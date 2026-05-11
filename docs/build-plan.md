@@ -41,10 +41,10 @@ This is the riskiest piece, so do it first.
 
 ## Phase 3 — Subprocess supervisor
 
-1. `ProcessSupervisor` actor: spawns, restarts on crash, streams stdout/stderr, handles graceful shutdown on app quit.
-2. `AstroDevServer`: wraps `node_modules/.bin/astro dev --port <auto>` with a port-detection regex on stdout. Emits a `ready(url:)` signal to the UI.
-3. `MCPClient`: spawns `node server/index.mjs` from the bundled plugin, speaks JSON-RPC over stdio. Reuse the existing message schema in `anglesite/server/messages.mjs`.
-4. **Debug pane** behind a hidden menu item: live tail of all subprocess stdout/stderr. Critical for shipping v0 — every weird user report will need these logs.
+1. ✅ `ProcessSupervisor` actor: spawns, restarts on crash, streams stdout/stderr (via `LogCenter` + libdispatch `readabilityHandler`), handles graceful shutdown. Cancellable `waitForExit(_:)` so task groups can unwind without waiting for the real process exit.
+2. ✅ `AstroDevServer`: wraps `astro dev` with a `parseReadyURL` regex (ANSI-stripped) and races URL match / unexpected exit / timeout in a single `withThrowingTaskGroup`.
+3. ✅ `MCPClient`: spawns the server with `attachStdin: true`, speaks JSON-RPC 2.0 over stdio (NDJSON via LogCenter). v0 surface: `initialize`, `tools/list`, `tools/call`. Includes a `JSONValue` codec for typed but `Sendable` request/response shapes.
+4. ✅ **Debug pane** behind `View → Show Debug Pane` (`⌥⌘D`): live tail of all subprocess stdout/stderr from `LogCenter.shared`, with source/stream filter chips, auto-scroll, copy-to-clipboard, and ring-buffer replay of pre-open history.
 
 ## Phase 4 — WKWebView + edit overlay (v0 core)
 

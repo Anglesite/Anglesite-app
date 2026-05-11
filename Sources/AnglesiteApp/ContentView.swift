@@ -13,6 +13,8 @@ struct ContentView: View {
     @State private var siteFailure: String?
 
     private let store = SiteStore()
+    private let supervisor = ProcessSupervisor()
+    @State private var probeRunning = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -39,11 +41,19 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Anglesite")
-                .font(.largeTitle).fontWeight(.semibold)
-            Text("Phase 2 — plugin + site project plumbing")
-                .font(.headline).foregroundStyle(.secondary)
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Anglesite")
+                    .font(.largeTitle).fontWeight(.semibold)
+                Text("Phase 3 — subprocess supervisor, MCP client, debug pane")
+                    .font(.headline).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(probeRunning ? "Probe running…" : "Run log probe") {
+                Task { await runLogProbe() }
+            }
+            .disabled(probeRunning)
+            .help("Spawns a short-lived subprocess whose stdout/stderr stream into the Debug pane (View → Show Debug Pane).")
         }
     }
 
@@ -127,6 +137,23 @@ struct ContentView: View {
                         .padding(.bottom, 8)
                 }
             }
+        }
+    }
+
+    /// Spawns a short-lived subprocess via the supervised `launch(...)` API so its output flows
+    /// through `LogCenter.shared` — handy for visually verifying the Debug pane works.
+    private func runLogProbe() async {
+        probeRunning = true
+        defer { probeRunning = false }
+        do {
+            let handle = try await supervisor.launch(
+                source: "probe",
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "for i in 1 2 3; do echo \"probe line $i\"; sleep 0.1; done; echo 'probe stderr' 1>&2"]
+            )
+            _ = await supervisor.waitForExit(handle)
+        } catch {
+            // Failures land in the Debug pane via stderr; nothing extra to do here.
         }
     }
 

@@ -58,4 +58,4 @@ xcodebuild -scheme Anglesite -configuration Debug build
 
 ## Plan
 
-See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 3** (Phase 2 plugin bundling, `SiteStore`, `ProjectValidator`, and Settings overrides landed; `node_modules` cache strategy from Phase 1 still pending).
+See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 4** (Phase 3 supervisor `launch(...)`, `AstroDevServer`, `MCPClient`, and Debug pane landed; `node_modules` cache strategy from Phase 1 still pending).

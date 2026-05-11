@@ -60,3 +60,6 @@ node_modules/
 .idea/
 *.swp
 *~
+
+# Claude Code harness state
+.claude/
