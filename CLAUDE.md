@@ -34,8 +34,9 @@ Sources/
 JS/
 └── edit-overlay/      TypeScript edit overlay compiled and bundled into app resources
 Resources/
-├── node-runtime/      (gitignored) Vendored Node binary, populated by build script
-└── plugin/            (gitignored) Copy of ../anglesite, populated by build script
+├── node-runtime/      (gitignored) Vendored Node binary, populated by scripts/vendor-node.sh
+└── plugin/            (gitignored) Copy of ../anglesite, populated by scripts/copy-plugin.sh
+                       (runs as a pre-build phase; respects $ANGLESITE_PLUGIN_SRC override)
 ```
 
 ## Editing guidelines
@@ -57,4 +58,4 @@ xcodebuild -scheme Anglesite -configuration Debug build
 
 ## Plan
 
-See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 1** (embedded Node smoke test landed; `node_modules` cache strategy still pending).
+See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 3** (Phase 2 plugin bundling, `SiteStore`, `ProjectValidator`, and Settings overrides landed; `node_modules` cache strategy from Phase 1 still pending).

@@ -11,5 +11,9 @@ struct AnglesiteApp: App {
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
+
+        Settings {
+            SettingsView()
+        }
     }
 }
