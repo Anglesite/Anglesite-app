@@ -31,23 +31,30 @@ The SwiftPM scaffold (Phase 0.3) builds and tests via `swift build` / `swift tes
 
 Everything from this point on — Info.plist, entitlements, deployment target, hardened runtime, signing identity — is configured by `project.yml`. **Edit `project.yml`, not the `.xcodeproj`.** Any manual `.xcodeproj` change will be lost the next time XcodeGen runs.
 
-## Verify signing
+## Signing configurations
+
+| Config | Identity | Apple account needed | Use for |
+|---|---|---|---|
+| `Debug` | ad-hoc (`-`) | none | Local development, running on your own Mac |
+| `Release` | `Developer ID Application` | **paid** Apple Developer Program ($99/yr) | Notarized distribution via `anglesite.dev` |
+
+Debug builds run on the local machine without any Apple account at all — the binary gets an anonymous ad-hoc signature, which is enough to run but not to distribute. All Phase 1+ development (embedded Node, MCP, WKWebView edit overlay) can be built and exercised in this config indefinitely.
+
+## Verify Debug signing (no Apple account needed)
 
 ```sh
-# Build with signing (requires DEVELOPMENT_TEAM):
 xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug \
-  DEVELOPMENT_TEAM=YOUR_TEAM_ID -derivedDataPath build/DerivedData build
-
-# Locate the .app bundle:
+  -derivedDataPath build/DerivedData build
 APP=build/DerivedData/Build/Products/Debug/Anglesite.app
-
-# Confirm it's signed with Hardened Runtime:
-codesign --display --verbose=4 "$APP" 2>&1 | grep -E '(Authority|flags)'
-# Expect: Authority=Apple Development: <you>  (Debug) or Developer ID Application: <team>  (Release)
-# Expect: flags=0x10000(runtime)
+codesign --display --verbose=2 "$APP" 2>&1 | grep -E "(Signature|TeamIdentifier|flags)"
+# Expect: Signature=adhoc
+# Expect: TeamIdentifier=not set
+# Expect: flags=0x2(adhoc)
 ```
 
-## Notarization dry run
+`spctl --assess` will *reject* an ad-hoc-signed app — that's correct, Gatekeeper only approves notarized builds. The app still launches when opened locally.
+
+## Notarization dry run (requires paid Apple Developer account)
 
 Before any real code lands, prove the notarization path works end-to-end with the empty Phase-0 app. The five acceptance steps for [issue #1](https://github.com/Anglesite/Anglesite-app/issues/1) are wrapped in [`scripts/notarize-dry-run.sh`](../scripts/notarize-dry-run.sh).
 
