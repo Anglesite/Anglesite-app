@@ -16,7 +16,8 @@ The app does not replace the plugin — it embeds it. Scaffolding, edits, deploy
 ## Requirements
 
 - macOS 14+
-- Xcode 16+
+- Xcode 26+ (current as of this writing)
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`) — the `.xcodeproj` is generated from [`project.yml`](project.yml)
 - A bundled Node.js runtime is shipped with the app — users do not need Node installed.
 
 ## Building
@@ -26,9 +27,20 @@ The app does not replace the plugin — it embeds it. Scaffolding, edits, deploy
 git clone https://github.com/Anglesite/Anglesite-app.git
 cd Anglesite-app
 
-# Open in Xcode
-xed .
+# Vendor the bundled Node runtime (version pinned in scripts/node-version.txt)
+scripts/vendor-node.sh
+
+# Generate the Xcode project
+xcodegen generate
+
+# Build via CLI (ad-hoc signed; no Apple account required)
+xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build
+
+# Or open in Xcode
+xed Anglesite.xcodeproj
 ```
+
+The Debug configuration uses ad-hoc signing so contributors can build and run locally without any Apple Developer enrollment. Notarized Release builds require a paid Apple Developer account — see [`docs/xcode-setup.md`](docs/xcode-setup.md) for the full distribution path.
 
 ## Relationship to the plugin repo
 
