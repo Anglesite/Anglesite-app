@@ -5,7 +5,8 @@
 Icon?
 ._*
 
-# Xcode
+# Xcode — Anglesite.xcodeproj is regenerated from project.yml via XcodeGen
+Anglesite.xcodeproj/
 build/
 DerivedData/
 *.pbxuser
