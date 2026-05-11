@@ -57,4 +57,4 @@ xcodebuild -scheme Anglesite -configuration Debug build
 
 ## Plan
 
-See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 0**.
+See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 1** (embedded Node smoke test landed; `node_modules` cache strategy still pending).

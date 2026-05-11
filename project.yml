@@ -19,6 +19,9 @@ targets:
     sources:
       - path: Sources/AnglesiteApp
       - path: Resources/Assets.xcassets
+      - path: Resources/node-runtime
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.anglesite.app

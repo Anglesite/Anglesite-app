@@ -26,10 +26,10 @@ This plan turns the high-level design into a concrete, phased implementation roa
 
 This is the riskiest piece, so do it first.
 
-1. Decide on `node` vs `bun` (design doc §13 leaves it open). Recommend `node` for v0 — Astro is officially supported, notarization is well-trodden, fewer surprises.
-2. Vendor a Node.js macOS universal binary into `Resources/node-runtime/` via a build script (download + verify signature + lipo arm64/x86_64).
-3. Re-sign the embedded `node` with the app's Developer ID (notarization requires every Mach-O to be signed by the same team).
-4. Smoke test: spawn `node -e "console.log(1+1)"` from `NSTask`/`Process`, confirm it works in a notarized build.
+1. ✅ Decide on `node` vs `bun` (design doc §13 leaves it open). Recommend `node` for v0 — Astro is officially supported, notarization is well-trodden, fewer surprises.
+2. ✅ Vendor a Node.js macOS universal binary into `Resources/node-runtime/` via a build script (download + verify signature + lipo arm64/x86_64).
+3. Re-sign the embedded `node` with the app's Developer ID (notarization requires every Mach-O to be signed by the same team). *(Deferred — Debug builds use ad-hoc signing; Release re-sign lands when notarization is wired up.)*
+4. ✅ Smoke test: spawn `node -e "console.log(1+1)"` from `NSTask`/`Process`, confirm it works in a notarized build. *(Ad-hoc-signed Debug confirmed; notarized confirmation deferred with step 3.)*
 5. Bundle a primed `node_modules/` cache strategy: ship a tarball of plugin + template `node_modules`, extract on first launch into `~/Library/Application Support/Anglesite/cache/`. Sites `npm install --prefer-offline` against this cache.
 
 ## Phase 2 — Plugin + site project plumbing

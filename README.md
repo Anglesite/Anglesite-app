@@ -6,7 +6,7 @@ The app does not replace the plugin — it embeds it. Scaffolding, edits, deploy
 
 ## Status
 
-**Pre-release.** Phase 0 (repo + Xcode bootstrap) in progress. See [`docs/build-plan.md`](docs/build-plan.md).
+**Pre-release.** Phase 1 (embedded Node runtime) in progress — launching the app runs a vendored-Node smoke test (`1+1` → `2`) to prove the embedded runtime spawns. See [`docs/build-plan.md`](docs/build-plan.md).
 
 ## Documentation
 
