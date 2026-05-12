@@ -90,7 +90,7 @@ This work lands in `anglesite/server/` — the app repo just calls it.
 
 ## Phase 9 — v1 multi-site + drag-drop images
 
-1. Sidebar supports N sites; switching tears down + spins up dev server.
+1. Multi-window: `WindowGroup(for: SiteID.self)` so each site opens in its own window with its own dev server (per the multi-window decision above). A "Sites" launcher (window list / open / new) replaces the single-window sidebar; opening a window spins up that site's dev server, closing it tears it down.
 2. Health badge polls `/anglesite:check` periodically.
 3. Image drop → call `optimize-images` skill via MCP → write to `public/` → patch `src=`.
 4. Undo affordance per edit in the chat panel, backed by the hidden git branch.
@@ -103,7 +103,7 @@ Per design doc §12: sandboxed App Store build (helper-tool architecture for Nod
 
 ## Cross-cutting decisions to lock in early
 
-- **Single-window with tabs** (per §11 open question) — recommend deciding now to avoid a v1 rewrite.
+- **Multi-window — one window per site.** *(Decided 2026-05-12, overriding the earlier "single-window with tabs" recommendation.)* Each open site gets its own top-level window with its own dev server / preview / debug pane; switching sites = `⌘\`` / Window menu, not in-window tabs. Practically: `AnglesiteApp` already uses `WindowGroup`; Phase 9 swaps it to `WindowGroup(for: SiteID.self)` so each window is bound to a specific site, and the Phase 9 "sidebar" becomes a window-switcher / new-site launcher rather than an in-window list.
 - **Chat history per-site** in `.anglesite/chat-history.jsonl`, included in the GitHub backup.
 - **Swift architecture: plain SwiftUI + actors for supervisors.** No TCA for v0 — keeps the maintainer pool wide.
 - **Two repos, coordinated:** changes spanning `anglesite/server/patcher.mjs` and the app land as paired PRs. Document this in `Anglesite-app/CLAUDE.md`.
