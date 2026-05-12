@@ -23,6 +23,10 @@ public actor AstroDevServer {
     /// before the dev server accepts connections, so a log match alone isn't "ready".
     public typealias ReadinessProbe = @Sendable (_ url: URL) async -> Bool
 
+    /// Notified when a supervised restart re-binds the dev server on a (possibly different) port —
+    /// i.e. *after* `start(...)` returned its first URL. Lets a `PreviewView` reload from the new URL.
+    public typealias ReadyURLChangeHandler = @Sendable (_ url: URL) async -> Void
+
     /// Default probe: a short-timeout GET that treats any non-5xx/connection-failure as ready.
     public static let httpReadinessProbe: ReadinessProbe = { url in
         var request = URLRequest(url: url)
@@ -42,6 +46,7 @@ public actor AstroDevServer {
     nonisolated let readinessProbe: ReadinessProbe
     private var currentHandle: ProcessSupervisor.Handle?
     private var currentURL: URL?
+    private var onReadyURLChange: ReadyURLChangeHandler?
     // Watches stdout for `Local …` lines after a supervised restart (the port may change) and
     // republishes `readyURL`. Lives for the duration of one `start(...)`; torn down by `stop()`.
     private var watcherTask: Task<Void, Never>?
@@ -75,9 +80,11 @@ public actor AstroDevServer {
         source: String = "astro",
         environment: [String: String] = [:],
         restartPolicy: ProcessSupervisor.RestartPolicy = .onCrash(maxAttempts: 3, baseBackoff: 0.5),
-        readyTimeout: TimeInterval = 30
+        readyTimeout: TimeInterval = 30,
+        onReadyURLChange: ReadyURLChangeHandler? = nil
     ) async throws -> URL {
         if currentHandle != nil { throw AstroError.alreadyRunning }
+        self.onReadyURLChange = onReadyURLChange
 
         var env = ProcessInfo.processInfo.environment
         // Strip color so AstroDevServer.parseReadyURL doesn't have to deal with ANSI escapes.
@@ -115,6 +122,7 @@ public actor AstroDevServer {
             await supervisor.terminate(handle, timeout: 1)
             _ = await supervisor.waitForExit(handle)
             currentHandle = nil
+            self.onReadyURLChange = nil
             throw error
         }
     }
@@ -125,6 +133,7 @@ public actor AstroDevServer {
         watcherTask = nil
         watcherSubscription?.cancel()
         watcherSubscription = nil
+        onReadyURLChange = nil
         guard let handle = currentHandle else { return }
         await supervisor.terminate(handle, timeout: timeout)
         _ = await supervisor.waitForExit(handle)
@@ -162,7 +171,11 @@ public actor AstroDevServer {
     }
 
     private func setWatcherSubscription(_ sub: LogCenter.Subscription) { watcherSubscription = sub }
-    private func publishReadyURL(_ url: URL) { currentURL = url }
+
+    private func publishReadyURL(_ url: URL) async {
+        currentURL = url
+        await onReadyURLChange?(url)
+    }
 
     private func raceForReadyURL(
         source: String,

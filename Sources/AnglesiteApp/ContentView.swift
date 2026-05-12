@@ -11,43 +11,60 @@ struct ContentView: View {
 
     @State private var sites: [SiteStore.Site] = []
     @State private var siteFailure: String?
+    @State private var selectedSiteID: SiteStore.Site.ID?
+
+    @State private var preview = PreviewModel()
 
     private let store = SiteStore()
     private let supervisor = ProcessSupervisor.shared
     @State private var probeRunning = false
 
+    private var selectedSite: SiteStore.Site? {
+        guard let selectedSiteID else { return nil }
+        return sites.first { $0.id == selectedSiteID }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(spacing: 0) {
             header
-
-            HStack(alignment: .top, spacing: 16) {
-                sitesPanel
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                infoPanel
-                    .frame(maxWidth: 320, alignment: .topLeading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+            Divider()
+            HStack(spacing: 0) {
+                sidebar
+                    .frame(width: 260)
+                Divider()
+                mainPane
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-
-            Spacer(minLength: 0)
+            Divider()
             Text(BuildInfo.summary)
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.tertiary)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 6)
         }
-        .padding(24)
         .task {
             await runNodeSmokeTest()
             await refreshPlugin()
             await refreshSites()
         }
+        .onChange(of: selectedSiteID) { _, newID in
+            if let newID, let site = sites.first(where: { $0.id == newID }) {
+                preview.open(siteID: site.id, siteDirectory: site.path)
+            } else {
+                preview.close()
+            }
+        }
     }
 
+    // MARK: Header
+
     private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Anglesite")
-                    .font(.largeTitle).fontWeight(.semibold)
-                Text("Phase 3 — subprocess supervisor, MCP client, debug pane")
-                    .font(.headline).foregroundStyle(.secondary)
-            }
+        HStack(alignment: .firstTextBaseline) {
+            Text("Anglesite").font(.title2).fontWeight(.semibold)
+            Text("live preview")
+                .font(.subheadline).foregroundStyle(.secondary)
             Spacer()
             Button(probeRunning ? "Probe running…" : "Run log probe") {
                 Task { await runLogProbe() }
@@ -57,88 +74,158 @@ struct ContentView: View {
         }
     }
 
-    private var sitesPanel: some View {
-        GroupBox("Sites") {
-            VStack(alignment: .leading, spacing: 8) {
-                if let siteFailure {
-                    Text(siteFailure)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.red)
-                } else if sites.isEmpty {
-                    Text("No Anglesite sites discovered.")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    Text("Create one with `/anglesite:start` in `~/Sites/<name>/`, or use Settings → Advanced to point Anglesite at a different sites root.")
+    // MARK: Sidebar — sites
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Sites").font(.headline)
+                Spacer()
+                Button {
+                    Task { await refreshSites() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Rescan the sites directory")
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+
+            if let siteFailure {
+                Text(siteFailure)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 12)
+            } else if sites.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("No Anglesite sites found.").font(.subheadline).foregroundStyle(.secondary)
+                    Text("Create one with `/anglesite:start` in `~/Sites/<name>/`, or set a sites-root override in Settings → Advanced.")
                         .font(.caption).foregroundStyle(.tertiary)
-                } else {
-                    ForEach(sites) { site in
-                        HStack(spacing: 8) {
-                            Image(systemName: site.isValid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                .foregroundStyle(site.isValid ? .green : .orange)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(site.name).font(.body.monospaced())
-                                Text(site.path.path)
-                                    .font(.caption).foregroundStyle(.secondary)
-                                    .lineLimit(1).truncationMode(.middle)
-                                if !site.missingSentinels.isEmpty {
-                                    Text("missing: \(site.missingSentinels.joined(separator: ", "))")
-                                        .font(.caption2).foregroundStyle(.orange)
-                                }
+                }
+                .padding(.horizontal, 12)
+            } else {
+                List(sites, selection: $selectedSiteID) { site in
+                    HStack(spacing: 8) {
+                        Image(systemName: site.isValid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(site.isValid ? .green : .orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(site.name).font(.body.monospaced())
+                            if !site.missingSentinels.isEmpty {
+                                Text("missing: \(site.missingSentinels.joined(separator: ", "))")
+                                    .font(.caption2).foregroundStyle(.orange)
                             }
                         }
                     }
+                    .tag(site.id)
                 }
+                .listStyle(.sidebar)
+            }
+            Spacer(minLength: 0)
+        }
+    }
 
-                HStack {
-                    Button("Refresh") {
-                        Task { await refreshSites() }
-                    }
+    // MARK: Main pane — preview or dashboard
+
+    @ViewBuilder
+    private var mainPane: some View {
+        if let site = selectedSite {
+            previewPane(for: site)
+        } else {
+            dashboardPane
+        }
+    }
+
+    @ViewBuilder
+    private func previewPane(for site: SiteStore.Site) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text(site.name).font(.headline)
+                if let url = preview.readyURL {
+                    Text(url.absoluteString).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Open in browser") { NSWorkspace.shared.open(url) }
+                        .controlSize(.small)
+                } else {
                     Spacer()
                 }
-                .padding(.top, 4)
             }
-            .padding(8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            Divider()
 
-    private var infoPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            GroupBox("Plugin") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(pluginDescription).font(.system(.body, design: .monospaced))
-                    if let pluginCommit {
-                        Text("commit \(pluginCommit.prefix(12))")
-                            .font(.caption).foregroundStyle(.secondary)
+            switch preview.state {
+            case .ready(_, let url):
+                PreviewView(url: url)
+            case .starting:
+                centeredStatus { ProgressView("Starting dev server for \(site.name)…") }
+            case .failed(_, let message):
+                centeredStatus {
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.largeTitle).foregroundStyle(.orange)
+                        Text("Can't preview \(site.name)").font(.headline)
+                        Text(message).font(.callout).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center).frame(maxWidth: 420)
+                        Button("Retry") { preview.open(siteID: site.id, siteDirectory: site.path) }
                     }
                 }
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            GroupBox("Vendored Node") {
-                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
-                    GridRow {
-                        Text("1+1:").foregroundStyle(.secondary)
-                        Text(arithmeticOutput).font(.system(.body, design: .monospaced))
-                    }
-                    GridRow {
-                        Text("version:").foregroundStyle(.secondary)
-                        Text(versionOutput).font(.system(.body, design: .monospaced))
-                    }
-                }
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                if let nodeFailure {
-                    Text(nodeFailure)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.red)
-                        .padding(.horizontal, 8)
-                        .padding(.bottom, 8)
-                }
+            case .idle:
+                centeredStatus { ProgressView() }
             }
         }
     }
+
+    private var dashboardPane: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Select a site on the left to start a live preview.")
+                    .font(.headline).foregroundStyle(.secondary)
+
+                GroupBox("Plugin") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(pluginDescription).font(.system(.body, design: .monospaced))
+                        if let pluginCommit {
+                            Text("commit \(pluginCommit.prefix(12))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                GroupBox("Vendored Node") {
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+                        GridRow {
+                            Text("1+1:").foregroundStyle(.secondary)
+                            Text(arithmeticOutput).font(.system(.body, design: .monospaced))
+                        }
+                        GridRow {
+                            Text("version:").foregroundStyle(.secondary)
+                            Text(versionOutput).font(.system(.body, design: .monospaced))
+                        }
+                    }
+                    .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+
+                    if let nodeFailure {
+                        Text(nodeFailure)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 8).padding(.bottom, 8)
+                    }
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private func centeredStatus<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    // MARK: Actions
 
     /// Spawns a short-lived subprocess via the supervised `launch(...)` API so its output flows
     /// through `LogCenter.shared` — handy for visually verifying the Debug pane works.
@@ -186,7 +273,12 @@ struct ContentView: View {
         siteFailure = nil
         do {
             try await store.load()
-            sites = try await store.refresh()
+            let updated = try await store.refresh()
+            sites = updated
+            // Drop the selection if that site vanished.
+            if let id = selectedSiteID, !updated.contains(where: { $0.id == id }) {
+                selectedSiteID = nil
+            }
         } catch {
             siteFailure = "failed to scan sites: \(error)"
         }

@@ -216,6 +216,41 @@ final class AstroDevServerTests: XCTestCase {
         await server.stop(timeout: 2)
     }
 
+    func testOnReadyURLChangeFiresWhenARestartPicksANewPort() async throws {
+        let supervisor = ProcessSupervisor()
+        let center = LogCenter()
+        let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
+
+        let counter = NSTemporaryDirectory() + "astro-cb-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: counter) }
+        let script = """
+        f="$0"
+        n=$(cat "$f" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$f"
+        echo "  Local    http://localhost:910$n/"
+        if [ "$n" -lt 2 ]; then sleep 0.2; exit 1; fi
+        exec sleep 30
+        """
+
+        let observed = URLCollector()
+        let first = try await server.start(
+            siteDirectory: URL(fileURLWithPath: "/tmp"),
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", script, counter],
+            source: "astro-cb",
+            restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.05),
+            readyTimeout: 5,
+            onReadyURLChange: { url in await observed.add(url) }
+        )
+        XCTAssertEqual(first, URL(string: "http://localhost:9101/"))
+
+        // Wait for the crash → restart → watcher → callback chain.
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        let urls = await observed.urls
+        XCTAssertEqual(urls, [URL(string: "http://localhost:9102/")!])
+
+        await server.stop(timeout: 2)
+    }
+
     func testStartTimesOutWhenReadinessProbeNeverSucceeds() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
@@ -244,4 +279,9 @@ final class AstroDevServerTests: XCTestCase {
 private actor ProbeCounter {
     private(set) var value = 0
     func bump() -> Int { value += 1; return value }
+}
+
+private actor URLCollector {
+    private(set) var urls: [URL] = []
+    func add(_ url: URL) { urls.append(url) }
 }

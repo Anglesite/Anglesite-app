@@ -28,5 +28,11 @@
 	<string>NSApplication</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Anglesite needs to coordinate with helper processes (Astro dev server, MCP server) to preview and edit your site.</string>
+	<!-- The site preview loads the local Astro dev server over plain http://localhost. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>
