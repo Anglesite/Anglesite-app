@@ -27,12 +27,19 @@ targets:
         type: folder
         buildPhase: resources
         optional: true
+      - path: Resources/npm-cache
+        type: folder
+        buildPhase: resources
+        optional: true
     preBuildScripts:
       - name: Vendor Node runtime
         script: "${PROJECT_DIR}/scripts/vendor-node.sh"
         basedOnDependencyAnalysis: false
       - name: Bundle Anglesite plugin
         script: "${PROJECT_DIR}/scripts/copy-plugin.sh"
+        basedOnDependencyAnalysis: false
+      - name: Vendor primed npm cache
+        script: "${PROJECT_DIR}/scripts/vendor-npm-cache.sh"
         basedOnDependencyAnalysis: false
     settings:
       base:

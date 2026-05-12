@@ -30,7 +30,7 @@ This is the riskiest piece, so do it first.
 2. ✅ Vendor a Node.js macOS universal binary into `Resources/node-runtime/` via a build script (download + verify signature + lipo arm64/x86_64).
 3. Re-sign the embedded `node` with the app's Developer ID (notarization requires every Mach-O to be signed by the same team). *(Deferred — Debug builds use ad-hoc signing; Release re-sign lands when notarization is wired up.)*
 4. ✅ Smoke test: spawn `node -e "console.log(1+1)"` from `NSTask`/`Process`, confirm it works in a notarized build. *(Ad-hoc-signed Debug confirmed; notarized confirmation deferred with step 3.)*
-5. Bundle a primed `node_modules/` cache strategy: ship a tarball of plugin + template `node_modules`, extract on first launch into `~/Library/Application Support/Anglesite/cache/`. Sites `npm install --prefer-offline` against this cache.
+5. 🟡 Primed npm cache: `scripts/vendor-npm-cache.sh` (opt-in prebuild phase — `ANGLESITE_BUILD_NPM_CACHE=1`) installs the bundled plugin/template deps into a shared npm cache, tarballs it to `Resources/npm-cache/cache.tar` + a `version.txt` stamp. `AnglesiteCore/NodeModulesCache` extracts it on launch into `~/Library/Application Support/Anglesite/npm-cache/` (re-extracts only on a version bump) and exposes `npm install --prefer-offline --cache <path>` flags. *Remaining:* measure the tarball size before turning the prebuild phase on by default (>100MB meaningfully bloats the DMG); wire the cache flags into the site-creation flow once the app owns site creation. Tracked in #6.
 
 ## Phase 2 — Plugin + site project plumbing
 

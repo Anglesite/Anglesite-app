@@ -58,4 +58,4 @@ xcodebuild -scheme Anglesite -configuration Debug build
 
 ## Plan
 
-See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 4** (Phase 3 supervisor `launch(...)`, `AstroDevServer`, `MCPClient`, and Debug pane landed; `node_modules` cache strategy from Phase 1 still pending).
+See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 4** (Phase 0–3 complete: embedded Node, plugin/site plumbing, `ProcessSupervisor`/`AstroDevServer`/`MCPClient`/Debug pane. Phase 1 primed-npm-cache is a first cut — `NodeModulesCache` + opt-in `vendor-npm-cache.sh`; size budget still to be measured, see #6. Deferred Release-track: Developer ID re-sign of embedded Node + notarization, #1/#4).

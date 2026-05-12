@@ -3,9 +3,23 @@ import AppKit
 import AnglesiteCore
 import AnglesiteBridge
 
-/// Owns process-level lifecycle that SwiftUI's `App` value type can't: on quit, drain every
-/// supervised child (Astro dev server, MCP server, ad-hoc Node) so nothing outlives the app.
+/// Owns process-level lifecycle that SwiftUI's `App` value type can't: prime the npm cache on
+/// launch, and on quit drain every supervised child (Astro dev server, MCP server, ad-hoc Node)
+/// so nothing outlives the app.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Extract the bundled npm cache into Application Support so the first site `npm install`
+        // is offline-fast. No-op when nothing's bundled or it's already current; logged either way.
+        Task {
+            do {
+                let outcome = try await NodeModulesCache.shared.prime()
+                await LogCenter.shared.append(source: "npm-cache", stream: .stdout, text: "prime: \(outcome)")
+            } catch {
+                await LogCenter.shared.append(source: "npm-cache", stream: .stderr, text: "prime failed: \(error)")
+            }
+        }
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task {
             await ProcessSupervisor.shared.shutdownAll(timeout: 5)

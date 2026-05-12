@@ -47,6 +47,7 @@ fastlane/test_output
 # Embedded runtimes (vendored at build time, not committed)
 Resources/node-runtime/
 Resources/plugin/
+Resources/npm-cache/
 node_modules/
 
 # Build artifacts
