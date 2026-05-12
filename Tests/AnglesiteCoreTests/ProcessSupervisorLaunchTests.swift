@@ -109,6 +109,44 @@ final class ProcessSupervisorLaunchTests: XCTestCase {
         XCTAssertEqual(reason, .exited(code: 0))
     }
 
+    func testOnRespawnFiresOncePerSuccessfulRestart() async throws {
+        let supervisor = ProcessSupervisor()
+        let center = LogCenter()
+        let respawns = RespawnCounter()
+        let handle = try await supervisor.launch(
+            source: "respawn-test",
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "exit 4"],
+            restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.0),
+            onRespawn: { await respawns.bump() },
+            logCenter: center
+        )
+        let reason = await supervisor.waitForExit(handle)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(reason, .retriesExhausted(lastCode: 4))
+        // Initial spawn doesn't count; 3 retries → 3 respawn callbacks.
+        let count = await respawns.value
+        XCTAssertEqual(count, 3)
+    }
+
+    func testOnRespawnNotCalledWhenProcessNeverCrashes() async throws {
+        let supervisor = ProcessSupervisor()
+        let center = LogCenter()
+        let respawns = RespawnCounter()
+        let handle = try await supervisor.launch(
+            source: "no-respawn",
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "exit 0"],
+            restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.0),
+            onRespawn: { await respawns.bump() },
+            logCenter: center
+        )
+        _ = await supervisor.waitForExit(handle)
+        let count = await respawns.value
+        XCTAssertEqual(count, 0)
+    }
+
     func testLaunchAttachStdinAllowsWrites() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
@@ -134,4 +172,9 @@ final class ProcessSupervisorLaunchTests: XCTestCase {
         let lines = await center.snapshot().filter { $0.source == "cat" && $0.stream == .stdout }.map(\.text)
         XCTAssertEqual(lines, ["hello"])
     }
+}
+
+private actor RespawnCounter {
+    private(set) var value = 0
+    func bump() { value += 1 }
 }

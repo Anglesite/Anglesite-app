@@ -36,6 +36,44 @@ final class MCPClientTests: XCTestCase {
         sys.stdout.flush()
     """
 
+    /// Fake server that handles one `crash` tool call (responds, then `exit(1)`) so the supervisor
+    /// restarts it. The fresh instance behaves like `fakeServerScript`. Lets us exercise reconnect.
+    private static let crashOnceServerScript = """
+    import sys, json
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except Exception:
+            continue
+        method = msg.get("method", "")
+        rid = msg.get("id")
+        if rid is None:
+            continue
+        if method == "initialize":
+            resp = {"jsonrpc":"2.0","id":rid,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"0.0.0"}}}
+        elif method == "tools/list":
+            resp = {"jsonrpc":"2.0","id":rid,"result":{"tools":[{"name":"echo","description":"Echoes back","inputSchema":{"type":"object"}}]}}
+        elif method == "tools/call":
+            params = msg.get("params", {})
+            name = params.get("name")
+            args = params.get("arguments", {}) or {}
+            if name == "crash":
+                sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":"crashing"}],"isError":False}}) + chr(10))
+                sys.stdout.flush()
+                sys.exit(1)
+            elif name == "echo":
+                resp = {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":args.get("text","")}],"isError":False}}
+            else:
+                resp = {"jsonrpc":"2.0","id":rid,"error":{"code":-32601,"message":"unknown tool"}}
+        else:
+            resp = {"jsonrpc":"2.0","id":rid,"error":{"code":-32601,"message":"method not found"}}
+        sys.stdout.write(json.dumps(resp) + chr(10))
+        sys.stdout.flush()
+    """
+
     private static let pythonURL: URL = {
         for path in ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/opt/anaconda3/bin/python3"] {
             if FileManager.default.isExecutableFile(atPath: path) {
@@ -131,6 +169,33 @@ final class MCPClientTests: XCTestCase {
         } catch {
             XCTFail("unexpected error: \(error)")
         }
+    }
+
+    // MARK: reconnect on crash
+
+    func testReconnectsAfterServerCrash() async throws {
+        let (client, _, _) = makeClient()
+        try await client.start(
+            executable: Self.pythonURL,
+            arguments: ["-u", "-c", Self.crashOnceServerScript],
+            source: "mcp-reconnect",
+            restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.05)
+        )
+        defer { Task { await client.stop() } }
+
+        // This call's response arrives, then the server exits(1) → supervisor restarts it.
+        let crashResult = try await client.callTool(name: "crash")
+        XCTAssertEqual(crashResult.content.first?.text, "crashing")
+
+        // Allow respawn + re-handshake to complete.
+        try? await Task.sleep(nanoseconds: 600_000_000)
+
+        // Fresh instance should answer normally — proves the client reconnected and re-initialized.
+        let tools = try await client.listTools()
+        XCTAssertEqual(tools.first?.name, "echo")
+
+        let echoed = try await client.callTool(name: "echo", arguments: .object(["text": .string("after-reconnect")]))
+        XCTAssertEqual(echoed.content.first?.text, "after-reconnect")
     }
 
     // MARK: JSONValue round-trip

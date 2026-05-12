@@ -15,6 +15,7 @@ struct SettingsView: View {
 private struct AdvancedSettingsView: View {
     @AppStorage(AppSettings.Key.pluginPathOverride) private var pluginPathOverride: String = ""
     @AppStorage(AppSettings.Key.sitesRootOverride) private var sitesRootOverride: String = ""
+    @AppStorage(AppSettings.Key.debugPaneEnabled) private var debugPaneEnabled: Bool = false
 
     var body: some View {
         Form {
@@ -40,6 +41,19 @@ private struct AdvancedSettingsView: View {
                 Text("By default, Anglesite scans `~/Sites/` for projects. Override this for development or testing.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("Diagnostics") {
+                Toggle("Show Debug Pane menu item", isOn: $debugPaneEnabled)
+                #if DEBUG
+                Text("Debug builds always show the Debug Pane (View → Show Debug Pane, ⌥⌘D) regardless of this setting.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                #else
+                Text("Adds View → Show Debug Pane (⌥⌘D), a live tail of every subprocess. Takes effect on the next launch. You can also hold ⌥ while launching Anglesite to reveal it once.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                #endif
             }
         }
         .formStyle(.grouped)

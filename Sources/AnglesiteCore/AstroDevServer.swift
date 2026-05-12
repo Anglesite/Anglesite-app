@@ -6,9 +6,11 @@ import Foundation
 ///
 ///     ┃ Local    http://localhost:4321/
 ///
-/// `start(...)` spawns the server through `ProcessSupervisor` and races three outcomes — a regex
-/// match on the ready URL, an unexpected exit, or a timeout — returning the URL once it's
-/// detected. The supervised process keeps running afterward; call `stop()` to take it down.
+/// `start(...)` spawns the server through `ProcessSupervisor` and races three outcomes — the
+/// ready URL appearing on stdout, an unexpected exit, or a timeout. Once the URL is spotted it
+/// is *probed over HTTP* (Astro logs the URL a beat before the server accepts connections), and
+/// only returned once the server actually answers. The supervised process keeps running
+/// afterward; call `stop()` to take it down.
 public actor AstroDevServer {
     public enum AstroError: Error, Sendable, Equatable {
         case readyTimeout
@@ -16,14 +18,43 @@ public actor AstroDevServer {
         case alreadyRunning
     }
 
+    /// Returns `true` once `url` is actually serving HTTP. Called repeatedly after the `Local …`
+    /// line is spotted, until it succeeds or `readyTimeout` elapses — Astro prints the URL a beat
+    /// before the dev server accepts connections, so a log match alone isn't "ready".
+    public typealias ReadinessProbe = @Sendable (_ url: URL) async -> Bool
+
+    /// Default probe: a short-timeout GET that treats any non-5xx/connection-failure as ready.
+    public static let httpReadinessProbe: ReadinessProbe = { url in
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 2
+        request.httpMethod = "GET"
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return false }
+            return (200..<500).contains(http.statusCode)
+        } catch {
+            return false
+        }
+    }
+
     private let supervisor: ProcessSupervisor
     private let logCenter: LogCenter
+    nonisolated let readinessProbe: ReadinessProbe
     private var currentHandle: ProcessSupervisor.Handle?
     private var currentURL: URL?
+    // Watches stdout for `Local …` lines after a supervised restart (the port may change) and
+    // republishes `readyURL`. Lives for the duration of one `start(...)`; torn down by `stop()`.
+    private var watcherTask: Task<Void, Never>?
+    private var watcherSubscription: LogCenter.Subscription?
 
-    public init(supervisor: ProcessSupervisor, logCenter: LogCenter = .shared) {
+    public init(
+        supervisor: ProcessSupervisor,
+        logCenter: LogCenter = .shared,
+        readinessProbe: @escaping ReadinessProbe = AstroDevServer.httpReadinessProbe
+    ) {
         self.supervisor = supervisor
         self.logCenter = logCenter
+        self.readinessProbe = readinessProbe
     }
 
     public var readyURL: URL? { currentURL }
@@ -31,7 +62,8 @@ public actor AstroDevServer {
     public var handle: ProcessSupervisor.Handle? { currentHandle }
 
     /// Spawn `executable arguments...` in `siteDirectory` (typically `<vendoredNode> <site>/node_modules/.bin/astro dev`)
-    /// and resolve once a `Local …` URL appears on stdout, or fail on timeout / unexpected exit.
+    /// and resolve once a `Local …` URL appears on stdout *and* the server answers an HTTP probe,
+    /// or fail on `readyTimeout` / unexpected exit.
     ///
     /// `source` is the LogCenter tag — production uses `"astro:<siteName>"`. `environment` is merged
     /// over a baseline that disables color so the regex stays simple.
@@ -42,6 +74,7 @@ public actor AstroDevServer {
         arguments: [String],
         source: String = "astro",
         environment: [String: String] = [:],
+        restartPolicy: ProcessSupervisor.RestartPolicy = .onCrash(maxAttempts: 3, baseBackoff: 0.5),
         readyTimeout: TimeInterval = 30
     ) async throws -> URL {
         if currentHandle != nil { throw AstroError.alreadyRunning }
@@ -61,7 +94,7 @@ public actor AstroDevServer {
             arguments: arguments,
             environment: env,
             currentDirectoryURL: siteDirectory,
-            restartPolicy: .never,
+            restartPolicy: restartPolicy,
             logCenter: logCenter
         )
         currentHandle = handle
@@ -75,6 +108,7 @@ public actor AstroDevServer {
             )
             subscription.cancel()
             currentURL = url
+            startURLWatcher(source: source)
             return url
         } catch {
             subscription.cancel()
@@ -87,12 +121,48 @@ public actor AstroDevServer {
 
     /// Sends SIGTERM (with SIGKILL escalation) and clears local state.
     public func stop(timeout: TimeInterval = 5) async {
+        watcherTask?.cancel()
+        watcherTask = nil
+        watcherSubscription?.cancel()
+        watcherSubscription = nil
         guard let handle = currentHandle else { return }
         await supervisor.terminate(handle, timeout: timeout)
         _ = await supervisor.waitForExit(handle)
         currentHandle = nil
         currentURL = nil
     }
+
+    // MARK: post-restart URL tracking
+
+    /// After the supervisor restarts a crashed dev server, Astro may bind a new port and print a
+    /// fresh `Local …` line. This watcher picks that up, re-probes it, and republishes `readyURL`
+    /// so a `PreviewView` can reload. Probing runs off-actor so a slow HTTP timeout can't stall us.
+    private func startURLWatcher(source: String) {
+        let center = logCenter
+        let probe = readinessProbe
+        watcherTask = Task { [weak self] in
+            let sub = await center.subscribe()
+            await self?.setWatcherSubscription(sub)
+            for await line in sub.stream {
+                if Task.isCancelled { break }
+                guard line.source == source, line.stream == .stdout else { continue }
+                guard let url = AstroDevServer.parseReadyURL(line.text) else { continue }
+                if await self?.readyURL == url { continue }
+                // New URL after a restart — confirm it serves before publishing.
+                for _ in 0..<15 {
+                    if Task.isCancelled { return }
+                    if await probe(url) {
+                        await self?.publishReadyURL(url)
+                        break
+                    }
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                }
+            }
+        }
+    }
+
+    private func setWatcherSubscription(_ sub: LogCenter.Subscription) { watcherSubscription = sub }
+    private func publishReadyURL(_ url: URL) { currentURL = url }
 
     private func raceForReadyURL(
         source: String,
@@ -101,12 +171,21 @@ public actor AstroDevServer {
         timeout: TimeInterval
     ) async throws -> URL {
         try await withThrowingTaskGroup(of: URL.self) { group in
-            group.addTask {
+            group.addTask { [readinessProbe] in
                 for await line in subscription.stream {
                     guard line.source == source, line.stream == .stdout else { continue }
-                    if let url = AstroDevServer.parseReadyURL(line.text) {
-                        return url
+                    guard let url = AstroDevServer.parseReadyURL(line.text) else { continue }
+                    // The URL is in the logs; Astro prints it slightly before the server
+                    // accepts connections. Poll until it actually answers (or the race times out).
+                    while !Task.isCancelled {
+                        if await readinessProbe(url) { return url }
+                        do {
+                            try await Task.sleep(nanoseconds: 200_000_000)
+                        } catch {
+                            throw AstroError.readyTimeout  // cancelled mid-poll
+                        }
                     }
+                    throw AstroError.readyTimeout
                 }
                 // Subscription cancelled or finished — bail out of this branch.
                 throw AstroError.readyTimeout

@@ -50,4 +50,35 @@ final class AppSettingsTests: XCTestCase {
         settings.sitesRootOverride = url
         XCTAssertEqual(settings.sitesRoot.path, url.path)
     }
+
+    func testDebugPaneEnabledDefaultsToFalse() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertFalse(settings.debugPaneEnabled)
+    }
+
+    func testDebugPaneEnabledRoundTrip() {
+        let settings = AppSettings(defaults: defaults)
+        settings.debugPaneEnabled = true
+        XCTAssertTrue(settings.debugPaneEnabled)
+        settings.debugPaneEnabled = false
+        XCTAssertFalse(settings.debugPaneEnabled)
+    }
+
+    // MARK: DebugPaneVisibility
+
+    func testDebugMenuAlwaysVisibleInDebugBuilds() {
+        XCTAssertTrue(DebugPaneVisibility.menuItemVisible(isDebugBuild: true, settingEnabled: false, optionHeldAtLaunch: false))
+    }
+
+    func testDebugMenuHiddenInReleaseByDefault() {
+        XCTAssertFalse(DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: false, optionHeldAtLaunch: false))
+    }
+
+    func testDebugMenuRevealedBySettingInRelease() {
+        XCTAssertTrue(DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: true, optionHeldAtLaunch: false))
+    }
+
+    func testDebugMenuRevealedByOptionKeyInRelease() {
+        XCTAssertTrue(DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: false, optionHeldAtLaunch: true))
+    }
 }

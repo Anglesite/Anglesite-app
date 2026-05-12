@@ -1,24 +1,31 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import AnglesiteCore
 
 /// Live tail of every subprocess line that lands in `LogCenter.shared`.
 ///
-/// Subscribes once per appearance, accumulates into local state, and offers filter chips so a
-/// developer hunting a bug can isolate (say) the `astro` source's stderr without scrolling
-/// through MCP traffic. Auto-scroll defaults on but can be turned off when copying text.
+/// Subscribes once per appearance, accumulates into local state, and offers source/stream filter
+/// chips plus a free-text search so a developer hunting a bug can isolate the lines that matter.
+/// `Pause` freezes the displayed rows (the underlying buffer keeps filling, so nothing is lost);
+/// `Save…` and `Copy` export whatever's currently visible.
 struct DebugPaneView: View {
     @State private var lines: [LogCenter.LogLine] = []
+    @State private var frozenLines: [LogCenter.LogLine]?  // non-nil while paused: the snapshot to show
     @State private var knownSources: Set<String> = []
-    @State private var sourceFilter: String = "All"
+    @State private var sourceFilter: String = allSourcesTag
     @State private var streamFilter: StreamFilter = .all
+    @State private var searchQuery: String = ""
     @State private var autoScroll: Bool = true
     @State private var subscriberTask: Task<Void, Never>?
 
+    private static let allSourcesTag = "All"
     private let center: LogCenter
 
     init(center: LogCenter = .shared) {
         self.center = center
     }
+
+    private var isPaused: Bool { frozenLines != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -38,14 +45,14 @@ struct DebugPaneView: View {
                 }
                 .background(Color(NSColor.textBackgroundColor))
                 .onChange(of: visibleLines.last?.id) { _, newID in
-                    guard autoScroll, let newID else { return }
+                    guard autoScroll, !isPaused, let newID else { return }
                     withAnimation(.linear(duration: 0.05)) {
                         proxy.scrollTo(newID, anchor: .bottom)
                     }
                 }
             }
         }
-        .frame(minWidth: 640, minHeight: 400)
+        .frame(minWidth: 680, minHeight: 400)
         .task { await startStreaming() }
         .onDisappear { subscriberTask?.cancel() }
     }
@@ -53,12 +60,12 @@ struct DebugPaneView: View {
     private var toolbar: some View {
         HStack(spacing: 12) {
             Picker("Source", selection: $sourceFilter) {
-                Text("All").tag("All")
+                Text("All").tag(Self.allSourcesTag)
                 ForEach(Array(knownSources).sorted(), id: \.self) { src in
                     Text(src).tag(src)
                 }
             }
-            .frame(maxWidth: 220)
+            .frame(maxWidth: 200)
 
             Picker("Stream", selection: $streamFilter) {
                 ForEach(StreamFilter.allCases, id: \.self) { f in
@@ -66,15 +73,30 @@ struct DebugPaneView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 220)
+            .frame(maxWidth: 200)
+
+            TextField("Search", text: $searchQuery)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 140, maxWidth: 240)
 
             Spacer()
 
+            Toggle("Pause", isOn: Binding(
+                get: { isPaused },
+                set: { frozenLines = $0 ? lines : nil }
+            ))
+            .toggleStyle(.switch)
+
             Toggle("Auto-scroll", isOn: $autoScroll)
                 .toggleStyle(.switch)
+                .disabled(isPaused)
 
-            Button("Clear") { lines.removeAll() }
+            Button("Clear") {
+                lines.removeAll()
+                frozenLines = nil
+            }
             Button("Copy") { copyVisibleToClipboard() }
+            Button("Save…") { saveVisibleToFile() }
         }
     }
 
@@ -100,14 +122,11 @@ struct DebugPaneView: View {
     }
 
     private var visibleLines: [LogCenter.LogLine] {
-        lines.filter { line in
-            if sourceFilter != "All" && line.source != sourceFilter { return false }
-            switch streamFilter {
-            case .all: return true
-            case .stdout: return line.stream == .stdout
-            case .stderr: return line.stream == .stderr
-            }
-        }
+        (frozenLines ?? lines).filtered(
+            source: sourceFilter == Self.allSourcesTag ? nil : sourceFilter,
+            stream: streamFilter.logStream,
+            query: searchQuery
+        )
     }
 
     private func startStreaming() async {
@@ -131,12 +150,19 @@ struct DebugPaneView: View {
     }
 
     private func copyVisibleToClipboard() {
-        let formatter = Self.timeFormatter
-        let text = visibleLines
-            .map { "\(formatter.string(from: $0.timestamp))  [\($0.source)/\($0.stream.rawValue)]  \($0.text)" }
-            .joined(separator: "\n")
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        NSPasteboard.general.setString(visibleLines.exportText(), forType: .string)
+    }
+
+    private func saveVisibleToFile() {
+        let panel = NSSavePanel()
+        panel.title = "Save Process Log"
+        panel.nameFieldStringValue = "anglesite-\(Self.fileStampFormatter.string(from: Date())).log"
+        if #available(macOS 11.0, *) {
+            panel.allowedContentTypes = [UTType(filenameExtension: "log") ?? .plainText, .plainText]
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        try? visibleLines.exportText().write(to: url, atomically: true, encoding: .utf8)
     }
 
     enum StreamFilter: String, CaseIterable, Hashable {
@@ -148,11 +174,24 @@ struct DebugPaneView: View {
             case .stderr: return "Err"
             }
         }
+        var logStream: LogCenter.Stream? {
+            switch self {
+            case .all: return nil
+            case .stdout: return .stdout
+            case .stderr: return .stderr
+            }
+        }
     }
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
+    private static let fileStampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd-HHmmss"
         return f
     }()
 }

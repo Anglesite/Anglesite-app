@@ -110,3 +110,34 @@ public actor LogCenter {
         subscribers[id] = nil
     }
 }
+
+public extension Sequence where Element == LogCenter.LogLine {
+    /// Filters log lines for the Debug pane:
+    /// - `source`: `nil` keeps every source; otherwise an exact match.
+    /// - `stream`: `nil` keeps both streams; otherwise an exact match.
+    /// - `query`: trimmed; when non-empty, a case-insensitive substring match against the
+    ///   line's source *or* text. Whitespace-only queries are treated as empty.
+    func filtered(source: String?, stream: LogCenter.Stream?, query: String) -> [LogCenter.LogLine] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return filter { line in
+            if let source, line.source != source { return false }
+            if let stream, line.stream != stream { return false }
+            if !needle.isEmpty {
+                guard line.source.lowercased().contains(needle) || line.text.lowercased().contains(needle) else {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+
+    /// Renders the lines as plain text — one `HH:mm:ss.SSS  [source/stream]  text` row each —
+    /// for the Debug pane's copy-to-clipboard and save-to-file actions.
+    func exportText(timestampFormat: String = "HH:mm:ss.SSS") -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = timestampFormat
+        return map { line in
+            "\(formatter.string(from: line.timestamp))  [\(line.source)/\(line.stream.rawValue)]  \(line.text)"
+        }.joined(separator: "\n")
+    }
+}

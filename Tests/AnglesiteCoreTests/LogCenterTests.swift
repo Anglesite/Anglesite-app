@@ -56,6 +56,50 @@ final class LogCenterTests: XCTestCase {
         XCTAssertEqual(bLine?.text, "hello")
     }
 
+    // MARK: Debug-pane helpers
+
+    private func sampleLines() -> [LogCenter.LogLine] {
+        [
+            LogCenter.LogLine(id: 0, timestamp: Date(timeIntervalSince1970: 0), source: "astro", stream: .stdout, text: "Local http://localhost:4321/"),
+            LogCenter.LogLine(id: 1, timestamp: Date(timeIntervalSince1970: 1), source: "astro", stream: .stderr, text: "warning: slow build"),
+            LogCenter.LogLine(id: 2, timestamp: Date(timeIntervalSince1970: 2), source: "mcp", stream: .stdout, text: "{\"jsonrpc\":\"2.0\"}"),
+            LogCenter.LogLine(id: 3, timestamp: Date(timeIntervalSince1970: 3), source: "mcp", stream: .stderr, text: "server ready"),
+        ]
+    }
+
+    func testFilteredBySourceOnly() {
+        let out = sampleLines().filtered(source: "astro", stream: nil, query: "")
+        XCTAssertEqual(out.map(\.id), [0, 1])
+    }
+
+    func testFilteredByStreamOnly() {
+        let out = sampleLines().filtered(source: nil, stream: .stderr, query: "")
+        XCTAssertEqual(out.map(\.id), [1, 3])
+    }
+
+    func testFilteredByQueryMatchesSourceAndText_CaseInsensitive() {
+        // "ready" matches the mcp/stderr text; "ASTRO" matches the astro source.
+        XCTAssertEqual(sampleLines().filtered(source: nil, stream: nil, query: "ready").map(\.id), [3])
+        XCTAssertEqual(sampleLines().filtered(source: nil, stream: nil, query: "ASTRO").map(\.id), [0, 1])
+    }
+
+    func testFilteredCombinesAllPredicates() {
+        let out = sampleLines().filtered(source: "mcp", stream: .stdout, query: "jsonrpc")
+        XCTAssertEqual(out.map(\.id), [2])
+    }
+
+    func testFilteredNilSourceAndEmptyQueryReturnsAll() {
+        XCTAssertEqual(sampleLines().filtered(source: nil, stream: nil, query: "  ").map(\.id), [0, 1, 2, 3])
+    }
+
+    func testExportTextFormatsEachLine() {
+        let text = sampleLines().exportText(timestampFormat: "ss")
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        XCTAssertEqual(lines.count, 4)
+        XCTAssertEqual(lines[0], "00  [astro/stdout]  Local http://localhost:4321/")
+        XCTAssertEqual(lines[3], "03  [mcp/stderr]  server ready")
+    }
+
     func testCancelEndsIterationAndUnregisters() async {
         let center = LogCenter()
         let sub = await center.subscribe()

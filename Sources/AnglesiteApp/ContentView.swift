@@ -13,7 +13,7 @@ struct ContentView: View {
     @State private var siteFailure: String?
 
     private let store = SiteStore()
-    private let supervisor = ProcessSupervisor()
+    private let supervisor = ProcessSupervisor.shared
     @State private var probeRunning = false
 
     var body: some View {
@@ -162,7 +162,6 @@ struct ContentView: View {
             nodeFailure = "Vendored Node not found.\nRun scripts/vendor-node.sh then rebuild."
             return
         }
-        let supervisor = ProcessSupervisor()
         do {
             arithmeticOutput = try await supervisor.run(
                 executable: executable,

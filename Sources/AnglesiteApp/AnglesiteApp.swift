@@ -1,10 +1,42 @@
 import SwiftUI
+import AppKit
 import AnglesiteCore
 import AnglesiteBridge
 
+/// Owns process-level lifecycle that SwiftUI's `App` value type can't: on quit, drain every
+/// supervised child (Astro dev server, MCP server, ad-hoc Node) so nothing outlives the app.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        Task {
+            await ProcessSupervisor.shared.shutdownAll(timeout: 5)
+            await MainActor.run { NSApp.reply(toApplicationShouldTerminate: true) }
+        }
+        return .terminateLater
+    }
+}
+
 @main
 struct AnglesiteApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
+
+    /// Computed once at launch: Debug builds always show the Debug-pane menu item; Release builds
+    /// only when the user opted in (Settings) or held ⌥ while launching. A settings change takes
+    /// effect on the next launch — the menu bar is built once here.
+    private let debugPaneMenuVisible: Bool
+
+    init() {
+        #if DEBUG
+        let isDebugBuild = true
+        #else
+        let isDebugBuild = false
+        #endif
+        debugPaneMenuVisible = DebugPaneVisibility.menuItemVisible(
+            isDebugBuild: isDebugBuild,
+            settingEnabled: AppSettings.shared.debugPaneEnabled,
+            optionHeldAtLaunch: NSEvent.modifierFlags.contains(.option)
+        )
+    }
 
     var body: some Scene {
         WindowGroup("Anglesite") {
@@ -14,13 +46,15 @@ struct AnglesiteApp: App {
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .commands {
-            // Debug pane lives off the View menu — `⌥⌘D` keeps it discoverable without
-            // crowding the primary commands. Phase 3 surfaces every subprocess line here.
+            // Debug pane lives off the View menu — `⌥⌘D` keeps it discoverable without crowding
+            // the primary commands. Hidden in Release unless explicitly enabled (see init()).
             CommandGroup(after: .toolbar) {
-                Button("Show Debug Pane") {
-                    openWindow(id: "debug")
+                if debugPaneMenuVisible {
+                    Button("Show Debug Pane") {
+                        openWindow(id: "debug")
+                    }
+                    .keyboardShortcut("d", modifiers: [.command, .option])
                 }
-                .keyboardShortcut("d", modifiers: [.command, .option])
             }
         }
 

@@ -14,6 +14,7 @@ public final class AppSettings: @unchecked Sendable {
     public enum Key {
         public static let pluginPathOverride = "anglesite.pluginPathOverride"
         public static let sitesRootOverride  = "anglesite.sitesRootOverride"
+        public static let debugPaneEnabled   = "anglesite.debugPaneEnabled"
     }
 
     private let defaults: UserDefaults
@@ -58,5 +59,24 @@ public final class AppSettings: @unchecked Sendable {
     public var sitesRoot: URL {
         sitesRootOverride
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Sites", isDirectory: true)
+    }
+
+    /// Opt-in toggle (Settings → Advanced) that surfaces the Debug pane menu item in Release
+    /// builds. Defaults to `false`; Debug builds always show the menu regardless. See
+    /// `DebugPaneVisibility`.
+    public var debugPaneEnabled: Bool {
+        get { defaults.bool(forKey: Key.debugPaneEnabled) }
+        set { defaults.set(newValue, forKey: Key.debugPaneEnabled) }
+    }
+}
+
+/// Decides whether the "Show Debug Pane" menu item is present.
+///
+/// The pane streams every subprocess line and is the first thing a weird bug report needs — so it
+/// is *always* available in Debug builds. In Release it stays hidden unless the user opts in
+/// (Settings → Advanced) or holds ⌥ while launching the app.
+public enum DebugPaneVisibility {
+    public static func menuItemVisible(isDebugBuild: Bool, settingEnabled: Bool, optionHeldAtLaunch: Bool) -> Bool {
+        isDebugBuild || settingEnabled || optionHeldAtLaunch
     }
 }

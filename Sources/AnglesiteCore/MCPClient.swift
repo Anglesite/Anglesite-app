@@ -73,6 +73,9 @@ public actor MCPClient {
         case rpcError(code: Int, message: String)
         case exitedBeforeReady(ProcessSupervisor.ExitReason)
         case timeout
+        /// In-flight request failed because the server process crashed and is being restarted;
+        /// the client re-runs `initialize` against the fresh process. Retry the call.
+        case reconnecting
     }
 
     public struct ToolDescriptor: Sendable, Equatable {
@@ -103,6 +106,11 @@ public actor MCPClient {
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
     private var initialized: Bool = false
 
+    // Captured from `start(...)` so a respawn can re-run the same `initialize` handshake.
+    private var clientName: String = "Anglesite"
+    private var clientVersion: String = "0.1.0"
+    private var initializeTimeout: TimeInterval = 10
+
     public init(supervisor: ProcessSupervisor, logCenter: LogCenter = .shared) {
         self.supervisor = supervisor
         self.logCenter = logCenter
@@ -111,19 +119,25 @@ public actor MCPClient {
     public var isRunning: Bool { handle != nil }
 
     /// Spawn the MCP server and run the `initialize` handshake. Returns once the server has
-    /// responded with its capabilities.
+    /// responded with its capabilities. If the server later crashes, `ProcessSupervisor` restarts
+    /// it per `restartPolicy` and the client re-runs `initialize` against the fresh process; calls
+    /// that were in flight at the moment of the crash fail with `MCPError.reconnecting`.
     public func start(
         executable: URL,
         arguments: [String],
         environment: [String: String] = [:],
         source: String = "mcp",
         currentDirectoryURL: URL? = nil,
+        restartPolicy: ProcessSupervisor.RestartPolicy = .onCrash(maxAttempts: 3, baseBackoff: 1.0),
         initializeTimeout: TimeInterval = 10,
         clientName: String = "Anglesite",
         clientVersion: String = "0.1.0"
     ) async throws {
         if handle != nil { throw MCPError.alreadyRunning }
         self.source = source
+        self.clientName = clientName
+        self.clientVersion = clientVersion
+        self.initializeTimeout = initializeTimeout
 
         let sub = await logCenter.subscribe()
         self.subscription = sub
@@ -134,8 +148,9 @@ public actor MCPClient {
             arguments: arguments,
             environment: environment,
             currentDirectoryURL: currentDirectoryURL,
-            restartPolicy: .never,
+            restartPolicy: restartPolicy,
             attachStdin: true,
+            onRespawn: { [weak self] in await self?.handleRespawn() },
             logCenter: logCenter
         )
         self.handle = h
@@ -146,26 +161,43 @@ public actor MCPClient {
         }
 
         do {
-            let params: JSONValue = .object([
-                "protocolVersion": .string("2024-11-05"),
-                "capabilities": .object([:]),
-                "clientInfo": .object([
-                    "name": .string(clientName),
-                    "version": .string(clientVersion),
-                ]),
-            ])
-            _ = try await sendRequest(
-                method: "initialize",
-                params: params,
-                timeout: initializeTimeout
-            )
-            // MCP requires a follow-up "initialized" notification; ignore failure (notifications
-            // expect no response and the server may not care).
-            try? await sendNotification(method: "notifications/initialized", params: nil)
+            try await runInitializeHandshake()
             self.initialized = true
         } catch {
             await teardown()
             throw error
+        }
+    }
+
+    /// Sends `initialize` (and the required `notifications/initialized` follow-up). Used both at
+    /// `start(...)` and after a supervised respawn.
+    private func runInitializeHandshake() async throws {
+        let params: JSONValue = .object([
+            "protocolVersion": .string("2024-11-05"),
+            "capabilities": .object([:]),
+            "clientInfo": .object([
+                "name": .string(clientName),
+                "version": .string(clientVersion),
+            ]),
+        ])
+        _ = try await sendRequest(method: "initialize", params: params, timeout: initializeTimeout)
+        // Notifications expect no response and the server may not care — ignore failure.
+        try? await sendNotification(method: "notifications/initialized", params: nil)
+    }
+
+    /// Fired by `ProcessSupervisor` after it restarts the crashed server. The old stdin is gone
+    /// (`writeJSONLine` re-fetches the writer, so it auto-targets the fresh pipe) and any in-flight
+    /// requests can never be answered — fail them, drop `initialized`, then re-handshake.
+    private func handleRespawn() async {
+        let waiters = pending
+        pending.removeAll()
+        for cont in waiters.values { cont.resume(throwing: MCPError.reconnecting) }
+        initialized = false
+        do {
+            try await runInitializeHandshake()
+            initialized = true
+        } catch {
+            // Reconnect failed; stays un-initialized. The next call throws `.notInitialized`.
         }
     }
 

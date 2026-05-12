@@ -13,6 +13,10 @@ import Darwin
 ///   - `launch(...)` — long-running supervised process; streams output into a `LogCenter`, exposes a
 ///     `Handle` for `terminate(_:)` / `waitForExit(_:)`, and honors `RestartPolicy` on crash.
 public actor ProcessSupervisor {
+    /// App-wide supervisor. The UI and app delegate share this so that `shutdownAll()` on quit
+    /// reaches every child the app spawned. Tests build their own instances.
+    public static let shared = ProcessSupervisor()
+
     private var entries: [UUID: Entry] = [:]
 
     public init() {}
@@ -110,13 +114,19 @@ public actor ProcessSupervisor {
         public let writer: FileHandle
     }
 
+    /// Invoked after the supervisor *respawns* a crashed process (once per successful restart;
+    /// never for the initial spawn). Lets a wrapper re-establish whatever the new process needs —
+    /// `MCPClient` re-runs its `initialize` handshake against the fresh stdin, for example. Runs
+    /// detached so it can `await` back into the supervisor (e.g. `stdinWriter(_:)`) without deadlock.
+    public typealias RespawnHandler = @Sendable () async -> Void
+
     /// Spawn a long-running supervised process. Log lines flow into `logCenter` tagged with `source`.
     ///
     /// Returns once the process has been spawned (or thrown). Use `waitForExit(_:)` for the final
     /// disposition and `terminate(_:)` to stop it.
     ///
     /// If you need to write to the process's stdin (e.g. MCP JSON-RPC framing), pass `attachStdin: true`
-    /// and call `stdinWriter(_:)` afterward.
+    /// and call `stdinWriter(_:)` afterward. Pass `onRespawn` to react to supervised restarts.
     @discardableResult
     public func launch(
         source: String,
@@ -126,6 +136,7 @@ public actor ProcessSupervisor {
         currentDirectoryURL: URL? = nil,
         restartPolicy: RestartPolicy = .never,
         attachStdin: Bool = false,
+        onRespawn: RespawnHandler? = nil,
         logCenter: LogCenter = .shared
     ) async throws -> Handle {
         let id = UUID()
@@ -138,6 +149,7 @@ public actor ProcessSupervisor {
             currentDirectoryURL: currentDirectoryURL,
             restartPolicy: restartPolicy,
             attachStdin: attachStdin,
+            onRespawn: onRespawn,
             logCenter: logCenter
         )
         entries[id] = entry
@@ -202,6 +214,25 @@ public actor ProcessSupervisor {
         }
     }
 
+    /// Terminates every supervised process. SIGTERM (with SIGKILL escalation after `timeout`) is
+    /// sent to all live entries concurrently; resolves once each supervision loop has settled.
+    /// Marking entries `manuallyTerminated` first means an in-flight `RestartPolicy.onCrash`
+    /// backoff is broken instead of waited out. Wire this to the app's quit notification so no
+    /// Node / Astro / MCP child outlives the app process.
+    public func shutdownAll(timeout: TimeInterval = 5) async {
+        let handles = entries.values.map(\.handle)
+        guard !handles.isEmpty else { return }
+        await withTaskGroup(of: Void.self) { group in
+            for handle in handles {
+                group.addTask { [weak self] in
+                    guard let self else { return }
+                    await self.terminate(handle, timeout: timeout)
+                    _ = await self.waitForExit(handle)
+                }
+            }
+        }
+    }
+
     public func isRunning(_ handle: Handle) -> Bool {
         entries[handle.id]?.currentProcess?.isRunning ?? false
     }
@@ -224,6 +255,7 @@ public actor ProcessSupervisor {
         let currentDirectoryURL: URL?
         let restartPolicy: RestartPolicy
         let attachStdin: Bool
+        let onRespawn: RespawnHandler?
         let logCenter: LogCenter
 
         var currentProcess: Process?
@@ -243,6 +275,7 @@ public actor ProcessSupervisor {
             currentDirectoryURL: URL?,
             restartPolicy: RestartPolicy,
             attachStdin: Bool,
+            onRespawn: RespawnHandler?,
             logCenter: LogCenter
         ) {
             self.handle = handle
@@ -252,6 +285,7 @@ public actor ProcessSupervisor {
             self.currentDirectoryURL = currentDirectoryURL
             self.restartPolicy = restartPolicy
             self.attachStdin = attachStdin
+            self.onRespawn = onRespawn
             self.logCenter = logCenter
         }
     }
@@ -348,6 +382,11 @@ public actor ProcessSupervisor {
                     )
                     await finalize(entry, reason: .retriesExhausted(lastCode: exitCode))
                     return
+                }
+                // Process is back up; let the wrapper re-establish session state. Detached so
+                // the handler can `await` into this actor (e.g. `stdinWriter`) without deadlock.
+                if let onRespawn = entry.onRespawn {
+                    Task { await onRespawn() }
                 }
             }
         }
