@@ -8,7 +8,11 @@ final class AnglesiteScriptHandlerTests: XCTestCase {
             "id": "e-99",
             "type": "anglesite:apply-edit",
             "path": "/contact/",
-            "selector": "h1",
+            "selector": [
+                "tag": "H1",
+                "classes": [] as [String],
+                "nthChild": 1,
+            ] as [String: Any],
             "op": "set-text",
             "value": "New heading",
         ]

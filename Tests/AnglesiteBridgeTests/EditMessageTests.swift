@@ -3,12 +3,23 @@ import XCTest
 import AnglesiteCore
 
 final class EditMessageTests: XCTestCase {
+    /// Matches the `ElementInfo` shape the JS overlay sends — the plugin's `server/selector.mjs`
+    /// resolves it server-side to a final CSS selector. See #18.
+    private func validSelector() -> [String: Any] {
+        [
+            "tag": "P",
+            "classes": [] as [String],
+            "nthChild": 2,
+            "ancestors": [] as [Any],
+        ]
+    }
+
     private func validBody(overrides: [String: Any] = [:]) -> [String: Any] {
         var body: [String: Any] = [
             "id": "edit-1",
             "type": "anglesite:apply-edit",
             "path": "/about/",
-            "selector": "p:nth-of-type(2)",
+            "selector": validSelector(),
             "op": "set-text",
             "value": "Hello, world.",
         ]
@@ -24,7 +35,12 @@ final class EditMessageTests: XCTestCase {
         XCTAssertEqual(msg.id, "edit-1")
         XCTAssertEqual(msg.type, .applyEdit)
         XCTAssertEqual(msg.path, "/about/")
-        XCTAssertEqual(msg.selector, "p:nth-of-type(2)")
+        // The selector is forwarded structurally to the plugin; check a couple of fields here.
+        guard case .object(let dict) = msg.selector else {
+            return XCTFail("expected .object selector, got \(msg.selector)")
+        }
+        XCTAssertEqual(dict["tag"], .string("P"))
+        XCTAssertEqual(dict["nthChild"], .int(2))
         XCTAssertEqual(msg.op, "set-text")
         XCTAssertEqual(msg.value, .string("Hello, world."))
     }
@@ -73,6 +89,17 @@ final class EditMessageTests: XCTestCase {
         XCTAssertEqual(
             EditMessage.decode(from: validBody(overrides: ["path": 123])),
             .failure(.wrongType(field: "path", expected: "string"))
+        )
+    }
+
+    func testRejectsSelectorThatIsNotAnObject() {
+        XCTAssertEqual(
+            EditMessage.decode(from: validBody(overrides: ["selector": "p:nth-of-type(2)"])),
+            .failure(.wrongType(field: "selector", expected: "object"))
+        )
+        XCTAssertEqual(
+            EditMessage.decode(from: validBody(overrides: ["selector": 123])),
+            .failure(.wrongType(field: "selector", expected: "object"))
         )
     }
 

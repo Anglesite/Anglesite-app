@@ -3,11 +3,17 @@ import XCTest
 import AnglesiteCore
 
 final class MCPApplyEditRouterTests: XCTestCase {
+    private static let sampleSelector: JSONValue = .object([
+        "tag": .string("P"),
+        "classes": .array([]),
+        "nthChild": .int(2),
+    ])
+
     private let sampleMessage = EditMessage(
         id: "e-1",
         type: .applyEdit,
         path: "/about/",
-        selector: "p:nth-of-type(2)",
+        selector: MCPApplyEditRouterTests.sampleSelector,
         op: "set-text",
         value: .string("Hello, world.")
     )
@@ -26,7 +32,7 @@ final class MCPApplyEditRouterTests: XCTestCase {
                 "id": .string("e-1"),
                 "type": .string("anglesite:apply-edit"),
                 "path": .string("/about/"),
-                "selector": .string("p:nth-of-type(2)"),
+                "selector": MCPApplyEditRouterTests.sampleSelector,
                 "op": .string("set-text"),
                 "value": .string("Hello, world."),
             ])

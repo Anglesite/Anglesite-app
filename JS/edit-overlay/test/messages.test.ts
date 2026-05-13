@@ -11,7 +11,7 @@ const sampleMessage: EditMessage = {
   id: "fixed-1",
   type: "anglesite:apply-edit",
   path: "/about/",
-  selector: "html > body > main > p",
+  selector: { tag: "P", classes: [], nthChild: 1, ancestors: [] },
   op: "set-text",
   value: "Hello",
 };

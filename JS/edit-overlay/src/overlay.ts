@@ -4,7 +4,7 @@
 // installs a reply channel so native can answer edit attempts. Pure DOM manipulation — all
 // JS → native messaging goes through `messages.ts`.
 
-import { cssSelectorFor } from "./selector.js";
+import { elementInfoFor } from "./selector.js";
 import {
   installReplyHandler,
   nextEditID,
@@ -80,7 +80,7 @@ function attachClickToEdit(awaitReply: (id: string, handler: (r: { status: strin
         id,
         type: "anglesite:apply-edit",
         path: location.pathname,
-        selector: cssSelectorFor(target),
+        selector: elementInfoFor(target),
         op: "set-text",
         value: newText,
       };
@@ -113,7 +113,7 @@ function attachImageDrop(): void {
         id,
         type: "anglesite:apply-edit",
         path: location.pathname,
-        selector: cssSelectorFor(target),
+        selector: elementInfoFor(target),
         op: "set-image",
         value: { filename: file.name, mimeType: file.type, dataURL },
       };

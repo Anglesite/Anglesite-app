@@ -87,11 +87,12 @@ describe("click-to-edit", () => {
     p.dispatchEvent(new FocusEvent("blur"));
 
     expect(sent.length).toBe(1);
-    const msg = sent[0] as { type: string; op: string; selector: string; value: unknown };
+    const msg = sent[0] as { type: string; op: string; selector: { tag: string; ancestors?: Array<{ tag: string }> }; value: unknown };
     expect(msg.type).toBe("anglesite:apply-edit");
     expect(msg.op).toBe("set-text");
     expect(msg.value).toBe("new");
-    expect(msg.selector).toContain("p");
+    expect(msg.selector.tag).toBe("P");
+    expect(msg.selector.ancestors?.map((a) => a.tag)).toEqual(["BODY", "MAIN"]);
   });
 
   it("does not post on blur when the text is unchanged", () => {

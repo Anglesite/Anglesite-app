@@ -19,14 +19,15 @@ public struct EditMessage: Sendable, Equatable {
     public let type: MessageType
     /// Page path (e.g. `/about/`).
     public let path: String
-    /// Element identifier the server can resolve back to source (see #18 for the exact strategy).
-    public let selector: String
+    /// Structured element metadata (`ElementInfo`) — the plugin's `server/selector.mjs` resolves
+    /// this to a CSS selector server-side. The bridge is a relay; #18 records the decision.
+    public let selector: JSONValue
     /// Edit operation — `"set-text"`, `"set-attribute"`, etc. Phase 5 finalizes the taxonomy.
     public let op: String
     /// Operation payload — varies by `op`. Optional because some ops (e.g. `"delete"`) won't carry one.
     public let value: JSONValue?
 
-    public init(id: String, type: MessageType, path: String, selector: String, op: String, value: JSONValue?) {
+    public init(id: String, type: MessageType, path: String, selector: JSONValue, op: String, value: JSONValue?) {
         self.id = id
         self.type = type
         self.path = path
@@ -42,7 +43,7 @@ public struct EditMessage: Sendable, Equatable {
             "id": .string(id),
             "type": .string(type.rawValue),
             "path": .string(path),
-            "selector": .string(selector),
+            "selector": selector,
             "op": .string(op),
         ]
         if let value { obj["value"] = value }
@@ -70,7 +71,6 @@ public struct EditMessage: Sendable, Equatable {
         let id: String
         let typeRaw: String
         let path: String
-        let selector: String
         let op: String
         switch requireString("id") {
         case .success(let v): id = v
@@ -84,14 +84,18 @@ public struct EditMessage: Sendable, Equatable {
         case .success(let v): path = v
         case .failure(let e): return .failure(e)
         }
-        switch requireString("selector") {
-        case .success(let v): selector = v
-        case .failure(let e): return .failure(e)
-        }
         switch requireString("op") {
         case .success(let v): op = v
         case .failure(let e): return .failure(e)
         }
+
+        // `selector` is structured (`ElementInfo` shape) — require an object so it's
+        // routable to the plugin's `selector.mjs.buildSelector(info)` unchanged. See #18.
+        guard let rawSelector = dict["selector"] else { return .failure(.missingField("selector")) }
+        guard let jv = JSONValue.from(rawSelector), case .object = jv else {
+            return .failure(.wrongType(field: "selector", expected: "object"))
+        }
+        let selector = jv
 
         guard let type = MessageType(rawValue: typeRaw) else {
             return .failure(.unknownType(typeRaw))

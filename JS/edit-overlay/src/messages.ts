@@ -5,11 +5,15 @@
 // `window.webkit.messageHandlers.anglesite.postMessage(...)` channel and receive replies
 // on `window.anglesite._handleReply(...)`.
 
+import type { ElementInfo } from "./selector.js";
+
 export interface EditMessage {
   id: string;
   type: "anglesite:apply-edit";
   path: string;
-  selector: string;
+  /** Structured element metadata; the server resolves it to a CSS selector via
+   *  `selector.mjs.buildSelector(info)` (decided in #18). */
+  selector: ElementInfo;
   op: string;
   value?: unknown;
 }
