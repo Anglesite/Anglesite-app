@@ -48,6 +48,7 @@ fastlane/test_output
 Resources/node-runtime/
 Resources/plugin/
 Resources/npm-cache/
+Resources/edit-overlay/
 node_modules/
 
 # Build artifacts

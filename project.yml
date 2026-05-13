@@ -31,6 +31,10 @@ targets:
         type: folder
         buildPhase: resources
         optional: true
+      - path: Resources/edit-overlay
+        type: folder
+        buildPhase: resources
+        optional: true
     preBuildScripts:
       - name: Vendor Node runtime
         script: "${PROJECT_DIR}/scripts/vendor-node.sh"
@@ -40,6 +44,9 @@ targets:
         basedOnDependencyAnalysis: false
       - name: Vendor primed npm cache
         script: "${PROJECT_DIR}/scripts/vendor-npm-cache.sh"
+        basedOnDependencyAnalysis: false
+      - name: Build edit overlay
+        script: "${PROJECT_DIR}/scripts/build-overlay.sh"
         basedOnDependencyAnalysis: false
     settings:
       base:

@@ -1,0 +1,74 @@
+// Typed wrapper around the JS → native message bridge.
+//
+// The native side is `AnglesiteBridge.AnglesiteScriptHandler` (registered under
+// `WebViewBridge.scriptMessageNamespace = "anglesite"`). We post via the standard
+// `window.webkit.messageHandlers.anglesite.postMessage(...)` channel and receive replies
+// on `window.anglesite._handleReply(...)`.
+
+export interface EditMessage {
+  id: string;
+  type: "anglesite:apply-edit";
+  path: string;
+  selector: string;
+  op: string;
+  value?: unknown;
+}
+
+export interface EditReply {
+  id: string;
+  status: "applied" | "failed" | "ambiguous";
+  message?: string;
+}
+
+interface WebKitWindow {
+  webkit?: {
+    messageHandlers?: {
+      anglesite?: { postMessage: (body: unknown) => void };
+    };
+  };
+}
+
+interface AnglesiteWindow {
+  anglesite?: { _handleReply?: (reply: EditReply) => void };
+}
+
+type ReplyHandler = (reply: EditReply) => void;
+
+let editCounter = 0;
+/** Monotonic-ish per-tab edit ID. Tab refresh resets the sequence; native correlates by full id. */
+export function nextEditID(): string {
+  editCounter += 1;
+  return `e-${Date.now().toString(36)}-${editCounter}`;
+}
+
+/** Post a message to native. Returns `false` (no throw) if the WKWebView bridge isn't present —
+ *  e.g. running the overlay in a plain browser tab for local debugging. */
+export function postEdit(
+  message: EditMessage,
+  win: WebKitWindow = window as unknown as WebKitWindow,
+): boolean {
+  const handler = win.webkit?.messageHandlers?.anglesite;
+  if (!handler) return false;
+  handler.postMessage(message);
+  return true;
+}
+
+/** Install `window.anglesite._handleReply` so native can deliver replies, and return an
+ *  `awaitReply` registrar bound to a closure-private map — each install gets its own. */
+export function installReplyHandler(
+  win: AnglesiteWindow = window as unknown as AnglesiteWindow,
+): { awaitReply: (id: string, handler: ReplyHandler) => void } {
+  const pending = new Map<string, ReplyHandler>();
+  win.anglesite = win.anglesite ?? {};
+  win.anglesite._handleReply = (reply: EditReply) => {
+    const handler = pending.get(reply.id);
+    if (!handler) return;
+    pending.delete(reply.id);
+    handler(reply);
+  };
+  return {
+    awaitReply: (id, handler) => {
+      pending.set(id, handler);
+    },
+  };
+}
