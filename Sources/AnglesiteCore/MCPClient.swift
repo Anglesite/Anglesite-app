@@ -88,9 +88,19 @@ public actor MCPClient {
         public let content: [Content]
         public let isError: Bool
 
+        public init(content: [Content], isError: Bool) {
+            self.content = content
+            self.isError = isError
+        }
+
         public struct Content: Sendable, Equatable {
             public let type: String
             public let text: String?
+
+            public init(type: String, text: String?) {
+                self.type = type
+                self.text = text
+            }
         }
     }
 

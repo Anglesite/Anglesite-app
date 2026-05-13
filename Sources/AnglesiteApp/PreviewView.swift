@@ -10,7 +10,10 @@ struct PreviewView: NSViewRepresentable {
     let url: URL
 
     func makeNSView(context: Context) -> WKWebView {
-        let webView = WKWebView(frame: .zero, configuration: WebViewBridge.localDevConfiguration())
+        // Each webview gets its own script-message handler so the WKWebView retains the router for
+        // its lifetime; `LoggingEditRouter` is the placeholder until Phase 5 lands a real one.
+        let handler = AnglesiteScriptHandler(router: LoggingEditRouter())
+        let webView = WKWebView(frame: .zero, configuration: WebViewBridge.localDevConfiguration(handler: handler))
         WebViewBridge.applyLocalDevDefaults(to: webView)
         webView.load(URLRequest(url: url))
         context.coordinator.loadedURL = url

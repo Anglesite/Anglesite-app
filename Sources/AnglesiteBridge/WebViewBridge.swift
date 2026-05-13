@@ -11,13 +11,17 @@ public enum WebViewBridge {
 
     /// A `WKWebViewConfiguration` tuned for previewing a local Astro dev server. In Debug builds it
     /// uses a non-persistent data store so nothing is cached between launches (the dev server moves
-    /// fast); in Release it uses the default store. The `anglesite` script-message handler is
-    /// registered onto this config by #16.
-    public static func localDevConfiguration() -> WKWebViewConfiguration {
+    /// fast); in Release it uses the default store. When `handler` is provided it is registered on
+    /// the user-content controller under the `anglesite` namespace — that's the JS → native channel
+    /// for edit messages from the overlay.
+    public static func localDevConfiguration(handler: WKScriptMessageHandler? = nil) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
         #if DEBUG
         config.websiteDataStore = .nonPersistent()
         #endif
+        if let handler {
+            config.userContentController.add(handler, name: scriptMessageNamespace)
+        }
         return config
     }
 

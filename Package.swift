@@ -27,6 +27,11 @@ let package = Package(
             name: "AnglesiteCoreTests",
             dependencies: ["AnglesiteCore"],
             path: "Tests/AnglesiteCoreTests"
+        ),
+        .testTarget(
+            name: "AnglesiteBridgeTests",
+            dependencies: ["AnglesiteBridge"],
+            path: "Tests/AnglesiteBridgeTests"
         )
     ]
 )
