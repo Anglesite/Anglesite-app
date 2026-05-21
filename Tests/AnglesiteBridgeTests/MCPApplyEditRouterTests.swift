@@ -14,7 +14,7 @@ final class MCPApplyEditRouterTests: XCTestCase {
         type: .applyEdit,
         path: "/about/",
         selector: MCPApplyEditRouterTests.sampleSelector,
-        op: "set-text",
+        op: "replace-text",
         value: .string("Hello, world.")
     )
 
@@ -25,7 +25,7 @@ final class MCPApplyEditRouterTests: XCTestCase {
 
         let calls = await recorder.calls
         XCTAssertEqual(calls.count, 1)
-        XCTAssertEqual(calls.first?.name, "anglesite:apply-edit")
+        XCTAssertEqual(calls.first?.name, "apply_edit")
         XCTAssertEqual(
             calls.first?.arguments,
             .object([
@@ -33,7 +33,7 @@ final class MCPApplyEditRouterTests: XCTestCase {
                 "type": .string("anglesite:apply-edit"),
                 "path": .string("/about/"),
                 "selector": MCPApplyEditRouterTests.sampleSelector,
-                "op": .string("set-text"),
+                "op": .string("replace-text"),
                 "value": .string("Hello, world."),
             ])
         )

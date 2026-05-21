@@ -20,7 +20,7 @@ final class EditMessageTests: XCTestCase {
             "type": "anglesite:apply-edit",
             "path": "/about/",
             "selector": validSelector(),
-            "op": "set-text",
+            "op": "replace-text",
             "value": "Hello, world.",
         ]
         for (k, v) in overrides { body[k] = v }
@@ -41,7 +41,7 @@ final class EditMessageTests: XCTestCase {
         }
         XCTAssertEqual(dict["tag"], .string("P"))
         XCTAssertEqual(dict["nthChild"], .int(2))
-        XCTAssertEqual(msg.op, "set-text")
+        XCTAssertEqual(msg.op, "replace-text")
         XCTAssertEqual(msg.value, .string("Hello, world."))
     }
 

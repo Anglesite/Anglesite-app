@@ -89,7 +89,7 @@ describe("click-to-edit", () => {
     expect(sent.length).toBe(1);
     const msg = sent[0] as { type: string; op: string; selector: { tag: string; ancestors?: Array<{ tag: string }> }; value: unknown };
     expect(msg.type).toBe("anglesite:apply-edit");
-    expect(msg.op).toBe("set-text");
+    expect(msg.op).toBe("replace-text");
     expect(msg.value).toBe("new");
     expect(msg.selector.tag).toBe("P");
     expect(msg.selector.ancestors?.map((a) => a.tag)).toEqual(["BODY", "MAIN"]);

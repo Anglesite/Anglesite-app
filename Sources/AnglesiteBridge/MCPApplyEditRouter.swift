@@ -1,13 +1,13 @@
 import Foundation
 import AnglesiteCore
 
-/// `EditRouter` backed by an `MCPClient` `tools/call` to the plugin's `anglesite:apply-edit` tool.
+/// `EditRouter` backed by an `MCPClient` `tools/call` to the plugin's `apply_edit` tool.
 ///
-/// Scaffolding for Phase 5: today nothing in the app instantiates an `MCPClient` running against
-/// the plugin server, and the plugin server doesn't speak `anglesite:apply-edit` yet — so the
-/// `PreviewView` wiring uses `LoggingEditRouter` instead. When Phase 5 lands, the wiring swaps to
-/// this router (the test-shaped `init(toolCaller:)` is the seam; the convenience `init(mcpClient:)`
-/// is the production hookup).
+/// Phase 5's `apply_edit` MCP tool is live in the plugin server (anglesite/anglesite#296 + #297
+/// + #298). Nothing in the app instantiates an `MCPClient` against that server yet, so the
+/// `PreviewView` wiring stays on `LoggingEditRouter`; this is the router the wiring will swap
+/// to once an MCP client is launched (the test-shaped `init(toolCaller:)` is the seam; the
+/// convenience `init(mcpClient:)` is the production hookup).
 public struct MCPApplyEditRouter: EditRouter {
     public typealias ToolCaller = @Sendable (_ name: String, _ arguments: JSONValue) async throws -> MCPClient.ToolCallResult
 
@@ -31,7 +31,7 @@ public struct MCPApplyEditRouter: EditRouter {
     public func apply(_ message: EditMessage) async -> EditReply {
         let args = message.jsonValue
         do {
-            let result = try await toolCaller("anglesite:apply-edit", args)
+            let result = try await toolCaller("apply_edit", args)
             let text = result.content.compactMap(\.text).joined(separator: "\n")
             let trimmed = text.isEmpty ? nil : text
             if result.isError {

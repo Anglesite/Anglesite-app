@@ -33,7 +33,7 @@ final class EditReplyAndRouterTests: XCTestCase {
         let msg = EditMessage(
             id: "e-42", type: .applyEdit, path: "/",
             selector: .object(["tag": .string("H1"), "classes": .array([]), "nthChild": .int(1)]),
-            op: "set-text", value: .string("Hi")
+            op: "replace-text", value: .string("Hi")
         )
         let reply = await router.apply(msg)
         XCTAssertEqual(reply.id, "e-42")
@@ -49,13 +49,13 @@ final class EditReplyAndRouterTests: XCTestCase {
         let msg = EditMessage(
             id: "e-1", type: .applyEdit, path: "/about/",
             selector: .object(["tag": .string("P"), "classes": .array([]), "nthChild": .int(1)]),
-            op: "set-text", value: .string("x")
+            op: "replace-text", value: .string("x")
         )
         _ = await router.apply(msg)
         let lines = await center.snapshot().filter { $0.source == "bridge" }
         XCTAssertFalse(lines.isEmpty, "expected at least one bridge log line")
         let text = lines.last?.text ?? ""
-        XCTAssertTrue(text.contains("set-text") && text.contains("/about/"),
+        XCTAssertTrue(text.contains("replace-text") && text.contains("/about/"),
                       "log line should reflect the op + path — got: \(text)")
     }
 }
