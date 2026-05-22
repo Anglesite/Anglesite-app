@@ -1,4 +1,5 @@
 import SwiftUI
+import AnglesiteBridge
 import AnglesiteCore
 
 /// SwiftUI-facing wrapper over a `PreviewSession` actor: mirrors the session's `State` into an
@@ -16,8 +17,18 @@ final class PreviewModel {
 
     private let session: PreviewSession
 
+    /// The `EditRouter` that the WKWebView's `AnglesiteScriptHandler` forwards overlay edits to.
+    /// Wired to the session's `MCPClient` via a weak getter so the router doesn't outlive the
+    /// model. If the MCP client isn't running (session not started yet, or graceful spawn
+    /// failure), `MCPApplyEditRouter` returns `.failed("MCP not running")` per its existing shape.
+    let editRouter: EditRouter
+
     init(session: PreviewSession = PreviewSession()) {
         self.session = session
+        self.editRouter = MCPApplyEditRouter(mcpClient: { [weak session] in
+            // `session` is the actor instance; reading `mcpClient` is synchronous on the actor.
+            await session?.mcpClient
+        })
         // Mirror session state into `state`. `[weak self]` so the model can still be freed; the
         // stream itself outlives a freed model (one PreviewModel per window today, so it's moot).
         Task { @MainActor [weak self] in

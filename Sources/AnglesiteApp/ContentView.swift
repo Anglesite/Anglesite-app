@@ -156,7 +156,7 @@ struct ContentView: View {
 
             switch preview.state {
             case .ready(_, let url):
-                PreviewView(url: url)
+                PreviewView(url: url, router: preview.editRouter)
             case .starting:
                 centeredStatus { ProgressView("Starting dev server for \(site.name)…") }
             case .failed(_, let message):

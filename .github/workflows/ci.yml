@@ -17,6 +17,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The end-to-end test in AnglesiteBridgeTests spawns the real plugin's MCP server, so
+      # CI needs the sibling repo present and `npm ci`-installed. Without these the test cleanly
+      # `XCTSkip`s; with them, the full overlay → patcher → file-on-disk round-trip is exercised.
+      - name: Checkout sibling Anglesite plugin
+        uses: actions/checkout@v4
+        with:
+          repository: Anglesite/anglesite
+          path: anglesite-plugin
+
+      - name: Set up Node (for the bundled plugin's MCP server)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install plugin dependencies
+        working-directory: anglesite-plugin
+        run: npm ci --no-audit --no-fund
+
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.app
 
@@ -24,11 +42,14 @@ jobs:
         run: |
           swift --version
           xcodebuild -version
+          node --version
 
       - name: Build (debug)
         run: swift build -c debug
 
       - name: Test
+        env:
+          ANGLESITE_PLUGIN_PATH: ${{ github.workspace }}/anglesite-plugin
         run: swift test -c debug --parallel
 
       - name: Build (release)

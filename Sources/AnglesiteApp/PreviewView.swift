@@ -6,13 +6,18 @@ import AnglesiteBridge
 ///
 /// `url` is owned by the caller (a `PreviewModel` driven by `PreviewSession`). When it changes —
 /// e.g. a supervised dev-server restart rebinds a new port — the web view reloads from the new URL.
+///
+/// `router` is the `EditRouter` the in-page overlay's `AnglesiteScriptHandler` forwards edits to.
+/// In production it's the `MCPApplyEditRouter` from `PreviewModel`, wrapping the session's
+/// `MCPClient`; tests can substitute any `EditRouter`.
 struct PreviewView: NSViewRepresentable {
     let url: URL
+    let router: EditRouter
 
     func makeNSView(context: Context) -> WKWebView {
         // Each webview gets its own script-message handler so the WKWebView retains the router for
-        // its lifetime; `LoggingEditRouter` is the placeholder until Phase 5 lands a real one.
-        let handler = AnglesiteScriptHandler(router: LoggingEditRouter())
+        // its lifetime. The router itself is shared (closure-captured by PreviewModel).
+        let handler = AnglesiteScriptHandler(router: router)
         let webView = WKWebView(frame: .zero, configuration: WebViewBridge.localDevConfiguration(handler: handler))
         WebViewBridge.applyLocalDevDefaults(to: webView)
         webView.load(URLRequest(url: url))
