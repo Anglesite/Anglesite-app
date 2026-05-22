@@ -13,7 +13,7 @@ final class AnglesiteScriptHandlerTests: XCTestCase {
                 "classes": [] as [String],
                 "nthChild": 1,
             ] as [String: Any],
-            "op": "set-text",
+            "op": "replace-text",
             "value": "New heading",
         ]
     }
@@ -29,7 +29,7 @@ final class AnglesiteScriptHandlerTests: XCTestCase {
         let received = await router.received
         XCTAssertEqual(received.count, 1)
         XCTAssertEqual(received.first?.id, "e-99")
-        XCTAssertEqual(received.first?.op, "set-text")
+        XCTAssertEqual(received.first?.op, "replace-text")
     }
 
     func testHandleInvalidBodyReturnsDecodeErrorAndDoesNotRoute() async {

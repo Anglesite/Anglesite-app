@@ -81,7 +81,7 @@ function attachClickToEdit(awaitReply: (id: string, handler: (r: { status: strin
         type: "anglesite:apply-edit",
         path: location.pathname,
         selector: elementInfoFor(target),
-        op: "set-text",
+        op: "replace-text",
         value: newText,
       };
       postEdit(msg);
@@ -114,7 +114,7 @@ function attachImageDrop(): void {
         type: "anglesite:apply-edit",
         path: location.pathname,
         selector: elementInfoFor(target),
-        op: "set-image",
+        op: "replace-image-src",
         value: { filename: file.name, mimeType: file.type, dataURL },
       };
       postEdit(msg);

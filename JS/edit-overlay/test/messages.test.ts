@@ -12,7 +12,7 @@ const sampleMessage: EditMessage = {
   type: "anglesite:apply-edit",
   path: "/about/",
   selector: { tag: "P", classes: [], nthChild: 1, ancestors: [] },
-  op: "set-text",
+  op: "replace-text",
   value: "Hello",
 };
 

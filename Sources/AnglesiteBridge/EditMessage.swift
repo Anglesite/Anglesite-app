@@ -22,7 +22,7 @@ public struct EditMessage: Sendable, Equatable {
     /// Structured element metadata (`ElementInfo`) — the plugin's `server/selector.mjs` resolves
     /// this to a CSS selector server-side. The bridge is a relay; #18 records the decision.
     public let selector: JSONValue
-    /// Edit operation — `"set-text"`, `"set-attribute"`, etc. Phase 5 finalizes the taxonomy.
+    /// Edit operation — `"replace-text"`, `"replace-attr"`, etc. Phase 5 finalizes the taxonomy.
     public let op: String
     /// Operation payload — varies by `op`. Optional because some ops (e.g. `"delete"`) won't carry one.
     public let value: JSONValue?
@@ -37,7 +37,9 @@ public struct EditMessage: Sendable, Equatable {
     }
 
     /// Round-trippable `JSONValue` representation — used as the `arguments` payload when the
-    /// router forwards an edit to the plugin's `anglesite:apply-edit` MCP tool.
+    /// router forwards an edit to the plugin's `apply_edit` MCP tool (the `type` field stays as
+    /// the WKWebView-side boundary tag `"anglesite:apply-edit"`; the plugin's schema accepts and
+    /// ignores it since the tool name is authoritative server-side).
     public var jsonValue: JSONValue {
         var obj: [String: JSONValue] = [
             "id": .string(id),
