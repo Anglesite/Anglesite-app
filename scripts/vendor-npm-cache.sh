@@ -63,9 +63,12 @@ if [[ -f "$TARBALL" && -f "$VERSION_FILE" && "$(tr -d '[:space:]' < "$VERSION_FI
     exit 0
 fi
 
-# Pick an npm.
+# Pick an npm. Also prepend the chosen npm's directory to PATH — under Xcode's stripped
+# PATH (`/usr/bin:/bin:...`), `#!/usr/bin/env node` shebangs in npm-spawned tools fail to
+# resolve. Putting the vendored bin on PATH first keeps the whole pipeline self-contained.
 if [[ -x "$REPO_ROOT/Resources/node-runtime/bin/npm" ]]; then
     NPM="$REPO_ROOT/Resources/node-runtime/bin/npm"
+    export PATH="$REPO_ROOT/Resources/node-runtime/bin:$PATH"
 elif command -v npm >/dev/null 2>&1; then
     NPM="$(command -v npm)"
 else

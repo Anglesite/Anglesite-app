@@ -50,10 +50,11 @@ Resources/
 ## Build
 
 ```sh
-# Once the Xcode project exists (Phase 0.5):
-xed .
+# Open the app project (not `xed .` — that opens Package.swift, which only
+# has the library scheme `Anglesite-Package` and no runnable target).
+open Anglesite.xcodeproj
 # ⌘B in Xcode, or:
-xcodebuild -scheme Anglesite -configuration Debug build
+xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build
 ```
 
 ## Plan

@@ -64,6 +64,11 @@ function attachClickToEdit(awaitReply: (id: string, handler: (r: { status: strin
     ev.preventDefault();
 
     target.classList.remove(HOVER_CLASS);
+    // Capture the selector snapshot BEFORE any edit mutations — `textContent` (and any other
+    // edit-time-mutable field) must reflect the source-file state so the server-side patcher
+    // can find the element. Done after HOVER_CLASS is removed and before EDITABLE_CLASS is
+    // added so the snapshot has no overlay-internal classes either.
+    const originalInfo = elementInfoFor(target);
     target.contentEditable = "true";
     target.classList.add(EDITABLE_CLASS);
     target.focus();
@@ -80,7 +85,7 @@ function attachClickToEdit(awaitReply: (id: string, handler: (r: { status: strin
         id,
         type: "anglesite:apply-edit",
         path: location.pathname,
-        selector: elementInfoFor(target),
+        selector: originalInfo,
         op: "replace-text",
         value: newText,
       };

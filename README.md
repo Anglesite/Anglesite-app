@@ -36,9 +36,11 @@ xcodegen generate
 # Build via CLI (ad-hoc signed; no Apple account required)
 xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build
 
-# Or open in Xcode
-xed Anglesite.xcodeproj
+# Or open in Xcode (note: `open Anglesite.xcodeproj`, NOT `xed .`)
+open Anglesite.xcodeproj
 ```
+
+> **Don't `xed .`** — this repo contains both a `Package.swift` and an `Anglesite.xcodeproj`. `xed .` opens the package, whose scheme picker only shows `Anglesite-Package` (libraries only, no runnable target). Open the `.xcodeproj` explicitly; the scheme picker should then show `Anglesite`, `AnglesiteCore`, and `AnglesiteBridge`, and ⌘R should run the app.
 
 The Debug configuration uses ad-hoc signing so contributors can build and run locally without any Apple Developer enrollment. Notarized Release builds require a paid Apple Developer account — see [`docs/xcode-setup.md`](docs/xcode-setup.md) for the full distribution path.
 

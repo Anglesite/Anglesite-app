@@ -101,4 +101,20 @@ describe("click-to-edit", () => {
     p.dispatchEvent(new FocusEvent("blur"));
     expect(sent.length).toBe(0);
   });
+
+  it("captures selector.textContent from the ORIGINAL text, not the edited one", () => {
+    // Regression: an earlier version called `elementInfoFor(target)` inside the blur handler,
+    // after the user had typed — sending the new text as `selector.textContent`. The
+    // server-side patcher then couldn't find the element in the source file (which still
+    // contained the original text), and no edit was applied.
+    const p = makeText(document.body, "p", "original-text");
+    p.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    p.textContent = "new-text-the-user-typed";
+    p.dispatchEvent(new FocusEvent("blur"));
+
+    expect(sent.length).toBe(1);
+    const msg = sent[0] as { selector: { textContent?: string }; value: unknown };
+    expect(msg.selector.textContent).toBe("original-text");
+    expect(msg.value).toBe("new-text-the-user-typed");
+  });
 });
