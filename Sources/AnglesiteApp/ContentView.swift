@@ -112,8 +112,12 @@ struct ContentView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(site.name).font(.body.monospaced())
                             if !site.missingSentinels.isEmpty {
-                                Text("missing: \(site.missingSentinels.joined(separator: ", "))")
-                                    .font(.caption2).foregroundStyle(.orange)
+                                // Valid site missing only recommended sentinels = informational
+                                // ("optional:", secondary color). Invalid site missing required
+                                // sentinels = blocker ("missing:", orange).
+                                Text((site.isValid ? "optional: " : "missing: ") + site.missingSentinels.joined(separator: ", "))
+                                    .font(.caption2)
+                                    .foregroundStyle(site.isValid ? .secondary : .orange)
                             }
                         }
                     }
