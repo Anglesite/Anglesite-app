@@ -25,10 +25,20 @@ public actor PreviewSession {
     }
 
     public typealias CommandResolver = @Sendable (_ siteDirectory: URL) -> LaunchPlan
+    /// How to spawn the bundled plugin's MCP server. The site directory is *not* part of the
+    /// plan — it goes into `ANGLESITE_PROJECT_ROOT` in the env at start time — so this resolver
+    /// is site-independent.
+    public typealias MCPCommandResolver = @Sendable () -> LaunchPlan
 
     private let devServer: AstroDevServer
+    /// The MCP client for this site's bundled plugin server. Exposed (via the actor getter
+    /// `mcpClient`) so a `PreviewModel` / `MCPApplyEditRouter` can route `apply_edit` calls
+    /// through it. If MCP spawn fails (graceful), `isRunning` stays false and tool calls
+    /// throw `.notInitialized` — preview still works without the edit pipeline.
+    public let mcpClient: MCPClient
     private let logCenter: LogCenter
     private let resolveCommand: CommandResolver
+    private let resolveMCPCommand: MCPCommandResolver
 
     private var current: State = .idle
     private var observers: [UUID: AsyncStream<State>.Continuation] = [:]
@@ -37,13 +47,17 @@ public actor PreviewSession {
 
     public init(
         devServer: AstroDevServer? = nil,
+        mcpClient: MCPClient? = nil,
         supervisor: ProcessSupervisor = .shared,
         logCenter: LogCenter = .shared,
-        resolveCommand: @escaping CommandResolver = PreviewSession.resolveAstroCommand
+        resolveCommand: @escaping CommandResolver = PreviewSession.resolveAstroCommand,
+        resolveMCPCommand: @escaping MCPCommandResolver = PreviewSession.resolveBundledMCPCommand
     ) {
         self.devServer = devServer ?? AstroDevServer(supervisor: supervisor, logCenter: logCenter)
+        self.mcpClient = mcpClient ?? MCPClient(supervisor: supervisor, logCenter: logCenter)
         self.logCenter = logCenter
         self.resolveCommand = resolveCommand
+        self.resolveMCPCommand = resolveMCPCommand
     }
 
     public var state: State { current }
@@ -69,7 +83,7 @@ public actor PreviewSession {
         restartPolicy: ProcessSupervisor.RestartPolicy = .onCrash(maxAttempts: 3, baseBackoff: 0.5),
         readyTimeout: TimeInterval = 30
     ) async {
-        await stopServer()
+        await stopSubprocesses()
         generation += 1
         let gen = generation
         setState(.starting(siteID: siteID))
@@ -93,6 +107,10 @@ public actor PreviewSession {
                     // newer call already stopped this server, so just drop the result.
                     return
                 }
+                // Best-effort MCP spawn — failures are logged and leave the session in .ready
+                // anyway (preview is the primary feature; the edit pipeline is an enhancement).
+                await startMCPClient(siteID: siteID, siteDirectory: siteDirectory)
+                guard gen == generation else { return }
                 setState(.ready(siteID: siteID, url: url))
             } catch {
                 guard gen == generation else { return }
@@ -101,17 +119,42 @@ public actor PreviewSession {
         }
     }
 
-    /// Stop the dev server and return to `.idle`.
+    /// Stop the dev server + MCP client and return to `.idle`.
     public func stop() async {
         generation += 1  // invalidate any in-flight start()
-        await stopServer()
+        await stopSubprocesses()
         setState(.idle)
     }
 
     // MARK: Internals
 
-    private func stopServer() async {
+    private func stopSubprocesses() async {
         await devServer.stop()
+        await mcpClient.stop()
+    }
+
+    private func startMCPClient(siteID: String, siteDirectory: URL) async {
+        switch resolveMCPCommand() {
+        case .unavailable(let reason):
+            await logCenter.append(
+                source: "mcp:\(siteID)", stream: .stderr,
+                text: "MCP not available: \(reason)"
+            )
+        case .run(let executable, let arguments):
+            do {
+                try await mcpClient.start(
+                    executable: executable,
+                    arguments: arguments,
+                    environment: ["ANGLESITE_PROJECT_ROOT": siteDirectory.path],
+                    source: "mcp:\(siteID)"
+                )
+            } catch {
+                await logCenter.append(
+                    source: "mcp:\(siteID)", stream: .stderr,
+                    text: "MCP start failed: \(error)"
+                )
+            }
+        }
     }
 
     private func handleReadyURLChange(_ url: URL, siteID: String, generation gen: Int) {
@@ -166,5 +209,25 @@ public actor PreviewSession {
             return .unavailable(reason: "the embedded Node runtime isn't bundled (rebuild the app)")
         }
         return .run(executable: node, arguments: [astroBin.path, "dev"])
+    }
+
+    /// Production `MCPCommandResolver`: spawn the *bundled* plugin's `server/index.mjs` with the
+    /// vendored Node. Honors the Settings → Advanced → Plugin path override via `PluginRuntime`,
+    /// so plugin authors point at `../anglesite` while iterating without rebuilding the app.
+    public static let resolveBundledMCPCommand: MCPCommandResolver = {
+        let resolution = PluginRuntime.resolve()
+        guard let pluginURL = resolution.url else {
+            return .unavailable(reason: "the Anglesite plugin isn't bundled (rebuild the app)")
+        }
+        let serverPath = pluginURL
+            .appendingPathComponent("server", isDirectory: true)
+            .appendingPathComponent("index.mjs")
+        guard FileManager.default.isReadableFile(atPath: serverPath.path) else {
+            return .unavailable(reason: "bundled plugin is missing server/index.mjs")
+        }
+        guard let node = NodeRuntime.bundledExecutableURL else {
+            return .unavailable(reason: "the embedded Node runtime isn't bundled (rebuild the app)")
+        }
+        return .run(executable: node, arguments: [serverPath.path])
     }
 }
