@@ -106,18 +106,21 @@ struct ContentView: View {
                 .padding(.horizontal, 12)
             } else {
                 List(sites, selection: $selectedSiteID) { site in
+                    // Pre-compute outside the View builder. Inline ternaries inside the closure
+                    // confuse SwiftUI's type inference (especially when branches have different
+                    // ShapeStyle / Color types), which then mis-routes to the Binding-based
+                    // `List` overload — a Xcode 26 + macOS 26 SDK papercut.
+                    let label: String = (site.isValid ? "optional: " : "missing: ") + site.missingSentinels.joined(separator: ", ")
+                    let captionColor: Color = site.isValid ? .secondary : .orange
                     HStack(spacing: 8) {
                         Image(systemName: site.isValid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                            .foregroundStyle(site.isValid ? .green : .orange)
+                            .foregroundStyle(site.isValid ? Color.green : Color.orange)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(site.name).font(.body.monospaced())
                             if !site.missingSentinels.isEmpty {
-                                // Valid site missing only recommended sentinels = informational
-                                // ("optional:", secondary color). Invalid site missing required
-                                // sentinels = blocker ("missing:", orange).
-                                Text((site.isValid ? "optional: " : "missing: ") + site.missingSentinels.joined(separator: ", "))
+                                Text(label)
                                     .font(.caption2)
-                                    .foregroundStyle(site.isValid ? .secondary : .orange)
+                                    .foregroundStyle(captionColor)
                             }
                         }
                     }
