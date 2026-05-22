@@ -91,6 +91,123 @@ final class PreviewSessionTests: XCTestCase {
         await session.stop()
     }
 
+    // MARK: MCP client lifecycle
+
+    /// Minimal python MCP fake that answers `initialize` so MCPClient.start can complete.
+    private static let mcpFakeScript = """
+    import sys, json
+    for line in sys.stdin:
+        line = line.strip()
+        if not line: continue
+        try: msg = json.loads(line)
+        except Exception: continue
+        rid = msg.get("id")
+        if rid is None: continue
+        method = msg.get("method", "")
+        if method == "initialize":
+            resp = {"jsonrpc":"2.0","id":rid,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"0.0.0"}}}
+        else:
+            resp = {"jsonrpc":"2.0","id":rid,"error":{"code":-32601,"message":"method not found"}}
+        sys.stdout.write(json.dumps(resp) + chr(10)); sys.stdout.flush()
+    """
+
+    private static let pythonURL: URL = {
+        for path in ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"] {
+            if FileManager.default.isExecutableFile(atPath: path) { return URL(fileURLWithPath: path) }
+        }
+        return URL(fileURLWithPath: "/usr/bin/python3")
+    }()
+
+    private func makeSessionWithMCP(
+        astroResolve: @escaping PreviewSession.CommandResolver,
+        mcpResolve: @escaping PreviewSession.MCPCommandResolver
+    ) -> (PreviewSession, MCPClient) {
+        let supervisor = ProcessSupervisor()
+        let center = LogCenter()
+        let devServer = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
+        let mcpClient = MCPClient(supervisor: supervisor, logCenter: center)
+        let session = PreviewSession(
+            devServer: devServer,
+            mcpClient: mcpClient,
+            logCenter: center,
+            resolveCommand: astroResolve,
+            resolveMCPCommand: mcpResolve
+        )
+        return (session, mcpClient)
+    }
+
+    private func runnableMCPFake() -> PreviewSession.LaunchPlan {
+        .run(executable: Self.pythonURL, arguments: ["-u", "-c", Self.mcpFakeScript])
+    }
+
+    func testMCPClientIsRunningAfterSuccessfulStart() async {
+        let (session, mcp) = makeSessionWithMCP(
+            astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
+            mcpResolve: { self.runnableMCPFake() }
+        )
+        await session.start(siteID: "mysite", siteDirectory: tmpDir)
+
+        // AstroDevServer succeeded → state is .ready.
+        let state = await session.state
+        XCTAssertEqual(state, .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
+
+        // MCP also came up.
+        let running = await mcp.isRunning
+        XCTAssertTrue(running, "expected MCPClient.isRunning after a successful session.start")
+
+        // The session's exposed reference is the same instance.
+        let exposed = await session.mcpClient
+        XCTAssertTrue(exposed === mcp)
+
+        await session.stop()
+    }
+
+    func testMCPClientStopsWhenSessionStops() async {
+        let (session, mcp) = makeSessionWithMCP(
+            astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
+            mcpResolve: { self.runnableMCPFake() }
+        )
+        await session.start(siteID: "mysite", siteDirectory: tmpDir)
+        let runningBefore = await mcp.isRunning
+        XCTAssertTrue(runningBefore)
+
+        await session.stop()
+        let runningAfter = await mcp.isRunning
+        XCTAssertFalse(runningAfter, "MCPClient should be stopped after session.stop()")
+    }
+
+    func testStateStaysReadyWhenMCPCommandIsUnavailable() async {
+        // MCP can't be located → session still reaches .ready (preview is the primary feature).
+        let (session, mcp) = makeSessionWithMCP(
+            astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
+            mcpResolve: { .unavailable(reason: "test: bundled plugin not present") }
+        )
+        await session.start(siteID: "mysite", siteDirectory: tmpDir)
+
+        let state = await session.state
+        XCTAssertEqual(state, .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
+        let running = await mcp.isRunning
+        XCTAssertFalse(running)
+
+        await session.stop()
+    }
+
+    func testStateStaysReadyWhenMCPLaunchFails() async {
+        // MCP launch errors out (bad executable) → session still reaches .ready, mcpClient is not running.
+        let (session, mcp) = makeSessionWithMCP(
+            astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
+            mcpResolve: { .run(executable: URL(fileURLWithPath: "/nonexistent/mcp/binary"), arguments: []) }
+        )
+        await session.start(siteID: "mysite", siteDirectory: tmpDir)
+        let state = await session.state
+        if case .ready = state { /* ok */ } else {
+            XCTFail("expected .ready (graceful MCP failure), got \(state)")
+        }
+        let running = await mcp.isRunning
+        XCTAssertFalse(running)
+        await session.stop()
+    }
+
     func testObserveStreamEmitsIdleStartingReady() async {
         let session = makeSession(
             resolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
