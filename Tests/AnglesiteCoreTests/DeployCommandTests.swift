@@ -9,7 +9,8 @@ final class DeployCommandTests: XCTestCase {
     private func makeCommand(
         resolve: @escaping DeployCommand.CommandResolver,
         token: @escaping DeployCommand.TokenSource,
-        preflight: @escaping DeployCommand.PreflightChecker = { _ in .passed(warnings: []) }
+        preflight: @escaping DeployCommand.PreflightChecker = { _ in .passed(warnings: []) },
+        build: @escaping DeployCommand.CommandResolver = { _ in .run(executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: []) }
     ) -> (DeployCommand, ProcessSupervisor, LogCenter) {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
@@ -17,6 +18,7 @@ final class DeployCommandTests: XCTestCase {
             supervisor: supervisor,
             logCenter: center,
             resolveCommand: resolve,
+            resolveBuildCommand: build,
             tokenSource: token,
             preflight: preflight
         )
@@ -161,6 +163,60 @@ final class DeployCommandTests: XCTestCase {
         let lines = await center.snapshot()
         let tokenLine = lines.first(where: { $0.text.contains("TOKEN_SEEN_BY_WRANGLER=") })
         XCTAssertEqual(tokenLine?.text, "TOKEN_SEEN_BY_WRANGLER=secret-token-abc")
+    }
+
+    // MARK: Build step
+
+    func testFailsWhenBuildExitsNonZero() async {
+        var wranglerSpawned = false
+        var preflightCalled = false
+        let (cmd, _, _) = makeCommand(
+            resolve: { _ in
+                wranglerSpawned = true
+                return self.shFixture("exit 0")
+            },
+            token: { "fake-token" },
+            preflight: { _ in
+                preflightCalled = true
+                return .passed(warnings: [])
+            },
+            build: { _ in
+                self.shFixture("echo 'astro: oops, type error' 1>&2; exit 2")
+            }
+        )
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        XCTAssertFalse(preflightCalled, "preflight must not run when build failed")
+        XCTAssertFalse(wranglerSpawned, "wrangler must not run when build failed")
+        guard case .failed(let reason, let exit) = result else { return XCTFail("expected .failed, got \(result)") }
+        XCTAssertEqual(exit, 2)
+        XCTAssertTrue(reason.contains("build") && reason.contains("2"), "reason should name the build and the exit code: \(reason)")
+    }
+
+    func testFailsWhenBuildResolverReportsUnavailable() async {
+        let (cmd, _, _) = makeCommand(
+            resolve: { _ in self.shFixture("exit 0") },
+            token: { "fake-token" },
+            build: { _ in .unavailable(reason: "vendored npm not found — rebuild the app") }
+        )
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .failed(let reason, _) = result else { return XCTFail("expected .failed, got \(result)") }
+        XCTAssertTrue(reason.contains("vendored npm"), reason)
+    }
+
+    func testBuildOutputAppearsInLogCenterUnderBuildSource() async {
+        let (cmd, _, center) = makeCommand(
+            resolve: { _ in
+                self.shFixture("echo 'Published angle-app (0.42 sec)'; echo '  https://t.example.workers.dev'; exit 0")
+            },
+            token: { "fake-token" },
+            build: { _ in self.shFixture("echo 'building dist…'; exit 0") }
+        )
+        _ = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        let lines = await center.snapshot()
+        XCTAssertTrue(
+            lines.contains { $0.source == "deploy:mysite:build" && $0.text == "building dist…" },
+            "build line should appear under deploy:<site>:build source"
+        )
     }
 
     // MARK: Pre-deploy preflight
