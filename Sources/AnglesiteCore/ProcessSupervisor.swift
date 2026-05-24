@@ -266,6 +266,13 @@ public actor ProcessSupervisor {
         var finalReason: ExitReason?
         // Keyed by waiter ID so cancellation handlers can remove their own continuation.
         var exitWaiters: [UUID: CheckedContinuation<ExitReason, Never>] = [:]
+        /// Log-drain Tasks for the current process incarnation (stdout + stderr). Each consumes
+        /// an `AsyncStream<String>` fed by the corresponding `readabilityHandler` and awaits
+        /// `logCenter.append` serially, so once both tasks complete every read byte has landed
+        /// in `LogCenter`. The supervision loop awaits these in `finalize` *before* resuming
+        /// exit waiters — that's what lets callers `snapshot()` immediately after `waitForExit`
+        /// without losing the tail of the output.
+        var logDrainTasks: [Task<Void, Never>] = []
 
         init(
             handle: Handle,
@@ -316,25 +323,29 @@ public actor ProcessSupervisor {
 
         entry.currentProcess = process
 
-        // Kick off pipe readers. They run until EOF on their pipe (which happens when the
-        // process exits or we close the pipes). They don't need to be awaited — they
-        // self-terminate. We use callback-based `readabilityHandler` so the blocking read
-        // happens on libdispatch, never on the Swift cooperative pool — otherwise the test
-        // runner can starve the readers under load and we don't see output until process exit.
+        // Kick off pipe readers. The `readabilityHandler` runs on a libdispatch queue
+        // (blocking reads never compete with the Swift cooperative pool — otherwise the test
+        // runner could starve the readers under load). Each handler yields complete lines
+        // into an `AsyncStream`, and a dedicated drain `Task` per pipe awaits
+        // `logCenter.append(...)` serially. Both drain Tasks are stored on the entry so
+        // `finalize` can await them before resuming exit waiters — guaranteeing every byte
+        // read has landed in `LogCenter` by the time `waitForExit(_:)` returns.
         let source = entry.handle.source
         let logCenter = entry.logCenter
-        Self.attachLineReader(
-            to: stdoutPipe.fileHandleForReading,
-            source: source,
-            stream: .stdout,
-            logCenter: logCenter
-        )
-        Self.attachLineReader(
-            to: stderrPipe.fileHandleForReading,
-            source: source,
-            stream: .stderr,
-            logCenter: logCenter
-        )
+        entry.logDrainTasks = [
+            Self.attachLineReader(
+                to: stdoutPipe.fileHandleForReading,
+                source: source,
+                stream: .stdout,
+                logCenter: logCenter
+            ),
+            Self.attachLineReader(
+                to: stderrPipe.fileHandleForReading,
+                source: source,
+                stream: .stderr,
+                logCenter: logCenter
+            )
+        ]
     }
 
     private func superviseLoop(id: UUID) async {
@@ -393,6 +404,21 @@ public actor ProcessSupervisor {
     }
 
     private func finalize(_ entry: Entry, reason: ExitReason) async {
+        // Drain the pipe readers before resuming exit waiters. Once `process.terminationHandler`
+        // fires, the OS closes our read ends of stdout/stderr and the `readabilityHandler`
+        // sees EOF on its next callback — which finishes the AsyncStream and lets the drain
+        // `Task` exit. Awaiting both drain tasks here means a caller doing
+        //
+        //   await supervisor.waitForExit(handle)
+        //   let lines = await logCenter.snapshot()
+        //
+        // never loses the tail of the output to the dispatch/runtime gap. Drain tasks have
+        // already started (they were spawned in `startProcess`), so we only `await` them —
+        // we don't spawn new work here.
+        for task in entry.logDrainTasks {
+            await task.value
+        }
+        entry.logDrainTasks.removeAll()
         entry.finalReason = reason
         entry.currentProcess = nil
         let waiters = entry.exitWaiters
@@ -410,34 +436,42 @@ public actor ProcessSupervisor {
         }
     }
 
-    /// Attaches a `readabilityHandler` that emits one line at a time to `logCenter`. The handler
-    /// runs on a libdispatch queue so blocking I/O doesn't compete with the Swift cooperative
-    /// thread pool. We accumulate bytes in a `LineBuffer` to handle partial reads / multi-line
-    /// chunks.
+    /// Attaches a `readabilityHandler` and returns the `Task` that drains the lines into
+    /// `logCenter`. The handler (libdispatch) yields complete lines into an `AsyncStream`; the
+    /// returned `Task` awaits each `logCenter.append(...)` in order. When the pipe sees EOF,
+    /// the handler finishes the stream and the drain `Task` ends — so awaiting the returned
+    /// `Task` is equivalent to "every byte read from this pipe has been written to LogCenter".
+    /// That awaitable boundary is what `finalize` uses to fix the prior race where the process
+    /// could exit before its last few log lines landed.
     private static func attachLineReader(
         to handle: FileHandle,
         source: String,
         stream: LogCenter.Stream,
         logCenter: LogCenter
-    ) {
+    ) -> Task<Void, Never> {
         let buffer = LineBuffer()
+        let (lineStream, continuation) = AsyncStream<String>.makeStream(bufferingPolicy: .unbounded)
+
         handle.readabilityHandler = { fh in
             let data = fh.availableData
             if data.isEmpty {
-                // EOF — flush trailing partial line and detach the handler.
+                // EOF — flush trailing partial line and tear down. The stream finish() lets the
+                // drain `Task` below exit naturally.
                 if let trailing = buffer.flush() {
-                    Task { await logCenter.append(source: source, stream: stream, text: trailing) }
+                    continuation.yield(trailing)
                 }
+                continuation.finish()
                 handle.readabilityHandler = nil
                 return
             }
-            let lines = buffer.append(data)
-            if !lines.isEmpty {
-                Task {
-                    for line in lines {
-                        await logCenter.append(source: source, stream: stream, text: line)
-                    }
-                }
+            for line in buffer.append(data) {
+                continuation.yield(line)
+            }
+        }
+
+        return Task {
+            for await line in lineStream {
+                await logCenter.append(source: source, stream: stream, text: line)
             }
         }
     }
