@@ -54,16 +54,18 @@ This is the riskiest piece, so do it first.
 4. ✅ **Selector strategy: server-side resolution (#18, decided 2026-05-13).** The overlay sends a structured `ElementInfo` payload — `{tag, id?, classes, nthChild, ancestors?, dataAnglesiteId?, dataTestId?, role?, ariaLabel?, textContent?}` matching the typedef in `anglesite/server/selector.mjs` — and the plugin invokes `buildSelector(info)` server-side. One source of truth for the priority order (`data-anglesite-id` > `data-testid` > `#id` > role/aria > stable classes > `tag:nth-child`), no fork-prone duplicated JS. `JS/edit-overlay/src/selector.ts` exposes `elementInfoFor(element)`; ancestors are root-first and stop at `<body>`. The bridge stays a relay: `EditMessage.selector` is `JSONValue` (validated as an object at decode), forwarded as-is by `MCPApplyEditRouter` to the `anglesite:apply-edit` tool when Phase 5 wires it up.
 5. ✅ MCP client lifecycle + apply-edit round-trip wired (2026-05-22). `PreviewSession` (AnglesiteCore) now owns one `MCPClient` per site alongside its `AstroDevServer` — spawned together in `start(siteID:siteDirectory:)`, drained together in `stop()`, both tracked by `ProcessSupervisor.shared` so app-quit drains every child. Spawn defaults: vendored Node + bundled plugin's `server/index.mjs` resolved via `PluginRuntime`, `ANGLESITE_PROJECT_ROOT` set to the site path, source tag `mcp:<siteName>`. Graceful failure — if MCP can't spawn the session still reaches `.ready(url)`; only edit attempts fail (with the existing `EditReply.failed("MCP not running")` shape). `PreviewModel` builds an `MCPApplyEditRouter` wrapping a weak getter to `session.mcpClient` and exposes it as `editRouter`; `PreviewView`/`ContentView` thread it into `AnglesiteScriptHandler` (was `LoggingEditRouter`). End-to-end test in `AnglesiteBridgeTests/AppliesEditEndToEndTests` spawns the real bundled plugin against a tmp Astro-shaped fixture, drives `apply_edit` through a real `MCPClient`, asserts the file's bytes change — `XCTSkip`s cleanly when the sibling plugin checkout or its `node_modules` aren't present (CI provides both via `actions/checkout` + `npm ci` + `ANGLESITE_PLUGIN_PATH`). Cost: +1 Node process per open site (~80–150 MB on top of the existing `astro dev` process).
 
-## Phase 5 — Source patcher (in the plugin repo, not the app)
+## Phase 5 — Source patcher (in the plugin repo, not the app) ✅
 
 This work lands in `anglesite/server/` — the app repo just calls it.
 
-1. Add `server/patcher.mjs` with three resolvers in priority order: `.mdoc` → Keystatic schema → `.astro` static text. Each resolver returns `{file, range, replacement}` or refuses with a reason.
-2. Extend `server/messages.mjs` with `apply-edit`, `edit-applied`, `edit-failed`.
-3. Wire `server/index.mjs` to dispatch the new message types.
-4. Implement the **hidden git branch** undo: every successful patch commits to `anglesite/edits` branch. Add `server/edit-history.mjs`.
-5. Tests in `anglesite/test/patcher.test.js` covering each resolver + ambiguous-match refusal.
-6. **Bounce-to-Claude path** is deferred to v0.5 — for v0, ambiguous edits surface a "Can't edit this directly — try chat (coming soon)" sheet.
+1. ✅ `server/patcher.mjs` — three resolvers in priority order (`.mdoc` → Keystatic schema → `.astro` static text). Each returns `{file, range, replacement}` or `{refused, reason, detail?}`. Landed in `Anglesite/anglesite#295` → merged via #314.
+2. ✅ `server/apply-edit-schema.mjs` — zod schemas for `apply_edit`, `edit-applied`, `edit-failed` (replaces the `messages.mjs` extension; tool name is `apply_edit` snake-case server-side, the WKWebView-side `type:` tag stays `"anglesite:apply-edit"`). Landed in `#296` → merged via #313.
+3. ✅ `server/index.mjs` dispatch — wires the `apply_edit` MCP tool to the dispatcher. Landed in `#297` → merged via #315.
+4. ✅ Hidden git branch undo — `server/edit-history.mjs` commits each successful patch to `anglesite/edits` via git plumbing (no working-tree-dirtying). Landed in `#298` → merged via #316.
+5. ✅ Tests in `anglesite/test/patcher.test.js` + `apply-edit-dispatcher.test.js` + `edit-history.test.js` covering each resolver, ambiguous-match refusal, write-failed mapping, and the onApplied hook contract.
+6. Bounce-to-Claude path remains deferred to v0.5 — for v0, ambiguous edits surface as `edit-failed` reasons (`no-match`, `dynamic-expression`, `ambiguous-match`); the app's plan is to render a "Can't edit this directly — try chat (coming soon)" sheet once the chat panel arrives in Phase 8.
+
+**End-to-end verification (2026-05-22):** typed h1 edit in `~/Sites/smoke/src/pages/index.astro` flowed through the WKWebView overlay → `AnglesiteScriptHandler.decode` → `MCPApplyEditRouter` → bundled MCP server → dispatcher → atomic file write. Tracking issues `Anglesite/anglesite#294` and `Anglesite/Anglesite-app#19` closed. The `AppliesEditEndToEndTests` xctest gives this round-trip ongoing CI coverage.
 
 ## Phase 6 — Deploy button (v0 finishing)
 
