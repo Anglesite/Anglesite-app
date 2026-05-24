@@ -75,7 +75,7 @@ This work lands in `anglesite/server/` — the app repo just calls it.
 
 ## Phase 7 — Keychain + secrets
 
-1. `KeychainStore` for the Cloudflare API token. First-launch deploy prompts; subsequent deploys read silently.
+1. ✅ `KeychainStore` (AnglesiteCore) wraps `SecItem` generic-password APIs under service `dev.anglesite.app`, account `cloudflare-api-token`, accessibility `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`. `DeployCommand.keychainTokenSource` is the new default `TokenSource` — env var wins (so a developer shell with `CLOUDFLARE_API_TOKEN` exported still dominates), then the Keychain. `DeployModel.deploy(...)` does the same pre-check and parks the deploy behind a `CloudflareTokenPromptView` sheet when neither slot has a token; saving the token writes it to the Keychain and immediately fires the parked deploy. Settings → Advanced → Credentials gets a `CloudflareTokenRow` that surfaces "stored / absent" status and provides paste/save/clear without leaking the token through `@AppStorage`. The token never enters `LogCenter` — it's passed via `Process.environment` (opaque to the supervisor's stdout/stderr pipe pumps). Tests cover `KeychainStore` round-trips against per-test scratch services (the `XCTSkip` path handles CI environments where the keychain refuses access).
 2. `gh` device-code flow stays in `gh` — the app just spawns it and surfaces the URL/code in a sheet.
 
 ## Phase 8 — v0.5 chat panel

@@ -29,14 +29,26 @@ final class DeployModel {
     /// Bound to a `.sheet` in `ContentView` for the `.blocked` outcome. The sheet has no
     /// override button — per CLAUDE.md, the app cannot bypass plugin security hooks.
     var blockedPresented: Bool = false
+    /// Bound to a `.sheet` in `ContentView` for the first-deploy "paste your Cloudflare token"
+    /// flow. Set when `deploy(...)` is invoked without a token in either the env or the
+    /// Keychain; cleared when the user saves a token (which then retries the deploy) or cancels.
+    var tokenPromptPresented: Bool = false
 
     private let command: DeployCommand
     private let logCenter: LogCenter
+    private let keychain: KeychainStore
     private var inFlight: Task<Void, Never>?
+    /// Site to retry once the user pastes a token. `nil` outside the prompt flow.
+    private var pendingDeploy: (siteID: String, siteDirectory: URL)?
 
-    init(command: DeployCommand = DeployCommand(), logCenter: LogCenter = .shared) {
+    init(
+        command: DeployCommand = DeployCommand(),
+        logCenter: LogCenter = .shared,
+        keychain: KeychainStore = KeychainStore()
+    ) {
         self.command = command
         self.logCenter = logCenter
+        self.keychain = keychain
     }
 
     var isRunning: Bool {
@@ -50,11 +62,46 @@ final class DeployModel {
     }
 
     /// Kicks off a deploy. No-op if one is already running.
+    ///
+    /// First checks whether a Cloudflare token is available (env > Keychain). If neither has one,
+    /// the token-prompt sheet is presented and the deploy is parked until the user saves a token
+    /// via `saveTokenAndRetry(_:)` — at which point the parked site is dispatched without the
+    /// user having to click Deploy again.
     func deploy(siteID: String, siteDirectory: URL) {
         guard !isRunning else { return }
+        if !hasUsableToken() {
+            pendingDeploy = (siteID, siteDirectory)
+            tokenPromptPresented = true
+            return
+        }
         inFlight = Task { @MainActor [weak self] in
             await self?.runDeploy(siteID: siteID, siteDirectory: siteDirectory)
         }
+    }
+
+    /// Called by the token-prompt sheet's "Save" button. Persists the token to the Keychain and
+    /// — if a deploy was parked on the prompt — kicks it off. Returns `nil` on success or an
+    /// error message on failure (the sheet stays presented so the user can correct it).
+    @discardableResult
+    func saveTokenAndRetry(_ token: String) -> String? {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Token is empty." }
+        do {
+            try keychain.writeCloudflareToken(trimmed)
+        } catch {
+            return "Couldn't save to Keychain: \(error)"
+        }
+        tokenPromptPresented = false
+        if let pending = pendingDeploy {
+            pendingDeploy = nil
+            deploy(siteID: pending.siteID, siteDirectory: pending.siteDirectory)
+        }
+        return nil
+    }
+
+    func cancelTokenPrompt() {
+        pendingDeploy = nil
+        tokenPromptPresented = false
     }
 
     func dismissDrawer() {
@@ -63,6 +110,18 @@ final class DeployModel {
 
     func dismissBlocked() {
         blockedPresented = false
+    }
+
+    /// True if either the env var or the Keychain currently holds a non-empty Cloudflare token.
+    /// Keychain errors are treated as "no token" — the user can recover by pasting fresh.
+    private func hasUsableToken() -> Bool {
+        if let env = ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"], !env.isEmpty {
+            return true
+        }
+        if let stored = (try? keychain.readCloudflareToken()) ?? nil, !stored.isEmpty {
+            return true
+        }
+        return false
     }
 
     private func runDeploy(siteID: String, siteDirectory: URL) async {
