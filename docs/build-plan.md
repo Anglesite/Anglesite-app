@@ -69,8 +69,8 @@ This work lands in `anglesite/server/` — the app repo just calls it.
 
 ## Phase 6 — Deploy button (v0 finishing)
 
-1. `DeployCommand`: shells out to `wrangler deploy` from the site directory. Cloudflare token from Keychain (Phase 7) or env.
-2. **Pre-deploy hook honored**: invoke `scripts/pre-deploy-check.sh` from the bundled plugin. On failure, surface the structured output as a sheet with remediation steps; do not allow override.
+1. ✅ `DeployCommand`: shells out to `wrangler deploy` from the site directory (#20). Cloudflare token from Keychain (Phase 7) or env.
+2. 🟡 **Pre-deploy hook honored**: `PreDeployCheck` (AnglesiteCore) shells out to the site's `scripts/pre-deploy-check.ts --json` and parses the structured `ScanReport` (failures + warnings). The plugin gained a `runScan()` export + `--json` CLI flag in the paired plugin PR; the same `template/scripts/pre-deploy-check.ts` powers both the human-readable mode (existing) and the app-facing JSON mode (new). `DeployCommand` now runs the scan after the token check but before `wrangler` is even resolved — a `.blocked` outcome short-circuits to the new `Result.blocked(failures:, warnings:)` case carrying `[PreDeployCheck.ScanFailure]` / `[PreDeployCheck.ScanWarning]`; `.error` outcomes (missing tsx, missing dist/, outdated scaffold without `--json`) fall through to `.failed` with a "run `/anglesite:update`" remediation. Per CLAUDE.md, *the app cannot bypass plugin security hooks* — no override is exposed. *Remaining for full Phase 6 closure (#22):* the blocked sheet UI (so far the data path is wired and tested; the SwiftUI sheet lands with the deploy drawer). The `npm run build` step that produces `dist/` before scanning is also queued for #22 — today the scan throws if `dist/` is missing and the user sees the remediation message.
 3. Output streamed to a transient drawer; success shows the deployed URL with a "Copy/Open" button.
 
 ## Phase 7 — Keychain + secrets

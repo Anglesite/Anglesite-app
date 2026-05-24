@@ -19,6 +19,9 @@ import Foundation
 public actor DeployCommand {
     public enum Result: Sendable, Equatable {
         case succeeded(url: URL, duration: TimeInterval)
+        /// The pre-deploy security scan refused the deploy. Carries the structured
+        /// failures (and any warnings) so the UI can render a sheet with no override.
+        case blocked(failures: [PreDeployCheck.ScanFailure], warnings: [PreDeployCheck.ScanWarning])
         /// `exitCode` is `nil` for pre-spawn refusals (no token, no wrangler) and for spawn
         /// failures; otherwise it's wrangler's exit code (including `0` for the
         /// "exited cleanly but we couldn't find a URL" case).
@@ -35,22 +38,28 @@ public actor DeployCommand {
     /// Returns the Cloudflare API token, or `nil` if none is configured. Phase 7's
     /// `KeychainStore` will replace the default `envTokenSource` in production callers.
     public typealias TokenSource = @Sendable () async throws -> String?
+    /// Runs the bundled plugin's pre-deploy scan against a site and returns the outcome.
+    /// Real callers use `DeployCommand.defaultPreflight`; tests inject a fake.
+    public typealias PreflightChecker = @Sendable (_ siteDirectory: URL) async -> PreDeployCheck.Outcome
 
     private let supervisor: ProcessSupervisor
     private let logCenter: LogCenter
     private let resolveCommand: CommandResolver
     private let tokenSource: TokenSource
+    private let preflight: PreflightChecker
 
     public init(
         supervisor: ProcessSupervisor = .shared,
         logCenter: LogCenter = .shared,
         resolveCommand: @escaping CommandResolver = DeployCommand.resolveWranglerCommand,
-        tokenSource: @escaping TokenSource = DeployCommand.envTokenSource
+        tokenSource: @escaping TokenSource = DeployCommand.envTokenSource,
+        preflight: @escaping PreflightChecker = DeployCommand.defaultPreflight
     ) {
         self.supervisor = supervisor
         self.logCenter = logCenter
         self.resolveCommand = resolveCommand
         self.tokenSource = tokenSource
+        self.preflight = preflight
     }
 
     /// Run a deploy for `siteID`. Returns once wrangler has exited (or before, if pre-spawn
@@ -67,6 +76,21 @@ public actor DeployCommand {
         }
         guard let token, !token.isEmpty else {
             return .failed(reason: "no CLOUDFLARE_API_TOKEN — set in env or Settings (Phase 7)", exitCode: nil)
+        }
+
+        // Pre-deploy scan runs before wrangler resolution. If the bundled plugin's
+        // checks find PII, exposed tokens, unauthorized third-party scripts, or
+        // Keystatic admin routes in dist/, the deploy is blocked regardless of
+        // whether wrangler is installed — the user needs to fix the scan findings
+        // first either way. Per the durable rule in CLAUDE.md, the app cannot
+        // bypass plugin security hooks; the UI sheet for `.blocked` has no override.
+        switch await preflight(siteDirectory) {
+        case .passed:
+            break
+        case .blocked(let failures, let warnings):
+            return .blocked(failures: failures, warnings: warnings)
+        case .error(let reason):
+            return .failed(reason: "pre-deploy scan could not run: \(reason)", exitCode: nil)
         }
 
         let plan = resolveCommand(siteDirectory)
@@ -152,6 +176,42 @@ public actor DeployCommand {
     /// Default `TokenSource`: read `CLOUDFLARE_API_TOKEN` from the environment.
     public static let envTokenSource: TokenSource = {
         ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"]
+    }
+
+    /// Default `PreflightChecker`: invokes the site's own `scripts/pre-deploy-check.ts
+    /// --json` via `npx tsx` and parses the result. The script is part of the bundled
+    /// plugin's template, so every Anglesite site already has it; outdated sites that
+    /// predate the `--json` mode surface as `.error` outcomes, which `deploy` maps to
+    /// `.failed` with a "run `/anglesite:update`" remediation.
+    public static let defaultPreflight: PreflightChecker = { siteDirectory in
+        let check = PreDeployCheck(invoke: { siteDir in
+            let scriptPath = siteDir.appendingPathComponent("scripts/pre-deploy-check.ts").path
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["npx", "tsx", scriptPath, "--json"]
+            process.currentDirectoryURL = siteDir
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+            process.standardOutput = stdoutPipe
+            process.standardError = stderrPipe
+            try process.run()
+            // Drain pipes off the actor — Process.waitUntilExit() blocks; doing it in a
+            // detached task avoids parking the calling actor's executor for long scans.
+            let result: (String, String, Int32) = await withCheckedContinuation { cont in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let out = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                    let err = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                    process.waitUntilExit()
+                    cont.resume(returning: (
+                        String(data: out, encoding: .utf8) ?? "",
+                        String(data: err, encoding: .utf8) ?? "",
+                        process.terminationStatus
+                    ))
+                }
+            }
+            return (stdout: result.0, exitCode: result.2)
+        })
+        return await check.check(siteID: "deploy", siteDirectory: siteDirectory)
     }
 
     /// Default `CommandResolver`: run the site's own `wrangler` (`node_modules/.bin/wrangler
