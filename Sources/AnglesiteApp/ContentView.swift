@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var selectedSiteID: SiteStore.Site.ID?
 
     @State private var preview = PreviewModel()
+    @State private var deploy = DeployModel()
 
     private let store = SiteStore()
     private let supervisor = ProcessSupervisor.shared
@@ -25,25 +26,33 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-            Divider()
-            HStack(spacing: 0) {
-                sidebar
-                    .frame(width: 260)
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                header
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
                 Divider()
-                mainPane
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                HStack(spacing: 0) {
+                    sidebar
+                        .frame(width: 260)
+                    Divider()
+                    mainPane
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                Divider()
+                Text(BuildInfo.summary)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 6)
             }
-            Divider()
-            Text(BuildInfo.summary)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 6)
+            if deploy.drawerPresented, let site = selectedSite {
+                DeployDrawerView(model: deploy, siteName: site.name)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .shadow(radius: 8, y: -2)
+            }
         }
+        .animation(.easeInOut(duration: 0.18), value: deploy.drawerPresented)
         .task {
             await runNodeSmokeTest()
             await refreshPlugin()
@@ -54,6 +63,13 @@ struct ContentView: View {
                 preview.open(siteID: site.id, siteDirectory: site.path)
             } else {
                 preview.close()
+            }
+        }
+        .sheet(isPresented: $deploy.blockedPresented) {
+            if case .blocked(let failures, let warnings) = deploy.phase {
+                BlockedDeploySheetView(failures: failures, warnings: warnings) {
+                    deploy.dismissBlocked()
+                }
             }
         }
     }
@@ -156,6 +172,17 @@ struct ContentView: View {
                 } else {
                     Spacer()
                 }
+                Button {
+                    deploy.deploy(siteID: site.id, siteDirectory: site.path)
+                } label: {
+                    Label("Deploy", systemImage: "paperplane.fill")
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .disabled(deploy.isRunning || !site.isValid)
+                .help(site.isValid
+                      ? "Build, scan, and `wrangler deploy` this site"
+                      : "Site is missing required files (see sidebar)")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
