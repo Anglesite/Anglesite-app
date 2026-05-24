@@ -72,6 +72,11 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(isPresented: $deploy.tokenPromptPresented) {
+            CloudflareTokenPromptView(model: deploy) {
+                deploy.cancelTokenPrompt()
+            }
+        }
     }
 
     // MARK: Header

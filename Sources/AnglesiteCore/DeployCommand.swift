@@ -37,8 +37,9 @@ public actor DeployCommand {
     }
 
     public typealias CommandResolver = @Sendable (_ siteDirectory: URL) -> LaunchPlan
-    /// Returns the Cloudflare API token, or `nil` if none is configured. Phase 7's
-    /// `KeychainStore` will replace the default `envTokenSource` in production callers.
+    /// Returns the Cloudflare API token, or `nil` if none is configured. Production callers use
+    /// `DeployCommand.keychainTokenSource` (Keychain with an env-var fallback for development);
+    /// tests typically inject a closure returning a literal.
     public typealias TokenSource = @Sendable () async throws -> String?
     /// Runs the bundled plugin's pre-deploy scan against a site and returns the outcome.
     /// Real callers use `DeployCommand.defaultPreflight`; tests inject a fake.
@@ -56,7 +57,7 @@ public actor DeployCommand {
         logCenter: LogCenter = .shared,
         resolveCommand: @escaping CommandResolver = DeployCommand.resolveWranglerCommand,
         resolveBuildCommand: @escaping CommandResolver = DeployCommand.resolveBuildCommand,
-        tokenSource: @escaping TokenSource = DeployCommand.envTokenSource,
+        tokenSource: @escaping TokenSource = DeployCommand.keychainTokenSource,
         preflight: @escaping PreflightChecker = DeployCommand.defaultPreflight
     ) {
         self.supervisor = supervisor
@@ -80,7 +81,7 @@ public actor DeployCommand {
             return .failed(reason: "couldn't read Cloudflare API token: \(error)", exitCode: nil)
         }
         guard let token, !token.isEmpty else {
-            return .failed(reason: "no CLOUDFLARE_API_TOKEN — set in env or Settings (Phase 7)", exitCode: nil)
+            return .failed(reason: "no CLOUDFLARE_API_TOKEN — add it in Settings → Advanced → Credentials, or set the env var", exitCode: nil)
         }
 
         // Build dist/ before the scan needs it. Streams to LogCenter via launch().
@@ -241,9 +242,22 @@ public actor DeployCommand {
 
     // MARK: Default seams
 
-    /// Default `TokenSource`: read `CLOUDFLARE_API_TOKEN` from the environment.
+    /// Reads `CLOUDFLARE_API_TOKEN` from the process environment. Useful in development (the env
+    /// var dominates the Keychain entry when both are set, so a shell with `CLOUDFLARE_API_TOKEN`
+    /// exported behaves the way a wrangler user expects).
     public static let envTokenSource: TokenSource = {
         ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"]
+    }
+
+    /// Default `TokenSource` for production: env var first (so a developer's shell still wins),
+    /// then the user's Keychain. A Keychain error is surfaced to the caller — we'd rather show
+    /// the user "couldn't read token" than silently fall through to `nil` and prompt for a
+    /// re-paste of a token that's actually stored fine.
+    public static let keychainTokenSource: TokenSource = {
+        if let env = ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"], !env.isEmpty {
+            return env
+        }
+        return try KeychainStore().readCloudflareToken()
     }
 
     /// Default `PreflightChecker`: invokes the site's own `scripts/pre-deploy-check.ts

@@ -43,6 +43,13 @@ private struct AdvancedSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Credentials") {
+                CloudflareTokenRow()
+                Text("Stored in the macOS Keychain under `dev.anglesite.app`. The token is passed to `wrangler deploy` as `CLOUDFLARE_API_TOKEN` and never written to logs. An exported `CLOUDFLARE_API_TOKEN` in the shell that launched Anglesite takes precedence over this entry.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Diagnostics") {
                 Toggle("Show Debug Pane menu item", isOn: $debugPaneEnabled)
                 #if DEBUG
@@ -58,6 +65,92 @@ private struct AdvancedSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+}
+
+/// Cloudflare API token row. Reads the current state from the Keychain on appear; saves a new
+/// value on commit; clears the slot on "Clear". The field stays a `SecureField` so the token
+/// doesn't appear in a screen share, but the actual secret bytes only round-trip when the user
+/// edits the field — appearing only redacts.
+private struct CloudflareTokenRow: View {
+    @State private var token: String = ""
+    @State private var status: Status = .unknown
+    @State private var savedMessage: String?
+
+    private enum Status: Equatable {
+        case unknown
+        case present
+        case absent
+        case error(String)
+    }
+
+    private let store = KeychainStore()
+
+    var body: some View {
+        LabeledContent("Cloudflare API token") {
+            VStack(alignment: .trailing, spacing: 6) {
+                HStack(spacing: 8) {
+                    SecureField("paste token", text: $token, prompt: Text(promptText))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 240)
+                    Button("Save") { save() }
+                        .disabled(token.isEmpty)
+                    Button("Clear") { clear() }
+                        .disabled(status != .present)
+                }
+                if let savedMessage {
+                    Text(savedMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if case .error(let message) = status {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        .task { refreshStatus() }
+    }
+
+    private var promptText: String {
+        switch status {
+        case .present: return "•••••••• (stored)"
+        case .absent:  return "paste token"
+        case .unknown: return ""
+        case .error:   return "paste token"
+        }
+    }
+
+    private func refreshStatus() {
+        do {
+            status = (try store.readCloudflareToken() != nil) ? .present : .absent
+        } catch {
+            status = .error("couldn't read keychain: \(error)")
+        }
+    }
+
+    private func save() {
+        do {
+            try store.writeCloudflareToken(token)
+            token = ""
+            status = .present
+            savedMessage = "Saved."
+        } catch {
+            status = .error("couldn't save: \(error)")
+            savedMessage = nil
+        }
+    }
+
+    private func clear() {
+        do {
+            try store.clearCloudflareToken()
+            token = ""
+            status = .absent
+            savedMessage = "Cleared."
+        } catch {
+            status = .error("couldn't clear: \(error)")
+            savedMessage = nil
+        }
     }
 }
 
