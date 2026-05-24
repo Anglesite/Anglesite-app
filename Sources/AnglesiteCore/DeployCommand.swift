@@ -139,13 +139,9 @@ public actor DeployCommand {
         let reason = await supervisor.waitForExit(handle)
         let duration = Date().timeIntervalSince(started)
 
-        // The supervisor's pipe pump dispatches each line via an untracked
-        // `Task { await logCenter.append(...) }`, so a few lines may still be
-        // in flight when waitForExit returns. A small grace period gives them
-        // time to land in LogCenter before we snapshot for URL extraction.
-        // Until the pump is restructured to be fully await-able, this is the
-        // pragmatic fix.
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        // `waitForExit` only resumes after the supervisor's per-pipe drain Tasks have
+        // finished — every byte wrangler wrote to stdout/stderr is in `LogCenter` by
+        // the time we get here, so the snapshot can't miss the `Published` line.
         let snapshot = await logCenter.snapshot()
         let stdout = snapshot
             .filter { $0.source == source && $0.stream == .stdout }
