@@ -15,6 +15,11 @@ struct ContentView: View {
 
     @State private var preview = PreviewModel()
     @State private var deploy = DeployModel()
+    /// Chat is per-site. We rebuild the model whenever the selected site changes so the
+    /// `ClaudeAgent` it owns is bound to the right working directory and the history file
+    /// reflects the conversation for that site.
+    @State private var chat: ChatModel?
+    @State private var chatPresented: Bool = false
 
     private let store = SiteStore()
     private let supervisor = ProcessSupervisor.shared
@@ -38,7 +43,14 @@ struct ContentView: View {
                     Divider()
                     mainPane
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if chatPresented, let chat {
+                        Divider()
+                        ChatView(model: chat)
+                            .frame(width: 420)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
                 }
+                .animation(.easeInOut(duration: 0.18), value: chatPresented)
                 Divider()
                 Text(BuildInfo.summary)
                     .font(.system(.caption, design: .monospaced))
@@ -61,8 +73,11 @@ struct ContentView: View {
         .onChange(of: selectedSiteID) { _, newID in
             if let newID, let site = sites.first(where: { $0.id == newID }) {
                 preview.open(siteID: site.id, siteDirectory: site.path)
+                chat = ChatModel(siteID: site.id, siteDirectory: site.path)
             } else {
                 preview.close()
+                chat = nil
+                chatPresented = false
             }
         }
         .sheet(isPresented: $deploy.blockedPresented) {
@@ -177,6 +192,15 @@ struct ContentView: View {
                 } else {
                     Spacer()
                 }
+                Button {
+                    chatPresented.toggle()
+                } label: {
+                    Label("Chat", systemImage: chatPresented ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right")
+                }
+                .controlSize(.small)
+                .help(chatPresented ? "Hide chat panel" : "Show chat panel")
+                .keyboardShortcut("k", modifiers: [.command])
+
                 Button {
                     deploy.deploy(siteID: site.id, siteDirectory: site.path)
                 } label: {
