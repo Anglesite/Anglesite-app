@@ -48,6 +48,11 @@ private struct AdvancedSettingsView: View {
                 Text("Stored in the macOS Keychain under `dev.anglesite.app`. The token is passed to `wrangler deploy` as `CLOUDFLARE_API_TOKEN` and never written to logs. An exported `CLOUDFLARE_API_TOKEN` in the shell that launched Anglesite takes precedence over this entry.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                GitHubAuthRow()
+                Text("Anglesite shells out to `gh` for GitHub operations and does not store the token itself — `gh` keeps it in its own keychain entry. Clicking Connect runs `gh auth login`; sign-out is `gh auth logout` in Terminal.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Diagnostics") {
@@ -151,6 +156,136 @@ private struct CloudflareTokenRow: View {
             status = .error("couldn't clear: \(error)")
             savedMessage = nil
         }
+    }
+}
+
+/// "Connect GitHub" row. The app never sees the GitHub token — `gh` stores it in its own
+/// credential store. This row just launches the `gh auth login` device-code flow and
+/// surfaces the result. Status reflects what `gh auth status` reports at appear-time.
+private struct GitHubAuthRow: View {
+    @State private var status: Status = .unknown
+    @State private var sheetPresented = false
+    @State private var resultMessage: ResultMessage?
+
+    private enum Status: Equatable {
+        case unknown
+        case signedIn(account: String)
+        case signedOut
+        case unavailable(String)
+    }
+
+    private struct ResultMessage: Equatable {
+        let text: String
+        let isError: Bool
+    }
+
+    var body: some View {
+        LabeledContent("GitHub") {
+            VStack(alignment: .trailing, spacing: 6) {
+                HStack(spacing: 8) {
+                    statusLabel
+                    Spacer()
+                    Button("Connect…") {
+                        resultMessage = nil
+                        sheetPresented = true
+                    }
+                    .disabled(isUnavailable)
+                }
+                if let resultMessage {
+                    Text(resultMessage.text)
+                        .font(.caption)
+                        .foregroundStyle(resultMessage.isError ? .red : .secondary)
+                }
+            }
+        }
+        .task { await refreshStatus() }
+        .sheet(isPresented: $sheetPresented) {
+            GitHubAuthSheetView { result in
+                sheetPresented = false
+                switch result {
+                case .authenticated:
+                    resultMessage = ResultMessage(text: "Connected.", isError: false)
+                    Task { await refreshStatus() }
+                case .failed(let reason):
+                    resultMessage = ResultMessage(text: reason, isError: true)
+                case .cancelled:
+                    resultMessage = nil
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var statusLabel: some View {
+        switch status {
+        case .signedIn(let account):
+            Label("Signed in as \(account)", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .labelStyle(.titleAndIcon)
+        case .signedOut:
+            Text("Not signed in").foregroundStyle(.secondary)
+        case .unknown:
+            Text("Checking…").foregroundStyle(.secondary)
+        case .unavailable(let reason):
+            Text(reason).foregroundStyle(.orange).font(.caption)
+        }
+    }
+
+    private var isUnavailable: Bool {
+        if case .unavailable = status { return true }
+        return false
+    }
+
+    private func refreshStatus() async {
+        // Probe `gh auth status` — robust to gh not being installed.
+        guard let gh = ResolveBinary.locate("gh") else {
+            status = .unavailable("`gh` not installed (brew install gh).")
+            return
+        }
+        let process = Process()
+        process.executableURL = gh
+        process.arguments = ["auth", "status", "--hostname", "github.com"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+        } catch {
+            status = .unavailable("couldn't run `gh`: \(error.localizedDescription)")
+            return
+        }
+        let output: (String, Int32) = await Task.detached(priority: .userInitiated) {
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return (String(data: data, encoding: .utf8) ?? "", process.terminationStatus)
+        }.value
+        if output.1 == 0 {
+            // Look for "account davidwkeith" or "Logged in to github.com account <name>"
+            if let range = output.0.range(of: #"account\s+(\S+)"#, options: .regularExpression) {
+                let token = output.0[range].split(separator: " ").last.map(String.init) ?? ""
+                let cleaned = token.trimmingCharacters(in: CharacterSet(charactersIn: "()"))
+                status = .signedIn(account: cleaned)
+            } else {
+                status = .signedIn(account: "github.com")
+            }
+        } else {
+            status = .signedOut
+        }
+    }
+}
+
+/// Tiny PATH-walker for finding a binary by name. Avoids depending on `which` (which itself
+/// requires a shell), and respects the environment Anglesite was launched with.
+private enum ResolveBinary {
+    static func locate(_ name: String) -> URL? {
+        let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/opt/homebrew/bin"
+        for dir in path.split(separator: ":") {
+            let candidate = URL(fileURLWithPath: String(dir), isDirectory: true).appendingPathComponent(name)
+            if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
     }
 }
 
