@@ -8,7 +8,8 @@ final class DeployCommandTests: XCTestCase {
 
     private func makeCommand(
         resolve: @escaping DeployCommand.CommandResolver,
-        token: @escaping DeployCommand.TokenSource
+        token: @escaping DeployCommand.TokenSource,
+        preflight: @escaping DeployCommand.PreflightChecker = { _ in .passed(warnings: []) }
     ) -> (DeployCommand, ProcessSupervisor, LogCenter) {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
@@ -16,7 +17,8 @@ final class DeployCommandTests: XCTestCase {
             supervisor: supervisor,
             logCenter: center,
             resolveCommand: resolve,
-            tokenSource: token
+            tokenSource: token,
+            preflight: preflight
         )
         return (cmd, supervisor, center)
     }
@@ -159,5 +161,60 @@ final class DeployCommandTests: XCTestCase {
         let lines = await center.snapshot()
         let tokenLine = lines.first(where: { $0.text.contains("TOKEN_SEEN_BY_WRANGLER=") })
         XCTAssertEqual(tokenLine?.text, "TOKEN_SEEN_BY_WRANGLER=secret-token-abc")
+    }
+
+    // MARK: Pre-deploy preflight
+
+    func testReturnsBlockedAndDoesNotSpawnWranglerWhenPreflightBlocks() async {
+        var wranglerSpawned = false
+        let blockedOutcome = PreDeployCheck.Outcome.blocked(
+            failures: [
+                .init(
+                    category: .piiEmail,
+                    file: "dist/index.html",
+                    detail: "Possible email address: jane@yourbusiness.com",
+                    remediation: "Wrap the address in a `mailto:` link or add it to PII_EMAIL_ALLOW in .site-config."
+                )
+            ],
+            warnings: []
+        )
+        let (cmd, _, _) = makeCommand(
+            resolve: { _ in
+                wranglerSpawned = true
+                return self.shFixture("exit 0")
+            },
+            token: { "fake-token" },
+            preflight: { _ in blockedOutcome }
+        )
+
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+
+        XCTAssertFalse(wranglerSpawned, "wrangler must not run when the pre-deploy scan blocks the deploy")
+        guard case .blocked(let failures, _) = result else {
+            return XCTFail("expected .blocked, got \(result)")
+        }
+        XCTAssertEqual(failures.count, 1)
+        XCTAssertEqual(failures[0].category, .piiEmail)
+        XCTAssertEqual(failures[0].file, "dist/index.html")
+    }
+
+    func testFailsWhenPreflightErrors() async {
+        var wranglerSpawned = false
+        let (cmd, _, _) = makeCommand(
+            resolve: { _ in
+                wranglerSpawned = true
+                return self.shFixture("exit 0")
+            },
+            token: { "fake-token" },
+            preflight: { _ in .error(reason: "tsx not installed in this site") }
+        )
+
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+
+        XCTAssertFalse(wranglerSpawned, "wrangler must not run when preflight could not run at all")
+        guard case .failed(let reason, _) = result else {
+            return XCTFail("expected .failed, got \(result)")
+        }
+        XCTAssertTrue(reason.contains("tsx"), "reason should surface the preflight error: \(reason)")
     }
 }
