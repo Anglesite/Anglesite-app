@@ -10,6 +10,10 @@ import Foundation
 /// timestamps so the UI can render immediately without re-scanning the filesystem. `refresh()`
 /// reconciles the cache with what's actually on disk.
 public actor SiteStore {
+    /// Process-wide shared instance. Multi-window code reads/writes through this so the
+    /// in-memory list and on-disk sites.json stay coherent across windows.
+    public static let shared = SiteStore()
+
     public struct Site: Sendable, Codable, Equatable, Identifiable {
         public let id: String          // path-derived, stable across launches
         public let name: String        // last path component
@@ -139,6 +143,12 @@ public actor SiteStore {
     public func remove(id: String) throws {
         sites.removeAll { $0.id == id }
         try persist()
+    }
+
+    /// Look up a site by id. Convenience used by window scenes that receive the id as a
+    /// `WindowGroup(for:)` value and need to resolve it to a path/name.
+    public func find(id: String) -> Site? {
+        sites.first { $0.id == id }
     }
 
     // MARK: - Persistence
