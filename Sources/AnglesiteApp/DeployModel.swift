@@ -23,13 +23,13 @@ final class DeployModel {
     /// Captured deploy + build log lines for the current/most-recent run.
     private(set) var logLines: [LogCenter.LogLine] = []
 
-    /// Bound to a custom slide-up drawer in `ContentView`. The view sets this back to false
+    /// Bound to a custom slide-up drawer in `SiteWindow`. The view sets this back to false
     /// when the user clicks "Dismiss" (we never auto-close — users want to read the URL).
     var drawerPresented: Bool = false
-    /// Bound to a `.sheet` in `ContentView` for the `.blocked` outcome. The sheet has no
+    /// Bound to a `.sheet` in `SiteWindow` for the `.blocked` outcome. The sheet has no
     /// override button — per CLAUDE.md, the app cannot bypass plugin security hooks.
     var blockedPresented: Bool = false
-    /// Bound to a `.sheet` in `ContentView` for the first-deploy "paste your Cloudflare token"
+    /// Bound to a `.sheet` in `SiteWindow` for the first-deploy "paste your Cloudflare token"
     /// flow. Set when `deploy(...)` is invoked without a token in either the env or the
     /// Keychain; cleared when the user saves a token (which then retries the deploy) or cancels.
     var tokenPromptPresented: Bool = false

@@ -4,8 +4,7 @@ import AnglesiteCore
 import AnglesiteBridge
 
 /// Owns process-level lifecycle that SwiftUI's `App` value type can't: prime the npm cache on
-/// launch, and on quit drain every supervised child (Astro dev server, MCP server, ad-hoc Node)
-/// so nothing outlives the app.
+/// launch, and drain every supervised child on quit so nothing outlives the app.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Extract the bundled npm cache into Application Support so the first site `npm install`
@@ -55,12 +54,13 @@ struct AnglesiteApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Anglesite") {
-            ContentView()
-                .frame(minWidth: 960, minHeight: 600)
+        // The launcher is the first scene so it's the default window at launch (used when
+        // SwiftUI has nothing to restore). It autoopens the most-recently-used site from its
+        // own .task — see SitesLauncherView.onFirstAppear().
+        Window("Sites", id: "sites") {
+            SitesLauncherView()
         }
-        .windowStyle(.titleBar)
-        .windowToolbarStyle(.unified)
+        .windowResizability(.contentSize)
         .commands {
             // "Check for Updates…" lives in the standard slot Mac users expect — directly
             // under "About Anglesite" in the application menu. `CommandGroup(after: .appInfo)`
@@ -80,6 +80,19 @@ struct AnglesiteApp: App {
                 }
             }
         }
+
+        // Per-site windows, keyed by SiteStore.Site.id (a stable path-derived String).
+        // Each window owns its own PreviewModel/DeployModel/ChatModel and dev-server lifetime.
+        // SwiftUI dedupes openWindow(value:) calls, so opening the same site twice just
+        // focuses the existing window.
+        WindowGroup(for: String.self) { $siteID in
+            if let siteID {
+                SiteWindow(siteID: siteID)
+                    .frame(minWidth: 960, minHeight: 600)
+            }
+        }
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified)
 
         Window("Anglesite Debug", id: "debug") {
             DebugPaneView()
