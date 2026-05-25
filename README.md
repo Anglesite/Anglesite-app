@@ -33,6 +33,11 @@ scripts/vendor-node.sh
 # Generate the Xcode project
 xcodegen generate
 
+# (Recommended) Enable git hooks that auto-regenerate the .xcodeproj after
+# `git pull` / branch switches / rebases — keeps Xcode in sync with project.yml
+# and Sources/ without manual `xcodegen generate` calls.
+git config core.hooksPath scripts/git-hooks
+
 # Build via CLI (ad-hoc signed; no Apple account required)
 xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build
 
