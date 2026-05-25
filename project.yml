@@ -11,6 +11,11 @@ options:
 packages:
   Anglesite:
     path: .
+  # Sparkle is the only third-party Swift dep allowed at v0.5 (per CLAUDE.md). Pinned to
+  # 2.x; minor bumps come in as a normal PR.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.6.0"
 
 targets:
   Anglesite:
@@ -75,6 +80,7 @@ targets:
         product: AnglesiteCore
       - package: Anglesite
         product: AnglesiteBridge
+      - package: Sparkle
 
 schemes:
   Anglesite:

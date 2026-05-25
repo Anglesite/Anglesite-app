@@ -34,5 +34,24 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+
+	<!-- Sparkle 2.x. Both values are placeholders until the release pipeline is stood up:
+	     1. Generate an Ed25519 keypair with `bin/generate_keys` (Sparkle's Tools bundle).
+	        Store the private key OUT-OF-REPO in the Keychain (the tool puts it there
+	        automatically); paste the *public* key into SUPublicEDKey below.
+	     2. Stand up `https://anglesite.dev/appcast.xml` (or a GitHub-Releases-backed
+	        equivalent) and replace SUFeedURL.
+	     Until both are set with real values, the in-app "Check for Updates…" command
+	     will surface a network/signature error to the user. That's intentional — better
+	     a clear failure than silently shipping unsigned updates.
+	     See docs/release.md for the release pipeline. -->
+	<key>SUFeedURL</key>
+	<string>https://anglesite.dev/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>REPLACE_WITH_BASE64_ED25519_PUBLIC_KEY</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUEnableInstallerLauncherService</key>
+	<false/>
 </dict>
 </plist>
