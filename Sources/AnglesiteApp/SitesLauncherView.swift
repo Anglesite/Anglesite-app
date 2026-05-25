@@ -35,6 +35,7 @@ struct SitesLauncherView: View {
             }
         }
         .task { await onFirstAppear() }
+        .navigationTitle("Sites")
     }
 
     private var launcherUI: some View {
