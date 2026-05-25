@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Fires after `git rebase` / `git commit --amend`. No simple old/new pair — regenerate
+# unconditionally; xcodegen is cheap and idempotent.
+set -euo pipefail
+exec "$(dirname "$0")/regenerate-xcodeproj.sh"
