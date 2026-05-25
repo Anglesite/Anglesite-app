@@ -28,7 +28,10 @@ struct ChatView: View {
         }
         .frame(minWidth: 320, idealWidth: 420)
         .background(Color(NSColor.windowBackgroundColor))
-        .task { await model.loadHistory() }
+        .task {
+            await model.loadHistory()
+            await model.loadAnnotations()
+        }
     }
 
     // MARK: Header
