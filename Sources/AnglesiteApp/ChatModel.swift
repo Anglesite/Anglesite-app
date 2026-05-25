@@ -69,23 +69,32 @@ final class ChatModel {
     private let siteDirectory: URL
     private let agent: ClaudeAgent
     private let history: ChatHistoryStore
+    /// Sticky-note source. Wired to the per-site `PreviewSession.mcpClient` in production so
+    /// `loadAnnotations()` shows the same annotations the edit overlay added; tests inject a
+    /// fixture closure. `nil` disables the feed (returns no annotations, no error).
+    private let annotationFeed: AnnotationFeed?
     private var streamTask: Task<Void, Never>?
     /// Tracks the in-flight assistant message — text events extend its `content`, tool events
     /// push into its `toolCalls`. Nil between turns.
     private var inFlightAssistantIndex: Int?
+    /// IDs of annotations already surfaced in chat, so repeated calls to `loadAnnotations()`
+    /// don't double-post the same sticky note when the user revisits a site mid-session.
+    private var surfacedAnnotationIDs: Set<String> = []
 
-    init(siteID: String, siteDirectory: URL) {
+    init(siteID: String, siteDirectory: URL, annotationFeed: AnnotationFeed? = nil) {
         self.siteDirectory = siteDirectory
         self.agent = ClaudeAgent(siteID: siteID, siteDirectory: siteDirectory)
         self.history = ChatHistoryStore(siteDirectory: siteDirectory)
+        self.annotationFeed = annotationFeed
     }
 
     /// Test-facing initializer: inject the agent (typically with a fixture launcher) and an
     /// optional override of the history store.
-    init(siteDirectory: URL, agent: ClaudeAgent, history: ChatHistoryStore? = nil) {
+    init(siteDirectory: URL, agent: ClaudeAgent, history: ChatHistoryStore? = nil, annotationFeed: AnnotationFeed? = nil) {
         self.siteDirectory = siteDirectory
         self.agent = agent
         self.history = history ?? ChatHistoryStore(siteDirectory: siteDirectory)
+        self.annotationFeed = annotationFeed
     }
 
     // MARK: API consumed by ChatView
@@ -99,6 +108,36 @@ final class ChatModel {
         } catch {
             lastError = "couldn't load history: \(error)"
         }
+    }
+
+    /// Loads unresolved annotations from the plugin and surfaces each as a system message in
+    /// the chat. No-op when no feed is wired up (tests without an MCP fake, or production
+    /// when the preview session hasn't started yet). Idempotent: each annotation is surfaced
+    /// at most once per `ChatModel` lifetime.
+    func loadAnnotations() async {
+        guard let annotationFeed else { return }
+        let annotations: [Annotation]
+        do {
+            annotations = try await annotationFeed()
+        } catch {
+            // Surface as a non-blocking inline error; the chat is still usable.
+            lastError = "couldn't load annotations: \(error.localizedDescription)"
+            return
+        }
+        for annotation in annotations where !annotation.resolved {
+            guard !surfacedAnnotationIDs.contains(annotation.id) else { continue }
+            surfacedAnnotationIDs.insert(annotation.id)
+            let content = ChatModel.renderAnnotation(annotation)
+            messages.append(.init(role: .system, content: content, timestamp: annotation.createdAt))
+        }
+    }
+
+    /// Format an annotation for inline display. Single-line so the chat doesn't grow vertically
+    /// when there are several pinned notes; the path + selector give the user enough context to
+    /// jump back to the relevant element.
+    static func renderAnnotation(_ a: Annotation) -> String {
+        let location = a.sourceFile ?? "\(a.path) → \(a.selector)"
+        return "📌 \(a.text) — \(location)"
     }
 
     /// Sends a user prompt to the agent and consumes the resulting event stream. No-op while

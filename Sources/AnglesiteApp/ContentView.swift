@@ -73,7 +73,10 @@ struct ContentView: View {
         .onChange(of: selectedSiteID) { _, newID in
             if let newID, let site = sites.first(where: { $0.id == newID }) {
                 preview.open(siteID: site.id, siteDirectory: site.path)
-                chat = ChatModel(siteID: site.id, siteDirectory: site.path)
+                let feed = AnnotationFeedFactory.viaMCP(mcpClient: { [preview] in
+                    await preview.mcpClient()
+                })
+                chat = ChatModel(siteID: site.id, siteDirectory: site.path, annotationFeed: feed)
             } else {
                 preview.close()
                 chat = nil

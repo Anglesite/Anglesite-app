@@ -53,4 +53,11 @@ final class PreviewModel {
         if case .ready(_, let url) = state { return url }
         return nil
     }
+
+    /// Exposes the session's `MCPClient` via the same weak-getter pattern `editRouter` uses,
+    /// so other features (annotation feed for chat, etc.) can reuse the per-site client
+    /// without spawning a duplicate MCP server.
+    func mcpClient() async -> MCPClient? {
+        await session.mcpClient
+    }
 }

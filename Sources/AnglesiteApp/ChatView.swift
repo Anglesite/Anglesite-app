@@ -38,6 +38,7 @@ struct ChatView: View {
         .background(Color(NSColor.windowBackgroundColor))
         .task {
             await model.loadHistory()
+            await model.loadAnnotations()
             loadQuickActions()
         }
     }
