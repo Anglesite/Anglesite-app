@@ -17,6 +17,10 @@ struct ChatView: View {
     /// UI state; the model only sees the final string when the user hits Send.
     @State private var draft: String = ""
     @FocusState private var inputFocused: Bool
+    /// Quick-action skill buttons surfaced above the input. Loaded once from the bundled
+    /// plugin on appear; empty when the plugin is missing or none of the curated skills
+    /// are present.
+    @State private var quickActions: [SkillRegistry.Skill] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,11 +28,23 @@ struct ChatView: View {
             Divider()
             messagesList
             Divider()
+            if !quickActions.isEmpty {
+                skillButtons
+                Divider()
+            }
             inputBar
         }
         .frame(minWidth: 320, idealWidth: 420)
         .background(Color(NSColor.windowBackgroundColor))
-        .task { await model.loadHistory() }
+        .task {
+            await model.loadHistory()
+            loadQuickActions()
+        }
+    }
+
+    private func loadQuickActions() {
+        guard let plugin = PluginRuntime.resolve().url else { return }
+        quickActions = SkillRegistry.quickActions(in: plugin)
     }
 
     // MARK: Header
@@ -93,6 +109,52 @@ struct ChatView: View {
                 // Stream characters extend the last message; re-anchor on each chunk.
                 proxy.scrollTo("__bottom__", anchor: .bottom)
             }
+        }
+    }
+
+    // MARK: Skill buttons
+
+    private var skillButtons: some View {
+        HStack(spacing: 6) {
+            ForEach(quickActions) { skill in
+                Button {
+                    invoke(skill: skill)
+                } label: {
+                    Label {
+                        Text(skill.name.capitalized)
+                    } icon: {
+                        Image(systemName: Self.iconName(for: skill.name))
+                    }
+                    .font(.callout)
+                }
+                .controlSize(.small)
+                .buttonStyle(.bordered)
+                .help(skill.description ?? "Run /anglesite:\(skill.name)")
+                .disabled(model.isStreaming)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private func invoke(skill: SkillRegistry.Skill) {
+        guard !model.isStreaming else { return }
+        model.send("/anglesite:\(skill.name)")
+        draft = ""
+        inputFocused = true
+    }
+
+    /// Maps the curated v0.5 quick-action names to SF Symbols. Keeps icons consistent
+    /// with the rest of the app (e.g. Deploy uses the same paperplane the toolbar Deploy
+    /// button uses). Unmapped names fall back to a generic command icon.
+    private static func iconName(for skillName: String) -> String {
+        switch skillName {
+        case "deploy": return "paperplane.fill"
+        case "backup": return "externaldrive.fill.badge.icloud"
+        case "check":  return "checkmark.shield.fill"
+        case "import": return "tray.and.arrow.down.fill"
+        default:       return "sparkles"
         }
     }
 
