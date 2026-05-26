@@ -59,4 +59,4 @@ xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug b
 
 ## Plan
 
-See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 4** (Phase 0–3 complete: embedded Node, plugin/site plumbing, `ProcessSupervisor`/`AstroDevServer`/`MCPClient`/Debug pane. Phase 1 primed-npm-cache is a first cut — `NodeModulesCache` + opt-in `vendor-npm-cache.sh`; size budget still to be measured, see #6. Deferred Release-track: Developer ID re-sign of embedded Node + notarization, #1/#4).
+See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 9** — multi-window architecture has landed (#54, one window per site keyed by `SiteStore.Site.id`); remaining v1 work is the health badge polling `/anglesite:check`, image-drop → `optimize-images`, and per-edit undo. Phases 0–8 are otherwise complete with two outstanding asterisks: opt-in primed npm cache size budget (#6) and Sparkle manual key/appcast setup. Deferred Release-track: Developer ID re-sign of embedded Node + notarization (#1/#4).
