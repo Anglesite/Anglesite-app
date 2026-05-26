@@ -44,6 +44,12 @@ public actor DeployCommand {
     /// Runs the bundled plugin's pre-deploy scan against a site and returns the outcome.
     /// Real callers use `DeployCommand.defaultPreflight`; tests inject a fake.
     public typealias PreflightChecker = @Sendable (_ siteDirectory: URL) async -> PreDeployCheck.Outcome
+    /// Fires once the preflight step resolves, with the outcome that was used to
+    /// decide whether to continue with wrangler. The closure runs inside the actor's
+    /// isolation; bridge to MainActor via a Task if you need to touch SwiftUI state.
+    /// Fires for every preflight result (.passed, .blocked, .error) — including the
+    /// cases where deploy() returns .failed afterwards.
+    public typealias PreflightObserver = @Sendable (PreDeployCheck.Outcome) -> Void
 
     private let supervisor: ProcessSupervisor
     private let logCenter: LogCenter
@@ -71,7 +77,11 @@ public actor DeployCommand {
     /// Run a deploy for `siteID`. Returns once wrangler has exited (or before, if pre-spawn
     /// refusal applies). Build output streams under source `"deploy:<siteID>:build"`, the deploy
     /// itself under `"deploy:<siteID>"`, so a UI consumer can distinguish phases.
-    public func deploy(siteID: String, siteDirectory: URL) async -> Result {
+    public func deploy(
+        siteID: String,
+        siteDirectory: URL,
+        onPreflight: PreflightObserver? = nil
+    ) async -> Result {
         // Pre-spawn checks. The token comes first so we never spend time on a build or scan
         // for a deploy that won't reach wrangler.
         let token: String?
@@ -97,7 +107,9 @@ public actor DeployCommand {
         // third-party scripts, or Keystatic admin routes in dist/, the deploy is blocked —
         // per the durable rule in CLAUDE.md, the app cannot bypass plugin security hooks;
         // the UI sheet for `.blocked` has no override.
-        switch await preflight(siteDirectory) {
+        let preflightOutcome = await preflight(siteDirectory)
+        onPreflight?(preflightOutcome)
+        switch preflightOutcome {
         case .passed:
             break
         case .blocked(let failures, let warnings):

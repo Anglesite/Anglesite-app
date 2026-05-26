@@ -273,4 +273,37 @@ final class DeployCommandTests: XCTestCase {
         }
         XCTAssertTrue(reason.contains("tsx"), "reason should surface the preflight error: \(reason)")
     }
+
+    // MARK: onPreflight callback
+
+    func testDeployFiresOnPreflightWithResolvedOutcome() async {
+        let expectedOutcome = PreDeployCheck.Outcome.passed(warnings: [
+            .init(category: .missingOgImage, detail: "no og image", remediation: "add one")
+        ])
+        let observed = Mutex<PreDeployCheck.Outcome?>(nil)
+
+        let (cmd, _, _) = makeCommand(
+            resolve: { _ in self.shFixture("exit 0") },
+            token: { "fake-token" },
+            preflight: { _ in expectedOutcome }
+        )
+
+        _ = await cmd.deploy(
+            siteID: "test",
+            siteDirectory: tmpDir,
+            onPreflight: { outcome in observed.set(outcome) }
+        )
+
+        XCTAssertEqual(observed.get(), expectedOutcome)
+    }
+}
+
+/// Minimal lock wrapper since `onPreflight` fires from inside `DeployCommand`'s actor
+/// isolation and the test needs to observe the value from outside.
+private final class Mutex<T>: @unchecked Sendable {
+    private var value: T
+    private let lock = NSLock()
+    init(_ v: T) { value = v }
+    func get() -> T { lock.lock(); defer { lock.unlock() }; return value }
+    func set(_ v: T) { lock.lock(); value = v; lock.unlock() }
 }
