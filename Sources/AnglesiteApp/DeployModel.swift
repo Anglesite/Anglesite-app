@@ -34,6 +34,13 @@ final class DeployModel {
     /// Keychain; cleared when the user saves a token (which then retries the deploy) or cancels.
     var tokenPromptPresented: Bool = false
 
+    /// Fires every time the deploy pipeline's preflight step resolves, with the
+    /// `PreDeployCheck.Outcome` that was used to decide whether to continue.
+    /// `SiteWindow` wires this to `HealthModel.ingestDeployOutcome` so the health
+    /// badge updates whenever a deploy runs — including the .passed and warnings-only
+    /// cases that don't surface through `phase`.
+    var onScanComplete: ((PreDeployCheck.Outcome) -> Void)?
+
     private let command: DeployCommand
     private let logCenter: LogCenter
     private let keychain: KeychainStore
@@ -140,7 +147,18 @@ final class DeployModel {
             }
         }
 
-        let result = await command.deploy(siteID: siteID, siteDirectory: siteDirectory)
+        let result = await command.deploy(
+            siteID: siteID,
+            siteDirectory: siteDirectory,
+            onPreflight: { [weak self] outcome in
+                // The callback fires inside DeployCommand's actor isolation; hop to
+                // MainActor before touching our @Observable state or the consumer's
+                // closure (which likely mutates SwiftUI state too).
+                Task { @MainActor in
+                    self?.onScanComplete?(outcome)
+                }
+            }
+        )
 
         subscription.cancel()
         _ = await logTask.value
