@@ -20,6 +20,7 @@ struct SiteWindow: View {
     @State private var deploy = DeployModel()
     @State private var chat: ChatModel?
     @State private var chatPresented = false
+    @State private var health = HealthModel(runner: DefaultHealthCheckRunner())
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -99,6 +100,15 @@ struct SiteWindow: View {
                 } else {
                     Spacer()
                 }
+                HealthBadgeView(
+                    model: health,
+                    onRecheck: { health.recheck(siteID: site.id, siteDirectory: site.path) },
+                    onAskClaude: {
+                        chatPresented = true
+                        chat?.send("/anglesite:check")
+                    }
+                )
+
                 Button {
                     chatPresented.toggle()
                 } label: {
@@ -191,5 +201,8 @@ struct SiteWindow: View {
             await preview.mcpClient()
         })
         chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, annotationFeed: feed)
+        deploy.onScanComplete = { [health] outcome in
+            health.ingestDeployOutcome(outcome)
+        }
     }
 }
