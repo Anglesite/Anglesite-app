@@ -68,5 +68,9 @@ cat <<EOF
        the app: ps -A -o pid,ppid,comm | awk '\$2 == <anglesite-pid>'
     4. Close the SiteWindow — the node child should be reaped within a few
        seconds (ProcessSupervisor.shutdownAll path).
-    5. Quit the app — no orphan node processes should remain.
+    5. Click the gray health-badge dot left of the Chat button → popover opens
+       titled "Health unknown". Click "Recheck" → spinner appears, settles to
+       a green/yellow/red dot depending on what the scan finds. The popover
+       summary should match what /anglesite:check reports for the same site.
+    6. Quit the app — no orphan node processes should remain.
 EOF
