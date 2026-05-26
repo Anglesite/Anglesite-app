@@ -130,7 +130,10 @@ struct ChatView: View {
                 }
                 .controlSize(.small)
                 .buttonStyle(.bordered)
-                .help(skill.description ?? "Run /anglesite:\(skill.name)")
+                // Wrap in `Text(verbatim:)` so plugin skill descriptions containing
+                // markdown (backticks, links, etc.) aren't parsed as AttributedString —
+                // `.help(_:)` only renders unstyled text.
+                .help(Text(verbatim: skill.description ?? "Run /anglesite:\(skill.name)"))
                 .disabled(model.isStreaming)
             }
             Spacer()

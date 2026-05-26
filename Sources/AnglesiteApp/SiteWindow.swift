@@ -120,7 +120,7 @@ struct SiteWindow: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(deploy.isRunning || !site.isValid)
                 .help(site.isValid
-                      ? "Build, scan, and `wrangler deploy` this site"
+                      ? "Build, scan, and run wrangler deploy on this site"
                       : "Site is missing required files")
             }
             .padding(.horizontal, 12)

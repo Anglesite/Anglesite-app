@@ -137,7 +137,7 @@ struct SitesLauncherView: View {
             Spacer()
             Text("New Site…")
                 .foregroundStyle(.tertiary)
-                .help("Coming soon — for now, run `/anglesite:start` from Claude Code in ~/Sites/")
+                .help("Coming soon — for now, run /anglesite:start from Claude Code in ~/Sites/")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
