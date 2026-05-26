@@ -86,10 +86,12 @@ struct AnglesiteApp: App {
         // SwiftUI dedupes openWindow(value:) calls, so opening the same site twice just
         // focuses the existing window.
         WindowGroup(for: String.self) { $siteID in
-            if let siteID {
-                SiteWindow(siteID: siteID)
-                    .frame(minWidth: 960, minHeight: 600)
-            }
+            // SiteWindow takes the optional directly so it can dismiss itself and
+            // route to the launcher when restoration hands us a nil or unresolvable
+            // id. If we short-circuit with `if let siteID` here the SiteWindow never
+            // instantiates and an empty restored window strands the user.
+            SiteWindow(siteID: siteID)
+                .frame(minWidth: 960, minHeight: 600)
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)

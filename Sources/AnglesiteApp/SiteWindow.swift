@@ -10,10 +10,11 @@ import AnglesiteCore
 /// affect the others, and SwiftUI dedupes `openWindow(value: id)` calls — opening
 /// the same site twice just focuses the existing window.
 struct SiteWindow: View {
-    let siteID: String
+    /// Optional because SwiftUI may restore a `WindowGroup(for: String.self)` with a
+    /// nil payload — see `loadAndStart()` for how that's handled.
+    let siteID: String?
 
     @State private var site: SiteStore.Site?
-    @State private var lookupError: String?
 
     @State private var preview = PreviewModel()
     @State private var deploy = DeployModel()
@@ -27,8 +28,6 @@ struct SiteWindow: View {
         Group {
             if let site {
                 siteUI(for: site)
-            } else if let lookupError {
-                missingSitePane(message: lookupError)
             } else {
                 ProgressView("Loading site…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -153,25 +152,6 @@ struct SiteWindow: View {
         }
     }
 
-    @ViewBuilder
-    private func missingSitePane(message: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "questionmark.folder")
-                .font(.largeTitle).foregroundStyle(.secondary)
-            Text("Site not found").font(.headline)
-            Text(message)
-                .font(.callout).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center).frame(maxWidth: 420)
-            Button("Open Sites…") {
-                openWindow(id: "sites")
-                dismissWindow()
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.windowBackgroundColor))
-    }
-
     private func centeredStatus<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -181,6 +161,16 @@ struct SiteWindow: View {
     // MARK: - Lifecycle
 
     private func loadAndStart() async {
+        // SwiftUI's NSPersistentUIManager will happily restore a WindowGroup with a
+        // nil payload, or one whose value no longer matches a known site (sites.json
+        // edited externally, a previous-session site was removed, etc). Both cases
+        // route back to the launcher rather than stranding the user in an empty or
+        // unresolvable SiteWindow.
+        guard let siteID else {
+            openWindow(id: "sites")
+            dismissWindow()
+            return
+        }
         let store = SiteStore.shared
         do {
             try await store.load()
@@ -189,8 +179,8 @@ struct SiteWindow: View {
             // Non-fatal: we'll fall back to whatever's already in the persisted list.
         }
         guard let resolved = await store.find(id: siteID) else {
-            lookupError = "The site at this id is no longer in the registry. It may have been removed or moved."
-            site = nil
+            openWindow(id: "sites")
+            dismissWindow()
             return
         }
         site = resolved
