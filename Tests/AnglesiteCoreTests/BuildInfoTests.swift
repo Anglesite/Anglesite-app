@@ -7,6 +7,6 @@ final class BuildInfoTests: XCTestCase {
     }
 
     func testSummaryContainsPhase() {
-        XCTAssertTrue(BuildInfo.summary.contains("phase 2"))
+        XCTAssertTrue(BuildInfo.summary.contains("phase \(BuildInfo.phase)"))
     }
 }
