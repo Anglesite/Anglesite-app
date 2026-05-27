@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import AnglesiteBridge
 import AnglesiteCore
 
 /// SwiftUI-facing wrapper around `ClaudeAgent` for one site. Owns the agent, accumulates
@@ -27,16 +28,32 @@ final class ChatModel {
         var content: String
         var toolCalls: [ToolCall]
         let timestamp: Date
+        /// Only set on `role: .edit` rows. Carries file + commit + undone flag.
+        var editMetadata: EditMetadata?
 
-        enum Role: Equatable { case user, assistant, system, error }
+        enum Role: Equatable { case user, assistant, system, error, edit }
 
-        init(id: UUID = UUID(), role: Role, content: String, toolCalls: [ToolCall] = [], timestamp: Date = Date()) {
+        init(
+            id: UUID = UUID(),
+            role: Role,
+            content: String,
+            toolCalls: [ToolCall] = [],
+            timestamp: Date = Date(),
+            editMetadata: EditMetadata? = nil
+        ) {
             self.id = id
             self.role = role
             self.content = content
             self.toolCalls = toolCalls
             self.timestamp = timestamp
+            self.editMetadata = editMetadata
         }
+    }
+
+    struct EditMetadata: Equatable {
+        let file: String
+        let commit: String
+        var undone: Bool
     }
 
     struct ToolCall: Identifiable, Equatable {
@@ -57,6 +74,26 @@ final class ChatModel {
     /// footer so the user can see token + cost telemetry without diving into the Debug pane.
     private(set) var lastUsage: TurnTelemetry?
 
+    /// SHA of the most-recent `.edit` row whose `editMetadata.undone == false`. Drives the
+    /// Undo button's enabled state — only the head row has an enabled button. Nil when no
+    /// un-undone edit rows exist.
+    var currentHeadSHA: String? {
+        messages.reversed().first { msg in
+            msg.role == .edit && (msg.editMetadata?.undone == false)
+        }?.editMetadata?.commit
+    }
+
+    /// Binding for the warn-and-confirm sheet shown when the working tree drifted between
+    /// the edit and the undo click. `nil` when no conflict is pending.
+    var conflictPrompt: ConflictPrompt?
+
+    struct ConflictPrompt: Identifiable, Equatable {
+        let id = UUID()
+        let messageID: UUID
+        let commit: String
+        let files: [String]
+    }
+
     struct TurnTelemetry: Equatable {
         let inputTokens: Int
         let outputTokens: Int
@@ -73,6 +110,9 @@ final class ChatModel {
     /// `loadAnnotations()` shows the same annotations the edit overlay added; tests inject a
     /// fixture closure. `nil` disables the feed (returns no annotations, no error).
     private let annotationFeed: AnnotationFeed?
+    /// Optional. Wired to the per-site `MCPClient` in production; nil in tests where the
+    /// chat has no MCP backing yet.
+    private let undoCommand: UndoCommand?
     private var streamTask: Task<Void, Never>?
     /// Tracks the in-flight assistant message — text events extend its `content`, tool events
     /// push into its `toolCalls`. Nil between turns.
@@ -81,20 +121,22 @@ final class ChatModel {
     /// don't double-post the same sticky note when the user revisits a site mid-session.
     private var surfacedAnnotationIDs: Set<String> = []
 
-    init(siteID: String, siteDirectory: URL, annotationFeed: AnnotationFeed? = nil) {
+    init(siteID: String, siteDirectory: URL, annotationFeed: AnnotationFeed? = nil, undoCommand: UndoCommand? = nil) {
         self.siteDirectory = siteDirectory
         self.agent = ClaudeAgent(siteID: siteID, siteDirectory: siteDirectory)
         self.history = ChatHistoryStore(siteDirectory: siteDirectory)
         self.annotationFeed = annotationFeed
+        self.undoCommand = undoCommand
     }
 
     /// Test-facing initializer: inject the agent (typically with a fixture launcher) and an
     /// optional override of the history store.
-    init(siteDirectory: URL, agent: ClaudeAgent, history: ChatHistoryStore? = nil, annotationFeed: AnnotationFeed? = nil) {
+    init(siteDirectory: URL, agent: ClaudeAgent, history: ChatHistoryStore? = nil, annotationFeed: AnnotationFeed? = nil, undoCommand: UndoCommand? = nil) {
         self.siteDirectory = siteDirectory
         self.agent = agent
         self.history = history ?? ChatHistoryStore(siteDirectory: siteDirectory)
         self.annotationFeed = annotationFeed
+        self.undoCommand = undoCommand
     }
 
     // MARK: API consumed by ChatView
@@ -160,6 +202,76 @@ final class ChatModel {
         streamTask = Task { @MainActor [weak self] in
             await self?.consumeAgentStream(prompt: trimmed)
         }
+    }
+
+    /// Append a `.edit` row from a successful `EditReply`. The reply must have a non-nil
+    /// `commit` field — `MCPApplyEditRouter.onEdit` only fires for those. Persists the row
+    /// via `ChatHistoryStore` with the `messageID` in metadata so future `undone` sidecars
+    /// can find it on reload.
+    func recordEdit(_ reply: EditReply) {
+        guard let file = reply.file, let commit = reply.commit else { return }
+        let metadata = EditMetadata(file: file, commit: commit, undone: false)
+        let message = Message(
+            role: .edit,
+            content: "Edited \(file)",
+            editMetadata: metadata
+        )
+        messages.append(message)
+        let entry = ChatHistoryStore.Entry(
+            timestamp: message.timestamp,
+            role: .edit,
+            content: message.content,
+            metadata: [
+                "file": file,
+                "commit": commit,
+                "messageID": message.id.uuidString,
+            ]
+        )
+        Task { [history] in try? await history.append(entry) }
+    }
+
+    /// Call `undo_edit` for the message identified by `messageID`. On success, flip the
+    /// row's `undone` flag and persist a sidecar. On working-tree drift, set `conflictPrompt`
+    /// so the view shows a sheet. On failure, append an `.error` system message.
+    func undoEdit(messageID: UUID, force: Bool = false) async {
+        guard let idx = messages.firstIndex(where: { $0.id == messageID }),
+              messages[idx].role == .edit,
+              let metadata = messages[idx].editMetadata,
+              !metadata.undone
+        else { return }
+        guard let undoCommand else {
+            lastError = "Undo unavailable: MCP not running."
+            return
+        }
+        let result = await undoCommand.undo(commit: metadata.commit, force: force)
+        switch result {
+        case .success(let newCommit):
+            var updated = metadata
+            updated.undone = true
+            messages[idx].editMetadata = updated
+            Task { [history] in
+                try? await history.appendUndone(messageID: messageID, newCommit: newCommit)
+            }
+        case .workingTreeModified(let files):
+            conflictPrompt = ConflictPrompt(messageID: messageID, commit: metadata.commit, files: files)
+        case .failed(let reason, let detail):
+            let errorContent = "Couldn't undo: \(detail) (\(reason))"
+            messages.append(Message(role: .error, content: errorContent))
+            lastError = errorContent
+        }
+    }
+
+    /// Called when the user clicks "Undo anyway" on the conflict sheet. Retries the undo
+    /// with `force: true` and dismisses the sheet.
+    func confirmConflictUndo() async {
+        guard let prompt = conflictPrompt else { return }
+        conflictPrompt = nil
+        await undoEdit(messageID: prompt.messageID, force: true)
+    }
+
+    /// Called when the user clicks "Cancel" on the conflict sheet.
+    func dismissConflictPrompt() {
+        conflictPrompt = nil
     }
 
     /// Stops the in-flight turn. The current assistant message is marked finished as-is.
@@ -270,11 +382,17 @@ final class ChatModel {
             case .user: return .user
             case .assistant: return .assistant
             case .system, .error: return .assistant
+            case .edit: return .edit
             }
         }()
         var metadata: [String: String] = [:]
         if !message.toolCalls.isEmpty {
             metadata["tool_calls"] = message.toolCalls.count.description
+        }
+        if let edit = message.editMetadata {
+            metadata["file"] = edit.file
+            metadata["commit"] = edit.commit
+            metadata["messageID"] = message.id.uuidString
         }
         let entry = ChatHistoryStore.Entry(
             timestamp: message.timestamp,
@@ -310,8 +428,21 @@ private extension ChatModel.Message {
             case .user: return .user
             case .assistant: return .assistant
             case .tool: return .assistant
+            case .edit: return .edit
             }
         }()
-        self.init(role: role, content: entry.content, timestamp: entry.timestamp)
+        var editMetadata: ChatModel.EditMetadata?
+        if entry.role == .edit,
+           let file = entry.metadata?["file"],
+           let commit = entry.metadata?["commit"] {
+            let undone = entry.metadata?["undone"] == "true"
+            editMetadata = ChatModel.EditMetadata(file: file, commit: commit, undone: undone)
+        }
+        self.init(
+            role: role,
+            content: entry.content,
+            timestamp: entry.timestamp,
+            editMetadata: editMetadata
+        )
     }
 }

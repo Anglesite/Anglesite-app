@@ -260,6 +260,7 @@ private struct MessageRow: View {
         case .assistant: return Color(NSColor.controlBackgroundColor)
         case .system: return Color.secondary.opacity(0.12)
         case .error: return Color.red.opacity(0.15)
+        case .edit: return Color.green.opacity(0.12)
         }
     }
 
