@@ -41,6 +41,26 @@ struct ChatView: View {
             await model.loadAnnotations()
             loadQuickActions()
         }
+        .sheet(item: $model.conflictPrompt) { prompt in
+            VStack(alignment: .leading, spacing: 12) {
+                Text("File modified outside Anglesite")
+                    .font(.headline)
+                Text("\(prompt.files.joined(separator: ", ")) has been changed since this edit. Undoing will overwrite those changes.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { model.dismissConflictPrompt() }
+                    Button("Undo anyway", role: .destructive) {
+                        Task { await model.confirmConflictUndo() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(20)
+            .frame(width: 380)
+        }
     }
 
     private func loadQuickActions() {
@@ -83,7 +103,7 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(model.messages) { message in
-                        MessageRow(message: message)
+                        MessageRow(message: message, model: model)
                             .id(message.id)
                     }
                     if let error = model.lastError, !model.messages.contains(where: { $0.role == .error && $0.content == error }) {
@@ -218,18 +238,65 @@ struct ChatView: View {
 
 private struct MessageRow: View {
     let message: ChatModel.Message
+    let model: ChatModel
 
     var body: some View {
-        HStack {
-            if message.role == .user { Spacer(minLength: 32) }
-            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
-                bubble
-                ForEach(message.toolCalls) { call in
-                    ToolCallCard(call: call)
+        if message.role == .edit {
+            editRow
+        } else {
+            HStack {
+                if message.role == .user { Spacer(minLength: 32) }
+                VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 6) {
+                    bubble
+                    ForEach(message.toolCalls) { call in
+                        ToolCallCard(call: call)
+                    }
+                }
+                if message.role != .user { Spacer(minLength: 32) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var editRow: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.4))
+                .frame(width: 3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(message.content)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                Text(relativeTime)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let metadata = message.editMetadata {
+                if metadata.undone {
+                    Text("Undone")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button("Undo") {
+                        Task { await model.undoEdit(messageID: message.id) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(metadata.commit != model.currentHeadSHA)
                 }
             }
-            if message.role != .user { Spacer(minLength: 32) }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.secondary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var relativeTime: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: message.timestamp, relativeTo: Date())
     }
 
     @ViewBuilder
@@ -260,7 +327,7 @@ private struct MessageRow: View {
         case .assistant: return Color(NSColor.controlBackgroundColor)
         case .system: return Color.secondary.opacity(0.12)
         case .error: return Color.red.opacity(0.15)
-        case .edit: return Color.green.opacity(0.12)
+        case .edit: return Color.secondary.opacity(0.06)  // editRow handles .edit rendering; this is unreachable
         }
     }
 
