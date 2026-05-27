@@ -14,11 +14,16 @@
 
 ---
 
-## Discovery (Phase 5 leftovers)
+## Discovery (revised at execution time)
 
-Investigation during planning revealed that Phase 5 issues `#297` (server/index.mjs dispatcher) and `#298` (server/edit-history.mjs) are marked CLOSED on the plugin repo but the code never merged. The plugin's `apply_edit` MCP tool today returns `edit-failed: not-implemented`. Image drop is therefore blocked on these Phase 5 leftovers landing as well. **Tasks 1–4 below close out Phase 5 in the plugin repo;** tasks 5+ are the actual Phase 9 image-drop work on top.
+The plan was originally written believing Phase 5 issues `#297` (dispatcher) and `#298` (edit-history) never merged. **After fetching the plugin repo's latest `origin/main` at execution start, both were already merged** (commits `a4d94be` and `b3af4e6`). Tasks 1, 3, 4 from the original plan are now obsolete and skipped — the file map and task numbering below have been adjusted accordingly. Original Tasks 5–10 are renumbered A–F below.
 
-The `docs/build-plan.md` change in Task 9 acknowledges this — it un-✅s Phase 5 steps 3 and 4 retroactively in the same commit where the paired PR makes them real.
+The actually-shipped API differs slightly from the original plan's assumptions:
+- Dispatcher exports `applyEdit(projectRoot, edit, opts)` with an `opts.onApplied` hook for history, not a new `dispatch(...)`.
+- Reply helpers are `createEditAppliedContent(id, file, range, commit)` and `createEditFailedContent(id, reason, detail)` in `server/apply-edit-schema.mjs` (returning MCP `{type: "text", text: JSON.stringify(...)}` content entries, not the message-object shape `messages.mjs` exports).
+- `recordEdit(projectRoot, { file, range, message? })` reads the on-disk file (after the dispatcher's `atomicWrite`) and commits THAT — uses `hash-object -w -- <file>`, not stdin.
+
+The remaining tasks below extend the shipped surface to cover the image-drop case. Tasks 2 (messages.mjs) and 6 (patcher resolver) and 5 (optimize hoist) keep their original numbering as well — but the existing detailed steps reference `messages.mjs`'s `createEditAppliedMessage`. **Use `apply-edit-schema.mjs`'s `createEditAppliedContent` instead** when extending the wire format to carry the `result` field. The renamed Task A below replaces the original Task 2.
 
 ## Working directories
 
