@@ -39,7 +39,7 @@ public struct UndoCommand: Sendable {
         do {
             result = try await caller("undo_edit", args)
         } catch {
-            return .failed(reason: "mcp-error", detail: String(describing: error))
+            return .failed(reason: "mcp-error", detail: error.localizedDescription)
         }
         let text = result.content.compactMap(\.text).joined(separator: "\n")
         guard let data = text.data(using: .utf8),

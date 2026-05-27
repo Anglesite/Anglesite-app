@@ -59,14 +59,17 @@ final class UndoCommandTests: XCTestCase {
     }
 
     func testUndoThrownErrorMapsToFailed() async {
-        struct OopsError: Error {}
+        struct OopsError: LocalizedError {
+            var errorDescription: String? { "oops: something broke" }
+        }
         let fake = FakeMCPCaller(result: .failure(OopsError()))
         let cmd = UndoCommand(caller: fake.call)
         let result = await cmd.undo(commit: "current-head", force: false)
-        guard case .failed(_, let detail) = result else {
+        guard case .failed(let reason, let detail) = result else {
             return XCTFail("expected .failed, got \(result)")
         }
-        XCTAssertTrue(detail.contains("OopsError"))
+        XCTAssertEqual(reason, "mcp-error")
+        XCTAssertEqual(detail, "oops: something broke")
     }
 }
 
