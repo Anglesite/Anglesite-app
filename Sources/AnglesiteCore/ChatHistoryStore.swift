@@ -13,6 +13,10 @@ public actor ChatHistoryStore {
         case user
         case assistant
         case tool
+        /// An edit landed on the source — surfaced in chat with an inline Undo button.
+        /// Metadata carries `file`, `commit`, `messageID`, and optional `undone`/`undoneNewCommit`
+        /// once an undone record has been processed.
+        case edit
     }
 
     /// One persisted line. The shape is intentionally narrow so it survives schema changes —
@@ -52,17 +56,49 @@ public actor ChatHistoryStore {
     }
 
     /// Load every entry from the history file, in write order. Returns an empty array if the
-    /// file doesn't exist yet (a brand-new site has no history).
+    /// file doesn't exist yet (a brand-new site has no history). Synthetic "undone" records are
+    /// collapsed onto the referenced edit entries by flipping their `metadata["undone"]` flag.
     public func load() throws -> [Entry] {
         guard fileManager.fileExists(atPath: fileURL.path) else { return [] }
         let data = try Data(contentsOf: fileURL)
         guard !data.isEmpty else { return [] }
+        struct UndoneSidecar: Decodable {
+            let kind: String
+            let messageID: String
+            let newCommit: String
+        }
         var entries: [Entry] = []
+        var undoneSidecars: [String: String] = [:]  // messageID → newCommit
         // Decode line by line so a single corrupt line (e.g. from a partial write) doesn't
         // destroy the whole history.
         for line in data.split(separator: 0x0A, omittingEmptySubsequences: true) {
-            guard let entry = try? decoder.decode(Entry.self, from: Data(line)) else { continue }
-            entries.append(entry)
+            let lineData = Data(line)
+            if let sidecar = try? decoder.decode(UndoneSidecar.self, from: lineData),
+               sidecar.kind == "undone" {
+                undoneSidecars[sidecar.messageID] = sidecar.newCommit
+                continue
+            }
+            if let entry = try? decoder.decode(Entry.self, from: lineData) {
+                entries.append(entry)
+            }
+        }
+        // Apply undone sidecars by matching the entry's metadata["messageID"].
+        if !undoneSidecars.isEmpty {
+            entries = entries.map { entry in
+                guard entry.role == .edit,
+                      let mid = entry.metadata?["messageID"],
+                      let newCommit = undoneSidecars[mid]
+                else { return entry }
+                var meta = entry.metadata ?? [:]
+                meta["undone"] = "true"
+                meta["undoneNewCommit"] = newCommit
+                return Entry(
+                    timestamp: entry.timestamp,
+                    role: entry.role,
+                    content: entry.content,
+                    metadata: meta
+                )
+            }
         }
         return entries
     }
@@ -88,5 +124,36 @@ public actor ChatHistoryStore {
     public func clear() throws {
         guard fileManager.fileExists(atPath: fileURL.path) else { return }
         try Data().write(to: fileURL, options: .atomic)
+    }
+
+    /// One synthetic record marker. `load()` collapses these onto the referenced edit by
+    /// setting its `metadata["undone"] = "true"` and `metadata["undoneNewCommit"] = "<sha>"`.
+    /// Wire format on disk:
+    ///   { "kind": "undone", "messageID": "<UUID>", "newCommit": "<sha>", "timestamp": "…" }
+    public func appendUndone(messageID: UUID, newCommit: String) throws {
+        struct UndoneRecord: Encodable {
+            let kind = "undone"
+            let messageID: String
+            let newCommit: String
+            let timestamp: Date
+        }
+        let record = UndoneRecord(
+            messageID: messageID.uuidString,
+            newCommit: newCommit,
+            timestamp: Date()
+        )
+        let parent = fileURL.deletingLastPathComponent()
+        if !fileManager.fileExists(atPath: parent.path) {
+            try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+        }
+        if !fileManager.fileExists(atPath: fileURL.path) {
+            fileManager.createFile(atPath: fileURL.path, contents: nil)
+        }
+        var data = try encoder.encode(record)
+        data.append(0x0A)
+        let handle = try FileHandle(forWritingTo: fileURL)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: data)
     }
 }

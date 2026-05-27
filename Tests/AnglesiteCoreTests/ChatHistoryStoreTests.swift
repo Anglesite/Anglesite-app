@@ -70,4 +70,63 @@ final class ChatHistoryStoreTests: XCTestCase {
         let loaded = try await store.load()
         XCTAssertEqual(loaded, [])
     }
+
+    // MARK: edit rows + undone records
+
+    func testEditEntryRoundTripsWithMetadata() async throws {
+        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let edit = ChatHistoryStore.Entry(
+            role: .edit,
+            content: "Edited src/pages/about.astro",
+            metadata: ["file": "src/pages/about.astro", "commit": "abc123"]
+        )
+        try await store.append(edit)
+        let loaded = try await store.load()
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded[0].role, .edit)
+        XCTAssertEqual(loaded[0].metadata?["file"], "src/pages/about.astro")
+        XCTAssertEqual(loaded[0].metadata?["commit"], "abc123")
+    }
+
+    func testUndoneRecordFlipsTheReferencedEditsUndoneFlag() async throws {
+        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let editID = UUID()
+        let edit = ChatHistoryStore.Entry(
+            role: .edit,
+            content: "Edited src/pages/about.astro",
+            metadata: ["file": "src/pages/about.astro", "commit": "abc123", "messageID": editID.uuidString]
+        )
+        try await store.append(edit)
+        try await store.appendUndone(messageID: editID, newCommit: "def456")
+
+        let loaded = try await store.load()
+        XCTAssertEqual(loaded.count, 1, "undone records collapse onto the referenced edit, not as separate rows")
+        XCTAssertEqual(loaded[0].metadata?["undone"], "true")
+        XCTAssertEqual(loaded[0].metadata?["undoneNewCommit"], "def456")
+    }
+
+    func testUndoneRecordWithoutMatchingEditIsIgnored() async throws {
+        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        try await store.appendUndone(messageID: UUID(), newCommit: "orphan")
+        let loaded = try await store.load()
+        XCTAssertEqual(loaded, [])
+    }
+
+    func testMixedHistoryPreservesOrderAndAppliesUndone() async throws {
+        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let editID = UUID()
+        try await store.append(.init(role: .user, content: "Hi"))
+        try await store.append(.init(
+            role: .edit,
+            content: "Edited src/pages/about.astro",
+            metadata: ["file": "src/pages/about.astro", "commit": "abc123", "messageID": editID.uuidString]
+        ))
+        try await store.append(.init(role: .assistant, content: "OK."))
+        try await store.appendUndone(messageID: editID, newCommit: "def456")
+
+        let loaded = try await store.load()
+        XCTAssertEqual(loaded.count, 3)
+        XCTAssertEqual(loaded.map(\.role), [.user, .edit, .assistant])
+        XCTAssertEqual(loaded[1].metadata?["undone"], "true")
+    }
 }
