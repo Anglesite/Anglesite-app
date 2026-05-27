@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { install, HOVER_CLASS, EDITABLE_CLASS } from "../src/overlay.js";
 
 interface WebKit {
@@ -29,6 +29,13 @@ function makeText<K extends keyof HTMLElementTagNameMap>(parent: Element, tag: K
 // the whole file so listener attachments don't accumulate across tests; reset only per-test
 // state (body DOM, post recorder) in beforeEach.
 beforeAll(() => {
+  // jsdom doesn't implement URL.createObjectURL / revokeObjectURL — shim them so the
+  // image-drop tests can exercise the overlay behaviour without a real blob URL.
+  if (typeof URL.createObjectURL === "undefined") {
+    let blobCounter = 0;
+    URL.createObjectURL = () => `blob:http://localhost/${++blobCounter}`;
+    URL.revokeObjectURL = () => { /* no-op in test */ };
+  }
   install();
 });
 
@@ -116,5 +123,102 @@ describe("click-to-edit", () => {
     const msg = sent[0] as { selector: { textContent?: string }; value: unknown };
     expect(msg.selector.textContent).toBe("original-text");
     expect(msg.value).toBe("new-text-the-user-typed");
+  });
+});
+
+describe("image drop", () => {
+  function makeImg(src: string, srcset?: string): HTMLImageElement {
+    const img = document.createElement("img");
+    img.src = src;
+    if (srcset) img.setAttribute("srcset", srcset);
+    document.body.appendChild(img);
+    return img;
+  }
+
+  /** jsdom 25 doesn't implement DragEvent or DataTransfer, so we use a plain Event
+   *  and define dataTransfer directly on the instance. */
+  function dropOn(target: Element, file: File): void {
+    const fakeDataTransfer = { files: [file] };
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "dataTransfer", { value: fakeDataTransfer });
+    target.dispatchEvent(drop);
+  }
+
+  /** jsdom's FileReader fires its onload callback after two macrotask ticks. */
+  async function flushFileReader(): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+
+  it("sets img.src to a blob URL immediately on drop", async () => {
+    const img = makeImg("/images/hero.jpg");
+    const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+    dropOn(img, file);
+    expect(img.src.startsWith("blob:")).toBe(true);
+    // Drain the pending FileReader so it doesn't bleed into the next test.
+    await flushFileReader();
+  });
+
+  it("posts apply-edit with op: replace-image-src and dataURL value", async () => {
+    const img = makeImg("/images/hero.jpg");
+    const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+    dropOn(img, file);
+    await flushFileReader();
+    expect(sent.length).toBe(1);
+    const msg = sent[0] as { op: string; value: { filename: string; mimeType: string; dataURL: string } };
+    expect(msg.op).toBe("replace-image-src");
+    expect(msg.value.filename).toBe("vacation.jpg");
+    expect(msg.value.mimeType).toBe("image/jpeg");
+    expect(msg.value.dataURL.startsWith("data:image/jpeg;base64,")).toBe(true);
+  });
+
+  it("on edit-applied with result, swaps src/srcset and revokes the blob URL", async () => {
+    const img = makeImg("/images/hero.jpg", "old-srcset");
+    const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+    dropOn(img, file);
+    await flushFileReader();
+    const id = (sent[0] as { id: string }).id;
+
+    const revokeSpy = vi.spyOn(URL, "revokeObjectURL");
+    (window as unknown as { anglesite: { _handleReply: (r: unknown) => void } }).anglesite._handleReply({
+      id, status: "applied", result: { src: "/images/hero.webp", srcset: "new-srcset" },
+    });
+
+    expect(img.src.endsWith("/images/hero.webp")).toBe(true);
+    expect(img.getAttribute("srcset")).toBe("new-srcset");
+    expect(revokeSpy).toHaveBeenCalled();
+  });
+
+  it("on edit-failed, restores original src/srcset, revokes blob URL, and shows a toast", async () => {
+    const img = makeImg("/images/hero.jpg", "original-srcset");
+    const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+    dropOn(img, file);
+    await flushFileReader();
+    const id = (sent[0] as { id: string }).id;
+
+    (window as unknown as { anglesite: { _handleReply: (r: unknown) => void } }).anglesite._handleReply({
+      id, status: "failed", reason: "image-optimize-failed", detail: "sharp error",
+    });
+
+    expect(img.src.endsWith("/images/hero.jpg")).toBe(true);
+    expect(img.getAttribute("srcset")).toBe("original-srcset");
+    expect(document.querySelector(".anglesite-toast")?.textContent).toContain("sharp error");
+  });
+
+  it("after 30s with no reply, restores original and toasts a timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const img = makeImg("/images/hero.jpg");
+      const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+      dropOn(img, file);
+      // Advance just past the 30s timeout (not runAllTimers, which would also
+      // fire the toast's 4s auto-dismiss and make the assertion miss).
+      await vi.advanceTimersByTimeAsync(30001);
+
+      expect(img.src.endsWith("/images/hero.jpg")).toBe(true);
+      expect(document.querySelector(".anglesite-toast")?.textContent).toMatch(/timed out/i);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

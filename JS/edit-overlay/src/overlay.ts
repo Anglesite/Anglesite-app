@@ -10,7 +10,9 @@ import {
   nextEditID,
   postEdit,
   type EditMessage,
+  type EditReply,
 } from "./messages.js";
+import { showToast } from "./toast.js";
 
 export const HOVER_CLASS = "anglesite-hover";
 export const EDITABLE_CLASS = "anglesite-editing";
@@ -97,7 +99,7 @@ function attachClickToEdit(awaitReply: (id: string, handler: (r: { status: strin
   });
 }
 
-function attachImageDrop(): void {
+function attachImageDrop(awaitReply: (id: string, handler: (r: EditReply) => void) => void): void {
   document.addEventListener("dragover", (ev) => {
     const target = ev.target as Element | null;
     if (target?.tagName !== "IMG") return;
@@ -106,14 +108,64 @@ function attachImageDrop(): void {
   document.addEventListener("drop", (ev) => {
     const target = ev.target as HTMLImageElement | null;
     if (target?.tagName !== "IMG") return;
-    const file = ev.dataTransfer?.files[0];
+    const file = (ev as DragEvent).dataTransfer?.files[0];
     if (!file || !file.type.startsWith("image/")) return;
     ev.preventDefault();
+
+    // Save originals before the optimistic swap so we can revert on failure.
+    const savedSrc = target.src;
+    const savedSrcset = target.getAttribute("srcset");
+    const blobURL = URL.createObjectURL(file);
+    target.src = blobURL;
+    target.removeAttribute("srcset");
+
+    const id = nextEditID();
+    let settled = false;
+
+    const revertWithToast = (text: string): void => {
+      if (settled) return;
+      settled = true;
+      target.src = savedSrc;
+      if (savedSrcset !== null) target.setAttribute("srcset", savedSrcset);
+      else target.removeAttribute("srcset");
+      URL.revokeObjectURL(blobURL);
+      showToast(text);
+    };
+
+    const settleOnReply = (reply: EditReply): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutHandle);
+      if (reply.status === "applied" && reply.result) {
+        target.src = reply.result.src;
+        if (reply.result.srcset !== undefined) {
+          target.setAttribute("srcset", reply.result.srcset);
+        } else {
+          target.removeAttribute("srcset");
+        }
+        URL.revokeObjectURL(blobURL);
+      } else {
+        target.src = savedSrc;
+        if (savedSrcset !== null) target.setAttribute("srcset", savedSrcset);
+        else target.removeAttribute("srcset");
+        URL.revokeObjectURL(blobURL);
+        showToast(reply.detail ?? reply.message ?? reply.reason ?? "Image edit failed");
+      }
+    };
+
+    const timeoutHandle = setTimeout(() => {
+      revertWithToast("Image edit timed out");
+    }, 30_000);
+
+    awaitReply(id, settleOnReply);
+
     const reader = new FileReader();
     reader.onload = () => {
       const dataURL = reader.result;
-      if (typeof dataURL !== "string") return;
-      const id = nextEditID();
+      if (typeof dataURL !== "string") {
+        revertWithToast("Couldn't read the dropped file");
+        return;
+      }
       const msg: EditMessage = {
         id,
         type: "anglesite:apply-edit",
@@ -122,8 +174,13 @@ function attachImageDrop(): void {
         op: "replace-image-src",
         value: { filename: file.name, mimeType: file.type, dataURL },
       };
-      postEdit(msg);
+      const ok = postEdit(msg);
+      if (!ok) {
+        clearTimeout(timeoutHandle);
+        revertWithToast("Not running inside the Anglesite app");
+      }
     };
+    reader.onerror = () => revertWithToast("Couldn't read the dropped file");
     reader.readAsDataURL(file);
   });
 }
@@ -138,5 +195,5 @@ export function install(): void {
   const { awaitReply } = installReplyHandler();
   attachHover();
   attachClickToEdit(awaitReply);
-  attachImageDrop();
+  attachImageDrop(awaitReply);
 }

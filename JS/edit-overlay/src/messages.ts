@@ -22,6 +22,13 @@ export interface EditReply {
   id: string;
   status: "applied" | "failed" | "ambiguous";
   message?: string;
+  /** Op-scoped metadata. For `replace-image-src`, carries the final src + optional
+   *  srcset the overlay should apply on swap. */
+  result?: { src: string; srcset?: string };
+  /** Failure detail forwarded from the server (e.g. the sharp error message). */
+  detail?: string;
+  /** Failure reason forwarded from the server's EDIT_FAILED_REASONS enum. */
+  reason?: string;
 }
 
 interface WebKitWindow {
