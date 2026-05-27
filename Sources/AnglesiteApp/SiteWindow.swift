@@ -200,7 +200,15 @@ struct SiteWindow: View {
         let feed = AnnotationFeedFactory.viaMCP(mcpClient: { [preview] in
             await preview.mcpClient()
         })
-        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, annotationFeed: feed)
+        let undoCommand = UndoCommand(mcpClient: { [preview] in
+            await preview.mcpClient()
+        })
+        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, annotationFeed: feed, undoCommand: undoCommand)
+        preview.setEditObserver { [weak chat] reply in
+            Task { @MainActor in
+                chat?.recordEdit(reply)
+            }
+        }
         deploy.onScanComplete = { [health] outcome in
             health.ingestDeployOutcome(outcome)
         }
