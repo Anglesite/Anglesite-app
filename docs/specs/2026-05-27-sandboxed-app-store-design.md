@@ -168,19 +168,17 @@ Unchanged from today. Sandbox off, hardened-runtime exceptions for JIT and dyld 
 ```xml
 <key>com.apple.security.app-sandbox</key><true/>
 <key>com.apple.security.network.client</key><true/>
-<key>com.apple.security.network.server</key><true/>
 <key>com.apple.security.files.user-selected.read-write</key><true/>
 <key>com.apple.security.files.bookmarks.app-scope</key><true/>
 ```
 
 Rationale per key:
 
-- `network.client`: WKWebView loading `http://localhost:4321`, future Anthropic-API HTTPS, GitHub HTTPS for git push (through the helper).
-- `network.server`: the dev server bound by the helper is reached *by the app* (WKWebView connects to it). Without `network.server`, sandboxed apps can't accept incoming local connections. (Belt-and-braces; in practice WKWebView talks to the helper's listener via the loopback interface and only `network.client` may be strictly required. Verified in the smoke fixture; if `network.server` proves unnecessary, dropped.)
+- `network.client`: WKWebView loading `http://localhost:4321` (the *helper* listens; the *app* only connects out as a client), future Anthropic-API HTTPS, GitHub HTTPS for git push (through the helper).
 - `files.user-selected.read-write`: NSOpenPanel grants per-folder access.
 - `files.bookmarks.app-scope`: persist security-scoped bookmarks across launches.
 
-Explicitly **omitted**: `temporary-exception` entitlements of any kind, `cs.disable-library-validation`, `application-groups`. App groups would let the app and helper share a container; we don't currently have a reason to, and adding them later is non-breaking.
+Explicitly **omitted**: `temporary-exception` entitlements of any kind, `cs.disable-library-validation`, `application-groups`, `network.server` (the app only consumes the local dev server as a client; the helper does the listening). App groups would let the app and helper share a container; we don't currently have a reason to, and adding them later is non-breaking. If the smoke fixture surfaces a real need for `network.server` on the app, it gets added back then — defaulting to the tightest viable entitlement set.
 
 ### `AnglesiteHelper` (XPC service) — `Resources/AnglesiteHelper.entitlements`
 
