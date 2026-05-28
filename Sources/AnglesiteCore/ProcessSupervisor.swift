@@ -42,10 +42,8 @@ public actor ProcessSupervisor {
     /// XPC-backed placeholder on MAS until Task 6).
     public init() {
         #if ANGLESITE_MAS
-        // XPCBackend lands in Task 6. Until then the MAS target must still *compile* (it is not
-        // runtime-functional pre-Task-6), so we install a trapping placeholder rather than the
-        // wrong InProcessBackend. Task 6 replaces this branch with `XPCBackend()`.
-        self.backend = UnimplementedBackend()
+        // MAS routes every spawn through the sandboxed `AnglesiteHelper` XPC service.
+        self.backend = XPCBackend()
         #else
         self.backend = InProcessBackend()
         #endif
@@ -188,6 +186,19 @@ public actor ProcessSupervisor {
         return StdinHandle(writer: writer)
     }
 
+    /// Writes `bytes` to the launched process's stdin. Works for both backends: `InProcessBackend`
+    /// writes to the tracked child's stdin pipe; `XPCBackend` forwards the bytes to the helper
+    /// (a live `FileHandle` can't cross the XPC boundary, so the `stdinWriter` seam returns `nil`
+    /// under MAS). MCP JSON-RPC framing uses this so it's backend-agnostic. Throws if the handle is
+    /// unknown or `launch` wasn't called with `attachStdin: true`.
+    public func writeStdin(_ handle: Handle, _ bytes: Data) async throws {
+        do {
+            try await backend.writeStdin(backendHandle(for: handle), bytes)
+        } catch let error as SupervisorBackendError {
+            throw Self.translate(error)
+        }
+    }
+
     // MARK: Error translation
 
     private static func translate(_ error: SupervisorBackendError) -> SupervisorError {
@@ -209,40 +220,3 @@ public actor ProcessSupervisor {
         }
     }
 }
-
-#if ANGLESITE_MAS
-/// Temporary placeholder for the MAS build so the target compiles before `XPCBackend` exists.
-/// The MAS app is not runtime-functional until Task 6 wires the real out-of-process helper; any
-/// call here traps loudly rather than silently spawning in-process (which would defeat the sandbox).
-private struct UnimplementedBackend: SupervisorBackend {
-    func runOneShot(_ spec: SpawnSpec) async throws -> ProcessResult {
-        fatalError("XPCBackend lands in Task 6")
-    }
-    func launch(
-        _ spec: SpawnSpec,
-        restartPolicy: RestartPolicy,
-        onRespawn: RespawnHandler?,
-        logCenter: LogCenter
-    ) async throws -> SpawnedProcessHandle {
-        fatalError("XPCBackend lands in Task 6")
-    }
-    func waitForExit(_ handle: SpawnedProcessHandle) async -> ProcessExitReason {
-        fatalError("XPCBackend lands in Task 6")
-    }
-    func isRunning(_ handle: SpawnedProcessHandle) async -> Bool {
-        fatalError("XPCBackend lands in Task 6")
-    }
-    func terminate(_ handle: SpawnedProcessHandle, timeout: TimeInterval) async {
-        fatalError("XPCBackend lands in Task 6")
-    }
-    func shutdownAll(timeout: TimeInterval) async {
-        fatalError("XPCBackend lands in Task 6")
-    }
-    func writeStdin(_ handle: SpawnedProcessHandle, _ bytes: Data) async throws {
-        fatalError("XPCBackend lands in Task 6")
-    }
-    func stdinHandle(_ handle: SpawnedProcessHandle) async -> FileHandle? {
-        fatalError("XPCBackend lands in Task 6")
-    }
-}
-#endif
