@@ -32,8 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct AnglesiteApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
+    #if !ANGLESITE_MAS
     /// Sparkle updater, held for the app's lifetime so its automatic-check timer keeps firing.
+    /// MAS builds update through the App Store and have no Sparkle dependency (Phase 10.1).
     @StateObject private var updater = Updater()
+    #endif
 
     /// Computed once at launch: Debug builds always show the Debug-pane menu item; Release builds
     /// only when the user opted in (Settings) or held ⌥ while launching. A settings change takes
@@ -65,10 +68,12 @@ struct AnglesiteApp: App {
             // "Check for Updates…" lives in the standard slot Mac users expect — directly
             // under "About Anglesite" in the application menu. `CommandGroup(after: .appInfo)`
             // puts it there.
+            #if !ANGLESITE_MAS
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { updater.checkForUpdates() }
                     .disabled(!updater.canCheckForUpdates)
             }
+            #endif
             // Debug pane lives off the View menu — `⌥⌘D` keeps it discoverable without crowding
             // the primary commands. Hidden in Release unless explicitly enabled (see init()).
             CommandGroup(after: .toolbar) {

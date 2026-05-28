@@ -82,11 +82,84 @@ targets:
         product: AnglesiteBridge
       - package: Sparkle
 
+  AnglesiteMAS:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/AnglesiteApp
+      - path: Resources/Assets.xcassets
+      - path: Resources/node-runtime
+        type: folder
+        buildPhase: resources
+        optional: true
+      - path: Resources/plugin
+        type: folder
+        buildPhase: resources
+        optional: true
+      - path: Resources/npm-cache
+        type: folder
+        buildPhase: resources
+        optional: true
+      - path: Resources/edit-overlay
+        type: folder
+        buildPhase: resources
+        optional: true
+    preBuildScripts:
+      - name: Vendor Node runtime
+        script: "${PROJECT_DIR}/scripts/vendor-node.sh"
+        basedOnDependencyAnalysis: false
+      - name: Bundle Anglesite plugin
+        script: "${PROJECT_DIR}/scripts/copy-plugin.sh"
+        basedOnDependencyAnalysis: false
+      - name: Vendor primed npm cache
+        script: "${PROJECT_DIR}/scripts/vendor-npm-cache.sh"
+        basedOnDependencyAnalysis: false
+      - name: Build edit overlay
+        script: "${PROJECT_DIR}/scripts/build-overlay.sh"
+        basedOnDependencyAnalysis: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.anglesite.app.mas
+        PRODUCT_NAME: Anglesite
+        INFOPLIST_FILE: Resources/AnglesiteMAS-Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Resources/AnglesiteMAS.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.10"
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "0.1.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        COMBINE_HIDPI_IMAGES: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: ANGLESITE_MAS
+      configs:
+        Debug:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+    dependencies:
+      - package: Anglesite
+        product: AnglesiteCore
+      - package: Anglesite
+        product: AnglesiteBridge
+
 schemes:
   Anglesite:
     build:
       targets:
         Anglesite: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+  AnglesiteMAS:
+    build:
+      targets:
+        AnglesiteMAS: all
     run:
       config: Debug
     archive:

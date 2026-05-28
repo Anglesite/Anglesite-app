@@ -1,3 +1,9 @@
+// Sparkle is the Developer ID auto-update mechanism. The Mac App Store build
+// (ANGLESITE_MAS) ships updates through the App Store, so it has no Sparkle
+// dependency — exclude this whole file from that target's compilation. Full
+// MAS/Sparkle separation lands in Phase 10.1 Task 10; this guard is the
+// minimal scaffold so the MAS target compiles in Task 1.
+#if !ANGLESITE_MAS
 import SwiftUI
 import Combine
 import Sparkle
@@ -36,3 +42,4 @@ final class Updater: ObservableObject {
         controller.checkForUpdates(nil)
     }
 }
+#endif
