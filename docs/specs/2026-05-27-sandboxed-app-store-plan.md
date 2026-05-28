@@ -12,6 +12,29 @@
 
 ---
 
+## Post-spike amendments (2026-05-28) — READ FIRST
+
+Task 0 ran, plus a Node sub-spike. Three results revise this plan. Full detail in the design spec's "Spike results" section and the two notes files (`2026-05-27-sandboxed-app-store-spike-notes.md`, `2026-05-28-node-sandbox-subspike-notes.md`).
+
+1. **Core capability confirmed.** Sandboxed XPC spawns the vendored Node binary, V8 inits, localhost binds. The helper entitlement set in Task 5 is verified sufficient (`cs.allow-jit` covers V8; `disable-library-validation` not needed). Tasks 1–6 proceed as written.
+
+2. **The `/usr/bin/git` problem is resolved by *removal*, not libgit2.** There is **no Swift-side git** — the only `git` usage is the plugin's Node MCP server (`edit-history.mjs` / `undo-edit.mjs`), which backs per-edit undo. Those calls are best-effort (the dispatcher catches failures and the edit still applies with `commit: undefined`), and the undo *UI* lives in the chat panel that Task 9 already cuts from MAS. So: **per-edit undo is simply absent from the MAS 10.1 build, alongside chat.** No libgit2 task. No plugin change. **Ignore any "libgit2 / SwiftGit2 fallback" or "Task 8a" language elsewhere in this plan** — it was based on a wrong premise (that git was Swift-side). Task 8 stands as written (it only migrates the two *non-git* Swift `Process()` sites: the wrangler/env shell-out and the `gh` status call).
+
+3. **Bookmark resolution under real signing is unverified.** A new gate — **Task 6.5** below — must run before Task 7, and it needs an Apple Development cert installed (the spike machine had none). If scoped bookmark resolution fails even under real signing, Task 7's design changes (resolve-in-app + pass `NSFileHandle`, or `inherit` + plain bookmark). Until Task 6.5 passes, do not start Task 7.
+
+One more thing to verify later (not blocking): a real `wrangler deploy` in-sandbox is untested (the Node-spawn mechanism is confirmed, but wrangler's own behavior isn't) — Task 11 covers it.
+
+### Task 6.5 (NEW — gated on user-provided signing cert): signed-build bookmark sub-spike
+
+**Files:** throwaway spike (not committed) + notes file `docs/specs/2026-05-28-bookmark-signed-subspike-notes.md`.
+
+**Prerequisite:** an Apple Development cert installed (`security find-identity -v -p codesigning` shows ≥1 identity). This is a **user action** — if no cert is present, this task is BLOCKED and the controller must stop and ask the user to install one (Xcode → Settings → Accounts → add Apple ID auto-creates an "Apple Development" cert).
+
+- [ ] **Step 1:** Rebuild the Task 0 spike structure (app + XPC helper), but sign both with the real Apple Development identity instead of ad-hoc (`CODE_SIGN_IDENTITY = "Apple Development"`, automatic signing).
+- [ ] **Step 2:** Drive it: NSOpenPanel → create `.withSecurityScope` bookmark in the app → send to helper → `URL(resolvingBookmarkData:options:.withSecurityScope)` in the helper → `startAccessingSecurityScopedResource()` → read a file.
+- [ ] **Step 3:** Record PASS/FAIL in the notes file with verbatim output. PASS → Task 7 proceeds as written. FAIL → escalate to the user; Task 7's bookmark-passing design needs revision (resolve-in-app + pass open `NSFileHandle`, or rely on `inherit` + plain bookmark for path recovery only).
+- [ ] **Step 4:** Commit the notes file only.
+
 ## Pre-flight reading for any implementer
 
 Before starting any task, an implementer subagent should read:

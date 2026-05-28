@@ -269,22 +269,33 @@ New files:
 
 The DevID path of `release.sh` is unchanged.
 
+## Spike results (Task 0 + Node sub-spike) — read before the risks table
+
+The Task 0 verification spike and a follow-up Node sub-spike ran on macOS 26.5 (Tahoe) under ad-hoc signing. Notes: [`2026-05-27-sandboxed-app-store-spike-notes.md`](2026-05-27-sandboxed-app-store-spike-notes.md), [`2026-05-28-node-sandbox-subspike-notes.md`](2026-05-28-node-sandbox-subspike-notes.md). Three load-bearing results, each of which revises the design:
+
+**1. The core capability works.** A sandboxed XPC helper *can* `Process()`-spawn child binaries against a user-selected folder, and — critically — it can spawn the **vendored Node binary**, init V8 (`cs.allow-jit` is sufficient; `disable-library-validation` is *not* needed), and bind a localhost port (`network.server`). The helper entitlement set in this spec is confirmed sufficient. This is the question the whole milestone rested on, and the answer is yes.
+
+**2. `/usr/bin/git` is blocked — but this is a *plugin*-side concern, not Swift, and it degrades gracefully.** `/usr/bin/git` on modern macOS is the `xcrun` shim, which refuses to run inside `app-sandbox` (confirmed; `DEVELOPER_DIR` does not bypass). The original spec assumed git was spawned from Swift via `ProcessSupervisor` and proposed a libgit2/SwiftGit2 fallback. **That assumption was wrong.** Anglesite's Swift code invokes no `git`. The only `git` usage is in the **plugin's Node MCP server** — `server/edit-history.mjs` and `server/undo-edit.mjs` (`execFileSync("git", …)`), which back the per-edit undo feature.
+
+  Crucially, `recordEdit` is **best-effort**: `apply-edit-dispatcher.mjs` wraps the `onApplied` hook in try/catch (lines 206–212), so when the git call fails the edit still applies and returns `commit: undefined`. The Swift `MCPApplyEditRouter` already treats `commit == nil` as "not undo-able" and surfaces no undo row. And the per-edit undo *UI* lives entirely in the chat panel (`Role.edit` rows in `ChatView`) — which is **already cut from the MAS build** (see *Feature flags*). So in MAS: `edit-history.mjs`'s git calls fail harmlessly under the sandbox, edits still apply, and there is no undo UI to break because it travels with the chat panel.
+
+  **Net effect: no libgit2, no Swift git rewrite, no plugin change for Phase 10.1.** Per-edit undo is simply absent from the MAS build in 10.1 — deferred alongside chat. Bringing undo back to MAS (a Phase 10.2+ concern, when chat returns) will require a sandbox-safe git in the plugin's Node code (isomorphic-git is the likely path — pure-JS, covers the shallow plumbing set used: `rev-parse`, `diff`, `hash-object`, `write-tree`, `commit-tree`, `update-ref`). That is explicitly out of scope here and gets its own cross-repo spec.
+
+**3. Security-scoped bookmark resolution across XPC is unverified under real signing.** `URL(resolvingBookmarkData:options:.withSecurityScope)` in the helper fails with `NSCocoaErrorDomain 259` under **ad-hoc** signing (the scopedbookmarksagent can't validate the creator identity without a Team ID). A *plain* (non-scope) bookmark resolves fine, and `com.apple.security.inherit` gives the helper the same powerbox access the app holds, which covered every read the spike tested. **Whether `.withSecurityScope` works under a real Apple Development / Distribution cert is untested** (no cert was installed on the spike machine). This is gated by a follow-up signed-build sub-spike before Task 7; if scoped resolution still fails under real signing, the bookmark-passing design changes (resolve in the app, pass an open `NSFileHandle` to the helper, or rely on `inherit` + plain bookmark for path recovery).
+
 ## Risks
 
-### Critical — could derail MAS: spawning `/usr/bin/git` from the sandboxed helper
+### Now-resolved (was "could derail MAS"): git from the sandbox
 
-The deploy and undo paths both shell out to `git` via `ProcessSupervisor`. In a sandboxed XPC service, spawning `/usr/bin/git` is *generally* allowed (it's a standard system binary), but Apple's review behavior is inconsistent — there are documented cases of rejection for "spawning non-app-bundle executables." `temporary-exception` entitlements would fix it but aren't allowed on MAS.
-
-**Mitigation plan:** Phase 10.1 first task — *before* any architectural work lands — is a 1-day verification spike. Build a minimal sandboxed XPC service skeleton, call `Process()` against `/usr/bin/git status` on a bookmark-scoped folder, and confirm it works on macOS 14 and macOS 15. If it works, proceed with the spec as written.
-
-**Fallback if the spike fails:** Replace `Process()`-based git calls with libgit2 via SwiftGit2 (Cocoa wrapper). The set of operations the app actually needs is small — `git push`, `git commit-tree`, `git log --pretty`, `git diff --quiet`, `git update-ref`, `git rev-parse`, `git cat-file`. Replacing them is a known-cost rewrite of ~300–500 lines of Swift across `EditHistoryClient`, `DeployCommand`, and the new `UndoCommand`. Build estimate doubles if we hit this. The libgit2 path is App Store-compatible and removes one external dependency, so it's a strict upgrade if needed — but it's enough work that we want to avoid it if the cheaper approach works.
+Superseded by spike result #2 above. Git is plugin-side Node, best-effort, and absent from MAS 10.1 along with the chat-panel undo UI. No libgit2 fallback is needed for this milestone. Documented here so the original risk isn't mistaken for still-open.
 
 ### Lower-priority risks
 
 | Risk | Mitigation |
 |---|---|
-| App Store reviewer flags the embedded Node binary | Node lives in the app bundle, signed with our cert, spawned only by code we wrote — same pattern as VS Code's MAS shim, Electron-MAS apps, Slack MAS, etc. If pushed back on, the response is "Node is bundled, signed, and only loaded by our XPC helper; no external code is downloaded." |
-| `wrangler` in user's `node_modules/.bin/` can't be spawned | Helper has `files.user-selected.read-write` + the per-site bookmark; `Process()` against an executable inside a bookmark-scoped URL is allowed for sandboxed XPC services. |
+| App Store reviewer flags the embedded Node binary | Node lives in the app bundle, signed with our cert, spawned only by code we wrote — same pattern as VS Code's MAS shim, Electron-MAS apps, Slack MAS, etc. Node-in-sandbox spawn is **confirmed** (sub-spike). Re-signing Node to our own Team ID is a MAS packaging step near Task 11/12 (App Store requires bundled executables signed with the submitter's identity); not a launch-blocker (the sub-spike ran Node with its original foreign Team ID under ad-hoc). |
+| `wrangler` from the site's `node_modules/.bin/` | wrangler is a Node script; the helper spawns Node (confirmed), Node runs wrangler, wrangler deploys over HTTPS (`network.client` granted). The Node-spawn mechanism is verified; wrangler's *own* end-to-end behavior in-sandbox (a real `wrangler deploy`) is **untested** — verify in the Task 11 smoke fixture. |
+| Bookmark `.withSecurityScope` resolution may fail under real signing | See spike result #3. Gated by a signed-build sub-spike before Task 7. Interim fallback: `inherit` + plain bookmark for path recovery. |
 | XPC connection setup latency on first spawn | Measure during smoke test; in practice ~10ms for the first connect, then negligible. Eat the cost — preview spin-up is already dominated by Astro startup (~2s). |
 | WKWebView in MAS can't load `http://localhost:4321` over plain HTTP | `NSAllowsLocalNetworking` is already present in `Info.plist` and the MAS app inherits it. Verify in smoke fixture. |
 | Astro's filesystem watcher behaves differently inside the helper's sandbox | The helper's `inherit` entitlement should pass file-watcher API access to Node. Verify in smoke fixture; if watching breaks, fall back to polling with `--force-polling` (Astro supports it). |
@@ -296,6 +307,7 @@ The deploy and undo paths both shell out to `git` via `ProcessSupervisor`. In a 
 Re-stating from *Scope and explicit deferrals* in one place to avoid the spec creeping into adjacent work:
 
 - Native Anthropic API chat client — Phase 10.2.
+- **Per-edit undo in the MAS build — Phase 10.2+.** The undo UI lives in the chat panel (cut from MAS 10.1), and the plugin's git-backed `recordEdit` fails harmlessly under the sandbox. Restoring undo to MAS needs a sandbox-safe git in the plugin's Node code (isomorphic-git) — a cross-repo change with its own spec.
 - Native GitHub auth (OAuth + git credential helper) — v3.
 - Defense-in-depth sandboxing of the DevID build — out of scope; DevID stays non-sandboxed.
 - Quick Look, Spotlight, Settings polish — separate Phase 10 sub-projects.
