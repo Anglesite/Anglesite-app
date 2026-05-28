@@ -145,6 +145,38 @@ targets:
         product: AnglesiteCore
       - package: Anglesite
         product: AnglesiteBridge
+      - target: AnglesiteHelper
+        embed: true
+        codeSign: true
+
+  AnglesiteHelper:
+    type: xpc-service
+    platform: macOS
+    sources:
+      - path: Sources/AnglesiteHelper
+      # Shares the @objc protocol AND the pure-data spawn types (SpawnTypes.swift) with
+      # the app. SupervisorBackend.swift is intentionally NOT compiled here — it references
+      # LogCenter (app-side only). The helper streams lines back over the XPC client proxy.
+      - path: Sources/AnglesiteCore/XPC
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.anglesite.app.mas.helper
+        PRODUCT_NAME: AnglesiteHelper
+        INFOPLIST_FILE: Resources/AnglesiteHelper-Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Resources/AnglesiteHelper.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.10"
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "0.1.0"
+      configs:
+        Debug:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
 
 schemes:
   Anglesite:
