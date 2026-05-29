@@ -103,7 +103,29 @@ final class NodeModulesCacheTests: XCTestCase {
         )
     }
 
-    // Integration: the real `/usr/bin/tar` extractor round-trips a tarball.
+    func testResolveBundledArchivePrefersGzippedTarball() throws {
+        let resources = scratch.appendingPathComponent("Resources", isDirectory: true)
+        let npmCache = resources.appendingPathComponent("npm-cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: npmCache, withIntermediateDirectories: true)
+        try Data().write(to: npmCache.appendingPathComponent("cache.tar.gz"))
+        try "abc123".write(to: npmCache.appendingPathComponent("version.txt"), atomically: true, encoding: .utf8)
+
+        let resolved = NodeModulesCache.resolveBundledArchive(inResourceDirectory: resources)
+        XCTAssertEqual(resolved?.url.lastPathComponent, "cache.tar.gz")
+        XCTAssertEqual(resolved?.version, "abc123")
+    }
+
+    func testResolveBundledArchiveIgnoresUncompressedTarball() throws {
+        // We ship gzipped now; a stale plain cache.tar must not be picked up.
+        let resources = scratch.appendingPathComponent("Resources", isDirectory: true)
+        let npmCache = resources.appendingPathComponent("npm-cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: npmCache, withIntermediateDirectories: true)
+        try Data().write(to: npmCache.appendingPathComponent("cache.tar"))
+
+        XCTAssertNil(NodeModulesCache.resolveBundledArchive(inResourceDirectory: resources))
+    }
+
+    // Integration: the real `/usr/bin/tar` extractor round-trips a gzipped tarball.
     func testTarExtractorRoundTrips() async throws {
         // Build a source "cache" directory and tar its *contents* (so they land directly in dest).
         let src = scratch.appendingPathComponent("src-cache", isDirectory: true)
@@ -111,13 +133,13 @@ final class NodeModulesCacheTests: XCTestCase {
         try "index".write(to: src.appendingPathComponent("_cacache/index-v5"), atomically: true, encoding: .utf8)
         try "{}".write(to: src.appendingPathComponent("_locks.json"), atomically: true, encoding: .utf8)
 
-        let tarball = scratch.appendingPathComponent("cache.tar")
+        let tarball = scratch.appendingPathComponent("cache.tar.gz")
         let supervisor = ProcessSupervisor()
         let mk = try await supervisor.run(
             executable: URL(fileURLWithPath: "/usr/bin/tar"),
-            arguments: ["-cf", tarball.path, "-C", src.path, "."]
+            arguments: ["-czf", tarball.path, "-C", src.path, "."]
         )
-        XCTAssertEqual(mk.exitCode, 0, "tar -cf failed: \(mk.stderr)")
+        XCTAssertEqual(mk.exitCode, 0, "tar -czf failed: \(mk.stderr)")
 
         let cache = NodeModulesCache(
             bundledArchive: .init(url: tarball, version: "real-v1"),
