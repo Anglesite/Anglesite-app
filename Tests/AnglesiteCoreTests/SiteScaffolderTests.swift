@@ -23,7 +23,7 @@ final class SiteScaffolderTests: XCTestCase {
                             calls: CallRecorder) -> SiteScaffolder.CommandRunner {
         return { executable, args, cwd in
             await calls.append(args.joined(separator: " "))
-            if args.contains("scaffold.sh"), scaffoldExit == 0, let cwd {
+            if args.contains(where: { $0.hasSuffix("scaffold.sh") }), scaffoldExit == 0, let cwd {
                 // Simulate the template copy the real scaffold.sh performs.
                 let css = cwd.appendingPathComponent("src/styles/global.css")
                 let astro = cwd.appendingPathComponent("src/pages/index.astro")
@@ -33,7 +33,7 @@ final class SiteScaffolderTests: XCTestCase {
                 try? "<h1>Welcome</h1>".write(to: astro, atomically: true, encoding: .utf8)
                 try? "ANGLESITE_VERSION=1.0.0".write(to: cwd.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
             }
-            let exit = args.contains("scaffold.sh") ? scaffoldExit : npmExit
+            let exit = args.contains(where: { $0.hasSuffix("scaffold.sh") }) ? scaffoldExit : npmExit
             return ProcessSupervisor.RunResult(stdout: "", stderr: exit == 0 ? "" : "boom", exitCode: exit)
         }
     }

@@ -58,13 +58,8 @@ public actor SiteScaffolder {
         emit(.copyingTemplate)
         let scaffoldScript = pluginURL.appendingPathComponent("scripts/scaffold.sh")
         do {
-            // Pass "scaffold.sh" as $0 so CommandRunner consumers can identify this call by
-            // args.contains("scaffold.sh"). The actual script path is in the -c body.
-            let escapedScript = scaffoldScript.path.replacingOccurrences(of: "'", with: "'\\''")
-            let escapedDir = siteDir.path.replacingOccurrences(of: "'", with: "'\\''")
             let r = try await run(URL(fileURLWithPath: "/bin/zsh"),
-                                  ["-c", "'\(escapedScript)' --yes '\(escapedDir)'", "scaffold.sh"],
-                                  siteDir)
+                                  [scaffoldScript.path, "--yes", siteDir.path], siteDir)
             if r.exitCode != 0 {
                 return emit(.failed(step: "copyingTemplate",
                                     message: "Couldn't create the site files.\n\(r.stderr)"))
@@ -72,7 +67,8 @@ public actor SiteScaffolder {
         } catch { return emit(.failed(step: "copyingTemplate", message: humanize(error))) }
 
         // 2b. Append owner answers to .site-config (scaffold.sh excludes it + stamps ANGLESITE_VERSION).
-        appendSiteConfig(draft, siteDir: siteDir)
+        do { try appendSiteConfig(draft, siteDir: siteDir) }
+        catch { emit(.warning(step: "copyingTemplate", message: humanize(error))) }
 
         // 3. Theme (non-fatal). Resolve the owner's chosen theme; fall back to the first available.
         emit(.applyingTheme)
@@ -113,7 +109,7 @@ public actor SiteScaffolder {
     }
 
     /// Append SITE_NAME / SITE_TYPE / TAGLINE without clobbering existing lines (e.g. ANGLESITE_VERSION).
-    private func appendSiteConfig(_ draft: NewSiteDraft, siteDir: URL) {
+    private func appendSiteConfig(_ draft: NewSiteDraft, siteDir: URL) throws {
         let url = siteDir.appendingPathComponent(".site-config")
         var contents = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
         func setKey(_ key: String, _ value: String) {
@@ -124,7 +120,7 @@ public actor SiteScaffolder {
         setKey("SITE_NAME", draft.name)
         setKey("SITE_TYPE", draft.siteType.rawValue)
         if !draft.tagline.isEmpty { setKey("TAGLINE", draft.tagline) }
-        try? contents.write(to: url, atomically: true, encoding: .utf8)
+        try contents.write(to: url, atomically: true, encoding: .utf8)
     }
 
     private func humanize(_ error: Error) -> String { (error as NSError).localizedDescription }
