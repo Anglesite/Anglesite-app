@@ -70,7 +70,7 @@ xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug b
 xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debug build
 ```
 
-Tests: `swift test --package-path .`. Note the full suite currently hangs on a Node-spawning end-to-end test in `AnglesiteBridgeTests` in some environments; `swift test --filter AnglesiteCoreTests` (208 unit tests) is the reliable gate.
+Tests: `swift test --package-path .` (208 `AnglesiteCoreTests` unit tests plus the `AnglesiteBridgeTests` apply-edit e2e, which `XCTSkip`s when the sibling plugin checkout / node aren't present). If `swift build`/`swift test` seems to hang with no output, a stale SwiftPM process is likely holding the `.build` lock — check `pgrep -fl swift-test` and kill the orphan rather than assuming a bad test.
 
 ## Plan
 
