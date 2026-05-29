@@ -60,6 +60,14 @@ targets:
       - name: Build Help index
         script: "${PROJECT_DIR}/scripts/build-help-index.sh"
         basedOnDependencyAnalysis: false
+    postBuildScripts:
+      # Re-sign the bundled Node (in the .app copy) with the app's Developer ID + hardened-runtime
+      # entitlements (node-runtime-devid.entitlements — the MAS set minus the sandbox keys), so the
+      # nested Mach-O's team matches the app and notarization accepts the bundle (#4). Runs after
+      # resources are copied, before Xcode's implicit final bundle code-sign.
+      - name: Re-sign bundled Node (Developer ID)
+        script: "${PROJECT_DIR}/scripts/resign-node.sh \"\" \"${PROJECT_DIR}/Resources/node-runtime-devid.entitlements\""
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.anglesite.app
