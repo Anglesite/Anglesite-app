@@ -118,7 +118,7 @@ xcodebuild -project "$REPO_ROOT/Anglesite.xcodeproj" \
     CODE_SIGN_IDENTITY="Apple Development" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="$DEV_TEAM" \
     build 2>&1 | tail -3
 
-APP="$DERIVED/Build/Products/Debug/Anglesite.app"
+APP="$DERIVED/Build/Products/Debug/AnglesiteMAS.app"
 NODE="$APP/Contents/Resources/node-runtime/bin/node"
 echo "==> verifying the bundled Node is real-signed with our team + JIT/sandbox entitlements"
 codesign -dv --verbose=4 "$NODE" 2>&1 | grep -E "Authority=Apple Development|TeamIdentifier|flags=" || true
@@ -134,7 +134,7 @@ cat <<EOF
 
   Launch the built app from a normal location (signed sandboxed apps refuse to
   run from /private/tmp):
-    cp -R "$APP" ~/Applications/ && open -n ~/Applications/Anglesite.app
+    cp -R "$APP" ~/Applications/ && open -n ~/Applications/AnglesiteMAS.app
 
   Then exercise the WRITE-HEAVY loop and watch for sandbox denials
   (log stream --predicate 'eventMessage CONTAINS "deny"' --style compact):

@@ -141,7 +141,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.anglesite.app.mas
-        PRODUCT_NAME: Anglesite
+        # Distinct product name so the MAS build emits AnglesiteMAS.app instead of colliding
+        # with the DevID Anglesite.app at the shared Products dir. The user-visible name stays
+        # "Anglesite" via CFBundleDisplayName in AnglesiteMAS-Info.plist.
+        PRODUCT_NAME: AnglesiteMAS
         INFOPLIST_FILE: Resources/AnglesiteMAS-Info.plist
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_ENTITLEMENTS: Resources/AnglesiteMAS.entitlements
