@@ -124,16 +124,37 @@ final class AppliesEditEndToEndTests: XCTestCase {
     }
 
     private static func requireNode() throws -> URL {
-        let candidates = [
-            "/opt/homebrew/bin/node",
-            "/usr/local/bin/node",
-            "/usr/bin/node",
-        ]
-        for p in candidates {
-            if FileManager.default.isExecutableFile(atPath: p) {
+        let fm = FileManager.default
+
+        // 1. Anything on PATH — covers Homebrew, asdf, and an nvm-active shell.
+        if let path = ProcessInfo.processInfo.environment["PATH"] {
+            for dir in path.split(separator: ":") {
+                let candidate = "\(dir)/node"
+                if fm.isExecutableFile(atPath: candidate) {
+                    return URL(fileURLWithPath: candidate)
+                }
+            }
+        }
+
+        // 2. nvm installs node outside PATH for non-interactive processes like this
+        //    test runner — probe ~/.nvm/versions/node/*/bin/node, newest version first.
+        let nvmRoot = fm.homeDirectoryForCurrentUser.appendingPathComponent(".nvm/versions/node")
+        if let versions = try? fm.contentsOfDirectory(at: nvmRoot, includingPropertiesForKeys: nil) {
+            let newest = versions
+                .map { $0.appendingPathComponent("bin/node") }
+                .filter { fm.isExecutableFile(atPath: $0.path) }
+                .sorted { $0.path.localizedStandardCompare($1.path) == .orderedDescending }
+                .first
+            if let newest { return newest }
+        }
+
+        // 3. Classic fixed locations.
+        for p in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"] {
+            if fm.isExecutableFile(atPath: p) {
                 return URL(fileURLWithPath: p)
             }
         }
-        throw XCTSkip("node not found in common paths; install Node ≥22")
+
+        throw XCTSkip("node not found (PATH, nvm, or common paths); install Node ≥22")
     }
 }

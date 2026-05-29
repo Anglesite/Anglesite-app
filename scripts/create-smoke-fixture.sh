@@ -14,6 +14,17 @@
 
 set -euo pipefail
 
+# --mas: also build the sandboxed Mac App Store target, real-signed (Apple Development),
+# so the run exercises the App Sandbox + hardened-runtime Node re-sign — the load-bearing
+# Phase 10.1 Task 11 validation. Without it, this preps the DevID fixture only.
+MAS=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --mas) MAS=1; shift ;;
+        *) echo "unknown arg: $1" >&2; exit 2 ;;
+    esac
+done
+
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
@@ -56,11 +67,12 @@ cd "$FIXTURE_DIR"
 echo "==> $NPM install --no-audit --no-fund --prefer-offline"
 "$NPM" install --no-audit --no-fund --prefer-offline
 
+if [[ $MAS -eq 0 ]]; then
 cat <<EOF
 
 ✓ Smoke fixture ready: $FIXTURE_DIR
 
-  Verify the dev-server lifecycle:
+  Verify the dev-server lifecycle (Developer ID build):
     1. Launch Anglesite (or use 'open Anglesite.xcodeproj' + ⌘R from Xcode).
     2. Open Folder… → pick anglesite-smoke (or it'll appear in the launcher
        since ~/Sites/anglesite-smoke is under the default sitesRoot).
@@ -73,4 +85,68 @@ cat <<EOF
        a green/yellow/red dot depending on what the scan finds. The popover
        summary should match what /anglesite:check reports for the same site.
     6. Quit the app — no orphan node processes should remain.
+EOF
+    exit 0
+fi
+
+# ----- MAS variant: real-signed sandbox validation (Task 11) -----
+# A real Apple Development identity is required — the App Sandbox + hardened-runtime
+# Node JIT entitlements are NOT enforced under ad-hoc signing, so an ad-hoc run would
+# pass for the wrong reasons. Bail early with guidance if no identity is present.
+if ! security find-identity -v -p codesigning | grep -q "Apple Development"; then
+    echo "error: no 'Apple Development' signing identity found." >&2
+    echo "       Task 11 needs a real cert (Xcode → Settings → Accounts → add Apple ID)." >&2
+    echo "       'security find-identity -v -p codesigning' must list ≥1 identity." >&2
+    exit 1
+fi
+
+DERIVED="$REPO_ROOT/build/mas-smoke"
+echo "==> building AnglesiteMAS (real-signed: Apple Development) into $DERIVED"
+xcodebuild -project "$REPO_ROOT/Anglesite.xcodeproj" \
+    -scheme AnglesiteMAS -configuration Debug \
+    -derivedDataPath "$DERIVED" \
+    CODE_SIGN_IDENTITY="Apple Development" CODE_SIGN_STYLE=Automatic \
+    build 2>&1 | tail -3
+
+APP="$DERIVED/Build/Products/Debug/Anglesite.app"
+NODE="$APP/Contents/Resources/node-runtime/bin/node"
+echo "==> verifying the bundled Node is real-signed with our team + JIT/sandbox entitlements"
+codesign -dv --verbose=4 "$NODE" 2>&1 | grep -E "Authority=Apple Development|TeamIdentifier|flags=" || true
+codesign -d --entitlements :- "$NODE" 2>/dev/null | plutil -p - 2>/dev/null | grep -E "app-sandbox|allow-jit|inherit|disable-library-validation" || true
+
+cat <<EOF
+
+✓ MAS smoke fixture ready: $FIXTURE_DIR
+✓ Real-signed MAS app built: $APP
+
+  This is the load-bearing Phase 10.1 validation — it must run INTERACTIVELY
+  under the real signature (the sandbox/JIT entitlements aren't enforced ad-hoc).
+
+  Launch the built app from a normal location (signed sandboxed apps refuse to
+  run from /private/tmp):
+    cp -R "$APP" ~/Applications/ && open -n ~/Applications/Anglesite.app
+
+  Then exercise the WRITE-HEAVY loop and watch for sandbox denials
+  (log stream --predicate 'eventMessage CONTAINS "deny"' --style compact):
+    1. Open Folder… → pick anglesite-smoke. This Powerbox grant is the per-site
+       security-scoped grant (do NOT pre-inject a bookmark — a foreign process's
+       scoped bookmark won't resolve in the app; cf. spike 6.5). It persists for
+       next launch.
+    2. Preview should reach .ready — Astro dev writes .astro/ and serves :4321.
+       A node child must be parented by the app (ps -o pid,ppid,comm).
+    3. Deploy button → 'npm run build' must write dist/ inside the granted folder,
+       then the pre-deploy scan runs. (A real 'wrangler deploy' needs a Cloudflare
+       token; reaching the wrangler spawn is the in-sandbox signal.)
+    4. Drag an image onto an <img> in the preview → bytes write to
+       public/images/ and sharp runs. THIS is where cs.disable-library-validation
+       is exercised: if the optimized variants appear, sharp's native addon loaded
+       under hardened runtime → the entitlement is doing its job. If the drop fails
+       with a code-signing/library-validation error in the log, record it.
+    5. Close the window → node child reaped. Quit → no orphan node.
+    6. Chat button must be ABSENT (compiled out of MAS); Settings → no GitHub
+       Connect row, no 'Check for Updates…' menu item.
+
+  Capture PASS/FAIL per step (esp. #3 wrangler-spawn and #4 sharp) in a notes
+  file; this is the evidence that settles cs.disable-library-validation and the
+  in-sandbox write path.
 EOF
