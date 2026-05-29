@@ -95,7 +95,7 @@ This work lands in `anglesite/server/` — the app repo just calls it.
 
 ## Phase 10 — v2 polish
 
-Per design doc §12: sandboxed App Store build (helper-tool architecture for Node), Quick Look, Spotlight, Settings polish.
+Per design doc §12: sandboxed App Store build, Quick Look, Spotlight, Settings polish. **Phase 10.1** (sandboxed Mac App Store target) is in progress — the architecture, settled after seven spikes, is a sandboxed `AnglesiteMAS` target sharing the DevID `InProcessBackend` (the app spawns Node/Astro/wrangler directly via `Process()` and holds a per-site security-scoped grant so the children inherit folder access; no XPC helper). See [`docs/specs/2026-05-27-sandboxed-app-store-plan.md`](specs/2026-05-27-sandboxed-app-store-plan.md).
 
 ---
 

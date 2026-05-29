@@ -16,6 +16,13 @@ struct SiteWindow: View {
 
     @State private var site: SiteStore.Site?
 
+    #if ANGLESITE_MAS
+    /// The security-scoped URL whose grant is held for this window's lifetime. Resolved from the
+    /// site's persisted bookmark in `loadAndStart()` before any subprocess spawns; the directly
+    /// spawned Node/Astro/wrangler children inherit folder access. Released in `onDisappear`.
+    @State private var scopedURL: URL?
+    #endif
+
     @State private var preview = PreviewModel()
     @State private var deploy = DeployModel()
     @State private var chat: ChatModel?
@@ -38,6 +45,10 @@ struct SiteWindow: View {
         .onDisappear {
             preview.close()
             chat = nil
+            #if ANGLESITE_MAS
+            scopedURL?.stopAccessingSecurityScopedResource()
+            scopedURL = nil
+            #endif
         }
     }
 
@@ -196,6 +207,10 @@ struct SiteWindow: View {
         site = resolved
         AppSettings.shared.lastOpenedSiteID = resolved.id
 
+        #if ANGLESITE_MAS
+        await acquireGrant(for: resolved, in: store)
+        #endif
+
         preview.open(siteID: resolved.id, siteDirectory: resolved.path)
         let feed = AnnotationFeedFactory.viaMCP(mcpClient: { [preview] in
             await preview.mcpClient()
@@ -213,4 +228,38 @@ struct SiteWindow: View {
             health.ingestDeployOutcome(outcome)
         }
     }
+
+    #if ANGLESITE_MAS
+    /// Resolve the site's persisted security-scoped bookmark and hold the grant for the window's
+    /// lifetime. Must run before any subprocess spawn so direct children inherit folder access.
+    /// On a stale bookmark, re-mint and persist a fresh one (grant must be active to do so).
+    private func acquireGrant(for site: SiteStore.Site, in store: SiteStore) async {
+        guard let bookmark = await store.bookmarkData(for: site.id) else {
+            await LogCenter.shared.append(
+                source: "grant:\(site.id)", stream: .stderr,
+                text: "No security-scoped bookmark for \(site.name); preview will fail until the folder is re-added via Open Folder…"
+            )
+            return
+        }
+        do {
+            let resolved = try SecurityScopedBookmark.resolve(bookmark)
+            guard resolved.url.startAccessingSecurityScopedResource() else {
+                await LogCenter.shared.append(
+                    source: "grant:\(site.id)", stream: .stderr,
+                    text: "startAccessingSecurityScopedResource() returned false for \(resolved.url.path)"
+                )
+                return
+            }
+            scopedURL = resolved.url
+            if resolved.isStale, let fresh = try? SecurityScopedBookmark.create(for: resolved.url) {
+                try? await store.setBookmark(fresh, for: site.id)
+            }
+        } catch {
+            await LogCenter.shared.append(
+                source: "grant:\(site.id)", stream: .stderr,
+                text: "Couldn't resolve security-scoped bookmark for \(site.name): \(error)"
+            )
+        }
+    }
+    #endif
 }

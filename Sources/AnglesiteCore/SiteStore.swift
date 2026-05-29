@@ -21,14 +21,29 @@ public actor SiteStore {
         public var isValid: Bool
         public var missingSentinels: [String]
         public var lastSeen: Date
+        /// Security-scoped bookmark for `path`. Populated via the MAS "Open Folder…" flow
+        /// (NSOpenPanel grants access; we stamp a bookmark so the grant survives relaunch).
+        /// `nil` for the DevID build (no sandbox) and for sites found by directory scan, which
+        /// can't mint a bookmark without an explicit user grant. Optional so existing
+        /// sites.json files decode unchanged.
+        public var bookmarkData: Data?
 
-        public init(id: String, name: String, path: URL, isValid: Bool, missingSentinels: [String], lastSeen: Date) {
+        public init(
+            id: String,
+            name: String,
+            path: URL,
+            isValid: Bool,
+            missingSentinels: [String],
+            lastSeen: Date,
+            bookmarkData: Data? = nil
+        ) {
             self.id = id
             self.name = name
             self.path = path
             self.isValid = isValid
             self.missingSentinels = missingSentinels
             self.lastSeen = lastSeen
+            self.bookmarkData = bookmarkData
         }
     }
 
@@ -105,7 +120,10 @@ public actor SiteStore {
         for site in sites where fileManager.fileExists(atPath: site.path.path) {
             byID[site.id] = site
         }
-        for site in discovered {
+        for var site in discovered {
+            // Re-discovery rebuilds a Site from the filesystem with no bookmark; carry forward
+            // any persisted security-scoped bookmark so a refresh doesn't strip the grant.
+            site.bookmarkData = byID[site.id]?.bookmarkData ?? site.bookmarkData
             byID[site.id] = site
         }
         sites = byID.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -149,6 +167,19 @@ public actor SiteStore {
     /// `WindowGroup(for:)` value and need to resolve it to a path/name.
     public func find(id: String) -> Site? {
         sites.first { $0.id == id }
+    }
+
+    /// The persisted security-scoped bookmark for a site, if any. `nil` in DevID and for
+    /// scan-discovered sites that were never granted via NSOpenPanel.
+    public func bookmarkData(for id: String) -> Data? {
+        sites.first { $0.id == id }?.bookmarkData
+    }
+
+    /// Stamp `bookmarkData` onto the site with the given id, then persist. No-op if unknown.
+    public func setBookmark(_ data: Data, for id: String) throws {
+        guard let index = sites.firstIndex(where: { $0.id == id }) else { return }
+        sites[index].bookmarkData = data
+        try persist()
     }
 
     // MARK: - Persistence
