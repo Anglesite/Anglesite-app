@@ -33,12 +33,11 @@ public enum ProcessExitReason: Sendable, Equatable {
 /// it can `await` back into the supervisor without deadlock.
 public typealias RespawnHandler = @Sendable () async -> Void
 
-/// The single seam between `ProcessSupervisor` and the underlying spawn mechanism.
-///
-/// - `InProcessBackend` (DevID): wraps `Process()` directly. No sandbox.
-/// - `XPCBackend` (MAS): sends spawn requests to `AnglesiteHelper` over `NSXPCConnection`.
-///
-/// `ProcessSupervisor` picks one at init time and never branches on which is in use after that.
+/// The seam between `ProcessSupervisor` and the underlying spawn mechanism. `InProcessBackend`
+/// (`Process()` directly) is the only implementation — used by both DevID and the sandboxed MAS
+/// build (the MAS app spawns directly and holds a per-window security-scoped grant so children
+/// inherit folder access; the originally-planned XPC helper was removed per the Task 6.7 spike).
+/// The protocol is kept as a clean boundary and test seam (`MockBackend`).
 public protocol SupervisorBackend: Sendable {
     /// Synchronous one-shot. Spawns, drains stdout+stderr concurrently, waits for exit.
     func runOneShot(_ spec: SpawnSpec) async throws -> ProcessResult

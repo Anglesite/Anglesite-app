@@ -3,10 +3,11 @@ import Foundation
 import Darwin
 #endif
 
-/// DevID `SupervisorBackend`: spawns and supervises subprocesses with `Process()` directly, in the
-/// app process, with no sandbox. This is the implementation that used to live inside
-/// `ProcessSupervisor`; it was lifted out wholesale during the Phase 10.1 backend split so the MAS
-/// build can swap in an out-of-process `XPCBackend` without `ProcessSupervisor` knowing the difference.
+/// The `SupervisorBackend`: spawns and supervises subprocesses with `Process()` directly, in the
+/// app process. Used by both DevID and the sandboxed MAS build. This is the implementation that used
+/// to live inside `ProcessSupervisor`; it was lifted out wholesale during the Phase 10.1 backend
+/// split. (MAS sandboxing is handled at the app/entitlement layer plus a per-window security-scoped
+/// grant the spawned children inherit — not by a separate process; see `ProcessSupervisor.init`.)
 ///
 /// Behavior is identical to the pre-split supervisor: concurrent pipe drainage for one-shot `run`,
 /// per-pipe line readers feeding `LogCenter`, `RestartPolicy.onCrash` backoff, `onRespawn`

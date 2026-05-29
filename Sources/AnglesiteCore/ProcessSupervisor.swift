@@ -8,7 +8,8 @@ import Foundation
 /// As of Phase 10.1 this is a thin **facade** over a `SupervisorBackend`. The actual spawn and
 /// supervision implementation lives in the backend:
 ///   - `InProcessBackend` (DevID): wraps `Process()` directly, no sandbox.
-///   - `XPCBackend` (MAS, lands in Task 6): forwards to a sandboxed helper over XPC.
+///   - (MAS uses the same `InProcessBackend`; the app is sandboxed and spawns directly, holding a
+///     per-window security-scoped grant — see `init()`.)
 ///
 /// The public API below is unchanged from the pre-split supervisor; every caller and test keeps
 /// working. Each method builds a `SpawnSpec` and delegates to `self.backend`. `Handle.id` and the
@@ -38,15 +39,13 @@ public actor ProcessSupervisor {
         SpawnedProcessHandle(id: handle.id, pid: 0)
     }
 
-    /// Convenience for the app and tests: the default backend (InProcess on DevID; an
-    /// XPC-backed placeholder on MAS until Task 6).
+    /// Convenience for the app and tests: the default in-process backend. Both DevID and MAS use
+    /// `InProcessBackend` — the MAS app is sandboxed and spawns Node/Astro/wrangler directly,
+    /// holding a per-`SiteWindow` security-scoped grant so spawned children inherit folder access
+    /// (verified in the Task 6.7 spike; the originally-planned XPC helper was removed because a
+    /// separate process can't inherit the app's scoped grant).
     public init() {
-        #if ANGLESITE_MAS
-        // MAS routes every spawn through the sandboxed `AnglesiteHelper` XPC service.
-        self.backend = XPCBackend()
-        #else
         self.backend = InProcessBackend()
-        #endif
     }
 
     /// Inject a backend explicitly (tests, future MAS wiring).
@@ -186,10 +185,8 @@ public actor ProcessSupervisor {
         return StdinHandle(writer: writer)
     }
 
-    /// Writes `bytes` to the launched process's stdin. Works for both backends: `InProcessBackend`
-    /// writes to the tracked child's stdin pipe; `XPCBackend` forwards the bytes to the helper
-    /// (a live `FileHandle` can't cross the XPC boundary, so the `stdinWriter` seam returns `nil`
-    /// under MAS). MCP JSON-RPC framing uses this so it's backend-agnostic. Throws if the handle is
+    /// Writes `bytes` to the launched process's stdin via the backend (`InProcessBackend` writes to
+    /// the tracked child's stdin pipe). MCP JSON-RPC framing uses this. Throws if the handle is
     /// unknown or `launch` wasn't called with `attachStdin: true`.
     public func writeStdin(_ handle: Handle, _ bytes: Data) async throws {
         do {

@@ -1,24 +1,21 @@
 import Foundation
 
-// MARK: - Shared spawn data types
+// MARK: - Spawn data types
 //
-// These are the pure-`Codable` types that cross the XPC boundary. They live in
-// `Sources/AnglesiteCore/XPC/` (alongside `AnglesiteHelperProtocol`) so the standalone
-// `AnglesiteHelper` XPC service can compile them WITHOUT dragging in `LogCenter` or the
-// rest of `AnglesiteCore`. The `SupervisorBackend` protocol + `RestartPolicy` /
-// `ProcessExitReason` / `RespawnHandler` stay in `SupervisorBackend.swift` because they
-// reference `LogCenter`, which is app-side only.
+// The pure-`Codable` value types describing a spawn request and its result. Kept in their own
+// file (separate from the `SupervisorBackend` protocol, which references the app-only `LogCenter`)
+// so they stay dependency-light. `Codable` is no longer load-bearing now that the XPC helper is
+// gone — both DevID and MAS spawn in-process via `InProcessBackend` — but it's harmless and these
+// remain the single shared call shape.
 
-/// One spawn request, fully described and serializable. Crossing the XPC boundary requires
-/// `Codable`; we use the same struct in-process too so DevID and MAS share one call shape.
+/// One spawn request. `workingDirectory` is a plain path; in MAS the app holds the security-scoped
+/// grant for that folder (per-`SiteWindow`) so the spawned child inherits access — nothing
+/// bookmark-related crosses a process boundary.
 public struct SpawnSpec: Sendable, Codable, Equatable {
     public let executable: URL
     public let arguments: [String]
     public let environment: [String: String]?
     public let workingDirectory: URL?
-    /// Security-scoped bookmark for `workingDirectory`. MAS-only; the XPC helper resolves and
-    /// `startAccessingSecurityScopedResource()`s before spawning. `nil` for DevID (no sandbox).
-    public let workingDirectoryBookmark: Data?
     /// When `true`, the spawned process gets a writable stdin pipe (MCP JSON-RPC framing needs this).
     public let stdinPipe: Bool
     /// Tag used by `LogCenter` when streaming stdout/stderr — e.g. `"astro:dev:<siteID>"`.
@@ -29,7 +26,6 @@ public struct SpawnSpec: Sendable, Codable, Equatable {
         arguments: [String] = [],
         environment: [String: String]? = nil,
         workingDirectory: URL? = nil,
-        workingDirectoryBookmark: Data? = nil,
         stdinPipe: Bool = false,
         logSource: String
     ) {
@@ -37,7 +33,6 @@ public struct SpawnSpec: Sendable, Codable, Equatable {
         self.arguments = arguments
         self.environment = environment
         self.workingDirectory = workingDirectory
-        self.workingDirectoryBookmark = workingDirectoryBookmark
         self.stdinPipe = stdinPipe
         self.logSource = logSource
     }

@@ -8,7 +8,6 @@ final class SupervisorBackendTests: XCTestCase {
             arguments: ["status", "--porcelain"],
             environment: ["PATH": "/usr/bin:/bin"],
             workingDirectory: URL(fileURLWithPath: "/tmp/site"),
-            workingDirectoryBookmark: Data([0xDE, 0xAD, 0xBE, 0xEF]),
             stdinPipe: true,
             logSource: "git:status"
         )
@@ -23,7 +22,6 @@ final class SupervisorBackendTests: XCTestCase {
             arguments: ["hi"],
             environment: nil,
             workingDirectory: nil,
-            workingDirectoryBookmark: nil,
             stdinPipe: false,
             logSource: "echo"
         )
