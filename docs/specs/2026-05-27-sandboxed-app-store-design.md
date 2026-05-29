@@ -132,7 +132,7 @@ A single XPC service per `SiteWindow`, connected lazily on the first spawn, torn
 }
 ```
 
-`SpawnSpec` (and `SpawnedProcess` / `ProcessResult`) are `Codable`; the XPC boundary serializes them as `Data`. The helper's `spawn` resolves the security-scoped bookmark, calls `startAccessingSecurityScopedResource()`, invokes `Process()` against the executable URL, sets up stdout/stderr pipes that stream line-by-line back to the app via the inbound `HelperClientProtocol`, and stores the running process keyed by pid for later `kill`. On connection invalidation, `shutdownAll` runs and the helper exits.
+`SpawnSpec` (and `SpawnedProcess` / `ProcessResult`) are `Codable`; the XPC boundary serializes them as `Data`. The helper's `spawn` invokes `Process()` against the executable URL with `workingDirectory` set to the plain absolute path of the site folder (reached via `com.apple.security.inherit` — **not** by resolving a scoped bookmark; see the AMENDED note under *Security-scoped bookmarks* below), sets up stdout/stderr pipes that stream line-by-line back to the app via the inbound `HelperClientProtocol`, and stores the running process keyed by pid for later `kill`. On connection invalidation, `shutdownAll` runs and the helper exits.
 
 The app routes stdout/stderr lines into `LogCenter` exactly as today — same source tags, same Debug pane.
 
@@ -151,7 +151,12 @@ In MAS, `~/Sites/<name>/` isn't accessible by default. The grant flow:
   ```
 
 - Every subsequent open re-resolves the bookmark with `URL(resolvingBookmarkData:options:.withSecurityScope, relativeTo:nil, bookmarkDataIsStale:&isStale)` and calls `startAccessingSecurityScopedResource()`. The window's `onDisappear` calls `stopAccessingSecurityScopedResource()`.
-- The bookmark `Data` is included in every `SpawnSpec` headed to the helper. The helper re-resolves it independently (XPC services bundled in the same app inherit access through the bookmark, but must call `startAccessing…` themselves) and uses the resolved URL as the spawn's working directory.
+
+> **AMENDED 2026-05-28 after the Task 6.5 signed-bookmark sub-spike (FAIL).** The original design had the *helper* re-resolve the scoped bookmark from a `SpawnSpec.workingDirectoryBookmark`. **That does not work** — `.withSecurityScope` bookmark resolution across the XPC boundary fails with `NSCocoaErrorDomain 259` *even under real Apple Development signing* (verified; result identical to ad-hoc). App-scoped bookmarks bind to the **creating process identity**, not the Team ID, so the helper (a separate sandbox identity) cannot resolve a bookmark the app created. Notes: [`2026-05-28-bookmark-signed-subspike-notes.md`](2026-05-28-bookmark-signed-subspike-notes.md).
+>
+> **Corrected design:** the **app** owns the security-scoped grant end to end — it resolves the persisted bookmark and calls `startAccessingSecurityScopedResource()`, holding the grant for the window's lifetime. The **helper never resolves a scoped bookmark.** The helper reaches the site folder via `com.apple.security.inherit` (which extends the app's active powerbox grant to the helper and the children it spawns) using a **plain absolute path** passed in the `SpawnSpec` (the existing `workingDirectory` field). The `workingDirectoryBookmark` field on `SpawnSpec` and the helper's `resolveSpawn` bookmark-resolution code (shipped in Tasks 5/6) become dead and are removed in Task 7.
+>
+> **Open question still gating Task 7 (not yet verified):** Task 0 confirmed `inherit` lets the helper *read* the top of the selected folder. It is **not yet confirmed** that `inherit` extends the app's scoped grant to the helper's Node child for **writes** (Astro build output, `npm` writing `node_modules`, wrangler's `.wrangler`, image drops writing `public/images/`) and for **subdirectories**, persistently while a long-lived dev server runs. A short confirm-spike of the `inherit` + write path (or, if it fails, fd-passing: the app opens the dir and sends an `NSFileHandle`/fd over XPC) should run before Task 7 locks. Fallback if `inherit` writes don't cover the tree: pass an open fd per spawn, or resolve-in-app and hand the helper a file descriptor it `fchdir`s into.
 
 `SiteStore.identifier(for:)` (currently the path-derived stable string) is unchanged — the bookmark is *additional* state per site, not the identifier.
 
