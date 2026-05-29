@@ -68,3 +68,5 @@ Resources/Anglesite.help/**/*.helpindex
 
 # Claude Code harness state
 .claude/
+
+.superpowers/
