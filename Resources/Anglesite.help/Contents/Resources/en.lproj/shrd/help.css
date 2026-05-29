@@ -1,0 +1,65 @@
+/* Anglesite Help — Apple-native styling. System fonts, readable column, light/dark. */
+:root {
+	color-scheme: light dark;
+	--fg: #1d1d1f;
+	--fg-dim: #515154;
+	--bg: #ffffff;
+	--accent: #0066cc;
+	--rule: #d2d2d7;
+	--card: #f5f5f7;
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--fg: #f5f5f7;
+		--fg-dim: #a1a1a6;
+		--bg: #1e1e1e;
+		--accent: #2997ff;
+		--rule: #3a3a3c;
+		--card: #2a2a2c;
+	}
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+	font-size: 15px;
+	line-height: 1.55;
+	color: var(--fg);
+	background: var(--bg);
+	margin: 0;
+	padding: 28px 32px 64px;
+	max-width: 640px;
+}
+h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 0.4em; }
+h2 { font-size: 19px; font-weight: 600; margin: 1.8em 0 0.5em; }
+h3 { font-size: 16px; font-weight: 600; margin: 1.4em 0 0.4em; }
+p, li { color: var(--fg); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, kbd {
+	font-family: ui-monospace, "SF Mono", Menlo, monospace;
+	font-size: 0.92em;
+	background: var(--card);
+	padding: 0.1em 0.35em;
+	border-radius: 4px;
+}
+kbd { border: 1px solid var(--rule); }
+ol, ul { padding-left: 1.4em; }
+li { margin: 0.3em 0; }
+hr { border: 0; border-top: 1px solid var(--rule); margin: 2em 0; }
+.lead { font-size: 16px; color: var(--fg-dim); }
+nav.toc ul { list-style: none; padding-left: 0; }
+nav.toc li { margin: 0.5em 0; }
+.related {
+	margin-top: 2.5em; padding-top: 1.2em; border-top: 1px solid var(--rule);
+	font-size: 14px; color: var(--fg-dim);
+}
+.related a { margin-right: 1em; }
+figure { margin: 1.4em 0; }
+figcaption { font-size: 13px; color: var(--fg-dim); margin-top: 0.5em; }
+.screenshot-placeholder {
+	display: flex; align-items: center; justify-content: center;
+	min-height: 160px; padding: 1.5em; text-align: center;
+	border: 2px dashed var(--rule); border-radius: 10px;
+	background: var(--card); color: var(--fg-dim); font-size: 13px;
+}
