@@ -20,6 +20,9 @@ struct SitesLauncherView: View {
     @State private var sites: [SiteStore.Site] = []
     @State private var loadError: String?
     @State private var deciding = true
+    @State private var showingNewSite = false
+    @State private var wizardModel: NewSiteWizardModel?
+    @State private var scaffolder: SiteScaffolder?
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -53,6 +56,23 @@ struct SitesLauncherView: View {
             footer
         }
         .frame(minWidth: 480, idealWidth: 520, minHeight: 360, idealHeight: 480)
+        .sheet(isPresented: $showingNewSite) {
+            if let wizardModel, let scaffolder {
+                NewSiteWizard(
+                    model: wizardModel,
+                    scaffolder: scaffolder,
+                    onComplete: { siteID in
+                        showingNewSite = false
+                        Task {
+                            await refreshSites()
+                            openWindow(value: siteID)
+                            dismissWindow()
+                        }
+                    },
+                    onCancel: { showingNewSite = false }
+                )
+            }
+        }
     }
 
     private var header: some View {
@@ -135,9 +155,7 @@ struct SitesLauncherView: View {
         HStack {
             Button("Open Folder…") { openFolder() }
             Spacer()
-            Text("New Site…")
-                .foregroundStyle(.tertiary)
-                .help("Coming soon — for now, run /anglesite:start from Claude Code in ~/Sites/")
+            Button("New Site…") { Task { await presentNewSite() } }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -174,6 +192,75 @@ struct SitesLauncherView: View {
             }
         }
     }
+
+    @MainActor
+    private func presentNewSite() async {
+        let resolution = PluginRuntime.resolve()
+        guard let pluginURL = resolution.url else {
+            loadError = "Plugin not found — can't create a site. Reinstall the app."
+            return
+        }
+        let catalog: ThemeCatalog
+        do { catalog = try ThemeCatalog.load(pluginURL: pluginURL) }
+        catch { loadError = "Couldn't load themes: \(error.localizedDescription)"; return }
+
+        // Effective sites root (override or ~/Sites) — the same accessor SiteStore uses.
+        let sitesRoot = AppSettings.shared.sitesRoot
+
+        #if ANGLESITE_MAS
+        guard let rootScope = await ensureSitesRootAccess(sitesRoot) else { return }  // user cancelled
+        defer { rootScope.stopAccessingSecurityScopedResource() }
+        #endif
+        try? FileManager.default.createDirectory(at: sitesRoot, withIntermediateDirectories: true)
+
+        let known = (try? await SiteStore.shared.refresh()) ?? []
+        let takenSlugs = Set(known.map { SiteSlug.derive(from: $0.name) })
+
+        let model = NewSiteWizardModel(catalog: catalog, slugTaken: { takenSlugs.contains($0) })
+
+        scaffolder = SiteScaffolder(
+            sitesRoot: sitesRoot,
+            pluginURL: pluginURL,
+            catalog: catalog,
+            run: { exe, args, cwd in
+                try await ProcessSupervisor.shared.run(executable: exe, arguments: args, currentDirectoryURL: cwd)
+            },
+            register: { url in
+                let site = try await SiteStore.shared.add(url)
+                #if ANGLESITE_MAS
+                let bookmark = try SecurityScopedBookmark.create(for: url)
+                try await SiteStore.shared.setBookmark(bookmark, for: site.id)
+                #endif
+                return site
+            }
+        )
+        wizardModel = model
+        showingNewSite = true
+    }
+
+    #if ANGLESITE_MAS
+    /// Obtain (or reuse) a security-scoped grant to the sites root so the sandboxed build can
+    /// create a new site folder under it. Returns the started-accessing URL, or nil if cancelled.
+    @MainActor
+    private func ensureSitesRootAccess(_ sitesRoot: URL) async -> URL? {
+        if let data = AppSettings.shared.sitesRootBookmark,
+           let resolved = try? SecurityScopedBookmark.resolve(data),
+           resolved.url.startAccessingSecurityScopedResource() {
+            return resolved.url
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.directoryURL = sitesRoot
+        panel.prompt = "Grant Access"
+        panel.message = "Choose your Sites folder so Anglesite can create the new site there."
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        if let data = try? SecurityScopedBookmark.create(for: url) {
+            AppSettings.shared.sitesRootBookmark = data
+        }
+        return url.startAccessingSecurityScopedResource() ? url : nil
+    }
+    #endif
 
     // MARK: - Lifecycle
 
