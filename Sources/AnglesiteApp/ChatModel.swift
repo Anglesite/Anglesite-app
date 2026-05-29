@@ -1,3 +1,7 @@
+// The chat panel ships in the Developer ID build only. The Mac App Store build (ANGLESITE_MAS)
+// omits it for 10.1; chat returns in 10.2 as a native Anthropic API client (the current panel
+// shells out to the `claude` CLI, which a sandboxed app can't rely on being installed).
+#if !ANGLESITE_MAS
 import Foundation
 import Observation
 import AnglesiteBridge
@@ -446,3 +450,5 @@ private extension ChatModel.Message {
         )
     }
 }
+
+#endif

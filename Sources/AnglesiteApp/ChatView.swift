@@ -1,3 +1,5 @@
+// Omitted from the Mac App Store build — see ChatModel.swift.
+#if !ANGLESITE_MAS
 import SwiftUI
 import AppKit
 import AnglesiteCore
@@ -401,3 +403,5 @@ private struct ToolCallCard: View {
     ChatView(model: ChatModel(siteID: "preview", siteDirectory: URL(fileURLWithPath: NSTemporaryDirectory())))
         .frame(width: 420, height: 560)
 }
+
+#endif

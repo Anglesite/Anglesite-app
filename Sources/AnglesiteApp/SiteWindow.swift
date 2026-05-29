@@ -25,8 +25,10 @@ struct SiteWindow: View {
 
     @State private var preview = PreviewModel()
     @State private var deploy = DeployModel()
+    #if !ANGLESITE_MAS
     @State private var chat: ChatModel?
     @State private var chatPresented = false
+    #endif
     @State private var health = HealthModel(runner: DefaultHealthCheckRunner())
 
     @Environment(\.openWindow) private var openWindow
@@ -44,7 +46,9 @@ struct SiteWindow: View {
         .task(id: siteID) { await loadAndStart() }
         .onDisappear {
             preview.close()
+            #if !ANGLESITE_MAS
             chat = nil
+            #endif
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()
             scopedURL = nil
@@ -59,14 +63,18 @@ struct SiteWindow: View {
                 HStack(spacing: 0) {
                     mainPane(for: site)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    #if !ANGLESITE_MAS
                     if chatPresented, let chat {
                         Divider()
                         ChatView(model: chat)
                             .frame(width: 420)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
+                    #endif
                 }
+                #if !ANGLESITE_MAS
                 .animation(.easeInOut(duration: 0.18), value: chatPresented)
+                #endif
                 Divider()
                 Text(BuildInfo.summary)
                     .font(.system(.caption, design: .monospaced))
@@ -115,11 +123,14 @@ struct SiteWindow: View {
                     model: health,
                     onRecheck: { health.recheck(siteID: site.id, siteDirectory: site.path) },
                     onAskClaude: {
+                        #if !ANGLESITE_MAS
                         chatPresented = true
                         chat?.send("/anglesite:check")
+                        #endif
                     }
                 )
 
+                #if !ANGLESITE_MAS
                 Button {
                     chatPresented.toggle()
                 } label: {
@@ -131,6 +142,7 @@ struct SiteWindow: View {
                 .controlSize(.small)
                 .help(chatPresented ? "Hide chat panel" : "Show chat panel")
                 .keyboardShortcut("k", modifiers: [.command])
+                #endif
 
                 Button {
                     deploy.deploy(siteID: site.id, siteDirectory: site.path)
@@ -212,6 +224,9 @@ struct SiteWindow: View {
         #endif
 
         preview.open(siteID: resolved.id, siteDirectory: resolved.path)
+        #if !ANGLESITE_MAS
+        // The annotation feed, undo command, and edit observer exist only to feed the chat
+        // panel, which the MAS build omits. The edit overlay still applies edits via MCP.
         let feed = AnnotationFeedFactory.viaMCP(mcpClient: { [preview] in
             await preview.mcpClient()
         })
@@ -224,6 +239,7 @@ struct SiteWindow: View {
                 chat?.recordEdit(reply)
             }
         }
+        #endif
         deploy.onScanComplete = { [health] outcome in
             health.ingestDeployOutcome(outcome)
         }

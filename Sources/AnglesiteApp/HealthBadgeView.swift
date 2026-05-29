@@ -182,12 +182,14 @@ struct HealthBadgeView: View {
 
     private var footerButtons: some View {
         HStack {
+            #if !ANGLESITE_MAS
             Button("Ask Claude") {
                 popoverPresented = false
                 onAskClaude()
             }
             .controlSize(.small)
             .help("Open the chat panel and run /anglesite:check for a deeper audit")
+            #endif
 
             Spacer()
 
