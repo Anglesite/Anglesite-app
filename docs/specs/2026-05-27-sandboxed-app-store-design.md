@@ -1,9 +1,23 @@
-# Sandboxed Mac App Store build — XPC helper architecture for embedded Node
+# Sandboxed Mac App Store build — embedded Node under App Sandbox
 
-**Status:** approved — ready for implementation
+**Status:** approved — **ARCHITECTURE PIVOTED 2026-05-28** (XPC helper removed; see banner below)
 **Tracks:** Phase 10 step 1 of [build-plan.md](../build-plan.md#phase-10--v2-polish) — "Mac App Store build (sandboxed)" from design doc §12 ([../../anglesite/docs/dev/mac-app-design.md](../../anglesite/docs/dev/mac-app-design.md))
 **Cross-repo:** none — this is app-only; the plugin's files copy in unchanged
-**Date:** 2026-05-27
+**Date:** 2026-05-27 (pivoted 2026-05-28)
+
+> ## ⚠️ ARCHITECTURE PIVOT (2026-05-28) — the XPC helper is GONE
+>
+> The original design (everything below referencing `AnglesiteHelper`, `XPCBackend`, the XPC protocol, helper entitlements) was built on a **false premise**: that a sandboxed app can't spawn subprocesses and therefore needs an out-of-process XPC helper. Five spikes disproved the helper path and validated a far simpler one. Empirical findings (notes files dated 2026-05-27/28):
+> - **Node runs under App Sandbox** (`cs.allow-jit` suffices; sub-spike B).
+> - **`/usr/bin/git` is blocked** in-sandbox (xcrun shim) — but git is plugin-side Node, best-effort, and absent from MAS 10.1 with chat. No libgit2.
+> - **A security-scoped grant does NOT reach a separate XPC helper** — not via bookmark resolution (6.5, fails even signed), not via fd-passing, not via `inherit` (6.6, "everything fails"). The grant is a sandbox extension **bound to the granting process**.
+> - **A direct child of the grant-holding app DOES inherit the grant** for absolute-path writes — `/bin/sh` and the bundled Node both wrote throughout a user-granted folder; a never-granted folder correctly EPERM'd (6.7, decisive).
+>
+> **Actual architecture for MAS:** the `AnglesiteMAS` app is sandboxed and uses the **same `InProcessBackend`** as the DevID build — it spawns Node/Astro/wrangler **directly** via `Process()`. Per `SiteWindow`, the app resolves the site's persisted security-scoped bookmark and calls `startAccessingSecurityScopedResource()`, holding the grant for the window's lifetime; the spawned children inherit folder access. **No XPC helper, no `XPCBackend`, no XPC protocol.** The only MAS-specific deltas over DevID are: (1) sandbox entitlements, (2) per-`SiteWindow` security-scoped grant management, (3) the **bundled Node binary re-signed** with `cs.allow-jit` + `cs.allow-unsigned-executable-memory` + `inherit` + `app-sandbox` (required or V8 OOMs under hardened runtime), (4) chat/Sparkle/`gh` compiled out, (5) MAS signing/packaging.
+>
+> **Status of shipped work:** Tasks 1 (MAS target), 2 (`SupervisorBackend`), 3 (`InProcessBackend`) are KEPT. Tasks 4 (XPC protocol), 5 (helper target), 6 (`XPCBackend`) are being REVERTED — the helper bought nothing and couldn't get folder access anyway. The `SupervisorBackend` protocol stays (clean seam; `InProcessBackend` is its only impl). `SpawnSpec.workingDirectoryBookmark` is removed (no boundary to cross).
+>
+> Everything below this banner that describes the XPC helper is **historical** — read it for context, not as the plan. The sections updated to the new architecture are marked with "(pivoted)".
 
 ## Motivation
 

@@ -12,30 +12,37 @@
 
 ---
 
-## Post-spike amendments (2026-05-28) — READ FIRST
+## ⚠️ ARCHITECTURE PIVOT (2026-05-28) — READ FIRST; supersedes the XPC-helper task structure below
 
-Task 0 ran, plus a Node sub-spike. Three results revise this plan. Full detail in the design spec's "Spike results" section and the two notes files (`2026-05-27-sandboxed-app-store-spike-notes.md`, `2026-05-28-node-sandbox-subspike-notes.md`).
+Seven spikes (Task 0, sub-spikes B/Node, 6.5, 6.6, 6.7 — notes files dated 2026-05-27/28) reshaped this plan. The headline: **the XPC helper is removed.** It was built on a false premise (that a sandboxed app can't spawn subprocesses). The validated architecture:
 
-1. **Core capability confirmed.** Sandboxed XPC spawns the vendored Node binary, V8 inits, localhost binds. The helper entitlement set in Task 5 is verified sufficient (`cs.allow-jit` covers V8; `disable-library-validation` not needed). Tasks 1–6 proceed as written.
+**MAS app = sandboxed + the SAME `InProcessBackend` as DevID.** The app spawns Node/Astro/wrangler directly via `Process()`. Per `SiteWindow`, the app resolves the site's persisted security-scoped bookmark and `startAccessingSecurityScopedResource()`, holding the grant for the window's lifetime; **direct children inherit the grant** (proven in 6.7 — `/bin/sh` and bundled Node both wrote absolute paths throughout a granted folder; never-granted folder EPERM'd). No `AnglesiteHelper`, no `XPCBackend`, no XPC protocol.
 
-2. **The `/usr/bin/git` problem is resolved by *removal*, not libgit2.** There is **no Swift-side git** — the only `git` usage is the plugin's Node MCP server (`edit-history.mjs` / `undo-edit.mjs`), which backs per-edit undo. Those calls are best-effort (the dispatcher catches failures and the edit still applies with `commit: undefined`), and the undo *UI* lives in the chat panel that Task 9 already cuts from MAS. So: **per-edit undo is simply absent from the MAS 10.1 build, alongside chat.** No libgit2 task. No plugin change. **Ignore any "libgit2 / SwiftGit2 fallback" or "Task 8a" language elsewhere in this plan** — it was based on a wrong premise (that git was Swift-side). Task 8 stands as written (it only migrates the two *non-git* Swift `Process()` sites: the wrangler/env shell-out and the `gh` status call).
+### What this means for shipped work
 
-3. **Bookmark resolution across XPC is BROKEN — Task 7 is redesigned (Task 6.5 ran, FAILED).** Task 6.5 confirmed under real Apple Development signing that the helper CANNOT resolve a `.withSecurityScope` bookmark the app created (`NSCocoaErrorDomain 259`; app-scoped bookmarks bind to the creating process, not the Team ID). Notes: `2026-05-28-bookmark-signed-subspike-notes.md`. **Task 7 redesign:** the *app* resolves the persisted scoped bookmark and holds the grant (`startAccessingSecurityScopedResource()` for the window lifetime); the *helper* never resolves a bookmark — it reaches the site folder via `com.apple.security.inherit` using the plain `workingDirectory` path. The `SpawnSpec.workingDirectoryBookmark` field and the helper's `resolveSpawn` bookmark code (shipped in Tasks 5/6) are now dead and get **removed** in Task 7. **Still unverified before Task 7 locks:** whether `inherit` extends the app's scoped grant to the helper's Node child for WRITES and SUBDIRECTORIES persistently (Task 0 only confirmed top-dir reads). A short confirm-spike (Task 6.6) should run first; fallback is fd-passing.
+- **KEEP:** Task 1 (`AnglesiteMAS` target + entitlements), Task 2 (`SupervisorBackend`), Task 3 (`InProcessBackend` + facade). The `SupervisorBackend` protocol stays as a clean seam; `InProcessBackend` is now its only implementation.
+- **REVERT (Task R below):** Task 4 (`Sources/AnglesiteCore/XPC/AnglesiteHelperProtocol.swift`), Task 5 (`Sources/AnglesiteHelper/`, helper entitlements + Info.plist, the `AnglesiteHelper` target + embed in `project.yml`), Task 6 (`Sources/AnglesiteCore/XPCBackend.swift`). Also: `ProcessSupervisor.init`'s `#if ANGLESITE_MAS` branch now uses `InProcessBackend()` (not `XPCBackend()`); remove `SpawnSpec.workingDirectoryBookmark` (no boundary to cross); fold `SpawnTypes.swift` back into `SupervisorBackend.swift` or leave it (harmless).
 
-4. **WWDR G3 intermediate gotcha (for Task 12).** The Apple Development cert reads as "0 valid identities" until the WWDR CA **G3** intermediate is installed (the leaf is issued by WWDR CA G3; that intermediate was missing/expired on this machine). The release/CI signing setup must import the current WWDR intermediate and assert `security find-identity -v -p codesigning` ≥ 1 before signing. Fixed locally on 2026-05-28 via `apple.com/certificateauthority/AppleWWDRCAG3.cer`.
+### Established facts that still hold
 
-One more thing to verify later (not blocking): a real `wrangler deploy` in-sandbox is untested (the Node-spawn mechanism is confirmed, but wrangler's own behavior isn't) — Task 11 covers it.
+1. **Node runs under App Sandbox** — but under **hardened runtime**, the bundled Node binary itself must carry `cs.allow-jit` + `cs.allow-unsigned-executable-memory` + `inherit` + `app-sandbox` or V8 OOMs at launch (`Failed to reserve virtual memory for CodeRange`). The ad-hoc sub-spike missed this. **Load-bearing for the Node re-sign (Task N below + Task 12).**
+2. **`/usr/bin/git` blocked in-sandbox**, but git is plugin-side Node, best-effort (dispatcher catches; edit still applies with `commit: undefined`), and per-edit undo's UI rides in the chat panel cut from MAS. So per-edit undo is simply absent from MAS 10.1. No libgit2, no plugin change. (This now applies to the app's *own* spawned Node MCP server too — when it shells out to git it'll fail best-effort, fine.)
+3. **WWDR G3 intermediate gotcha (Task 12):** the Apple Development cert reads "0 valid identities" until WWDR CA **G3** is installed. CI/release must import it and assert `security find-identity -v -p codesigning` ≥ 1 before signing. Fixed locally 2026-05-28 via `apple.com/certificateauthority/AppleWWDRCAG3.cer`.
+4. Untested, verify at Task 11/12: real `wrangler deploy` + full `astro dev` in-sandbox, Node→grandchild grant inheritance, file-watching under sandbox, Distribution-profile signing, cross-launch bookmark persistence, macOS 14/15.
 
-### Task 6.5 (NEW — gated on user-provided signing cert): signed-build bookmark sub-spike
+### Revised remaining task roadmap (replaces old Tasks 7–13)
 
-**Files:** throwaway spike (not committed) + notes file `docs/specs/2026-05-28-bookmark-signed-subspike-notes.md`.
+- **Task R — Revert the XPC helper layer.** Remove the helper target/sources/entitlements/Info.plist + embed from `project.yml`; delete `XPCBackend.swift` + `AnglesiteHelperProtocol.swift`; point `ProcessSupervisor.init` MAS branch at `InProcessBackend()`; drop `SpawnSpec.workingDirectoryBookmark`. Both schemes build; full suite green (`--parallel`); DevID smoke green.
+- **Task 7 (revised) — App-held per-site security-scoped grant.** `SiteStore.Site.bookmarkData: Data?` (kept from the original Task 7). MAS `Open Folder…` creates + persists the scoped bookmark; `SiteWindow.loadAndStart` resolves it and `startAccessingSecurityScopedResource()`, `onDisappear` stops. Stale-bookmark re-grant flow. NO bookmark crosses any process boundary — the app holds the grant and spawns directly. `#if ANGLESITE_MAS` guards the grant calls (DevID has no bookmark/grant).
+- **Task N — Bundled Node re-sign for sandbox.** A build step (re-sign `Resources/node-runtime/bin/node` — and any other Mach-O under node-runtime — with the app's identity + an entitlements plist carrying `app-sandbox`/`inherit`/`cs.allow-jit`/`cs.allow-unsigned-executable-memory`) so V8 runs under the MAS app's hardened runtime. Wire into the MAS target's build phases / `scripts/`. (This also subsumes the deferred DevID Node re-sign #1/#4 conceptually, but scope to MAS here.)
+- **Task 8 — Migrate the 2 direct `Process()` sites** (`DeployCommand` env/wrangler, `SettingsView` `gh`) through `ProcessSupervisor`. Unchanged from original. (`gh` is then compiled out of MAS in Task 10.)
+- **Task 9 — Chat out of MAS** (`#if !ANGLESITE_MAS`). Unchanged.
+- **Task 10 — Sparkle + `gh` Settings out of MAS.** Sparkle slice already done in Task 1; finish the `gh` Settings variant.
+- **Task 11 — MAS smoke fixture.** Build/run the `AnglesiteMAS` scheme (real-signed, Node re-signed), set up a per-site scoped grant, drive the full preview/edit/**write-heavy** loop (Astro build writing `dist/`, npm, image drop into `public/images/`), and a real `wrangler` invocation. Node discovery must handle **nvm**-installed node (the existing e2e MCP test only probes `/opt/homebrew`,`/usr/local`,`/usr/bin` and skips under nvm — fix or note). No helper to exercise anymore.
+- **Task 12 — Release pipeline + docs.** MAS archive/export/`productbuild`/upload + the Node re-sign step + the WWDR G3 preflight check + entitlements diff (no helper to check now). `docs/release.md` MAS section.
+- **Task 13 — Final integration check + build-plan/CLAUDE.md flip.** Both schemes build, suite green, MAS smoke green, docs updated.
 
-**Prerequisite:** an Apple Development cert installed (`security find-identity -v -p codesigning` shows ≥1 identity). This is a **user action** — if no cert is present, this task is BLOCKED and the controller must stop and ask the user to install one (Xcode → Settings → Accounts → add Apple ID auto-creates an "Apple Development" cert).
-
-- [ ] **Step 1:** Rebuild the Task 0 spike structure (app + XPC helper), but sign both with the real Apple Development identity instead of ad-hoc (`CODE_SIGN_IDENTITY = "Apple Development"`, automatic signing).
-- [ ] **Step 2:** Drive it: NSOpenPanel → create `.withSecurityScope` bookmark in the app → send to helper → `URL(resolvingBookmarkData:options:.withSecurityScope)` in the helper → `startAccessingSecurityScopedResource()` → read a file.
-- [ ] **Step 3:** Record PASS/FAIL in the notes file with verbatim output. PASS → Task 7 proceeds as written. FAIL → escalate to the user; Task 7's bookmark-passing design needs revision (resolve-in-app + pass open `NSFileHandle`, or rely on `inherit` + plain bookmark for path recovery only).
-- [ ] **Step 4:** Commit the notes file only.
+The detailed task bodies below (old Tasks 4–13) are **historical** except where this roadmap says "unchanged" — follow this roadmap, not the old XPC-helper task text.
 
 ## Pre-flight reading for any implementer
 
