@@ -34,7 +34,7 @@ public actor SiteStore {
             path: URL,
             isValid: Bool,
             missingSentinels: [String],
-            lastSeen: Date,
+            lastSeen: Date = Date(),
             bookmarkData: Data? = nil
         ) {
             self.id = id
