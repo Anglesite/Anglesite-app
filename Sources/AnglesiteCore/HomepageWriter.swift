@@ -7,12 +7,12 @@ public enum HomepageWriter {
     public enum WriteError: Error, Sendable { case homepageNotFound(URL) }
 
     // The exact strings the template ships.
-    private static let titleLine =
+    static let titleLine =
         #"title="Welcome — Your New Anglesite Business Website""#
-    private static let descLine =
+    static let descLine =
         #"description="Your business website is ready to set up. Run /start in Claude to begin the guided setup.""#
-    private static let h1Line = "<h1>Welcome</h1>"
-    private static let introLine =
+    static let h1Line = "<h1>Welcome</h1>"
+    static let introLine =
         "<p>This site is ready to set up. Type <code>/start</code> in Claude Desktop to get started.</p>"
 
     public static func fill(_ source: String, headline: String, blurb: String, tagline: String) -> String {
