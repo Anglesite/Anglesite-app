@@ -20,7 +20,5 @@
 	<string>index.html</string>
 	<key>HPDBookIndexPath</key>
 	<string>Anglesite.helpindex</string>
-	<key>HPDBookIconPath</key>
-	<string>shrd/img/AnglesiteHelp.png</string>
 </dict>
 </plist>

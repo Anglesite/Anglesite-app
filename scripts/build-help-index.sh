@@ -24,7 +24,9 @@ if ! command -v hiutil >/dev/null 2>&1; then
 fi
 
 echo "==> Indexing Anglesite Help → en.lproj/Anglesite.helpindex"
-if ! hiutil -Caf "$LPROJ/Anglesite.helpindex" "$LPROJ" 2>&1; then
+# `-I corespotlight` builds the modern Spotlight index format that macOS Mojave+ expects;
+# without it hiutil emits the legacy LSM format.
+if ! hiutil -I corespotlight -Caf "$LPROJ/Anglesite.helpindex" "$LPROJ" 2>&1; then
     echo "warning: hiutil failed — skipping help index." >&2
     exit 0
 fi

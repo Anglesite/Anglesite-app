@@ -20,10 +20,15 @@ if [[ ! -d "$LPROJ" ]]; then
     exit 1
 fi
 
-fail=0
+# Tally dead links in a temp file (the `while | read` subshell can't mutate a parent
+# variable). mktemp avoids polluting the repo and leaves no stale state across runs.
+failures=$(mktemp)
+trap 'rm -f "$failures"' EXIT
+
 while IFS= read -r html; do
     dir=$(dirname "$html")
-    # Pull href/src targets; one per line.
+    # Pull href/src targets; one per line. The trailing `|| true` keeps a page with no
+    # href/src (grep exits 1 on no match) from tripping `set -o pipefail`.
     grep -oE '(href|src)="[^"]+"' "$html" | sed -E 's/^(href|src)="//; s/"$//' | while IFS= read -r ref; do
         case "$ref" in
             http://*|https://*|mailto:*|"#"*) continue ;;
@@ -32,15 +37,12 @@ while IFS= read -r html; do
         [[ -z "$target" ]] && continue
         if [[ ! -e "$dir/$target" ]]; then
             echo "DEAD LINK: ${html#"$REPO_ROOT"/} -> $ref" >&2
-            echo "x" >> "$REPO_ROOT/.help-link-failures"
+            echo "x" >> "$failures"
         fi
-    done
+    done || true
 done < <(find "$LPROJ" -name '*.html')
 
-if [[ -f "$REPO_ROOT/.help-link-failures" ]]; then
-    fail=$(wc -l < "$REPO_ROOT/.help-link-failures" | tr -d '[:space:]')
-    rm -f "$REPO_ROOT/.help-link-failures"
-fi
+fail=$(wc -l < "$failures" | tr -d '[:space:]')
 
 if [[ "$fail" -gt 0 ]]; then
     echo "FAIL: $fail dead link(s)." >&2
