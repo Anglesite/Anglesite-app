@@ -57,8 +57,11 @@ public struct NewSiteDraft: Sendable, Equatable {
 
 /// Derives a filesystem-safe folder slug from a site name.
 public enum SiteSlug {
+    /// Lowercases, transliterates non-Latin characters to Latin, strips diacritics,
+    /// and collapses any run of non-alphanumeric characters to a single hyphen.
     public static func derive(from name: String) -> String {
-        let folded = name.folding(options: .diacriticInsensitive, locale: .current)
+        let transliterated = name.applyingTransform(.toLatin, reverse: false) ?? name
+        let folded = transliterated.folding(options: .diacriticInsensitive, locale: Locale(identifier: "en_US_POSIX"))
         var out = ""
         var lastWasHyphen = false
         for scalar in folded.lowercased().unicodeScalars {

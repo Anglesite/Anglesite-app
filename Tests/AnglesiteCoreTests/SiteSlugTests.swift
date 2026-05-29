@@ -19,4 +19,18 @@ final class SiteSlugTests: XCTestCase {
         XCTAssertEqual(d.headline, "Acme")
         XCTAssertEqual(d.themeID, "")
     }
+    func testDigitsOnlyNameIsKept() {
+        XCTAssertEqual(SiteSlug.derive(from: "42"), "42")
+    }
+    func testTransliteratedNameIsAsciiSlugAndNonEmpty() {
+        // Accented / ligature names should transliterate to a clean ascii slug, not collapse to empty.
+        let slug = SiteSlug.derive(from: "Æsop & Çödë")
+        XCTAssertFalse(slug.isEmpty)
+        XCTAssertEqual(slug, slug.lowercased())
+        // Only lowercase ascii alphanumerics and hyphens, no leading/trailing hyphen.
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
+        XCTAssertTrue(slug.unicodeScalars.allSatisfy { allowed.contains($0) }, "unexpected chars in \(slug)")
+        XCTAssertFalse(slug.hasPrefix("-"))
+        XCTAssertFalse(slug.hasSuffix("-"))
+    }
 }
