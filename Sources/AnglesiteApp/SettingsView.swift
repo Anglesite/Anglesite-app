@@ -49,10 +49,20 @@ private struct AdvancedSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                #if !ANGLESITE_MAS
                 GitHubAuthRow()
                 Text("Anglesite shells out to `gh` for GitHub operations and does not store the token itself — `gh` keeps it in its own keychain entry. Clicking Connect runs `gh auth login`; sign-out is `gh auth logout` in Terminal.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                #else
+                LabeledContent("GitHub") {
+                    Text("Uses your existing `git` credentials")
+                        .foregroundStyle(.secondary)
+                }
+                Text("The App Store build doesn't bundle `gh`. Anglesite uses whatever `git` credentials are already configured on your Mac (Keychain or SSH key) when pushing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                #endif
             }
 
             Section("Diagnostics") {
@@ -159,6 +169,10 @@ private struct CloudflareTokenRow: View {
     }
 }
 
+// The gh-backed GitHub panel ships in the Developer ID build only. The MAS build has no `gh`
+// (and a sandboxed app can't rely on it); it uses the user's existing git credentials instead
+// — see the #else branch in the Credentials section above.
+#if !ANGLESITE_MAS
 /// "Connect GitHub" row. The app never sees the GitHub token — `gh` stores it in its own
 /// credential store. This row just launches the `gh auth login` device-code flow and
 /// surfaces the result. Status reflects what `gh auth status` reports at appear-time.
@@ -283,6 +297,7 @@ private enum ResolveBinary {
         return nil
     }
 }
+#endif
 
 private struct FolderPickerRow: View {
     let label: String
