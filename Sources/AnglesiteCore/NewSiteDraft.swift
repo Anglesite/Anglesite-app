@@ -1,0 +1,76 @@
+import Foundation
+
+/// The kind of site the owner is creating. The wizard collects only these five broad
+/// categories; the plugin's fine-grained `bestFor` business types stay with the chat path.
+public enum SiteType: String, Sendable, CaseIterable, Codable {
+    case business, personal, blog, portfolio, organization
+
+    /// Owner-facing label for the Type step.
+    public var label: String {
+        switch self {
+        case .business:     return "Business"
+        case .personal:     return "Personal"
+        case .blog:         return "Blog"
+        case .portfolio:    return "Portfolio"
+        case .organization: return "Organization"
+        }
+    }
+
+    /// SF Symbol for the Type step row.
+    public var symbol: String {
+        switch self {
+        case .business:     return "building.2"
+        case .personal:     return "person.crop.circle"
+        case .blog:         return "text.alignleft"
+        case .portfolio:    return "square.grid.2x2"
+        case .organization: return "person.3"
+        }
+    }
+}
+
+/// Everything the wizard collects before scaffolding. A plain value — no behavior.
+public struct NewSiteDraft: Sendable, Equatable {
+    public var siteType: SiteType
+    public var name: String
+    public var tagline: String
+    public var themeID: String
+    public var headline: String
+    public var blurb: String
+
+    public init(
+        siteType: SiteType,
+        name: String,
+        tagline: String = "",
+        themeID: String = "",
+        headline: String? = nil,
+        blurb: String = ""
+    ) {
+        self.siteType = siteType
+        self.name = name
+        self.tagline = tagline
+        self.themeID = themeID
+        // Default the homepage headline to the site name so step 4 starts pre-filled.
+        self.headline = headline ?? name
+        self.blurb = blurb
+    }
+}
+
+/// Derives a filesystem-safe folder slug from a site name.
+public enum SiteSlug {
+    public static func derive(from name: String) -> String {
+        let folded = name.folding(options: .diacriticInsensitive, locale: .current)
+        var out = ""
+        var lastWasHyphen = false
+        for scalar in folded.lowercased().unicodeScalars {
+            if (scalar >= "a" && scalar <= "z") || (scalar >= "0" && scalar <= "9") {
+                out.unicodeScalars.append(scalar)
+                lastWasHyphen = false
+            } else if !lastWasHyphen {
+                out.append("-")
+                lastWasHyphen = true
+            }
+        }
+        let trimmed = out.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return trimmed.isEmpty ? "untitled-site" : trimmed
+    }
+}
