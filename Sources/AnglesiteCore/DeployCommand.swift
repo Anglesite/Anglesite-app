@@ -276,30 +276,14 @@ public actor DeployCommand {
     public static let defaultPreflight: PreflightChecker = { siteDirectory in
         let check = PreDeployCheck(invoke: { siteDir in
             let scriptPath = siteDir.appendingPathComponent("scripts/pre-deploy-check.ts").path
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["npx", "tsx", scriptPath, "--json"]
-            process.currentDirectoryURL = siteDir
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
-            try process.run()
-            // Drain pipes off the actor — Process.waitUntilExit() blocks; doing it in a
-            // detached task avoids parking the calling actor's executor for long scans.
-            let result: (String, String, Int32) = await withCheckedContinuation { cont in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let out = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                    let err = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                    process.waitUntilExit()
-                    cont.resume(returning: (
-                        String(data: out, encoding: .utf8) ?? "",
-                        String(data: err, encoding: .utf8) ?? "",
-                        process.terminationStatus
-                    ))
-                }
-            }
-            return (stdout: result.0, exitCode: result.2)
+            // Routed through ProcessSupervisor so the spawn goes through the one supervised path
+            // (and, under the MAS sandbox, inherits the app-held per-site folder grant).
+            let result = try await ProcessSupervisor.shared.run(
+                executable: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["npx", "tsx", scriptPath, "--json"],
+                currentDirectoryURL: siteDir
+            )
+            return (stdout: result.stdout, exitCode: result.exitCode)
         })
         return await check.check(siteID: "deploy", siteDirectory: siteDirectory)
     }

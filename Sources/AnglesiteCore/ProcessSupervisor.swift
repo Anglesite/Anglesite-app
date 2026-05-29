@@ -79,12 +79,14 @@ public actor ProcessSupervisor {
     public func run(
         executable: URL,
         arguments: [String] = [],
-        environment: [String: String]? = nil
+        environment: [String: String]? = nil,
+        currentDirectoryURL: URL? = nil
     ) async throws -> RunResult {
         let spec = SpawnSpec(
             executable: executable,
             arguments: arguments,
             environment: environment,
+            workingDirectory: currentDirectoryURL,
             logSource: "run"
         )
         let result: ProcessResult

@@ -242,27 +242,22 @@ private struct GitHubAuthRow: View {
             status = .unavailable("`gh` not installed (brew install gh).")
             return
         }
-        let process = Process()
-        process.executableURL = gh
-        process.arguments = ["auth", "status", "--hostname", "github.com"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        let result: ProcessSupervisor.RunResult
         do {
-            try process.run()
+            result = try await ProcessSupervisor.shared.run(
+                executable: gh,
+                arguments: ["auth", "status", "--hostname", "github.com"]
+            )
         } catch {
             status = .unavailable("couldn't run `gh`: \(error.localizedDescription)")
             return
         }
-        let output: (String, Int32) = await Task.detached(priority: .userInitiated) {
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            return (String(data: data, encoding: .utf8) ?? "", process.terminationStatus)
-        }.value
-        if output.1 == 0 {
+        // gh writes its status to stderr; combine both streams as the old single-pipe code did.
+        let output = result.stdout + result.stderr
+        if result.exitCode == 0 {
             // Look for "account davidwkeith" or "Logged in to github.com account <name>"
-            if let range = output.0.range(of: #"account\s+(\S+)"#, options: .regularExpression) {
-                let token = output.0[range].split(separator: " ").last.map(String.init) ?? ""
+            if let range = output.range(of: #"account\s+(\S+)"#, options: .regularExpression) {
+                let token = output[range].split(separator: " ").last.map(String.init) ?? ""
                 let cleaned = token.trimmingCharacters(in: CharacterSet(charactersIn: "()"))
                 status = .signedIn(account: cleaned)
             } else {
