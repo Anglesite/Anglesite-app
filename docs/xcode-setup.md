@@ -18,7 +18,7 @@ Two app targets are generated from `project.yml`:
 | `Anglesite` | `dev.anglesite.app` | Developer ID (notarized) + Sparkle | off (Hardened Runtime on) |
 | `AnglesiteMAS` | `dev.anglesite.app.mas` | Mac App Store | App Sandbox (Hardened Runtime on) |
 
-`dev.anglesite.app` matches the planned `anglesite.dev` distribution domain (design doc §10). The MAS target shares all `Sources/AnglesiteApp` code; its differences are gated by the `ANGLESITE_MAS` compile flag and a postBuildScript that re-signs the bundled Node for the sandbox (`scripts/resign-node.sh`). *Note:* both targets currently emit `Anglesite.app` (same `PRODUCT_NAME`) — give MAS a distinct product name or output dir before wiring the release pipeline (Phase 10.1 Task 12).
+`dev.anglesite.app` matches the planned `anglesite.dev` distribution domain (design doc §10). The MAS target shares all `Sources/AnglesiteApp` code; its differences are gated by the `ANGLESITE_MAS` compile flag and a postBuildScript that re-signs the bundled Node for the sandbox (`scripts/resign-node.sh`). The MAS target emits `AnglesiteMAS.app` (`PRODUCT_NAME: AnglesiteMAS`) so it doesn't collide with the DevID `Anglesite.app` in the shared Products dir; its user-visible name stays "Anglesite" via `CFBundleDisplayName`.
 
 ## One-time setup
 
