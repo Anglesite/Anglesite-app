@@ -233,12 +233,12 @@ final class ThemeCatalogTests: XCTestCase {
 
     // DRIFT GUARD: parse the REAL bundled plugin themes.ts. Skips when the sibling
     // plugin checkout isn't present (e.g. CI without it / pure `swift test`).
-    func testRealThemesFileParsesToNineCompleteThemes() throws {
+    func testRealThemesFileParsesToEightCompleteThemes() throws {
         guard let url = Self.realThemesURL(), let ts = try? String(contentsOf: url, encoding: .utf8) else {
             throw XCTSkip("plugin themes.ts not found; set ANGLESITE_PLUGIN_PATH or check out ../anglesite")
         }
         let themes = try ThemeCatalog.parse(themesTS: ts)
-        XCTAssertEqual(themes.count, 9, "expected 9 built-in themes")
+        XCTAssertEqual(themes.count, 8, "expected 8 built-in themes (data file ships 8; SKILL.md prose says 9)")
         for t in themes {
             for key in ["color-primary", "color-accent", "font-heading", "font-body"] {
                 XCTAssertNotNil(t.cssVars[key], "\(t.id) missing --\(key)")
@@ -291,7 +291,7 @@ public struct Theme: Sendable, Identifiable, Equatable {
     }
 }
 
-/// The 9 built-in themes plus the wizard's default-by-site-type mapping.
+/// The 8 built-in themes plus the wizard's default-by-site-type mapping.
 public struct ThemeCatalog: Sendable {
     public let themes: [Theme]
     public init(themes: [Theme]) { self.themes = themes }
@@ -305,7 +305,7 @@ public struct ThemeCatalog: Sendable {
     public func defaultThemeID(for type: SiteType) -> String {
         let preferred: [SiteType: String] = [
             .business: "classic", .personal: "elegant", .blog: "warm",
-            .portfolio: "studio", .organization: "community",
+            .portfolio: "bold", .organization: "community",   // no "studio" in the data file
         ]
         let want = preferred[type] ?? "classic"
         if theme(id: want) != nil { return want }

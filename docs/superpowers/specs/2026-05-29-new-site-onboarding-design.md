@@ -18,7 +18,7 @@ Success criterion: a first-time owner with no developer tools installed creates 
 ## Non-goals
 
 - **Replacing the chat `start` skill.** The conversational interview remains the richer path for owners who have Claude and want design iteration, tool install, GitHub backup, etc. This wizard is the deterministic floor, not a superset.
-- **The freedesignmd 121-theme catalog.** That path needs web fetch + token translation (effectively Claude/network work). The wizard ships the 9 built-in themes only; "more looks" stays a chat enhancement.
+- **The freedesignmd 121-theme catalog.** That path needs web fetch + token translation (effectively Claude/network work). The wizard ships the 8 built-in themes only; "more looks" stays a chat enhancement.
 - **GitHub backup / Cloudflare / tool install during onboarding.** Those are separate flows (some already exist). The wizard's job ends at "site is open and previewing."
 - **Custom domain, deploy, analytics.** Out of scope; tracked elsewhere.
 
@@ -73,7 +73,7 @@ actor SiteScaffolder {
 Pure orchestration. Every subprocess (`scaffold.sh`, `npm install`) goes through `ProcessSupervisor.shared`; output streams to `LogCenter` under a `scaffold:<slug>` source so the debug pane sees it.
 
 ### `ThemeCatalog` (`AnglesiteCore`)
-Parses the 9 built-in themes out of the bundled `template/scripts/themes.ts` (resolved via `PluginRuntime`). The file exports `THEMES: Record<string, Theme>`, each `{ displayName, description, bestFor: string[], vars: Record<string,string> }`. Returns `[Theme]`:
+Parses the 8 built-in themes out of the bundled `template/scripts/themes.ts` (resolved via `PluginRuntime`). (The plugin's `themes` SKILL.md prose mentions a 9th "Studio" theme, but the data file ships 8 — see commit "8 pre-built palettes (#57)". The data file is authoritative.) The file exports `THEMES: Record<string, Theme>`, each `{ displayName, description, bestFor: string[], vars: Record<string,string> }`. Returns `[Theme]`:
 
 ```swift
 struct Theme: Sendable, Identifiable {
@@ -87,7 +87,7 @@ struct Theme: Sendable, Identifiable {
 
 Does not execute TypeScript — `THEMES` is a flat data declaration, parsed with a tolerant scan. One source of theme data, consumed by both the gallery UI and `ThemeApplier`.
 
-**Default theme suggestion** is an app-side `SiteType → themeID` table (5 entries — e.g. `business → classic`, `personal → elegant`, `blog → warm`, `portfolio → studio`, `organization → community`). The wizard collects only the 5 broad site types, so it does not consult the plugin's fine-grained `bestFor` arrays (those map specific business types like `legal`/`restaurant` and stay with the chat path). The owner can override the suggestion in the gallery.
+**Default theme suggestion** is an app-side `SiteType → themeID` table (5 entries — `business → classic`, `personal → elegant`, `blog → warm`, `portfolio → bold`, `organization → community`; `bold` because the data file has no `studio`). The wizard collects only the 5 broad site types, so it does not consult the plugin's fine-grained `bestFor` arrays (those map specific business types like `legal`/`restaurant` and stay with the chat path). The owner can override the suggestion in the gallery.
 
 ### `ThemeApplier` (`AnglesiteCore`)
 Given a `Theme` and a site directory, rewrites the `:root { … }` block in `src/styles/global.css`: replaces color + font custom properties, leaves spacing / radius / shadow / other properties untouched. Pure string transform over a known file. Mirrors exactly what the plugin's `themes` skill Step 3 does by hand.
@@ -120,7 +120,7 @@ Note: `scaffold.sh` excludes `.site-config` from its rsync copy and itself stamp
 
 The cost of applying themes app-side is that the app depends on the shape of `template/scripts/themes.ts`. A CI/unit test (`ThemeCatalogTests`) parses the **current bundled** `themes.ts` and asserts:
 
-1. Exactly 9 themes parse from `THEMES`.
+1. Exactly 8 themes parse from `THEMES`.
 2. Each theme has the expected keys (`displayName`, `description`, `vars` including `color-primary`, `color-accent`, `font-heading`, `font-body`).
 3. The app-side `SiteType → themeID` default table resolves to a real parsed theme id for every `SiteType` case.
 
@@ -151,7 +151,7 @@ No chat dependency in either build.
 
 ## Testing
 
-- **`ThemeCatalogTests`** — parse the real bundled `themes.ts` (the drift guard) plus a checked-in fixture; assert 9 themes, key presence, full business-type coverage.
+- **`ThemeCatalogTests`** — parse the real bundled `themes.ts` (the drift guard) plus a checked-in fixture; assert 8 themes, key presence, full business-type coverage.
 - **`ThemeApplierTests`** — apply each theme to a `global.css` fixture; assert color/font vars change, spacing/radius/shadow survive, and the transform is idempotent.
 - **`HomepageWriterTests`** — write into an `index.astro` fixture; assert the three target strings change, surrounding markup survives, empty inputs are no-ops, and owner text is correctly escaped.
 - **`SiteScaffolderTests`** — inject a fake launcher (same pattern as `ClaudeAgent` / `GitHubAuthFlow` tests) + a tmp directory; drive the full stream and assert step order, the warning paths (theme/content non-fatal), and the `npm install`-fails-but-still-registers-and-emits-`done` path (the launcher owns `openWindow`).
