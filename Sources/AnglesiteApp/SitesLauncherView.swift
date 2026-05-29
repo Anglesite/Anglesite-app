@@ -23,6 +23,7 @@ struct SitesLauncherView: View {
     @State private var showingNewSite = false
     @State private var wizardModel: NewSiteWizardModel?
     @State private var scaffolder: SiteScaffolder?
+    @State private var sitesRootScopedURL: URL?
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -71,6 +72,10 @@ struct SitesLauncherView: View {
                     },
                     onCancel: { showingNewSite = false }
                 )
+                .onDisappear {
+                    sitesRootScopedURL?.stopAccessingSecurityScopedResource()
+                    sitesRootScopedURL = nil
+                }
             }
         }
     }
@@ -209,7 +214,7 @@ struct SitesLauncherView: View {
 
         #if ANGLESITE_MAS
         guard let rootScope = await ensureSitesRootAccess(sitesRoot) else { return }  // user cancelled
-        defer { rootScope.stopAccessingSecurityScopedResource() }
+        sitesRootScopedURL = rootScope
         #endif
         try? FileManager.default.createDirectory(at: sitesRoot, withIntermediateDirectories: true)
 
@@ -246,6 +251,9 @@ struct SitesLauncherView: View {
         if let data = AppSettings.shared.sitesRootBookmark,
            let resolved = try? SecurityScopedBookmark.resolve(data),
            resolved.url.startAccessingSecurityScopedResource() {
+            if resolved.isStale, let fresh = try? SecurityScopedBookmark.create(for: resolved.url) {
+                AppSettings.shared.sitesRootBookmark = fresh
+            }
             return resolved.url
         }
         let panel = NSOpenPanel()
