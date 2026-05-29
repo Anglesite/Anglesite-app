@@ -117,6 +117,13 @@ targets:
       - name: Build edit overlay
         script: "${PROJECT_DIR}/scripts/build-overlay.sh"
         basedOnDependencyAnalysis: false
+    postBuildScripts:
+      # Re-sign the bundled Node (in the .app copy) with the app's identity + hardened-runtime
+      # JIT/sandbox entitlements, or V8 OOMs at launch under the MAS app's hardened runtime.
+      # Runs after resources are copied, before Xcode's implicit final bundle code-sign.
+      - name: Re-sign bundled Node for sandbox
+        script: "${PROJECT_DIR}/scripts/resign-node.sh"
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.anglesite.app.mas
