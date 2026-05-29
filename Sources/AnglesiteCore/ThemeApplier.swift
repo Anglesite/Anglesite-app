@@ -10,6 +10,8 @@ public enum ThemeApplier {
         var result = css
         for (key, value) in theme.cssVars {
             // Match `--key:` then everything up to the line-ending `;`, replace the value.
+            // Pattern assumes one declaration per line with a trailing `;` (true of all
+            // Astro-generated global.css files); multi-line values are intentionally not matched.
             let pattern = "(--" + NSRegularExpression.escapedPattern(for: key) + ":)[^;\\n]*;"
             guard let re = try? NSRegularExpression(pattern: pattern) else { continue }
             let ns = result as NSString
@@ -27,9 +29,10 @@ public enum ThemeApplier {
 
     public static func apply(_ theme: Theme, siteDirectory: URL, fileManager: FileManager = .default) throws {
         let cssURL = siteDirectory.appendingPathComponent("src/styles/global.css")
-        guard let css = try? String(contentsOf: cssURL, encoding: .utf8) else {
+        guard fileManager.fileExists(atPath: cssURL.path) else {
             throw ApplyError.cssNotFound(cssURL)
         }
+        let css = try String(contentsOf: cssURL, encoding: .utf8)
         let updated = apply(theme, toCSS: css)
         try updated.write(to: cssURL, atomically: true, encoding: .utf8)
     }

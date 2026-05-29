@@ -48,4 +48,12 @@ final class ThemeApplierTests: XCTestCase {
         let out = try String(contentsOf: cssPath, encoding: .utf8)
         XCTAssertTrue(out.contains("--color-primary: #e65100;"))
     }
+
+    func testValueContainingDollarAndBackslash() {
+        let theme = Theme(id: "t", name: "", blurb: "", swatch: [],
+                          cssVars: ["color-primary": #"url($1\path)"#])
+        let css = ":root { --color-primary: #fff; }"
+        let out = ThemeApplier.apply(theme, toCSS: css)
+        XCTAssertTrue(out.contains(#"--color-primary: url($1\path);"#))
+    }
 }
