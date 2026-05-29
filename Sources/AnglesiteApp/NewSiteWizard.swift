@@ -4,7 +4,7 @@ import AnglesiteCore
 /// The New Site wizard sheet. Presented from SitesLauncherView; calls `onComplete(siteID)`
 /// when the site is scaffolded and registered.
 struct NewSiteWizard: View {
-    @State var model: NewSiteWizardModel
+    @Bindable var model: NewSiteWizardModel
     let scaffolder: SiteScaffolder
     let onComplete: (String) -> Void
     let onCancel: () -> Void
@@ -97,7 +97,7 @@ struct NewSiteWizard: View {
             ForEach(Array(model.progress.enumerated()), id: \.offset) { _, s in
                 Text(label(for: s)).font(.callout)
             }
-            if let f = model.fatal, case .failed(_, let msg) = f {
+            if case .failed(_, let msg) = model.fatal {
                 Text(msg).font(.caption).foregroundStyle(.red).textSelection(.enabled)
             }
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
