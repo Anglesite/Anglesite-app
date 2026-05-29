@@ -50,6 +50,18 @@ final class ThemeCatalogTests: XCTestCase {
         }
     }
 
+    func testDefaultThemeIDUsesPreferredMappingWhenPresent() {
+        let ids = ["classic", "elegant", "warm", "bold", "community"]
+        let catalog = ThemeCatalog(themes: ids.map {
+            Theme(id: $0, name: $0, blurb: "", swatch: [], cssVars: [:])
+        })
+        XCTAssertEqual(catalog.defaultThemeID(for: .business), "classic")
+        XCTAssertEqual(catalog.defaultThemeID(for: .personal), "elegant")
+        XCTAssertEqual(catalog.defaultThemeID(for: .blog), "warm")
+        XCTAssertEqual(catalog.defaultThemeID(for: .portfolio), "bold")
+        XCTAssertEqual(catalog.defaultThemeID(for: .organization), "community")
+    }
+
     // DRIFT GUARD: parse the REAL bundled plugin themes.ts. Skips when the sibling
     // plugin checkout isn't present (e.g. CI without it / pure `swift test`).
     func testRealThemesFileParsesToEightCompleteThemes() throws {

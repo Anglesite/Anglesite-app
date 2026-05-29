@@ -47,7 +47,8 @@ public struct ThemeCatalog: Sendable {
         guard themesTS.contains("THEMES") else { throw ParseError.noThemesDeclaration }
 
         // Per-theme block: id, displayName, description, bestFor[...], vars{...}.
-        // `vars` body uses [^}]* — safe because vars holds no nested braces.
+        // `vars` body uses [^}]* — CSS values inside `vars` must not contain a literal `}`
+        // (the capture stops at the first closing brace). The real themes.ts satisfies this.
         let themePattern = #"(\w+):\s*\{\s*displayName:\s*"([^"]*)",\s*description:\s*"([^"]*)",\s*bestFor:\s*\[[^\]]*\],\s*vars:\s*\{([^}]*)\}"#
         let varPattern = #""([^"]+)":\s*"([^"]*)""#
 
