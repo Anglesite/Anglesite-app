@@ -100,12 +100,22 @@ if ! security find-identity -v -p codesigning | grep -q "Apple Development"; the
     exit 1
 fi
 
+# Manual signing with the Apple Development identity + team — no provisioning profile needed
+# for a local development run (Automatic style would try to fetch one and fail offline). Derive
+# the 10-char Team ID from the cert; override with DEVELOPMENT_TEAM=... if the default is wrong.
+DEV_TEAM="${DEVELOPMENT_TEAM:-$(security find-certificate -c "Apple Development" -p 2>/dev/null \
+    | openssl x509 -noout -subject 2>/dev/null | grep -oE 'OU *= *[A-Z0-9]{10}' | grep -oE '[A-Z0-9]{10}' | head -1)}"
+if [[ -z "$DEV_TEAM" ]]; then
+    echo "error: couldn't derive the Apple Development Team ID; set DEVELOPMENT_TEAM=..." >&2
+    exit 1
+fi
+
 DERIVED="$REPO_ROOT/build/mas-smoke"
-echo "==> building AnglesiteMAS (real-signed: Apple Development) into $DERIVED"
+echo "==> building AnglesiteMAS (real-signed: Apple Development, team $DEV_TEAM) into $DERIVED"
 xcodebuild -project "$REPO_ROOT/Anglesite.xcodeproj" \
     -scheme AnglesiteMAS -configuration Debug \
     -derivedDataPath "$DERIVED" \
-    CODE_SIGN_IDENTITY="Apple Development" CODE_SIGN_STYLE=Automatic \
+    CODE_SIGN_IDENTITY="Apple Development" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="$DEV_TEAM" \
     build 2>&1 | tail -3
 
 APP="$DERIVED/Build/Products/Debug/Anglesite.app"
