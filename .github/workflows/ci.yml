@@ -14,6 +14,11 @@ jobs:
   build-test:
     runs-on: macos-15
     timeout-minutes: 15
+    # Don't build the ~264MB primed npm cache in CI (#6). It's an Xcode prebuild phase
+    # (scripts/vendor-npm-cache.sh), so the SwiftPM steps below never trigger it today —
+    # this keeps it off if an xcodebuild step (e.g. the release archive) is ever added here.
+    env:
+      ANGLESITE_BUILD_NPM_CACHE: '0'
     steps:
       - uses: actions/checkout@v4
 
