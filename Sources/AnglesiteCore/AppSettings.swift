@@ -16,6 +16,7 @@ public final class AppSettings: @unchecked Sendable {
         public static let sitesRootOverride  = "anglesite.sitesRootOverride"
         public static let debugPaneEnabled   = "anglesite.debugPaneEnabled"
         public static let lastOpenedSiteID   = "anglesite.lastOpenedSiteID"
+        public static let sitesRootBookmark  = "anglesite.sitesRootBookmark"
     }
 
     private let defaults: UserDefaults
@@ -68,6 +69,16 @@ public final class AppSettings: @unchecked Sendable {
     public var debugPaneEnabled: Bool {
         get { defaults.bool(forKey: Key.debugPaneEnabled) }
         set { defaults.set(newValue, forKey: Key.debugPaneEnabled) }
+    }
+
+    /// Security-scoped bookmark for the sites root, persisted so the sandboxed (MAS) build only
+    /// has to prompt once for permission to create new site folders. `nil` until granted.
+    public var sitesRootBookmark: Data? {
+        get { defaults.data(forKey: Key.sitesRootBookmark) }
+        set {
+            if let newValue { defaults.set(newValue, forKey: Key.sitesRootBookmark) }
+            else { defaults.removeObject(forKey: Key.sitesRootBookmark) }
+        }
     }
 
     /// The site that was most-recently focused. Used by the Sites launcher to auto-open
