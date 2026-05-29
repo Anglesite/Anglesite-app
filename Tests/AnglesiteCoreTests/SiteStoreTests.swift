@@ -110,6 +110,44 @@ final class SiteStoreTests: XCTestCase {
         XCTAssertEqual(loaded.map(\.name), ["external"])
     }
 
+    func testAddNormalizesSymlinkedPath() async throws {
+        // A real project dir, reached through a symlink that points at it.
+        let realDir = tempDir.appendingPathComponent("real-site", isDirectory: true)
+        try fileManager.createDirectory(at: realDir, withIntermediateDirectories: true)
+        for sentinel in ProjectValidator.sentinels {
+            try Data().write(to: realDir.appendingPathComponent(sentinel))
+        }
+        let linkDir = tempDir.appendingPathComponent("link-site", isDirectory: true)
+        try fileManager.createSymbolicLink(at: linkDir, withDestinationURL: realDir)
+
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let site = try await store.add(linkDir)
+
+        // id and path must derive from the same symlink-resolved form: the
+        // stored path is already canonical, so its .path equals the id, and the
+        // name reflects the real directory rather than the symlink.
+        XCTAssertEqual(site.path.path, site.id)
+        XCTAssertEqual(site.name, "real-site")
+    }
+
+    func testAddCollapsesSymlinkedAndRealPathToOneEntry() async throws {
+        let realDir = tempDir.appendingPathComponent("real-site", isDirectory: true)
+        try fileManager.createDirectory(at: realDir, withIntermediateDirectories: true)
+        for sentinel in ProjectValidator.sentinels {
+            try Data().write(to: realDir.appendingPathComponent(sentinel))
+        }
+        let linkDir = tempDir.appendingPathComponent("link-site", isDirectory: true)
+        try fileManager.createSymbolicLink(at: linkDir, withDestinationURL: realDir)
+
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let viaLink = try await store.add(linkDir)
+        let viaReal = try await store.add(realDir)
+
+        XCTAssertEqual(viaLink.id, viaReal.id)
+        let count = await store.sites.count
+        XCTAssertEqual(count, 1, "the same directory via symlink and real path must be one entry")
+    }
+
     func testRemoveDoesNotDeleteFiles() async throws {
         let dir = try makeValidSite(named: "alpha")
         let store = SiteStore(settings: settings, persistenceURL: persistenceURL)

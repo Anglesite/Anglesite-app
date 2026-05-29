@@ -99,10 +99,11 @@ public actor SiteStore {
                 .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
                 .map { url in
                     let result = ProjectValidator.validate(url, fileManager: fileManager)
+                    let canonical = Self.canonicalize(url)
                     return Site(
-                        id: Self.identifier(for: url),
-                        name: url.lastPathComponent,
-                        path: url,
+                        id: Self.identifier(for: canonical),
+                        name: canonical.lastPathComponent,
+                        path: canonical,
                         isValid: result.isValid,
                         missingSentinels: result.missing,
                         lastSeen: Date()
@@ -142,10 +143,14 @@ public actor SiteStore {
         guard result.isValid else {
             throw StoreError.invalidProject(url, missing: result.missing)
         }
+        // Canonicalize once so id, path, and name all derive from the same
+        // symlink-resolved form — NSOpenPanel hands us paths that may differ
+        // from the resolved form by a /private prefix or a symlinked root (#56).
+        let canonical = Self.canonicalize(url)
         let site = Site(
-            id: Self.identifier(for: url),
-            name: url.lastPathComponent,
-            path: url,
+            id: Self.identifier(for: canonical),
+            name: canonical.lastPathComponent,
+            path: canonical,
             isValid: true,
             missingSentinels: [],
             lastSeen: Date()
@@ -204,9 +209,16 @@ public actor SiteStore {
         return d
     }
 
+    /// The canonical file URL for `url`: standardized and symlink-resolved. The single
+    /// resolved form that `id`, `path`, and `name` are all derived from, so a site reached
+    /// via a symlinked root (e.g. `/tmp` → `/private/tmp`) collapses to one stable entry (#56).
+    static func canonicalize(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
+    }
+
     private static func identifier(for url: URL) -> String {
         // Standardize so "/Users/x/Sites/foo" and "/Users/x/Sites/foo/" resolve to the same id.
-        url.standardizedFileURL.resolvingSymlinksInPath().path
+        canonicalize(url).path
     }
 
     private static func defaultPersistenceURL(fileManager: FileManager) -> URL {
