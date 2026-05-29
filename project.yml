@@ -40,6 +40,10 @@ targets:
         type: folder
         buildPhase: resources
         optional: true
+      - path: Resources/Anglesite.help
+        type: folder
+        buildPhase: resources
+        optional: true
     preBuildScripts:
       - name: Vendor Node runtime
         script: "${PROJECT_DIR}/scripts/vendor-node.sh"
@@ -52,6 +56,9 @@ targets:
         basedOnDependencyAnalysis: false
       - name: Build edit overlay
         script: "${PROJECT_DIR}/scripts/build-overlay.sh"
+        basedOnDependencyAnalysis: false
+      - name: Build Help index
+        script: "${PROJECT_DIR}/scripts/build-help-index.sh"
         basedOnDependencyAnalysis: false
     settings:
       base:
@@ -104,6 +111,10 @@ targets:
         type: folder
         buildPhase: resources
         optional: true
+      - path: Resources/Anglesite.help
+        type: folder
+        buildPhase: resources
+        optional: true
     preBuildScripts:
       - name: Vendor Node runtime
         script: "${PROJECT_DIR}/scripts/vendor-node.sh"
@@ -116,6 +127,9 @@ targets:
         basedOnDependencyAnalysis: false
       - name: Build edit overlay
         script: "${PROJECT_DIR}/scripts/build-overlay.sh"
+        basedOnDependencyAnalysis: false
+      - name: Build Help index
+        script: "${PROJECT_DIR}/scripts/build-help-index.sh"
         basedOnDependencyAnalysis: false
     settings:
       base:
