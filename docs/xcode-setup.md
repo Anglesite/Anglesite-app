@@ -9,9 +9,16 @@ The SwiftPM scaffold (Phase 0.3) builds and tests via `swift build` / `swift tes
 
 `Anglesite.xcodeproj` references the SwiftPM package as a local dependency (the `Anglesite` package declared in this repo's root `Package.swift`), so source files live in `Sources/` and are shared between both build paths.
 
-## Bundle id
+## Targets and bundle ids
 
-**`dev.anglesite.app`** — matches the planned `anglesite.dev` distribution domain (design doc §10).
+Two app targets are generated from `project.yml`:
+
+| Target | Bundle id | Distribution | Sandbox |
+|---|---|---|---|
+| `Anglesite` | `dev.anglesite.app` | Developer ID (notarized) + Sparkle | off (Hardened Runtime on) |
+| `AnglesiteMAS` | `dev.anglesite.app.mas` | Mac App Store | App Sandbox (Hardened Runtime on) |
+
+`dev.anglesite.app` matches the planned `anglesite.dev` distribution domain (design doc §10). The MAS target shares all `Sources/AnglesiteApp` code; its differences are gated by the `ANGLESITE_MAS` compile flag and a postBuildScript that re-signs the bundled Node for the sandbox (`scripts/resign-node.sh`). *Note:* both targets currently emit `Anglesite.app` (same `PRODUCT_NAME`) — give MAS a distinct product name or output dir before wiring the release pipeline (Phase 10.1 Task 12).
 
 ## One-time setup
 
@@ -33,10 +40,12 @@ Everything from this point on — Info.plist, entitlements, deployment target, h
 
 ## Signing configurations
 
-| Config | Identity | Apple account needed | Use for |
-|---|---|---|---|
-| `Debug` | ad-hoc (`-`) | none | Local development, running on your own Mac |
-| `Release` | `Developer ID Application` | **paid** Apple Developer Program ($99/yr) | Notarized distribution via `anglesite.dev` |
+| Target | Config | Identity | Apple account needed | Use for |
+|---|---|---|---|---|
+| `Anglesite` | `Debug` | ad-hoc (`-`) | none | Local development, running on your own Mac |
+| `Anglesite` | `Release` | `Developer ID Application` | **paid** Apple Developer Program ($99/yr) | Notarized distribution via `anglesite.dev` |
+| `AnglesiteMAS` | `Debug` | ad-hoc (`-`) | none | Local development of the sandboxed build |
+| `AnglesiteMAS` | `Release` | `Apple Distribution` | **paid** Apple Developer Program | Mac App Store submission |
 
 Debug builds run on the local machine without any Apple account at all — the binary gets an anonymous ad-hoc signature, which is enough to run but not to distribute. All Phase 1+ development (embedded Node, MCP, WKWebView edit overlay) can be built and exercised in this config indefinitely.
 
@@ -86,9 +95,9 @@ Override defaults via env vars: `SCHEME`, `CONFIGURATION`, `KEYCHAIN_PROFILE`.
 
 ## What's deferred
 
-- **Auto-update (Sparkle)** — Phase 8 (v0.5 milestone).
+- **Auto-update (Sparkle)** — landed in Phase 8 (DevID target only; the MAS build updates via the App Store).
 - **DMG packaging** — once Phase 1 (embedded Node) lands, we'll add a `scripts/package-dmg.sh`.
-- **App Store Connect / sandboxed build** — Phase 10 (v2).
+- **App Store Connect submission** — the sandboxed `AnglesiteMAS` target exists and builds (Phase 10.1); the archive/export/upload pipeline is Task 12.
 
 ## After Phase 0.5
 

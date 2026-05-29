@@ -1,7 +1,15 @@
 # Release pipeline
 
-The app ships auto-updates via [Sparkle 2.x](https://sparkle-project.org/). This document
-walks the one-time setup and the per-release flow.
+This document covers the **Developer ID** distribution track for the `Anglesite` target, which
+ships auto-updates via [Sparkle 2.x](https://sparkle-project.org/). It walks the one-time setup
+and the per-release flow.
+
+> **Mac App Store track (pending).** The sandboxed `AnglesiteMAS` target builds today, but its
+> submission pipeline — archive → export with `Apple Distribution` → `productbuild`/`altool`
+> upload to App Store Connect, including the bundled-Node re-sign (`scripts/resign-node.sh`) and
+> a WWDR-CA-G3 intermediate preflight — is **Phase 10.1 Task 12** and not yet built. The MAS build
+> has no Sparkle (the App Store handles its updates). See
+> [the sandboxed App Store plan](specs/2026-05-27-sandboxed-app-store-plan.md).
 
 ## One-time setup (do once, ever)
 
