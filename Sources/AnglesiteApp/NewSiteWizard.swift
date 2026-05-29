@@ -123,7 +123,12 @@ struct NewSiteWizard: View {
                 Button("Back") { model.back() }
             }
             Spacer()
-            Button("Cancel") { onCancel() }
+            // No Cancel once building starts: the scaffold pipeline isn't cancellable and
+            // always reaches .done or .failed (failure shows Close below), so cancelling
+            // mid-build would leak the in-flight work and the MAS security scope.
+            if model.step != .building {
+                Button("Cancel") { onCancel() }
+            }
             if model.step == .content {
                 Button("Create Site") {
                     Task { if let id = await model.build(using: scaffolder) { onComplete(id) } }
