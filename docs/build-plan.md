@@ -97,6 +97,8 @@ This work lands in `anglesite/server/` — the app repo just calls it.
 
 Per design doc §12: sandboxed App Store build, Quick Look, Spotlight, Settings polish. **Phase 10.1** (sandboxed Mac App Store target) is in progress — the architecture, settled after seven spikes, is a sandboxed `AnglesiteMAS` target sharing the DevID `InProcessBackend` (the app spawns Node/Astro/wrangler directly via `Process()` and holds a per-site security-scoped grant so the children inherit folder access; no XPC helper). See [`docs/specs/2026-05-27-sandboxed-app-store-plan.md`](specs/2026-05-27-sandboxed-app-store-plan.md).
 
+**Apple Help Book shipped.** A classic indexed Help Book (`Resources/Anglesite.help`) of 15 hand-authored, Apple-native-styled HTML pages covering every shipped feature (sites, preview, editing with Claude, image drop, undo, health/readiness, deploy, accounts, settings, updates, debug pane, shortcuts, troubleshooting). `scripts/build-help-index.sh` builds the `hiutil` search index as a pre-build phase on both targets; `CFBundleHelpBookFolder`/`CFBundleHelpBookName` register the book so **Help ▸ Anglesite Help** opens it (no Swift change needed). `scripts/check-help-links.sh` guards intra-book links. Both schemes build with the book + index bundled. Design / plan: [`docs/specs/2026-05-28-apple-help-design.md`](specs/2026-05-28-apple-help-design.md) · [`docs/specs/2026-05-28-apple-help-plan.md`](specs/2026-05-28-apple-help-plan.md). *Deferred follow-ups:* capture real screenshots for the placeholder slots; book-icon artwork (`AnglesiteHelp.png`).
+
 ---
 
 ## Cross-cutting decisions to lock in early

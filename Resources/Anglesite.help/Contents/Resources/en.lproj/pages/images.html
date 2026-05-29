@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="robots" content="anchor">
+	<meta name="description" content="How to add images to your site by dragging them onto the live preview, and how Anglesite optimizes them automatically.">
+	<title>Adding and optimizing images — Anglesite Help</title>
+	<link rel="stylesheet" href="../shrd/help.css">
+</head>
+<body>
+	<h1>Adding and optimizing images</h1>
+	<p class="lead">Drop an image onto the live preview to replace a picture on your site — Anglesite handles the rest automatically.</p>
+
+	<h2>Drag an image onto the page</h2>
+	<ol>
+		<li>Open the site window and navigate to the page that has the image you want to replace.</li>
+		<li>Drag an image file from Finder and drop it onto the picture in the live preview.</li>
+	</ol>
+
+	<figure>
+		<!-- alt: An image file being dragged onto a picture in the Anglesite live preview -->
+		<div class="screenshot-placeholder">Screenshot: Dropping a new image onto the preview.</div>
+		<figcaption>Dropping a new image onto the preview.</figcaption>
+	</figure>
+
+	<h2>Anglesite optimizes it automatically</h2>
+	<p>Once you drop the image, Anglesite processes it without any extra steps on your part:</p>
+	<ul>
+		<li>Converts the image to WebP for efficient web delivery.</li>
+		<li>Strips embedded metadata (EXIF) to protect privacy and reduce file size.</li>
+		<li>Generates responsive sizes at 480, 768, 1024, and 1920 pixels wide so the image looks sharp on any screen and loads only what's needed.</li>
+	</ul>
+	<p>The optimized images are saved into your site's <code>public/images/</code> folder. The image they replace is kept safely in <code>public/images/originals/</code> so nothing is lost. When optimization finishes, the preview updates to show the new image.</p>
+
+	<h2>If something goes wrong</h2>
+	<p>If an image can't be processed, Anglesite restores the original and shows a message explaining what happened.</p>
+
+	<p class="related">
+		<strong>See also:</strong>
+		<a href="editing-with-claude.html">Editing with Claude</a>
+		<a href="undo.html">Undoing edits</a>
+		<a href="../index.html">Help home</a>
+	</p>
+</body>
+</html>
