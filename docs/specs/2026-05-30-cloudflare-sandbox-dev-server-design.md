@@ -1,32 +1,76 @@
-# Cloudflare Sandbox dev server (toward Anglesite on iOS) — Investigation / Design
+# Containerized dev server (local on macOS, Cloudflare on iOS) — Investigation / Design
 
 > **Status:** investigation. No implementation committed. This captures the findings
-> of the "run the dev server in a Cloudflare Sandbox so Anglesite can run on iOS"
-> spike and proposes a phased path. **The OPEN decisions were resolved 2026-05-30 —
-> see §7.** Next artifact is a `…-plan.md`.
+> of the "run the dev server off the host process so Anglesite can run on iOS" spike
+> and proposes a phased path. **Decisions resolved 2026-05-30 (two rounds) — see §0
+> and §7.** Next artifact is a `…-plan.md`, gated on the Phase 0 spike (§6).
 
-## Decisions (resolved 2026-05-30)
+## 0. Architecture — platform-split, one container image (resolved 2026-05-30, round 2)
+
+The dev server (and the plugin's MCP server) always run **inside a Linux container**,
+never in the host app process. The *same OCI image* is executed two ways depending on
+the platform's capability:
+
+| Platform | Substrate | Reachability |
+|---|---|---|
+| **macOS 26+ on Apple Silicon** | **Apple Containerization** (`container` / the `containerization` Swift package) — local lightweight per-container VM | host-local: each container gets a dedicated IP → `http://<ip>:4321` directly |
+| **Intel Macs · macOS < 26 · iOS/iPadOS** | **Cloudflare Sandbox** (remote container) — the fallback for anything that can't run the local VM | per-session **Cloudflare Tunnel** + **bearer token** |
+
+This is the security/performance trade the owner asked for: capable Macs get a **local,
+zero-network, zero-marginal-cost** container with full-VM isolation; everything else
+(and all of iOS) gets the **remote** container. Because both run the **same image**,
+`SiteRuntime` (§4) has two thin implementations over one behavior contract.
+
+**Net simplification:** there is **no embedded-Node / host-`Process` path in the end
+state at all.** The entire Phase 10.1 bundled-Node re-sign / JIT-entitlement saga
+(`scripts/resign-node.sh`, `node-runtime.entitlements`, `cs.allow-jit`) becomes
+**moot** — JIT runs inside the guest, not the host.
+
+### Decisions table
 
 | # | Decision | Choice |
 |---|---|---|
-| 1 | Durable substrate | **Git remote** — the sandbox `git clone`s on start, edits commit/push, the source of truth is the repo. |
-| 2 | Scope | **Replace** — remote-everywhere; drop the embedded Node / local subprocess path once remote is proven. macOS and iOS both use `RemoteSiteRuntime`. |
-| 3 | Preview authz | **Per-session bearer token** issued by the app, validated by the proxy Worker. |
-| 4 | Account/billing | **Per-user BYO Cloudflare token** (reuse the existing Keychain `CLOUDFLARE_API_TOKEN`). |
-| 5a | Preview URL exposure | **Per-session Cloudflare Tunnel** — no wildcard-DNS custom domain required, so no per-user domain onboarding. |
-| 5b | Cold-start latency | **Container snapshots when available** (restore disk, skip `npm ci`); a "warming…" UX is the fallback until snapshots ship. |
+| 1 | Source of truth | **Git, everywhere** — the container `git clone`s on start; edits commit/push. No VirtioFS host-share; no live local `~/Sites` working tree driven by the app. |
+| 2 | Scope | **Replace** the host-subprocess path with containers. macOS-capable → local container; else → Cloudflare. |
+| 2a | Local container tech | **Apple Containerization** (`container`), macOS 26+ / Apple Silicon. Same OCI image as Cloudflare. |
+| 2b | Fallback | **Cloudflare Sandbox** for Intel, macOS < 26, and iOS. |
+| 3 | Remote preview authz | **Per-session bearer token** (app-minted, proxy-Worker-validated). *Local containers are host-only; bearer token optional there.* |
+| 4 | Account/billing | **Per-user BYO Cloudflare token** (reuse Keychain `CLOUDFLARE_API_TOKEN`) — only the *remote* path bills. The local path is free. |
+| 5a | Remote URL exposure | **Per-session Cloudflare Tunnel** — no wildcard-DNS domain needed. |
+| 5b | Cold-start | Skip `npm ci` via **committed/snapshotted images** (local: a pre-baked image layer; remote: Cloudflare container snapshots when GA); "warming…" UX fallback. |
 
-**Consequence of #2 (Replace):** even macOS now needs network + the user's Cloudflare
-account to preview — no offline editing. The `CLAUDE.md` rule "the filesystem is the
-source of truth / the app must never be the only way to edit a site" is **reframed to
-"Git is the source of truth"**: the repo (and any local `git clone` of it — Finder,
-VS Code, Claude Code CLI) remains a real, externally-editable working copy, so the
-*spirit* of the rule holds even though the app no longer drives a local `~/Sites`
-working tree directly. **This reframing must be reflected in `CLAUDE.md` when the
-plan lands.**
+### ⚠️ Load-bearing risk — verify in Phase 0 before committing the plan
 
-**Consequence of #5a (Tunnel):** §3.3's wildcard-DNS caveat is moot — the tunnel
-supplies the hostname; our bearer token (#3) supplies the authz.
+**Apple Containerization may not run inside a sandboxed MAS app.** The `container`
+tool is architected as a **system daemon** (`container system start`) using XPC +
+`vmnet`-class networking. Embedding the `containerization` package in an
+**App-Sandboxed** process is **unproven** and may require entitlements the Mac App
+Store does not grant. Outcomes to design for:
+
+- **Best case:** it works in-sandbox (or with a documented helper) → local path on
+  both `Anglesite` (DevID) and `AnglesiteMAS`.
+- **Likely fallback:** local path is **DevID-only**; the **MAS build always uses the
+  Cloudflare path** (consistent with Intel/old-macOS fallback). MAS then never needs
+  the virtualization entitlement at all.
+
+Either way the product is shippable; the spike just decides *which* Macs get the
+local fast-path. **No plan is written until Phase 0 answers this.**
+
+### Source-of-truth reframing (applies to `CLAUDE.md`)
+
+With Git as the source of truth on every platform, the `CLAUDE.md` rule "the
+filesystem is the source of truth / the app must never be the only way to edit a
+site" is **reframed to "Git is the source of truth."** The repo — clonable into
+Finder/VS Code/Claude Code CLI on any machine — remains the real, externally-editable
+copy, so the *spirit* holds. **Update `CLAUDE.md` when the plan lands.**
+
+---
+
+> **Round-1 note (superseded by §0):** the first decision round chose *Cloudflare
+> everywhere* (incl. macOS). Round 2 split it: capable Macs run the container
+> **locally** via Apple Containerization for cost/latency/offline reasons, with
+> Cloudflare as the fallback + the iOS path. The §1–§8 body below predates round 2
+> and still reads as Cloudflare-centric; §0 + §7 are canonical where they differ.
 
 **Motivation:** The app today runs the Astro dev server (and the plugin's MCP
 server) as *local subprocesses* via a vendored Node runtime. That model cannot
@@ -172,25 +216,31 @@ not pipes (`stdinHandle` would return `nil`, stdout-scraping for the ready URL
 disappears, etc.). Forcing it through that protocol fights the abstraction.
 
 The right seam is **one level up, at `PreviewSession`**. Today `PreviewSession`
-*is* the thing that "owns the live preview of one site." Extract a protocol:
+*is* the thing that "owns the live preview of one site." Extract a protocol with
+**two container implementations** (per §0 — there is no host-subprocess impl in the
+end state):
 
 ```
 protocol SiteRuntime: Sendable {
-    func start(siteID:siteDirectory:) async        // or (siteID:gitRef:) for remote
+    func start(siteID:gitRef:) async       // both impls hydrate from Git, run the same image
     func stop() async
-    func observe() -> AsyncStream<State>            // .ready(url:) etc. — unchanged
-    var mcpEndpoint: MCPEndpoint { get }            // stdio (local) | http(url) (remote)
+    func observe() -> AsyncStream<State>   // .ready(url:) etc. — unchanged
+    var mcpEndpoint: URL { get }           // HTTP/WS endpoint of the in-container MCP server
 }
 ```
 
-- `LocalSiteRuntime` = today's `PreviewSession`, verbatim (macOS).
-- `RemoteSiteRuntime` = drives a sandbox via the Worker's control API: ensure
-  container, hydrate files (§3.1), `startProcess("astro dev")`, `exposePort`, return
-  the preview `url`. `MCPClient` grows an **HTTP/WS transport** alongside stdio (§3.2).
+- `LocalContainerSiteRuntime` (macOS 26+/Apple Silicon) = drives **Apple
+  Containerization**: pull/run the OCI image, `git clone` into it, start `astro dev`
+  + the MCP server, expose the container IP. Host-local, no tunnel.
+- `RemoteSandboxSiteRuntime` (Intel · macOS < 26 · iOS) = drives a **Cloudflare
+  Sandbox** via the Worker control API: `getSandbox`, `git clone`,
+  `startProcess("astro dev")`, tunnel + bearer token, return the preview `url`.
 
-`PreviewView` already only needs a `URL` + an `EditRouter` — it doesn't care whether
-the URL is `http://localhost:4321` or `https://4321-sandbox-….dev`. That's the part
-that's *already* portable.
+Both speak to the **same in-container MCP server over HTTP/WS** (§3.2), so `MCPClient`
+grows one HTTP transport that serves both — **stdio goes away with the host
+subprocess.** `PreviewView` already only needs a `URL` + an `EditRouter`; it doesn't
+care whether the URL is a local container IP or a Cloudflare tunnel. That part is
+*already* portable.
 
 ---
 
@@ -217,78 +267,85 @@ macOS-only.
 
 ## 6. Proposed phasing (each phase independently useful)
 
-1. **Spike (throwaway):** stand up a minimal Worker + `@cloudflare/sandbox`, `git
-   clone` a real Anglesite site, `startProcess("npm ci && astro dev")`,
-   `exposePort`, and load the preview URL **in a desktop browser**. Confirm: (a)
-   `npm ci` + `astro dev` cold-start time, (b) **HMR over the preview-URL
-   WebSocket**, (c) `pre-deploy-check` + `wrangler deploy` work in-container. Decide
-   §3.1 (Git vs R2) from real cold-start numbers. *No app changes.*
+0. **⚠️ De-risking spike (gates the plan) — Apple Containerization under App
+   Sandbox.** Prove whether the `containerization` Swift package can `run` a Linux
+   container *from inside an App-Sandboxed (MAS) process* — or whether it needs the
+   system `container` daemon / entitlements MAS won't grant. Output: a yes/no on
+   "local path on MAS," which decides whether MAS ships local-or-Cloudflare (see §0
+   risk). Also measure local container boot + `astro dev` time. *No app changes.*
+1. **OCI image + Cloudflare spike (throwaway).** Define **one Dockerfile** (Node +
+   Astro deps) used by both substrates. Stand up a minimal Worker + `@cloudflare/sandbox`
+   running that image, `git clone` a real site, `startProcess("astro dev")`, tunnel,
+   load the preview **in a browser**. Confirm: (a) cold-start time, (b) **HMR over the
+   tunnel WebSocket**, (c) `pre-deploy-check` + `wrangler deploy` in-container, (d)
+   snapshot availability. *No app changes.*
 2. **Plugin PR:** add an **HTTP/SSE (streamable-HTTP) transport** to the plugin's
-   MCP server so `apply_edit` can round-trip without stdio. Tagged plugin release.
-3. **App refactor (macOS, no behavior change):** extract `SiteRuntime` from
-   `PreviewSession`; today's path becomes a *transitional* `LocalSiteRuntime`. Add an
+   MCP server so `apply_edit` round-trips without stdio. Tagged plugin release.
+3. **App refactor (no behavior change):** extract `SiteRuntime` from `PreviewSession`;
+   today's path becomes a *transitional* `LocalSiteRuntime` (host subprocess). Add the
    HTTP/WS transport to `MCPClient` behind the existing actor API. Pure refactor, full
-   suite stays green.
-4. **`RemoteSiteRuntime` (macOS):** build the full remote loop — ensure container,
-   tunnel + bearer token, `git clone`/`npm ci`/`astro dev`, `exposePort` — and make
-   it the macOS default. Proves the whole thing on a platform we can still debug
-   locally, then **remove `LocalSiteRuntime` + embedded Node** (OPEN-2 Replace).
-   Reframe the `CLAUDE.md` source-of-truth rule here.
-5. **iOS target:** new thin SwiftUI/UIKit client reusing `AnglesiteBridge` +
-   `SiteRuntime` (remote-only — the only runtime that exists by now).
+   suite green.
+4. **`RemoteSandboxSiteRuntime` (macOS, all-Mac fallback path first).** Build the
+   Cloudflare loop — `getSandbox`, `git clone`, `astro dev`, tunnel + bearer token —
+   and make it the default on Macs that can't run local. Debuggable on the desktop.
+5. **`LocalContainerSiteRuntime` (macOS 26+/Apple Silicon).** Apple Containerization
+   running the **same OCI image** locally; select it when capable, else fall back to
+   Phase 4. Then **remove the transitional `LocalSiteRuntime` + embedded Node**
+   (`scripts/resign-node.sh` et al. retire). Reframe the `CLAUDE.md` rule here.
+6. **iOS target:** new thin SwiftUI/UIKit client reusing `AnglesiteBridge` +
+   `RemoteSandboxSiteRuntime`.
 
 ---
 
-## 7. Decisions — resolved 2026-05-30
+## 7. Decisions — resolved 2026-05-30 (two rounds)
 
-All five OPEN items are settled; the table at the top of this doc is the canonical
-record. Restated with rationale:
+The **§0 table is canonical.** Round 1 settled the Cloudflare substrate; round 2
+split execution by platform (local Apple Containerization on capable Macs, Cloudflare
+otherwise). Rationale, restated:
 
-- **OPEN-1 → Git remote.** The sandbox `git clone`s a site's repo on start, runs
-  `npm ci` + `astro dev`, and pushes edits back. The repo is the source of truth.
-- **OPEN-2 → Replace (remote everywhere).** No `LocalSiteRuntime` in the end state;
-  the embedded Node / `Process`-spawn stack is removed once `RemoteSiteRuntime` is
-  proven. Single code path, no vendored Node, but requires network + a Cloudflare
-  account on every platform. See the "Consequence of #2" note at the top re: the
-  `CLAUDE.md` source-of-truth reframing.
-- **OPEN-3 → Per-session bearer token.** The app mints a session token; the proxy
-  Worker validates it on every request (injected into the `WKWebView` via header or
-  signed cookie). Self-contained, identical on macOS/iOS, no Zero Trust dependency.
-- **OPEN-4 → Per-user BYO token.** Reuse the Keychain `CLOUDFLARE_API_TOKEN` already
-  collected for `wrangler deploy`. Each user pays their own container usage; no cost
-  to Anglesite. Onboarding cost: a Workers Paid plan.
-- **OPEN-5a → Per-session Tunnel.** Sidesteps the wildcard-DNS / per-user-domain
-  requirement entirely (a domain on Cloudflare would otherwise be a steep ask for
-  casual/iOS users). The bearer token (#3) is the security boundary, not DNS.
-- **OPEN-5b → Snapshots when available.** Target Cloudflare's "coming soon" container
-  snapshots to restore disk and skip `npm ci` on re-entry; ship the explicit
-  "warming…" `PreviewSession.State` as the fallback until snapshots are GA.
+- **#1 Git, everywhere.** Container `git clone`s on start; edits commit/push. One
+  source-of-truth model across local + remote. (Round-1 §3.1-A, now applied to the
+  local container too — no VirtioFS host-share.)
+- **#2 Replace, platform-split.** No host-`Process`/embedded-Node path survives.
+  macOS-capable → local container; Intel/old-macOS/iOS → Cloudflare. See §0 risk re:
+  whether *MAS* counts as "capable."
+- **#2a Apple Containerization** for local: same OCI image as Cloudflare, full-VM
+  isolation, sub-second boot, zero network/marginal cost. macOS 26+ / Apple Silicon.
+- **#2b Cloudflare Sandbox** is the universal fallback + iOS path.
+- **#3 Per-session bearer token** (remote only; local containers are host-bound).
+- **#4 Per-user BYO Cloudflare token** — only the *remote* path bills; local is free.
+- **#5a Per-session Tunnel** — no wildcard-DNS domain onboarding (remote only).
+- **#5b Pre-baked image / snapshots** to skip `npm ci`; "warming…" UX fallback.
 
 ### New questions these answers raise (for the plan, not blockers)
 
-- **Q-A — Repo bootstrap for non-Git sites.** OPEN-1 assumes every site has a Git
-  remote. Sites created in-app may not. The plan needs a "create + push a repo"
-  onboarding step (likely via the user's token / `gh` equivalent) before remote
-  preview can work.
-- **Q-B — Edit→push→reload loop latency.** With Git as truth, an `apply_edit` is
-  write→commit→push in-container; HMR picks up the in-container file write
-  immediately, but cross-device convergence (another client, or the macOS pull) is
-  push-bound. Confirm the in-container write is what HMR watches (it is) so edits
-  feel instant locally regardless of push timing.
-- **Q-C — Tunnel lifecycle vs. session token.** Per-session tunnel URL + per-session
-  bearer token should share a lifetime; define who tears down the tunnel on
-  window/tab close and on idle.
+- **Q-0 — Containerization × App Sandbox (MAS).** The §0 load-bearing risk;
+  **Phase 0** answers it.
+- **Q-A — Repo bootstrap for non-Git sites.** Git-everywhere assumes every site has a
+  remote. In-app-created sites may not — needs a "create + push a repo" onboarding
+  step (via the user's token / `gh` equivalent) before either runtime can hydrate.
+- **Q-B — Edit→reload latency.** `apply_edit` is write→commit→push in-container; HMR
+  watches the in-container *write*, so local edits feel instant regardless of push
+  timing. Cross-device convergence is push-bound (acceptable).
+- **Q-C — Tunnel/session lifetime.** Tunnel URL + bearer token share a lifetime
+  (remote); define teardown on window/tab close + idle. Local containers: define
+  stop-on-window-close + idle reaping.
+- **Q-D — Image distribution.** Where the OCI image comes from (built + pushed to a
+  registry the user pulls, vs. Cloudflare-side build) and how local Apple
+  Containerization pulls the *same* digest. Affects reproducibility + cold start.
 
 ---
 
 ## 8. One-paragraph recommendation
 
 It's viable and the abstraction boundary is in a good place — `PreviewView` already
-only wants a URL, and `PreviewSession` is the natural `SiteRuntime` seam. The work is
-**not** in spawning; it's in (1) making a remote, ephemeral disk coexist with the
-source-of-truth rule — **decided: Git is the durable substrate** and, per OPEN-2,
-the source of truth outright (remote-everywhere), (2) moving the **MCP edit pipeline
-off stdio onto HTTP/WS** (a paired plugin change), and (3) building a **new thin iOS
-client** since the current shell is AppKit-bound. With the decisions settled, the
-**Phase 1 Worker spike** is now about de-risking execution (cold-start time, HMR over
-the tunnel, snapshot availability) rather than choosing a substrate.
+only wants a URL, and `PreviewSession` is the natural `SiteRuntime` seam with two
+container implementations over one OCI image. The work is **not** in spawning; it's
+in (1) **Git as the single source of truth** for both substrates, (2) moving the
+**MCP edit pipeline off stdio onto HTTP/WS** (a paired plugin change), (3) running
+the **same image** locally via Apple Containerization and remotely via Cloudflare,
+and (4) a **new thin iOS client**. The single biggest unknown is **whether Apple
+Containerization runs under the App Sandbox (MAS)** — so the **Phase 0 spike gates
+everything**; if it fails, MAS simply uses the Cloudflare path like Intel/old-macOS,
+and the product still ships. A welcome side effect of the whole direction: the
+embedded-Node re-sign / JIT-entitlement complexity (Phase 10.1) **retires**.
