@@ -114,6 +114,7 @@ struct DebugPaneView: View {
             Image(systemName: line.stream == .stderr ? "exclamationmark.bubble" : "text.bubble")
                 .foregroundStyle(line.stream == .stderr ? .orange : .secondary)
                 .imageScale(.small)
+                .accessibilityLabel(line.stream == .stderr ? "Standard error" : "Standard output")
             Text(line.text)
                 .font(.system(size: 12, design: .monospaced))
                 .textSelection(.enabled)

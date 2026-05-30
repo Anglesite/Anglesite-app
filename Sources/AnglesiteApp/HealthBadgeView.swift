@@ -16,6 +16,10 @@ struct HealthBadgeView: View {
 
     @State private var popoverPresented: Bool = false
 
+    /// When set, the badge can't rely on color alone to convey state, so it draws a
+    /// state-specific glyph instead of a plain dot (HIG: differentiate without color).
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+
     var body: some View {
         Button {
             popoverPresented.toggle()
@@ -25,6 +29,9 @@ struct HealthBadgeView: View {
         .buttonStyle(.plain)
         .controlSize(.small)
         .help(helpText)
+        .accessibilityLabel("Deploy readiness")
+        .accessibilityValue(headerTitle)
+        .accessibilityHint("Shows the most recent pre-deploy scan results")
         .popover(isPresented: $popoverPresented, arrowEdge: .top) {
             popoverContent
                 .padding(14)
@@ -35,9 +42,15 @@ struct HealthBadgeView: View {
     @ViewBuilder
     private var indicator: some View {
         ZStack {
-            Circle()
-                .fill(color)
-                .frame(width: 10, height: 10)
+            if differentiateWithoutColor {
+                Image(systemName: stateSymbol)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(color)
+            } else {
+                Circle()
+                    .fill(color)
+                    .frame(width: 10, height: 10)
+            }
             if model.isRunning {
                 Circle()
                     .strokeBorder(Color.secondary.opacity(0.5), lineWidth: 1)
@@ -46,6 +59,16 @@ struct HealthBadgeView: View {
         }
         .frame(width: 18, height: 18, alignment: .center)
         .contentShape(Rectangle())
+    }
+
+    /// Shape that distinguishes badge state without relying on color.
+    private var stateSymbol: String {
+        switch model.badgeState {
+        case .unknown:  return "questionmark"
+        case .clean:    return "checkmark"
+        case .warnings: return "exclamationmark"
+        case .failures: return "xmark"
+        }
     }
 
     private var color: Color {
@@ -147,6 +170,7 @@ struct HealthBadgeView: View {
                     let f = failures[i]
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                            .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(f.detail).font(.callout)
                             if let file = f.file {
@@ -163,6 +187,7 @@ struct HealthBadgeView: View {
                     let w = warnings[i]
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                            .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(w.detail).font(.callout)
                             Text(w.remediation).font(.caption).foregroundStyle(.secondary)

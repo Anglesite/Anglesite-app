@@ -195,20 +195,18 @@ struct ChatView: View {
                 .onSubmit(submitIfReady)
                 .disabled(model.isStreaming)
             if model.isStreaming {
-                Button {
+                Button("Cancel response", systemImage: "stop.fill") {
                     model.cancel()
-                } label: {
-                    Image(systemName: "stop.fill")
                 }
+                .labelStyle(.iconOnly)
                 .help("Cancel response")
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
             } else {
-                Button {
+                Button("Send", systemImage: "paperplane.fill") {
                     submitIfReady()
-                } label: {
-                    Image(systemName: "paperplane.fill")
                 }
+                .labelStyle(.iconOnly)
                 .help("Send (⏎)")
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.return, modifiers: .command)

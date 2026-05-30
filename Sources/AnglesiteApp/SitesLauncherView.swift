@@ -84,11 +84,10 @@ struct SitesLauncherView: View {
         HStack {
             Text("Sites").font(.title2.bold())
             Spacer()
-            Button {
+            Button("Rescan sites", systemImage: "arrow.clockwise") {
                 Task { await refreshSites() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
             }
+            .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
             .help("Rescan ~/Sites")
         }
@@ -106,6 +105,7 @@ struct SitesLauncherView: View {
                           ? "checkmark.circle.fill"
                           : "exclamationmark.triangle.fill")
                         .foregroundStyle(site.isValid ? Color.green : Color.orange)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(site.name).font(.body.monospaced())
                         Text(site.path.path)
@@ -121,6 +121,7 @@ struct SitesLauncherView: View {
             }
             .buttonStyle(.plain)
             .disabled(!site.isValid)
+            .accessibilityValue(site.isValid ? "Valid" : "Missing required files")
             .help(site.isValid
                   ? "Open \(site.name) in its own window"
                   : "Site is missing required files: \(site.missingSentinels.joined(separator: ", "))")
