@@ -1,9 +1,32 @@
 # Cloudflare Sandbox dev server (toward Anglesite on iOS) — Investigation / Design
 
-> **Status:** investigation only. No implementation committed. This captures the
-> findings of the "run the dev server in a Cloudflare Sandbox so Anglesite can run
-> on iOS" spike and proposes a phased path. Decisions marked **OPEN** below need an
-> owner sign-off before any `…-plan.md` is written.
+> **Status:** investigation. No implementation committed. This captures the findings
+> of the "run the dev server in a Cloudflare Sandbox so Anglesite can run on iOS"
+> spike and proposes a phased path. **The OPEN decisions were resolved 2026-05-30 —
+> see §7.** Next artifact is a `…-plan.md`.
+
+## Decisions (resolved 2026-05-30)
+
+| # | Decision | Choice |
+|---|---|---|
+| 1 | Durable substrate | **Git remote** — the sandbox `git clone`s on start, edits commit/push, the source of truth is the repo. |
+| 2 | Scope | **Replace** — remote-everywhere; drop the embedded Node / local subprocess path once remote is proven. macOS and iOS both use `RemoteSiteRuntime`. |
+| 3 | Preview authz | **Per-session bearer token** issued by the app, validated by the proxy Worker. |
+| 4 | Account/billing | **Per-user BYO Cloudflare token** (reuse the existing Keychain `CLOUDFLARE_API_TOKEN`). |
+| 5a | Preview URL exposure | **Per-session Cloudflare Tunnel** — no wildcard-DNS custom domain required, so no per-user domain onboarding. |
+| 5b | Cold-start latency | **Container snapshots when available** (restore disk, skip `npm ci`); a "warming…" UX is the fallback until snapshots ship. |
+
+**Consequence of #2 (Replace):** even macOS now needs network + the user's Cloudflare
+account to preview — no offline editing. The `CLAUDE.md` rule "the filesystem is the
+source of truth / the app must never be the only way to edit a site" is **reframed to
+"Git is the source of truth"**: the repo (and any local `git clone` of it — Finder,
+VS Code, Claude Code CLI) remains a real, externally-editable working copy, so the
+*spirit* of the rule holds even though the app no longer drives a local `~/Sites`
+working tree directly. **This reframing must be reflected in `CLAUDE.md` when the
+plan lands.**
+
+**Consequence of #5a (Tunnel):** §3.3's wildcard-DNS caveat is moot — the tunnel
+supplies the hostname; our bearer token (#3) supplies the authz.
 
 **Motivation:** The app today runs the Astro dev server (and the plugin's MCP
 server) as *local subprocesses* via a vendored Node runtime. That model cannot
@@ -107,10 +130,12 @@ somewhere durable that the sandbox hydrates from and writes back to.** Options:
 | **B. R2 bucket per site** | R2 object store | sandbox syncs R2↔disk (or FUSE-mounts). App reads/writes R2. Adds an R2 sync layer to own. |
 | **C. App stays the source of truth, streams files** | the *local* device | only works where the app has a real filesystem (macOS). On iOS there's no `~/Sites` — defeats the purpose. |
 
-**Recommendation:** lean toward **(A) Git** as the durable substrate for the
-*remote/iOS* story, because it's already adjacent to the deploy flow and preserves
-the "editable outside the app" guarantee. On macOS the **local FS stays primary**;
-remote is an opt-in mode, not a replacement. **OPEN: pick A vs B.**
+**Decided → (A) Git** (OPEN-1). It's already adjacent to the deploy flow and
+preserves the "editable outside the app" guarantee via the repo. Per OPEN-2 this is
+*remote-everywhere*: there is no local-FS-primary fallback in the end state, so the
+"source of truth" is the **repo**, not a local `~/Sites` working tree (see the
+reframing note at the top). **Follow-up Q-A (§7):** sites without a Git remote need a
+bootstrap "create + push a repo" step.
 
 ### 3.2 The MCP edit pipeline is stdio-coupled
 
@@ -126,11 +151,13 @@ transport is a **paired plugin PR**, not an app-only change.
 
 ### 3.3 Preview URL reachability + auth + multi-tenancy
 
-- Need a Cloudflare zone with **wildcard DNS** for stable preview URLs (or Tunnels
-  for dev). We already collect a `CLOUDFLARE_API_TOKEN`.
-- Preview URLs are effectively **public** unless gated (token in the hostname is for
-  *routing*, not *authz*). A site mid-edit shouldn't be world-readable → put the
-  proxy Worker behind **Cloudflare Access** or a per-session bearer token.
+- **Decided → per-session Tunnel** (OPEN-5a), so the wildcard-DNS custom-domain
+  requirement is sidestepped entirely — no per-user Cloudflare *domain* needed (the
+  user still needs an account/token for compute, OPEN-4).
+- **Decided → per-session bearer token** (OPEN-3): preview URLs are otherwise
+  effectively public (the hostname token is for *routing*, not *authz*), so the proxy
+  Worker validates an app-minted session token on every request. **Follow-up Q-C
+  (§7):** tunnel + token must share a lifetime.
 - One container **per site per user** (`getSandbox` id scoped to user+site, per the
   docs' "scope IDs to a single user" guidance).
 
@@ -199,31 +226,58 @@ macOS-only.
 2. **Plugin PR:** add an **HTTP/SSE (streamable-HTTP) transport** to the plugin's
    MCP server so `apply_edit` can round-trip without stdio. Tagged plugin release.
 3. **App refactor (macOS, no behavior change):** extract `SiteRuntime` from
-   `PreviewSession`; today's path becomes `LocalSiteRuntime`. Add an HTTP transport
-   to `MCPClient` behind the existing actor API. Pure refactor, full suite stays
-   green.
-4. **`RemoteSiteRuntime` (macOS, opt-in):** a "Preview on Cloudflare" mode behind a
-   flag — proves the whole remote loop on a platform we can still debug locally.
+   `PreviewSession`; today's path becomes a *transitional* `LocalSiteRuntime`. Add an
+   HTTP/WS transport to `MCPClient` behind the existing actor API. Pure refactor, full
+   suite stays green.
+4. **`RemoteSiteRuntime` (macOS):** build the full remote loop — ensure container,
+   tunnel + bearer token, `git clone`/`npm ci`/`astro dev`, `exposePort` — and make
+   it the macOS default. Proves the whole thing on a platform we can still debug
+   locally, then **remove `LocalSiteRuntime` + embedded Node** (OPEN-2 Replace).
+   Reframe the `CLAUDE.md` source-of-truth rule here.
 5. **iOS target:** new thin SwiftUI/UIKit client reusing `AnglesiteBridge` +
-   `SiteRuntime` (remote-only).
+   `SiteRuntime` (remote-only — the only runtime that exists by now).
 
 ---
 
-## 7. Open decisions (need sign-off before a `…-plan.md`)
+## 7. Decisions — resolved 2026-05-30
 
-- **OPEN-1 — Durable substrate:** Git remote (§3.1-A) vs R2 (§3.1-B) as the
-  source-of-truth the sandbox hydrates from. Affects everything downstream.
-- **OPEN-2 — Does remote *replace* or *augment* local?** Recommendation: augment.
-  macOS keeps the local subprocess path; remote is opt-in and the only path on iOS.
-  Preserves the "editable outside the app" rule on the platform that has a real FS.
-- **OPEN-3 — Preview-URL authz:** Cloudflare Access vs per-session bearer token vs
-  Tunnels-for-dev-only. Preview URLs are otherwise effectively public.
-- **OPEN-4 — Who pays / whose account?** Per-user BYO Cloudflare token (we already
-  collect one) vs an Anglesite-operated account with metered cost. Containers bill on
-  active use; `keepAlive` is continuous cost.
-- **OPEN-5 — Cold-start UX:** `npm ci` + first `astro dev` in a fresh container is
-  not instant, and idle eviction (~10 min) means re-paying it. Need a "warming…"
-  state and possibly a snapshot/keepAlive strategy.
+All five OPEN items are settled; the table at the top of this doc is the canonical
+record. Restated with rationale:
+
+- **OPEN-1 → Git remote.** The sandbox `git clone`s a site's repo on start, runs
+  `npm ci` + `astro dev`, and pushes edits back. The repo is the source of truth.
+- **OPEN-2 → Replace (remote everywhere).** No `LocalSiteRuntime` in the end state;
+  the embedded Node / `Process`-spawn stack is removed once `RemoteSiteRuntime` is
+  proven. Single code path, no vendored Node, but requires network + a Cloudflare
+  account on every platform. See the "Consequence of #2" note at the top re: the
+  `CLAUDE.md` source-of-truth reframing.
+- **OPEN-3 → Per-session bearer token.** The app mints a session token; the proxy
+  Worker validates it on every request (injected into the `WKWebView` via header or
+  signed cookie). Self-contained, identical on macOS/iOS, no Zero Trust dependency.
+- **OPEN-4 → Per-user BYO token.** Reuse the Keychain `CLOUDFLARE_API_TOKEN` already
+  collected for `wrangler deploy`. Each user pays their own container usage; no cost
+  to Anglesite. Onboarding cost: a Workers Paid plan.
+- **OPEN-5a → Per-session Tunnel.** Sidesteps the wildcard-DNS / per-user-domain
+  requirement entirely (a domain on Cloudflare would otherwise be a steep ask for
+  casual/iOS users). The bearer token (#3) is the security boundary, not DNS.
+- **OPEN-5b → Snapshots when available.** Target Cloudflare's "coming soon" container
+  snapshots to restore disk and skip `npm ci` on re-entry; ship the explicit
+  "warming…" `PreviewSession.State` as the fallback until snapshots are GA.
+
+### New questions these answers raise (for the plan, not blockers)
+
+- **Q-A — Repo bootstrap for non-Git sites.** OPEN-1 assumes every site has a Git
+  remote. Sites created in-app may not. The plan needs a "create + push a repo"
+  onboarding step (likely via the user's token / `gh` equivalent) before remote
+  preview can work.
+- **Q-B — Edit→push→reload loop latency.** With Git as truth, an `apply_edit` is
+  write→commit→push in-container; HMR picks up the in-container file write
+  immediately, but cross-device convergence (another client, or the macOS pull) is
+  push-bound. Confirm the in-container write is what HMR watches (it is) so edits
+  feel instant locally regardless of push timing.
+- **Q-C — Tunnel lifecycle vs. session token.** Per-session tunnel URL + per-session
+  bearer token should share a lifetime; define who tears down the tunnel on
+  window/tab close and on idle.
 
 ---
 
@@ -232,8 +286,9 @@ macOS-only.
 It's viable and the abstraction boundary is in a good place — `PreviewView` already
 only wants a URL, and `PreviewSession` is the natural `SiteRuntime` seam. The work is
 **not** in spawning; it's in (1) making a remote, ephemeral disk coexist with the
-"filesystem is the source of truth" rule (favor **Git** as the durable substrate),
-(2) moving the **MCP edit pipeline off stdio onto HTTP/WS** (a paired plugin change),
-and (3) building a **new thin iOS client** since the current shell is AppKit-bound.
-Recommend starting with the **throwaway Worker spike (Phase 1)** to get real
-cold-start / HMR numbers before committing to OPEN-1.
+source-of-truth rule — **decided: Git is the durable substrate** and, per OPEN-2,
+the source of truth outright (remote-everywhere), (2) moving the **MCP edit pipeline
+off stdio onto HTTP/WS** (a paired plugin change), and (3) building a **new thin iOS
+client** since the current shell is AppKit-bound. With the decisions settled, the
+**Phase 1 Worker spike** is now about de-risking execution (cold-start time, HMR over
+the tunnel, snapshot availability) rather than choosing a substrate.
