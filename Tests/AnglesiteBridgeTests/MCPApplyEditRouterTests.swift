@@ -1,8 +1,8 @@
-import XCTest
+import Testing
 @testable import AnglesiteBridge
 import AnglesiteCore
 
-final class MCPApplyEditRouterTests: XCTestCase {
+struct MCPApplyEditRouterTests {
     private static let sampleSelector: JSONValue = .object([
         "tag": .string("P"),
         "classes": .array([]),
@@ -18,17 +18,16 @@ final class MCPApplyEditRouterTests: XCTestCase {
         value: .string("Hello, world.")
     )
 
-    func testCallsApplyEditToolWithEditMessageAsArguments() async {
+    @Test func `Calls apply-edit tool with edit message as arguments`() async {
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(content: [], isError: false)))
-        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         _ = await router.apply(sampleMessage)
 
         let calls = await recorder.calls
-        XCTAssertEqual(calls.count, 1)
-        XCTAssertEqual(calls.first?.name, "apply_edit")
-        XCTAssertEqual(
-            calls.first?.arguments,
-            .object([
+        #expect(calls.count == 1)
+        #expect(calls.first?.name == "apply_edit")
+        #expect(
+            calls.first?.arguments == .object([
                 "id": .string("e-1"),
                 "type": .string("anglesite:apply-edit"),
                 "path": .string("/about/"),
@@ -39,35 +38,35 @@ final class MCPApplyEditRouterTests: XCTestCase {
         )
     }
 
-    func testSuccessfulToolResultMapsToApplied() async {
+    @Test func `Successful tool result maps to applied`() async {
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: "patched /about.mdoc range 12-25")],
             isError: false
         )))
-        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         let reply = await router.apply(sampleMessage)
-        XCTAssertEqual(reply.id, "e-1")
-        XCTAssertEqual(reply.status, .applied)
-        XCTAssertEqual(reply.message, "patched /about.mdoc range 12-25")
+        #expect(reply.id == "e-1")
+        #expect(reply.status == .applied)
+        #expect(reply.message == "patched /about.mdoc range 12-25")
     }
 
-    func testIsErrorResultMapsToFailedWithToolMessage() async {
+    @Test func `Is-error result maps to failed with tool message`() async {
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: "selector resolved to two nodes")],
             isError: true
         )))
-        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         let reply = await router.apply(sampleMessage)
-        XCTAssertEqual(reply.status, .failed)
-        XCTAssertEqual(reply.message, "selector resolved to two nodes")
+        #expect(reply.status == .failed)
+        #expect(reply.message == "selector resolved to two nodes")
     }
 
-    func testThrownErrorMapsToFailed() async {
+    @Test func `Thrown error maps to failed`() async {
         let recorder = ToolCallRecorder(result: .failure(MCPClient.MCPError.notInitialized))
-        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         let reply = await router.apply(sampleMessage)
-        XCTAssertEqual(reply.status, .failed)
-        XCTAssertNotNil(reply.message)
+        #expect(reply.status == .failed)
+        #expect(reply.message != nil)
     }
 }
 

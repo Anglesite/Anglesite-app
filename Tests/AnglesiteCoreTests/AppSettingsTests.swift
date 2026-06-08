@@ -1,84 +1,84 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class AppSettingsTests: XCTestCase {
-    private var suiteName: String!
-    private var defaults: UserDefaults!
+/// A `final class` (not a `struct`) so `deinit` can drop the throwaway `UserDefaults` suite,
+/// mirroring the former `tearDown`.
+final class AppSettingsTests {
+    private let suiteName: String
+    private let defaults: UserDefaults
 
-    override func setUp() {
-        super.setUp()
-        suiteName = "test-anglesite-\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)
+    init() {
+        let suite = "test-anglesite-\(UUID().uuidString)"
+        suiteName = suite
+        defaults = UserDefaults(suiteName: suite)!
     }
 
-    override func tearDown() {
-        defaults?.removePersistentDomain(forName: suiteName)
-        defaults = nil
-        suiteName = nil
-        super.tearDown()
+    deinit {
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
-    func testPluginPathOverrideDefaultsToNil() {
+    @Test func `Plugin path override defaults to nil`() {
         let settings = AppSettings(defaults: defaults)
-        XCTAssertNil(settings.pluginPathOverride)
+        #expect(settings.pluginPathOverride == nil)
     }
 
-    func testPluginPathOverrideRoundTrip() {
+    @Test func `Plugin path override round trip`() {
         let settings = AppSettings(defaults: defaults)
         let url = URL(fileURLWithPath: "/tmp/anglesite-plugin", isDirectory: true)
         settings.pluginPathOverride = url
-        XCTAssertEqual(settings.pluginPathOverride?.path, url.path)
+        #expect(settings.pluginPathOverride?.path == url.path)
     }
 
-    func testClearingPluginPathOverride() {
+    @Test func `Clearing plugin path override`() {
         let settings = AppSettings(defaults: defaults)
         settings.pluginPathOverride = URL(fileURLWithPath: "/tmp/x", isDirectory: true)
         settings.pluginPathOverride = nil
-        XCTAssertNil(settings.pluginPathOverride)
+        #expect(settings.pluginPathOverride == nil)
     }
 
-    func testSitesRootFallsBackToHomeSites() {
+    @Test func `Sites root falls back to home Sites`() {
         let settings = AppSettings(defaults: defaults)
         let expected = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Sites", isDirectory: true)
-        XCTAssertEqual(settings.sitesRoot.path, expected.path)
+        #expect(settings.sitesRoot.path == expected.path)
     }
 
-    func testSitesRootHonorsOverride() {
+    @Test func `Sites root honors override`() {
         let settings = AppSettings(defaults: defaults)
         let url = URL(fileURLWithPath: "/tmp/anglesite-sites", isDirectory: true)
         settings.sitesRootOverride = url
-        XCTAssertEqual(settings.sitesRoot.path, url.path)
+        #expect(settings.sitesRoot.path == url.path)
     }
 
-    func testDebugPaneEnabledDefaultsToFalse() {
+    @Test func `Debug pane enabled defaults to false`() {
         let settings = AppSettings(defaults: defaults)
-        XCTAssertFalse(settings.debugPaneEnabled)
+        #expect(!settings.debugPaneEnabled)
     }
 
-    func testDebugPaneEnabledRoundTrip() {
+    @Test func `Debug pane enabled round trip`() {
         let settings = AppSettings(defaults: defaults)
         settings.debugPaneEnabled = true
-        XCTAssertTrue(settings.debugPaneEnabled)
+        #expect(settings.debugPaneEnabled)
         settings.debugPaneEnabled = false
-        XCTAssertFalse(settings.debugPaneEnabled)
+        #expect(!settings.debugPaneEnabled)
     }
 
     // MARK: DebugPaneVisibility
 
-    func testDebugMenuAlwaysVisibleInDebugBuilds() {
-        XCTAssertTrue(DebugPaneVisibility.menuItemVisible(isDebugBuild: true, settingEnabled: false, optionHeldAtLaunch: false))
+    @Test func `Debug menu always visible in debug builds`() {
+        #expect(DebugPaneVisibility.menuItemVisible(isDebugBuild: true, settingEnabled: false, optionHeldAtLaunch: false))
     }
 
-    func testDebugMenuHiddenInReleaseByDefault() {
-        XCTAssertFalse(DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: false, optionHeldAtLaunch: false))
+    @Test func `Debug menu hidden in release by default`() {
+        #expect(!DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: false, optionHeldAtLaunch: false))
     }
 
-    func testDebugMenuRevealedBySettingInRelease() {
-        XCTAssertTrue(DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: true, optionHeldAtLaunch: false))
+    @Test func `Debug menu revealed by setting in release`() {
+        #expect(DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: true, optionHeldAtLaunch: false))
     }
 
-    func testDebugMenuRevealedByOptionKeyInRelease() {
-        XCTAssertTrue(DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: false, optionHeldAtLaunch: true))
+    @Test func `Debug menu revealed by option key in release`() {
+        #expect(DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: false, optionHeldAtLaunch: true))
     }
 }

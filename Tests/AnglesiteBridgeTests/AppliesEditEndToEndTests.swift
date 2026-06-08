@@ -1,15 +1,19 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteBridge
 import AnglesiteCore
 
 /// End-to-end: spawn the *real* bundled plugin's MCP server, drive an `apply_edit` through a
 /// real `MCPClient` via `MCPApplyEditRouter`, and assert the file's bytes change on disk.
 ///
-/// `XCTSkip` cleanly when the sibling plugin checkout or its `node_modules` aren't present —
+/// Cancels cleanly when the sibling plugin checkout or its `node_modules` aren't present —
 /// CI provides them via the `ANGLESITE_PLUGIN_PATH` env var; local dev relies on the
 /// `../anglesite` sibling layout documented in CLAUDE.md.
-final class AppliesEditEndToEndTests: XCTestCase {
-    private var tmpSite: URL!
+///
+/// A `final class` (not a `struct`) so `deinit` can tear down the temp site, mirroring the
+/// former `tearDownWithError`.
+final class AppliesEditEndToEndTests {
+    private let tmpSite: URL
     private static let editableHeading = "Welcome to E2E Test Site"
     private static let pageContents = """
     <h1>\(editableHeading)</h1>
@@ -18,7 +22,7 @@ final class AppliesEditEndToEndTests: XCTestCase {
 
     // MARK: setup / teardown
 
-    override func setUpWithError() throws {
+    init() throws {
         try Self.requireSiblingPlugin()
         _ = try Self.requireNode()
 
@@ -32,13 +36,13 @@ final class AppliesEditEndToEndTests: XCTestCase {
         )
     }
 
-    override func tearDownWithError() throws {
-        if let tmpSite { try? FileManager.default.removeItem(at: tmpSite) }
+    deinit {
+        try? FileManager.default.removeItem(at: tmpSite)
     }
 
     // MARK: the test
 
-    func testApplyEditEndToEndMutatesTheFileOnDisk() async throws {
+    @Test func `Apply edit end to end mutates the file on disk`() async throws {
         let pluginRoot = try Self.requireSiblingPlugin()
         let node = try Self.requireNode()
         let serverPath = pluginRoot.appendingPathComponent("server/index.mjs")
@@ -76,27 +80,27 @@ final class AppliesEditEndToEndTests: XCTestCase {
         // Sanity: file currently has the original heading.
         let pagePath = tmpSite.appendingPathComponent("src/pages/index.astro")
         let before = try String(contentsOf: pagePath, encoding: .utf8)
-        XCTAssertTrue(before.contains(Self.editableHeading))
+        #expect(before.contains(Self.editableHeading))
 
         // Drive the round-trip.
         let reply = await router.apply(message)
-        XCTAssertEqual(reply.id, "e2e-1")
-        XCTAssertEqual(
-            reply.status, .applied,
+        #expect(reply.id == "e2e-1")
+        #expect(
+            reply.status == .applied,
             "expected the plugin's apply_edit to succeed; router message: \(reply.message ?? "nil")"
         )
 
         // The file's bytes actually changed.
         let after = try String(contentsOf: pagePath, encoding: .utf8)
-        XCTAssertFalse(after.contains(Self.editableHeading), "old heading should be gone")
-        XCTAssertTrue(after.contains("Welcome to the new headline"), "new heading should be present")
+        #expect(!after.contains(Self.editableHeading), "old heading should be gone")
+        #expect(after.contains("Welcome to the new headline"), "new heading should be present")
 
         await mcp.stop()
     }
 
     // MARK: prerequisite probing
 
-    /// Returns the path to the sibling Anglesite plugin checkout, or throws `XCTSkip` if absent.
+    /// Returns the path to the sibling Anglesite plugin checkout, or cancels the test if absent.
     @discardableResult
     private static func requireSiblingPlugin() throws -> URL {
         // Priority: explicit env var (CI), then `../anglesite` relative to the test's CWD
@@ -109,20 +113,20 @@ final class AppliesEditEndToEndTests: XCTestCase {
         }()
         let serverPath = candidate.appendingPathComponent("server/index.mjs")
         guard FileManager.default.isReadableFile(atPath: serverPath.path) else {
-            throw XCTSkip(
-                "Anglesite plugin checkout not found at \(candidate.path)/server/index.mjs. "
-                + "Set ANGLESITE_PLUGIN_PATH or clone Anglesite/anglesite as a sibling."
+            try Test.cancel(
+                "Anglesite plugin checkout not found at \(candidate.path)/server/index.mjs. Set ANGLESITE_PLUGIN_PATH or clone Anglesite/anglesite as a sibling."
             )
         }
         let sdkPath = candidate.appendingPathComponent("node_modules/@modelcontextprotocol/sdk")
         guard FileManager.default.fileExists(atPath: sdkPath.path) else {
-            throw XCTSkip(
+            try Test.cancel(
                 "Plugin's node_modules are missing — run `npm ci` in \(candidate.path)"
             )
         }
         return candidate
     }
 
+    @discardableResult
     private static func requireNode() throws -> URL {
         let candidates = [
             "/opt/homebrew/bin/node",
@@ -134,6 +138,6 @@ final class AppliesEditEndToEndTests: XCTestCase {
                 return URL(fileURLWithPath: p)
             }
         }
-        throw XCTSkip("node not found in common paths; install Node ≥22")
+        try Test.cancel("node not found in common paths; install Node ≥22")
     }
 }

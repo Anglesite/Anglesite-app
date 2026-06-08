@@ -1,8 +1,9 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class ProcessSupervisorLaunchTests: XCTestCase {
-    func testLaunchStreamsStdoutLinesToLogCenter() async throws {
+struct ProcessSupervisorLaunchTests {
+    @Test func `Launch streams stdout lines to log center`() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let handle = try await supervisor.launch(
@@ -15,12 +16,12 @@ final class ProcessSupervisorLaunchTests: XCTestCase {
         // Pipe drainage may complete after exit signal; give readers a beat.
         try? await Task.sleep(nanoseconds: 100_000_000)
 
-        XCTAssertEqual(reason, .exited(code: 0))
+        #expect(reason == .exited(code: 0))
         let lines = await center.snapshot().filter { $0.source == "stdout-test" && $0.stream == .stdout }
-        XCTAssertEqual(lines.map(\.text), ["one", "two", "three"])
+        #expect(lines.map(\.text) == ["one", "two", "three"])
     }
 
-    func testLaunchSeparatesStderrFromStdout() async throws {
+    @Test func `Launch separates stderr from stdout`() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let handle = try await supervisor.launch(
@@ -35,11 +36,11 @@ final class ProcessSupervisorLaunchTests: XCTestCase {
         let snapshot = await center.snapshot().filter { $0.source == "stderr-test" }
         let outs = snapshot.filter { $0.stream == .stdout }.map(\.text)
         let errs = snapshot.filter { $0.stream == .stderr }.map(\.text)
-        XCTAssertEqual(outs, ["out"])
-        XCTAssertEqual(errs, ["err"])
+        #expect(outs == ["out"])
+        #expect(errs == ["err"])
     }
 
-    func testWaitForExitReportsNonZeroCode() async throws {
+    @Test func `Wait for exit reports non-zero code`() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let handle = try await supervisor.launch(
@@ -49,10 +50,10 @@ final class ProcessSupervisorLaunchTests: XCTestCase {
             logCenter: center
         )
         let reason = await supervisor.waitForExit(handle)
-        XCTAssertEqual(reason, .exited(code: 9))
+        #expect(reason == .exited(code: 9))
     }
 
-    func testTerminateStopsLongRunningProcess() async throws {
+    @Test func `Terminate stops long-running process`() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let handle = try await supervisor.launch(
@@ -64,16 +65,16 @@ final class ProcessSupervisorLaunchTests: XCTestCase {
         // Let it actually start.
         try? await Task.sleep(nanoseconds: 100_000_000)
         let runningBefore = await supervisor.isRunning(handle)
-        XCTAssertTrue(runningBefore)
+        #expect(runningBefore)
 
         await supervisor.terminate(handle, timeout: 2)
         let reason = await supervisor.waitForExit(handle)
-        XCTAssertEqual(reason, .terminated)
+        #expect(reason == .terminated)
         let runningAfter = await supervisor.isRunning(handle)
-        XCTAssertFalse(runningAfter)
+        #expect(!runningAfter)
     }
 
-    func testRestartOnCrashGivesUpAfterMaxAttempts() async throws {
+    @Test func `Restart on crash gives up after max attempts`() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let handle = try await supervisor.launch(
@@ -87,15 +88,15 @@ final class ProcessSupervisorLaunchTests: XCTestCase {
         // Pipe drainage may lag the exit signal.
         try? await Task.sleep(nanoseconds: 200_000_000)
 
-        XCTAssertEqual(reason, .retriesExhausted(lastCode: 2))
+        #expect(reason == .retriesExhausted(lastCode: 2))
         let boomCount = await center.snapshot().filter {
             $0.source == "crashy" && $0.text == "boom"
         }.count
         // Initial attempt + 2 retries = 3 emissions of "boom".
-        XCTAssertEqual(boomCount, 3)
+        #expect(boomCount == 3)
     }
 
-    func testRestartOnCrashStopsAfterCleanExit() async throws {
+    @Test func `Restart on crash stops after clean exit`() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let handle = try await supervisor.launch(
@@ -106,10 +107,10 @@ final class ProcessSupervisorLaunchTests: XCTestCase {
             logCenter: center
         )
         let reason = await supervisor.waitForExit(handle)
-        XCTAssertEqual(reason, .exited(code: 0))
+        #expect(reason == .exited(code: 0))
     }
 
-    func testOnRespawnFiresOncePerSuccessfulRestart() async throws {
+    @Test func `On respawn fires once per successful restart`() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let respawns = RespawnCounter()
@@ -124,13 +125,13 @@ final class ProcessSupervisorLaunchTests: XCTestCase {
         let reason = await supervisor.waitForExit(handle)
         try? await Task.sleep(nanoseconds: 100_000_000)
 
-        XCTAssertEqual(reason, .retriesExhausted(lastCode: 4))
+        #expect(reason == .retriesExhausted(lastCode: 4))
         // Initial spawn doesn't count; 3 retries → 3 respawn callbacks.
         let count = await respawns.value
-        XCTAssertEqual(count, 3)
+        #expect(count == 3)
     }
 
-    func testOnRespawnNotCalledWhenProcessNeverCrashes() async throws {
+    @Test func `On respawn not called when process never crashes`() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let respawns = RespawnCounter()
@@ -144,10 +145,10 @@ final class ProcessSupervisorLaunchTests: XCTestCase {
         )
         _ = await supervisor.waitForExit(handle)
         let count = await respawns.value
-        XCTAssertEqual(count, 0)
+        #expect(count == 0)
     }
 
-    func testLaunchAttachStdinAllowsWrites() async throws {
+    @Test func `Launch attach stdin allows writes`() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         // `cat` echoes whatever we feed it; then we close stdin and it exits cleanly.
@@ -158,19 +159,16 @@ final class ProcessSupervisorLaunchTests: XCTestCase {
             attachStdin: true,
             logCenter: center
         )
-        guard let stdin = await supervisor.stdinWriter(handle) else {
-            XCTFail("expected stdin writer")
-            return
-        }
+        let stdin = try #require(await supervisor.stdinWriter(handle), "expected stdin writer")
         try stdin.writer.write(contentsOf: Data("hello\n".utf8))
         try stdin.writer.close()
 
         let reason = await supervisor.waitForExit(handle)
         try? await Task.sleep(nanoseconds: 100_000_000)
 
-        XCTAssertEqual(reason, .exited(code: 0))
+        #expect(reason == .exited(code: 0))
         let lines = await center.snapshot().filter { $0.source == "cat" && $0.stream == .stdout }.map(\.text)
-        XCTAssertEqual(lines, ["hello"])
+        #expect(lines == ["hello"])
     }
 }
 

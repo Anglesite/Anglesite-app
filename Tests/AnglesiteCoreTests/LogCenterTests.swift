@@ -1,30 +1,31 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class LogCenterTests: XCTestCase {
-    func testAppendRetainsLinesInOrder() async {
+struct LogCenterTests {
+    @Test func `Append retains lines in order`() async {
         let center = LogCenter()
         await center.append(source: "astro", stream: .stdout, text: "first")
         await center.append(source: "astro", stream: .stderr, text: "second")
         let snapshot = await center.snapshot()
-        XCTAssertEqual(snapshot.count, 2)
-        XCTAssertEqual(snapshot.map(\.text), ["first", "second"])
-        XCTAssertEqual(snapshot.map(\.stream), [.stdout, .stderr])
-        XCTAssertEqual(snapshot.map(\.id), [0, 1])
+        #expect(snapshot.count == 2)
+        #expect(snapshot.map(\.text) == ["first", "second"])
+        #expect(snapshot.map(\.stream) == [.stdout, .stderr])
+        #expect(snapshot.map(\.id) == [0, 1])
     }
 
-    func testRingBufferEvictsOldestLines() async {
+    @Test func `Ring buffer evicts oldest lines`() async {
         let center = LogCenter(bufferCapacity: 3)
         for i in 0..<5 {
             await center.append(source: "x", stream: .stdout, text: "line\(i)")
         }
         let snapshot = await center.snapshot()
-        XCTAssertEqual(snapshot.map(\.text), ["line2", "line3", "line4"])
+        #expect(snapshot.map(\.text) == ["line2", "line3", "line4"])
         // IDs are monotonic regardless of eviction — they're a global sequence, not an index.
-        XCTAssertEqual(snapshot.map(\.id), [2, 3, 4])
+        #expect(snapshot.map(\.id) == [2, 3, 4])
     }
 
-    func testSubscriberReceivesSubsequentAppends() async {
+    @Test func `Subscriber receives subsequent appends`() async {
         let center = LogCenter()
         let sub = await center.subscribe()
         await center.append(source: "a", stream: .stdout, text: "one")
@@ -36,15 +37,15 @@ final class LogCenterTests: XCTestCase {
             guard let line = await iterator.next() else { break }
             collected.append(line.text)
         }
-        XCTAssertEqual(collected, ["one", "two"])
+        #expect(collected == ["one", "two"])
     }
 
-    func testMultipleSubscribersEachReceiveEveryLine() async {
+    @Test func `Multiple subscribers each receive every line`() async {
         let center = LogCenter()
         let a = await center.subscribe()
         let b = await center.subscribe()
         let initialCount = await center.subscriberCount()
-        XCTAssertEqual(initialCount, 2)
+        #expect(initialCount == 2)
 
         await center.append(source: "s", stream: .stdout, text: "hello")
 
@@ -52,8 +53,8 @@ final class LogCenterTests: XCTestCase {
         var bIter = b.stream.makeAsyncIterator()
         let aLine = await aIter.next()
         let bLine = await bIter.next()
-        XCTAssertEqual(aLine?.text, "hello")
-        XCTAssertEqual(bLine?.text, "hello")
+        #expect(aLine?.text == "hello")
+        #expect(bLine?.text == "hello")
     }
 
     // MARK: Debug-pane helpers
@@ -67,44 +68,44 @@ final class LogCenterTests: XCTestCase {
         ]
     }
 
-    func testFilteredBySourceOnly() {
+    @Test func `Filtered by source only`() {
         let out = sampleLines().filtered(source: "astro", stream: nil, query: "")
-        XCTAssertEqual(out.map(\.id), [0, 1])
+        #expect(out.map(\.id) == [0, 1])
     }
 
-    func testFilteredByStreamOnly() {
+    @Test func `Filtered by stream only`() {
         let out = sampleLines().filtered(source: nil, stream: .stderr, query: "")
-        XCTAssertEqual(out.map(\.id), [1, 3])
+        #expect(out.map(\.id) == [1, 3])
     }
 
-    func testFilteredByQueryMatchesSourceAndText_CaseInsensitive() {
+    @Test func `Filtered by query matches source and text, case-insensitive`() {
         // "ready" matches the mcp/stderr text; "ASTRO" matches the astro source.
-        XCTAssertEqual(sampleLines().filtered(source: nil, stream: nil, query: "ready").map(\.id), [3])
-        XCTAssertEqual(sampleLines().filtered(source: nil, stream: nil, query: "ASTRO").map(\.id), [0, 1])
+        #expect(sampleLines().filtered(source: nil, stream: nil, query: "ready").map(\.id) == [3])
+        #expect(sampleLines().filtered(source: nil, stream: nil, query: "ASTRO").map(\.id) == [0, 1])
     }
 
-    func testFilteredCombinesAllPredicates() {
+    @Test func `Filtered combines all predicates`() {
         let out = sampleLines().filtered(source: "mcp", stream: .stdout, query: "jsonrpc")
-        XCTAssertEqual(out.map(\.id), [2])
+        #expect(out.map(\.id) == [2])
     }
 
-    func testFilteredNilSourceAndEmptyQueryReturnsAll() {
-        XCTAssertEqual(sampleLines().filtered(source: nil, stream: nil, query: "  ").map(\.id), [0, 1, 2, 3])
+    @Test func `Filtered nil source and empty query returns all`() {
+        #expect(sampleLines().filtered(source: nil, stream: nil, query: "  ").map(\.id) == [0, 1, 2, 3])
     }
 
-    func testExportTextFormatsEachLine() {
+    @Test func `Export text formats each line`() {
         let text = sampleLines().exportText(timestampFormat: "ss")
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        XCTAssertEqual(lines.count, 4)
-        XCTAssertEqual(lines[0], "00  [astro/stdout]  Local http://localhost:4321/")
-        XCTAssertEqual(lines[3], "03  [mcp/stderr]  server ready")
+        #expect(lines.count == 4)
+        #expect(lines[0] == "00  [astro/stdout]  Local http://localhost:4321/")
+        #expect(lines[3] == "03  [mcp/stderr]  server ready")
     }
 
-    func testCancelEndsIterationAndUnregisters() async {
+    @Test func `Cancel ends iteration and unregisters`() async {
         let center = LogCenter()
         let sub = await center.subscribe()
         let initial = await center.subscriberCount()
-        XCTAssertEqual(initial, 1)
+        #expect(initial == 1)
 
         sub.cancel()
         // onTermination → removeSubscriber hops through a Task; allow it to land.
@@ -113,10 +114,10 @@ final class LogCenterTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 20_000_000)
             finalCount = await center.subscriberCount()
         }
-        XCTAssertEqual(finalCount, 0)
+        #expect(finalCount == 0)
 
         var iterator = sub.stream.makeAsyncIterator()
         let next = await iterator.next()
-        XCTAssertNil(next)
+        #expect(next == nil)
     }
 }

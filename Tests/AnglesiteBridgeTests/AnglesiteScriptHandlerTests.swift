@@ -1,8 +1,8 @@
-import XCTest
+import Testing
 @testable import AnglesiteBridge
 import AnglesiteCore
 
-final class AnglesiteScriptHandlerTests: XCTestCase {
+struct AnglesiteScriptHandlerTests {
     private func validBody() -> [String: Any] {
         [
             "id": "e-99",
@@ -18,32 +18,34 @@ final class AnglesiteScriptHandlerTests: XCTestCase {
         ]
     }
 
-    func testHandleValidBodyRoutesAndReturnsReply() async {
+    @Test func `Handle valid body routes and returns reply`() async {
         let router = RecordingRouter(reply: EditReply(id: "e-99", status: .applied, message: "done"))
         let result = await AnglesiteScriptHandler.handle(body: validBody(), via: router)
         guard case .success(let reply) = result else {
-            return XCTFail("expected .success, got \(result)")
+            Issue.record("expected .success, got \(result)")
+            return
         }
-        XCTAssertEqual(reply.id, "e-99")
-        XCTAssertEqual(reply.status, .applied)
+        #expect(reply.id == "e-99")
+        #expect(reply.status == .applied)
         let received = await router.received
-        XCTAssertEqual(received.count, 1)
-        XCTAssertEqual(received.first?.id, "e-99")
-        XCTAssertEqual(received.first?.op, "replace-text")
+        #expect(received.count == 1)
+        #expect(received.first?.id == "e-99")
+        #expect(received.first?.op == "replace-text")
     }
 
-    func testHandleInvalidBodyReturnsDecodeErrorAndDoesNotRoute() async {
+    @Test func `Handle invalid body returns decode error and does not route`() async {
         // Wrong type at the type field — strict decode rejects it before any routing.
         var bad = validBody()
         bad["type"] = "anglesite:not-real"
         let router = RecordingRouter(reply: EditReply(id: "x", status: .applied, message: nil))
         let result = await AnglesiteScriptHandler.handle(body: bad, via: router)
         guard case .failure(let err) = result else {
-            return XCTFail("expected .failure, got \(result)")
+            Issue.record("expected .failure, got \(result)")
+            return
         }
-        XCTAssertEqual(err, .unknownType("anglesite:not-real"))
+        #expect(err == .unknownType("anglesite:not-real"))
         let received = await router.received
-        XCTAssertTrue(received.isEmpty, "router must not see undecodable input")
+        #expect(received.isEmpty, "router must not see undecodable input")
     }
 }
 

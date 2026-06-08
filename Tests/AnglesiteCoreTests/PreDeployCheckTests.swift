@@ -1,26 +1,28 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class PreDeployCheckTests: XCTestCase {
+struct PreDeployCheckTests {
     private let siteDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
 
     // MARK: Happy path
 
-    func testReturnsPassedWhenScriptEmitsOkTrueJSON() async {
+    @Test func `Returns passed when script emits ok-true JSON`() async {
         let json = #"{"ok": true, "failures": [], "warnings": []}"#
         let check = PreDeployCheck(invoke: { _ in (stdout: json, exitCode: 0) })
 
         let outcome = await check.check(siteID: "mysite", siteDirectory: siteDir)
 
         guard case .passed(let warnings) = outcome else {
-            return XCTFail("expected .passed, got \(outcome)")
+            Issue.record("expected .passed, got \(outcome)")
+            return
         }
-        XCTAssertEqual(warnings, [])
+        #expect(warnings == [])
     }
 
     // MARK: Blocked
 
-    func testReturnsBlockedWhenScriptEmitsOkFalseWithFailures() async {
+    @Test func `Returns blocked when script emits ok-false with failures`() async {
         let json = """
         {
           "ok": false,
@@ -40,16 +42,17 @@ final class PreDeployCheckTests: XCTestCase {
         let outcome = await check.check(siteID: "mysite", siteDirectory: siteDir)
 
         guard case .blocked(let failures, _) = outcome else {
-            return XCTFail("expected .blocked, got \(outcome)")
+            Issue.record("expected .blocked, got \(outcome)")
+            return
         }
-        XCTAssertEqual(failures.count, 1)
-        XCTAssertEqual(failures[0].category, .piiEmail)
-        XCTAssertEqual(failures[0].file, "dist/index.html")
-        XCTAssertTrue(failures[0].detail.contains("jane@yourbusiness.com"))
-        XCTAssertTrue(failures[0].remediation.contains("PII_EMAIL_ALLOW"))
+        #expect(failures.count == 1)
+        #expect(failures[0].category == .piiEmail)
+        #expect(failures[0].file == "dist/index.html")
+        #expect(failures[0].detail.contains("jane@yourbusiness.com"))
+        #expect(failures[0].remediation.contains("PII_EMAIL_ALLOW"))
     }
 
-    func testParsesAllFiveFailureCategories() async {
+    @Test func `Parses all five failure categories`() async {
         let json = """
         {
           "ok": false,
@@ -66,49 +69,52 @@ final class PreDeployCheckTests: XCTestCase {
         let check = PreDeployCheck(invoke: { _ in (stdout: json, exitCode: 1) })
 
         guard case .blocked(let failures, _) = await check.check(siteID: "mysite", siteDirectory: siteDir) else {
-            return XCTFail("expected .blocked")
+            Issue.record("expected .blocked")
+            return
         }
-        XCTAssertEqual(
-            Set(failures.map(\.category)),
-            Set([.piiEmail, .piiPhone, .exposedToken, .thirdPartyScript, .keystaticRoute])
+        #expect(
+            Set(failures.map(\.category)) == Set([.piiEmail, .piiPhone, .exposedToken, .thirdPartyScript, .keystaticRoute])
         )
     }
 
     // MARK: Error paths
 
-    func testReturnsErrorWhenInvokerThrows() async {
+    @Test func `Returns error when invoker throws`() async {
         struct SpawnFailed: Error {}
         let check = PreDeployCheck(invoke: { _ in throw SpawnFailed() })
 
         let outcome = await check.check(siteID: "mysite", siteDirectory: siteDir)
 
         guard case .error(let reason) = outcome else {
-            return XCTFail("expected .error, got \(outcome)")
+            Issue.record("expected .error, got \(outcome)")
+            return
         }
-        XCTAssertTrue(reason.contains("couldn't run"), reason)
+        #expect(reason.contains("couldn't run"), "\(reason)")
     }
 
-    func testReturnsErrorWhenStdoutIsNotParseableJSON() async {
+    @Test func `Returns error when stdout is not parseable JSON`() async {
         // tsx not installed → "command not found" on stderr, no stdout, exit 127
         let check = PreDeployCheck(invoke: { _ in (stdout: "", exitCode: 127) })
 
         guard case .error(let reason) = await check.check(siteID: "mysite", siteDirectory: siteDir) else {
-            return XCTFail("expected .error")
+            Issue.record("expected .error")
+            return
         }
-        XCTAssertTrue(reason.contains("exit 127") || reason.contains("npm run build") || reason.contains("update"), reason)
+        #expect(reason.contains("exit 127") || reason.contains("npm run build") || reason.contains("update"), "\(reason)")
     }
 
-    func testReturnsErrorWhenJSONIsMalformed() async {
+    @Test func `Returns error when JSON is malformed`() async {
         let check = PreDeployCheck(invoke: { _ in (stdout: "not json at all", exitCode: 0) })
 
         guard case .error = await check.check(siteID: "mysite", siteDirectory: siteDir) else {
-            return XCTFail("expected .error")
+            Issue.record("expected .error")
+            return
         }
     }
 
     // MARK: Warnings pass-through
 
-    func testWarningsAreReturnedAlongsidePassedAndBlockedOutcomes() async {
+    @Test func `Warnings are returned alongside passed and blocked outcomes`() async {
         let warningJSON = """
         "warnings": [
           {"category": "missing-og-image", "detail": "No og:image meta tag.", "remediation": "Run `npm run ai-images`."}
@@ -123,16 +129,18 @@ final class PreDeployCheckTests: XCTestCase {
 
         let passedCheck = PreDeployCheck(invoke: { _ in (stdout: passedJSON, exitCode: 0) })
         guard case .passed(let pw) = await passedCheck.check(siteID: "mysite", siteDirectory: siteDir) else {
-            return XCTFail("expected .passed")
+            Issue.record("expected .passed")
+            return
         }
-        XCTAssertEqual(pw.count, 1)
-        XCTAssertEqual(pw[0].category, .missingOgImage)
+        #expect(pw.count == 1)
+        #expect(pw[0].category == .missingOgImage)
 
         let blockedCheck = PreDeployCheck(invoke: { _ in (stdout: blockedJSON, exitCode: 1) })
         guard case .blocked(_, let bw) = await blockedCheck.check(siteID: "mysite", siteDirectory: siteDir) else {
-            return XCTFail("expected .blocked")
+            Issue.record("expected .blocked")
+            return
         }
-        XCTAssertEqual(bw.count, 1)
-        XCTAssertEqual(bw[0].category, .missingOgImage)
+        #expect(bw.count == 1)
+        #expect(bw[0].category == .missingOgImage)
     }
 }

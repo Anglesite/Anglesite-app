@@ -1,7 +1,8 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class PreviewSessionTests: XCTestCase {
+struct PreviewSessionTests {
     private let alwaysReady: AstroDevServer.ReadinessProbe = { _ in true }
     /// A real, existing directory — the supervisor `cd`s into the site dir before spawning, so a
     /// nonexistent path would fail `process.run()` before our fixture script even runs.
@@ -21,31 +22,31 @@ final class PreviewSessionTests: XCTestCase {
         .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script] + args)
     }
 
-    func testUnavailableCommandLandsInFailed() async {
+    @Test func `Unavailable command lands in failed`() async {
         let session = makeSession(
             resolve: { _ in .unavailable(reason: "dependencies not installed — run `npm install`") },
             probe: alwaysReady
         )
         await session.start(siteID: "mysite", siteDirectory: tmpDir)
         let state = await session.state
-        XCTAssertEqual(state, .failed(siteID: "mysite", message: "dependencies not installed — run `npm install`"))
+        #expect(state == .failed(siteID: "mysite", message: "dependencies not installed — run `npm install`"))
     }
 
-    func testRunnableCommandReachesReadyThenStopReturnsToIdle() async {
+    @Test func `Runnable command reaches ready then stop returns to idle`() async {
         let session = makeSession(
             resolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             probe: alwaysReady
         )
         await session.start(siteID: "mysite", siteDirectory: tmpDir)
         let ready = await session.state
-        XCTAssertEqual(ready, .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
+        #expect(ready == .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
 
         await session.stop()
         let idle = await session.state
-        XCTAssertEqual(idle, .idle)
+        #expect(idle == .idle)
     }
 
-    func testCrashBeforeReadyLandsInFailed() async {
+    @Test func `Crash before ready lands in failed`() async {
         let session = makeSession(
             resolve: { _ in self.shFixture("echo broken 1>&2; exit 1") },
             probe: alwaysReady
@@ -57,12 +58,13 @@ final class PreviewSessionTests: XCTestCase {
         )
         let state = await session.state
         guard case .failed(let siteID, _) = state else {
-            return XCTFail("expected .failed, got \(state)")
+            Issue.record("expected .failed, got \(state)")
+            return
         }
-        XCTAssertEqual(siteID, "mysite")
+        #expect(siteID == "mysite")
     }
 
-    func testReadyURLUpdatesWhenADevServerRestartPicksANewPort() async throws {
+    @Test func `Ready URL updates when a dev server restart picks a new port`() async throws {
         let counter = NSTemporaryDirectory() + "preview-restart-\(UUID().uuidString)"
         defer { try? FileManager.default.removeItem(atPath: counter) }
         let script = """
@@ -82,11 +84,11 @@ final class PreviewSessionTests: XCTestCase {
             restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.05)
         )
         let first = await session.state
-        XCTAssertEqual(first, .ready(siteID: "mysite", url: URL(string: "http://localhost:9201/")!))
+        #expect(first == .ready(siteID: "mysite", url: URL(string: "http://localhost:9201/")!))
 
         try? await Task.sleep(nanoseconds: 700_000_000)
         let updated = await session.state
-        XCTAssertEqual(updated, .ready(siteID: "mysite", url: URL(string: "http://localhost:9202/")!))
+        #expect(updated == .ready(siteID: "mysite", url: URL(string: "http://localhost:9202/")!))
 
         await session.stop()
     }
@@ -140,7 +142,7 @@ final class PreviewSessionTests: XCTestCase {
         .run(executable: Self.pythonURL, arguments: ["-u", "-c", Self.mcpFakeScript])
     }
 
-    func testMCPClientIsRunningAfterSuccessfulStart() async {
+    @Test func `MCP client is running after successful start`() async {
         let (session, mcp) = makeSessionWithMCP(
             astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             mcpResolve: { self.runnableMCPFake() }
@@ -149,34 +151,34 @@ final class PreviewSessionTests: XCTestCase {
 
         // AstroDevServer succeeded → state is .ready.
         let state = await session.state
-        XCTAssertEqual(state, .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
+        #expect(state == .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
 
         // MCP also came up.
         let running = await mcp.isRunning
-        XCTAssertTrue(running, "expected MCPClient.isRunning after a successful session.start")
+        #expect(running, "expected MCPClient.isRunning after a successful session.start")
 
         // The session's exposed reference is the same instance.
         let exposed = await session.mcpClient
-        XCTAssertTrue(exposed === mcp)
+        #expect(exposed === mcp)
 
         await session.stop()
     }
 
-    func testMCPClientStopsWhenSessionStops() async {
+    @Test func `MCP client stops when session stops`() async {
         let (session, mcp) = makeSessionWithMCP(
             astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             mcpResolve: { self.runnableMCPFake() }
         )
         await session.start(siteID: "mysite", siteDirectory: tmpDir)
         let runningBefore = await mcp.isRunning
-        XCTAssertTrue(runningBefore)
+        #expect(runningBefore)
 
         await session.stop()
         let runningAfter = await mcp.isRunning
-        XCTAssertFalse(runningAfter, "MCPClient should be stopped after session.stop()")
+        #expect(!runningAfter, "MCPClient should be stopped after session.stop()")
     }
 
-    func testStateStaysReadyWhenMCPCommandIsUnavailable() async {
+    @Test func `State stays ready when MCP command is unavailable`() async {
         // MCP can't be located → session still reaches .ready (preview is the primary feature).
         let (session, mcp) = makeSessionWithMCP(
             astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
@@ -185,14 +187,14 @@ final class PreviewSessionTests: XCTestCase {
         await session.start(siteID: "mysite", siteDirectory: tmpDir)
 
         let state = await session.state
-        XCTAssertEqual(state, .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
+        #expect(state == .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
         let running = await mcp.isRunning
-        XCTAssertFalse(running)
+        #expect(!running)
 
         await session.stop()
     }
 
-    func testStateStaysReadyWhenMCPLaunchFails() async {
+    @Test func `State stays ready when MCP launch fails`() async {
         // MCP launch errors out (bad executable) → session still reaches .ready, mcpClient is not running.
         let (session, mcp) = makeSessionWithMCP(
             astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
@@ -201,14 +203,14 @@ final class PreviewSessionTests: XCTestCase {
         await session.start(siteID: "mysite", siteDirectory: tmpDir)
         let state = await session.state
         if case .ready = state { /* ok */ } else {
-            XCTFail("expected .ready (graceful MCP failure), got \(state)")
+            Issue.record("expected .ready (graceful MCP failure), got \(state)")
         }
         let running = await mcp.isRunning
-        XCTAssertFalse(running)
+        #expect(!running)
         await session.stop()
     }
 
-    func testObserveStreamEmitsIdleStartingReady() async {
+    @Test func `Observe stream emits idle starting ready`() async {
         let session = makeSession(
             resolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             probe: alwaysReady
@@ -218,7 +220,7 @@ final class PreviewSessionTests: XCTestCase {
 
         // First emission is the current state (idle), before we start.
         let s0 = await iterator.next()
-        XCTAssertEqual(s0, .idle)
+        #expect(s0 == .idle)
 
         await session.start(siteID: "mysite", siteDirectory: tmpDir)
 
@@ -228,8 +230,8 @@ final class PreviewSessionTests: XCTestCase {
             seen.append(s)
             if case .ready = s { break }
         }
-        XCTAssertEqual(seen.first, .starting(siteID: "mysite"))
-        XCTAssertEqual(seen.last, .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
+        #expect(seen.first == .starting(siteID: "mysite"))
+        #expect(seen.last == .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
 
         await session.stop()
     }

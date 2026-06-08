@@ -1,17 +1,20 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class NodeModulesCacheTests: XCTestCase {
-    private var scratch: URL!
+/// A `final class` (not a `struct`) so `deinit` can remove the scratch directory, mirroring the
+/// former `tearDownWithError`.
+final class NodeModulesCacheTests {
+    private let scratch: URL
 
-    override func setUpWithError() throws {
+    init() throws {
         scratch = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("npmcache-test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
-        if let scratch { try? FileManager.default.removeItem(at: scratch) }
+    deinit {
+        try? FileManager.default.removeItem(at: scratch)
     }
 
     /// A fake extractor that drops a marker file (named after the archive) and a sub-directory
@@ -35,18 +38,18 @@ final class NodeModulesCacheTests: XCTestCase {
         scratch.appendingPathComponent("cache.tar")
     }
 
-    func testPrimeExtractsWhenCacheMissing() async throws {
+    @Test func `Prime extracts when cache missing`() async throws {
         let cache = makeCache(archive: .init(url: dummyArchiveURL(), version: "v1"), extract: fakeExtractor())
         let outcome = try await cache.prime()
-        XCTAssertEqual(outcome, .extracted(version: "v1"))
+        #expect(outcome == .extracted(version: "v1"))
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: cache.npmCacheURL.appendingPathComponent("marker.txt").path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: cache.npmCacheURL.appendingPathComponent("some-package").path))
+        #expect(FileManager.default.fileExists(atPath: cache.npmCacheURL.appendingPathComponent("marker.txt").path))
+        #expect(FileManager.default.fileExists(atPath: cache.npmCacheURL.appendingPathComponent("some-package").path))
         let stamp = try String(contentsOf: cache.versionStampURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
-        XCTAssertEqual(stamp, "v1")
+        #expect(stamp == "v1")
     }
 
-    func testPrimeIsNoOpWhenAlreadyCurrent() async throws {
+    @Test func `Prime is no-op when already current`() async throws {
         let first = makeCache(archive: .init(url: dummyArchiveURL(), version: "v1"), extract: fakeExtractor())
         _ = try await first.prime()
 
@@ -54,57 +57,55 @@ final class NodeModulesCacheTests: XCTestCase {
         let secondCalls = ProbeCounter()
         let second = makeCache(archive: .init(url: dummyArchiveURL(), version: "v1"), extract: fakeExtractor(callCount: secondCalls))
         let outcome = try await second.prime()
-        XCTAssertEqual(outcome, .upToDate(version: "v1"))
+        #expect(outcome == .upToDate(version: "v1"))
         let calls = await secondCalls.value
-        XCTAssertEqual(calls, 0)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: second.npmCacheURL.appendingPathComponent("marker.txt").path))
+        #expect(calls == 0)
+        #expect(FileManager.default.fileExists(atPath: second.npmCacheURL.appendingPathComponent("marker.txt").path))
     }
 
-    func testPrimeReExtractsWhenVersionChanged() async throws {
+    @Test func `Prime re-extracts when version changed`() async throws {
         _ = try await makeCache(archive: .init(url: dummyArchiveURL(), version: "v1"), extract: fakeExtractor()).prime()
 
         let v2Calls = ProbeCounter()
         let v2 = makeCache(archive: .init(url: dummyArchiveURL(), version: "v2"), extract: fakeExtractor(callCount: v2Calls))
         let outcome = try await v2.prime()
-        XCTAssertEqual(outcome, .extracted(version: "v2"))
+        #expect(outcome == .extracted(version: "v2"))
         let calls = await v2Calls.value
-        XCTAssertEqual(calls, 1)
+        #expect(calls == 1)
         let stamp = try String(contentsOf: v2.versionStampURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
-        XCTAssertEqual(stamp, "v2")
+        #expect(stamp == "v2")
     }
 
-    func testPrimeReExtractsWhenCacheDirRemovedButStampPresent() async throws {
+    @Test func `Prime re-extracts when cache dir removed but stamp present`() async throws {
         let cache = makeCache(archive: .init(url: dummyArchiveURL(), version: "v1"), extract: fakeExtractor())
         _ = try await cache.prime()
         try FileManager.default.removeItem(at: cache.npmCacheURL)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: cache.npmCacheURL.path))
+        #expect(!FileManager.default.fileExists(atPath: cache.npmCacheURL.path))
 
         let outcome = try await cache.prime()
-        XCTAssertEqual(outcome, .extracted(version: "v1"))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: cache.npmCacheURL.appendingPathComponent("marker.txt").path))
+        #expect(outcome == .extracted(version: "v1"))
+        #expect(FileManager.default.fileExists(atPath: cache.npmCacheURL.appendingPathComponent("marker.txt").path))
     }
 
-    func testPrimeReturnsNoBundledArchiveWhenNothingBundled() async throws {
+    @Test func `Prime returns no bundled archive when nothing bundled`() async throws {
         let cache = makeCache(archive: nil, extract: fakeExtractor())
         let outcome = try await cache.prime()
-        XCTAssertEqual(outcome, .noBundledArchive)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: cache.npmCacheURL.path))
+        #expect(outcome == .noBundledArchive)
+        #expect(!FileManager.default.fileExists(atPath: cache.npmCacheURL.path))
     }
 
-    func testNpmInstallArgumentsPointAtTheCache() {
+    @Test func `Npm install arguments point at the cache`() {
         let cache = makeCache(archive: nil, extract: fakeExtractor())
-        XCTAssertEqual(
-            cache.npmInstallArguments(),
-            ["install", "--prefer-offline", "--cache", cache.npmCacheURL.path]
+        #expect(
+            cache.npmInstallArguments() == ["install", "--prefer-offline", "--cache", cache.npmCacheURL.path]
         )
-        XCTAssertEqual(
-            cache.npmInstallArguments(extra: ["--no-audit"]),
-            ["install", "--prefer-offline", "--cache", cache.npmCacheURL.path, "--no-audit"]
+        #expect(
+            cache.npmInstallArguments(extra: ["--no-audit"]) == ["install", "--prefer-offline", "--cache", cache.npmCacheURL.path, "--no-audit"]
         )
     }
 
     // Integration: the real `/usr/bin/tar` extractor round-trips a tarball.
-    func testTarExtractorRoundTrips() async throws {
+    @Test func `Tar extractor round trips`() async throws {
         // Build a source "cache" directory and tar its *contents* (so they land directly in dest).
         let src = scratch.appendingPathComponent("src-cache", isDirectory: true)
         try FileManager.default.createDirectory(at: src.appendingPathComponent("_cacache"), withIntermediateDirectories: true)
@@ -117,7 +118,7 @@ final class NodeModulesCacheTests: XCTestCase {
             executable: URL(fileURLWithPath: "/usr/bin/tar"),
             arguments: ["-cf", tarball.path, "-C", src.path, "."]
         )
-        XCTAssertEqual(mk.exitCode, 0, "tar -cf failed: \(mk.stderr)")
+        #expect(mk.exitCode == 0, "tar -cf failed: \(mk.stderr)")
 
         let cache = NodeModulesCache(
             bundledArchive: .init(url: tarball, version: "real-v1"),
@@ -125,12 +126,11 @@ final class NodeModulesCacheTests: XCTestCase {
             extract: NodeModulesCache.makeTarExtractor(supervisor: supervisor)
         )
         let outcome = try await cache.prime()
-        XCTAssertEqual(outcome, .extracted(version: "real-v1"))
-        XCTAssertEqual(
-            try String(contentsOf: cache.npmCacheURL.appendingPathComponent("_cacache/index-v5"), encoding: .utf8),
-            "index"
+        #expect(outcome == .extracted(version: "real-v1"))
+        #expect(
+            try String(contentsOf: cache.npmCacheURL.appendingPathComponent("_cacache/index-v5"), encoding: .utf8) == "index"
         )
-        XCTAssertTrue(FileManager.default.fileExists(atPath: cache.npmCacheURL.appendingPathComponent("_locks.json").path))
+        #expect(FileManager.default.fileExists(atPath: cache.npmCacheURL.appendingPathComponent("_locks.json").path))
     }
 }
 

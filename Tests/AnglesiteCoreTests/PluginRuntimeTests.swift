@@ -1,46 +1,50 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class PluginRuntimeTests: XCTestCase {
-    private var tempDir: URL!
-    private var suiteName: String!
-    private var defaults: UserDefaults!
+/// A `final class` (not a `struct`) so `deinit` can clean up the temp directory and throwaway
+/// `UserDefaults` suite, mirroring the former `tearDownWithError`.
+final class PluginRuntimeTests {
+    private let tempDir: URL
+    private let suiteName: String
+    private let defaults: UserDefaults
     private let fileManager = FileManager.default
 
-    override func setUpWithError() throws {
+    init() throws {
         tempDir = fileManager.temporaryDirectory.appendingPathComponent("anglesite-plugin-\(UUID().uuidString)", isDirectory: true)
         try fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        suiteName = "test-anglesite-\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)
+        let suite = "test-anglesite-\(UUID().uuidString)"
+        suiteName = suite
+        defaults = UserDefaults(suiteName: suite)!
     }
 
-    override func tearDownWithError() throws {
+    deinit {
         try? fileManager.removeItem(at: tempDir)
-        defaults?.removePersistentDomain(forName: suiteName)
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
-    func testIsPluginDirectoryRecognizesManifest() throws {
+    @Test func `Is plugin directory recognizes manifest`() throws {
         let plugin = tempDir.appendingPathComponent("plugin", isDirectory: true)
         let claudeDir = plugin.appendingPathComponent(".claude-plugin", isDirectory: true)
         try fileManager.createDirectory(at: claudeDir, withIntermediateDirectories: true)
         try Data().write(to: claudeDir.appendingPathComponent("plugin.json"))
 
-        XCTAssertTrue(PluginRuntime.isPluginDirectory(plugin))
+        #expect(PluginRuntime.isPluginDirectory(plugin))
     }
 
-    func testIsPluginDirectoryRejectsBareDirectory() {
-        XCTAssertFalse(PluginRuntime.isPluginDirectory(tempDir))
+    @Test func `Is plugin directory rejects bare directory`() {
+        #expect(!PluginRuntime.isPluginDirectory(tempDir))
     }
 
-    func testResolveReportsMissingWhenNoSourceFound() {
+    @Test func `Resolve reports missing when no source found`() {
         let settings = AppSettings(defaults: defaults)
         // Bundle.main inside `swift test` is the test runner — it has no plugin resource.
         let resolution = PluginRuntime.resolve(settings: settings)
-        XCTAssertEqual(resolution.source, .missing)
-        XCTAssertNil(resolution.url)
+        #expect(resolution.source == .missing)
+        #expect(resolution.url == nil)
     }
 
-    func testResolveHonorsOverrideWhenValid() throws {
+    @Test func `Resolve honors override when valid`() throws {
         let plugin = tempDir.appendingPathComponent("plugin", isDirectory: true)
         let claudeDir = plugin.appendingPathComponent(".claude-plugin", isDirectory: true)
         try fileManager.createDirectory(at: claudeDir, withIntermediateDirectories: true)
@@ -50,14 +54,14 @@ final class PluginRuntimeTests: XCTestCase {
         settings.pluginPathOverride = plugin
 
         let resolution = PluginRuntime.resolve(settings: settings)
-        XCTAssertEqual(resolution.source, .override(plugin))
-        XCTAssertEqual(resolution.url?.path, plugin.path)
+        #expect(resolution.source == .override(plugin))
+        #expect(resolution.url?.path == plugin.path)
     }
 
-    func testResolveIgnoresInvalidOverride() {
+    @Test func `Resolve ignores invalid override`() {
         let settings = AppSettings(defaults: defaults)
         settings.pluginPathOverride = tempDir // exists but no plugin.json
         let resolution = PluginRuntime.resolve(settings: settings)
-        XCTAssertEqual(resolution.source, .missing)
+        #expect(resolution.source == .missing)
     }
 }
