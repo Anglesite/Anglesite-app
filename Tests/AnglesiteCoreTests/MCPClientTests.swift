@@ -177,15 +177,30 @@ struct MCPClientTests {
         let crashResult = try await client.callTool(name: "crash")
         #expect(crashResult.content.first?.text == "crashing")
 
-        // Allow respawn + re-handshake to complete.
-        try? await Task.sleep(nanoseconds: 600_000_000)
-
         // Fresh instance should answer normally — proves the client reconnected and re-initialized.
-        let tools = try await client.listTools()
+        // Poll instead of a fixed sleep: respawn + handshake comfortably fits in a few hundred ms
+        // locally but can take seconds on a loaded CI runner. .notInitialized / .reconnecting are
+        // the documented transient errors during a supervised respawn; anything else is real.
+        let tools = try await Self.listToolsAwaitingReconnect(client, timeout: 10)
         #expect(tools.first?.name == "echo")
 
         let echoed = try await client.callTool(name: "echo", arguments: .object(["text": .string("after-reconnect")]))
         #expect(echoed.content.first?.text == "after-reconnect")
+    }
+
+    private static func listToolsAwaitingReconnect(
+        _ client: MCPClient,
+        timeout: TimeInterval
+    ) async throws -> [MCPClient.ToolDescriptor] {
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            do {
+                return try await client.listTools()
+            } catch MCPClient.MCPError.notInitialized, MCPClient.MCPError.reconnecting {
+                guard Date() < deadline else { throw MCPClient.MCPError.timeout }
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
     }
 
     // MARK: JSONValue round-trip
