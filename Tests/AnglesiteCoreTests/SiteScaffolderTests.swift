@@ -1,4 +1,5 @@
 import XCTest
+import os
 @testable import AnglesiteCore
 
 final class SiteScaffolderTests: XCTestCase {
@@ -78,15 +79,18 @@ final class SiteScaffolderTests: XCTestCase {
 
     func testNpmFailureIsNonFatalAndStillRegisters() async throws {
         let root = tmpDir()
-        var registered = false
+        let registered = OSAllocatedUnfairLock<Bool>(initialState: false)
         let scaffolder = SiteScaffolder(
             sitesRoot: root, pluginURL: URL(fileURLWithPath: "/plugin"), catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(npmExit: 1, calls: CallRecorder()),
-            register: { url in registered = true; return SiteStore.Site(id: url.path, name: "x", path: url, isValid: true, missingSentinels: []) }
+            register: { url in
+                registered.withLock { $0 = true }
+                return SiteStore.Site(id: url.path, name: "x", path: url, isValid: true, missingSentinels: [])
+            }
         )
         var steps: [SiteScaffolder.ScaffoldStep] = []
         for await s in scaffolder.scaffold(makeDraft()) { steps.append(s) }
-        XCTAssertTrue(registered, "npm failure should not block registration")
+        XCTAssertTrue(registered.withLock { $0 }, "npm failure should not block registration")
         XCTAssertTrue(steps.contains { if case .warning(let s, _) = $0 { return s == "installing" }; return false })
         guard case .done? = steps.last else { return XCTFail("expected .done despite npm failure") }
     }
