@@ -15,7 +15,7 @@ let strictConcurrency: [SwiftSetting] = [
 let package = Package(
     name: "Anglesite",
     platforms: [
-        .macOS(.v14)
+        .macOS("27.0")
     ],
     products: [
         .library(name: "AnglesiteCore", targets: ["AnglesiteCore"]),

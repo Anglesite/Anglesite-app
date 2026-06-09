@@ -18,7 +18,7 @@ When in doubt, the plugin is the source of truth for skills, hooks, and the MCP 
 
 ## Stack
 
-- **Swift / SwiftUI** — app shell. Targets macOS 14+.
+- **Swift / SwiftUI** — app shell. Targets macOS 27+.
 - **Plain SwiftUI + actors** for v0. No TCA, no third-party state libraries.
 - **WKWebView** — live preview of the Astro dev server.
 - **Embedded Node** — vendored at build time. The sandboxed MAS target re-signs it with the app's identity + hardened-runtime JIT/sandbox entitlements (`scripts/resign-node.sh`); a Developer-ID re-sign for the DevID notarization track is still deferred (#1/#4).
