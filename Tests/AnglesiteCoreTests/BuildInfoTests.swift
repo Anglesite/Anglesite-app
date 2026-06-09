@@ -2,11 +2,11 @@ import Testing
 @testable import AnglesiteCore
 
 struct BuildInfoTests {
-    @Test func `Summary contains app name`() {
+    @Test("Summary contains app name") func summaryContainsAppName() {
         #expect(BuildInfo.summary.contains("Anglesite"))
     }
 
-    @Test func `Summary contains phase`() {
+    @Test("Summary contains phase") func summaryContainsPhase() {
         #expect(BuildInfo.summary.contains("phase \(BuildInfo.phase)"))
     }
 }

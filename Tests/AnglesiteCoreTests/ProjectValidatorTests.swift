@@ -17,20 +17,20 @@ final class ProjectValidatorTests {
         try? fileManager.removeItem(at: tempDir)
     }
 
-    @Test func `Reports all sentinels missing for nonexistent directory`() {
+    @Test("Reports all sentinels missing for nonexistent directory") func reportsAllSentinelsMissingForNonexistentDirectory() {
         let missing = tempDir.appendingPathComponent("does-not-exist")
         let result = ProjectValidator.validate(missing)
         #expect(!result.isValid)
         #expect(Set(result.missing) == Set(ProjectValidator.sentinels))
     }
 
-    @Test func `Reports all sentinels missing for empty directory`() {
+    @Test("Reports all sentinels missing for empty directory") func reportsAllSentinelsMissingForEmptyDirectory() {
         let result = ProjectValidator.validate(tempDir)
         #expect(!result.isValid)
         #expect(Set(result.missing) == Set(ProjectValidator.sentinels))
     }
 
-    @Test func `Is valid when only required sentinels present`() throws {
+    @Test("Is valid when only required sentinels present") func isValidWhenOnlyRequiredSentinelsPresent() throws {
         // Smoke test (2026-05-22) exposed: a minimal site that has the *required* sentinels
         // (anglesite.config.json + astro.config.ts) but is missing the *recommended* one
         // (keystatic.config.ts) is a valid Anglesite project — keystatic is an optional
@@ -44,7 +44,7 @@ final class ProjectValidatorTests {
         #expect(result.missingRequired == [])
     }
 
-    @Test func `Not valid when a required sentinel is missing`() throws {
+    @Test("Not valid when a required sentinel is missing") func notValidWhenARequiredSentinelIsMissing() throws {
         // Only the recommended sentinel + one of the two required ones — still not a valid
         // Anglesite project because anglesite.config.json is missing.
         try Data().write(to: tempDir.appendingPathComponent("astro.config.ts"))
@@ -54,7 +54,7 @@ final class ProjectValidatorTests {
         #expect(result.missingRequired == ["anglesite.config.json"])
     }
 
-    @Test func `Is valid when all sentinels present`() throws {
+    @Test("Is valid when all sentinels present") func isValidWhenAllSentinelsPresent() throws {
         for name in ProjectValidator.sentinels {
             try Data().write(to: tempDir.appendingPathComponent(name))
         }

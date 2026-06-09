@@ -91,7 +91,7 @@ struct MCPClientTests {
         return (client, center, supervisor)
     }
 
-    @Test func `Start runs initialize handshake`() async throws {
+    @Test("Start runs initialize handshake") func startRunsInitializeHandshake() async throws {
         let (client, _, _) = makeClient()
         try await client.start(
             executable: Self.pythonURL,
@@ -105,7 +105,7 @@ struct MCPClientTests {
         #expect(!runningAfter)
     }
 
-    @Test func `List tools returns server tool definitions`() async throws {
+    @Test("List tools returns server tool definitions") func listToolsReturnsServerToolDefinitions() async throws {
         let (client, _, _) = makeClient()
         try await client.start(
             executable: Self.pythonURL,
@@ -121,7 +121,7 @@ struct MCPClientTests {
         #expect(tools.first?.inputSchema != nil)
     }
 
-    @Test func `Call tool returns text content`() async throws {
+    @Test("Call tool returns text content") func callToolReturnsTextContent() async throws {
         let (client, _, _) = makeClient()
         try await client.start(
             executable: Self.pythonURL,
@@ -140,7 +140,7 @@ struct MCPClientTests {
         #expect(result.content.first?.text == "hello")
     }
 
-    @Test func `Call tool unknown returns RPC error`() async throws {
+    @Test("Call tool unknown returns RPC error") func callToolUnknownReturnsRPCError() async throws {
         let (client, _, _) = makeClient()
         try await client.start(
             executable: Self.pythonURL,
@@ -154,7 +154,7 @@ struct MCPClientTests {
         }
     }
 
-    @Test func `Call tool before start throws not initialized`() async throws {
+    @Test("Call tool before start throws not initialized") func callToolBeforeStartThrowsNotInitialized() async throws {
         let (client, _, _) = makeClient()
         await #expect(throws: MCPClient.MCPError.notInitialized) {
             _ = try await client.callTool(name: "echo")
@@ -163,7 +163,7 @@ struct MCPClientTests {
 
     // MARK: reconnect on crash
 
-    @Test func `Reconnects after server crash`() async throws {
+    @Test("Reconnects after server crash") func reconnectsAfterServerCrash() async throws {
         let (client, _, _) = makeClient()
         try await client.start(
             executable: Self.pythonURL,
@@ -190,7 +190,7 @@ struct MCPClientTests {
 
     // MARK: JSONValue round-trip
 
-    @Test func `JSON value round trip`() throws {
+    @Test("JSON value round trip") func jSONValueRoundTrip() throws {
         let original: JSONValue = .object([
             "s": .string("hello"),
             "n": .int(42),

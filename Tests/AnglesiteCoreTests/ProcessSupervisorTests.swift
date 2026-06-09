@@ -3,7 +3,7 @@ import Foundation
 @testable import AnglesiteCore
 
 struct ProcessSupervisorTests {
-    @Test func `Run captures standard output`() async throws {
+    @Test("Run captures standard output") func runCapturesStandardOutput() async throws {
         let supervisor = ProcessSupervisor()
         let result = try await supervisor.run(
             executable: URL(fileURLWithPath: "/bin/echo"),
@@ -14,7 +14,7 @@ struct ProcessSupervisorTests {
         #expect(result.exitCode == 0)
     }
 
-    @Test func `Run captures standard error`() async throws {
+    @Test("Run captures standard error") func runCapturesStandardError() async throws {
         let supervisor = ProcessSupervisor()
         let result = try await supervisor.run(
             executable: URL(fileURLWithPath: "/bin/sh"),
@@ -25,7 +25,7 @@ struct ProcessSupervisorTests {
         #expect(result.exitCode == 0)
     }
 
-    @Test func `Run reports non-zero exit code`() async throws {
+    @Test("Run reports non-zero exit code") func runReportsNonZeroExitCode() async throws {
         let supervisor = ProcessSupervisor()
         let result = try await supervisor.run(
             executable: URL(fileURLWithPath: "/bin/sh"),
@@ -34,7 +34,7 @@ struct ProcessSupervisorTests {
         #expect(result.exitCode == 7)
     }
 
-    @Test func `Run throws when executable missing`() async {
+    @Test("Run throws when executable missing") func runThrowsWhenExecutableMissing() async {
         let supervisor = ProcessSupervisor()
         await #expect(throws: ProcessSupervisor.SupervisorError.self) {
             _ = try await supervisor.run(
@@ -44,7 +44,7 @@ struct ProcessSupervisorTests {
         }
     }
 
-    @Test func `Run passes environment`() async throws {
+    @Test("Run passes environment") func runPassesEnvironment() async throws {
         let supervisor = ProcessSupervisor()
         let result = try await supervisor.run(
             executable: URL(fileURLWithPath: "/bin/sh"),

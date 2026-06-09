@@ -7,7 +7,7 @@ struct EditReplyAndRouterTests {
 
     // MARK: EditReply JSON encoding
 
-    @Test func `Edit reply encodes applied with message`() throws {
+    @Test("Edit reply encodes applied with message") func editReplyEncodesAppliedWithMessage() throws {
         let reply = EditReply(id: "e-1", status: .applied, message: "ok")
         let json = try JSONEncoder().encode(reply)
         let decoded = try JSONSerialization.jsonObject(with: json) as? [String: Any]
@@ -16,7 +16,7 @@ struct EditReplyAndRouterTests {
         #expect(decoded?["message"] as? String == "ok")
     }
 
-    @Test func `Edit reply encodes failure and ambiguous status strings`() throws {
+    @Test("Edit reply encodes failure and ambiguous status strings") func editReplyEncodesFailureAndAmbiguousStatusStrings() throws {
         let cases: [(EditReply.Status, String)] = [(.applied, "applied"), (.failed, "failed"), (.ambiguous, "ambiguous")]
         for (status, raw) in cases {
             let reply = EditReply(id: "e", status: status, message: nil)
@@ -28,7 +28,7 @@ struct EditReplyAndRouterTests {
 
     // MARK: LoggingEditRouter
 
-    @Test func `Logging edit router replies failed with correlated ID`() async {
+    @Test("Logging edit router replies failed with correlated ID") func loggingEditRouterRepliesFailedWithCorrelatedID() async {
         let center = LogCenter()
         let router = LoggingEditRouter(logCenter: center)
         let msg = EditMessage(
@@ -44,7 +44,7 @@ struct EditReplyAndRouterTests {
                 "reply message should explain that the routing isn't wired yet — got: \(reply.message ?? "nil")")
     }
 
-    @Test func `Logging edit router appends to log center`() async {
+    @Test("Logging edit router appends to log center") func loggingEditRouterAppendsToLogCenter() async {
         let center = LogCenter()
         let router = LoggingEditRouter(logCenter: center)
         let msg = EditMessage(

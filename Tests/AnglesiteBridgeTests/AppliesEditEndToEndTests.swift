@@ -42,7 +42,7 @@ final class AppliesEditEndToEndTests {
 
     // MARK: the test
 
-    @Test func `Apply edit end to end mutates the file on disk`() async throws {
+    @Test("Apply edit end to end mutates the file on disk") func applyEditEndToEndMutatesTheFileOnDisk() async throws {
         let pluginRoot = try Self.requireSiblingPlugin()
         let node = try Self.requireNode()
         let serverPath = pluginRoot.appendingPathComponent("server/index.mjs")

@@ -7,7 +7,7 @@ struct PreDeployCheckTests {
 
     // MARK: Happy path
 
-    @Test func `Returns passed when script emits ok-true JSON`() async {
+    @Test("Returns passed when script emits ok-true JSON") func returnsPassedWhenScriptEmitsOkTrueJSON() async {
         let json = #"{"ok": true, "failures": [], "warnings": []}"#
         let check = PreDeployCheck(invoke: { _ in (stdout: json, exitCode: 0) })
 
@@ -22,7 +22,7 @@ struct PreDeployCheckTests {
 
     // MARK: Blocked
 
-    @Test func `Returns blocked when script emits ok-false with failures`() async {
+    @Test("Returns blocked when script emits ok-false with failures") func returnsBlockedWhenScriptEmitsOkFalseWithFailures() async {
         let json = """
         {
           "ok": false,
@@ -52,7 +52,7 @@ struct PreDeployCheckTests {
         #expect(failures[0].remediation.contains("PII_EMAIL_ALLOW"))
     }
 
-    @Test func `Parses all five failure categories`() async {
+    @Test("Parses all five failure categories") func parsesAllFiveFailureCategories() async {
         let json = """
         {
           "ok": false,
@@ -79,7 +79,7 @@ struct PreDeployCheckTests {
 
     // MARK: Error paths
 
-    @Test func `Returns error when invoker throws`() async {
+    @Test("Returns error when invoker throws") func returnsErrorWhenInvokerThrows() async {
         struct SpawnFailed: Error {}
         let check = PreDeployCheck(invoke: { _ in throw SpawnFailed() })
 
@@ -92,7 +92,7 @@ struct PreDeployCheckTests {
         #expect(reason.contains("couldn't run"), "\(reason)")
     }
 
-    @Test func `Returns error when stdout is not parseable JSON`() async {
+    @Test("Returns error when stdout is not parseable JSON") func returnsErrorWhenStdoutIsNotParseableJSON() async {
         // tsx not installed → "command not found" on stderr, no stdout, exit 127
         let check = PreDeployCheck(invoke: { _ in (stdout: "", exitCode: 127) })
 
@@ -103,7 +103,7 @@ struct PreDeployCheckTests {
         #expect(reason.contains("exit 127") || reason.contains("npm run build") || reason.contains("update"), "\(reason)")
     }
 
-    @Test func `Returns error when JSON is malformed`() async {
+    @Test("Returns error when JSON is malformed") func returnsErrorWhenJSONIsMalformed() async {
         let check = PreDeployCheck(invoke: { _ in (stdout: "not json at all", exitCode: 0) })
 
         guard case .error = await check.check(siteID: "mysite", siteDirectory: siteDir) else {
@@ -114,7 +114,7 @@ struct PreDeployCheckTests {
 
     // MARK: Warnings pass-through
 
-    @Test func `Warnings are returned alongside passed and blocked outcomes`() async {
+    @Test("Warnings are returned alongside passed and blocked outcomes") func warningsAreReturnedAlongsidePassedAndBlockedOutcomes() async {
         let warningJSON = """
         "warnings": [
           {"category": "missing-og-image", "detail": "No og:image meta tag.", "remediation": "Run `npm run ai-images`."}

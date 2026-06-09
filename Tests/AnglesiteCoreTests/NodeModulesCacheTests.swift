@@ -38,7 +38,7 @@ final class NodeModulesCacheTests {
         scratch.appendingPathComponent("cache.tar")
     }
 
-    @Test func `Prime extracts when cache missing`() async throws {
+    @Test("Prime extracts when cache missing") func primeExtractsWhenCacheMissing() async throws {
         let cache = makeCache(archive: .init(url: dummyArchiveURL(), version: "v1"), extract: fakeExtractor())
         let outcome = try await cache.prime()
         #expect(outcome == .extracted(version: "v1"))
@@ -49,7 +49,7 @@ final class NodeModulesCacheTests {
         #expect(stamp == "v1")
     }
 
-    @Test func `Prime is no-op when already current`() async throws {
+    @Test("Prime is no-op when already current") func primeIsNoOpWhenAlreadyCurrent() async throws {
         let first = makeCache(archive: .init(url: dummyArchiveURL(), version: "v1"), extract: fakeExtractor())
         _ = try await first.prime()
 
@@ -63,7 +63,7 @@ final class NodeModulesCacheTests {
         #expect(FileManager.default.fileExists(atPath: second.npmCacheURL.appendingPathComponent("marker.txt").path))
     }
 
-    @Test func `Prime re-extracts when version changed`() async throws {
+    @Test("Prime re-extracts when version changed") func primeReExtractsWhenVersionChanged() async throws {
         _ = try await makeCache(archive: .init(url: dummyArchiveURL(), version: "v1"), extract: fakeExtractor()).prime()
 
         let v2Calls = ProbeCounter()
@@ -76,7 +76,7 @@ final class NodeModulesCacheTests {
         #expect(stamp == "v2")
     }
 
-    @Test func `Prime re-extracts when cache dir removed but stamp present`() async throws {
+    @Test("Prime re-extracts when cache dir removed but stamp present") func primeReExtractsWhenCacheDirRemovedButStampPresent() async throws {
         let cache = makeCache(archive: .init(url: dummyArchiveURL(), version: "v1"), extract: fakeExtractor())
         _ = try await cache.prime()
         try FileManager.default.removeItem(at: cache.npmCacheURL)
@@ -87,14 +87,14 @@ final class NodeModulesCacheTests {
         #expect(FileManager.default.fileExists(atPath: cache.npmCacheURL.appendingPathComponent("marker.txt").path))
     }
 
-    @Test func `Prime returns no bundled archive when nothing bundled`() async throws {
+    @Test("Prime returns no bundled archive when nothing bundled") func primeReturnsNoBundledArchiveWhenNothingBundled() async throws {
         let cache = makeCache(archive: nil, extract: fakeExtractor())
         let outcome = try await cache.prime()
         #expect(outcome == .noBundledArchive)
         #expect(!FileManager.default.fileExists(atPath: cache.npmCacheURL.path))
     }
 
-    @Test func `Npm install arguments point at the cache`() {
+    @Test("Npm install arguments point at the cache") func npmInstallArgumentsPointAtTheCache() {
         let cache = makeCache(archive: nil, extract: fakeExtractor())
         #expect(
             cache.npmInstallArguments() == ["install", "--prefer-offline", "--cache", cache.npmCacheURL.path]
@@ -104,7 +104,7 @@ final class NodeModulesCacheTests {
         )
     }
 
-    @Test func `Resolve bundled archive prefers gzipped tarball`() throws {
+    @Test("Resolve bundled archive prefers gzipped tarball") func resolveBundledArchivePrefersGzippedTarball() throws {
         let resources = scratch.appendingPathComponent("Resources", isDirectory: true)
         let npmCache = resources.appendingPathComponent("npm-cache", isDirectory: true)
         try FileManager.default.createDirectory(at: npmCache, withIntermediateDirectories: true)
@@ -116,7 +116,7 @@ final class NodeModulesCacheTests {
         #expect(resolved?.version == "abc123")
     }
 
-    @Test func `Resolve bundled archive ignores uncompressed tarball`() throws {
+    @Test("Resolve bundled archive ignores uncompressed tarball") func resolveBundledArchiveIgnoresUncompressedTarball() throws {
         // We ship gzipped now; a stale plain cache.tar must not be picked up.
         let resources = scratch.appendingPathComponent("Resources", isDirectory: true)
         let npmCache = resources.appendingPathComponent("npm-cache", isDirectory: true)
@@ -127,7 +127,7 @@ final class NodeModulesCacheTests {
     }
 
     // Integration: the real `/usr/bin/tar` extractor round-trips a gzipped tarball.
-    @Test func `Tar extractor round trips`() async throws {
+    @Test("Tar extractor round trips") func tarExtractorRoundTrips() async throws {
         // Build a source "cache" directory and tar its *contents* (so they land directly in dest).
         let src = scratch.appendingPathComponent("src-cache", isDirectory: true)
         try FileManager.default.createDirectory(at: src.appendingPathComponent("_cacache"), withIntermediateDirectories: true)

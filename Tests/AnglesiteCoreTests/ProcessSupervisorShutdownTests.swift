@@ -3,7 +3,7 @@ import Foundation
 @testable import AnglesiteCore
 
 struct ProcessSupervisorShutdownTests {
-    @Test func `Shutdown all terminates every supervised process`() async throws {
+    @Test("Shutdown all terminates every supervised process") func shutdownAllTerminatesEverySupervisedProcess() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
 
@@ -34,13 +34,13 @@ struct ProcessSupervisorShutdownTests {
         }
     }
 
-    @Test func `Shutdown all on idle supervisor returns immediately`() async {
+    @Test("Shutdown all on idle supervisor returns immediately") func shutdownAllOnIdleSupervisorReturnsImmediately() async {
         let supervisor = ProcessSupervisor()
         // No processes launched — must not hang.
         await supervisor.shutdownAll(timeout: 1)
     }
 
-    @Test func `Shutdown all stops restarting crash-looped process`() async throws {
+    @Test("Shutdown all stops restarting crash-looped process") func shutdownAllStopsRestartingCrashLoopedProcess() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         // A process that crashes immediately, configured to retry many times with a

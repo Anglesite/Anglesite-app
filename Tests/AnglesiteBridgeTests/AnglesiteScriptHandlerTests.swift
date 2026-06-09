@@ -18,7 +18,7 @@ struct AnglesiteScriptHandlerTests {
         ]
     }
 
-    @Test func `Handle valid body routes and returns reply`() async {
+    @Test("Handle valid body routes and returns reply") func handleValidBodyRoutesAndReturnsReply() async {
         let router = RecordingRouter(reply: EditReply(id: "e-99", status: .applied, message: "done"))
         let result = await AnglesiteScriptHandler.handle(body: validBody(), via: router)
         guard case .success(let reply) = result else {
@@ -33,7 +33,7 @@ struct AnglesiteScriptHandlerTests {
         #expect(received.first?.op == "replace-text")
     }
 
-    @Test func `Handle invalid body returns decode error and does not route`() async {
+    @Test("Handle invalid body returns decode error and does not route") func handleInvalidBodyReturnsDecodeErrorAndDoesNotRoute() async {
         // Wrong type at the type field — strict decode rejects it before any routing.
         var bad = validBody()
         bad["type"] = "anglesite:not-real"

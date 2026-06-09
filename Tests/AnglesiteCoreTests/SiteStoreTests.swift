@@ -40,7 +40,7 @@ final class SiteStoreTests {
         return dir
     }
 
-    @Test func `Refresh discovers valid sites`() async throws {
+    @Test("Refresh discovers valid sites") func refreshDiscoversValidSites() async throws {
         _ = try makeValidSite(named: "alpha")
         _ = try makeValidSite(named: "bravo")
 
@@ -51,7 +51,7 @@ final class SiteStoreTests {
         #expect(result.allSatisfy { $0.isValid })
     }
 
-    @Test func `Refresh skips non-project directories`() async throws {
+    @Test("Refresh skips non-project directories") func refreshSkipsNonProjectDirectories() async throws {
         _ = try makeValidSite(named: "alpha")
         try fileManager.createDirectory(at: sitesRoot.appendingPathComponent("not-a-site"), withIntermediateDirectories: true)
 
@@ -60,7 +60,7 @@ final class SiteStoreTests {
         #expect(result.map(\.name) == ["alpha"])
     }
 
-    @Test func `Refresh keeps partial scaffolds with diagnostics`() async throws {
+    @Test("Refresh keeps partial scaffolds with diagnostics") func refreshKeepsPartialScaffoldsWithDiagnostics() async throws {
         let dir = sitesRoot.appendingPathComponent("partial", isDirectory: true)
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         try Data().write(to: dir.appendingPathComponent("anglesite.config.json"))
@@ -73,7 +73,7 @@ final class SiteStoreTests {
         #expect(Set(result[0].missingSentinels) == Set(["astro.config.ts", "keystatic.config.ts"]))
     }
 
-    @Test func `Persistence round trip`() async throws {
+    @Test("Persistence round trip") func persistenceRoundTrip() async throws {
         _ = try makeValidSite(named: "alpha")
         let writer = SiteStore(settings: settings, persistenceURL: persistenceURL)
         try await writer.refresh()
@@ -84,7 +84,7 @@ final class SiteStoreTests {
         #expect(loaded.map(\.name) == ["alpha"])
     }
 
-    @Test func `Add rejects invalid project`() async throws {
+    @Test("Add rejects invalid project") func addRejectsInvalidProject() async throws {
         let dir = tempDir.appendingPathComponent("not-a-site", isDirectory: true)
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
 
@@ -97,7 +97,7 @@ final class SiteStoreTests {
         }
     }
 
-    @Test func `Add persists site outside Sites root`() async throws {
+    @Test("Add persists site outside Sites root") func addPersistsSiteOutsideSitesRoot() async throws {
         let dir = tempDir.appendingPathComponent("external", isDirectory: true)
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         for sentinel in ProjectValidator.sentinels {
@@ -114,7 +114,7 @@ final class SiteStoreTests {
         #expect(loaded.map(\.name) == ["external"])
     }
 
-    @Test func `Add normalizes symlinked path`() async throws {
+    @Test("Add normalizes symlinked path") func addNormalizesSymlinkedPath() async throws {
         // A real project dir, reached through a symlink that points at it.
         let realDir = tempDir.appendingPathComponent("real-site", isDirectory: true)
         try fileManager.createDirectory(at: realDir, withIntermediateDirectories: true)
@@ -134,7 +134,7 @@ final class SiteStoreTests {
         #expect(site.name == "real-site")
     }
 
-    @Test func `Add collapses symlinked and real path to one entry`() async throws {
+    @Test("Add collapses symlinked and real path to one entry") func addCollapsesSymlinkedAndRealPathToOneEntry() async throws {
         let realDir = tempDir.appendingPathComponent("real-site", isDirectory: true)
         try fileManager.createDirectory(at: realDir, withIntermediateDirectories: true)
         for sentinel in ProjectValidator.sentinels {
@@ -152,7 +152,7 @@ final class SiteStoreTests {
         #expect(count == 1, "the same directory via symlink and real path must be one entry")
     }
 
-    @Test func `Remove does not delete files`() async throws {
+    @Test("Remove does not delete files") func removeDoesNotDeleteFiles() async throws {
         let dir = try makeValidSite(named: "alpha")
         let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
         try await store.refresh()

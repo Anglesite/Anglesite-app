@@ -9,22 +9,22 @@ struct AstroDevServerTests {
 
     // MARK: parseReadyURL
 
-    @Test func `Parse ready URL matches Astro Local line`() {
+    @Test("Parse ready URL matches Astro Local line") func parseReadyURLMatchesAstroLocalLine() {
         let url = AstroDevServer.parseReadyURL("  ┃ Local    http://localhost:4321/")
         #expect(url == URL(string: "http://localhost:4321/"))
     }
 
-    @Test func `Parse ready URL matches plain line`() {
+    @Test("Parse ready URL matches plain line") func parseReadyURLMatchesPlainLine() {
         let url = AstroDevServer.parseReadyURL("Local: http://127.0.0.1:8080/")
         #expect(url == URL(string: "http://127.0.0.1:8080/"))
     }
 
-    @Test func `Parse ready URL ignores non-URL lines`() {
+    @Test("Parse ready URL ignores non-URL lines") func parseReadyURLIgnoresNonURLLines() {
         #expect(AstroDevServer.parseReadyURL("astro v5.0.0 ready in 320 ms") == nil)
         #expect(AstroDevServer.parseReadyURL("") == nil)
     }
 
-    @Test func `Parse ready URL strips ANSI escapes`() {
+    @Test("Parse ready URL strips ANSI escapes") func parseReadyURLStripsANSIEscapes() {
         // ESC [32m Local ESC [0m http://localhost:4321/
         let coloured = "\u{1B}[32mLocal\u{1B}[0m  http://localhost:4321/"
         let url = AstroDevServer.parseReadyURL(coloured)
@@ -33,7 +33,7 @@ struct AstroDevServerTests {
 
     // MARK: start / stop against a fake server fixture
 
-    @Test func `Start resolves when fake server prints ready URL`() async throws {
+    @Test("Start resolves when fake server prints ready URL") func startResolvesWhenFakeServerPrintsReadyURL() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
@@ -55,7 +55,7 @@ struct AstroDevServerTests {
         #expect(!runningAfter)
     }
 
-    @Test func `Start times out when ready line never arrives`() async throws {
+    @Test("Start times out when ready line never arrives") func startTimesOutWhenReadyLineNeverArrives() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
@@ -74,7 +74,7 @@ struct AstroDevServerTests {
         #expect(!isRunning)
     }
 
-    @Test func `Start fails when server exits before ready`() async throws {
+    @Test("Start fails when server exits before ready") func startFailsWhenServerExitsBeforeReady() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
@@ -91,7 +91,7 @@ struct AstroDevServerTests {
         }
     }
 
-    @Test func `Start gives up when server crash-loops before ready`() async throws {
+    @Test("Start gives up when server crash-loops before ready") func startGivesUpWhenServerCrashLoopsBeforeReady() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
@@ -110,7 +110,7 @@ struct AstroDevServerTests {
         #expect(!isRunning)
     }
 
-    @Test func `Start rejects second concurrent start`() async throws {
+    @Test("Start rejects second concurrent start") func startRejectsSecondConcurrentStart() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
@@ -135,7 +135,7 @@ struct AstroDevServerTests {
 
     // MARK: HTTP readiness probe
 
-    @Test func `Start waits for readiness probe to succeed`() async throws {
+    @Test("Start waits for readiness probe to succeed") func startWaitsForReadinessProbeToSucceed() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
 
@@ -163,7 +163,7 @@ struct AstroDevServerTests {
 
     // MARK: restart handling
 
-    @Test func `Ready URL updates after supervised restart`() async throws {
+    @Test("Ready URL updates after supervised restart") func readyURLUpdatesAfterSupervisedRestart() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
@@ -197,7 +197,7 @@ struct AstroDevServerTests {
         await server.stop(timeout: 2)
     }
 
-    @Test func `On ready URL change fires when a restart picks a new port`() async throws {
+    @Test("On ready URL change fires when a restart picks a new port") func onReadyURLChangeFiresWhenARestartPicksANewPort() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
@@ -232,7 +232,7 @@ struct AstroDevServerTests {
         await server.stop(timeout: 2)
     }
 
-    @Test func `Start times out when readiness probe never succeeds`() async throws {
+    @Test("Start times out when readiness probe never succeeds") func startTimesOutWhenReadinessProbeNeverSucceeds() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let probe: AstroDevServer.ReadinessProbe = { _ in false }

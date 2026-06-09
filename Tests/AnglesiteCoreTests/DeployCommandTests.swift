@@ -32,7 +32,7 @@ struct DeployCommandTests {
 
     // MARK: Pre-spawn refusal (no work wasted)
 
-    @Test func `Refuses before spawn when token source returns nil`() async {
+    @Test("Refuses before spawn when token source returns nil") func refusesBeforeSpawnWhenTokenSourceReturnsNil() async {
         // The resolver must never be consulted when the token is missing.
         await confirmation("resolver should not be consulted when token is missing", expectedCount: 0) { resolverCalled in
             let (cmd, _, _) = makeCommand(
@@ -52,7 +52,7 @@ struct DeployCommandTests {
         }
     }
 
-    @Test func `Refuses before spawn when token source returns empty string`() async {
+    @Test("Refuses before spawn when token source returns empty string") func refusesBeforeSpawnWhenTokenSourceReturnsEmptyString() async {
         let (cmd, _, _) = makeCommand(
             resolve: { _ in self.shFixture("exit 0") },
             token: { "" }
@@ -65,7 +65,7 @@ struct DeployCommandTests {
         #expect(reason.contains("CLOUDFLARE_API_TOKEN"), "\(reason)")
     }
 
-    @Test func `Fails when resolver reports unavailable`() async {
+    @Test("Fails when resolver reports unavailable") func failsWhenResolverReportsUnavailable() async {
         let (cmd, _, _) = makeCommand(
             resolve: { _ in .unavailable(reason: "wrangler not installed — run `npm install`") },
             token: { "fake-token" }
@@ -81,7 +81,7 @@ struct DeployCommandTests {
 
     // MARK: Happy path — URL extraction
 
-    @Test func `Succeeds and extracts URL from published line`() async {
+    @Test("Succeeds and extracts URL from published line") func succeedsAndExtractsURLFromPublishedLine() async {
         // Synthetic wrangler output: a blank line, the `Published ...` summary, indented URL, exit 0.
         let script = """
         echo ''
@@ -105,7 +105,7 @@ struct DeployCommandTests {
         #expect(duration >= 0)
     }
 
-    @Test func `Ignores URLs that appear before the published anchor`() async {
+    @Test("Ignores URLs that appear before the published anchor") func ignoresURLsThatAppearBeforeThePublishedAnchor() async {
         // A help-text URL in wrangler's output must NOT be reported as the deployed URL.
         let script = """
         echo 'See https://developers.cloudflare.com/workers for help.'
@@ -127,7 +127,7 @@ struct DeployCommandTests {
 
     // MARK: Failure surfacing
 
-    @Test func `Fails when wrangler exits non-zero`() async {
+    @Test("Fails when wrangler exits non-zero") func failsWhenWranglerExitsNonZero() async {
         let script = """
         echo 'Error: authentication failed' 1>&2
         exit 10
@@ -145,7 +145,7 @@ struct DeployCommandTests {
         #expect(reason.contains("10"), "reason should mention the exit code: \(reason)")
     }
 
-    @Test func `Fails semantically when zero exit but no published URL`() async {
+    @Test("Fails semantically when zero exit but no published URL") func failsSemanticallyWhenZeroExitButNoPublishedURL() async {
         // A wrangler bug or unexpected output shape: process exits 0 but our anchor never matched.
         // We surface this as a clear failure rather than silently returning a bogus URL.
         let script = """
@@ -168,7 +168,7 @@ struct DeployCommandTests {
 
     // MARK: Token propagation
 
-    @Test func `Passes Cloudflare token as environment variable to subprocess`() async {
+    @Test("Passes Cloudflare token as environment variable to subprocess") func passesCloudflareTokenAsEnvironmentVariableToSubprocess() async {
         // Fixture echoes the value of $CLOUDFLARE_API_TOKEN, then prints a fake Published URL so
         // the deploy reaches `.succeeded`. We can then read what was echoed via the LogCenter.
         let script = """
@@ -193,7 +193,7 @@ struct DeployCommandTests {
 
     // MARK: Build step
 
-    @Test func `Fails when build exits non-zero`() async {
+    @Test("Fails when build exits non-zero") func failsWhenBuildExitsNonZero() async {
         // preflight and wrangler must not run when build fails.
         await confirmation("neither preflight nor wrangler runs when build fails", expectedCount: 0) { neitherCalled in
             let (cmd, _, _) = makeCommand(
@@ -220,7 +220,7 @@ struct DeployCommandTests {
         }
     }
 
-    @Test func `Fails when build resolver reports unavailable`() async {
+    @Test("Fails when build resolver reports unavailable") func failsWhenBuildResolverReportsUnavailable() async {
         let (cmd, _, _) = makeCommand(
             resolve: { _ in self.shFixture("exit 0") },
             token: { "fake-token" },
@@ -234,7 +234,7 @@ struct DeployCommandTests {
         #expect(reason.contains("vendored npm"), "\(reason)")
     }
 
-    @Test func `Build output appears in LogCenter under build source`() async {
+    @Test("Build output appears in LogCenter under build source") func buildOutputAppearsInLogCenterUnderBuildSource() async {
         let (cmd, _, center) = makeCommand(
             resolve: { _ in
                 self.shFixture("echo 'Published angle-app (0.42 sec)'; echo '  https://t.example.workers.dev'; exit 0")
@@ -252,7 +252,7 @@ struct DeployCommandTests {
 
     // MARK: Pre-deploy preflight
 
-    @Test func `Returns blocked and does not spawn wrangler when preflight blocks`() async {
+    @Test("Returns blocked and does not spawn wrangler when preflight blocks") func returnsBlockedAndDoesNotSpawnWranglerWhenPreflightBlocks() async {
         let blockedOutcome = PreDeployCheck.Outcome.blocked(
             failures: [
                 .init(
@@ -287,7 +287,7 @@ struct DeployCommandTests {
         }
     }
 
-    @Test func `Fails when preflight errors`() async {
+    @Test("Fails when preflight errors") func failsWhenPreflightErrors() async {
         // wrangler must not run when preflight could not run at all.
         await confirmation("wrangler must not run when preflight could not run at all", expectedCount: 0) { wranglerSpawned in
             let (cmd, _, _) = makeCommand(
@@ -311,7 +311,7 @@ struct DeployCommandTests {
 
     // MARK: onPreflight callback
 
-    @Test func `Deploy fires onPreflight with resolved outcome`() async {
+    @Test("Deploy fires onPreflight with resolved outcome") func deployFiresOnPreflightWithResolvedOutcome() async {
         let expectedOutcome = PreDeployCheck.Outcome.passed(warnings: [
             .init(category: .missingOgImage, detail: "no og image", remediation: "add one")
         ])

@@ -27,7 +27,7 @@ struct EditMessageTests {
         return body
     }
 
-    @Test func `Decodes valid apply-edit message`() {
+    @Test("Decodes valid apply-edit message") func decodesValidApplyEditMessage() {
         let result = EditMessage.decode(from: validBody())
         guard case .success(let msg) = result else {
             Issue.record("expected success, got \(result)")
@@ -47,7 +47,7 @@ struct EditMessageTests {
         #expect(msg.value == .string("Hello, world."))
     }
 
-    @Test func `Decodes when value is absent`() {
+    @Test("Decodes when value is absent") func decodesWhenValueIsAbsent() {
         var body = validBody()
         body.removeValue(forKey: "value")
         let result = EditMessage.decode(from: body)
@@ -58,7 +58,7 @@ struct EditMessageTests {
         #expect(msg.value == nil)
     }
 
-    @Test func `Decodes object value`() {
+    @Test("Decodes object value") func decodesObjectValue() {
         let result = EditMessage.decode(from: validBody(overrides: ["value": ["a": 1, "b": "two"] as [String: Any]]))
         guard case .success(let msg) = result else {
             Issue.record("expected success")
@@ -67,13 +67,13 @@ struct EditMessageTests {
         #expect(msg.value == .object(["a": .int(1), "b": .string("two")]))
     }
 
-    @Test func `Rejects non-object body`() {
+    @Test("Rejects non-object body") func rejectsNonObjectBody() {
         #expect(EditMessage.decode(from: "just a string") == .failure(.notAnObject))
         #expect(EditMessage.decode(from: 42) == .failure(.notAnObject))
         #expect(EditMessage.decode(from: [1, 2, 3]) == .failure(.notAnObject))
     }
 
-    @Test func `Rejects missing required field`() {
+    @Test("Rejects missing required field") func rejectsMissingRequiredField() {
         for missing in ["id", "type", "path", "selector", "op"] {
             var body = validBody()
             body.removeValue(forKey: missing)
@@ -84,7 +84,7 @@ struct EditMessageTests {
         }
     }
 
-    @Test func `Rejects wrong type on required field`() {
+    @Test("Rejects wrong type on required field") func rejectsWrongTypeOnRequiredField() {
         #expect(
             EditMessage.decode(from: validBody(overrides: ["id": 123])) == .failure(.wrongType(field: "id", expected: "string"))
         )
@@ -93,7 +93,7 @@ struct EditMessageTests {
         )
     }
 
-    @Test func `Rejects selector that is not an object`() {
+    @Test("Rejects selector that is not an object") func rejectsSelectorThatIsNotAnObject() {
         #expect(
             EditMessage.decode(from: validBody(overrides: ["selector": "p:nth-of-type(2)"])) == .failure(.wrongType(field: "selector", expected: "object"))
         )
@@ -102,7 +102,7 @@ struct EditMessageTests {
         )
     }
 
-    @Test func `Rejects unknown message type`() {
+    @Test("Rejects unknown message type") func rejectsUnknownMessageType() {
         #expect(
             EditMessage.decode(from: validBody(overrides: ["type": "anglesite:something-else"])) == .failure(.unknownType("anglesite:something-else"))
         )

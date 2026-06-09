@@ -18,45 +18,45 @@ final class AppSettingsTests {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
-    @Test func `Plugin path override defaults to nil`() {
+    @Test("Plugin path override defaults to nil") func pluginPathOverrideDefaultsToNil() {
         let settings = AppSettings(defaults: defaults)
         #expect(settings.pluginPathOverride == nil)
     }
 
-    @Test func `Plugin path override round trip`() {
+    @Test("Plugin path override round trip") func pluginPathOverrideRoundTrip() {
         let settings = AppSettings(defaults: defaults)
         let url = URL(fileURLWithPath: "/tmp/anglesite-plugin", isDirectory: true)
         settings.pluginPathOverride = url
         #expect(settings.pluginPathOverride?.path == url.path)
     }
 
-    @Test func `Clearing plugin path override`() {
+    @Test("Clearing plugin path override") func clearingPluginPathOverride() {
         let settings = AppSettings(defaults: defaults)
         settings.pluginPathOverride = URL(fileURLWithPath: "/tmp/x", isDirectory: true)
         settings.pluginPathOverride = nil
         #expect(settings.pluginPathOverride == nil)
     }
 
-    @Test func `Sites root falls back to home Sites`() {
+    @Test("Sites root falls back to home Sites") func sitesRootFallsBackToHomeSites() {
         let settings = AppSettings(defaults: defaults)
         let expected = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Sites", isDirectory: true)
         #expect(settings.sitesRoot.path == expected.path)
     }
 
-    @Test func `Sites root honors override`() {
+    @Test("Sites root honors override") func sitesRootHonorsOverride() {
         let settings = AppSettings(defaults: defaults)
         let url = URL(fileURLWithPath: "/tmp/anglesite-sites", isDirectory: true)
         settings.sitesRootOverride = url
         #expect(settings.sitesRoot.path == url.path)
     }
 
-    @Test func `Debug pane enabled defaults to false`() {
+    @Test("Debug pane enabled defaults to false") func debugPaneEnabledDefaultsToFalse() {
         let settings = AppSettings(defaults: defaults)
         #expect(!settings.debugPaneEnabled)
     }
 
-    @Test func `Debug pane enabled round trip`() {
+    @Test("Debug pane enabled round trip") func debugPaneEnabledRoundTrip() {
         let settings = AppSettings(defaults: defaults)
         settings.debugPaneEnabled = true
         #expect(settings.debugPaneEnabled)
@@ -66,19 +66,19 @@ final class AppSettingsTests {
 
     // MARK: DebugPaneVisibility
 
-    @Test func `Debug menu always visible in debug builds`() {
+    @Test("Debug menu always visible in debug builds") func debugMenuAlwaysVisibleInDebugBuilds() {
         #expect(DebugPaneVisibility.menuItemVisible(isDebugBuild: true, settingEnabled: false, optionHeldAtLaunch: false))
     }
 
-    @Test func `Debug menu hidden in release by default`() {
+    @Test("Debug menu hidden in release by default") func debugMenuHiddenInReleaseByDefault() {
         #expect(!DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: false, optionHeldAtLaunch: false))
     }
 
-    @Test func `Debug menu revealed by setting in release`() {
+    @Test("Debug menu revealed by setting in release") func debugMenuRevealedBySettingInRelease() {
         #expect(DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: true, optionHeldAtLaunch: false))
     }
 
-    @Test func `Debug menu revealed by option key in release`() {
+    @Test("Debug menu revealed by option key in release") func debugMenuRevealedByOptionKeyInRelease() {
         #expect(DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: false, optionHeldAtLaunch: true))
     }
 }

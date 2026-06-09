@@ -3,7 +3,7 @@ import Foundation
 @testable import AnglesiteCore
 
 struct LogCenterTests {
-    @Test func `Append retains lines in order`() async {
+    @Test("Append retains lines in order") func appendRetainsLinesInOrder() async {
         let center = LogCenter()
         await center.append(source: "astro", stream: .stdout, text: "first")
         await center.append(source: "astro", stream: .stderr, text: "second")
@@ -14,7 +14,7 @@ struct LogCenterTests {
         #expect(snapshot.map(\.id) == [0, 1])
     }
 
-    @Test func `Ring buffer evicts oldest lines`() async {
+    @Test("Ring buffer evicts oldest lines") func ringBufferEvictsOldestLines() async {
         let center = LogCenter(bufferCapacity: 3)
         for i in 0..<5 {
             await center.append(source: "x", stream: .stdout, text: "line\(i)")
@@ -25,7 +25,7 @@ struct LogCenterTests {
         #expect(snapshot.map(\.id) == [2, 3, 4])
     }
 
-    @Test func `Subscriber receives subsequent appends`() async {
+    @Test("Subscriber receives subsequent appends") func subscriberReceivesSubsequentAppends() async {
         let center = LogCenter()
         let sub = await center.subscribe()
         await center.append(source: "a", stream: .stdout, text: "one")
@@ -40,7 +40,7 @@ struct LogCenterTests {
         #expect(collected == ["one", "two"])
     }
 
-    @Test func `Multiple subscribers each receive every line`() async {
+    @Test("Multiple subscribers each receive every line") func multipleSubscribersEachReceiveEveryLine() async {
         let center = LogCenter()
         let a = await center.subscribe()
         let b = await center.subscribe()
@@ -68,32 +68,32 @@ struct LogCenterTests {
         ]
     }
 
-    @Test func `Filtered by source only`() {
+    @Test("Filtered by source only") func filteredBySourceOnly() {
         let out = sampleLines().filtered(source: "astro", stream: nil, query: "")
         #expect(out.map(\.id) == [0, 1])
     }
 
-    @Test func `Filtered by stream only`() {
+    @Test("Filtered by stream only") func filteredByStreamOnly() {
         let out = sampleLines().filtered(source: nil, stream: .stderr, query: "")
         #expect(out.map(\.id) == [1, 3])
     }
 
-    @Test func `Filtered by query matches source and text, case-insensitive`() {
+    @Test("Filtered by query matches source and text, case-insensitive") func filteredByQueryMatchesSourceAndTextCaseInsensitive() {
         // "ready" matches the mcp/stderr text; "ASTRO" matches the astro source.
         #expect(sampleLines().filtered(source: nil, stream: nil, query: "ready").map(\.id) == [3])
         #expect(sampleLines().filtered(source: nil, stream: nil, query: "ASTRO").map(\.id) == [0, 1])
     }
 
-    @Test func `Filtered combines all predicates`() {
+    @Test("Filtered combines all predicates") func filteredCombinesAllPredicates() {
         let out = sampleLines().filtered(source: "mcp", stream: .stdout, query: "jsonrpc")
         #expect(out.map(\.id) == [2])
     }
 
-    @Test func `Filtered nil source and empty query returns all`() {
+    @Test("Filtered nil source and empty query returns all") func filteredNilSourceAndEmptyQueryReturnsAll() {
         #expect(sampleLines().filtered(source: nil, stream: nil, query: "  ").map(\.id) == [0, 1, 2, 3])
     }
 
-    @Test func `Export text formats each line`() {
+    @Test("Export text formats each line") func exportTextFormatsEachLine() {
         let text = sampleLines().exportText(timestampFormat: "ss")
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         #expect(lines.count == 4)
@@ -101,7 +101,7 @@ struct LogCenterTests {
         #expect(lines[3] == "03  [mcp/stderr]  server ready")
     }
 
-    @Test func `Cancel ends iteration and unregisters`() async {
+    @Test("Cancel ends iteration and unregisters") func cancelEndsIterationAndUnregisters() async {
         let center = LogCenter()
         let sub = await center.subscribe()
         let initial = await center.subscriberCount()

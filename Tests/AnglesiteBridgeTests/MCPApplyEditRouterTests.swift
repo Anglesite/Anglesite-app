@@ -18,7 +18,7 @@ struct MCPApplyEditRouterTests {
         value: .string("Hello, world.")
     )
 
-    @Test func `Calls apply-edit tool with edit message as arguments`() async {
+    @Test("Calls apply-edit tool with edit message as arguments") func callsApplyEditToolWithEditMessageAsArguments() async {
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(content: [], isError: false)))
         let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         _ = await router.apply(sampleMessage)
@@ -38,7 +38,7 @@ struct MCPApplyEditRouterTests {
         )
     }
 
-    @Test func `Successful tool result maps to applied`() async {
+    @Test("Successful tool result maps to applied") func successfulToolResultMapsToApplied() async {
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: "patched /about.mdoc range 12-25")],
             isError: false
@@ -50,7 +50,7 @@ struct MCPApplyEditRouterTests {
         #expect(reply.message == "patched /about.mdoc range 12-25")
     }
 
-    @Test func `Is-error result maps to failed with tool message`() async {
+    @Test("Is-error result maps to failed with tool message") func isErrorResultMapsToFailedWithToolMessage() async {
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: "selector resolved to two nodes")],
             isError: true
@@ -61,7 +61,7 @@ struct MCPApplyEditRouterTests {
         #expect(reply.message == "selector resolved to two nodes")
     }
 
-    @Test func `Thrown error maps to failed`() async {
+    @Test("Thrown error maps to failed") func thrownErrorMapsToFailed() async {
         let recorder = ToolCallRecorder(result: .failure(MCPClient.MCPError.notInitialized))
         let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         let reply = await router.apply(sampleMessage)
@@ -71,7 +71,7 @@ struct MCPApplyEditRouterTests {
 
     // MARK: structured reply parse
 
-    @Test func `Successful reply with structured body exposes structured fields`() async {
+    @Test("Successful reply with structured body exposes structured fields") func successfulReplyWithStructuredBodyExposesStructuredFields() async {
         let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","range":{"start":12,"end":25},"commit":"abc1234567890abcdef1234567890abcdef12345"}"#
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: body)],
@@ -85,7 +85,7 @@ struct MCPApplyEditRouterTests {
         #expect(reply.result == nil)
     }
 
-    @Test func `Successful reply with result exposes image result`() async {
+    @Test("Successful reply with result exposes image result") func successfulReplyWithResultExposesImageResult() async {
         let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","range":{"start":12,"end":25},"commit":"abc1234567890abcdef1234567890abcdef12345","result":{"src":"/images/hero.webp","srcset":"/images/hero-480w.webp 480w"}}"#
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: body)],
@@ -97,7 +97,7 @@ struct MCPApplyEditRouterTests {
         #expect(reply.result?.srcset == "/images/hero-480w.webp 480w")
     }
 
-    @Test func `Malformed reply text falls back to message string`() async {
+    @Test("Malformed reply text falls back to message string") func malformedReplyTextFallsBackToMessageString() async {
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: "not valid json {")],
             isError: false
@@ -110,7 +110,7 @@ struct MCPApplyEditRouterTests {
         #expect(reply.commit == nil)
     }
 
-    @Test func `On edit fires for applied reply with commit`() async {
+    @Test("On edit fires for applied reply with commit") func onEditFiresForAppliedReplyWithCommit() async {
         let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","range":{"start":12,"end":25},"commit":"abc1234567890abcdef1234567890abcdef12345"}"#
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: body)],
@@ -128,7 +128,7 @@ struct MCPApplyEditRouterTests {
         #expect(captured.first?.commit == "abc1234567890abcdef1234567890abcdef12345")
     }
 
-    @Test func `On edit does not fire when reply has no commit`() async {
+    @Test("On edit does not fire when reply has no commit") func onEditDoesNotFireWhenReplyHasNoCommit() async {
         // No JSON in the content — parser gives up; reply has nil commit; observer must NOT fire.
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: "stub edit response")],

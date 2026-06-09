@@ -7,12 +7,12 @@ import Foundation
 /// Testing otherwise runs them on an arbitrary task.
 @MainActor
 struct WebViewBridgeTests {
-    @Test func `Make overlay user script returns nil for missing file`() {
+    @Test("Make overlay user script returns nil for missing file") func makeOverlayUserScriptReturnsNilForMissingFile() {
         let missing = URL(fileURLWithPath: "/tmp/anglesite-overlay-missing-\(UUID().uuidString).js")
         #expect(WebViewBridge.makeOverlayUserScript(from: missing) == nil)
     }
 
-    @Test func `Make overlay user script wraps file contents at document end`() throws {
+    @Test("Make overlay user script wraps file contents at document end") func makeOverlayUserScriptWrapsFileContentsAtDocumentEnd() throws {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("anglesite-overlay-\(UUID().uuidString).js")
         defer { try? FileManager.default.removeItem(at: tmp) }
@@ -28,7 +28,7 @@ struct WebViewBridgeTests {
         #expect(!script.isForMainFrameOnly)
     }
 
-    @Test func `Make overlay user script in bundle returns nil for bundle without overlay`() {
+    @Test("Make overlay user script in bundle returns nil for bundle without overlay") func makeOverlayUserScriptInBundleReturnsNilForBundleWithoutOverlay() {
         // The test runner's own bundle does not contain `edit-overlay/overlay.js`; it must report
         // that absence with `nil` rather than crashing.
         #expect(WebViewBridge.makeOverlayUserScript(in: Bundle(for: BundleAnchor.self)) == nil)

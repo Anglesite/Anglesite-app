@@ -22,7 +22,7 @@ struct PreviewSessionTests {
         .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script] + args)
     }
 
-    @Test func `Unavailable command lands in failed`() async {
+    @Test("Unavailable command lands in failed") func unavailableCommandLandsInFailed() async {
         let session = makeSession(
             resolve: { _ in .unavailable(reason: "dependencies not installed — run `npm install`") },
             probe: alwaysReady
@@ -32,7 +32,7 @@ struct PreviewSessionTests {
         #expect(state == .failed(siteID: "mysite", message: "dependencies not installed — run `npm install`"))
     }
 
-    @Test func `Runnable command reaches ready then stop returns to idle`() async {
+    @Test("Runnable command reaches ready then stop returns to idle") func runnableCommandReachesReadyThenStopReturnsToIdle() async {
         let session = makeSession(
             resolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             probe: alwaysReady
@@ -46,7 +46,7 @@ struct PreviewSessionTests {
         #expect(idle == .idle)
     }
 
-    @Test func `Crash before ready lands in failed`() async {
+    @Test("Crash before ready lands in failed") func crashBeforeReadyLandsInFailed() async {
         let session = makeSession(
             resolve: { _ in self.shFixture("echo broken 1>&2; exit 1") },
             probe: alwaysReady
@@ -64,7 +64,7 @@ struct PreviewSessionTests {
         #expect(siteID == "mysite")
     }
 
-    @Test func `Ready URL updates when a dev server restart picks a new port`() async throws {
+    @Test("Ready URL updates when a dev server restart picks a new port") func readyURLUpdatesWhenADevServerRestartPicksANewPort() async throws {
         let counter = NSTemporaryDirectory() + "preview-restart-\(UUID().uuidString)"
         defer { try? FileManager.default.removeItem(atPath: counter) }
         let script = """
@@ -142,7 +142,7 @@ struct PreviewSessionTests {
         .run(executable: Self.pythonURL, arguments: ["-u", "-c", Self.mcpFakeScript])
     }
 
-    @Test func `MCP client is running after successful start`() async {
+    @Test("MCP client is running after successful start") func mCPClientIsRunningAfterSuccessfulStart() async {
         let (session, mcp) = makeSessionWithMCP(
             astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             mcpResolve: { self.runnableMCPFake() }
@@ -164,7 +164,7 @@ struct PreviewSessionTests {
         await session.stop()
     }
 
-    @Test func `MCP client stops when session stops`() async {
+    @Test("MCP client stops when session stops") func mCPClientStopsWhenSessionStops() async {
         let (session, mcp) = makeSessionWithMCP(
             astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             mcpResolve: { self.runnableMCPFake() }
@@ -178,7 +178,7 @@ struct PreviewSessionTests {
         #expect(!runningAfter, "MCPClient should be stopped after session.stop()")
     }
 
-    @Test func `State stays ready when MCP command is unavailable`() async {
+    @Test("State stays ready when MCP command is unavailable") func stateStaysReadyWhenMCPCommandIsUnavailable() async {
         // MCP can't be located → session still reaches .ready (preview is the primary feature).
         let (session, mcp) = makeSessionWithMCP(
             astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
@@ -194,7 +194,7 @@ struct PreviewSessionTests {
         await session.stop()
     }
 
-    @Test func `State stays ready when MCP launch fails`() async {
+    @Test("State stays ready when MCP launch fails") func stateStaysReadyWhenMCPLaunchFails() async {
         // MCP launch errors out (bad executable) → session still reaches .ready, mcpClient is not running.
         let (session, mcp) = makeSessionWithMCP(
             astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
@@ -210,7 +210,7 @@ struct PreviewSessionTests {
         await session.stop()
     }
 
-    @Test func `Observe stream emits idle starting ready`() async {
+    @Test("Observe stream emits idle starting ready") func observeStreamEmitsIdleStartingReady() async {
         let session = makeSession(
             resolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             probe: alwaysReady

@@ -3,7 +3,7 @@ import Foundation
 @testable import AnglesiteCore
 
 struct ProcessSupervisorLaunchTests {
-    @Test func `Launch streams stdout lines to log center`() async throws {
+    @Test("Launch streams stdout lines to log center") func launchStreamsStdoutLinesToLogCenter() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let handle = try await supervisor.launch(
@@ -19,7 +19,7 @@ struct ProcessSupervisorLaunchTests {
         #expect(lines.map(\.text) == ["one", "two", "three"])
     }
 
-    @Test func `Launch separates stderr from stdout`() async throws {
+    @Test("Launch separates stderr from stdout") func launchSeparatesStderrFromStdout() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let handle = try await supervisor.launch(
@@ -45,7 +45,7 @@ struct ProcessSupervisorLaunchTests {
     /// CI load. This test runs the burst-then-exit pattern that triggered the flake (lots of
     /// output crammed into the last few milliseconds before exit) and asserts that the very
     /// last line is present in the snapshot with zero post-exit sleep.
-    @Test func `Snapshot includes last line after wait for exit without sleep`() async throws {
+    @Test("Snapshot includes last line after wait for exit without sleep") func snapshotIncludesLastLineAfterWaitForExitWithoutSleep() async throws {
         for _ in 0..<25 {
             let supervisor = ProcessSupervisor()
             let center = LogCenter()
@@ -69,7 +69,7 @@ struct ProcessSupervisorLaunchTests {
         }
     }
 
-    @Test func `Wait for exit reports non-zero code`() async throws {
+    @Test("Wait for exit reports non-zero code") func waitForExitReportsNonZeroCode() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let handle = try await supervisor.launch(
@@ -82,7 +82,7 @@ struct ProcessSupervisorLaunchTests {
         #expect(reason == .exited(code: 9))
     }
 
-    @Test func `Terminate stops long-running process`() async throws {
+    @Test("Terminate stops long-running process") func terminateStopsLongRunningProcess() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let handle = try await supervisor.launch(
@@ -103,7 +103,7 @@ struct ProcessSupervisorLaunchTests {
         #expect(!runningAfter)
     }
 
-    @Test func `Restart on crash gives up after max attempts`() async throws {
+    @Test("Restart on crash gives up after max attempts") func restartOnCrashGivesUpAfterMaxAttempts() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let handle = try await supervisor.launch(
@@ -123,7 +123,7 @@ struct ProcessSupervisorLaunchTests {
         #expect(boomCount == 3)
     }
 
-    @Test func `Restart on crash stops after clean exit`() async throws {
+    @Test("Restart on crash stops after clean exit") func restartOnCrashStopsAfterCleanExit() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let handle = try await supervisor.launch(
@@ -137,7 +137,7 @@ struct ProcessSupervisorLaunchTests {
         #expect(reason == .exited(code: 0))
     }
 
-    @Test func `On respawn fires once per successful restart`() async throws {
+    @Test("On respawn fires once per successful restart") func onRespawnFiresOncePerSuccessfulRestart() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let respawns = RespawnCounter()
@@ -157,7 +157,7 @@ struct ProcessSupervisorLaunchTests {
         #expect(count == 3)
     }
 
-    @Test func `On respawn not called when process never crashes`() async throws {
+    @Test("On respawn not called when process never crashes") func onRespawnNotCalledWhenProcessNeverCrashes() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let respawns = RespawnCounter()
@@ -174,7 +174,7 @@ struct ProcessSupervisorLaunchTests {
         #expect(count == 0)
     }
 
-    @Test func `Launch attach stdin allows writes`() async throws {
+    @Test("Launch attach stdin allows writes") func launchAttachStdinAllowsWrites() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         // `cat` echoes whatever we feed it; then we close stdin and it exits cleanly.
