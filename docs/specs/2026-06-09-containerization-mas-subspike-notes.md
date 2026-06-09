@@ -121,6 +121,51 @@ Recommended: defer these to whenever Anglesite has the Developer ID provisioning
 - **"Is there a networking model that sidesteps `com.apple.vm.networking`?"** — Not testable empirically without the entitlements unlocked, but mooted: per the desk research and the apple/container daemon's reliance on `container-network-vmnet`, the routable-per-container-IP property §0 of the design depends on requires `vmnet`. If a future Anglesite team gets the entitlements, this should be revisited.
 - **"Cold-boot wall-clock for `astro dev`-ready container."** — Deferred. Requires a real Developer ID provisioning profile to test.
 
+## Appendix — "Can MAS still run Node *some other way*?"
+
+Question that came up after the empirical run: the spike confirmed MAS can't ship Apple Containerization, but doesn't say MAS can't ship *Node*. The #59 cloudflare-sandbox design treats "containerized" as universal-or-bust, but the original driver of that pivot was **iOS** (which truly can't run Node at all), with the iOS-MAS code-path sharing as a secondary benefit. So: what's actually available to MAS for Node?
+
+### The option that's already in the codebase
+
+**Phase 10.1's vendored Node in the sandbox.** It ships today and works:
+
+- `Resources/node-runtime/` is re-signed by `scripts/resign-node.sh` with `Resources/node-runtime.entitlements` (inherit + `app-sandbox` + `cs.allow-jit` + `cs.allow-unsigned-executable-memory`).
+- `AnglesiteMAS` holds a per-`SiteWindow` security-scoped bookmark grant; spawned Node inherits folder access to `~/Sites/<name>/`.
+- `ProcessSupervisor` orchestrates spawn / restart / log capture for `node`, the bundled MCP server, `npm`, `wrangler`, `gh`.
+
+This is a *working* MAS path. The current #59 trajectory retires it; the question is whether that retirement is necessary.
+
+### Alternatives, ranked by realism
+
+| # | Approach | Trade-off |
+|---|---|---|
+| 1 | **Keep Phase 10.1 on MAS, Cloudflare on iOS only.** Two runtime paths, each simpler than the unified Cloudflare-on-both. Preserves offline editing on MAS. The seam from §4 of the cloudflare-sandbox design (`SiteRuntime` protocol) already accommodates this. | Maintaining two runtimes forever. |
+| 2 | **Embed Node as a library** (e.g., [NodeJS-mobile](https://github.com/JaneaSystems/nodejs-mobile)) instead of spawning. Same entitlement story (still needs JIT under MAS), but in-process — no `Process()`, no separate-binary re-sign, sandbox bookmarks just work. | Architectural cleanup, not a new capability. iOS App Store JIT rules still block the iOS use case, so iOS still needs Cloudflare. |
+| 3 | **DevID-signed helper app launched from MAS.** Two-app distribution: MAS shell + DevID Node helper, IPC between them. | Apple's review team treats this as a sandbox-escape pattern; awkward dual-installer UX. Not recommended. |
+| 4 | **WASM-hosted JS in JavaScriptCore in-process** (no Node). Build "Astro lite" using `esbuild-wasm`, `wasm-vips`, etc. | Massive scope — likely person-years for full Astro compatibility. Not v0-realistic. |
+| 5 | **Cloudflare-on-MAS** (current #59 design). | Eliminates Node from MAS entirely; matches iOS code path. Adds Cloudflare account + Workers Paid plan ($5/mo) as a MAS dependency; loses offline editing. |
+
+### The trade that's actually being made
+
+| Cloudflare-on-MAS gives up | Cloudflare-on-MAS gains |
+|---|---|
+| Offline editing on MAS | One runtime path shared with iOS |
+| Phase 10.1's already-shipped work (vendored Node, npm cache, re-sign, JIT entitlement) | Drops all of Phase 10.1's complexity from MAS |
+| "No external dependency" property | Same `SiteRuntime` implementation as iOS |
+| ~milliseconds-to-spawn local Node | Persistent Cloudflare account requirement on MAS |
+
+The argument for staying on Cloudflare-on-MAS is **not** "MAS can't run Node" — that's the iOS argument. It's "we don't want to maintain two runtime paths forever." That's a real engineering-economics question, separate from the technical-possibility question the spike was answering.
+
+### Recommendation (advisory, not decided)
+
+Surface **option #1** as a deliberate choice in #59's plan-write rather than letting it disappear into the Cloudflare default. Specifically, the plan should answer:
+
+- Do we want offline editing on MAS to survive? (If yes, #1 is on the table.)
+- Is "Cloudflare account required" acceptable as a MAS purchase-time precondition? (If no, #1 is required.)
+- Are we comfortable maintaining `LocalSiteRuntime` indefinitely for the MAS-and-DevID branch? (If no, retire it and accept the trade.)
+
+Whichever way it goes, the question deserves an explicit answer in the plan, not an inherited default.
+
 ## Sources
 
 - Apple Containerization Swift package — [apple/containerization](https://github.com/apple/containerization), [`Package.swift`](https://github.com/apple/containerization/blob/main/Package.swift), [`LinuxContainer.swift`](https://github.com/apple/containerization/blob/main/Sources/Containerization/LinuxContainer.swift)
