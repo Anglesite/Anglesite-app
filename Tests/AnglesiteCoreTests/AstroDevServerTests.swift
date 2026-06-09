@@ -1,38 +1,39 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class AstroDevServerTests: XCTestCase {
+struct AstroDevServerTests {
     /// A readiness probe that always reports the server is up — used by the log-only fixtures
     /// below, which print a `Local …` line but don't actually bind a port.
     private let alwaysReady: AstroDevServer.ReadinessProbe = { _ in true }
 
     // MARK: parseReadyURL
 
-    func testParseReadyURLMatchesAstroLocalLine() {
+    @Test("Parse ready URL matches Astro Local line") func parseReadyURLMatchesAstroLocalLine() {
         let url = AstroDevServer.parseReadyURL("  ┃ Local    http://localhost:4321/")
-        XCTAssertEqual(url, URL(string: "http://localhost:4321/"))
+        #expect(url == URL(string: "http://localhost:4321/"))
     }
 
-    func testParseReadyURLMatchesPlainLine() {
+    @Test("Parse ready URL matches plain line") func parseReadyURLMatchesPlainLine() {
         let url = AstroDevServer.parseReadyURL("Local: http://127.0.0.1:8080/")
-        XCTAssertEqual(url, URL(string: "http://127.0.0.1:8080/"))
+        #expect(url == URL(string: "http://127.0.0.1:8080/"))
     }
 
-    func testParseReadyURLIgnoresNonURLLines() {
-        XCTAssertNil(AstroDevServer.parseReadyURL("astro v5.0.0 ready in 320 ms"))
-        XCTAssertNil(AstroDevServer.parseReadyURL(""))
+    @Test("Parse ready URL ignores non-URL lines") func parseReadyURLIgnoresNonURLLines() {
+        #expect(AstroDevServer.parseReadyURL("astro v5.0.0 ready in 320 ms") == nil)
+        #expect(AstroDevServer.parseReadyURL("") == nil)
     }
 
-    func testParseReadyURLStripsANSIEscapes() {
+    @Test("Parse ready URL strips ANSI escapes") func parseReadyURLStripsANSIEscapes() {
         // ESC [32m Local ESC [0m http://localhost:4321/
         let coloured = "\u{1B}[32mLocal\u{1B}[0m  http://localhost:4321/"
         let url = AstroDevServer.parseReadyURL(coloured)
-        XCTAssertEqual(url, URL(string: "http://localhost:4321/"))
+        #expect(url == URL(string: "http://localhost:4321/"))
     }
 
     // MARK: start / stop against a fake server fixture
 
-    func testStartResolvesWhenFakeServerPrintsReadyURL() async throws {
+    @Test("Start resolves when fake server prints ready URL") func startResolvesWhenFakeServerPrintsReadyURL() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
@@ -45,21 +46,21 @@ final class AstroDevServerTests: XCTestCase {
             readyTimeout: 5
         )
 
-        XCTAssertEqual(url, URL(string: "http://localhost:4321/"))
+        #expect(url == URL(string: "http://localhost:4321/"))
         let running = await server.isRunning
-        XCTAssertTrue(running)
+        #expect(running)
 
         await server.stop(timeout: 2)
         let runningAfter = await server.isRunning
-        XCTAssertFalse(runningAfter)
+        #expect(!runningAfter)
     }
 
-    func testStartTimesOutWhenReadyLineNeverArrives() async throws {
+    @Test("Start times out when ready line never arrives") func startTimesOutWhenReadyLineNeverArrives() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
 
-        do {
+        await #expect(throws: AstroDevServer.AstroError.readyTimeout) {
             _ = try await server.start(
                 siteDirectory: URL(fileURLWithPath: "/tmp"),
                 executable: URL(fileURLWithPath: "/bin/sh"),
@@ -67,23 +68,18 @@ final class AstroDevServerTests: XCTestCase {
                 source: "astro-timeout",
                 readyTimeout: 0.3
             )
-            XCTFail("expected timeout")
-        } catch AstroDevServer.AstroError.readyTimeout {
-            // expected
-        } catch {
-            XCTFail("unexpected error: \(error)")
         }
         // After a timeout the handle is cleared so a new start can be attempted.
         let isRunning = await server.isRunning
-        XCTAssertFalse(isRunning)
+        #expect(!isRunning)
     }
 
-    func testStartFailsWhenServerExitsBeforeReady() async throws {
+    @Test("Start fails when server exits before ready") func startFailsWhenServerExitsBeforeReady() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
 
-        do {
+        await #expect(throws: AstroDevServer.AstroError.exitedBeforeReady(.exited(code: 1))) {
             _ = try await server.start(
                 siteDirectory: URL(fileURLWithPath: "/tmp"),
                 executable: URL(fileURLWithPath: "/bin/sh"),
@@ -92,20 +88,15 @@ final class AstroDevServerTests: XCTestCase {
                 restartPolicy: .never,
                 readyTimeout: 5
             )
-            XCTFail("expected exitedBeforeReady")
-        } catch AstroDevServer.AstroError.exitedBeforeReady(let reason) {
-            XCTAssertEqual(reason, .exited(code: 1))
-        } catch {
-            XCTFail("unexpected error: \(error)")
         }
     }
 
-    func testStartGivesUpWhenServerCrashLoopsBeforeReady() async throws {
+    @Test("Start gives up when server crash-loops before ready") func startGivesUpWhenServerCrashLoopsBeforeReady() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
 
-        do {
+        await #expect(throws: AstroDevServer.AstroError.exitedBeforeReady(.retriesExhausted(lastCode: 1))) {
             _ = try await server.start(
                 siteDirectory: URL(fileURLWithPath: "/tmp"),
                 executable: URL(fileURLWithPath: "/bin/sh"),
@@ -114,17 +105,12 @@ final class AstroDevServerTests: XCTestCase {
                 restartPolicy: .onCrash(maxAttempts: 2, baseBackoff: 0.0),
                 readyTimeout: 5
             )
-            XCTFail("expected exitedBeforeReady after retries exhausted")
-        } catch AstroDevServer.AstroError.exitedBeforeReady(let reason) {
-            XCTAssertEqual(reason, .retriesExhausted(lastCode: 1))
-        } catch {
-            XCTFail("unexpected error: \(error)")
         }
         let isRunning = await server.isRunning
-        XCTAssertFalse(isRunning)
+        #expect(!isRunning)
     }
 
-    func testStartRejectsSecondConcurrentStart() async throws {
+    @Test("Start rejects second concurrent start") func startRejectsSecondConcurrentStart() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
@@ -136,25 +122,20 @@ final class AstroDevServerTests: XCTestCase {
             source: "astro-concurrent",
             readyTimeout: 5
         )
-        do {
+        await #expect(throws: AstroDevServer.AstroError.alreadyRunning) {
             _ = try await server.start(
                 siteDirectory: URL(fileURLWithPath: "/tmp"),
                 executable: URL(fileURLWithPath: "/bin/sh"),
                 arguments: ["-c", "exec sleep 30"],
                 source: "astro-concurrent-2"
             )
-            XCTFail("expected alreadyRunning")
-        } catch AstroDevServer.AstroError.alreadyRunning {
-            // expected
-        } catch {
-            XCTFail("unexpected error: \(error)")
         }
         await server.stop(timeout: 2)
     }
 
     // MARK: HTTP readiness probe
 
-    func testStartWaitsForReadinessProbeToSucceed() async throws {
+    @Test("Start waits for readiness probe to succeed") func startWaitsForReadinessProbeToSucceed() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
 
@@ -173,16 +154,16 @@ final class AstroDevServerTests: XCTestCase {
             source: "astro-probe",
             readyTimeout: 10
         )
-        XCTAssertEqual(url, URL(string: "http://localhost:4321/"))
+        #expect(url == URL(string: "http://localhost:4321/"))
         let count = await attempts.value
-        XCTAssertGreaterThanOrEqual(count, 3)
+        #expect(count >= 3)
 
         await server.stop(timeout: 2)
     }
 
     // MARK: restart handling
 
-    func testReadyURLUpdatesAfterSupervisedRestart() async throws {
+    @Test("Ready URL updates after supervised restart") func readyURLUpdatesAfterSupervisedRestart() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
@@ -206,17 +187,17 @@ final class AstroDevServerTests: XCTestCase {
             restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.05),
             readyTimeout: 5
         )
-        XCTAssertEqual(first, URL(string: "http://localhost:9001/"))
+        #expect(first == URL(string: "http://localhost:9001/"))
 
         // Give the supervisor time to notice the crash, restart, and the watcher to pick up :9002/.
         try? await Task.sleep(nanoseconds: 700_000_000)
         let updated = await server.readyURL
-        XCTAssertEqual(updated, URL(string: "http://localhost:9002/"))
+        #expect(updated == URL(string: "http://localhost:9002/"))
 
         await server.stop(timeout: 2)
     }
 
-    func testOnReadyURLChangeFiresWhenARestartPicksANewPort() async throws {
+    @Test("On ready URL change fires when a restart picks a new port") func onReadyURLChangeFiresWhenARestartPicksANewPort() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
@@ -241,23 +222,23 @@ final class AstroDevServerTests: XCTestCase {
             readyTimeout: 5,
             onReadyURLChange: { url in await observed.add(url) }
         )
-        XCTAssertEqual(first, URL(string: "http://localhost:9101/"))
+        #expect(first == URL(string: "http://localhost:9101/"))
 
         // Wait for the crash → restart → watcher → callback chain.
         try? await Task.sleep(nanoseconds: 700_000_000)
         let urls = await observed.urls
-        XCTAssertEqual(urls, [URL(string: "http://localhost:9102/")!])
+        #expect(urls == [URL(string: "http://localhost:9102/")!])
 
         await server.stop(timeout: 2)
     }
 
-    func testStartTimesOutWhenReadinessProbeNeverSucceeds() async throws {
+    @Test("Start times out when readiness probe never succeeds") func startTimesOutWhenReadinessProbeNeverSucceeds() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let probe: AstroDevServer.ReadinessProbe = { _ in false }
         let server = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: probe)
 
-        do {
+        await #expect(throws: AstroDevServer.AstroError.readyTimeout) {
             _ = try await server.start(
                 siteDirectory: URL(fileURLWithPath: "/tmp"),
                 executable: URL(fileURLWithPath: "/bin/sh"),
@@ -265,14 +246,9 @@ final class AstroDevServerTests: XCTestCase {
                 source: "astro-probe-timeout",
                 readyTimeout: 0.5
             )
-            XCTFail("expected timeout — ready line printed but server never answers")
-        } catch AstroDevServer.AstroError.readyTimeout {
-            // expected
-        } catch {
-            XCTFail("unexpected error: \(error)")
         }
         let isRunning = await server.isRunning
-        XCTAssertFalse(isRunning)
+        #expect(!isRunning)
     }
 }
 

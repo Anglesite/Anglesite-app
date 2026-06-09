@@ -1,8 +1,9 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class ProcessSupervisorShutdownTests: XCTestCase {
-    func testShutdownAllTerminatesEverySupervisedProcess() async throws {
+struct ProcessSupervisorShutdownTests {
+    @Test("Shutdown all terminates every supervised process") func shutdownAllTerminatesEverySupervisedProcess() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
 
@@ -20,26 +21,26 @@ final class ProcessSupervisorShutdownTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 150_000_000)
         for h in handles {
             let running = await supervisor.isRunning(h)
-            XCTAssertTrue(running)
+            #expect(running)
         }
 
         await supervisor.shutdownAll(timeout: 2)
 
         for h in handles {
             let reason = await supervisor.waitForExit(h)
-            XCTAssertEqual(reason, .terminated)
+            #expect(reason == .terminated)
             let running = await supervisor.isRunning(h)
-            XCTAssertFalse(running)
+            #expect(!running)
         }
     }
 
-    func testShutdownAllOnIdleSupervisorReturnsImmediately() async {
+    @Test("Shutdown all on idle supervisor returns immediately") func shutdownAllOnIdleSupervisorReturnsImmediately() async {
         let supervisor = ProcessSupervisor()
         // No processes launched — must not hang.
         await supervisor.shutdownAll(timeout: 1)
     }
 
-    func testShutdownAllStopsRestartingCrashLoopedProcess() async throws {
+    @Test("Shutdown all stops restarting crash-looped process") func shutdownAllStopsRestartingCrashLoopedProcess() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         // A process that crashes immediately, configured to retry many times with a
@@ -56,6 +57,6 @@ final class ProcessSupervisorShutdownTests: XCTestCase {
         await supervisor.shutdownAll(timeout: 1)
 
         let reason = await supervisor.waitForExit(handle)
-        XCTAssertEqual(reason, .terminated)
+        #expect(reason == .terminated)
     }
 }

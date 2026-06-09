@@ -1,7 +1,8 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class MCPClientTests: XCTestCase {
+struct MCPClientTests {
     /// Python fake MCP server speaking JSON-RPC 2.0 over stdio. `-u` keeps it unbuffered.
     private static let fakeServerScript = """
     import sys, json
@@ -90,7 +91,7 @@ final class MCPClientTests: XCTestCase {
         return (client, center, supervisor)
     }
 
-    func testStartRunsInitializeHandshake() async throws {
+    @Test("Start runs initialize handshake") func startRunsInitializeHandshake() async throws {
         let (client, _, _) = makeClient()
         try await client.start(
             executable: Self.pythonURL,
@@ -98,13 +99,13 @@ final class MCPClientTests: XCTestCase {
             source: "mcp-handshake"
         )
         let running = await client.isRunning
-        XCTAssertTrue(running)
+        #expect(running)
         await client.stop()
         let runningAfter = await client.isRunning
-        XCTAssertFalse(runningAfter)
+        #expect(!runningAfter)
     }
 
-    func testListToolsReturnsServerToolDefinitions() async throws {
+    @Test("List tools returns server tool definitions") func listToolsReturnsServerToolDefinitions() async throws {
         let (client, _, _) = makeClient()
         try await client.start(
             executable: Self.pythonURL,
@@ -114,13 +115,13 @@ final class MCPClientTests: XCTestCase {
         defer { Task { await client.stop() } }
 
         let tools = try await client.listTools()
-        XCTAssertEqual(tools.count, 1)
-        XCTAssertEqual(tools.first?.name, "echo")
-        XCTAssertEqual(tools.first?.description, "Echoes back")
-        XCTAssertNotNil(tools.first?.inputSchema)
+        #expect(tools.count == 1)
+        #expect(tools.first?.name == "echo")
+        #expect(tools.first?.description == "Echoes back")
+        #expect(tools.first?.inputSchema != nil)
     }
 
-    func testCallToolReturnsTextContent() async throws {
+    @Test("Call tool returns text content") func callToolReturnsTextContent() async throws {
         let (client, _, _) = makeClient()
         try await client.start(
             executable: Self.pythonURL,
@@ -133,13 +134,13 @@ final class MCPClientTests: XCTestCase {
             name: "echo",
             arguments: .object(["text": .string("hello")])
         )
-        XCTAssertEqual(result.isError, false)
-        XCTAssertEqual(result.content.count, 1)
-        XCTAssertEqual(result.content.first?.type, "text")
-        XCTAssertEqual(result.content.first?.text, "hello")
+        #expect(result.isError == false)
+        #expect(result.content.count == 1)
+        #expect(result.content.first?.type == "text")
+        #expect(result.content.first?.text == "hello")
     }
 
-    func testCallToolUnknownReturnsRPCError() async throws {
+    @Test("Call tool unknown returns RPC error") func callToolUnknownReturnsRPCError() async throws {
         let (client, _, _) = makeClient()
         try await client.start(
             executable: Self.pythonURL,
@@ -148,32 +149,21 @@ final class MCPClientTests: XCTestCase {
         )
         defer { Task { await client.stop() } }
 
-        do {
+        await #expect(throws: MCPClient.MCPError.rpcError(code: -32601, message: "unknown tool")) {
             _ = try await client.callTool(name: "does-not-exist")
-            XCTFail("expected rpcError")
-        } catch MCPClient.MCPError.rpcError(let code, let message) {
-            XCTAssertEqual(code, -32601)
-            XCTAssertEqual(message, "unknown tool")
-        } catch {
-            XCTFail("unexpected error: \(error)")
         }
     }
 
-    func testCallToolBeforeStartThrowsNotInitialized() async throws {
+    @Test("Call tool before start throws not initialized") func callToolBeforeStartThrowsNotInitialized() async throws {
         let (client, _, _) = makeClient()
-        do {
+        await #expect(throws: MCPClient.MCPError.notInitialized) {
             _ = try await client.callTool(name: "echo")
-            XCTFail("expected notInitialized")
-        } catch MCPClient.MCPError.notInitialized {
-            // expected
-        } catch {
-            XCTFail("unexpected error: \(error)")
         }
     }
 
     // MARK: reconnect on crash
 
-    func testReconnectsAfterServerCrash() async throws {
+    @Test("Reconnects after server crash") func reconnectsAfterServerCrash() async throws {
         let (client, _, _) = makeClient()
         try await client.start(
             executable: Self.pythonURL,
@@ -185,22 +175,22 @@ final class MCPClientTests: XCTestCase {
 
         // This call's response arrives, then the server exits(1) → supervisor restarts it.
         let crashResult = try await client.callTool(name: "crash")
-        XCTAssertEqual(crashResult.content.first?.text, "crashing")
+        #expect(crashResult.content.first?.text == "crashing")
 
         // Allow respawn + re-handshake to complete.
         try? await Task.sleep(nanoseconds: 600_000_000)
 
         // Fresh instance should answer normally — proves the client reconnected and re-initialized.
         let tools = try await client.listTools()
-        XCTAssertEqual(tools.first?.name, "echo")
+        #expect(tools.first?.name == "echo")
 
         let echoed = try await client.callTool(name: "echo", arguments: .object(["text": .string("after-reconnect")]))
-        XCTAssertEqual(echoed.content.first?.text, "after-reconnect")
+        #expect(echoed.content.first?.text == "after-reconnect")
     }
 
     // MARK: JSONValue round-trip
 
-    func testJSONValueRoundTrip() throws {
+    @Test("JSON value round trip") func jSONValueRoundTrip() throws {
         let original: JSONValue = .object([
             "s": .string("hello"),
             "n": .int(42),
@@ -213,6 +203,6 @@ final class MCPClientTests: XCTestCase {
         let data = try JSONSerialization.data(withJSONObject: original.rawValue)
         let decoded = try JSONSerialization.jsonObject(with: data)
         let round = JSONValue.from(decoded)
-        XCTAssertEqual(round, original)
+        #expect(round == original)
     }
 }

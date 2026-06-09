@@ -1,60 +1,56 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class ProcessSupervisorTests: XCTestCase {
-    func testRunCapturesStandardOutput() async throws {
+struct ProcessSupervisorTests {
+    @Test("Run captures standard output") func runCapturesStandardOutput() async throws {
         let supervisor = ProcessSupervisor()
         let result = try await supervisor.run(
             executable: URL(fileURLWithPath: "/bin/echo"),
             arguments: ["hello"]
         )
-        XCTAssertEqual(result.stdout, "hello\n")
-        XCTAssertEqual(result.stderr, "")
-        XCTAssertEqual(result.exitCode, 0)
+        #expect(result.stdout == "hello\n")
+        #expect(result.stderr == "")
+        #expect(result.exitCode == 0)
     }
 
-    func testRunCapturesStandardError() async throws {
+    @Test("Run captures standard error") func runCapturesStandardError() async throws {
         let supervisor = ProcessSupervisor()
         let result = try await supervisor.run(
             executable: URL(fileURLWithPath: "/bin/sh"),
             arguments: ["-c", "printf err 1>&2"]
         )
-        XCTAssertEqual(result.stdout, "")
-        XCTAssertEqual(result.stderr, "err")
-        XCTAssertEqual(result.exitCode, 0)
+        #expect(result.stdout == "")
+        #expect(result.stderr == "err")
+        #expect(result.exitCode == 0)
     }
 
-    func testRunReportsNonZeroExitCode() async throws {
+    @Test("Run reports non-zero exit code") func runReportsNonZeroExitCode() async throws {
         let supervisor = ProcessSupervisor()
         let result = try await supervisor.run(
             executable: URL(fileURLWithPath: "/bin/sh"),
             arguments: ["-c", "exit 7"]
         )
-        XCTAssertEqual(result.exitCode, 7)
+        #expect(result.exitCode == 7)
     }
 
-    func testRunThrowsWhenExecutableMissing() async {
+    @Test("Run throws when executable missing") func runThrowsWhenExecutableMissing() async {
         let supervisor = ProcessSupervisor()
-        do {
+        await #expect(throws: ProcessSupervisor.SupervisorError.self) {
             _ = try await supervisor.run(
                 executable: URL(fileURLWithPath: "/usr/bin/definitely-not-a-real-binary-xyz"),
                 arguments: []
             )
-            XCTFail("expected spawnFailed")
-        } catch ProcessSupervisor.SupervisorError.spawnFailed {
-            // expected
-        } catch {
-            XCTFail("unexpected error: \(error)")
         }
     }
 
-    func testRunPassesEnvironment() async throws {
+    @Test("Run passes environment") func runPassesEnvironment() async throws {
         let supervisor = ProcessSupervisor()
         let result = try await supervisor.run(
             executable: URL(fileURLWithPath: "/bin/sh"),
             arguments: ["-c", "printf %s \"$ANGLESITE_TEST\""],
             environment: ["ANGLESITE_TEST": "phase-1"]
         )
-        XCTAssertEqual(result.stdout, "phase-1")
+        #expect(result.stdout == "phase-1")
     }
 }

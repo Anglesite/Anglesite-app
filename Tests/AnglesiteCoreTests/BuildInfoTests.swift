@@ -1,12 +1,12 @@
-import XCTest
+import Testing
 @testable import AnglesiteCore
 
-final class BuildInfoTests: XCTestCase {
-    func testSummaryContainsAppName() {
-        XCTAssertTrue(BuildInfo.summary.contains("Anglesite"))
+struct BuildInfoTests {
+    @Test("Summary contains app name") func summaryContainsAppName() {
+        #expect(BuildInfo.summary.contains("Anglesite"))
     }
 
-    func testSummaryContainsPhase() {
-        XCTAssertTrue(BuildInfo.summary.contains("phase \(BuildInfo.phase)"))
+    @Test("Summary contains phase") func summaryContainsPhase() {
+        #expect(BuildInfo.summary.contains("phase \(BuildInfo.phase)"))
     }
 }

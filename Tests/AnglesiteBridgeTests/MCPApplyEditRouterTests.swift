@@ -1,8 +1,8 @@
-import XCTest
+import Testing
 @testable import AnglesiteBridge
 import AnglesiteCore
 
-final class MCPApplyEditRouterTests: XCTestCase {
+struct MCPApplyEditRouterTests {
     private static let sampleSelector: JSONValue = .object([
         "tag": .string("P"),
         "classes": .array([]),
@@ -18,17 +18,16 @@ final class MCPApplyEditRouterTests: XCTestCase {
         value: .string("Hello, world.")
     )
 
-    func testCallsApplyEditToolWithEditMessageAsArguments() async {
+    @Test("Calls apply-edit tool with edit message as arguments") func callsApplyEditToolWithEditMessageAsArguments() async {
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(content: [], isError: false)))
-        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         _ = await router.apply(sampleMessage)
 
         let calls = await recorder.calls
-        XCTAssertEqual(calls.count, 1)
-        XCTAssertEqual(calls.first?.name, "apply_edit")
-        XCTAssertEqual(
-            calls.first?.arguments,
-            .object([
+        #expect(calls.count == 1)
+        #expect(calls.first?.name == "apply_edit")
+        #expect(
+            calls.first?.arguments == .object([
                 "id": .string("e-1"),
                 "type": .string("anglesite:apply-edit"),
                 "path": .string("/about/"),
@@ -39,109 +38,111 @@ final class MCPApplyEditRouterTests: XCTestCase {
         )
     }
 
-    func testSuccessfulToolResultMapsToApplied() async {
+    @Test("Successful tool result maps to applied") func successfulToolResultMapsToApplied() async {
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: "patched /about.mdoc range 12-25")],
             isError: false
         )))
-        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         let reply = await router.apply(sampleMessage)
-        XCTAssertEqual(reply.id, "e-1")
-        XCTAssertEqual(reply.status, .applied)
-        XCTAssertEqual(reply.message, "patched /about.mdoc range 12-25")
+        #expect(reply.id == "e-1")
+        #expect(reply.status == .applied)
+        #expect(reply.message == "patched /about.mdoc range 12-25")
     }
 
-    func testIsErrorResultMapsToFailedWithToolMessage() async {
+    @Test("Is-error result maps to failed with tool message") func isErrorResultMapsToFailedWithToolMessage() async {
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: "selector resolved to two nodes")],
             isError: true
         )))
-        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         let reply = await router.apply(sampleMessage)
-        XCTAssertEqual(reply.status, .failed)
-        XCTAssertEqual(reply.message, "selector resolved to two nodes")
+        #expect(reply.status == .failed)
+        #expect(reply.message == "selector resolved to two nodes")
     }
 
-    func testThrownErrorMapsToFailed() async {
+    @Test("Thrown error maps to failed") func thrownErrorMapsToFailed() async {
         let recorder = ToolCallRecorder(result: .failure(MCPClient.MCPError.notInitialized))
-        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         let reply = await router.apply(sampleMessage)
-        XCTAssertEqual(reply.status, .failed)
-        XCTAssertNotNil(reply.message)
+        #expect(reply.status == .failed)
+        #expect(reply.message != nil)
     }
 
     // MARK: structured reply parse
 
-    func testSuccessfulReplyWithStructuredBodyExposesStructuredFields() async {
+    @Test("Successful reply with structured body exposes structured fields") func successfulReplyWithStructuredBodyExposesStructuredFields() async {
         let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","range":{"start":12,"end":25},"commit":"abc1234567890abcdef1234567890abcdef12345"}"#
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: body)],
             isError: false
         )))
-        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         let reply = await router.apply(sampleMessage)
-        XCTAssertEqual(reply.status, .applied)
-        XCTAssertEqual(reply.file, "src/pages/about.astro")
-        XCTAssertEqual(reply.commit, "abc1234567890abcdef1234567890abcdef12345")
-        XCTAssertNil(reply.result)
+        #expect(reply.status == .applied)
+        #expect(reply.file == "src/pages/about.astro")
+        #expect(reply.commit == "abc1234567890abcdef1234567890abcdef12345")
+        #expect(reply.result == nil)
     }
 
-    func testSuccessfulReplyWithResultExposesImageResult() async {
+    @Test("Successful reply with result exposes image result") func successfulReplyWithResultExposesImageResult() async {
         let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","range":{"start":12,"end":25},"commit":"abc1234567890abcdef1234567890abcdef12345","result":{"src":"/images/hero.webp","srcset":"/images/hero-480w.webp 480w"}}"#
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: body)],
             isError: false
         )))
-        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         let reply = await router.apply(sampleMessage)
-        XCTAssertEqual(reply.result?.src, "/images/hero.webp")
-        XCTAssertEqual(reply.result?.srcset, "/images/hero-480w.webp 480w")
+        #expect(reply.result?.src == "/images/hero.webp")
+        #expect(reply.result?.srcset == "/images/hero-480w.webp 480w")
     }
 
-    func testMalformedReplyTextFallsBackToMessageString() async {
+    @Test("Malformed reply text falls back to message string") func malformedReplyTextFallsBackToMessageString() async {
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: "not valid json {")],
             isError: false
         )))
-        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         let reply = await router.apply(sampleMessage)
-        XCTAssertEqual(reply.status, .applied)
-        XCTAssertEqual(reply.message, "not valid json {")
-        XCTAssertNil(reply.file)
-        XCTAssertNil(reply.commit)
+        #expect(reply.status == .applied)
+        #expect(reply.message == "not valid json {")
+        #expect(reply.file == nil)
+        #expect(reply.commit == nil)
     }
 
-    func testOnEditFiresForAppliedReplyWithCommit() async {
+    @Test("On edit fires for applied reply with commit") func onEditFiresForAppliedReplyWithCommit() async {
         let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","range":{"start":12,"end":25},"commit":"abc1234567890abcdef1234567890abcdef12345"}"#
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: body)],
             isError: false
         )))
         let observed = ObservedReplies()
-        let router = MCPApplyEditRouter(toolCaller: recorder.call, onEdit: { reply in
-            Task { await observed.record(reply) }
-        })
+        let router = MCPApplyEditRouter(
+            toolCaller: { try await recorder.call(name: $0, arguments: $1) },
+            onEdit: { reply in Task { await observed.record(reply) } }
+        )
         _ = await router.apply(sampleMessage)
         try? await Task.sleep(nanoseconds: 50_000_000)
         let captured = await observed.replies
-        XCTAssertEqual(captured.count, 1)
-        XCTAssertEqual(captured.first?.commit, "abc1234567890abcdef1234567890abcdef12345")
+        #expect(captured.count == 1)
+        #expect(captured.first?.commit == "abc1234567890abcdef1234567890abcdef12345")
     }
 
-    func testOnEditDoesNotFireWhenReplyHasNoCommit() async {
+    @Test("On edit does not fire when reply has no commit") func onEditDoesNotFireWhenReplyHasNoCommit() async {
         // No JSON in the content — parser gives up; reply has nil commit; observer must NOT fire.
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: "stub edit response")],
             isError: false
         )))
         let observed = ObservedReplies()
-        let router = MCPApplyEditRouter(toolCaller: recorder.call, onEdit: { reply in
-            Task { await observed.record(reply) }
-        })
+        let router = MCPApplyEditRouter(
+            toolCaller: { try await recorder.call(name: $0, arguments: $1) },
+            onEdit: { reply in Task { await observed.record(reply) } }
+        )
         _ = await router.apply(sampleMessage)
         try? await Task.sleep(nanoseconds: 50_000_000)
         let captured = await observed.replies
-        XCTAssertTrue(captured.isEmpty)
+        #expect(captured.isEmpty)
     }
 }
 

@@ -1,30 +1,34 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class SiteStoreTests: XCTestCase {
-    private var tempDir: URL!
-    private var sitesRoot: URL!
-    private var persistenceURL: URL!
-    private var settings: AppSettings!
-    private var defaults: UserDefaults!
-    private var suiteName: String!
+/// A `final class` (not a `struct`) so `deinit` can remove the temp directories and throwaway
+/// `UserDefaults` suite, mirroring the former `tearDownWithError`.
+final class SiteStoreTests {
+    private let tempDir: URL
+    private let sitesRoot: URL
+    private let persistenceURL: URL
+    private let settings: AppSettings
+    private let defaults: UserDefaults
+    private let suiteName: String
     private let fileManager = FileManager.default
 
-    override func setUpWithError() throws {
+    init() throws {
         tempDir = fileManager.temporaryDirectory.appendingPathComponent("anglesite-store-\(UUID().uuidString)", isDirectory: true)
         sitesRoot = tempDir.appendingPathComponent("Sites", isDirectory: true)
         persistenceURL = tempDir.appendingPathComponent("sites.json")
         try fileManager.createDirectory(at: sitesRoot, withIntermediateDirectories: true)
 
-        suiteName = "test-anglesite-\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)
+        let suite = "test-anglesite-\(UUID().uuidString)"
+        suiteName = suite
+        defaults = UserDefaults(suiteName: suite)!
         settings = AppSettings(defaults: defaults)
         settings.sitesRootOverride = sitesRoot
     }
 
-    override func tearDownWithError() throws {
+    deinit {
         try? fileManager.removeItem(at: tempDir)
-        defaults?.removePersistentDomain(forName: suiteName)
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     private func makeValidSite(named name: String) throws -> URL {
@@ -36,40 +40,40 @@ final class SiteStoreTests: XCTestCase {
         return dir
     }
 
-    func testRefreshDiscoversValidSites() async throws {
+    @Test("Refresh discovers valid sites") func refreshDiscoversValidSites() async throws {
         _ = try makeValidSite(named: "alpha")
         _ = try makeValidSite(named: "bravo")
 
         let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
         let result = try await store.refresh()
 
-        XCTAssertEqual(result.map(\.name), ["alpha", "bravo"])
-        XCTAssertTrue(result.allSatisfy { $0.isValid })
+        #expect(result.map(\.name) == ["alpha", "bravo"])
+        #expect(result.allSatisfy { $0.isValid })
     }
 
-    func testRefreshSkipsNonProjectDirectories() async throws {
+    @Test("Refresh skips non-project directories") func refreshSkipsNonProjectDirectories() async throws {
         _ = try makeValidSite(named: "alpha")
         try fileManager.createDirectory(at: sitesRoot.appendingPathComponent("not-a-site"), withIntermediateDirectories: true)
 
         let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
         let result = try await store.refresh()
-        XCTAssertEqual(result.map(\.name), ["alpha"])
+        #expect(result.map(\.name) == ["alpha"])
     }
 
-    func testRefreshKeepsPartialScaffoldsWithDiagnostics() async throws {
+    @Test("Refresh keeps partial scaffolds with diagnostics") func refreshKeepsPartialScaffoldsWithDiagnostics() async throws {
         let dir = sitesRoot.appendingPathComponent("partial", isDirectory: true)
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         try Data().write(to: dir.appendingPathComponent("anglesite.config.json"))
 
         let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
         let result = try await store.refresh()
-        XCTAssertEqual(result.count, 1)
-        XCTAssertEqual(result[0].name, "partial")
-        XCTAssertFalse(result[0].isValid)
-        XCTAssertEqual(Set(result[0].missingSentinels), Set(["astro.config.ts", "keystatic.config.ts"]))
+        #expect(result.count == 1)
+        #expect(result[0].name == "partial")
+        #expect(!result[0].isValid)
+        #expect(Set(result[0].missingSentinels) == Set(["astro.config.ts", "keystatic.config.ts"]))
     }
 
-    func testPersistenceRoundTrip() async throws {
+    @Test("Persistence round trip") func persistenceRoundTrip() async throws {
         _ = try makeValidSite(named: "alpha")
         let writer = SiteStore(settings: settings, persistenceURL: persistenceURL)
         try await writer.refresh()
@@ -77,23 +81,23 @@ final class SiteStoreTests: XCTestCase {
         let reader = SiteStore(settings: settings, persistenceURL: persistenceURL)
         try await reader.load()
         let loaded = await reader.sites
-        XCTAssertEqual(loaded.map(\.name), ["alpha"])
+        #expect(loaded.map(\.name) == ["alpha"])
     }
 
-    func testAddRejectsInvalidProject() async throws {
+    @Test("Add rejects invalid project") func addRejectsInvalidProject() async throws {
         let dir = tempDir.appendingPathComponent("not-a-site", isDirectory: true)
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
 
         let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
         do {
             _ = try await store.add(dir)
-            XCTFail("expected invalidProject")
+            Issue.record("expected invalidProject")
         } catch SiteStore.StoreError.invalidProject(_, let missing) {
-            XCTAssertEqual(Set(missing), Set(ProjectValidator.sentinels))
+            #expect(Set(missing) == Set(ProjectValidator.sentinels))
         }
     }
 
-    func testAddPersistsSiteOutsideSitesRoot() async throws {
+    @Test("Add persists site outside Sites root") func addPersistsSiteOutsideSitesRoot() async throws {
         let dir = tempDir.appendingPathComponent("external", isDirectory: true)
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         for sentinel in ProjectValidator.sentinels {
@@ -102,15 +106,15 @@ final class SiteStoreTests: XCTestCase {
 
         let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
         let site = try await store.add(dir)
-        XCTAssertEqual(site.name, "external")
+        #expect(site.name == "external")
 
         let reader = SiteStore(settings: settings, persistenceURL: persistenceURL)
         try await reader.load()
         let loaded = await reader.sites
-        XCTAssertEqual(loaded.map(\.name), ["external"])
+        #expect(loaded.map(\.name) == ["external"])
     }
 
-    func testAddNormalizesSymlinkedPath() async throws {
+    @Test("Add normalizes symlinked path") func addNormalizesSymlinkedPath() async throws {
         // A real project dir, reached through a symlink that points at it.
         let realDir = tempDir.appendingPathComponent("real-site", isDirectory: true)
         try fileManager.createDirectory(at: realDir, withIntermediateDirectories: true)
@@ -126,11 +130,11 @@ final class SiteStoreTests: XCTestCase {
         // id and path must derive from the same symlink-resolved form: the
         // stored path is already canonical, so its .path equals the id, and the
         // name reflects the real directory rather than the symlink.
-        XCTAssertEqual(site.path.path, site.id)
-        XCTAssertEqual(site.name, "real-site")
+        #expect(site.path.path == site.id)
+        #expect(site.name == "real-site")
     }
 
-    func testAddCollapsesSymlinkedAndRealPathToOneEntry() async throws {
+    @Test("Add collapses symlinked and real path to one entry") func addCollapsesSymlinkedAndRealPathToOneEntry() async throws {
         let realDir = tempDir.appendingPathComponent("real-site", isDirectory: true)
         try fileManager.createDirectory(at: realDir, withIntermediateDirectories: true)
         for sentinel in ProjectValidator.sentinels {
@@ -143,12 +147,12 @@ final class SiteStoreTests: XCTestCase {
         let viaLink = try await store.add(linkDir)
         let viaReal = try await store.add(realDir)
 
-        XCTAssertEqual(viaLink.id, viaReal.id)
+        #expect(viaLink.id == viaReal.id)
         let count = await store.sites.count
-        XCTAssertEqual(count, 1, "the same directory via symlink and real path must be one entry")
+        #expect(count == 1, "the same directory via symlink and real path must be one entry")
     }
 
-    func testRemoveDoesNotDeleteFiles() async throws {
+    @Test("Remove does not delete files") func removeDoesNotDeleteFiles() async throws {
         let dir = try makeValidSite(named: "alpha")
         let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
         try await store.refresh()
@@ -156,7 +160,7 @@ final class SiteStoreTests: XCTestCase {
 
         try await store.remove(id: id)
         let remaining = await store.sites
-        XCTAssertTrue(remaining.isEmpty)
-        XCTAssertTrue(fileManager.fileExists(atPath: dir.path), "files on disk must be untouched")
+        #expect(remaining.isEmpty)
+        #expect(fileManager.fileExists(atPath: dir.path), "files on disk must be untouched")
     }
 }
