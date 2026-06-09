@@ -113,13 +113,13 @@ final class AppliesEditEndToEndTests {
         }()
         let serverPath = candidate.appendingPathComponent("server/index.mjs")
         guard FileManager.default.isReadableFile(atPath: serverPath.path) else {
-            try Test.cancel(
+            throw SkipReason(
                 "Anglesite plugin checkout not found at \(candidate.path)/server/index.mjs. Set ANGLESITE_PLUGIN_PATH or clone Anglesite/anglesite as a sibling."
             )
         }
         let sdkPath = candidate.appendingPathComponent("node_modules/@modelcontextprotocol/sdk")
         guard FileManager.default.fileExists(atPath: sdkPath.path) else {
-            try Test.cancel(
+            throw SkipReason(
                 "Plugin's node_modules are missing — run `npm ci` in \(candidate.path)"
             )
         }
@@ -138,6 +138,15 @@ final class AppliesEditEndToEndTests {
                 return URL(fileURLWithPath: p)
             }
         }
-        try Test.cancel("node not found in common paths; install Node ≥22")
+        throw SkipReason("node not found in common paths; install Node ≥22")
     }
+}
+
+/// Carries a precondition-skip message in the test's `throws` channel. Swift 6.0's Swift Testing
+/// has no runtime `Test.cancel` API; throwing surfaces the reason in the failure output so a
+/// local dev sees why the test didn't run, while CI (which provides ANGLESITE_PLUGIN_PATH and a
+/// Node install) never hits these paths.
+private struct SkipReason: Error, CustomStringConvertible {
+    let description: String
+    init(_ description: String) { self.description = description }
 }
