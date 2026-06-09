@@ -11,6 +11,11 @@ options:
 packages:
   Anglesite:
     path: .
+  # Sparkle is the only third-party Swift dep allowed at v0.5 (per CLAUDE.md). Pinned to
+  # 2.x; minor bumps come in as a normal PR.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.6.0"
 
 targets:
   Anglesite:
@@ -35,6 +40,10 @@ targets:
         type: folder
         buildPhase: resources
         optional: true
+      - path: Resources/Anglesite.help
+        type: folder
+        buildPhase: resources
+        optional: true
     preBuildScripts:
       - name: Vendor Node runtime
         script: "${PROJECT_DIR}/scripts/vendor-node.sh"
@@ -47,6 +56,17 @@ targets:
         basedOnDependencyAnalysis: false
       - name: Build edit overlay
         script: "${PROJECT_DIR}/scripts/build-overlay.sh"
+        basedOnDependencyAnalysis: false
+      - name: Build Help index
+        script: "${PROJECT_DIR}/scripts/build-help-index.sh"
+        basedOnDependencyAnalysis: false
+    postBuildScripts:
+      # Re-sign the bundled Node (in the .app copy) with the app's Developer ID + hardened-runtime
+      # entitlements (node-runtime-devid.entitlements — the MAS set minus the sandbox keys), so the
+      # nested Mach-O's team matches the app and notarization accepts the bundle (#4). Runs after
+      # resources are copied, before Xcode's implicit final bundle code-sign.
+      - name: Re-sign bundled Node (Developer ID)
+        script: "${PROJECT_DIR}/scripts/resign-node.sh \"\" \"${PROJECT_DIR}/Resources/node-runtime-devid.entitlements\""
         basedOnDependencyAnalysis: false
     settings:
       base:
@@ -75,12 +95,103 @@ targets:
         product: AnglesiteCore
       - package: Anglesite
         product: AnglesiteBridge
+      - package: Sparkle
+
+  AnglesiteMAS:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/AnglesiteApp
+      - path: Resources/Assets.xcassets
+      - path: Resources/node-runtime
+        type: folder
+        buildPhase: resources
+        optional: true
+      - path: Resources/plugin
+        type: folder
+        buildPhase: resources
+        optional: true
+      - path: Resources/npm-cache
+        type: folder
+        buildPhase: resources
+        optional: true
+      - path: Resources/edit-overlay
+        type: folder
+        buildPhase: resources
+        optional: true
+      - path: Resources/Anglesite.help
+        type: folder
+        buildPhase: resources
+        optional: true
+    preBuildScripts:
+      - name: Vendor Node runtime
+        script: "${PROJECT_DIR}/scripts/vendor-node.sh"
+        basedOnDependencyAnalysis: false
+      - name: Bundle Anglesite plugin
+        script: "${PROJECT_DIR}/scripts/copy-plugin.sh"
+        basedOnDependencyAnalysis: false
+      - name: Vendor primed npm cache
+        script: "${PROJECT_DIR}/scripts/vendor-npm-cache.sh"
+        basedOnDependencyAnalysis: false
+      - name: Build edit overlay
+        script: "${PROJECT_DIR}/scripts/build-overlay.sh"
+        basedOnDependencyAnalysis: false
+      - name: Build Help index
+        script: "${PROJECT_DIR}/scripts/build-help-index.sh"
+        basedOnDependencyAnalysis: false
+    postBuildScripts:
+      # Re-sign the bundled Node (in the .app copy) with the app's identity + hardened-runtime
+      # JIT/sandbox entitlements, or V8 OOMs at launch under the MAS app's hardened runtime.
+      # Runs after resources are copied, before Xcode's implicit final bundle code-sign.
+      - name: Re-sign bundled Node for sandbox
+        script: "${PROJECT_DIR}/scripts/resign-node.sh"
+        basedOnDependencyAnalysis: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.anglesite.app.mas
+        # Distinct product name so the MAS build emits AnglesiteMAS.app instead of colliding
+        # with the DevID Anglesite.app at the shared Products dir. The user-visible name stays
+        # "Anglesite" via CFBundleDisplayName in AnglesiteMAS-Info.plist.
+        PRODUCT_NAME: AnglesiteMAS
+        INFOPLIST_FILE: Resources/AnglesiteMAS-Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Resources/AnglesiteMAS.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.10"
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "0.1.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        COMBINE_HIDPI_IMAGES: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: ANGLESITE_MAS
+      configs:
+        Debug:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+    dependencies:
+      - package: Anglesite
+        product: AnglesiteCore
+      - package: Anglesite
+        product: AnglesiteBridge
 
 schemes:
   Anglesite:
     build:
       targets:
         Anglesite: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+  AnglesiteMAS:
+    build:
+      targets:
+        AnglesiteMAS: all
     run:
       config: Debug
     archive:

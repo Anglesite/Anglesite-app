@@ -2,20 +2,22 @@ import Foundation
 
 /// One-shot orchestrator for `wrangler deploy`.
 ///
-/// Unlike `AstroDevServer` and `MCPClient` (long-running supervisees), a deploy is a single
-/// foreground action: spawn wrangler, wait for exit, parse the deployed URL out of the success
-/// line, return a `Result`. The process goes through `ProcessSupervisor.run(...)` (synchronous
-/// capture) rather than `.launch(...)`, because the `.launch(...)` path's LogCenter pump is
-/// async-and-untracked — `waitForExit` returns before late `Task { logCenter.append(...) }`
-/// calls have settled, and the URL line we need can be one of those late lines. The captured
-/// stdout/stderr are *also* fed to LogCenter line-by-line after exit so the Debug pane sees
-/// the run; for now that lands at the end of the deploy rather than in real time. Real-time
-/// streaming would require tracking the supervisor's pump Tasks — left as a follow-up.
+/// A deploy is a single foreground action with three real steps and one resolver step:
+///   1. Resolve / read the Cloudflare API token (pre-spawn; no token → `.failed`).
+///   2. Run `npm run build` so `dist/` is fresh (streamed to `LogCenter` via `supervisor.launch`).
+///   3. Run the bundled plugin's pre-deploy scan; `.blocked` short-circuits with no override
+///      (per CLAUDE.md, the app cannot bypass plugin security hooks).
+///   4. Run `wrangler deploy` (also streamed to `LogCenter`); parse the deployed URL out of the
+///      success block on exit 0.
 ///
-/// Pre-spawn refusals (no Cloudflare token, no wrangler) return `.failed` without launching
-/// anything. After spawn, only the exit code + collected stdout matter: a zero exit with a
-/// matched `Published <name> (…)\n  <url>` block becomes `.succeeded`; a non-zero exit, or zero
-/// exit with no matched URL, becomes `.failed` with a reason.
+/// Both subprocesses go through `ProcessSupervisor.launch(...)`, not `.run(...)`, so their stdout
+/// and stderr flow into `LogCenter` line-by-line as wrangler produces them. The deploy drawer
+/// (#22) and Debug pane both consume this stream while the deploy is in flight; the URL extractor
+/// re-reads the captured stdout via a `LogCenter` subscription opened before launch.
+///
+/// Note: the supervisor's pipe pump dispatches each line via an untracked `Task { await
+/// logCenter.append(...) }`, so the subscription needs a brief grace period after `waitForExit`
+/// before it's safe to cancel — see the call site for details.
 public actor DeployCommand {
     public enum Result: Sendable, Equatable {
         case succeeded(url: URL, duration: TimeInterval)
@@ -23,28 +25,36 @@ public actor DeployCommand {
         /// failures (and any warnings) so the UI can render a sheet with no override.
         case blocked(failures: [PreDeployCheck.ScanFailure], warnings: [PreDeployCheck.ScanWarning])
         /// `exitCode` is `nil` for pre-spawn refusals (no token, no wrangler) and for spawn
-        /// failures; otherwise it's wrangler's exit code (including `0` for the
-        /// "exited cleanly but we couldn't find a URL" case).
+        /// failures; otherwise it's the failing subprocess's exit code (including `0` for the
+        /// "wrangler exited cleanly but we couldn't find a URL" case).
         case failed(reason: String, exitCode: Int32?)
     }
 
-    /// How to run wrangler for a site directory — or why it can't be run.
+    /// How to run a subprocess for a site directory — or why it can't be run.
     public enum LaunchPlan: Sendable, Equatable {
         case run(executable: URL, arguments: [String])
         case unavailable(reason: String)
     }
 
     public typealias CommandResolver = @Sendable (_ siteDirectory: URL) -> LaunchPlan
-    /// Returns the Cloudflare API token, or `nil` if none is configured. Phase 7's
-    /// `KeychainStore` will replace the default `envTokenSource` in production callers.
+    /// Returns the Cloudflare API token, or `nil` if none is configured. Production callers use
+    /// `DeployCommand.keychainTokenSource` (Keychain with an env-var fallback for development);
+    /// tests typically inject a closure returning a literal.
     public typealias TokenSource = @Sendable () async throws -> String?
     /// Runs the bundled plugin's pre-deploy scan against a site and returns the outcome.
     /// Real callers use `DeployCommand.defaultPreflight`; tests inject a fake.
     public typealias PreflightChecker = @Sendable (_ siteDirectory: URL) async -> PreDeployCheck.Outcome
+    /// Fires once the preflight step resolves, with the outcome that was used to
+    /// decide whether to continue with wrangler. The closure runs inside the actor's
+    /// isolation; bridge to MainActor via a Task if you need to touch SwiftUI state.
+    /// Fires for every preflight result (.passed, .blocked, .error) — including the
+    /// cases where deploy() returns .failed afterwards.
+    public typealias PreflightObserver = @Sendable (PreDeployCheck.Outcome) -> Void
 
     private let supervisor: ProcessSupervisor
     private let logCenter: LogCenter
     private let resolveCommand: CommandResolver
+    private let resolveBuildCommand: CommandResolver
     private let tokenSource: TokenSource
     private let preflight: PreflightChecker
 
@@ -52,22 +62,28 @@ public actor DeployCommand {
         supervisor: ProcessSupervisor = .shared,
         logCenter: LogCenter = .shared,
         resolveCommand: @escaping CommandResolver = DeployCommand.resolveWranglerCommand,
-        tokenSource: @escaping TokenSource = DeployCommand.envTokenSource,
+        resolveBuildCommand: @escaping CommandResolver = DeployCommand.resolveBuildCommand,
+        tokenSource: @escaping TokenSource = DeployCommand.keychainTokenSource,
         preflight: @escaping PreflightChecker = DeployCommand.defaultPreflight
     ) {
         self.supervisor = supervisor
         self.logCenter = logCenter
         self.resolveCommand = resolveCommand
+        self.resolveBuildCommand = resolveBuildCommand
         self.tokenSource = tokenSource
         self.preflight = preflight
     }
 
     /// Run a deploy for `siteID`. Returns once wrangler has exited (or before, if pre-spawn
-    /// refusal applies). The subprocess streams to `logCenter` under source `deploy:<siteID>`
-    /// for the whole supervisor / Debug-pane / deploy-drawer pipeline.
-    public func deploy(siteID: String, siteDirectory: URL) async -> Result {
-        // Pre-spawn checks. The token comes first so we never spend time resolving an
-        // executable we won't end up running.
+    /// refusal applies). Build output streams under source `"deploy:<siteID>:build"`, the deploy
+    /// itself under `"deploy:<siteID>"`, so a UI consumer can distinguish phases.
+    public func deploy(
+        siteID: String,
+        siteDirectory: URL,
+        onPreflight: PreflightObserver? = nil
+    ) async -> Result {
+        // Pre-spawn checks. The token comes first so we never spend time on a build or scan
+        // for a deploy that won't reach wrangler.
         let token: String?
         do {
             token = try await tokenSource()
@@ -75,16 +91,25 @@ public actor DeployCommand {
             return .failed(reason: "couldn't read Cloudflare API token: \(error)", exitCode: nil)
         }
         guard let token, !token.isEmpty else {
-            return .failed(reason: "no CLOUDFLARE_API_TOKEN — set in env or Settings (Phase 7)", exitCode: nil)
+            return .failed(reason: "no CLOUDFLARE_API_TOKEN — add it in Settings → Advanced → Credentials, or set the env var", exitCode: nil)
         }
 
-        // Pre-deploy scan runs before wrangler resolution. If the bundled plugin's
-        // checks find PII, exposed tokens, unauthorized third-party scripts, or
-        // Keystatic admin routes in dist/, the deploy is blocked regardless of
-        // whether wrangler is installed — the user needs to fix the scan findings
-        // first either way. Per the durable rule in CLAUDE.md, the app cannot
-        // bypass plugin security hooks; the UI sheet for `.blocked` has no override.
-        switch await preflight(siteDirectory) {
+        // Build dist/ before the scan needs it. Streams to LogCenter via launch().
+        switch await runBuild(siteID: siteID, siteDirectory: siteDirectory) {
+        case .success:
+            break
+        case .failure(let result):
+            return result
+        }
+
+        // Pre-deploy scan runs after the build (so dist/ exists) and before wrangler is
+        // resolved. If the bundled plugin's checks find PII, exposed tokens, unauthorized
+        // third-party scripts, or Keystatic admin routes in dist/, the deploy is blocked —
+        // per the durable rule in CLAUDE.md, the app cannot bypass plugin security hooks;
+        // the UI sheet for `.blocked` has no override.
+        let preflightOutcome = await preflight(siteDirectory)
+        onPreflight?(preflightOutcome)
+        switch preflightOutcome {
         case .passed:
             break
         case .blocked(let failures, let warnings):
@@ -109,37 +134,89 @@ public actor DeployCommand {
         environment["CLOUDFLARE_API_TOKEN"] = token
 
         let started = Date()
-        let result: ProcessSupervisor.RunResult
+        let handle: ProcessSupervisor.Handle
         do {
-            result = try await supervisor.run(
+            handle = try await supervisor.launch(
+                source: source,
                 executable: executable,
                 arguments: arguments,
-                environment: environment
+                environment: environment,
+                currentDirectoryURL: siteDirectory,
+                logCenter: logCenter
             )
         } catch {
             return .failed(reason: "couldn't spawn wrangler: \(error)", exitCode: nil)
         }
+
+        let reason = await supervisor.waitForExit(handle)
         let duration = Date().timeIntervalSince(started)
 
-        // Mirror the captured output into LogCenter line-by-line so the Debug pane shows the
-        // run. This lands after exit rather than in real time — see the doc-comment header for
-        // why; the deploy drawer (#22) will show a spinner during the run so the user knows
-        // something is happening.
-        for line in result.stdout.split(separator: "\n", omittingEmptySubsequences: false) where !line.isEmpty {
-            await logCenter.append(source: source, stream: .stdout, text: String(line))
+        // `waitForExit` only resumes after the supervisor's per-pipe drain Tasks have
+        // finished — every byte wrangler wrote to stdout/stderr is in `LogCenter` by
+        // the time we get here, so the snapshot can't miss the `Published` line.
+        let snapshot = await logCenter.snapshot()
+        let stdout = snapshot
+            .filter { $0.source == source && $0.stream == .stdout }
+            .map(\.text)
+            .joined(separator: "\n")
+
+        switch reason {
+        case .exited(let code):
+            if code == 0 {
+                if let url = Self.extractDeployedURL(from: stdout) {
+                    return .succeeded(url: url, duration: duration)
+                }
+                return .failed(reason: "wrangler exited cleanly but no deployed URL was found in its output", exitCode: 0)
+            }
+            return .failed(reason: "wrangler exited with code \(code)", exitCode: code)
+        case .terminated:
+            return .failed(reason: "wrangler was terminated", exitCode: nil)
+        case .retriesExhausted(let lastCode):
+            return .failed(reason: "wrangler retries exhausted (exit \(lastCode))", exitCode: lastCode)
         }
-        for line in result.stderr.split(separator: "\n", omittingEmptySubsequences: false) where !line.isEmpty {
-            await logCenter.append(source: source, stream: .stderr, text: String(line))
+    }
+
+    // MARK: Build step
+
+    private enum BuildOutcome { case success; case failure(Result) }
+
+    private func runBuild(siteID: String, siteDirectory: URL) async -> BuildOutcome {
+        let plan = resolveBuildCommand(siteDirectory)
+        let executable: URL
+        let arguments: [String]
+        switch plan {
+        case .unavailable(let reason):
+            return .failure(.failed(reason: reason, exitCode: nil))
+        case .run(let exe, let args):
+            executable = exe
+            arguments = args
         }
 
-        let code = result.exitCode
-        if code == 0 {
-            if let url = Self.extractDeployedURL(from: result.stdout) {
-                return .succeeded(url: url, duration: duration)
-            }
-            return .failed(reason: "wrangler exited cleanly but no deployed URL was found in its output", exitCode: 0)
+        let source = "deploy:\(siteID):build"
+        let handle: ProcessSupervisor.Handle
+        do {
+            handle = try await supervisor.launch(
+                source: source,
+                executable: executable,
+                arguments: arguments,
+                currentDirectoryURL: siteDirectory,
+                logCenter: logCenter
+            )
+        } catch {
+            return .failure(.failed(reason: "couldn't spawn build: \(error)", exitCode: nil))
         }
-        return .failed(reason: "wrangler exited with code \(code)", exitCode: code)
+
+        let reason = await supervisor.waitForExit(handle)
+        switch reason {
+        case .exited(let code) where code == 0:
+            return .success
+        case .exited(let code):
+            return .failure(.failed(reason: "npm run build failed (exit \(code))", exitCode: code))
+        case .terminated:
+            return .failure(.failed(reason: "build was terminated", exitCode: nil))
+        case .retriesExhausted(let lastCode):
+            return .failure(.failed(reason: "build retries exhausted (exit \(lastCode))", exitCode: lastCode))
+        }
     }
 
     // MARK: URL extraction
@@ -173,9 +250,22 @@ public actor DeployCommand {
 
     // MARK: Default seams
 
-    /// Default `TokenSource`: read `CLOUDFLARE_API_TOKEN` from the environment.
+    /// Reads `CLOUDFLARE_API_TOKEN` from the process environment. Useful in development (the env
+    /// var dominates the Keychain entry when both are set, so a shell with `CLOUDFLARE_API_TOKEN`
+    /// exported behaves the way a wrangler user expects).
     public static let envTokenSource: TokenSource = {
         ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"]
+    }
+
+    /// Default `TokenSource` for production: env var first (so a developer's shell still wins),
+    /// then the user's Keychain. A Keychain error is surfaced to the caller — we'd rather show
+    /// the user "couldn't read token" than silently fall through to `nil` and prompt for a
+    /// re-paste of a token that's actually stored fine.
+    public static let keychainTokenSource: TokenSource = {
+        if let env = ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"], !env.isEmpty {
+            return env
+        }
+        return try KeychainStore().readCloudflareToken()
     }
 
     /// Default `PreflightChecker`: invokes the site's own `scripts/pre-deploy-check.ts
@@ -186,30 +276,14 @@ public actor DeployCommand {
     public static let defaultPreflight: PreflightChecker = { siteDirectory in
         let check = PreDeployCheck(invoke: { siteDir in
             let scriptPath = siteDir.appendingPathComponent("scripts/pre-deploy-check.ts").path
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["npx", "tsx", scriptPath, "--json"]
-            process.currentDirectoryURL = siteDir
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
-            try process.run()
-            // Drain pipes off the actor — Process.waitUntilExit() blocks; doing it in a
-            // detached task avoids parking the calling actor's executor for long scans.
-            let result: (String, String, Int32) = await withCheckedContinuation { cont in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let out = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                    let err = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                    process.waitUntilExit()
-                    cont.resume(returning: (
-                        String(data: out, encoding: .utf8) ?? "",
-                        String(data: err, encoding: .utf8) ?? "",
-                        process.terminationStatus
-                    ))
-                }
-            }
-            return (stdout: result.0, exitCode: result.2)
+            // Routed through ProcessSupervisor so the spawn goes through the one supervised path
+            // (and, under the MAS sandbox, inherits the app-held per-site folder grant).
+            let result = try await ProcessSupervisor.shared.run(
+                executable: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["npx", "tsx", scriptPath, "--json"],
+                currentDirectoryURL: siteDir
+            )
+            return (stdout: result.stdout, exitCode: result.exitCode)
         })
         return await check.check(siteID: "deploy", siteDirectory: siteDirectory)
     }
@@ -228,5 +302,19 @@ public actor DeployCommand {
             return .unavailable(reason: "the embedded Node runtime isn't bundled (rebuild the app)")
         }
         return .run(executable: node, arguments: [wranglerBin.path, "deploy"])
+    }
+
+    /// Default `BuildCommandResolver`: run `npm run build` from the vendored npm. Reports
+    /// `.unavailable` if the vendored Node runtime is missing (rebuild the app).
+    public static let resolveBuildCommand: CommandResolver = { siteDirectory in
+        guard let node = NodeRuntime.bundledExecutableURL else {
+            return .unavailable(reason: "the embedded Node runtime isn't bundled (rebuild the app)")
+        }
+        // The vendored npm sits alongside node: <node-runtime>/bin/{node,npm}.
+        let npm = node.deletingLastPathComponent().appendingPathComponent("npm")
+        guard FileManager.default.isExecutableFile(atPath: npm.path) else {
+            return .unavailable(reason: "vendored npm not found — rebuild the app")
+        }
+        return .run(executable: node, arguments: [npm.path, "run", "build"])
     }
 }

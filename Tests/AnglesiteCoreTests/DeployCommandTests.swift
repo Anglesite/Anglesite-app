@@ -10,7 +10,8 @@ struct DeployCommandTests {
     private func makeCommand(
         resolve: @escaping DeployCommand.CommandResolver,
         token: @escaping DeployCommand.TokenSource,
-        preflight: @escaping DeployCommand.PreflightChecker = { _ in .passed(warnings: []) }
+        preflight: @escaping DeployCommand.PreflightChecker = { _ in .passed(warnings: []) },
+        build: @escaping DeployCommand.CommandResolver = { _ in .run(executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: []) }
     ) -> (DeployCommand, ProcessSupervisor, LogCenter) {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
@@ -18,6 +19,7 @@ struct DeployCommandTests {
             supervisor: supervisor,
             logCenter: center,
             resolveCommand: resolve,
+            resolveBuildCommand: build,
             tokenSource: token,
             preflight: preflight
         )
@@ -189,6 +191,65 @@ struct DeployCommandTests {
         #expect(tokenLine?.text == "TOKEN_SEEN_BY_WRANGLER=secret-token-abc")
     }
 
+    // MARK: Build step
+
+    @Test func `Fails when build exits non-zero`() async {
+        // preflight and wrangler must not run when build fails.
+        await confirmation("neither preflight nor wrangler runs when build fails", expectedCount: 0) { neitherCalled in
+            let (cmd, _, _) = makeCommand(
+                resolve: { _ in
+                    neitherCalled()
+                    return self.shFixture("exit 0")
+                },
+                token: { "fake-token" },
+                preflight: { _ in
+                    neitherCalled()
+                    return .passed(warnings: [])
+                },
+                build: { _ in
+                    self.shFixture("echo 'astro: oops, type error' 1>&2; exit 2")
+                }
+            )
+            let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+            guard case .failed(let reason, let exit) = result else {
+                Issue.record("expected .failed, got \(result)")
+                return
+            }
+            #expect(exit == 2)
+            #expect(reason.contains("build") && reason.contains("2"), "reason should name the build and the exit code: \(reason)")
+        }
+    }
+
+    @Test func `Fails when build resolver reports unavailable`() async {
+        let (cmd, _, _) = makeCommand(
+            resolve: { _ in self.shFixture("exit 0") },
+            token: { "fake-token" },
+            build: { _ in .unavailable(reason: "vendored npm not found — rebuild the app") }
+        )
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .failed(let reason, _) = result else {
+            Issue.record("expected .failed, got \(result)")
+            return
+        }
+        #expect(reason.contains("vendored npm"), "\(reason)")
+    }
+
+    @Test func `Build output appears in LogCenter under build source`() async {
+        let (cmd, _, center) = makeCommand(
+            resolve: { _ in
+                self.shFixture("echo 'Published angle-app (0.42 sec)'; echo '  https://t.example.workers.dev'; exit 0")
+            },
+            token: { "fake-token" },
+            build: { _ in self.shFixture("echo 'building dist…'; exit 0") }
+        )
+        _ = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        let lines = await center.snapshot()
+        #expect(
+            lines.contains { $0.source == "deploy:mysite:build" && $0.text == "building dist…" },
+            "build line should appear under deploy:<site>:build source"
+        )
+    }
+
     // MARK: Pre-deploy preflight
 
     @Test func `Returns blocked and does not spawn wrangler when preflight blocks`() async {
@@ -247,4 +308,37 @@ struct DeployCommandTests {
             #expect(reason.contains("tsx"), "reason should surface the preflight error: \(reason)")
         }
     }
+
+    // MARK: onPreflight callback
+
+    @Test func `Deploy fires onPreflight with resolved outcome`() async {
+        let expectedOutcome = PreDeployCheck.Outcome.passed(warnings: [
+            .init(category: .missingOgImage, detail: "no og image", remediation: "add one")
+        ])
+        let observed = Mutex<PreDeployCheck.Outcome?>(nil)
+
+        let (cmd, _, _) = makeCommand(
+            resolve: { _ in self.shFixture("exit 0") },
+            token: { "fake-token" },
+            preflight: { _ in expectedOutcome }
+        )
+
+        _ = await cmd.deploy(
+            siteID: "test",
+            siteDirectory: tmpDir,
+            onPreflight: { outcome in observed.set(outcome) }
+        )
+
+        #expect(observed.get() == expectedOutcome)
+    }
+}
+
+/// Minimal lock wrapper since `onPreflight` fires from inside `DeployCommand`'s actor
+/// isolation and the test needs to observe the value from outside.
+private final class Mutex<T>: @unchecked Sendable {
+    private var value: T
+    private let lock = NSLock()
+    init(_ v: T) { value = v }
+    func get() -> T { lock.lock(); defer { lock.unlock() }; return value }
+    func set(_ v: T) { lock.lock(); value = v; lock.unlock() }
 }

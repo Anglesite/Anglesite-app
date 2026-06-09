@@ -43,6 +43,28 @@ private struct AdvancedSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Credentials") {
+                CloudflareTokenRow()
+                Text("Stored in the macOS Keychain under `dev.anglesite.app`. The token is passed to `wrangler deploy` as `CLOUDFLARE_API_TOKEN` and never written to logs. An exported `CLOUDFLARE_API_TOKEN` in the shell that launched Anglesite takes precedence over this entry.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                #if !ANGLESITE_MAS
+                GitHubAuthRow()
+                Text("Anglesite shells out to `gh` for GitHub operations and does not store the token itself — `gh` keeps it in its own keychain entry. Clicking Connect runs `gh auth login`; sign-out is `gh auth logout` in Terminal.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                #else
+                LabeledContent("GitHub") {
+                    Text("Uses your existing `git` credentials")
+                        .foregroundStyle(.secondary)
+                }
+                Text("The App Store build doesn't bundle `gh`. Anglesite uses whatever `git` credentials are already configured on your Mac (Keychain or SSH key) when pushing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                #endif
+            }
+
             Section("Diagnostics") {
                 Toggle("Show Debug Pane menu item", isOn: $debugPaneEnabled)
                 #if DEBUG
@@ -60,6 +82,222 @@ private struct AdvancedSettingsView: View {
         .padding()
     }
 }
+
+/// Cloudflare API token row. Reads the current state from the Keychain on appear; saves a new
+/// value on commit; clears the slot on "Clear". The field stays a `SecureField` so the token
+/// doesn't appear in a screen share, but the actual secret bytes only round-trip when the user
+/// edits the field — appearing only redacts.
+private struct CloudflareTokenRow: View {
+    @State private var token: String = ""
+    @State private var status: Status = .unknown
+    @State private var savedMessage: String?
+
+    private enum Status: Equatable {
+        case unknown
+        case present
+        case absent
+        case error(String)
+    }
+
+    private let store = KeychainStore()
+
+    var body: some View {
+        LabeledContent("Cloudflare API token") {
+            VStack(alignment: .trailing, spacing: 6) {
+                HStack(spacing: 8) {
+                    SecureField("paste token", text: $token, prompt: Text(promptText))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 240)
+                    Button("Save") { save() }
+                        .disabled(token.isEmpty)
+                    Button("Clear") { clear() }
+                        .disabled(status != .present)
+                }
+                if let savedMessage {
+                    Text(savedMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if case .error(let message) = status {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        .task { refreshStatus() }
+    }
+
+    private var promptText: String {
+        switch status {
+        case .present: return "•••••••• (stored)"
+        case .absent:  return "paste token"
+        case .unknown: return ""
+        case .error:   return "paste token"
+        }
+    }
+
+    private func refreshStatus() {
+        do {
+            status = (try store.readCloudflareToken() != nil) ? .present : .absent
+        } catch {
+            status = .error("couldn't read keychain: \(error)")
+        }
+    }
+
+    private func save() {
+        do {
+            try store.writeCloudflareToken(token)
+            token = ""
+            status = .present
+            savedMessage = "Saved."
+        } catch {
+            status = .error("couldn't save: \(error)")
+            savedMessage = nil
+        }
+    }
+
+    private func clear() {
+        do {
+            try store.clearCloudflareToken()
+            token = ""
+            status = .absent
+            savedMessage = "Cleared."
+        } catch {
+            status = .error("couldn't clear: \(error)")
+            savedMessage = nil
+        }
+    }
+}
+
+// The gh-backed GitHub panel ships in the Developer ID build only. The MAS build has no `gh`
+// (and a sandboxed app can't rely on it); it uses the user's existing git credentials instead
+// — see the #else branch in the Credentials section above.
+#if !ANGLESITE_MAS
+/// "Connect GitHub" row. The app never sees the GitHub token — `gh` stores it in its own
+/// credential store. This row just launches the `gh auth login` device-code flow and
+/// surfaces the result. Status reflects what `gh auth status` reports at appear-time.
+private struct GitHubAuthRow: View {
+    @State private var status: Status = .unknown
+    @State private var sheetPresented = false
+    @State private var resultMessage: ResultMessage?
+
+    private enum Status: Equatable {
+        case unknown
+        case signedIn(account: String)
+        case signedOut
+        case unavailable(String)
+    }
+
+    private struct ResultMessage: Equatable {
+        let text: String
+        let isError: Bool
+    }
+
+    var body: some View {
+        LabeledContent("GitHub") {
+            VStack(alignment: .trailing, spacing: 6) {
+                HStack(spacing: 8) {
+                    statusLabel
+                    Spacer()
+                    Button("Connect…") {
+                        resultMessage = nil
+                        sheetPresented = true
+                    }
+                    .disabled(isUnavailable)
+                }
+                if let resultMessage {
+                    Text(resultMessage.text)
+                        .font(.caption)
+                        .foregroundStyle(resultMessage.isError ? .red : .secondary)
+                }
+            }
+        }
+        .task { await refreshStatus() }
+        .sheet(isPresented: $sheetPresented) {
+            GitHubAuthSheetView { result in
+                sheetPresented = false
+                switch result {
+                case .authenticated:
+                    resultMessage = ResultMessage(text: "Connected.", isError: false)
+                    Task { await refreshStatus() }
+                case .failed(let reason):
+                    resultMessage = ResultMessage(text: reason, isError: true)
+                case .cancelled:
+                    resultMessage = nil
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var statusLabel: some View {
+        switch status {
+        case .signedIn(let account):
+            Label("Signed in as \(account)", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .labelStyle(.titleAndIcon)
+        case .signedOut:
+            Text("Not signed in").foregroundStyle(.secondary)
+        case .unknown:
+            Text("Checking…").foregroundStyle(.secondary)
+        case .unavailable(let reason):
+            Text(reason).foregroundStyle(.orange).font(.caption)
+        }
+    }
+
+    private var isUnavailable: Bool {
+        if case .unavailable = status { return true }
+        return false
+    }
+
+    private func refreshStatus() async {
+        // Probe `gh auth status` — robust to gh not being installed.
+        guard let gh = ResolveBinary.locate("gh") else {
+            status = .unavailable("`gh` not installed (brew install gh).")
+            return
+        }
+        let result: ProcessSupervisor.RunResult
+        do {
+            result = try await ProcessSupervisor.shared.run(
+                executable: gh,
+                arguments: ["auth", "status", "--hostname", "github.com"]
+            )
+        } catch {
+            status = .unavailable("couldn't run `gh`: \(error.localizedDescription)")
+            return
+        }
+        // gh writes its status to stderr; combine both streams as the old single-pipe code did.
+        let output = result.stdout + result.stderr
+        if result.exitCode == 0 {
+            // Look for "account davidwkeith" or "Logged in to github.com account <name>"
+            if let range = output.range(of: #"account\s+(\S+)"#, options: .regularExpression) {
+                let token = output[range].split(separator: " ").last.map(String.init) ?? ""
+                let cleaned = token.trimmingCharacters(in: CharacterSet(charactersIn: "()"))
+                status = .signedIn(account: cleaned)
+            } else {
+                status = .signedIn(account: "github.com")
+            }
+        } else {
+            status = .signedOut
+        }
+    }
+}
+
+/// Tiny PATH-walker for finding a binary by name. Avoids depending on `which` (which itself
+/// requires a shell), and respects the environment Anglesite was launched with.
+private enum ResolveBinary {
+    static func locate(_ name: String) -> URL? {
+        let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/opt/homebrew/bin"
+        for dir in path.split(separator: ":") {
+            let candidate = URL(fileURLWithPath: String(dir), isDirectory: true).appendingPathComponent(name)
+            if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
+    }
+}
+#endif
 
 private struct FolderPickerRow: View {
     let label: String

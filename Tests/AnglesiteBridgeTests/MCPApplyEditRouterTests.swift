@@ -68,6 +68,86 @@ struct MCPApplyEditRouterTests {
         #expect(reply.status == .failed)
         #expect(reply.message != nil)
     }
+
+    // MARK: structured reply parse
+
+    func testSuccessfulReplyWithStructuredBodyExposesStructuredFields() async {
+        let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","range":{"start":12,"end":25},"commit":"abc1234567890abcdef1234567890abcdef12345"}"#
+        let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
+            content: [.init(type: "text", text: body)],
+            isError: false
+        )))
+        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let reply = await router.apply(sampleMessage)
+        XCTAssertEqual(reply.status, .applied)
+        XCTAssertEqual(reply.file, "src/pages/about.astro")
+        XCTAssertEqual(reply.commit, "abc1234567890abcdef1234567890abcdef12345")
+        XCTAssertNil(reply.result)
+    }
+
+    func testSuccessfulReplyWithResultExposesImageResult() async {
+        let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","range":{"start":12,"end":25},"commit":"abc1234567890abcdef1234567890abcdef12345","result":{"src":"/images/hero.webp","srcset":"/images/hero-480w.webp 480w"}}"#
+        let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
+            content: [.init(type: "text", text: body)],
+            isError: false
+        )))
+        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let reply = await router.apply(sampleMessage)
+        XCTAssertEqual(reply.result?.src, "/images/hero.webp")
+        XCTAssertEqual(reply.result?.srcset, "/images/hero-480w.webp 480w")
+    }
+
+    func testMalformedReplyTextFallsBackToMessageString() async {
+        let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
+            content: [.init(type: "text", text: "not valid json {")],
+            isError: false
+        )))
+        let router = MCPApplyEditRouter(toolCaller: recorder.call)
+        let reply = await router.apply(sampleMessage)
+        XCTAssertEqual(reply.status, .applied)
+        XCTAssertEqual(reply.message, "not valid json {")
+        XCTAssertNil(reply.file)
+        XCTAssertNil(reply.commit)
+    }
+
+    func testOnEditFiresForAppliedReplyWithCommit() async {
+        let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","range":{"start":12,"end":25},"commit":"abc1234567890abcdef1234567890abcdef12345"}"#
+        let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
+            content: [.init(type: "text", text: body)],
+            isError: false
+        )))
+        let observed = ObservedReplies()
+        let router = MCPApplyEditRouter(toolCaller: recorder.call, onEdit: { reply in
+            Task { await observed.record(reply) }
+        })
+        _ = await router.apply(sampleMessage)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let captured = await observed.replies
+        XCTAssertEqual(captured.count, 1)
+        XCTAssertEqual(captured.first?.commit, "abc1234567890abcdef1234567890abcdef12345")
+    }
+
+    func testOnEditDoesNotFireWhenReplyHasNoCommit() async {
+        // No JSON in the content — parser gives up; reply has nil commit; observer must NOT fire.
+        let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
+            content: [.init(type: "text", text: "stub edit response")],
+            isError: false
+        )))
+        let observed = ObservedReplies()
+        let router = MCPApplyEditRouter(toolCaller: recorder.call, onEdit: { reply in
+            Task { await observed.record(reply) }
+        })
+        _ = await router.apply(sampleMessage)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let captured = await observed.replies
+        XCTAssertTrue(captured.isEmpty)
+    }
+}
+
+/// Thread-safe collector for the `onEdit` callback fired from the router's async context.
+private actor ObservedReplies {
+    private(set) var replies: [EditReply] = []
+    func record(_ reply: EditReply) { replies.append(reply) }
 }
 
 private actor ToolCallRecorder {

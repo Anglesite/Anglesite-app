@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Fires on branch checkouts. $1=prev HEAD, $2=new HEAD, $3=1 for branch checkout, 0 for file checkout.
+set -euo pipefail
+prev_head="${1:-}"
+new_head="${2:-}"
+branch_checkout="${3:-0}"
+# Skip per-file checkouts (`git checkout -- path`) — they can't change project shape.
+if [[ "$branch_checkout" != "1" ]]; then
+  exit 0
+fi
+exec "$(dirname "$0")/regenerate-xcodeproj.sh" "$prev_head" "$new_head"

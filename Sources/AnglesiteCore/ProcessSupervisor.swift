@@ -1,12 +1,19 @@
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#endif
 
 /// Spawns and supervises subprocesses (Astro dev server, MCP server, Claude agent, ad-hoc Node smoke tests).
 ///
 /// All subprocess spawning in the app goes through this actor. Direct `Process()` use from views or
 /// other modules is not allowed — it would bypass log streaming and shutdown handling.
+///
+/// As of Phase 10.1 this is a thin **facade** over a `SupervisorBackend`. The actual spawn and
+/// supervision implementation lives in the backend:
+///   - `InProcessBackend` (DevID): wraps `Process()` directly, no sandbox.
+///   - (MAS uses the same `InProcessBackend`; the app is sandboxed and spawns directly, holding a
+///     per-window security-scoped grant — see `init()`.)
+///
+/// The public API below is unchanged from the pre-split supervisor; every caller and test keeps
+/// working. Each method builds a `SpawnSpec` and delegates to `self.backend`. `Handle.id` and the
+/// backend's `SpawnedProcessHandle.id` are the same UUID, so the facade maps between them for free.
 ///
 /// Two flavors of spawn:
 ///   - `run(...)` — fire-and-await for short-lived commands; returns captured stdout/stderr/exitCode.
@@ -17,9 +24,34 @@ public actor ProcessSupervisor {
     /// reaches every child the app spawned. Tests build their own instances.
     public static let shared = ProcessSupervisor()
 
-    private var entries: [UUID: Entry] = [:]
+    private let backend: SupervisorBackend
 
-    public init() {}
+    /// Source-compat re-exports. These used to be nested types; they now live at the protocol layer
+    /// (so the backend can speak them too), re-exposed here so existing call sites such as
+    /// `ProcessSupervisor.RestartPolicy.onCrash(...)` and `ProcessSupervisor.ExitReason` compile
+    /// unchanged.
+    public typealias RestartPolicy = AnglesiteCore.RestartPolicy
+    public typealias ExitReason = AnglesiteCore.ProcessExitReason
+    public typealias RespawnHandler = AnglesiteCore.RespawnHandler
+
+    /// `Handle.source` is preserved (the backend's opaque handle doesn't carry it), so map by `id`.
+    private func backendHandle(for handle: Handle) -> SpawnedProcessHandle {
+        SpawnedProcessHandle(id: handle.id, pid: 0)
+    }
+
+    /// Convenience for the app and tests: the default in-process backend. Both DevID and MAS use
+    /// `InProcessBackend` — the MAS app is sandboxed and spawns Node/Astro/wrangler directly,
+    /// holding a per-`SiteWindow` security-scoped grant so spawned children inherit folder access
+    /// (verified in the Task 6.7 spike; the originally-planned XPC helper was removed because a
+    /// separate process can't inherit the app's scoped grant).
+    public init() {
+        self.backend = InProcessBackend()
+    }
+
+    /// Inject a backend explicitly (tests, future MAS wiring).
+    public init(backend: SupervisorBackend) {
+        self.backend = backend
+    }
 
     // MARK: One-shot run
 
@@ -47,63 +79,30 @@ public actor ProcessSupervisor {
     public func run(
         executable: URL,
         arguments: [String] = [],
-        environment: [String: String]? = nil
+        environment: [String: String]? = nil,
+        currentDirectoryURL: URL? = nil
     ) async throws -> RunResult {
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        if let environment {
-            process.environment = environment
-        }
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
+        let spec = SpawnSpec(
+            executable: executable,
+            arguments: arguments,
+            environment: environment,
+            workingDirectory: currentDirectoryURL,
+            logSource: "run"
+        )
+        let result: ProcessResult
         do {
-            try process.run()
-        } catch {
-            throw SupervisorError.spawnFailed(underlying: error)
+            result = try await backend.runOneShot(spec)
+        } catch let error as SupervisorBackendError {
+            throw Self.translate(error)
         }
-
-        async let stdoutData = Self.readToEnd(stdoutPipe)
-        async let stderrData = Self.readToEnd(stderrPipe)
-        let (out, err) = await (stdoutData, stderrData)
-
-        process.waitUntilExit()
-
         return RunResult(
-            stdout: String(data: out, encoding: .utf8) ?? "",
-            stderr: String(data: err, encoding: .utf8) ?? "",
-            exitCode: process.terminationStatus
+            stdout: String(data: result.stdout, encoding: .utf8) ?? "",
+            stderr: String(data: result.stderr, encoding: .utf8) ?? "",
+            exitCode: result.exitCode
         )
     }
 
-    private static func readToEnd(_ pipe: Pipe) async -> Data {
-        await Task.detached(priority: .userInitiated) {
-            (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
-        }.value
-    }
-
     // MARK: Long-running launch
-
-    public enum RestartPolicy: Sendable, Equatable {
-        case never
-        /// Restart on non-zero exit only (clean exit code 0 always stops). Capped at `maxAttempts`
-        /// consecutive failures, with `baseBackoff * 2^(attempt-1)` between retries.
-        case onCrash(maxAttempts: Int, baseBackoff: TimeInterval)
-    }
-
-    public enum ExitReason: Sendable, Equatable {
-        /// Process exited on its own (clean or crash). May or may not follow restarts —
-        /// the code is from the *final* attempt.
-        case exited(code: Int32)
-        /// `terminate(_:)` was called; we sent SIGTERM (and possibly SIGKILL).
-        case terminated
-        /// `RestartPolicy.onCrash` exhausted its attempts.
-        case retriesExhausted(lastCode: Int32)
-    }
 
     public struct Handle: Sendable, Identifiable, Hashable {
         public let id: UUID
@@ -113,12 +112,6 @@ public actor ProcessSupervisor {
     public struct StdinHandle: Sendable {
         public let writer: FileHandle
     }
-
-    /// Invoked after the supervisor *respawns* a crashed process (once per successful restart;
-    /// never for the initial spawn). Lets a wrapper re-establish whatever the new process needs —
-    /// `MCPClient` re-runs its `initialize` handshake against the fresh stdin, for example. Runs
-    /// detached so it can `await` back into the supervisor (e.g. `stdinWriter(_:)`) without deadlock.
-    public typealias RespawnHandler = @Sendable () async -> Void
 
     /// Spawn a long-running supervised process. Log lines flow into `logCenter` tagged with `source`.
     ///
@@ -139,32 +132,26 @@ public actor ProcessSupervisor {
         onRespawn: RespawnHandler? = nil,
         logCenter: LogCenter = .shared
     ) async throws -> Handle {
-        let id = UUID()
-        let handle = Handle(id: id, source: source)
-        let entry = Entry(
-            handle: handle,
+        let spec = SpawnSpec(
             executable: executable,
             arguments: arguments,
             environment: environment,
-            currentDirectoryURL: currentDirectoryURL,
-            restartPolicy: restartPolicy,
-            attachStdin: attachStdin,
-            onRespawn: onRespawn,
-            logCenter: logCenter
+            workingDirectory: currentDirectoryURL,
+            stdinPipe: attachStdin,
+            logSource: source
         )
-        entries[id] = entry
-
+        let spawned: SpawnedProcessHandle
         do {
-            try await startProcess(for: entry)
-        } catch {
-            entries[id] = nil
-            throw error
+            spawned = try await backend.launch(
+                spec,
+                restartPolicy: restartPolicy,
+                onRespawn: onRespawn,
+                logCenter: logCenter
+            )
+        } catch let error as SupervisorBackendError {
+            throw Self.translate(error)
         }
-
-        entry.supervisionTask = Task { [weak self] in
-            await self?.superviseLoop(id: id)
-        }
-        return handle
+        return Handle(id: spawned.id, source: source)
     }
 
     /// Awaits the final exit reason for a launched process. Resolves once the supervision loop ends
@@ -172,46 +159,12 @@ public actor ProcessSupervisor {
     /// awaiting task is cancelled, returns `.terminated` immediately — letting task groups
     /// unwind without waiting for the real process exit.
     public func waitForExit(_ handle: Handle) async -> ExitReason {
-        guard let entry = entries[handle.id] else { return .terminated }
-        if let reason = entry.finalReason { return reason }
-
-        let waiterID = UUID()
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { (cont: CheckedContinuation<ExitReason, Never>) in
-                entry.exitWaiters[waiterID] = cont
-            }
-        } onCancel: { [weak self] in
-            // Hop back to the actor to remove and resume our continuation. The cancel handler
-            // runs on the cancelling task's executor, so we can't touch actor state directly.
-            Task { [weak self] in
-                await self?.resumeCancelledWaiter(handleID: handle.id, waiterID: waiterID)
-            }
-        }
-    }
-
-    private func resumeCancelledWaiter(handleID: UUID, waiterID: UUID) {
-        guard let entry = entries[handleID],
-              let cont = entry.exitWaiters.removeValue(forKey: waiterID)
-        else { return }
-        cont.resume(returning: .terminated)
+        await backend.waitForExit(backendHandle(for: handle))
     }
 
     /// Sends SIGTERM and waits up to `timeout` seconds before escalating to SIGKILL.
     public func terminate(_ handle: Handle, timeout: TimeInterval = 5) async {
-        guard let entry = entries[handle.id] else { return }
-        entry.manuallyTerminated = true
-        guard let process = entry.currentProcess, process.isRunning else { return }
-
-        process.terminate()  // SIGTERM
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning && Date() < deadline {
-            try? await Task.sleep(nanoseconds: 50_000_000)
-        }
-        if process.isRunning {
-            #if canImport(Darwin)
-            kill(process.processIdentifier, SIGKILL)
-            #endif
-        }
+        await backend.terminate(backendHandle(for: handle), timeout: timeout)
     }
 
     /// Terminates every supervised process. SIGTERM (with SIGKILL escalation after `timeout`) is
@@ -220,253 +173,49 @@ public actor ProcessSupervisor {
     /// backoff is broken instead of waited out. Wire this to the app's quit notification so no
     /// Node / Astro / MCP child outlives the app process.
     public func shutdownAll(timeout: TimeInterval = 5) async {
-        let handles = entries.values.map(\.handle)
-        guard !handles.isEmpty else { return }
-        await withTaskGroup(of: Void.self) { group in
-            for handle in handles {
-                group.addTask { [weak self] in
-                    guard let self else { return }
-                    await self.terminate(handle, timeout: timeout)
-                    _ = await self.waitForExit(handle)
-                }
-            }
-        }
+        await backend.shutdownAll(timeout: timeout)
     }
 
-    public func isRunning(_ handle: Handle) -> Bool {
-        entries[handle.id]?.currentProcess?.isRunning ?? false
+    public func isRunning(_ handle: Handle) async -> Bool {
+        await backend.isRunning(backendHandle(for: handle))
     }
 
     /// File handle for writing to the launched process's stdin. Only available when `launch` was
     /// called with `attachStdin: true`. Returns `nil` if the handle is unknown or stdin wasn't attached.
-    public func stdinWriter(_ handle: Handle) -> StdinHandle? {
-        guard let writer = entries[handle.id]?.stdinWriter else { return nil }
+    public func stdinWriter(_ handle: Handle) async -> StdinHandle? {
+        guard let writer = await backend.stdinHandle(backendHandle(for: handle)) else { return nil }
         return StdinHandle(writer: writer)
     }
 
-    // MARK: Internals
-
-    /// One launch's worth of state. Mutated only from the supervisor actor.
-    private final class Entry {
-        let handle: Handle
-        let executable: URL
-        let arguments: [String]
-        let environment: [String: String]?
-        let currentDirectoryURL: URL?
-        let restartPolicy: RestartPolicy
-        let attachStdin: Bool
-        let onRespawn: RespawnHandler?
-        let logCenter: LogCenter
-
-        var currentProcess: Process?
-        var stdinWriter: FileHandle?
-        var supervisionTask: Task<Void, Never>?
-        var attempt: Int = 0
-        var manuallyTerminated: Bool = false
-        var finalReason: ExitReason?
-        // Keyed by waiter ID so cancellation handlers can remove their own continuation.
-        var exitWaiters: [UUID: CheckedContinuation<ExitReason, Never>] = [:]
-
-        init(
-            handle: Handle,
-            executable: URL,
-            arguments: [String],
-            environment: [String: String]?,
-            currentDirectoryURL: URL?,
-            restartPolicy: RestartPolicy,
-            attachStdin: Bool,
-            onRespawn: RespawnHandler?,
-            logCenter: LogCenter
-        ) {
-            self.handle = handle
-            self.executable = executable
-            self.arguments = arguments
-            self.environment = environment
-            self.currentDirectoryURL = currentDirectoryURL
-            self.restartPolicy = restartPolicy
-            self.attachStdin = attachStdin
-            self.onRespawn = onRespawn
-            self.logCenter = logCenter
-        }
-    }
-
-    private func startProcess(for entry: Entry) async throws {
-        let process = Process()
-        process.executableURL = entry.executable
-        process.arguments = entry.arguments
-        if let env = entry.environment { process.environment = env }
-        if let cwd = entry.currentDirectoryURL { process.currentDirectoryURL = cwd }
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        if entry.attachStdin {
-            let stdinPipe = Pipe()
-            process.standardInput = stdinPipe
-            entry.stdinWriter = stdinPipe.fileHandleForWriting
-        }
-
+    /// Writes `bytes` to the launched process's stdin via the backend (`InProcessBackend` writes to
+    /// the tracked child's stdin pipe). MCP JSON-RPC framing uses this. Throws if the handle is
+    /// unknown or `launch` wasn't called with `attachStdin: true`.
+    public func writeStdin(_ handle: Handle, _ bytes: Data) async throws {
         do {
-            try process.run()
-        } catch {
-            throw SupervisorError.spawnFailed(underlying: error)
-        }
-
-        entry.currentProcess = process
-
-        // Kick off pipe readers. They run until EOF on their pipe (which happens when the
-        // process exits or we close the pipes). They don't need to be awaited — they
-        // self-terminate. We use callback-based `readabilityHandler` so the blocking read
-        // happens on libdispatch, never on the Swift cooperative pool — otherwise the test
-        // runner can starve the readers under load and we don't see output until process exit.
-        let source = entry.handle.source
-        let logCenter = entry.logCenter
-        Self.attachLineReader(
-            to: stdoutPipe.fileHandleForReading,
-            source: source,
-            stream: .stdout,
-            logCenter: logCenter
-        )
-        Self.attachLineReader(
-            to: stderrPipe.fileHandleForReading,
-            source: source,
-            stream: .stderr,
-            logCenter: logCenter
-        )
-    }
-
-    private func superviseLoop(id: UUID) async {
-        while let entry = entries[id], let process = entry.currentProcess {
-            let exitCode = await awaitExit(of: process)
-
-            if entry.manuallyTerminated {
-                await finalize(entry, reason: .terminated)
-                return
-            }
-
-            switch entry.restartPolicy {
-            case .never:
-                await finalize(entry, reason: .exited(code: exitCode))
-                return
-
-            case .onCrash(let maxAttempts, let baseBackoff):
-                if exitCode == 0 {
-                    await finalize(entry, reason: .exited(code: 0))
-                    return
-                }
-                entry.attempt += 1
-                if entry.attempt > maxAttempts {
-                    await finalize(entry, reason: .retriesExhausted(lastCode: exitCode))
-                    return
-                }
-                let delay = baseBackoff * pow(2.0, Double(entry.attempt - 1))
-                await entry.logCenter.append(
-                    source: entry.handle.source,
-                    stream: .stderr,
-                    text: "[supervisor] restart attempt \(entry.attempt)/\(maxAttempts) after exit \(exitCode), waiting \(String(format: "%.2f", delay))s"
-                )
-                try? await Task.sleep(nanoseconds: UInt64(max(delay, 0) * 1_000_000_000))
-                if entry.manuallyTerminated {
-                    await finalize(entry, reason: .terminated)
-                    return
-                }
-                do {
-                    try await startProcess(for: entry)
-                } catch {
-                    await entry.logCenter.append(
-                        source: entry.handle.source,
-                        stream: .stderr,
-                        text: "[supervisor] respawn failed: \(error)"
-                    )
-                    await finalize(entry, reason: .retriesExhausted(lastCode: exitCode))
-                    return
-                }
-                // Process is back up; let the wrapper re-establish session state. Detached so
-                // the handler can `await` into this actor (e.g. `stdinWriter`) without deadlock.
-                if let onRespawn = entry.onRespawn {
-                    Task { await onRespawn() }
-                }
-            }
+            try await backend.writeStdin(backendHandle(for: handle), bytes)
+        } catch let error as SupervisorBackendError {
+            throw Self.translate(error)
         }
     }
 
-    private func finalize(_ entry: Entry, reason: ExitReason) async {
-        entry.finalReason = reason
-        entry.currentProcess = nil
-        let waiters = entry.exitWaiters
-        entry.exitWaiters.removeAll()
-        for cont in waiters.values { cont.resume(returning: reason) }
-    }
+    // MARK: Error translation
 
-    /// Bridges `Process.terminationHandler` to async. The handler runs on a libdispatch queue;
-    /// we just resume the continuation with the exit code.
-    private func awaitExit(of process: Process) async -> Int32 {
-        await withCheckedContinuation { cont in
-            process.terminationHandler = { p in
-                cont.resume(returning: p.terminationStatus)
-            }
-        }
-    }
-
-    /// Attaches a `readabilityHandler` that emits one line at a time to `logCenter`. The handler
-    /// runs on a libdispatch queue so blocking I/O doesn't compete with the Swift cooperative
-    /// thread pool. We accumulate bytes in a `LineBuffer` to handle partial reads / multi-line
-    /// chunks.
-    private static func attachLineReader(
-        to handle: FileHandle,
-        source: String,
-        stream: LogCenter.Stream,
-        logCenter: LogCenter
-    ) {
-        let buffer = LineBuffer()
-        handle.readabilityHandler = { fh in
-            let data = fh.availableData
-            if data.isEmpty {
-                // EOF — flush trailing partial line and detach the handler.
-                if let trailing = buffer.flush() {
-                    Task { await logCenter.append(source: source, stream: stream, text: trailing) }
-                }
-                handle.readabilityHandler = nil
-                return
-            }
-            let lines = buffer.append(data)
-            if !lines.isEmpty {
-                Task {
-                    for line in lines {
-                        await logCenter.append(source: source, stream: stream, text: line)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Accumulates bytes across reads and emits complete lines (split on `\n`).
-    private final class LineBuffer: @unchecked Sendable {
-        private var pending = Data()
-        private let lock = NSLock()
-
-        /// Append `data`; return any newly complete lines.
-        func append(_ data: Data) -> [String] {
-            lock.lock(); defer { lock.unlock() }
-            pending.append(data)
-            var lines: [String] = []
-            while let nl = pending.firstIndex(of: 0x0A) {
-                let lineData = pending[..<nl]
-                pending.removeSubrange(...nl)
-                lines.append(String(data: Data(lineData), encoding: .utf8) ?? "")
-            }
-            return lines
-        }
-
-        /// Take whatever's left (no trailing newline) and clear.
-        func flush() -> String? {
-            lock.lock(); defer { lock.unlock() }
-            guard !pending.isEmpty else { return nil }
-            let s = String(data: pending, encoding: .utf8)
-            pending.removeAll(keepingCapacity: false)
-            return s
+    private static func translate(_ error: SupervisorBackendError) -> SupervisorError {
+        switch error {
+        case .spawnFailed(let message):
+            return .spawnFailed(underlying: NSError(
+                domain: "AnglesiteCore.SupervisorBackend",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: message]
+            ))
+        case .unknownHandle:
+            return .unknownHandle
+        case .bookmarkResolutionFailed(let message), .backendUnavailable(let message):
+            return .spawnFailed(underlying: NSError(
+                domain: "AnglesiteCore.SupervisorBackend",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: message]
+            ))
         }
     }
 }

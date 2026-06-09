@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Entitlements for the bundled Node binary in the sandboxed Mac App Store build.
+      Applied by scripts/resign-node.sh as a post-build phase on the AnglesiteMAS target.
+
+      Under the MAS app's hardened runtime, the embedded `node` must carry these or V8 OOMs
+      at launch ("Failed to reserve virtual memory for CodeRange") — proven empirically in the
+      app-spawn sub-spike (docs/specs/2026-05-28-app-spawn-subspike-notes.md, S3). The first
+      four are the load-bearing set from the architecture pivot.
+    -->
+
+    <!-- Node runs inside the app's sandbox so it inherits the app's per-site folder grant. -->
+    <key>com.apple.security.app-sandbox</key><true/>
+    <key>com.apple.security.inherit</key><true/>
+
+    <!-- V8 JIT under hardened runtime. -->
+    <key>com.apple.security.cs.allow-jit</key><true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+
+    <!--
+      Node dlopen()s native addons (e.g. sharp, used by the image-drop pipeline) installed into
+      the user's per-site node_modules — code we cannot re-sign with our team. Library validation
+      would block those loads under hardened runtime. Beyond the pivot's four-entitlement minimum;
+      verify it's actually exercised (and still required) in the write-heavy MAS smoke (Task 11).
+    -->
+    <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict>
+</plist>

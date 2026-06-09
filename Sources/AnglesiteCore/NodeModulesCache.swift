@@ -113,12 +113,21 @@ public struct NodeModulesCache: Sendable {
 
     // MARK: Defaults
 
-    /// Resolves `<bundle>/npm-cache/cache.tar` + `<bundle>/npm-cache/version.txt`, or `nil` if the
+    /// Name of the bundled archive. Gzipped (`vendor-npm-cache.sh` writes it with `tar -czf`) so the
+    /// shipped cache stays ~3× smaller than the raw tar; the extractor below uses `tar -xzf` to match.
+    static let archiveName = "cache.tar.gz"
+
+    /// Resolves `<bundle>/npm-cache/cache.tar.gz` + `<bundle>/npm-cache/version.txt`, or `nil` if the
     /// archive isn't present.
     public static func resolveBundledArchive(in bundle: Bundle) -> BundledArchive? {
         guard let resourceURL = bundle.resourceURL else { return nil }
+        return resolveBundledArchive(inResourceDirectory: resourceURL)
+    }
+
+    /// Directory-based resolver (the testable seam): looks for `<resourceDir>/npm-cache/cache.tar.gz`.
+    static func resolveBundledArchive(inResourceDirectory resourceURL: URL) -> BundledArchive? {
         let dir = resourceURL.appendingPathComponent("npm-cache", isDirectory: true)
-        let archive = dir.appendingPathComponent("cache.tar")
+        let archive = dir.appendingPathComponent(archiveName)
         guard FileManager.default.fileExists(atPath: archive.path) else { return nil }
         let versionFile = dir.appendingPathComponent("version.txt")
         let version = (try? String(contentsOf: versionFile, encoding: .utf8))?
@@ -132,13 +141,13 @@ public struct NodeModulesCache: Sendable {
                 .appendingPathComponent("Library/Application Support", isDirectory: true)
     }
 
-    /// Extractor backed by `/usr/bin/tar -xf <archive> -C <dest>`, spawned through `ProcessSupervisor`
-    /// so all subprocess creation stays centralized.
+    /// Extractor backed by `/usr/bin/tar -xzf <archive> -C <dest>`, spawned through `ProcessSupervisor`
+    /// so all subprocess creation stays centralized. `-z` matches the gzipped `cache.tar.gz` we ship.
     public static func makeTarExtractor(supervisor: ProcessSupervisor = .shared) -> Extractor {
         { archive, dest in
             let result = try await supervisor.run(
                 executable: URL(fileURLWithPath: "/usr/bin/tar"),
-                arguments: ["-xf", archive.path, "-C", dest.path]
+                arguments: ["-xzf", archive.path, "-C", dest.path]
             )
             guard result.exitCode == 0 else {
                 throw CacheError.extractionFailed(exitCode: result.exitCode, stderr: result.stderr)

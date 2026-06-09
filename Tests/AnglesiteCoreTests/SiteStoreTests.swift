@@ -89,14 +89,12 @@ final class SiteStoreTests {
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
 
         let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        let error = await #expect(throws: SiteStore.StoreError.self) {
+        do {
             _ = try await store.add(dir)
+            Issue.record("expected invalidProject")
+        } catch SiteStore.StoreError.invalidProject(_, let missing) {
+            #expect(Set(missing) == Set(ProjectValidator.sentinels))
         }
-        guard case .invalidProject(_, let missing) = error else {
-            Issue.record("expected invalidProject, got \(String(describing: error))")
-            return
-        }
-        #expect(Set(missing) == Set(ProjectValidator.sentinels))
     }
 
     @Test func `Add persists site outside Sites root`() async throws {
@@ -114,6 +112,44 @@ final class SiteStoreTests {
         try await reader.load()
         let loaded = await reader.sites
         #expect(loaded.map(\.name) == ["external"])
+    }
+
+    @Test func `Add normalizes symlinked path`() async throws {
+        // A real project dir, reached through a symlink that points at it.
+        let realDir = tempDir.appendingPathComponent("real-site", isDirectory: true)
+        try fileManager.createDirectory(at: realDir, withIntermediateDirectories: true)
+        for sentinel in ProjectValidator.sentinels {
+            try Data().write(to: realDir.appendingPathComponent(sentinel))
+        }
+        let linkDir = tempDir.appendingPathComponent("link-site", isDirectory: true)
+        try fileManager.createSymbolicLink(at: linkDir, withDestinationURL: realDir)
+
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let site = try await store.add(linkDir)
+
+        // id and path must derive from the same symlink-resolved form: the
+        // stored path is already canonical, so its .path equals the id, and the
+        // name reflects the real directory rather than the symlink.
+        #expect(site.path.path == site.id)
+        #expect(site.name == "real-site")
+    }
+
+    @Test func `Add collapses symlinked and real path to one entry`() async throws {
+        let realDir = tempDir.appendingPathComponent("real-site", isDirectory: true)
+        try fileManager.createDirectory(at: realDir, withIntermediateDirectories: true)
+        for sentinel in ProjectValidator.sentinels {
+            try Data().write(to: realDir.appendingPathComponent(sentinel))
+        }
+        let linkDir = tempDir.appendingPathComponent("link-site", isDirectory: true)
+        try fileManager.createSymbolicLink(at: linkDir, withDestinationURL: realDir)
+
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let viaLink = try await store.add(linkDir)
+        let viaReal = try await store.add(realDir)
+
+        #expect(viaLink.id == viaReal.id)
+        let count = await store.sites.count
+        #expect(count == 1, "the same directory via symlink and real path must be one entry")
     }
 
     @Test func `Remove does not delete files`() async throws {

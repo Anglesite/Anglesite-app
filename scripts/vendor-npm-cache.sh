@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 #
-# Phase 1 — build a primed npm cache tarball into Resources/npm-cache/cache.tar.
+# Phase 1 — build a primed npm cache tarball into Resources/npm-cache/cache.tar.gz.
 #
-# To avoid a cold network install on first launch, we ship a tarball of an npm
-# cache directory pre-filled by installing the bundled plugin's (and any site
+# To avoid a cold network install on first launch, we ship a gzipped tarball of an
+# npm cache directory pre-filled by installing the bundled plugin's (and any site
 # template's) dependencies. At launch the app extracts it into
 #   ~/Library/Application Support/Anglesite/npm-cache/
 # and points `npm --cache` at it (see AnglesiteCore/NodeModulesCache).
 #
-# OPT-IN: this script is a no-op unless ANGLESITE_BUILD_NPM_CACHE=1. The tarball
-# size budget is still unmeasured (build-plan Phase 1 step 5 open question — a
-# >100MB tarball meaningfully bloats the DMG and every dev's checkout), so the
-# build phase exists but stays dormant until the maintainer measures and opts in.
-# When enabled it is idempotent: it rebuilds only when the bundled plugin commit
-# (Resources/plugin/.bundled-from-commit) changes.
+# DEFAULT-ON: this runs as part of every build. Set ANGLESITE_BUILD_NPM_CACHE=0 to
+# skip it (e.g. an offline checkout or a fast local iteration build). Measured cost
+# (build-plan Phase 1 step 5): the primed cache is ~768MB raw → ~264MB gzipped — over
+# the original 100MB DMG-bloat budget, accepted as the price of offline first-launch
+# (decided 2026-05-29). It is idempotent: it rebuilds only when the bundled plugin
+# commit (Resources/plugin/.bundled-from-commit) changes, so a normal incremental
+# build skips the ~1min install.
 #
 # Requires the bundled plugin (run scripts/copy-plugin.sh first) and a working
 # `npm` — uses the vendored Resources/node-runtime/bin/npm if present, else the
@@ -26,17 +27,21 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 PLUGIN_DIR="$REPO_ROOT/Resources/plugin"
 DEST_DIR="$REPO_ROOT/Resources/npm-cache"
-TARBALL="$DEST_DIR/cache.tar"
+TARBALL="$DEST_DIR/cache.tar.gz"
 VERSION_FILE="$DEST_DIR/version.txt"
 
 # Always materialize the destination directory: it's referenced (optionally) by the Xcode
 # target's resources phase, which still fails at build time on a missing folder reference even
 # when XcodeGen marked it optional. An empty dir is harmless — NodeModulesCache treats "no
-# cache.tar inside" as `.noBundledArchive`.
+# cache.tar.gz inside" as `.noBundledArchive`.
 mkdir -p "$DEST_DIR"
 
-if [[ "${ANGLESITE_BUILD_NPM_CACHE:-0}" != "1" ]]; then
-    echo "==> vendor-npm-cache: skipped (set ANGLESITE_BUILD_NPM_CACHE=1 to build the primed cache)."
+# Drop any stale uncompressed artifact from the pre-gzip format so it doesn't ride along in the
+# bundle (NodeModulesCache only reads cache.tar.gz now).
+rm -f "$DEST_DIR/cache.tar"
+
+if [[ "${ANGLESITE_BUILD_NPM_CACHE:-1}" == "0" ]]; then
+    echo "==> vendor-npm-cache: skipped (ANGLESITE_BUILD_NPM_CACHE=0)."
     exit 0
 fi
 
@@ -102,10 +107,10 @@ done
 
 mkdir -p "$DEST_DIR"
 echo "==> Writing $TARBALL"
-tar -cf "$TARBALL" -C "$CACHE" .
+tar -czf "$TARBALL" -C "$CACHE" .
 echo "$plugin_version" > "$VERSION_FILE"
 
 size=$(du -sh "$TARBALL" 2>/dev/null | awk '{print $1}')
 echo
 echo "Primed npm cache: $TARBALL (${size:-?}, version $plugin_version)"
-echo "  size-budget note: >100MB meaningfully bloats the DMG — see build-plan Phase 1 step 5."
+echo "  note: ~264MB gzipped, bundled by default — set ANGLESITE_BUILD_NPM_CACHE=0 to skip."

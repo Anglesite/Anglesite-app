@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Entitlements for the bundled Node binary in the Developer ID (non-sandboxed) build.
+      Applied by scripts/resign-node.sh as a post-build phase on the Anglesite target (#4).
+
+      Notarization requires every nested Mach-O to be signed by the app's team with the
+      hardened runtime. This is the MAS node-runtime.entitlements set MINUS the two sandbox
+      keys (app-sandbox / inherit) — the DevID build isn't sandboxed (see Anglesite.entitlements),
+      so the embedded node must not declare itself sandboxed either, or it would be denied
+      filesystem access the unsandboxed app otherwise has.
+    -->
+
+    <!-- V8 JIT under hardened runtime — without these the embedded V8 OOMs at launch. -->
+    <key>com.apple.security.cs.allow-jit</key><true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+
+    <!--
+      Node dlopen()s native addons (e.g. sharp, used by the image-drop pipeline) from the user's
+      per-site node_modules — code we can't re-sign with our team. Library validation would block
+      those loads under hardened runtime.
+    -->
+    <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict>
+</plist>

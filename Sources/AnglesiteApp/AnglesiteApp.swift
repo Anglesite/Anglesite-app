@@ -4,8 +4,7 @@ import AnglesiteCore
 import AnglesiteBridge
 
 /// Owns process-level lifecycle that SwiftUI's `App` value type can't: prime the npm cache on
-/// launch, and on quit drain every supervised child (Astro dev server, MCP server, ad-hoc Node)
-/// so nothing outlives the app.
+/// launch, and drain every supervised child on quit so nothing outlives the app.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Extract the bundled npm cache into Application Support so the first site `npm install`
@@ -33,6 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct AnglesiteApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
+    #if !ANGLESITE_MAS
+    /// Sparkle updater, held for the app's lifetime so its automatic-check timer keeps firing.
+    /// MAS builds update through the App Store and have no Sparkle dependency (Phase 10.1).
+    @StateObject private var updater = Updater()
+    #endif
 
     /// Computed once at launch: Debug builds always show the Debug-pane menu item; Release builds
     /// only when the user opted in (Settings) or held ⌥ while launching. A settings change takes
@@ -53,13 +57,23 @@ struct AnglesiteApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Anglesite") {
-            ContentView()
-                .frame(minWidth: 960, minHeight: 600)
+        // The launcher is the first scene so it's the default window at launch (used when
+        // SwiftUI has nothing to restore). It autoopens the most-recently-used site from its
+        // own .task — see SitesLauncherView.onFirstAppear().
+        Window("Sites", id: "sites") {
+            SitesLauncherView()
         }
-        .windowStyle(.titleBar)
-        .windowToolbarStyle(.unified)
+        .windowResizability(.contentSize)
         .commands {
+            // "Check for Updates…" lives in the standard slot Mac users expect — directly
+            // under "About Anglesite" in the application menu. `CommandGroup(after: .appInfo)`
+            // puts it there.
+            #if !ANGLESITE_MAS
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheckForUpdates)
+            }
+            #endif
             // Debug pane lives off the View menu — `⌥⌘D` keeps it discoverable without crowding
             // the primary commands. Hidden in Release unless explicitly enabled (see init()).
             CommandGroup(after: .toolbar) {
@@ -71,6 +85,21 @@ struct AnglesiteApp: App {
                 }
             }
         }
+
+        // Per-site windows, keyed by SiteStore.Site.id (a stable path-derived String).
+        // Each window owns its own PreviewModel/DeployModel/ChatModel and dev-server lifetime.
+        // SwiftUI dedupes openWindow(value:) calls, so opening the same site twice just
+        // focuses the existing window.
+        WindowGroup(for: String.self) { $siteID in
+            // SiteWindow takes the optional directly so it can dismiss itself and
+            // route to the launcher when restoration hands us a nil or unresolvable
+            // id. If we short-circuit with `if let siteID` here the SiteWindow never
+            // instantiates and an empty restored window strands the user.
+            SiteWindow(siteID: siteID)
+                .frame(minWidth: 960, minHeight: 600)
+        }
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified)
 
         Window("Anglesite Debug", id: "debug") {
             DebugPaneView()

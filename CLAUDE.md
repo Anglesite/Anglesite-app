@@ -21,8 +21,17 @@ When in doubt, the plugin is the source of truth for skills, hooks, and the MCP 
 - **Swift / SwiftUI** — app shell. Targets macOS 14+.
 - **Plain SwiftUI + actors** for v0. No TCA, no third-party state libraries.
 - **WKWebView** — live preview of the Astro dev server.
-- **Embedded Node** — vendored at build time, re-signed with Developer ID.
+- **Embedded Node** — vendored at build time. The sandboxed MAS target re-signs it with the app's identity + hardened-runtime JIT/sandbox entitlements (`scripts/resign-node.sh`); a Developer-ID re-sign for the DevID notarization track is still deferred (#1/#4).
 - **MCP** — talks to the plugin's server over stdio.
+
+## Two build targets
+
+| Scheme | Bundle id | Distribution | Sandbox |
+|---|---|---|---|
+| `Anglesite` (DevID) | `dev.anglesite.app` | Developer ID + Sparkle auto-update | off |
+| `AnglesiteMAS` | `dev.anglesite.app.mas` | Mac App Store | App Sandbox |
+
+Both share the `Sources/AnglesiteApp` code and the same `InProcessBackend` spawn path. MAS-only differences are gated with `#if ANGLESITE_MAS` (set via `SWIFT_ACTIVE_COMPILATION_CONDITIONS` on the MAS *app target* only — **not** on the `AnglesiteCore`/`AnglesiteBridge` SPM package, so a guard in those packages is a no-op). The MAS build is sandboxed and holds a per-`SiteWindow` security-scoped bookmark grant so directly-spawned children inherit folder access; chat, Sparkle, and the `gh` Settings panel are compiled out of it.
 
 ## Module layout
 
@@ -35,8 +44,10 @@ JS/
 └── edit-overlay/      TypeScript edit overlay compiled and bundled into app resources
 Resources/
 ├── node-runtime/      (gitignored) Vendored Node binary, populated by scripts/vendor-node.sh
-└── plugin/            (gitignored) Copy of ../anglesite, populated by scripts/copy-plugin.sh
-                       (runs as a pre-build phase; respects $ANGLESITE_PLUGIN_SRC override)
+├── plugin/            (gitignored) Copy of ../anglesite, populated by scripts/copy-plugin.sh
+│                      (runs as a pre-build phase; respects $ANGLESITE_PLUGIN_SRC override)
+├── Anglesite.help/    Apple Help Book (HTML pages; hiutil index built by scripts/build-help-index.sh)
+└── *.entitlements     Per-target sandbox/signing entitlements (incl. node-runtime.entitlements for the MAS Node re-sign)
 ```
 
 ## Editing guidelines
@@ -55,8 +66,12 @@ Resources/
 open Anglesite.xcodeproj
 # ⌘B in Xcode, or:
 xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build
+# Sandboxed App Store target:
+xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debug build
 ```
+
+Tests: `swift test --package-path .` (208 `AnglesiteCoreTests` unit tests plus the `AnglesiteBridgeTests` apply-edit e2e, which `XCTSkip`s when the sibling plugin checkout / node aren't present). If `swift build`/`swift test` seems to hang with no output, a stale SwiftPM process is likely holding the `.build` lock — check `pgrep -fl swift-test` and kill the orphan rather than assuming a bad test.
 
 ## Plan
 
-See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 4** (Phase 0–3 complete: embedded Node, plugin/site plumbing, `ProcessSupervisor`/`AstroDevServer`/`MCPClient`/Debug pane. Phase 1 primed-npm-cache is a first cut — `NodeModulesCache` + opt-in `vendor-npm-cache.sh`; size budget still to be measured, see #6. Deferred Release-track: Developer ID re-sign of embedded Node + notarization, #1/#4).
+See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 10** — v2 polish. Phases 0–9 are complete. Within Phase 10, the **Apple Help Book** has shipped and the **sandboxed Mac App Store build (Phase 10.1)** is most of the way there: the `AnglesiteMAS` target, the app-held per-site security-scoped grant (Task 7), the bundled-Node re-sign (Task N), routing all `Process()` through `ProcessSupervisor` (Task 8), and compiling chat/Sparkle/`gh` out of MAS (Tasks 9–10) are all done and build clean. **Remaining (Phase 10.1):** real-signed write-heavy MAS smoke (Task 11 — also confirms whether `cs.disable-library-validation` on the bundled Node is actually needed for sharp/native addons), the App Store release pipeline (Task 12), and closeout (Task 13). Still-open follow-ups: Sparkle manual key/appcast setup; **placeholder** app icon (#55 — `scripts/generate-app-icon.swift` draws a teal/blue "A" squircle at all 10 mac sizes; re-run with a 1024px PNG to drop in real artwork); notarization for the DevID track — the embedded-Node re-sign is now wired on both targets (#4 done via `scripts/resign-node.sh` post-build phases), but the real Developer-ID signing + notarize/staple dry run (#1) and the notarized clean-Mac spawn smoke (#5) still need the signing cert + `TEAM_ID` (scripts ready: `scripts/notarize-dry-run.sh`). (The shared-output-path issue is fixed: the MAS target builds `AnglesiteMAS.app`, display name still "Anglesite".)

@@ -7,6 +7,6 @@ struct BuildInfoTests {
     }
 
     @Test func `Summary contains phase`() {
-        #expect(BuildInfo.summary.contains("phase 2"))
+        #expect(BuildInfo.summary.contains("phase \(BuildInfo.phase)"))
     }
 }

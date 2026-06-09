@@ -3,29 +3,39 @@ import AnglesiteCore
 
 /// `EditRouter` backed by an `MCPClient` `tools/call` to the plugin's `apply_edit` tool.
 ///
-/// Phase 5's `apply_edit` MCP tool is live in the plugin server (anglesite/anglesite#296 + #297
-/// + #298). Nothing in the app instantiates an `MCPClient` against that server yet, so the
-/// `PreviewView` wiring stays on `LoggingEditRouter`; this is the router the wiring will swap
-/// to once an MCP client is launched (the test-shaped `init(toolCaller:)` is the seam; the
-/// convenience `init(mcpClient:)` is the production hookup).
+/// Parses the plugin's structured reply body — `{ type, id, file, range, commit, result? }` —
+/// out of the MCP tool's `content[0].text` JSON string into typed Swift properties on
+/// `EditReply`. Falls back gracefully to the original "stuff the text in `message`" behavior
+/// when the body isn't valid JSON (e.g. older plugins, or `apply_edit` impls that don't emit
+/// the structured body).
+///
+/// `onEdit` fires after every successful `.applied` reply with a non-nil `commit` — wired by
+/// `SiteWindow` to `ChatModel.recordEdit(_:)` so the chat panel surfaces each edit as a row.
 public struct MCPApplyEditRouter: EditRouter {
     public typealias ToolCaller = @Sendable (_ name: String, _ arguments: JSONValue) async throws -> MCPClient.ToolCallResult
+    public typealias EditObserver = @Sendable (EditReply) -> Void
 
     private let toolCaller: ToolCaller
+    private let onEdit: EditObserver?
 
     /// Test seam — inject a closure that mimics `MCPClient.callTool` so the router's mapping
     /// logic is verifiable without a live MCP server.
-    public init(toolCaller: @escaping ToolCaller) {
+    public init(toolCaller: @escaping ToolCaller, onEdit: EditObserver? = nil) {
         self.toolCaller = toolCaller
+        self.onEdit = onEdit
     }
 
     /// Production hookup: bind to a getter for the currently-active `MCPClient`. Returns
-    /// `.failed("MCP not running")` shape via a thrown `notInitialized` when the getter is `nil`.
-    public init(mcpClient: @escaping @Sendable () async -> MCPClient?) {
+    /// `.failed("MCP not running")` via a thrown `notInitialized` when the getter is `nil`.
+    public init(
+        mcpClient: @escaping @Sendable () async -> MCPClient?,
+        onEdit: EditObserver? = nil
+    ) {
         self.toolCaller = { name, args in
             guard let client = await mcpClient() else { throw MCPClient.MCPError.notInitialized }
             return try await client.callTool(name: name, arguments: args)
         }
+        self.onEdit = onEdit
     }
 
     public func apply(_ message: EditMessage) async -> EditReply {
@@ -34,12 +44,55 @@ public struct MCPApplyEditRouter: EditRouter {
             let result = try await toolCaller("apply_edit", args)
             let text = result.content.compactMap(\.text).joined(separator: "\n")
             let trimmed = text.isEmpty ? nil : text
+            let parsed = Self.parseStructured(text)
             if result.isError {
-                return EditReply(id: message.id, status: .failed, message: trimmed ?? "tool reported error")
+                return EditReply(
+                    id: message.id,
+                    status: .failed,
+                    message: trimmed,
+                    file: parsed?.file,
+                    commit: parsed?.commit,
+                    result: parsed?.result
+                )
             }
-            return EditReply(id: message.id, status: .applied, message: trimmed)
+            let reply = EditReply(
+                id: message.id,
+                status: .applied,
+                message: trimmed,
+                file: parsed?.file,
+                commit: parsed?.commit,
+                result: parsed?.result
+            )
+            if reply.commit != nil { onEdit?(reply) }
+            return reply
         } catch {
             return EditReply(id: message.id, status: .failed, message: "\(error)")
         }
+    }
+
+    /// Parses the plugin's edit-applied JSON body out of the MCP tool's content text. Returns
+    /// `nil` for non-JSON content (the router falls back to the message-string behavior in
+    /// that case).
+    static func parseStructured(_ text: String) -> Parsed? {
+        guard !text.isEmpty,
+              let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        let file = json["file"] as? String
+        let commit = json["commit"] as? String
+        var image: EditReply.ImageResult?
+        if let resultDict = json["result"] as? [String: Any],
+           let src = resultDict["src"] as? String {
+            let srcset = resultDict["srcset"] as? String
+            image = EditReply.ImageResult(src: src, srcset: srcset)
+        }
+        if file == nil && commit == nil && image == nil { return nil }
+        return Parsed(file: file, commit: commit, result: image)
+    }
+
+    struct Parsed: Equatable {
+        let file: String?
+        let commit: String?
+        let result: EditReply.ImageResult?
     }
 }

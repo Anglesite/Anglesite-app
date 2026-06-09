@@ -13,8 +13,6 @@ struct ProcessSupervisorLaunchTests {
             logCenter: center
         )
         let reason = await supervisor.waitForExit(handle)
-        // Pipe drainage may complete after exit signal; give readers a beat.
-        try? await Task.sleep(nanoseconds: 100_000_000)
 
         #expect(reason == .exited(code: 0))
         let lines = await center.snapshot().filter { $0.source == "stdout-test" && $0.stream == .stdout }
@@ -31,13 +29,44 @@ struct ProcessSupervisorLaunchTests {
             logCenter: center
         )
         _ = await supervisor.waitForExit(handle)
-        try? await Task.sleep(nanoseconds: 100_000_000)
 
         let snapshot = await center.snapshot().filter { $0.source == "stderr-test" }
         let outs = snapshot.filter { $0.stream == .stdout }.map(\.text)
         let errs = snapshot.filter { $0.stream == .stderr }.map(\.text)
         #expect(outs == ["out"])
         #expect(errs == ["err"])
+    }
+
+    /// Regression: `waitForExit` must not resume until every byte read from the child's
+    /// stdout/stderr is in `LogCenter`. The previous pump fired untracked
+    /// `Task { await logCenter.append }` from the readabilityHandler, so a snapshot taken
+    /// immediately after `waitForExit` could miss the tail of the output — `DeployCommand`
+    /// papered over the gap with a 100ms sleep, and `DeployCommandTests` still flaked under
+    /// CI load. This test runs the burst-then-exit pattern that triggered the flake (lots of
+    /// output crammed into the last few milliseconds before exit) and asserts that the very
+    /// last line is present in the snapshot with zero post-exit sleep.
+    @Test func `Snapshot includes last line after wait for exit without sleep`() async throws {
+        for _ in 0..<25 {
+            let supervisor = ProcessSupervisor()
+            let center = LogCenter()
+            let handle = try await supervisor.launch(
+                source: "drain-race",
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: [
+                    "-c",
+                    // Burst a few lines, then write a sentinel right before exiting. If the
+                    // pump ever loses the tail, this test will fail on the sentinel.
+                    "for i in 1 2 3 4 5 6 7 8 9 10; do printf 'line %s\\n' $i; done; printf 'SENTINEL\\n'"
+                ],
+                logCenter: center
+            )
+            _ = await supervisor.waitForExit(handle)
+            let lines = await center.snapshot()
+                .filter { $0.source == "drain-race" && $0.stream == .stdout }
+                .map(\.text)
+            #expect(lines.last == "SENTINEL", "last stdout line must be in LogCenter the moment waitForExit returns")
+            #expect(lines.count == 11, "all lines must be present, none lost: \(lines)")
+        }
     }
 
     @Test func `Wait for exit reports non-zero code`() async throws {
@@ -85,8 +114,6 @@ struct ProcessSupervisorLaunchTests {
             logCenter: center
         )
         let reason = await supervisor.waitForExit(handle)
-        // Pipe drainage may lag the exit signal.
-        try? await Task.sleep(nanoseconds: 200_000_000)
 
         #expect(reason == .retriesExhausted(lastCode: 2))
         let boomCount = await center.snapshot().filter {
@@ -123,7 +150,6 @@ struct ProcessSupervisorLaunchTests {
             logCenter: center
         )
         let reason = await supervisor.waitForExit(handle)
-        try? await Task.sleep(nanoseconds: 100_000_000)
 
         #expect(reason == .retriesExhausted(lastCode: 4))
         // Initial spawn doesn't count; 3 retries → 3 respawn callbacks.
@@ -164,7 +190,6 @@ struct ProcessSupervisorLaunchTests {
         try stdin.writer.close()
 
         let reason = await supervisor.waitForExit(handle)
-        try? await Task.sleep(nanoseconds: 100_000_000)
 
         #expect(reason == .exited(code: 0))
         let lines = await center.snapshot().filter { $0.source == "cat" && $0.stream == .stdout }.map(\.text)

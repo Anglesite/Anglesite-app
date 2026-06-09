@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Fires after `git pull` / `git merge`. ORIG_HEAD is the pre-merge tip; HEAD is the new tip.
+set -euo pipefail
+exec "$(dirname "$0")/regenerate-xcodeproj.sh" "ORIG_HEAD" "HEAD"

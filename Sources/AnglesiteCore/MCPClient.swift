@@ -196,8 +196,8 @@ public actor MCPClient {
     }
 
     /// Fired by `ProcessSupervisor` after it restarts the crashed server. The old stdin is gone
-    /// (`writeJSONLine` re-fetches the writer, so it auto-targets the fresh pipe) and any in-flight
-    /// requests can never be answered — fail them, drop `initialized`, then re-handshake.
+    /// (`writeJSONLine` writes by `Handle` through the supervisor, which targets the fresh pipe) and
+    /// any in-flight requests can never be answered — fail them, drop `initialized`, then re-handshake.
     private func handleRespawn() async {
         let waiters = pending
         pending.removeAll()
@@ -322,14 +322,19 @@ public actor MCPClient {
     }
 
     private func writeJSONLine(_ value: JSONValue) async throws {
-        guard let handle = self.handle,
-              let writer = await supervisor.stdinWriter(handle)
-        else {
+        guard let handle = self.handle else {
             throw MCPError.notInitialized
         }
-        let data = try JSONSerialization.data(withJSONObject: value.rawValue, options: [])
-        try writer.writer.write(contentsOf: data)
-        try writer.writer.write(contentsOf: Data([0x0A]))  // '\n'
+        var data = try JSONSerialization.data(withJSONObject: value.rawValue, options: [])
+        data.append(0x0A)  // '\n' — one JSON object per line; framing must be byte-identical.
+        // Route through the supervisor's `writeStdin` so this works for both backends: the
+        // in-process backend writes to the child's stdin pipe; the XPC backend forwards the bytes
+        // to the helper (a live FileHandle can't cross the XPC boundary).
+        do {
+            try await supervisor.writeStdin(handle, data)
+        } catch {
+            throw MCPError.notInitialized
+        }
     }
 
     private func registerPending(id: Int, continuation: CheckedContinuation<JSONValue, Error>) {

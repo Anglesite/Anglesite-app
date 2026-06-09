@@ -51,6 +51,9 @@ Resources/npm-cache/
 Resources/edit-overlay/
 node_modules/
 
+# Generated Apple Help search index (rebuilt by scripts/build-help-index.sh)
+Resources/Anglesite.help/**/*.helpindex
+
 # Build artifacts
 *.app
 *.dmg
@@ -65,3 +68,5 @@ node_modules/
 
 # Claude Code harness state
 .claude/
+
+.superpowers/

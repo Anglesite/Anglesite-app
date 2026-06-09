@@ -15,6 +15,8 @@ public final class AppSettings: @unchecked Sendable {
         public static let pluginPathOverride = "anglesite.pluginPathOverride"
         public static let sitesRootOverride  = "anglesite.sitesRootOverride"
         public static let debugPaneEnabled   = "anglesite.debugPaneEnabled"
+        public static let lastOpenedSiteID   = "anglesite.lastOpenedSiteID"
+        public static let sitesRootBookmark  = "anglesite.sitesRootBookmark"
     }
 
     private let defaults: UserDefaults
@@ -67,6 +69,33 @@ public final class AppSettings: @unchecked Sendable {
     public var debugPaneEnabled: Bool {
         get { defaults.bool(forKey: Key.debugPaneEnabled) }
         set { defaults.set(newValue, forKey: Key.debugPaneEnabled) }
+    }
+
+    /// Security-scoped bookmark for the sites root, persisted so the sandboxed (MAS) build only
+    /// has to prompt once for permission to create new site folders. `nil` until granted.
+    public var sitesRootBookmark: Data? {
+        get { defaults.data(forKey: Key.sitesRootBookmark) }
+        set {
+            if let newValue { defaults.set(newValue, forKey: Key.sitesRootBookmark) }
+            else { defaults.removeObject(forKey: Key.sitesRootBookmark) }
+        }
+    }
+
+    /// The site that was most-recently focused. Used by the Sites launcher to auto-open
+    /// the user's last working window on a fresh launch instead of showing the picker.
+    /// Cleared when the site disappears from `SiteStore`.
+    public var lastOpenedSiteID: String? {
+        get {
+            guard let id = defaults.string(forKey: Key.lastOpenedSiteID), !id.isEmpty else { return nil }
+            return id
+        }
+        set {
+            if let id = newValue {
+                defaults.set(id, forKey: Key.lastOpenedSiteID)
+            } else {
+                defaults.removeObject(forKey: Key.lastOpenedSiteID)
+            }
+        }
     }
 }
 

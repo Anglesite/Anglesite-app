@@ -10,6 +10,10 @@ import Foundation
 /// timestamps so the UI can render immediately without re-scanning the filesystem. `refresh()`
 /// reconciles the cache with what's actually on disk.
 public actor SiteStore {
+    /// Process-wide shared instance. Multi-window code reads/writes through this so the
+    /// in-memory list and on-disk sites.json stay coherent across windows.
+    public static let shared = SiteStore()
+
     public struct Site: Sendable, Codable, Equatable, Identifiable {
         public let id: String          // path-derived, stable across launches
         public let name: String        // last path component
@@ -17,14 +21,29 @@ public actor SiteStore {
         public var isValid: Bool
         public var missingSentinels: [String]
         public var lastSeen: Date
+        /// Security-scoped bookmark for `path`. Populated via the MAS "Open Folder…" flow
+        /// (NSOpenPanel grants access; we stamp a bookmark so the grant survives relaunch).
+        /// `nil` for the DevID build (no sandbox) and for sites found by directory scan, which
+        /// can't mint a bookmark without an explicit user grant. Optional so existing
+        /// sites.json files decode unchanged.
+        public var bookmarkData: Data?
 
-        public init(id: String, name: String, path: URL, isValid: Bool, missingSentinels: [String], lastSeen: Date) {
+        public init(
+            id: String,
+            name: String,
+            path: URL,
+            isValid: Bool,
+            missingSentinels: [String],
+            lastSeen: Date = Date(),
+            bookmarkData: Data? = nil
+        ) {
             self.id = id
             self.name = name
             self.path = path
             self.isValid = isValid
             self.missingSentinels = missingSentinels
             self.lastSeen = lastSeen
+            self.bookmarkData = bookmarkData
         }
     }
 
@@ -80,10 +99,11 @@ public actor SiteStore {
                 .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
                 .map { url in
                     let result = ProjectValidator.validate(url, fileManager: fileManager)
+                    let canonical = Self.canonicalize(url)
                     return Site(
-                        id: Self.identifier(for: url),
-                        name: url.lastPathComponent,
-                        path: url,
+                        id: Self.identifier(for: canonical),
+                        name: canonical.lastPathComponent,
+                        path: canonical,
                         isValid: result.isValid,
                         missingSentinels: result.missing,
                         lastSeen: Date()
@@ -101,7 +121,10 @@ public actor SiteStore {
         for site in sites where fileManager.fileExists(atPath: site.path.path) {
             byID[site.id] = site
         }
-        for site in discovered {
+        for var site in discovered {
+            // Re-discovery rebuilds a Site from the filesystem with no bookmark; carry forward
+            // any persisted security-scoped bookmark so a refresh doesn't strip the grant.
+            site.bookmarkData = byID[site.id]?.bookmarkData ?? site.bookmarkData
             byID[site.id] = site
         }
         sites = byID.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -120,10 +143,14 @@ public actor SiteStore {
         guard result.isValid else {
             throw StoreError.invalidProject(url, missing: result.missing)
         }
+        // Canonicalize once so id, path, and name all derive from the same
+        // symlink-resolved form — NSOpenPanel hands us paths that may differ
+        // from the resolved form by a /private prefix or a symlinked root (#56).
+        let canonical = Self.canonicalize(url)
         let site = Site(
-            id: Self.identifier(for: url),
-            name: url.lastPathComponent,
-            path: url,
+            id: Self.identifier(for: canonical),
+            name: canonical.lastPathComponent,
+            path: canonical,
             isValid: true,
             missingSentinels: [],
             lastSeen: Date()
@@ -138,6 +165,25 @@ public actor SiteStore {
     /// Removes a site from the list. Does not delete files on disk.
     public func remove(id: String) throws {
         sites.removeAll { $0.id == id }
+        try persist()
+    }
+
+    /// Look up a site by id. Convenience used by window scenes that receive the id as a
+    /// `WindowGroup(for:)` value and need to resolve it to a path/name.
+    public func find(id: String) -> Site? {
+        sites.first { $0.id == id }
+    }
+
+    /// The persisted security-scoped bookmark for a site, if any. `nil` in DevID and for
+    /// scan-discovered sites that were never granted via NSOpenPanel.
+    public func bookmarkData(for id: String) -> Data? {
+        sites.first { $0.id == id }?.bookmarkData
+    }
+
+    /// Stamp `bookmarkData` onto the site with the given id, then persist. No-op if unknown.
+    public func setBookmark(_ data: Data, for id: String) throws {
+        guard let index = sites.firstIndex(where: { $0.id == id }) else { return }
+        sites[index].bookmarkData = data
         try persist()
     }
 
@@ -163,9 +209,16 @@ public actor SiteStore {
         return d
     }
 
+    /// The canonical file URL for `url`: standardized and symlink-resolved. The single
+    /// resolved form that `id`, `path`, and `name` are all derived from, so a site reached
+    /// via a symlinked root (e.g. `/tmp` → `/private/tmp`) collapses to one stable entry (#56).
+    static func canonicalize(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
+    }
+
     private static func identifier(for url: URL) -> String {
         // Standardize so "/Users/x/Sites/foo" and "/Users/x/Sites/foo/" resolve to the same id.
-        url.standardizedFileURL.resolvingSymlinksInPath().path
+        canonicalize(url).path
     }
 
     private static func defaultPersistenceURL(fileManager: FileManager) -> URL {
