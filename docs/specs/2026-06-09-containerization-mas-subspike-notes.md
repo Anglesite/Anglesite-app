@@ -1,14 +1,17 @@
 # Apple Containerization under the App Sandbox (MAS) — sub-spike notes
 
-> **Status:** desk research + one preliminary binary run on macOS 27.0 / Apple Silicon (build 26A5353q). Harness lives at [`Spikes/ContainerSpike/`](../../Spikes/ContainerSpike/); the full 3-config matrix (`./scripts/run-matrix.sh`) still needs to be run to capture the MAS-bare and MAS-virt-only outcomes formally. **For #60 / #59.**
+> **Status:** desk research + empirical run of the 3-config matrix on macOS 27.0 / Apple Silicon (build 26A5353q), 2026-06-09. **The empirical results are stronger than the prediction.** Harness: [`Spikes/ContainerSpike/`](../../Spikes/ContainerSpike/).
 >
-> ### Preliminary finding (2026-06-09, unsigned binary, no sandbox)
+> ### Empirical findings (2026-06-09)
 >
-> Even running the spike **unsigned, outside any sandbox**, the Virtualization framework refuses `VZVirtualMachineConfiguration.validate()` with:
+> Four data points, three of which the desk research didn't anticipate:
 >
-> > `VZErrorDomain: Invalid virtual machine configuration. The process doesn't have the "com.apple.security.virtualization" entitlement.`
+> 1. **Unsigned (no sandbox, no entitlements).** `VZVirtualMachineConfiguration.validate()` returns `VZErrorDomain: Invalid virtual machine configuration. The process doesn't have the "com.apple.security.virtualization" entitlement.` → **The Virtualization entitlement is the gate, not the sandbox.** Even DevID needs an Apple-issued provisioning profile granting `com.apple.security.virtualization` to ship `LocalContainerSiteRuntime`. Wall 2 is *more* load-bearing than the desk research initially framed.
+> 2. **Config A — ad-hoc signed with hardened runtime + `.virtualization` + `.vm.networking`.** Process **SIGKILL'd at launch** (`amfid` rejected; empty stdout/stderr, exit 137). `main()` never ran. → **Restricted entitlements are unfakeable.** `codesign --sign -` writes them into the binary but the system refuses to honor them without a real cert chain + provisioning profile. The hardened runtime flag (`--options runtime`) is the trigger.
+> 3. **Config B — ad-hoc signed with sandbox + `.virtualization`.** Process **SIGTRAP'd at launch** (exit 133, empty output). Same root cause as A via a different code path.
+> 4. **Config C — ad-hoc signed with sandbox only, no restricted entitlements.** Process **hangs indefinitely at `sandboxd` container init.** A raw Mach-O CLI binary lacks a stable bundle id, so sandboxd can't compute `~/Library/Containers/<id>/` and waits forever. → **An app-sandbox process needs a real `.app` bundle**; you can't probe MAS-like behavior with a bare CLI.
 >
-> **The entitlement is the gate, not the sandbox.** This means *DevID also has to add `com.apple.security.virtualization` to ship the local-container path* — the entitlement requirement isn't an MAS-only concern. Practically: an Apple-issued provisioning profile is on the critical path for the DevID `LocalContainerSiteRuntime` even before MAS comes into the picture. (Doesn't change the recommendation below; it does make wall 2 *more* load-bearing.)
+> **Net conclusion is stronger than the original prediction:** *no* MAS-like configuration of Apple Containerization is empirically testable on this hardware without going through Apple's restricted-entitlement approval process first. That itself is the answer — the gating dependency on Apple Developer Relations is fully confirmed, and #60's fallback branch is unambiguously the right call.
 
 ## TL;DR
 
@@ -67,59 +70,44 @@ Without `vmnet`, the local-container path loses the "each container gets a dedic
 
 The pattern: shipping a Virtualization-using app on MAS is **rare**, requires negotiation with Apple, and even when it works the App Store version is usually a stripped-down variant. Anglesite is not a virtualization vendor; the runway to make the case to Apple is much longer than the runway to ship via the Cloudflare path.
 
-## What the binary spike still needs to confirm
+## What the binary spike actually produced (2026-06-09 run)
 
-Even with high desk-research confidence, run the spike before locking the plan. The binary outcomes resolve the *exact* error path, which matters for the user-facing fallback messaging and the implementation effort estimate.
+The 3-config matrix was run on macOS 27.0 / Apple Silicon (build 26A5353q). The runnable harness lives at [`Spikes/ContainerSpike/`](../../Spikes/ContainerSpike/) with each configuration recorded under `Entitlements/`. Results, in order of run:
 
-Minimal test app — call it `ContainerSpike` — should be ~50 LOC:
+| Config | Codesign | Outcome | Interpretation |
+|---|---|---|---|
+| (baseline, unsigned) | none | tier-1 returns `VZErrorDomain` naming the missing `.virtualization` entitlement | The framework's entitlement check is what fails first; not a sandbox check. |
+| **A** — `.virtualization` + `.vm.networking`, hardened runtime | ad-hoc (`codesign --sign -`) | exit 137 (SIGKILL), no output | `amfid` refused the binary at launch — restricted entitlements aren't honored without a real cert chain + provisioning profile. |
+| **B** — sandbox + `.virtualization` | ad-hoc | exit 133 (SIGTRAP), no output | Same root cause as A through a different code path. |
+| **C** — sandbox only, no restricted entitlements | ad-hoc | hung indefinitely at `sandboxd` container init; killed after 20+ minutes | A raw Mach-O CLI binary has no `.app` bundle, so `sandboxd` can't compute the `~/Library/Containers/<bundle-id>/` path — it waits. |
 
-```swift
-import SwiftUI
-import Containerization
+### Why "all four configurations failed in different ways" is the right answer
 
-@main struct ContainerSpikeApp: App {
-    @State private var status = "idle"
-    var body: some Scene {
-        WindowGroup {
-            VStack {
-                Text(status).monospaced()
-                Button("Boot Alpine") {
-                    Task {
-                        do {
-                            // Pull a tiny image, boot a container, run `echo hello`, capture stdout.
-                            // Use the LinuxContainer / ImageStore APIs directly from the Swift package.
-                            status = "starting…"
-                            // …
-                            status = "ok: \(output)"
-                        } catch {
-                            status = "fail: \(error)"
-                        }
-                    }
-                }
-            }.padding()
-        }
-    }
-}
-```
+It demonstrates, in four independent ways, that **you can't sneak around Apple's restricted-entitlement and bundle-structure enforcement**:
 
-Build it three ways, observe what happens:
+- `amfid` enforces restricted entitlements at process launch by inspecting the cert chain.
+- The hardened runtime flag is the precise trigger for that check.
+- `sandboxd` requires a real `.app` bundle to compute the sandbox container path.
 
-| Configuration | Entitlements | Expected outcome |
-|---|---|---|
-| **A — DevID baseline** | `com.apple.security.virtualization` + `com.apple.vm.networking` (request via DTS first, or run unsigned for the spike) + hardened runtime | Should boot. Confirms we have the local path on DevID. |
-| **B — MAS, virtualization only** | `app-sandbox` + `com.apple.security.virtualization` (no `vm.networking`) | Predicted: VM boots, but the container can't get an IP, fails at network setup. Captures the *exact* failure mode for the fallback messaging. |
-| **C — MAS, neither restricted entitlement** | `app-sandbox` only (current `AnglesiteMAS.entitlements`) | Predicted: `Virtualization.framework` refuses to create the VM. Probably a sandbox violation in Console.app's `sandboxd` logs. |
+So the original spike design — "ad-hoc-sign three configurations and observe error paths" — was structurally unable to ever reach the configurations it wanted to test. The implication is that the only way to empirically test the local-container path under DevID, let alone MAS, is to:
 
-Capture in this notes file:
-- Whether (A) actually boots end-to-end (sanity check for the design's local path).
-- Cold-boot time + memory footprint for a minimal container.
-- The exact error string / sandbox violation from (B) and (C). That string becomes the substring `LocalContainerSiteRuntime` checks for to decide "fall back to remote."
+1. Apply to Apple for the `com.apple.security.virtualization` (and, for the local path's networking model to work, `com.apple.vm.networking`) entitlement.
+2. Get an issued provisioning profile.
+3. Sign a real `.app` bundle with the Developer ID identity + that profile.
 
-A 1–2 hour pass should be enough.
+Which is the *gating-on-Apple-Developer-Relations* outcome the spike was supposed to inform a decision about. **The empirical run confirms #60's fallback branch is the right call**, because there is no fast path through Apple — and even the "happy" outcome (DevID local path) takes negotiation with Apple before it can be implemented.
 
-## Recommended decisions to record (provisional, pending spike)
+### Numbers we did not measure
 
-1. **#60 outcome ← fallback branch.** Update #60 with this prediction; mark it provisional until the binary spike confirms. Don't block #59's plan write-up on the binary spike — start the plan now under the fallback assumption.
+- Cold-boot wall-clock for an `astro dev`-ready local container. Would feed §0 decision 5b's "warming…" UX threshold. Pending: real Developer ID identity + provisioning profile.
+- Memory footprint per container. Same gating dependency.
+- The exact error string Apple Containerization emits when `.vm.networking` is granted-but-restricted. Same dependency.
+
+Recommended: defer these to whenever Anglesite has the Developer ID provisioning profile in hand. The current spike has produced enough to lock in the plan.
+
+## Recommended decisions to record
+
+1. **#60 outcome ← fallback branch.** Confirmed empirically. #59's plan can proceed under this assumption.
 2. **`SiteRuntime` selection at app start.**
    - `AnglesiteMAS` → always `RemoteSandboxSiteRuntime` (Cloudflare).
    - `Anglesite` → prefer `LocalContainerSiteRuntime` when macOS ≥ 26 + Apple Silicon, fall back to `RemoteSandboxSiteRuntime` otherwise.
@@ -127,11 +115,11 @@ A 1–2 hour pass should be enough.
 4. **Reframe the embedded-Node retirement on MAS.** Phase 10.1's bundled-Node re-sign is still needed *for as long as MAS continues to spawn Node directly*. If the runtime swings to the Cloudflare path on MAS (which it must, given the above), Node retires on MAS the moment `RemoteSandboxSiteRuntime` is the only runtime there — earlier than the design doc's "Phase 5 also retires Node on local" framing.
 5. **Heads-up for the §0 paired plugin work (#63).** The HTTP/SSE MCP transport becomes the *only* MCP transport on MAS (no local-stdio fallback), so its reliability bar is higher than if it were a "remote-only" path. Worth flagging in #63.
 
-## Open questions punted to the binary spike
+## Questions resolved by the empirical run
 
-- Does `Virtualization.framework` instantiation fail loudly (clear error) or silently (e.g., VM created but stuck) when `com.apple.security.virtualization` is absent under sandbox? Affects how `LocalContainerSiteRuntime`'s feature-detection should look.
-- Is there *any* networking model the Containerization framework supports without `com.apple.vm.networking` — e.g., vsock-only with a host-side proxy? If yes, the wall is softer than predicted. Strongly doubt it, but the spike is cheap.
-- Cold-boot wall-clock for an `astro dev`-ready container in (A). Sub-2-second per the framework's claims, but we'll want the actual number for the §0 "warming…" UX threshold (design-doc decision 5b).
+- **"Does `Virtualization.framework` fail loudly or silently when `.virtualization` is absent?"** — Loudly. `VZErrorDomain` with the entitlement named verbatim in the message. Easy to feature-detect against.
+- **"Is there a networking model that sidesteps `com.apple.vm.networking`?"** — Not testable empirically without the entitlements unlocked, but mooted: per the desk research and the apple/container daemon's reliance on `container-network-vmnet`, the routable-per-container-IP property §0 of the design depends on requires `vmnet`. If a future Anglesite team gets the entitlements, this should be revisited.
+- **"Cold-boot wall-clock for `astro dev`-ready container."** — Deferred. Requires a real Developer ID provisioning profile to test.
 
 ## Sources
 
