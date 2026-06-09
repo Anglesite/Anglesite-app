@@ -198,9 +198,9 @@ final class GateRunner: HealthCheckRunner, @unchecked Sendable {
     /// (the task body hasn't reached `run` yet); fatals if more than one is queued.
     func respond(with result: Result<PreDeployCheck.Outcome, Error>) async {
         let cont = await dequeueOldest()
-        lock.lock()
-        precondition(pending.isEmpty, "expected exactly one pending call, found \(pending.count + 1)")
-        lock.unlock()
+        lock.withLock {
+            precondition(pending.isEmpty, "expected exactly one pending call, found \(pending.count + 1)")
+        }
         deliver(cont, result)
     }
 
@@ -213,13 +213,9 @@ final class GateRunner: HealthCheckRunner, @unchecked Sendable {
 
     private func dequeueOldest() async -> CheckedContinuation<PreDeployCheck.Outcome, Error> {
         while true {
-            lock.lock()
-            if !pending.isEmpty {
-                let cont = pending.removeFirst()
-                lock.unlock()
+            if let cont = lock.withLock({ pending.isEmpty ? nil : pending.removeFirst() }) {
                 return cont
             }
-            lock.unlock()
             try? await Task.sleep(for: .milliseconds(5))
         }
     }
