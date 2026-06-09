@@ -12,7 +12,7 @@ This plan turns the high-level design into a concrete, phased implementation roa
 
 1. `git init` in `Anglesite-app/`. Add `.gitignore` (Xcode, SwiftPM, DerivedData, `.DS_Store`, `node-runtime/`).
 2. Create Xcode project: macOS App, SwiftUI lifecycle, Swift, deployment target macOS 14 (matches WKWebView/SwiftUI APIs needed).
-   - Bundle id: `dev.anglesite.app` (or `io.dwk.anglesite` — decide before signing).
+   - Bundle id: `dev.anglesite.app`.
    - Capabilities: **off** sandbox for v0 (per §10), Hardened Runtime **on**, allow JIT + unsigned executable memory (Node needs both), allow DYLD env vars.
 3. Add a top-level `README.md`, `LICENSE` (ISC to match plugin), `CLAUDE.md` (a short one — points back to `anglesite/CLAUDE.md` for plugin context).
 4. Add module structure inside the app target:
@@ -26,7 +26,7 @@ This plan turns the high-level design into a concrete, phased implementation roa
 
 This is the riskiest piece, so do it first.
 
-1. ✅ Decide on `node` vs `bun` (design doc §13 leaves it open). Recommend `node` for v0 — Astro is officially supported, notarization is well-trodden, fewer surprises.
+1. ✅ Decide on `node` vs `bun`. **Decided 2026-06-09: Node** — Astro is officially supported, notarization is well-trodden, fewer surprises. (Removed from design-doc §13 in [paired plugin PR].)
 2. ✅ Vendor a Node.js macOS universal binary into `Resources/node-runtime/` via a build script (download + verify signature + lipo arm64/x86_64).
 3. ✅ Re-sign the embedded `node` with the app's identity (notarization requires every Mach-O to be signed by the same team) (#4). Both targets now run `scripts/resign-node.sh` as a post-build phase: the **MAS target** with `Resources/node-runtime.entitlements` (app-sandbox/inherit + JIT, Task N), the **DevID `Anglesite` target** with `Resources/node-runtime-devid.entitlements` (the same JIT/unsigned-exec/disable-library-validation set *minus* the sandbox keys, since the DevID build isn't sandboxed). The script signs with `$EXPANDED_CODE_SIGN_IDENTITY` + `--options runtime` (Developer ID on a Release build with the cert; ad-hoc on Debug). Verified on an ad-hoc Debug build: the node carries the three entitlements with the `runtime` flag and `codesign --verify --deep --strict` reports the bundle valid + satisfies its Designated Requirement. The real Developer-ID-identity pass is exercised by the notarize dry run (#1), which needs the signing cert + `TEAM_ID`.
 4. ✅ Smoke test: spawn `node -e "console.log(1+1)"` from `NSTask`/`Process`, confirm it works in a notarized build. *(Ad-hoc-signed Debug confirmed; notarized confirmation deferred with step 3.)*
@@ -116,9 +116,11 @@ Per design doc §12: sandboxed App Store build, Quick Look, Spotlight, Settings 
 ## Cross-cutting decisions to lock in early
 
 - **Multi-window — one window per site.** *(Decided 2026-05-12, overriding the earlier "single-window with tabs" recommendation; landed in Phase 9.)* Each open site gets its own top-level window with its own dev server / preview / debug pane; switching sites = `⌘\`` / Window menu, not in-window tabs. As shipped: `AnglesiteApp` uses `WindowGroup(for: String.self)` keyed by `SiteStore.Site.id`, and the Phase 9 "sidebar" became a separate `Window("Sites", id: "sites")` launcher rather than an in-window list.
-- **Chat history per-site** in `.anglesite/chat-history.jsonl`, included in the GitHub backup.
-- **Swift architecture: plain SwiftUI + actors for supervisors.** No TCA for v0 — keeps the maintainer pool wide.
-- **Two repos, coordinated:** changes spanning `anglesite/server/patcher.mjs` and the app land as paired PRs. Document this in `Anglesite-app/CLAUDE.md`.
+- **Chat history per-site, local-only.** *(Decided 2026-06-09.)* Persisted to `<site>/.anglesite/chat-history.jsonl` as append-only JSONL (one `{timestamp, role, content, metadata?}` record per line, plus `{kind: "undone", messageID, newCommit}` sidecar lines for the undo trail). Implemented in `Sources/AnglesiteCore/ChatHistoryStore.swift`. **Not** included in the GitHub backup — the plugin's template `.gitignore` excludes `.anglesite/` (alongside skill audit trails) and we keep it that way to avoid leaking drafts/strategy/voice notes into the backup repo. Trade-off accepted: reinstalling the app or switching machines drops local history.
+- **Swift architecture: plain SwiftUI + actors for supervisors.** *(Decided 2026-06-09 — already in effect.)* No TCA for v0 — keeps the maintainer pool wide. See `CLAUDE.md`.
+- **Two repos, coordinated:** *(Decided 2026-06-09 — already in effect.)* Changes spanning `anglesite/server/patcher.mjs` and the app land as paired PRs. Both repos carry a `.github/PULL_REQUEST_TEMPLATE.md` with an explicit "Does this need a paired PR in the other repo?" prompt. See `CLAUDE.md` "Two-repo coordination".
+- **Bundle id: `dev.anglesite.app`** (DevID) and **`dev.anglesite.app.mas`** (Mac App Store). *(Decided 2026-06-09 — already in `project.yml`.)* The earlier `io.dwk.anglesite` candidate is dropped.
+- **Runtime: Node, not Bun.** *(Decided 2026-06-09.)* Vendored macOS universal Node ships in `Resources/node-runtime/`; Astro is officially supported on Node, notarization is well-trodden. See Phase 1.
 
 ## Suggested first PR to land
 
