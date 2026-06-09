@@ -16,6 +16,12 @@ public enum WebViewBridge {
     /// for edit messages from the overlay. The overlay bundle (`edit-overlay/overlay.js`) is
     /// injected via `WKUserScript` at `atDocumentEnd` when present; missing bundle is non-fatal —
     /// the preview just loads without edit affordances.
+    ///
+    /// `@MainActor` because every WebKit type touched here (`WKWebViewConfiguration`,
+    /// `WKUserContentController`, `WKWebsiteDataStore`, `WKUserScript`) is main-actor isolated
+    /// in modern SDKs. This matches the existing call sites: SwiftUI view bodies and the
+    /// `WKScriptMessageHandler` delegate, both of which are already on the main actor.
+    @MainActor
     public static func localDevConfiguration(handler: WKScriptMessageHandler? = nil, bundle: Bundle = .main) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
         #if DEBUG
@@ -33,6 +39,7 @@ public enum WebViewBridge {
     /// Loads the bundled edit overlay (built by `scripts/build-overlay.sh`) as a `WKUserScript`,
     /// or returns `nil` when the bundle hasn't been produced (e.g. `swift test`, or a build where
     /// the prebuild script was skipped).
+    @MainActor
     public static func makeOverlayUserScript(in bundle: Bundle = .main) -> WKUserScript? {
         guard let url = bundle.url(forResource: "overlay", withExtension: "js", subdirectory: "edit-overlay")
         else { return nil }
@@ -41,6 +48,7 @@ public enum WebViewBridge {
 
     /// Reads `url` and wraps it as a `WKUserScript` at `atDocumentEnd`. Returns `nil` on read
     /// failure. Public so it's testable with a real file path independent of any `Bundle`.
+    @MainActor
     public static func makeOverlayUserScript(from url: URL) -> WKUserScript? {
         guard let source = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         return WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
@@ -48,6 +56,7 @@ public enum WebViewBridge {
 
     /// Per-instance dev tweaks that aren't expressible on the configuration. In Debug builds this
     /// enables the Web Inspector (right-click → Inspect Element, or ⌥⌘I when the web view is focused).
+    @MainActor
     public static func applyLocalDevDefaults(to webView: WKWebView) {
         #if DEBUG
         webView.isInspectable = true
