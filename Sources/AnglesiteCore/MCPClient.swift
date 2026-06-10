@@ -295,39 +295,30 @@ public actor MCPClient {
             "method": .string(method),
         ]
         if let params { obj["params"] = params }
+        let message = JSONValue.object(obj)
 
-        return try await withThrowingTaskGroup(of: JSONValue.self) { group in
-            group.addTask { [weak self] in
-                try await withCheckedThrowingContinuation { (cont: CheckedContinuation<JSONValue, Error>) in
-                    Task { [weak self] in
-                        await self?.registerPending(id: id, continuation: cont)
-                    }
+        // Bound the wait: fail the pending request if no response arrives in time.
+        let timeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
+            if !Task.isCancelled { await self?.failPending(id: id, error: MCPError.timeout) }
+        }
+        defer { timeoutTask.cancel() }
+
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<JSONValue, Error>) in
+            // This closure runs synchronously on the actor, so the continuation is registered
+            // *before* the send — a response (which the HTTP transport produces during `send`)
+            // can never be missed, and there is no registration race.
+            pending[id] = cont
+            // Send on a detached task so a synchronous transport failure (e.g. connection refused)
+            // resolves THIS continuation via `failPending` instead of leaking it. Every exit path —
+            // response (`resolvePending` from the reader), timeout, or send error — resumes the
+            // continuation exactly once (`pending` removal guarantees single-resume).
+            Task { [weak self] in
+                do {
+                    try await self?.send(message)
+                } catch {
+                    await self?.failPending(id: id, error: error)
                 }
-            }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
-                throw MCPError.timeout
-            }
-
-            do {
-                try await send(.object(obj))
-            } catch {
-                group.cancelAll()
-                throw error
-            }
-
-            do {
-                guard let first = try await group.next() else {
-                    group.cancelAll()
-                    failPending(id: id, error: MCPError.timeout)
-                    throw MCPError.timeout
-                }
-                group.cancelAll()
-                return first
-            } catch {
-                group.cancelAll()
-                failPending(id: id, error: error)
-                throw error
             }
         }
     }
@@ -344,10 +335,6 @@ public actor MCPClient {
     private func send(_ value: JSONValue) async throws {
         guard let transport else { throw MCPError.notInitialized }
         try await transport.send(value)
-    }
-
-    private func registerPending(id: Int, continuation: CheckedContinuation<JSONValue, Error>) {
-        pending[id] = continuation
     }
 
     private func failPending(id: Int, error: Error) {

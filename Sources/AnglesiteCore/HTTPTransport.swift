@@ -74,9 +74,15 @@ public actor HTTPTransport: MCPTransport {
         if let sessionID { request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id") }
         request.httpBody = try JSONSerialization.data(withJSONObject: message.rawValue, options: [])
 
-        let (data, response): (Data, URLResponse)
+        // Use `bytes(for:)`, NOT `data(for:)`: a `text/event-stream` response is treated by
+        // URLSession as an indefinite stream on a keep-alive connection, so `data(for:)` never
+        // completes (it waits for the socket to close, which doesn't happen) — it hangs. With
+        // `bytes(for:)` we read SSE events incrementally and return after the first complete event
+        // (the response to this request) without waiting for the stream to end.
+        let asyncBytes: URLSession.AsyncBytes
+        let response: URLResponse
         do {
-            (data, response) = try await urlSession.data(for: request)
+            (asyncBytes, response) = try await urlSession.bytes(for: request)
         } catch {
             sessionID = nil
             throw HTTPError.sessionLost
@@ -89,7 +95,7 @@ public actor HTTPTransport: MCPTransport {
 
         switch http.statusCode {
         case 202:
-            return  // notification accepted; no body
+            return  // notification accepted; no response body
         case 404:
             sessionID = nil
             throw HTTPError.sessionLost
@@ -101,14 +107,30 @@ public actor HTTPTransport: MCPTransport {
 
         let contentType = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
         if contentType.contains("text/event-stream") {
-            let text = String(decoding: data, as: UTF8.self)
-            for payload in SSEFrameParser.dataPayloads(in: text) {
-                if let value = decode(payload) { continuation.yield(value) }
+            // Parse SSE line-by-line; emit the first complete event's data payload and return.
+            // (One POSTed request yields exactly one response message on its request-scoped stream.)
+            var dataLines: [String] = []
+            for try await line in asyncBytes.lines {
+                if line.isEmpty {
+                    if !dataLines.isEmpty {
+                        if let value = decode(dataLines.joined(separator: "\n")) { continuation.yield(value) }
+                        return
+                    }
+                } else if line.hasPrefix("data:") {
+                    let v = line.dropFirst("data:".count)
+                    dataLines.append(v.hasPrefix(" ") ? String(v.dropFirst()) : String(v))
+                }
+                // event:/id:/retry:/comment lines are ignored.
             }
-        } else if data.isEmpty {
-            return
+            // Stream ended without a trailing blank line — flush whatever accumulated.
+            if !dataLines.isEmpty, let value = decode(dataLines.joined(separator: "\n")) {
+                continuation.yield(value)
+            }
         } else {
-            if let value = decodeData(data) { continuation.yield(value) }
+            // application/json (or other): accumulate the bounded body and decode one message.
+            var data = Data()
+            for try await byte in asyncBytes { data.append(byte) }
+            if !data.isEmpty, let value = decodeData(data) { continuation.yield(value) }
         }
     }
 
