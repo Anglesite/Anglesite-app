@@ -19,7 +19,7 @@ struct BackupCommandTests {
 
     private func makeCommand(
         runner: @escaping BackupCommand.GitRunner,
-        streamer: @escaping BackupCommand.GitStreamer = { _, _, _ in 0 }
+        streamer: @escaping BackupCommand.GitStreamer = { _, _, _ in (0, "") }
     ) -> BackupCommand {
         BackupCommand(runner: runner, streamer: streamer, clock: fixedClock)
     }
@@ -36,6 +36,28 @@ struct BackupCommandTests {
             }
             return ProcessSupervisor.RunResult(stdout: entry.stdout, stderr: "", exitCode: entry.exitCode)
         }
+    }
+
+    // MARK: Non-repo refusal
+
+    @Test("Refuses outside a git repository with a clear, actionable message")
+    func refusesOutsideGitRepo() async {
+        // `git rev-parse --is-inside-work-tree` exits non-zero on a plain directory. The
+        // command must stop here — before branch/remote/status — with a git-init remediation.
+        let cmd = makeCommand(runner: { _, args in
+            if args.contains("--is-inside-work-tree") {
+                return .init(stdout: "", stderr: "fatal: not a git repository", exitCode: 128)
+            }
+            Issue.record("no git command should run after the work-tree check fails: \(args)")
+            return .init(stdout: "", stderr: "unexpected", exitCode: 1)
+        })
+        let result = await cmd.backup(siteID: "site", siteDirectory: tmpDir)
+        guard case .failed(let reason, let exit) = result else {
+            Issue.record("expected .failed, got \(result)")
+            return
+        }
+        #expect(reason.lowercased().contains("git repository"), "reason should name the missing repo: \(reason)")
+        #expect(exit == nil, "non-repo refusal is pre-spawn — no exit code")
     }
 
     // MARK: noChanges
@@ -109,7 +131,7 @@ struct BackupCommandTests {
                 return .init(stdout: "", stderr: "unmocked", exitCode: 1)
             }
         }
-        let cmd = makeCommand(runner: runner, streamer: { _, _, _ in 0 })
+        let cmd = makeCommand(runner: runner, streamer: { _, _, _ in (0, "") })
 
         let result = await cmd.backup(siteID: "site", siteDirectory: tmpDir)
         guard case .succeeded(let sha, let branch, let remote) = result else {
@@ -123,7 +145,7 @@ struct BackupCommandTests {
 
     // MARK: Push failure
 
-    @Test("Surfaces push failure with exit code")
+    @Test("Surfaces push failure with exit code and git's stderr")
     func surfacesPushFailureWithExitCode() async {
         let runner: BackupCommand.GitRunner = { _, args in
             switch args.first {
@@ -139,8 +161,10 @@ struct BackupCommandTests {
             }
         }
         let streamer: BackupCommand.GitStreamer = { _, args, _ in
-            // Fail only on `git push`; add/commit succeed.
-            args.first == "push" ? 128 : 0
+            // Fail only on `git push` (with a realistic rejection on stderr); add/commit succeed.
+            args.first == "push"
+                ? (128, "! [rejected] draft -> draft (fetch first)\nerror: failed to push some refs")
+                : (0, "")
         }
         let cmd = makeCommand(runner: runner, streamer: streamer)
 
@@ -150,6 +174,7 @@ struct BackupCommandTests {
             return
         }
         #expect(reason.lowercased().contains("push"), "reason should mention which step failed: \(reason)")
+        #expect(reason.contains("rejected"), "reason should embed git's stderr so the user sees why: \(reason)")
         #expect(exit == 128)
     }
 
@@ -176,7 +201,7 @@ struct BackupCommandTests {
             if args.first == "commit" {
                 captured.set(args)
             }
-            return 0
+            return (0, "")
         }
         let cmd = makeCommand(runner: runner, streamer: streamer)
 
@@ -213,7 +238,7 @@ struct BackupCommandTests {
         }
         let streamer: BackupCommand.GitStreamer = { _, _, source in
             sources.add(source)
-            return 0
+            return (0, "")
         }
         let cmd = makeCommand(runner: runner, streamer: streamer)
         _ = await cmd.backup(siteID: "mysite", siteDirectory: tmpDir)

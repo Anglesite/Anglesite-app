@@ -35,8 +35,11 @@ public actor BackupCommand {
 
     /// Runs a streaming git command (logs flow to `LogCenter` under `source`).
     /// Used for action steps whose output the drawer renders live (`add`, `commit`,
-    /// `push`). Returns the git exit code; throws only on spawn failure.
-    public typealias GitStreamer = @Sendable (_ siteDirectory: URL, _ arguments: [String], _ source: String) async throws -> Int32
+    /// `push`). Returns the git exit code **and** the stderr it emitted (also streamed
+    /// live), so a failing step can surface git's own message — e.g. the
+    /// `! [rejected] ... (fetch first)` of a push rejection — in the `.failed` reason
+    /// rather than only in the drawer log. Throws only on spawn failure.
+    public typealias GitStreamer = @Sendable (_ siteDirectory: URL, _ arguments: [String], _ source: String) async throws -> (exitCode: Int32, stderr: String)
 
     private let runner: GitRunner
     private let streamer: GitStreamer
@@ -54,6 +57,23 @@ public actor BackupCommand {
 
     public func backup(siteID: String, siteDirectory: URL) async -> Result {
         let source = "backup:\(siteID)"
+
+        // 0. Repository — refuse outside a git work tree with a clear, actionable message.
+        // `git rev-parse --is-inside-work-tree` exits 0 inside any repo (including a fresh
+        // one with no commits) and non-zero outside one, so it distinguishes "not a repo"
+        // from the later "couldn't read branch"/"no remote" cases that would otherwise
+        // produce a confusing diagnosis on a plain directory.
+        do {
+            let result = try await runner(siteDirectory, ["rev-parse", "--is-inside-work-tree"])
+            guard result.exitCode == 0 else {
+                return .failed(
+                    reason: "this site isn't a git repository — run `git init` and add an `origin` remote, or use `/anglesite:backup` in chat to set it up.",
+                    exitCode: nil
+                )
+            }
+        } catch {
+            return .failed(reason: "couldn't check the git repository: \(error)", exitCode: nil)
+        }
 
         // 1. Branch — refuse on main. Done first so a user who's on main isn't
         // surprised by a "no changes" message that would mask the real issue
@@ -145,9 +165,13 @@ public actor BackupCommand {
         label: String
     ) async -> Result? {
         do {
-            let exit = try await streamer(siteDirectory, arguments, source)
+            let (exit, stderr) = try await streamer(siteDirectory, arguments, source)
             if exit == 0 { return nil }
-            return .failed(reason: "`\(label)` failed (exit \(exit))", exitCode: exit)
+            let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .failed(
+                reason: "`\(label)` failed (exit \(exit))" + (detail.isEmpty ? "" : ": \(detail)"),
+                exitCode: exit
+            )
         } catch {
             return .failed(reason: "couldn't spawn `\(label)`: \(error)", exitCode: nil)
         }
@@ -179,7 +203,20 @@ public actor BackupCommand {
     /// stdout/stderr flow into `LogCenter` line-by-line under `source`. Waits for exit and
     /// returns the code; `git push`'s auth-prompt back-and-forth is therefore visible in
     /// the drawer in real time.
+    ///
+    /// It also subscribes to `LogCenter` *before* launching and collects this run's stderr
+    /// lines, so a non-zero exit can carry git's own message back to the caller. Subscribing
+    /// before launch (rather than reading a snapshot afterward) scopes the capture to exactly
+    /// this invocation — a snapshot would also include earlier runs under the same `source`.
     public static let defaultStreamer: GitStreamer = { siteDirectory, arguments, source in
+        let subscription = await LogCenter.shared.subscribe()
+        let collector = StderrCollector()
+        let collectTask = Task {
+            for await line in subscription.stream where line.source == source && line.stream == .stderr {
+                await collector.append(line.text)
+            }
+        }
+
         let handle = try await ProcessSupervisor.shared.launch(
             source: source,
             executable: URL(fileURLWithPath: "/usr/bin/env"),
@@ -187,10 +224,26 @@ public actor BackupCommand {
             currentDirectoryURL: siteDirectory
         )
         let reason = await ProcessSupervisor.shared.waitForExit(handle)
+
+        // `waitForExit` only resumes once the supervisor's pipe-drain Tasks have finished, so
+        // every stderr line is already in LogCenter; cancelling ends the stream and the await
+        // drains any still-buffered lines into the collector before we read it.
+        subscription.cancel()
+        _ = await collectTask.value
+        let stderr = await collector.joined()
+
         switch reason {
-        case .exited(let code):                return code
-        case .terminated:                       return -1
-        case .retriesExhausted(let lastCode):   return lastCode
+        case .exited(let code):                return (code, stderr)
+        case .terminated:                       return (-1, stderr)
+        case .retriesExhausted(let lastCode):   return (lastCode, stderr)
         }
     }
+}
+
+/// Accumulates streamed stderr lines for `BackupCommand.defaultStreamer`. An actor so the
+/// `@Sendable` collect Task can append without a lock.
+private actor StderrCollector {
+    private var lines: [String] = []
+    func append(_ line: String) { lines.append(line) }
+    func joined() -> String { lines.joined(separator: "\n") }
 }
