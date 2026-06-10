@@ -133,18 +133,32 @@ final class SkillRegistryTests: XCTestCase {
             "skills/backup/SKILL.md": "---\nname: backup\ndescription: \"snapshot\"\n---\n"
         ])
         let quick = SkillRegistry.quickActions(in: root)
-        XCTAssertEqual(quick.map(\.name), ["deploy", "backup", "check", "import"],
-                       "must be in curated order, must exclude non-curated skills")
-        XCTAssertEqual(quick.first?.description, "deploy")
+        // `deploy` is intentionally absent: the toolbar Deploy button invokes
+        // DeployCommand directly (#84), so surfacing a redundant LLM-routed Deploy
+        // pill in chat would just burn tokens for an action that already has a
+        // structured entry point.
+        XCTAssertEqual(quick.map(\.name), ["backup", "check", "import"],
+                       "must be in curated order, must exclude non-curated skills, must exclude deploy")
+        XCTAssertEqual(quick.first?.description, "snapshot")
+    }
+
+    func testQuickActionsExcludesDeployEvenWhenSkillExists() throws {
+        // Regression guard for #84: even with a deploy/SKILL.md on disk, the chat
+        // quick-actions must not surface it — the toolbar owns Deploy.
+        let root = try makeFixturePlugin([
+            "skills/deploy/SKILL.md": "---\nname: deploy\ndescription: \"deploy\"\n---\n",
+            "skills/backup/SKILL.md": "---\nname: backup\ndescription: \"snapshot\"\n---\n"
+        ])
+        XCTAssertEqual(SkillRegistry.quickActions(in: root).map(\.name), ["backup"])
     }
 
     func testQuickActionsTolerantOfMissingCuratedSkills() throws {
         // A plugin that's missing some of the curated names just returns whatever it has.
         let root = try makeFixturePlugin([
-            "skills/deploy/SKILL.md": "---\nname: deploy\n---\n",
+            "skills/backup/SKILL.md": "---\nname: backup\n---\n",
             "skills/check/SKILL.md": "---\nname: check\n---\n"
         ])
-        XCTAssertEqual(SkillRegistry.quickActions(in: root).map(\.name), ["deploy", "check"])
+        XCTAssertEqual(SkillRegistry.quickActions(in: root).map(\.name), ["backup", "check"])
     }
 
     // MARK: Test helpers

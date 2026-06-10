@@ -171,12 +171,10 @@ struct ChatView: View {
         inputFocused = true
     }
 
-    /// Maps the curated v0.5 quick-action names to SF Symbols. Keeps icons consistent
-    /// with the rest of the app (e.g. Deploy uses the same paperplane the toolbar Deploy
-    /// button uses). Unmapped names fall back to a generic command icon.
+    /// Maps the curated quick-action names to SF Symbols. Unmapped names fall back to a
+    /// generic command icon.
     private static func iconName(for skillName: String) -> String {
         switch skillName {
-        case "deploy": return "paperplane.fill"
         case "backup": return "externaldrive.fill.badge.icloud"
         case "check":  return "checkmark.shield.fill"
         case "import": return "tray.and.arrow.down.fill"

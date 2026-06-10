@@ -28,7 +28,13 @@ public enum SkillRegistry {
 
     /// Curated v0.5 quick-action set, in display order. Hard-coded here because exposing all
     /// owner-triggered skills (28 today, more coming) would overwhelm the chat toolbar.
-    public static let quickActionNames: [String] = ["deploy", "backup", "check", "import"]
+    ///
+    /// `deploy` is intentionally absent: #84 moved it to the toolbar Deploy button, which
+    /// calls `DeployCommand` directly. Surfacing a chat pill for the same action would just
+    /// burn LLM tokens to invoke a tool Claude always invokes. The chat path still works for
+    /// natural-language phrasings ("deploy my site"); only the dedicated button is gone.
+    /// Phase A is dissolving the rest of this list the same way (#85 backup, #86 check).
+    public static let quickActionNames: [String] = ["backup", "check", "import"]
 
     /// Discover skills under `<pluginDirectory>/skills/`. Returns all readable skills in
     /// directory order; the caller filters down (e.g. by `quickActionNames`) for display.
