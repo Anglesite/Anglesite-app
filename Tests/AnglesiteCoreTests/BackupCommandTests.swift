@@ -26,6 +26,11 @@ struct BackupCommandTests {
 
     /// Fake runner that dispatches on the first git argument so each test can script multiple
     /// subcommands (`status`, `rev-parse`, `remote`) in one closure without nested switches.
+    ///
+    /// Note: the `"rev-parse"` entry answers BOTH `rev-parse --is-inside-work-tree` (step 0,
+    /// where only `exitCode == 0` matters — it means "is a repo") and `rev-parse --abbrev-ref
+    /// HEAD` (step 1, whose stdout is the branch name). Tests that want to reach the branch/
+    /// remote/status steps therefore give `"rev-parse"` an exit-0 entry.
     private func runner(
         _ table: [String: (stdout: String, exitCode: Int32)]
     ) -> BackupCommand.GitRunner {
