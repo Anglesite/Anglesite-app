@@ -22,7 +22,7 @@ See [`docs/build-plan.md`](docs/build-plan.md) for the full phased status.
 ## Requirements
 
 - macOS 27+
-- Xcode 26+ (current as of this writing)
+- Xcode 27+ (Swift 6.4; required for the SwiftUI 27 `@State` macro semantics audited in [`docs/specs/2026-06-10-xcode27-state-macro-audit-notes.md`](docs/specs/2026-06-10-xcode27-state-macro-audit-notes.md))
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`) — the `.xcodeproj` is generated from [`project.yml`](project.yml)
 - A bundled Node.js runtime is shipped with the app — users do not need Node installed.
 
