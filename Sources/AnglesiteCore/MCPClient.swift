@@ -55,7 +55,7 @@ public indirect enum JSONValue: Sendable, Equatable {
     }
 }
 
-/// JSON-RPC 2.0 client speaking the Model Context Protocol over stdio.
+/// JSON-RPC 2.0 client speaking the Model Context Protocol over a pluggable transport.
 ///
 /// Phase 3 surface is intentionally narrow: `start(...)` spawns the server and runs the
 /// `initialize` handshake; `listTools()` and `callTool(name:arguments:)` cover what the
@@ -104,19 +104,17 @@ public actor MCPClient {
         }
     }
 
+    private var transport: (any MCPTransport)?
+    private var readerTask: Task<Void, Never>?
+
+    // Stdio construction inputs retained so `start(...)` can build a StdioTransport.
     private let supervisor: ProcessSupervisor
     private let logCenter: LogCenter
-
-    private var handle: ProcessSupervisor.Handle?
-    private var subscription: LogCenter.Subscription?
-    private var readerTask: Task<Void, Never>?
-    private var source: String = ""
 
     private var nextRequestID: Int = 1
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
     private var initialized: Bool = false
 
-    // Captured from `start(...)` so a respawn can re-run the same `initialize` handshake.
     private var clientName: String = "Anglesite"
     private var clientVersion: String = "0.1.0"
     private var initializeTimeout: TimeInterval = 10
@@ -126,7 +124,7 @@ public actor MCPClient {
         self.logCenter = logCenter
     }
 
-    public var isRunning: Bool { handle != nil }
+    public var isRunning: Bool { transport != nil }
 
     /// Spawn the MCP server and run the `initialize` handshake. Returns once the server has
     /// responded with its capabilities. If the server later crashes, `ProcessSupervisor` restarts
@@ -143,33 +141,42 @@ public actor MCPClient {
         clientName: String = "Anglesite",
         clientVersion: String = "0.1.0"
     ) async throws {
-        if handle != nil { throw MCPError.alreadyRunning }
-        self.source = source
-        self.clientName = clientName
-        self.clientVersion = clientVersion
-        self.initializeTimeout = initializeTimeout
-
-        let sub = await logCenter.subscribe()
-        self.subscription = sub
-
-        let h = try await supervisor.launch(
+        let t = StdioTransport(
+            supervisor: supervisor,
+            logCenter: logCenter,
             source: source,
             executable: executable,
             arguments: arguments,
             environment: environment,
             currentDirectoryURL: currentDirectoryURL,
             restartPolicy: restartPolicy,
-            attachStdin: true,
-            onRespawn: { [weak self] in await self?.handleRespawn() },
-            logCenter: logCenter
+            onReconnect: { [weak self] in await self?.handleRespawn() }
         )
-        self.handle = h
+        try await startWithTransport(t, initializeTimeout: initializeTimeout, clientName: clientName, clientVersion: clientVersion)
+    }
 
-        // Start the reader before we send anything so we don't lose an early response.
-        readerTask = Task { [weak self] in
-            await self?.consumeResponses(sub.stream, source: source)
+    /// Shared start path for any transport: open, start the reader, run the initialize handshake.
+    func startWithTransport(
+        _ t: any MCPTransport,
+        initializeTimeout: TimeInterval,
+        clientName: String,
+        clientVersion: String
+    ) async throws {
+        if transport != nil { throw MCPError.alreadyRunning }
+        self.transport = t
+        self.clientName = clientName
+        self.clientVersion = clientVersion
+        self.initializeTimeout = initializeTimeout
+        do {
+            try await t.open()
+        } catch {
+            await teardown()
+            throw error
         }
-
+        readerTask = Task { [weak self] in
+            guard let self else { return }
+            await self.consumeResponses(t.inbound())
+        }
         do {
             try await runInitializeHandshake()
             self.initialized = true
@@ -196,7 +203,7 @@ public actor MCPClient {
     }
 
     /// Fired by `ProcessSupervisor` after it restarts the crashed server. The old stdin is gone
-    /// (`writeJSONLine` writes by `Handle` through the supervisor, which targets the fresh pipe) and
+    /// (`send` writes by `Handle` through the supervisor, which targets the fresh pipe) and
     /// any in-flight requests can never be answered — fail them, drop `initialized`, then re-handshake.
     private func handleRespawn() async {
         let waiters = pending
@@ -290,7 +297,7 @@ public actor MCPClient {
             }
 
             do {
-                try await writeJSONLine(.object(obj))
+                try await send(.object(obj))
             } catch {
                 group.cancelAll()
                 throw error
@@ -318,23 +325,12 @@ public actor MCPClient {
             "method": .string(method),
         ]
         if let params { obj["params"] = params }
-        try await writeJSONLine(.object(obj))
+        try await send(.object(obj))
     }
 
-    private func writeJSONLine(_ value: JSONValue) async throws {
-        guard let handle = self.handle else {
-            throw MCPError.notInitialized
-        }
-        var data = try JSONSerialization.data(withJSONObject: value.rawValue, options: [])
-        data.append(0x0A)  // '\n' — one JSON object per line; framing must be byte-identical.
-        // Route through the supervisor's `writeStdin` so this works for both backends: the
-        // in-process backend writes to the child's stdin pipe; the XPC backend forwards the bytes
-        // to the helper (a live FileHandle can't cross the XPC boundary).
-        do {
-            try await supervisor.writeStdin(handle, data)
-        } catch {
-            throw MCPError.notInitialized
-        }
+    private func send(_ value: JSONValue) async throws {
+        guard let transport else { throw MCPError.notInitialized }
+        try await transport.send(value)
     }
 
     private func registerPending(id: Int, continuation: CheckedContinuation<JSONValue, Error>) {
@@ -353,27 +349,19 @@ public actor MCPClient {
         }
     }
 
-    private func consumeResponses(_ stream: AsyncStream<LogCenter.LogLine>, source: String) async {
-        for await line in stream {
-            guard line.source == source, line.stream == .stdout else { continue }
-            guard let data = line.text.data(using: .utf8) else { continue }
-            // MCP frames are one JSON object per line — skip lines that aren't JSON (the server
-            // may emit incidental log output before/during startup).
-            guard let raw = try? JSONSerialization.jsonObject(with: data),
-                  let obj = raw as? [String: Any]
-            else { continue }
+    private func consumeResponses(_ stream: AsyncStream<JSONValue>) async {
+        for await message in stream {
+            guard case .object(let obj) = message else { continue }
+            guard case .int(let id)? = obj["id"] else { continue }  // responses only
 
-            // We only care about responses (have an `id` and either `result` or `error`).
-            guard let id = obj["id"] as? Int else { continue }
-
-            if let errObj = obj["error"] as? [String: Any] {
-                let code = (errObj["code"] as? Int) ?? -1
-                let message = (errObj["message"] as? String) ?? "unknown rpc error"
-                failPending(id: id, error: MCPError.rpcError(code: code, message: message))
+            if case .object(let errObj)? = obj["error"] {
+                let code: Int = { if case .int(let c)? = errObj["code"] { return c }; return -1 }()
+                let msg: String = { if case .string(let m)? = errObj["message"] { return m }; return "unknown rpc error" }()
+                failPending(id: id, error: MCPError.rpcError(code: code, message: msg))
                 continue
             }
-            if let result = obj["result"], let value = JSONValue.from(result) {
-                resolvePending(id: id, value: value)
+            if let result = obj["result"] {
+                resolvePending(id: id, value: result)
             } else {
                 resolvePending(id: id, value: .null)
             }
@@ -381,20 +369,12 @@ public actor MCPClient {
     }
 
     private func teardown() async {
-        subscription?.cancel()
-        subscription = nil
         readerTask?.cancel()
         readerTask = nil
-        if let h = handle {
-            await supervisor.terminate(h, timeout: 2)
-            _ = await supervisor.waitForExit(h)
-        }
-        handle = nil
+        if let transport { await transport.close() }
+        transport = nil
         initialized = false
-        // Fail outstanding requests.
-        for (_, cont) in pending {
-            cont.resume(throwing: MCPError.notInitialized)
-        }
+        for (_, cont) in pending { cont.resume(throwing: MCPError.notInitialized) }
         pending.removeAll()
     }
 }
