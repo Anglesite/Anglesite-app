@@ -1,6 +1,6 @@
 # Anglesite Mac App — Build Plan
 
-**Status:** Draft
+**Status:** Active — Phases 0–9 complete, Phase 10 in progress
 **Companion design doc:** [`anglesite/docs/dev/mac-app-design.md`](../../anglesite/docs/dev/mac-app-design.md)
 **Audience:** Contributors building the native macOS app in this repo.
 
@@ -11,7 +11,7 @@ This plan turns the high-level design into a concrete, phased implementation roa
 **Goal:** A buildable, signable, empty SwiftUI app committed to its own git repo.
 
 1. `git init` in `Anglesite-app/`. Add `.gitignore` (Xcode, SwiftPM, DerivedData, `.DS_Store`, `node-runtime/`).
-2. Create Xcode project: macOS App, SwiftUI lifecycle, Swift, deployment target macOS 14 (matches WKWebView/SwiftUI APIs needed).
+2. Create Xcode project: macOS App, SwiftUI lifecycle, Swift. *(Originally macOS 14; bumped to macOS 27+ after the Xcode 27 migration in #108.)*
    - Bundle id: `dev.anglesite.app`.
    - Capabilities: **off** sandbox for v0 (per §10), Hardened Runtime **on**, allow JIT + unsigned executable memory (Node needs both), allow DYLD env vars.
 3. Add a top-level `README.md`, `LICENSE` (ISC to match plugin), `CLAUDE.md` (a short one — points back to `anglesite/CLAUDE.md` for plugin context).
@@ -111,6 +111,48 @@ Per design doc §12: sandboxed App Store build, Quick Look, Spotlight, Settings 
 
 **Apple Help Book shipped.** A classic indexed Help Book (`Resources/Anglesite.help`) of 15 hand-authored, Apple-native-styled HTML pages covering every shipped feature (sites, preview, editing with Claude, image drop, undo, health/readiness, deploy, accounts, settings, updates, debug pane, shortcuts, troubleshooting). `scripts/build-help-index.sh` builds the `hiutil` search index as a pre-build phase on both targets; `CFBundleHelpBookFolder`/`CFBundleHelpBookName` register the book so **Help ▸ Anglesite Help** opens it (no Swift change needed). `scripts/check-help-links.sh` guards intra-book links. Both schemes build with the book + index bundled. Design / plan: [`docs/specs/2026-05-28-apple-help-design.md`](specs/2026-05-28-apple-help-design.md) · [`docs/specs/2026-05-28-apple-help-plan.md`](specs/2026-05-28-apple-help-plan.md). *Deferred follow-ups:* capture real screenshots for the placeholder slots; book-icon artwork (`AnglesiteHelp.png`).
 
+**Xcode 27 migration (#108).** Both schemes build clean on Xcode 27.0 (27A5194q) / Swift 6.4. The `@State` macro semantics audit found no behavioral regressions — see [`docs/specs/2026-06-10-xcode27-state-macro-audit-notes.md`](specs/2026-06-10-xcode27-state-macro-audit-notes.md). `LSMinimumSystemVersion` bumped to 27.0 across both Info.plists. Vendored Node is now arm64-only (#106) since macOS 27 is Apple-silicon-only. All 270 tests pass (152 Swift Testing + 118 XCTest after the #74 migration). Verification notes: [`docs/specs/2026-06-10-xcode27-build-test-verification-notes.md`](specs/2026-06-10-xcode27-build-test-verification-notes.md).
+
+---
+
+## Containerization epic (#59) — containerized dev server
+
+**Tracking issue:** #59. Design: [`docs/specs/2026-05-30-cloudflare-sandbox-dev-server-design.md`](specs/2026-05-30-cloudflare-sandbox-dev-server-design.md).
+
+The long-term architecture replaces the in-process Node subprocess with a container-backed dev server: local via Apple Containerization (macOS, Apple Silicon, DevID only) or remote via Cloudflare Sandbox (MAS, iOS, Intel fallback). Both share a single OCI image.
+
+- ✅ **SiteRuntime protocol** (#65) — extracted from `PreviewSession`; `LocalSiteRuntime` is the current conformer. `PreviewModel` depends on the protocol, not the concrete session. Full suite green; pure refactor. Design: issue #64 description.
+- ✅ **HTTP/Streamable MCP transport** (#64) — `MCPClient` gained `connect(httpEndpoint:)` alongside the existing `start(executable:)` stdio path, behind an `MCPTransport` seam. Reconnect-on-container-restart is stubbed for #66/#69.
+- ✅ **Shared OCI image** (#62) — `Dockerfile` + `scripts/build-container-image.sh` targeting `linux/arm64`. Node pinned to `scripts/node-version.txt`, plugin MCP server baked in.
+- ✅ **Spike: Apple Containerization under App Sandbox** (#60) — MAS-incompatible (requires `com.apple.vm.networking` which the App Store won't grant). DevID-only. Notes: [`docs/specs/2026-06-09-containerization-mas-subspike-notes.md`](specs/2026-06-09-containerization-mas-subspike-notes.md).
+- ✅ **Spike: Cloudflare Sandbox throwaway** (#61) — HMR, wrangler-in-container verified. Notes: [`docs/specs/2026-06-10-cloudflare-sandbox-spike-notes.md`](specs/2026-06-10-cloudflare-sandbox-spike-notes.md).
+- 🔲 **Plugin HTTP/SSE transport** (#63) — paired plugin PR adding HTTP transport to the MCP server.
+- 🔲 **RemoteSandboxSiteRuntime** (#66) — Cloudflare Worker control plane + remote preview.
+- 🔲 **Remote preview security** (#67) — per-session tunnel + bearer token + lifecycle.
+- 🔲 **Repo bootstrap for non-Git sites** (#68) — create + push a repo.
+- 🔲 **LocalContainerSiteRuntime** (#69) — Apple Containerization, macOS 26+/Apple Silicon, DevID-only.
+- 🔲 **Retire embedded Node** (#70) — once containers land, the vendored Node + JIT re-sign can be removed.
+- 🔲 **iOS target** (#71) — thin SwiftUI/UIKit client using only the remote (Cloudflare) runtime.
+
+---
+
+## Phase 10.2+ — macOS 27 platform features (open)
+
+These issues target macOS 27 APIs available with Xcode 27 / Swift 6.4:
+
+- 🔲 **Native chat on Foundation Models** (#105) — replace Claude CLI subprocess with the on-device `LanguageModel` protocol for the MAS build.
+- 🔲 **System-wide MCP** (#101) — expose Anglesite actions to system AI via macOS 27's system-wide MCP.
+- 🔲 **Spotlight semantic index** (#102) — contribute sites/pages via App Intents entity schemas.
+- 🔲 **View Annotations for Siri** (#103) — onscreen awareness on the preview pane.
+- 🔲 **App Intents Testing** (#104) — adopt the framework for intent coverage.
+- 🔲 **SwiftUI toolbar APIs** (#107) — adopt macOS 27 native toolbar for the site window action bar.
+- 🔲 **Structured UI for common tasks** (#94) — reduce chat to open-ended tasks; direct UI for deploy, backup, audit.
+  - 🔲 Wire deploy button directly (#84), backup (#85), audit (#86), swipe-to-resolve (#87).
+- 🔲 **App Intents + Shortcuts** (#88, #89, #90) — `SiteEntity`, deploy/backup/audit intents, Shortcuts integration.
+- 🔲 **On-device summarization** (#93), **Image Playground** (#92), **Writing Tools** (#91).
+- 🔲 **Accessibility** — VoiceOver pass (#80), Dynamic Type audit (#79).
+- 🔲 **Misc** — oxlint for JS overlay (#73), reframe "filesystem is source of truth" → "Git is source of truth" (#72).
+
 ---
 
 ## Cross-cutting decisions to lock in early
@@ -122,6 +164,6 @@ Per design doc §12: sandboxed App Store build, Quick Look, Spotlight, Settings 
 - **Bundle id: `dev.anglesite.app`** (DevID) and **`dev.anglesite.app.mas`** (Mac App Store). *(Decided 2026-06-09 — already in `project.yml`.)* The earlier `io.dwk.anglesite` candidate is dropped.
 - **Runtime: Node, not Bun.** *(Decided 2026-06-09.)* Vendored macOS Node (arm64-only since #106) ships in `Resources/node-runtime/`; Astro is officially supported on Node, notarization is well-trodden. See Phase 1.
 
-## Suggested first PR to land
+## Historical note
 
-A single PR containing Phases 0 + 1 + a "hello world" that spawns embedded Node and prints `2` in the UI. That's the smallest slice that proves the riskiest assumption (notarized embedded Node works) and gives a foundation everything else builds on.
+The original plan suggested landing Phases 0 + 1 together as the first PR to prove the riskiest assumption (notarized embedded Node). That shipped successfully — the embedded Node, WKWebView preview, MCP edit pipeline, deploy, chat, multi-window, and all v0–v1 features are built and shipping. The plan is now a living record of what shipped and what's next.
