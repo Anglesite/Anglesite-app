@@ -95,10 +95,12 @@ Override defaults via env vars: `SCHEME`, `CONFIGURATION`, `KEYCHAIN_PROFILE`.
 
 ## What's deferred
 
-- **Auto-update (Sparkle)** — landed in Phase 8 (DevID target only; the MAS build updates via the App Store).
-- **DMG packaging** — once Phase 1 (embedded Node) lands, we'll add a `scripts/package-dmg.sh`.
+- **DMG packaging** — `scripts/package-dmg.sh` is not yet built; `scripts/release.sh` ships a notarized zip.
 - **App Store Connect submission** — the sandboxed `AnglesiteMAS` target exists and builds (Phase 10.1); the archive/export/upload pipeline is Task 12.
+- **Notarization for DevID** — `scripts/notarize-dry-run.sh` is ready; blocked on the signing cert + `TEAM_ID`.
 
-## After Phase 0.5
+## What's shipped (since Phase 0.5)
 
-When the notarization dry run passes, mark Phase 0 complete and move to **Phase 1: Embedded Node runtime**.
+- **Sparkle auto-update** — landed in Phase 8 (DevID target only; the MAS build updates via the App Store). Manual key/appcast setup remains (see [`docs/release.md`](release.md)).
+- **Phases 0–9 complete** — embedded Node, plugin plumbing, subprocess supervisor, WKWebView edit overlay, deploy, Keychain, chat panel, multi-window, health badge, image drop, per-edit undo.
+- **Phase 10** in progress — sandboxed MAS build (Tasks 11–13 remaining), Apple Help Book shipped, Xcode 27 migration done.
