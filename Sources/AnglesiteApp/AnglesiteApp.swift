@@ -61,7 +61,7 @@ struct AnglesiteApp: App {
         // SwiftUI has nothing to restore). It autoopens the most-recently-used site from its
         // own .task — see SitesLauncherView.onFirstAppear().
         Window("Sites", id: "sites") {
-            SitesLauncherView()
+            SitesWindowRoot(openWindow: openWindow)
         }
         .windowResizability(.contentSize)
         .commands {
