@@ -28,8 +28,12 @@ ARM64_TARBALL="node-v${NODE_VERSION}-darwin-arm64.tar.xz"
 if [[ -x "$DEST/bin/node" ]]; then
     current=$("$DEST/bin/node" --version 2>/dev/null || echo "")
     if [[ "$current" == "v${NODE_VERSION}" ]]; then
-        echo "Node ${current} already vendored at $DEST. Skipping."
-        exit 0
+        if file "$DEST/bin/node" | grep -q "universal binary"; then
+            echo "Existing $DEST/bin/node is a pre-#106 universal binary. Re-vendoring as arm64-only."
+        else
+            echo "Node ${current} already vendored at $DEST. Skipping."
+            exit 0
+        fi
     fi
 fi
 
