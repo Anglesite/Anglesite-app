@@ -4,7 +4,7 @@ import AnglesiteBridge
 
 /// SwiftUI wrapper around a `WKWebView` showing the live Astro dev server.
 ///
-/// `url` is owned by the caller (a `PreviewModel` driven by `PreviewSession`). When it changes —
+/// `url` is owned by the caller (a `PreviewModel` driven by a `SiteRuntime`). When it changes —
 /// e.g. a supervised dev-server restart rebinds a new port — the web view reloads from the new URL.
 ///
 /// `router` is the `EditRouter` the in-page overlay's `AnglesiteScriptHandler` forwards edits to.
