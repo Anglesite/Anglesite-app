@@ -128,17 +128,29 @@ final class AppliesEditEndToEndTests {
 
     @discardableResult
     private static func requireNode() throws -> URL {
-        let candidates = [
+        // Explicit override (CI / nvm shells) wins.
+        if let override = ProcessInfo.processInfo.environment["NODE_BINARY"], !override.isEmpty,
+           FileManager.default.isExecutableFile(atPath: override) {
+            return URL(fileURLWithPath: override)
+        }
+        var candidates = [
             "/opt/homebrew/bin/node",
             "/usr/local/bin/node",
             "/usr/bin/node",
         ]
-        for p in candidates {
-            if FileManager.default.isExecutableFile(atPath: p) {
-                return URL(fileURLWithPath: p)
-            }
+        // nvm-managed installs live under ~/.nvm/versions/node/<version>/bin/node and aren't on
+        // any of the common paths; add whatever versions are present.
+        let nvmDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".nvm/versions/node")
+        if let versions = try? FileManager.default.contentsOfDirectory(at: nvmDir, includingPropertiesForKeys: nil) {
+            candidates.append(contentsOf: versions
+                .map { $0.appendingPathComponent("bin/node").path }
+                .filter { FileManager.default.isExecutableFile(atPath: $0) }
+                .sorted())
         }
-        throw SkipReason("node not found in common paths; install Node ≥22")
+        for p in candidates where FileManager.default.isExecutableFile(atPath: p) {
+            return URL(fileURLWithPath: p)
+        }
+        throw SkipReason("node not found; set NODE_BINARY, install Node ≥22 in a common path, or via nvm")
     }
 }
 
