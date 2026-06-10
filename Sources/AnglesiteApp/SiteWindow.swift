@@ -33,6 +33,8 @@ struct SiteWindow: View {
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
+    /// Reduce Motion → fade the chat panel and deploy drawer in/out instead of sliding them.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
@@ -68,7 +70,9 @@ struct SiteWindow: View {
                         Divider()
                         ChatView(model: chat)
                             .frame(width: 420)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .transition(reduceMotion
+                                ? .opacity
+                                : .move(edge: .trailing).combined(with: .opacity))
                     }
                     #endif
                 }
@@ -84,7 +88,9 @@ struct SiteWindow: View {
             }
             if deploy.drawerPresented {
                 DeployDrawerView(model: deploy, siteName: site.name)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(reduceMotion
+                        ? .opacity
+                        : .move(edge: .bottom).combined(with: .opacity))
                     .shadow(radius: 8, y: -2)
             }
         }
