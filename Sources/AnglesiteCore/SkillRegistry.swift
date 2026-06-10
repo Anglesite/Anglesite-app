@@ -29,12 +29,15 @@ public enum SkillRegistry {
     /// Curated v0.5 quick-action set, in display order. Hard-coded here because exposing all
     /// owner-triggered skills (28 today, more coming) would overwhelm the chat toolbar.
     ///
-    /// `deploy` is intentionally absent: #84 moved it to the toolbar Deploy button, which
-    /// calls `DeployCommand` directly. Surfacing a chat pill for the same action would just
-    /// burn LLM tokens to invoke a tool Claude always invokes. The chat path still works for
-    /// natural-language phrasings ("deploy my site"); only the dedicated button is gone.
-    /// Phase A is dissolving the rest of this list the same way (#85 backup, #86 check).
-    public static let quickActionNames: [String] = ["backup", "check", "import"]
+    /// Phase A dissolved this list as deterministic structured buttons replaced each pill:
+    /// `deploy` left for the toolbar Deploy button (#84); `backup` for the toolbar Backup
+    /// button (#85); `check` for the toolbar Audit button + `AuditSheetView` (#86). All
+    /// three call their respective `*Command` actors directly, skipping the LLM for
+    /// actions Claude was just invoking the same way every time. The chat path still
+    /// works for natural-language phrasings ("audit my site"); only the dedicated pills
+    /// are gone. `import` remains because it's an interactive flow that benefits from
+    /// LLM-assisted disambiguation of source URLs / formats.
+    public static let quickActionNames: [String] = ["import"]
 
     /// Discover skills under `<pluginDirectory>/skills/`. Returns all readable skills in
     /// directory order; the caller filters down (e.g. by `quickActionNames`) for display.
