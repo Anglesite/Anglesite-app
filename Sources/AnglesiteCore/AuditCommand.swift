@@ -93,6 +93,13 @@ public actor AuditCommand {
                 findings.append(contentsOf: runnerFindings)
                 executed.append(runner.category)
             } catch {
+                // Record the skip AND log it — a runner that throws before it can emit anything
+                // itself (e.g. a spawn failure) would otherwise be invisible in the drawer.
+                await logCenter.append(
+                    source: source,
+                    stream: .stderr,
+                    text: "\(runner.category.rawValue) audit skipped — \(error)"
+                )
                 skipped.append(.init(category: runner.category, reason: "\(error)"))
             }
         }
