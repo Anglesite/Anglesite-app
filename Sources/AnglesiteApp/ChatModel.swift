@@ -34,8 +34,10 @@ final class ChatModel {
         let timestamp: Date
         /// Only set on `role: .edit` rows. Carries file + commit + undone flag.
         var editMetadata: EditMetadata?
+        /// Only set on `role: .annotation` rows. Carries the backing annotation id.
+        var annotationMetadata: AnnotationMetadata?
 
-        enum Role: Equatable { case user, assistant, system, error, edit }
+        enum Role: Equatable { case user, assistant, system, error, edit, annotation }
 
         init(
             id: UUID = UUID(),
@@ -43,7 +45,8 @@ final class ChatModel {
             content: String,
             toolCalls: [ToolCall] = [],
             timestamp: Date = Date(),
-            editMetadata: EditMetadata? = nil
+            editMetadata: EditMetadata? = nil,
+            annotationMetadata: AnnotationMetadata? = nil
         ) {
             self.id = id
             self.role = role
@@ -51,6 +54,7 @@ final class ChatModel {
             self.toolCalls = toolCalls
             self.timestamp = timestamp
             self.editMetadata = editMetadata
+            self.annotationMetadata = annotationMetadata
         }
     }
 
@@ -58,6 +62,11 @@ final class ChatModel {
         let file: String
         let commit: String
         var undone: Bool
+    }
+
+    /// Identifies the backing annotation so its chat row can be resolved via MCP.
+    struct AnnotationMetadata: Equatable {
+        let annotationID: String
     }
 
     struct ToolCall: Identifiable, Equatable {
@@ -114,6 +123,10 @@ final class ChatModel {
     /// `loadAnnotations()` shows the same annotations the edit overlay added; tests inject a
     /// fixture closure. `nil` disables the feed (returns no annotations, no error).
     private let annotationFeed: AnnotationFeed?
+    /// Resolves an annotation via the plugin's `resolve_annotation` MCP tool. Injected so tests
+    /// can assert the id passed and simulate failures. `nil` disables resolution.
+    typealias AnnotationResolver = @Sendable (_ id: String) async throws -> Void
+    private let annotationResolver: ChatModel.AnnotationResolver?
     /// Optional. Wired to the per-site `MCPClient` in production; nil in tests where the
     /// chat has no MCP backing yet.
     private let undoCommand: UndoCommand?
@@ -125,21 +138,23 @@ final class ChatModel {
     /// don't double-post the same sticky note when the user revisits a site mid-session.
     private var surfacedAnnotationIDs: Set<String> = []
 
-    init(siteID: String, siteDirectory: URL, annotationFeed: AnnotationFeed? = nil, undoCommand: UndoCommand? = nil) {
+    init(siteID: String, siteDirectory: URL, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
         self.siteDirectory = siteDirectory
         self.agent = ClaudeAgent(siteID: siteID, siteDirectory: siteDirectory)
         self.history = ChatHistoryStore(siteDirectory: siteDirectory)
         self.annotationFeed = annotationFeed
+        self.annotationResolver = annotationResolver
         self.undoCommand = undoCommand
     }
 
     /// Test-facing initializer: inject the agent (typically with a fixture launcher) and an
     /// optional override of the history store.
-    init(siteDirectory: URL, agent: ClaudeAgent, history: ChatHistoryStore? = nil, annotationFeed: AnnotationFeed? = nil, undoCommand: UndoCommand? = nil) {
+    init(siteDirectory: URL, agent: ClaudeAgent, history: ChatHistoryStore? = nil, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
         self.siteDirectory = siteDirectory
         self.agent = agent
         self.history = history ?? ChatHistoryStore(siteDirectory: siteDirectory)
         self.annotationFeed = annotationFeed
+        self.annotationResolver = annotationResolver
         self.undoCommand = undoCommand
     }
 
@@ -173,8 +188,12 @@ final class ChatModel {
         for annotation in annotations where !annotation.resolved {
             guard !surfacedAnnotationIDs.contains(annotation.id) else { continue }
             surfacedAnnotationIDs.insert(annotation.id)
-            let content = ChatModel.renderAnnotation(annotation)
-            messages.append(.init(role: .system, content: content, timestamp: annotation.createdAt))
+            messages.append(.init(
+                role: .annotation,
+                content: ChatModel.renderAnnotation(annotation),
+                timestamp: annotation.createdAt,
+                annotationMetadata: .init(annotationID: annotation.id)
+            ))
         }
     }
 
@@ -184,6 +203,28 @@ final class ChatModel {
     static func renderAnnotation(_ a: Annotation) -> String {
         let location = a.sourceFile ?? "\(a.path) → \(a.selector)"
         return "📌 \(a.text) — \(location)"
+    }
+
+    /// Resolves the annotation backing `messageID`: optimistically marks it resolved and drops
+    /// the row, then calls the MCP tool. On error, restores the row and records `lastError`.
+    func resolveAnnotation(messageID: UUID) async {
+        guard let idx = messages.firstIndex(where: { $0.id == messageID }),
+              let meta = messages[idx].annotationMetadata,
+              let resolver = annotationResolver else { return }
+
+        let removed = messages.remove(at: idx)              // optimistic: drop from the feed
+        surfacedAnnotationIDs.remove(meta.annotationID)
+        do {
+            try await resolver(meta.annotationID)
+        } catch {
+            // `idx` was captured before the await; messages may have shifted during the
+            // suspension (concurrent resolve, streaming send, loadAnnotations). Re-locate
+            // the chronological insertion point by timestamp instead of trusting idx.
+            let insertIdx = messages.firstIndex { $0.timestamp > removed.timestamp } ?? messages.count
+            messages.insert(removed, at: insertIdx)
+            surfacedAnnotationIDs.insert(meta.annotationID)
+            lastError = "couldn't resolve annotation: \(error.localizedDescription)"
+        }
     }
 
     /// Sends a user prompt to the agent and consumes the resulting event stream. No-op while
@@ -385,7 +426,11 @@ final class ChatModel {
             switch message.role {
             case .user: return .user
             case .assistant: return .assistant
-            case .system, .error: return .assistant
+            // `.system`/`.error`/`.annotation` are never routed through `persist` — they're
+            // appended directly. Annotations in particular are reloaded fresh from MCP each
+            // session via `loadAnnotations()`, so they're intentionally non-persisted. This
+            // arm only keeps the switch exhaustive.
+            case .system, .error, .annotation: return .assistant
             case .edit: return .edit
             }
         }()

@@ -281,13 +281,27 @@ struct SiteWindow: View {
         #if !ANGLESITE_MAS
         // The annotation feed, undo command, and edit observer exist only to feed the chat
         // panel, which the MAS build omits. The edit overlay still applies edits via MCP.
-        let feed = AnnotationFeedFactory.viaMCP(mcpClient: { [preview] in
+        let mcpClient: @Sendable () async -> MCPClient? = { [preview] in
             await preview.mcpClient()
-        })
-        let undoCommand = UndoCommand(mcpClient: { [preview] in
-            await preview.mcpClient()
-        })
-        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, annotationFeed: feed, undoCommand: undoCommand)
+        }
+        let feed = AnnotationFeedFactory.viaMCP(mcpClient: mcpClient)
+        let undoCommand = UndoCommand(mcpClient: mcpClient)
+        // Resolve directly via the same per-site MCP client the feed uses — no `claude`
+        // process is spawned for a resolve, only a `resolve_annotation` tool call.
+        let annotationResolver: ChatModel.AnnotationResolver = { id in
+            guard let client = await mcpClient() else {
+                throw NSError(domain: "AnnotationFeed", code: 1, userInfo: [NSLocalizedDescriptionKey: "no MCP client"])
+            }
+            let result = try await client.callTool(
+                name: "resolve_annotation",
+                arguments: .object(["id": .string(id)])
+            )
+            if result.isError {
+                let detail = result.content.compactMap(\.text).joined(separator: "\n")
+                throw NSError(domain: "AnnotationFeed", code: 2, userInfo: [NSLocalizedDescriptionKey: detail])
+            }
+        }
+        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
         preview.setEditObserver { [weak chat] reply in
             Task { @MainActor in
                 chat?.recordEdit(reply)

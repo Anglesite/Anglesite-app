@@ -230,6 +230,14 @@ struct ChatView: View {
     }
 }
 
+// MARK: - Shared formatter
+
+private let sharedRelativeTimeFormatter: RelativeDateTimeFormatter = {
+    let f = RelativeDateTimeFormatter()
+    f.unitsStyle = .short
+    return f
+}()
+
 // MARK: - Message row
 
 private struct MessageRow: View {
@@ -239,6 +247,8 @@ private struct MessageRow: View {
     var body: some View {
         if message.role == .edit {
             editRow
+        } else if message.role == .annotation {
+            AnnotationRowView(message: message, model: model)
         } else {
             HStack {
                 if message.role == .user { Spacer(minLength: 32) }
@@ -290,9 +300,7 @@ private struct MessageRow: View {
     }
 
     private var relativeTime: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: message.timestamp, relativeTo: Date())
+        sharedRelativeTimeFormatter.localizedString(for: message.timestamp, relativeTo: .now)
     }
 
     @ViewBuilder
@@ -324,6 +332,7 @@ private struct MessageRow: View {
         case .system: return Color.secondary.opacity(0.12)
         case .error: return Color.red.opacity(0.15)
         case .edit: return Color.secondary.opacity(0.06)  // editRow handles .edit rendering; this is unreachable
+        case .annotation: return Color.secondary.opacity(0.12)
         }
     }
 
@@ -332,6 +341,49 @@ private struct MessageRow: View {
         case .error: return .red
         default: return .primary
         }
+    }
+}
+
+// MARK: - Annotation row
+
+private struct AnnotationRowView: View {
+    let message: ChatModel.Message
+    let model: ChatModel
+    @State private var isResolving = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.orange.opacity(0.5))
+                .frame(width: 3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(message.content)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                Text(relativeTime)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Resolve") {
+                isResolving = true
+                Task {
+                    await model.resolveAnnotation(messageID: message.id)
+                    isResolving = false
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(isResolving)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var relativeTime: String {
+        sharedRelativeTimeFormatter.localizedString(for: message.timestamp, relativeTo: .now)
     }
 }
 
