@@ -15,7 +15,7 @@ final class AuditModel {
         case idle
         case running(siteID: String, since: Date)
         case succeeded(report: AuditReport, duration: TimeInterval)
-        case failed(reason: String, exitCode: Int32?)
+        case failed(reason: String, exitCode: Int32?, logTail: [LogCenter.LogLine])
     }
 
     private(set) var phase: Phase = .idle
@@ -35,6 +35,14 @@ final class AuditModel {
     var isRunning: Bool {
         if case .running = phase { return true }
         return false
+    }
+
+    /// Renders the captured build log as plain text for the "Copy log" affordance on the
+    /// failure sheet. Empty for non-failure phases or for failures that produced no output
+    /// (e.g. spawn refusal before the build process started).
+    var logText: String {
+        guard case .failed(_, _, let tail) = phase else { return "" }
+        return tail.map(\.text).joined(separator: "\n")
     }
 
     /// Kicks off an audit. No-op if one is already running.
@@ -60,8 +68,8 @@ final class AuditModel {
         switch result {
         case .succeeded(let report, let duration):
             phase = .succeeded(report: report, duration: duration)
-        case .failed(let reason, let exit):
-            phase = .failed(reason: reason, exitCode: exit)
+        case .failed(let reason, let exit, let logTail):
+            phase = .failed(reason: reason, exitCode: exit, logTail: logTail)
         }
         sheetPresented = true
     }

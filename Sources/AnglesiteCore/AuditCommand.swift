@@ -36,7 +36,11 @@ public protocol AuditRunner: Sendable {
 public actor AuditCommand {
     public enum Result: Sendable, Equatable {
         case succeeded(report: AuditReport, duration: TimeInterval)
-        case failed(reason: String, exitCode: Int32?)
+        /// `logTail` carries the captured `audit:<siteID>:build` lines so the failure
+        /// sheet can show *why* the build failed without the owner having to open the
+        /// Debug pane. Empty for pre-spawn refusals (`.unavailable`, spawn errors) where
+        /// no subprocess produced output.
+        case failed(reason: String, exitCode: Int32?, logTail: [LogCenter.LogLine])
     }
 
     /// How to run a subprocess for a site directory — or why it can't be run.
@@ -118,7 +122,7 @@ public actor AuditCommand {
         let arguments: [String]
         switch plan {
         case .unavailable(let reason):
-            return .failure(.failed(reason: reason, exitCode: nil))
+            return .failure(.failed(reason: reason, exitCode: nil, logTail: []))
         case .run(let exe, let args):
             executable = exe
             arguments = args
@@ -135,19 +139,23 @@ public actor AuditCommand {
                 logCenter: logCenter
             )
         } catch {
-            return .failure(.failed(reason: "couldn't spawn build: \(error)", exitCode: nil))
+            return .failure(.failed(reason: "couldn't spawn build: \(error)", exitCode: nil, logTail: []))
         }
 
         let reason = await supervisor.waitForExit(handle)
+        // `waitForExit` only returns after the supervisor's per-pipe drain Tasks have finished,
+        // so every byte the build wrote is already in `LogCenter` — filtering the snapshot by
+        // source gives us the complete captured output for this build run.
+        let tail = await logCenter.snapshot().filter { $0.source == source }
         switch reason {
         case .exited(let code) where code == 0:
             return .success
         case .exited(let code):
-            return .failure(.failed(reason: "build failed (exit \(code))", exitCode: code))
+            return .failure(.failed(reason: "build failed", exitCode: code, logTail: tail))
         case .terminated:
-            return .failure(.failed(reason: "build was terminated", exitCode: nil))
+            return .failure(.failed(reason: "build was terminated", exitCode: nil, logTail: tail))
         case .retriesExhausted(let lastCode):
-            return .failure(.failed(reason: "build retries exhausted (exit \(lastCode))", exitCode: lastCode))
+            return .failure(.failed(reason: "build retries exhausted", exitCode: lastCode, logTail: tail))
         }
     }
 
