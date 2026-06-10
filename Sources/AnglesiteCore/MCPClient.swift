@@ -55,16 +55,17 @@ public indirect enum JSONValue: Sendable, Equatable {
     }
 }
 
-/// JSON-RPC 2.0 client speaking the Model Context Protocol over a pluggable transport.
+/// JSON-RPC 2.0 client speaking the Model Context Protocol over a pluggable `MCPTransport`.
 ///
-/// Phase 3 surface is intentionally narrow: `start(...)` spawns the server and runs the
-/// `initialize` handshake; `listTools()` and `callTool(name:arguments:)` cover what the
-/// app actually needs in v0. Notifications from the server (no `id`) are discarded — Phase 5
-/// will revisit this when `apply-edit` round-trips need richer routing.
+/// The surface is intentionally narrow: `start(executable:…)` spawns a server over stdio (a
+/// `StdioTransport`) or `connect(httpEndpoint:)` reaches one over Streamable HTTP (an
+/// `HTTPTransport`), both running the `initialize` handshake; `listTools()` and
+/// `callTool(name:arguments:)` cover what the app needs. Server notifications (no `id`) are
+/// discarded — the client only correlates request/response by id.
 ///
-/// All stdout from the supervised server flows through `LogCenter` (so the Debug pane can see
-/// the protocol traffic). The client subscribes to that same `LogCenter` and parses lines
-/// matching its source tag.
+/// The client owns the JSON-RPC id/pending bookkeeping and the handshake; the transport owns the
+/// wire (process pipes vs HTTP). For the stdio transport, protocol traffic also flows through
+/// `LogCenter`, so the Debug pane can see it.
 public actor MCPClient {
     public enum MCPError: Error, Sendable, Equatable {
         case notInitialized
