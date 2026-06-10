@@ -60,6 +60,8 @@ Resources/
 
 ## Build
 
+Toolchain: **Xcode 27+ / Swift 6.4** (required for SwiftUI 27's `@State` macro semantics — see [`docs/specs/2026-06-10-xcode27-state-macro-audit-notes.md`](docs/specs/2026-06-10-xcode27-state-macro-audit-notes.md)).
+
 ```sh
 # Open the app project (not `xed .` — that opens Package.swift, which only
 # has the library scheme `Anglesite-Package` and no runnable target).
