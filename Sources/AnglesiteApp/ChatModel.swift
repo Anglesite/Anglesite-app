@@ -205,15 +205,22 @@ final class ChatModel {
         return "📌 \(a.text) — \(location)"
     }
 
-    /// Resolves the annotation backing `messageID`: optimistically marks it resolved and drops
-    /// the row, then calls the MCP tool. On error, restores the row and records `lastError`.
+    /// Resolves the annotation backing `messageID`: optimistically drops the row, then calls the
+    /// MCP tool. On error, restores the row and records `lastError`.
+    ///
+    /// The annotation id is deliberately **kept** in `surfacedAnnotationIDs` for the whole
+    /// operation — including across the `await`. If it were removed first, a `loadAnnotations()`
+    /// that runs during the suspension (e.g. ⌘K toggles the chat panel, tearing down and
+    /// re-mounting `ChatView` and refiring its `.task`) would see the id missing, fetch the
+    /// still-unresolved annotation from MCP, and append a duplicate row. Leaving the id in the
+    /// set makes that re-surface a no-op. On success the row is simply gone (the resolved
+    /// annotation is filtered out of future feeds anyway); on failure we re-insert the one row.
     func resolveAnnotation(messageID: UUID) async {
         guard let idx = messages.firstIndex(where: { $0.id == messageID }),
               let meta = messages[idx].annotationMetadata,
               let resolver = annotationResolver else { return }
 
         let removed = messages.remove(at: idx)              // optimistic: drop from the feed
-        surfacedAnnotationIDs.remove(meta.annotationID)
         do {
             try await resolver(meta.annotationID)
         } catch {
@@ -222,7 +229,6 @@ final class ChatModel {
             // the chronological insertion point by timestamp instead of trusting idx.
             let insertIdx = messages.firstIndex { $0.timestamp > removed.timestamp } ?? messages.count
             messages.insert(removed, at: insertIdx)
-            surfacedAnnotationIDs.insert(meta.annotationID)
             lastError = "couldn't resolve annotation: \(error.localizedDescription)"
         }
     }
