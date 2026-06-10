@@ -2,61 +2,59 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
-struct PreviewSessionTests {
+struct LocalSiteRuntimeTests {
     private let alwaysReady: AstroDevServer.ReadinessProbe = { _ in true }
     /// A real, existing directory — the supervisor `cd`s into the site dir before spawning, so a
     /// nonexistent path would fail `process.run()` before our fixture script even runs.
     private let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
 
-    private func makeSession(
-        resolve: @escaping PreviewSession.CommandResolver,
-        probe: @escaping AstroDevServer.ReadinessProbe
-    ) -> PreviewSession {
+    private func makeRuntime(
+        resolve: @escaping LocalSiteRuntime.CommandResolver,
+        probe: @escaping AstroDevServer.ReadinessProbe,
+        restartPolicy: ProcessSupervisor.RestartPolicy = .onCrash(maxAttempts: 3, baseBackoff: 0.5)
+    ) -> LocalSiteRuntime {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let devServer = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: probe)
-        return PreviewSession(devServer: devServer, logCenter: center, resolveCommand: resolve)
+        return LocalSiteRuntime(devServer: devServer, logCenter: center, resolveCommand: resolve, restartPolicy: restartPolicy)
     }
 
-    private func shFixture(_ script: String, _ args: String...) -> PreviewSession.LaunchPlan {
+    private func shFixture(_ script: String, _ args: String...) -> LocalSiteRuntime.LaunchPlan {
         .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script] + args)
     }
 
     @Test("Unavailable command lands in failed") func unavailableCommandLandsInFailed() async {
-        let session = makeSession(
+        let runtime = makeRuntime(
             resolve: { _ in .unavailable(reason: "dependencies not installed — run `npm install`") },
             probe: alwaysReady
         )
-        await session.start(siteID: "mysite", siteDirectory: tmpDir)
-        let state = await session.state
+        await runtime.start(siteID: "mysite", siteDirectory: tmpDir)
+        let state = await runtime.state
         #expect(state == .failed(siteID: "mysite", message: "dependencies not installed — run `npm install`"))
     }
 
     @Test("Runnable command reaches ready then stop returns to idle") func runnableCommandReachesReadyThenStopReturnsToIdle() async {
-        let session = makeSession(
+        let runtime = makeRuntime(
             resolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             probe: alwaysReady
         )
-        await session.start(siteID: "mysite", siteDirectory: tmpDir)
-        let ready = await session.state
+        await runtime.start(siteID: "mysite", siteDirectory: tmpDir)
+        let ready = await runtime.state
         #expect(ready == .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
 
-        await session.stop()
-        let idle = await session.state
+        await runtime.stop()
+        let idle = await runtime.state
         #expect(idle == .idle)
     }
 
     @Test("Crash before ready lands in failed") func crashBeforeReadyLandsInFailed() async {
-        let session = makeSession(
+        let runtime = makeRuntime(
             resolve: { _ in self.shFixture("echo broken 1>&2; exit 1") },
-            probe: alwaysReady
-        )
-        await session.start(
-            siteID: "mysite",
-            siteDirectory: tmpDir,
+            probe: alwaysReady,
             restartPolicy: .never
         )
-        let state = await session.state
+        await runtime.start(siteID: "mysite", siteDirectory: tmpDir)
+        let state = await runtime.state
         guard case .failed(let siteID, _) = state else {
             Issue.record("expected .failed, got \(state)")
             return
@@ -74,23 +72,20 @@ struct PreviewSessionTests {
         if [ "$n" -lt 2 ]; then sleep 0.2; exit 1; fi
         exec sleep 30
         """
-        let session = makeSession(
+        let runtime = makeRuntime(
             resolve: { _ in self.shFixture(script, counter) },
-            probe: alwaysReady
-        )
-        await session.start(
-            siteID: "mysite",
-            siteDirectory: tmpDir,
+            probe: alwaysReady,
             restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.05)
         )
-        let first = await session.state
+        await runtime.start(siteID: "mysite", siteDirectory: tmpDir)
+        let first = await runtime.state
         #expect(first == .ready(siteID: "mysite", url: URL(string: "http://localhost:9201/")!))
 
         try? await Task.sleep(nanoseconds: 700_000_000)
-        let updated = await session.state
+        let updated = await runtime.state
         #expect(updated == .ready(siteID: "mysite", url: URL(string: "http://localhost:9202/")!))
 
-        await session.stop()
+        await runtime.stop()
     }
 
     // MARK: MCP client lifecycle
@@ -120,112 +115,112 @@ struct PreviewSessionTests {
         return URL(fileURLWithPath: "/usr/bin/python3")
     }()
 
-    private func makeSessionWithMCP(
-        astroResolve: @escaping PreviewSession.CommandResolver,
-        mcpResolve: @escaping PreviewSession.MCPCommandResolver
-    ) -> (PreviewSession, MCPClient) {
+    private func makeRuntimeWithMCP(
+        astroResolve: @escaping LocalSiteRuntime.CommandResolver,
+        mcpResolve: @escaping LocalSiteRuntime.MCPCommandResolver
+    ) -> (LocalSiteRuntime, MCPClient) {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
         let devServer = AstroDevServer(supervisor: supervisor, logCenter: center, readinessProbe: alwaysReady)
         let mcpClient = MCPClient(supervisor: supervisor, logCenter: center)
-        let session = PreviewSession(
+        let runtime = LocalSiteRuntime(
             devServer: devServer,
             mcpClient: mcpClient,
             logCenter: center,
             resolveCommand: astroResolve,
             resolveMCPCommand: mcpResolve
         )
-        return (session, mcpClient)
+        return (runtime, mcpClient)
     }
 
-    private func runnableMCPFake() -> PreviewSession.LaunchPlan {
+    private func runnableMCPFake() -> LocalSiteRuntime.LaunchPlan {
         .run(executable: Self.pythonURL, arguments: ["-u", "-c", Self.mcpFakeScript])
     }
 
     @Test("MCP client is running after successful start") func mCPClientIsRunningAfterSuccessfulStart() async {
-        let (session, mcp) = makeSessionWithMCP(
+        let (runtime, mcp) = makeRuntimeWithMCP(
             astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             mcpResolve: { self.runnableMCPFake() }
         )
-        await session.start(siteID: "mysite", siteDirectory: tmpDir)
+        await runtime.start(siteID: "mysite", siteDirectory: tmpDir)
 
         // AstroDevServer succeeded → state is .ready.
-        let state = await session.state
+        let state = await runtime.state
         #expect(state == .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
 
         // MCP also came up.
         let running = await mcp.isRunning
-        #expect(running, "expected MCPClient.isRunning after a successful session.start")
+        #expect(running, "expected MCPClient.isRunning after a successful runtime.start")
 
-        // The session's exposed reference is the same instance.
-        let exposed = await session.mcpClient
+        // The runtime's exposed reference is the same instance.
+        let exposed = await runtime.mcpClient
         #expect(exposed === mcp)
 
-        await session.stop()
+        await runtime.stop()
     }
 
-    @Test("MCP client stops when session stops") func mCPClientStopsWhenSessionStops() async {
-        let (session, mcp) = makeSessionWithMCP(
+    @Test("MCP client stops when runtime stops") func mCPClientStopsWhenRuntimeStops() async {
+        let (runtime, mcp) = makeRuntimeWithMCP(
             astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             mcpResolve: { self.runnableMCPFake() }
         )
-        await session.start(siteID: "mysite", siteDirectory: tmpDir)
+        await runtime.start(siteID: "mysite", siteDirectory: tmpDir)
         let runningBefore = await mcp.isRunning
         #expect(runningBefore)
 
-        await session.stop()
+        await runtime.stop()
         let runningAfter = await mcp.isRunning
-        #expect(!runningAfter, "MCPClient should be stopped after session.stop()")
+        #expect(!runningAfter, "MCPClient should be stopped after runtime.stop()")
     }
 
     @Test("State stays ready when MCP command is unavailable") func stateStaysReadyWhenMCPCommandIsUnavailable() async {
-        // MCP can't be located → session still reaches .ready (preview is the primary feature).
-        let (session, mcp) = makeSessionWithMCP(
+        // MCP can't be located → runtime still reaches .ready (preview is the primary feature).
+        let (runtime, mcp) = makeRuntimeWithMCP(
             astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             mcpResolve: { .unavailable(reason: "test: bundled plugin not present") }
         )
-        await session.start(siteID: "mysite", siteDirectory: tmpDir)
+        await runtime.start(siteID: "mysite", siteDirectory: tmpDir)
 
-        let state = await session.state
+        let state = await runtime.state
         #expect(state == .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
         let running = await mcp.isRunning
         #expect(!running)
 
-        await session.stop()
+        await runtime.stop()
     }
 
     @Test("State stays ready when MCP launch fails") func stateStaysReadyWhenMCPLaunchFails() async {
-        // MCP launch errors out (bad executable) → session still reaches .ready, mcpClient is not running.
-        let (session, mcp) = makeSessionWithMCP(
+        // MCP launch errors out (bad executable) → runtime still reaches .ready, mcpClient is not running.
+        let (runtime, mcp) = makeRuntimeWithMCP(
             astroResolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             mcpResolve: { .run(executable: URL(fileURLWithPath: "/nonexistent/mcp/binary"), arguments: []) }
         )
-        await session.start(siteID: "mysite", siteDirectory: tmpDir)
-        let state = await session.state
+        await runtime.start(siteID: "mysite", siteDirectory: tmpDir)
+        let state = await runtime.state
         if case .ready = state { /* ok */ } else {
             Issue.record("expected .ready (graceful MCP failure), got \(state)")
         }
         let running = await mcp.isRunning
         #expect(!running)
-        await session.stop()
+        await runtime.stop()
     }
 
     @Test("Observe stream emits idle starting ready") func observeStreamEmitsIdleStartingReady() async {
-        let session = makeSession(
+        let runtime = makeRuntime(
             resolve: { _ in self.shFixture("echo '  Local    http://localhost:4321/'; exec sleep 30") },
             probe: alwaysReady
         )
-        let stream = await session.observe()
+        let stream = await runtime.observe()
         var iterator = stream.makeAsyncIterator()
 
         // First emission is the current state (idle), before we start.
         let s0 = await iterator.next()
         #expect(s0 == .idle)
 
-        await session.start(siteID: "mysite", siteDirectory: tmpDir)
+        await runtime.start(siteID: "mysite", siteDirectory: tmpDir)
 
         // Collect the remaining transitions until we see .ready.
-        var seen: [PreviewSession.State] = []
+        var seen: [SiteRuntimeState] = []
         while let s = await iterator.next() {
             seen.append(s)
             if case .ready = s { break }
@@ -233,6 +228,6 @@ struct PreviewSessionTests {
         #expect(seen.first == .starting(siteID: "mysite"))
         #expect(seen.last == .ready(siteID: "mysite", url: URL(string: "http://localhost:4321/")!))
 
-        await session.stop()
+        await runtime.stop()
     }
 }

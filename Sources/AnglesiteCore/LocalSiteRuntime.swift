@@ -1,23 +1,16 @@
 import Foundation
 
-/// Owns the live preview of one site: it figures out how to run `astro dev` for that site,
-/// spawns it through `AstroDevServer`, and exposes a small `State` that a `PreviewView` can drive
-/// off (placeholder while starting / failed; loads the URL once ready; reloads when a supervised
-/// restart picks a new port).
+/// The host-subprocess `SiteRuntime`: it figures out how to run `astro dev` for a site, spawns it
+/// through `AstroDevServer`, and drives a `SiteRuntimeState` that a `PreviewView` can render off
+/// (placeholder while starting / failed; loads the URL once ready; reloads when a supervised
+/// restart picks a new port). It also owns the per-site MCP client for the edit pipeline.
 ///
-/// One session = one site at a time. `start(siteID:siteDirectory:)` tears down any previous site
-/// first. The session is reused across sites (it holds one `AstroDevServer`); for the v1 multi-site
-/// model each window will own its own `PreviewSession`.
-public actor PreviewSession {
-    public enum State: Sendable, Equatable {
-        case idle
-        case starting(siteID: String)
-        case ready(siteID: String, url: URL)
-        /// Couldn't preview this site (deps not installed, dev server crashed, etc.). `message` is
-        /// shown to the owner; the Debug pane has the full subprocess output.
-        case failed(siteID: String, message: String)
-    }
-
+/// One runtime = one site at a time. `start(siteID:siteDirectory:)` tears down any previous site
+/// first. Each window owns its own `LocalSiteRuntime` (per the v1 multi-site model).
+///
+/// This is the transitional implementation that keeps today's behavior; the Cloudflare (#66) and
+/// local-container (#69) runtimes will be alternate `SiteRuntime` conformers.
+public actor LocalSiteRuntime: SiteRuntime {
     /// How to run `astro dev` for a site directory — or why it can't be run.
     public enum LaunchPlan: Sendable, Equatable {
         case run(executable: URL, arguments: [String])
@@ -39,9 +32,11 @@ public actor PreviewSession {
     private let logCenter: LogCenter
     private let resolveCommand: CommandResolver
     private let resolveMCPCommand: MCPCommandResolver
+    private let restartPolicy: ProcessSupervisor.RestartPolicy
+    private let readyTimeout: TimeInterval
 
-    private var current: State = .idle
-    private var observers: [UUID: AsyncStream<State>.Continuation] = [:]
+    private var current: SiteRuntimeState = .idle
+    private var observers: [UUID: AsyncStream<SiteRuntimeState>.Continuation] = [:]
     /// Bumped on every `start(...)`; lets a slow `devServer.start` await know it was superseded.
     private var generation = 0
 
@@ -50,22 +45,26 @@ public actor PreviewSession {
         mcpClient: MCPClient? = nil,
         supervisor: ProcessSupervisor = .shared,
         logCenter: LogCenter = .shared,
-        resolveCommand: @escaping CommandResolver = PreviewSession.resolveAstroCommand,
-        resolveMCPCommand: @escaping MCPCommandResolver = PreviewSession.resolveBundledMCPCommand
+        resolveCommand: @escaping CommandResolver = LocalSiteRuntime.resolveAstroCommand,
+        resolveMCPCommand: @escaping MCPCommandResolver = LocalSiteRuntime.resolveBundledMCPCommand,
+        restartPolicy: ProcessSupervisor.RestartPolicy = .onCrash(maxAttempts: 3, baseBackoff: 0.5),
+        readyTimeout: TimeInterval = 30
     ) {
         self.devServer = devServer ?? AstroDevServer(supervisor: supervisor, logCenter: logCenter)
         self.mcpClient = mcpClient ?? MCPClient(supervisor: supervisor, logCenter: logCenter)
         self.logCenter = logCenter
         self.resolveCommand = resolveCommand
         self.resolveMCPCommand = resolveMCPCommand
+        self.restartPolicy = restartPolicy
+        self.readyTimeout = readyTimeout
     }
 
-    public var state: State { current }
+    public var state: SiteRuntimeState { current }
 
     /// Stream of state transitions. Yields the current state immediately, then every subsequent
     /// change. Multiple observers are supported; each gets its own stream.
-    public func observe() -> AsyncStream<State> {
-        let (stream, continuation) = AsyncStream<State>.makeStream(bufferingPolicy: .unbounded)
+    public func observe() -> AsyncStream<SiteRuntimeState> {
+        let (stream, continuation) = AsyncStream<SiteRuntimeState>.makeStream(bufferingPolicy: .unbounded)
         let id = UUID()
         observers[id] = continuation
         continuation.onTermination = { [weak self] _ in
@@ -77,12 +76,7 @@ public actor PreviewSession {
 
     /// Start (or switch to) the live preview for `siteID` at `siteDirectory`. Tears down any
     /// previous site first. Returns once the state has settled to `.ready` or `.failed`.
-    public func start(
-        siteID: String,
-        siteDirectory: URL,
-        restartPolicy: ProcessSupervisor.RestartPolicy = .onCrash(maxAttempts: 3, baseBackoff: 0.5),
-        readyTimeout: TimeInterval = 30
-    ) async {
+    public func start(siteID: String, siteDirectory: URL) async {
         await stopSubprocesses()
         generation += 1
         let gen = generation
@@ -107,7 +101,7 @@ public actor PreviewSession {
                     // newer call already stopped this server, so just drop the result.
                     return
                 }
-                // Best-effort MCP spawn — failures are logged and leave the session in .ready
+                // Best-effort MCP spawn — failures are logged and leave the runtime in .ready
                 // anyway (preview is the primary feature; the edit pipeline is an enhancement).
                 await startMCPClient(siteID: siteID, siteDirectory: siteDirectory)
                 guard gen == generation else { return }
@@ -169,7 +163,7 @@ public actor PreviewSession {
         }
     }
 
-    private func setState(_ newState: State) {
+    private func setState(_ newState: SiteRuntimeState) {
         guard newState != current else { return }
         current = newState
         for continuation in observers.values { continuation.yield(newState) }

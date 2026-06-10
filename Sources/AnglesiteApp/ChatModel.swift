@@ -110,7 +110,7 @@ final class ChatModel {
     private let siteDirectory: URL
     private let agent: ClaudeAgent
     private let history: ChatHistoryStore
-    /// Sticky-note source. Wired to the per-site `PreviewSession.mcpClient` in production so
+    /// Sticky-note source. Wired to the per-site `SiteRuntime.mcpClient` in production so
     /// `loadAnnotations()` shows the same annotations the edit overlay added; tests inject a
     /// fixture closure. `nil` disables the feed (returns no annotations, no error).
     private let annotationFeed: AnnotationFeed?
