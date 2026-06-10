@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+#
+# Cloudflare Sandbox substrate wrapper — issue #62, consumed by #61 / #66.
+#
+# Both substrates run the SAME canonical image (container/Dockerfile). The
+# Cloudflare Sandbox SDK needs its standalone `/sandbox` init binary present so
+# the Worker can drive the container over the Sandbox HTTP API. This thin layer
+# adds only that binary on top of the canonical image — the toolchain layers
+# underneath stay byte-identical to what Apple Containerization pulls.
+#
+# Per Cloudflare's docs, the standalone binary lets you "add sandbox capabilities
+# to any Docker image" without depending on their base image, and you must NOT
+# override the ENTRYPOINT — `/sandbox` is the entrypoint; it starts the HTTP API
+# then spawns CMD as a child with signal forwarding.
+#
+# NOTE: the exact source path/tag of the standalone binary is pinned and
+# validated by the Cloudflare spike (#61); treat the COPY below as the integration
+# point, not a finalized version.
+
+ARG CANONICAL_IMAGE=ghcr.io/anglesite/anglesite-devserver:dev
+ARG SANDBOX_IMAGE=docker.io/cloudflare/sandbox:latest
+
+FROM ${SANDBOX_IMAGE} AS sandbox
+
+FROM ${CANONICAL_IMAGE}
+COPY --from=sandbox /sandbox /sandbox
+ENTRYPOINT ["/sandbox"]
+CMD ["start-dev-server.sh"]

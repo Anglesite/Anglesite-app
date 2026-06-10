@@ -1,0 +1,19 @@
+# The build context is staged by scripts/build-container-image.sh, which copies
+# in only what the image needs (plugin runtime + template manifests + helpers).
+# These excludes are a belt-and-suspenders guard in case the Dockerfile is built
+# against an un-staged context.
+**/node_modules
+**/.git
+**/.github
+**/.worktrees
+**/.serena
+**/.playwright-mcp
+**/.claude
+**/dist
+**/build
+**/tests
+**/test
+**/docs
+**/*.log
+**/.DS_Store
+metadata.json
