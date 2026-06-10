@@ -135,7 +135,7 @@ struct SitesLauncherView: View {
                 .font(.largeTitle).foregroundStyle(.tertiary)
             Text("No Anglesite sites found")
                 .font(.headline)
-            Text("Create one with `/anglesite:start` in `~/Sites/<name>/`, or use **Open Folder…** below to add an existing project.")
+            Text("Create one with `/anglesite:start` in `~/Sites/<name>/`, or use **Add Site → Import existing site…** to add an existing project.")
                 .font(.callout).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
@@ -159,9 +159,15 @@ struct SitesLauncherView: View {
 
     private var footer: some View {
         HStack {
-            Button("Open Folder…") { openFolder() }
             Spacer()
-            Button("New Site…") { Task { await presentNewSite() } }
+            Menu {
+                Button("Create new site…") { Task { await presentNewSite() } }
+                Button("Import existing site…") { openFolder() }
+            } label: {
+                Label("Add Site", systemImage: "plus")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
