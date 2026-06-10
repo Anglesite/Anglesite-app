@@ -25,6 +25,7 @@ struct SiteWindow: View {
 
     @State private var preview = PreviewModel()
     @State private var deploy = DeployModel()
+    @State private var backup = BackupModel()
     @State private var audit = AuditModel()
     #if !ANGLESITE_MAS
     @State private var chat: ChatModel?
@@ -93,9 +94,20 @@ struct SiteWindow: View {
                         ? .opacity
                         : .move(edge: .bottom).combined(with: .opacity))
                     .shadow(radius: 8, y: -2)
+            } else if backup.drawerPresented {
+                // Backup and deploy can't both run at once (each disables the other's
+                // button while running), but a stale completed-deploy drawer might still
+                // be on screen when a backup finishes. Deploy wins the z-order — its
+                // drawer carries the more critical "your deploy URL" payload.
+                BackupDrawerView(model: backup, siteName: site.name)
+                    .transition(reduceMotion
+                        ? .opacity
+                        : .move(edge: .bottom).combined(with: .opacity))
+                    .shadow(radius: 8, y: -2)
             }
         }
         .animation(.easeInOut(duration: 0.18), value: deploy.drawerPresented)
+        .animation(.easeInOut(duration: 0.18), value: backup.drawerPresented)
         .navigationTitle(site.name)
         .sheet(isPresented: $deploy.blockedPresented) {
             if case .blocked(let failures, let warnings) = deploy.phase {
@@ -159,6 +171,18 @@ struct SiteWindow: View {
                 #endif
 
                 Button {
+                    backup.backup(siteID: site.id, siteDirectory: site.path)
+                } label: {
+                    Label("Backup", systemImage: "externaldrive.fill.badge.icloud")
+                }
+                .controlSize(.small)
+                .buttonStyle(.bordered)
+                .disabled(backup.isRunning || audit.isRunning || deploy.isRunning || !site.isValid)
+                .help(site.isValid
+                      ? "Commit and push working-tree changes to your current branch"
+                      : "Site is missing required files")
+
+                Button {
                     audit.audit(siteID: site.id, siteDirectory: site.path)
                 } label: {
                     if audit.isRunning {
@@ -169,7 +193,7 @@ struct SiteWindow: View {
                 }
                 .controlSize(.small)
                 .buttonStyle(.bordered)
-                .disabled(audit.isRunning || deploy.isRunning || !site.isValid)
+                .disabled(audit.isRunning || backup.isRunning || deploy.isRunning || !site.isValid)
                 .help(site.isValid
                       ? "Run the structured accessibility audit against this site"
                       : "Site is missing required files")
@@ -181,7 +205,7 @@ struct SiteWindow: View {
                 }
                 .controlSize(.small)
                 .buttonStyle(.borderedProminent)
-                .disabled(deploy.isRunning || audit.isRunning || !site.isValid)
+                .disabled(deploy.isRunning || backup.isRunning || audit.isRunning || !site.isValid)
                 .help(site.isValid
                       ? "Build, scan, and run wrangler deploy on this site"
                       : "Site is missing required files")
