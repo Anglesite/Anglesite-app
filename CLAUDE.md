@@ -21,7 +21,7 @@ When in doubt, the plugin is the source of truth for skills, hooks, and the MCP 
 - **Swift / SwiftUI** — app shell. Targets macOS 27+.
 - **Plain SwiftUI + actors** for v0. No TCA, no third-party state libraries.
 - **WKWebView** — live preview of the Astro dev server.
-- **Embedded Node** — vendored at build time. The sandboxed MAS target re-signs it with the app's identity + hardened-runtime JIT/sandbox entitlements (`scripts/resign-node.sh`); a Developer-ID re-sign for the DevID notarization track is still deferred (#1/#4).
+- **Embedded Node** — vendored at build time. Both targets re-sign it via a `scripts/resign-node.sh` post-build phase with the app's identity + hardened runtime: the MAS target uses `node-runtime.entitlements` (sandbox/inherit + JIT), the DevID target uses `node-runtime-devid.entitlements` (same minus the sandbox keys). The DevID re-sign + bundle-seal verification is done (#4 — `codesign --verify --deep --strict` passes); only the real Developer-ID-cert notarize run remains deferred (#1, gated on the signing cert + `TEAM_ID`).
 - **MCP** — talks to the plugin's server over stdio.
 
 ## Two build targets
