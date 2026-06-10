@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# Phase 1 — vendor a universal macOS Node.js runtime into Resources/node-runtime/.
+# Phase 1 — vendor a macOS Node.js runtime into Resources/node-runtime/.
 #
-# Reads the pinned version from scripts/node-version.txt. Downloads both arm64
-# and x64 tarballs from nodejs.org, verifies SHA256 against the project's
+# Reads the pinned version from scripts/node-version.txt. Downloads the arm64
+# tarball from nodejs.org, verifies SHA256 against the project's
 # SHASUMS256.txt, optionally GPG-verifies SHASUMS (warns if Node maintainer
-# keys aren't imported), extracts the arm64 distribution, then `lipo`s the
-# two `node` binaries into a single universal Mach-O at
-# Resources/node-runtime/bin/node.
+# keys aren't imported), then extracts the distribution to
+# Resources/node-runtime/. arm64-only: the app targets macOS 27+, which runs
+# exclusively on Apple silicon (#106).
 #
 # Idempotent: a no-op if the destination already contains the pinned version.
 
@@ -24,7 +24,6 @@ NODE_VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
 
 DIST_URL="https://nodejs.org/dist/v${NODE_VERSION}"
 ARM64_TARBALL="node-v${NODE_VERSION}-darwin-arm64.tar.xz"
-X64_TARBALL="node-v${NODE_VERSION}-darwin-x64.tar.xz"
 
 if [[ -x "$DEST/bin/node" ]]; then
     current=$("$DEST/bin/node" --version 2>/dev/null || echo "")
@@ -37,26 +36,23 @@ fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-echo "==> Downloading Node v${NODE_VERSION} (arm64 + x64) from nodejs.org"
+echo "==> Downloading Node v${NODE_VERSION} (arm64) from nodejs.org"
 curl -fL --progress-bar -o "$TMP/$ARM64_TARBALL" "$DIST_URL/$ARM64_TARBALL"
-curl -fL --progress-bar -o "$TMP/$X64_TARBALL"   "$DIST_URL/$X64_TARBALL"
 curl -fLs -o "$TMP/SHASUMS256.txt" "$DIST_URL/SHASUMS256.txt"
 
-echo "==> Verifying SHA256 checksums"
+echo "==> Verifying SHA256 checksum"
 (
     cd "$TMP"
-    for tarball in "$ARM64_TARBALL" "$X64_TARBALL"; do
-        expected=$(awk -v f="$tarball" '$2 == f { print $1 }' SHASUMS256.txt)
-        [[ -n "$expected" ]] || { echo "no checksum entry for $tarball" >&2; exit 1; }
-        actual=$(shasum -a 256 "$tarball" | awk '{ print $1 }')
-        if [[ "$expected" != "$actual" ]]; then
-            echo "SHA256 mismatch for $tarball" >&2
-            echo "  expected: $expected" >&2
-            echo "  actual:   $actual" >&2
-            exit 1
-        fi
-        echo "  ok  $tarball"
-    done
+    expected=$(awk -v f="$ARM64_TARBALL" '$2 == f { print $1 }' SHASUMS256.txt)
+    [[ -n "$expected" ]] || { echo "no checksum entry for $ARM64_TARBALL" >&2; exit 1; }
+    actual=$(shasum -a 256 "$ARM64_TARBALL" | awk '{ print $1 }')
+    if [[ "$expected" != "$actual" ]]; then
+        echo "SHA256 mismatch for $ARM64_TARBALL" >&2
+        echo "  expected: $expected" >&2
+        echo "  actual:   $actual" >&2
+        exit 1
+    fi
+    echo "  ok  $ARM64_TARBALL"
 )
 
 echo "==> Verifying GPG signature on SHASUMS256.txt (best effort)"
@@ -76,20 +72,12 @@ echo "==> Extracting arm64 distribution to $DEST"
 rm -rf "$DEST"
 mkdir -p "$DEST"
 tar --strip-components=1 -xf "$TMP/$ARM64_TARBALL" -C "$DEST"
-
-echo "==> Extracting x64 node binary for lipo merge"
-mkdir -p "$TMP/x64"
-tar --strip-components=1 -xf "$TMP/$X64_TARBALL" -C "$TMP/x64" "node-v${NODE_VERSION}-darwin-x64/bin/node"
-
-echo "==> Creating universal binary at $DEST/bin/node"
-lipo -create "$DEST/bin/node" "$TMP/x64/bin/node" -output "$TMP/node-universal"
-mv "$TMP/node-universal" "$DEST/bin/node"
 chmod +x "$DEST/bin/node"
 
-echo "==> Verifying universal binary"
-file "$DEST/bin/node" | grep -q "universal binary" || { echo "lipo did not produce a universal binary" >&2; exit 1; }
+echo "==> Verifying arm64 binary"
+file "$DEST/bin/node" | grep -q "arm64" || { echo "vendored node is not an arm64 binary" >&2; exit 1; }
 "$DEST/bin/node" --version | grep -q "^v${NODE_VERSION}$" || { echo "vendored node reports unexpected version" >&2; exit 1; }
 
 echo
-echo "Vendored Node v${NODE_VERSION} (universal arm64+x64) at $DEST/bin/node"
+echo "Vendored Node v${NODE_VERSION} (arm64) at $DEST/bin/node"
 file "$DEST/bin/node"
