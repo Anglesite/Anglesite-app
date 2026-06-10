@@ -43,12 +43,33 @@ struct AuditCommandTests {
             build: { _ in self.shFixture("exit 1") }
         )
         let result = await cmd.audit(siteID: "site", siteDirectory: tmpDir)
-        guard case .failed(let reason, let exit) = result else {
+        guard case .failed(let reason, let exit, _) = result else {
             Issue.record("expected .failed, got \(result)")
             return
         }
         #expect(reason.lowercased().contains("build"), "reason should name the failing step: \(reason)")
+        #expect(!reason.lowercased().contains("exit"), "exit code lives in the exitCode field; encoding it into reason caused the view to render '(exit N) (exit N)'")
         #expect(exit == 1)
+    }
+
+    @Test("Failed build carries its captured stdout+stderr as logTail so the failure sheet can show why")
+    func failedBuildCapturesLogTail() async {
+        let (cmd, _, _) = makeCommand(
+            runners: [FakeAuditRunner(category: .accessibility, result: .success([]))],
+            build: { _ in self.shFixture("echo build-started; echo build-broke >&2; exit 1") }
+        )
+        let result = await cmd.audit(siteID: "site", siteDirectory: tmpDir)
+        guard case .failed(_, _, let tail) = result else {
+            Issue.record("expected .failed, got \(result)")
+            return
+        }
+        let texts = tail.map(\.text)
+        #expect(texts.contains("build-started"), "stdout line missing from logTail: \(texts)")
+        #expect(texts.contains("build-broke"), "stderr line missing from logTail: \(texts)")
+        #expect(tail.allSatisfy { $0.source == "audit:site:build" },
+                "logTail must only contain this build's output, not unrelated LogCenter sources")
+        #expect(tail.contains { $0.stream == .stderr },
+                "stderr stream metadata must be preserved so the sheet can color it red")
     }
 
     @Test("Fails when the build resolver reports unavailable")
@@ -58,12 +79,13 @@ struct AuditCommandTests {
             build: { _ in .unavailable(reason: "vendored npm not found — rebuild the app") }
         )
         let result = await cmd.audit(siteID: "site", siteDirectory: tmpDir)
-        guard case .failed(let reason, let exit) = result else {
+        guard case .failed(let reason, let exit, let tail) = result else {
             Issue.record("expected .failed, got \(result)")
             return
         }
         #expect(reason == "vendored npm not found — rebuild the app")
         #expect(exit == nil)
+        #expect(tail.isEmpty, "pre-spawn refusals have no build output to show")
     }
 
     // MARK: Empty runner list

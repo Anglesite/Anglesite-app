@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import AnglesiteCore
 
 /// Modal sheet that renders an `AuditCommand` result. Groups findings by category,
@@ -86,11 +87,18 @@ struct AuditSheetView: View {
             }
             parts.append(String(format: "%.1f s", duration))
             return parts.joined(separator: " · ")
-        case .failed(let reason, let exit):
-            return exit.map { "\(reason) (exit \($0))" } ?? reason
+        case .failed(let reason, let exit, _):
+            return Self.formatFailure(reason: reason, exitCode: exit)
         default:
             return nil
         }
+    }
+
+    /// Compose `reason` and `exitCode` for display. Kept as the single formatter so
+    /// the header subtitle and the body render the same string — when the exit was
+    /// also encoded into `reason`, both layers appended it and produced "(exit N) (exit N)".
+    static func formatFailure(reason: String, exitCode: Int32?) -> String {
+        exitCode.map { "\(reason) (exit \($0))" } ?? reason
     }
 
     // MARK: Body
@@ -100,11 +108,12 @@ struct AuditSheetView: View {
         switch model.phase {
         case .succeeded(let report, _):
             findingsList(report)
-        case .failed(let reason, _):
+        case .failed(let reason, let exit, let tail):
             VStack(alignment: .leading, spacing: 12) {
-                Text(reason).font(.callout).foregroundStyle(.secondary)
+                Text(Self.formatFailure(reason: reason, exitCode: exit))
+                    .font(.callout).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Spacer()
+                failureLog(tail)
             }
             .padding(16)
         case .idle, .running:
@@ -242,6 +251,45 @@ struct AuditSheetView: View {
         }
     }
 
+    // MARK: Failure log
+
+    /// Monospaced scroller of the captured `audit:<siteID>:build` output. Mirrors the deploy
+    /// drawer's log presentation (stderr in red) so a failed audit shows the same diagnostic
+    /// surface owners already know from deploys, without making them open the Debug pane.
+    @ViewBuilder
+    private func failureLog(_ tail: [LogCenter.LogLine]) -> some View {
+        if tail.isEmpty {
+            Text("The build produced no output.")
+                .font(.caption).foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer()
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        ForEach(tail) { line in
+                            Text(line.text)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(line.stream == .stderr ? Color.red : Color.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                                .id(line.id)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+                .background(Color(NSColor.textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .onAppear {
+                    if let last = tail.last {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: Footer
 
     private var footer: some View {
@@ -250,9 +298,15 @@ struct AuditSheetView: View {
                 Button("Run again") {
                     onRunAgain()
                 }
-            } else if !model.isRunning, case .failed = model.phase {
+            } else if !model.isRunning, case .failed(_, _, let tail) = model.phase {
                 Button("Try again") {
                     onRunAgain()
+                }
+                if !tail.isEmpty {
+                    Button("Copy log") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(model.logText, forType: .string)
+                    }
                 }
             }
             Spacer()
