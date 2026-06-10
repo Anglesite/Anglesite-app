@@ -19,21 +19,12 @@ struct ChatView: View {
     /// UI state; the model only sees the final string when the user hits Send.
     @State private var draft: String = ""
     @FocusState private var inputFocused: Bool
-    /// Quick-action skill buttons surfaced above the input. Loaded once from the bundled
-    /// plugin on appear; empty when the plugin is missing or none of the curated skills
-    /// are present.
-    @State private var quickActions: [SkillRegistry.Skill] = []
-
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
             messagesList
             Divider()
-            if !quickActions.isEmpty {
-                skillButtons
-                Divider()
-            }
             inputBar
         }
         .frame(minWidth: 320, idealWidth: 420)
@@ -41,7 +32,6 @@ struct ChatView: View {
         .task {
             await model.loadHistory()
             await model.loadAnnotations()
-            loadQuickActions()
         }
         .sheet(item: $model.conflictPrompt) { prompt in
             VStack(alignment: .leading, spacing: 12) {
@@ -63,11 +53,6 @@ struct ChatView: View {
             .padding(20)
             .frame(width: 380)
         }
-    }
-
-    private func loadQuickActions() {
-        guard let plugin = PluginRuntime.resolve().url else { return }
-        quickActions = SkillRegistry.quickActions(in: plugin)
     }
 
     // MARK: Header
@@ -132,51 +117,6 @@ struct ChatView: View {
                 // Stream characters extend the last message; re-anchor on each chunk.
                 proxy.scrollTo("__bottom__", anchor: .bottom)
             }
-        }
-    }
-
-    // MARK: Skill buttons
-
-    private var skillButtons: some View {
-        HStack(spacing: 6) {
-            ForEach(quickActions) { skill in
-                Button {
-                    invoke(skill: skill)
-                } label: {
-                    Label {
-                        Text(skill.name.capitalized)
-                    } icon: {
-                        Image(systemName: Self.iconName(for: skill.name))
-                    }
-                    .font(.callout)
-                }
-                .controlSize(.small)
-                .buttonStyle(.bordered)
-                // Wrap in `Text(verbatim:)` so plugin skill descriptions containing
-                // markdown (backticks, links, etc.) aren't parsed as AttributedString —
-                // `.help(_:)` only renders unstyled text.
-                .help(Text(verbatim: skill.description ?? "Run /anglesite:\(skill.name)"))
-                .disabled(model.isStreaming)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
-    private func invoke(skill: SkillRegistry.Skill) {
-        guard !model.isStreaming else { return }
-        model.send("/anglesite:\(skill.name)")
-        draft = ""
-        inputFocused = true
-    }
-
-    /// Maps the curated quick-action names to SF Symbols. Unmapped names fall back to a
-    /// generic command icon.
-    private static func iconName(for skillName: String) -> String {
-        switch skillName {
-        case "import": return "tray.and.arrow.down.fill"
-        default:       return "sparkles"
         }
     }
 
