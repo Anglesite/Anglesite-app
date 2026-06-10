@@ -3,26 +3,32 @@
 # Cloudflare Sandbox substrate wrapper — issue #62, consumed by #61 / #66.
 #
 # Both substrates run the SAME canonical image (container/Dockerfile). The
-# Cloudflare Sandbox SDK needs its standalone `/sandbox` init binary present so
-# the Worker can drive the container over the Sandbox HTTP API. This thin layer
-# adds only that binary on top of the canonical image — the toolchain layers
-# underneath stay byte-identical to what Apple Containerization pulls.
+# Cloudflare Sandbox SDK needs its init binary present so the Worker can drive the
+# container over the Sandbox HTTP API. This thin layer copies the sandbox init
+# (the `/container-server` dir from cloudflare/sandbox) on top of the canonical
+# image — the toolchain layers underneath stay byte-identical to what Apple
+# Containerization pulls.
 #
-# Per Cloudflare's docs, the standalone binary lets you "add sandbox capabilities
-# to any Docker image" without depending on their base image, and you must NOT
-# override the ENTRYPOINT — `/sandbox` is the entrypoint; it starts the HTTP API
-# then spawns CMD as a child with signal forwarding.
+# The init binary is the ENTRYPOINT (`/container-server/sandbox`); it starts the
+# Sandbox HTTP API then spawns CMD as a child with signal forwarding.
 #
-# NOTE: the exact source path/tag of the standalone binary is pinned and
-# validated by the Cloudflare spike (#61); treat the COPY below as the integration
-# point, not a finalized version.
+# ⚠️ ARCH: cloudflare/sandbox is linux/amd64-only, so the canonical image must be
+# built amd64 (or multi-arch) for this substrate. See the #61 spike notes.
+#
+# The standalone-binary version MUST match the `@cloudflare/sandbox` npm package the
+# Worker imports (the SDK and the in-container init speak a versioned protocol). Pinned
+# to 0.12.1 by the Cloudflare spike (#61); bump both together. See
+# Spikes/CloudflareSandboxSpike/ for the throwaway Worker that validated this.
 
 ARG CANONICAL_IMAGE=ghcr.io/anglesite/anglesite-devserver:dev
-ARG SANDBOX_IMAGE=docker.io/cloudflare/sandbox:latest
+ARG SANDBOX_IMAGE=docker.io/cloudflare/sandbox:0.12.1
 
 FROM ${SANDBOX_IMAGE} AS sandbox
 
 FROM ${CANONICAL_IMAGE}
-COPY --from=sandbox /sandbox /sandbox
-ENTRYPOINT ["/sandbox"]
+# The init binary lives at /container-server/sandbox (validated by the #61 spike — it is
+# NOT at /sandbox). Copy the whole dir so any sibling files come along. It starts the
+# Sandbox HTTP API, then spawns CMD as a child with signal forwarding.
+COPY --from=sandbox /container-server /container-server
+ENTRYPOINT ["/container-server/sandbox"]
 CMD ["start-dev-server.sh"]
