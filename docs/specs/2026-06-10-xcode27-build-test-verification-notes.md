@@ -96,12 +96,34 @@ These are worth a dedicated investigation but don't gate the Xcode 27 toolchain 
 `.github/workflows/ci.yml` currently does:
 
 ```yaml
+- uses: actions/checkout@v4
+
+- name: Checkout sibling Anglesite plugin
+  uses: actions/checkout@v4
+  with:
+    repository: Anglesite/anglesite
+    path: anglesite-plugin
+
+- name: Set up Node (for the bundled plugin's MCP server)
+  uses: actions/setup-node@v4
+  with:
+    node-version: '22'
+
+- name: Install plugin dependencies
+  working-directory: anglesite-plugin
+  run: npm ci --no-audit --no-fund
+
 - name: Select Xcode
   run: sudo xcode-select -s /Applications/Xcode_16.app
+
 - name: Build (debug)
   run: swift build -c debug
+
 - name: Test
+  env:
+    ANGLESITE_PLUGIN_PATH: ${{ github.workspace }}/anglesite-plugin
   run: swift test -c debug --parallel
+
 - name: Build (release)
   run: swift build -c release
 ```
@@ -109,6 +131,7 @@ These are worth a dedicated investigation but don't gate the Xcode 27 toolchain 
 So:
 - CI uses **Xcode 16**, not Xcode 27. Nothing in CI exercises the Xcode 27 / Swift 6.4 toolchain that local dev now requires.
 - CI uses `swift build`/`swift test` against `Package.swift`, never `xcodebuild` against `Anglesite.xcodeproj`. The xcodeproj-only failure modes (stale `MACOSX_DEPLOYMENT_TARGET`, the plist `LSMinimumSystemVersion` warning fixed by this PR) are invisible to CI.
+- CI *does* check out the sibling `Anglesite/anglesite` plugin and `npm ci`s it, and sets `ANGLESITE_PLUGIN_PATH` so the MCP e2e tests run with a fresh plugin checkout. So the two local flakes documented above are not "tests CI skips" — they're tests CI runs under Xcode 16 + parallel + a clean plugin tree, and the flake on local could just as plausibly be an environmental difference in plugin state or node version as a real bug.
 
 Bumping CI to Xcode 27 is a follow-up — it likely needs `macos-15` → `macos-26` or whatever runner image carries Xcode 27 — but is outside this PR's scope. Filed as a #108 follow-up item.
 
