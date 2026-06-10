@@ -102,4 +102,32 @@ struct HTTPTransportTests {
         let next = await iterator.next()
         #expect(next == nil)
     }
+
+    @Test("MCPClient.connect handshakes and lists tools over HTTP") func clientOverHTTP() async throws {
+        StubURLProtocol.reset()
+        // initialize response
+        StubURLProtocol.queue.append(.init(
+            status: 200,
+            headers: ["Content-Type": "application/json", "Mcp-Session-Id": "s"],
+            body: #"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"0"}}}"#.data(using: .utf8)!
+        ))
+        // notifications/initialized → 202 (no id, no body)
+        StubURLProtocol.queue.append(.init(status: 202, headers: [:], body: Data()))
+        // tools/list response
+        StubURLProtocol.queue.append(.init(
+            status: 200,
+            headers: ["Content-Type": "application/json"],
+            body: #"{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo","description":"E","inputSchema":{"type":"object"}}]}}"#.data(using: .utf8)!
+        ))
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        let session = URLSession(configuration: config)
+
+        let client = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        try await client.connect(httpEndpoint: URL(string: "http://127.0.0.1:4399/mcp")!, urlSession: session)
+        let tools = try await client.listTools()
+        #expect(tools.first?.name == "echo")
+        await client.stop()
+    }
 }

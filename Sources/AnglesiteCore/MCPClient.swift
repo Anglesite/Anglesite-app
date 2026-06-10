@@ -155,6 +155,19 @@ public actor MCPClient {
         try await startWithTransport(t, initializeTimeout: initializeTimeout, clientName: clientName, clientVersion: clientVersion)
     }
 
+    /// Connect to an MCP server over Streamable HTTP at `httpEndpoint` (the full `…/mcp` URL) and run
+    /// the initialize handshake. Mirrors `start(...)` but for the HTTP transport.
+    public func connect(
+        httpEndpoint: URL,
+        urlSession: URLSession = .shared,
+        initializeTimeout: TimeInterval = 10,
+        clientName: String = "Anglesite",
+        clientVersion: String = "0.1.0"
+    ) async throws {
+        let t = HTTPTransport(endpoint: httpEndpoint, urlSession: urlSession)
+        try await startWithTransport(t, initializeTimeout: initializeTimeout, clientName: clientName, clientVersion: clientVersion)
+    }
+
     /// Shared start path for any transport: open, start the reader, run the initialize handshake.
     func startWithTransport(
         _ t: any MCPTransport,
