@@ -133,32 +133,33 @@ final class SkillRegistryTests: XCTestCase {
             "skills/backup/SKILL.md": "---\nname: backup\ndescription: \"snapshot\"\n---\n"
         ])
         let quick = SkillRegistry.quickActions(in: root)
-        // `deploy` is intentionally absent: the toolbar Deploy button invokes
-        // DeployCommand directly (#84), so surfacing a redundant LLM-routed Deploy
-        // pill in chat would just burn tokens for an action that already has a
-        // structured entry point.
-        XCTAssertEqual(quick.map(\.name), ["backup", "check", "import"],
-                       "must be in curated order, must exclude non-curated skills, must exclude deploy")
-        XCTAssertEqual(quick.first?.description, "snapshot")
+        // `deploy` (#84), `backup` (#85), and `check` (#86) are intentionally absent —
+        // each has a toolbar entry point that invokes its `*Command` actor directly,
+        // so redundant LLM-routed pills would just burn tokens for actions Claude was
+        // invoking the same way every time.
+        XCTAssertEqual(quick.map(\.name), ["import"],
+                       "must be in curated order, must exclude non-curated skills, must exclude deploy/backup/check")
+        XCTAssertEqual(quick.first?.description, "import content")
     }
 
-    func testQuickActionsExcludesDeployEvenWhenSkillExists() throws {
-        // Regression guard for #84: even with a deploy/SKILL.md on disk, the chat
-        // quick-actions must not surface it — the toolbar owns Deploy.
+    func testQuickActionsExcludesDeterministicSkillsEvenWhenPresent() throws {
+        // Regression guard for #84 + #85 + #86: even with all three SKILL.mds on disk,
+        // the chat quick-actions must not surface them — the toolbar owns them.
         let root = try makeFixturePlugin([
             "skills/deploy/SKILL.md": "---\nname: deploy\ndescription: \"deploy\"\n---\n",
-            "skills/backup/SKILL.md": "---\nname: backup\ndescription: \"snapshot\"\n---\n"
+            "skills/backup/SKILL.md": "---\nname: backup\ndescription: \"snapshot\"\n---\n",
+            "skills/check/SKILL.md": "---\nname: check\ndescription: \"audit\"\n---\n",
+            "skills/import/SKILL.md": "---\nname: import\ndescription: \"import content\"\n---\n"
         ])
-        XCTAssertEqual(SkillRegistry.quickActions(in: root).map(\.name), ["backup"])
+        XCTAssertEqual(SkillRegistry.quickActions(in: root).map(\.name), ["import"])
     }
 
     func testQuickActionsTolerantOfMissingCuratedSkills() throws {
         // A plugin that's missing some of the curated names just returns whatever it has.
         let root = try makeFixturePlugin([
-            "skills/backup/SKILL.md": "---\nname: backup\n---\n",
-            "skills/check/SKILL.md": "---\nname: check\n---\n"
+            "skills/import/SKILL.md": "---\nname: import\n---\n"
         ])
-        XCTAssertEqual(SkillRegistry.quickActions(in: root).map(\.name), ["backup", "check"])
+        XCTAssertEqual(SkillRegistry.quickActions(in: root).map(\.name), ["import"])
     }
 
     // MARK: Test helpers

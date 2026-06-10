@@ -175,8 +175,6 @@ struct ChatView: View {
     /// generic command icon.
     private static func iconName(for skillName: String) -> String {
         switch skillName {
-        case "backup": return "externaldrive.fill.badge.icloud"
-        case "check":  return "checkmark.shield.fill"
         case "import": return "tray.and.arrow.down.fill"
         default:       return "sparkles"
         }

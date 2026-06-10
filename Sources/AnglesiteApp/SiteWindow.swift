@@ -25,6 +25,7 @@ struct SiteWindow: View {
 
     @State private var preview = PreviewModel()
     @State private var deploy = DeployModel()
+    @State private var audit = AuditModel()
     #if !ANGLESITE_MAS
     @State private var chat: ChatModel?
     @State private var chatPresented = false
@@ -108,6 +109,13 @@ struct SiteWindow: View {
                 deploy.cancelTokenPrompt()
             }
         }
+        .sheet(isPresented: $audit.sheetPresented) {
+            AuditSheetView(
+                model: audit,
+                siteName: site.name,
+                onRunAgain: { audit.audit(siteID: site.id, siteDirectory: site.path) }
+            )
+        }
     }
 
     @ViewBuilder
@@ -151,13 +159,29 @@ struct SiteWindow: View {
                 #endif
 
                 Button {
+                    audit.audit(siteID: site.id, siteDirectory: site.path)
+                } label: {
+                    if audit.isRunning {
+                        Label("Auditing…", systemImage: "magnifyingglass")
+                    } else {
+                        Label("Audit", systemImage: "checkmark.shield.fill")
+                    }
+                }
+                .controlSize(.small)
+                .buttonStyle(.bordered)
+                .disabled(audit.isRunning || deploy.isRunning || !site.isValid)
+                .help(site.isValid
+                      ? "Run the structured accessibility audit against this site"
+                      : "Site is missing required files")
+
+                Button {
                     deploy.deploy(siteID: site.id, siteDirectory: site.path)
                 } label: {
                     Label("Deploy", systemImage: "paperplane.fill")
                 }
                 .controlSize(.small)
                 .buttonStyle(.borderedProminent)
-                .disabled(deploy.isRunning || !site.isValid)
+                .disabled(deploy.isRunning || audit.isRunning || !site.isValid)
                 .help(site.isValid
                       ? "Build, scan, and run wrangler deploy on this site"
                       : "Site is missing required files")
