@@ -5,7 +5,10 @@ import AnglesiteCore
 /// the testable Result→dialog logic. No Claude/LLM process is involved — the intents drive the
 /// deterministic command actors directly.
 
-struct DeploySiteIntent: AppIntent {
+// `LongRunningIntent` (→ `ProgressReportingIntent` → `AppIntent`) tells the system this work
+// can exceed the default intent execution budget, so a real deploy/audit invoked from Siri or
+// a background Shortcut isn't killed mid-run. The actual work runs inside `performBackgroundTask`.
+struct DeploySiteIntent: LongRunningIntent {
     static var title: LocalizedStringResource = "Deploy Site"
     static var description = IntentDescription("Deploy a site to production with Anglesite.")
 
@@ -18,13 +21,16 @@ struct DeploySiteIntent: AppIntent {
         // pre-deploy security scan still gates inside DeployCommand — confirmation is an
         // additional guard against accidental voice/Shortcut triggers, not a replacement.
         try await requestConfirmation(
-            result: .result(dialog: "Deploy \(site.displayName) to production?")
+            dialog: "Deploy \(site.displayName) to production?"
         )
         let ops = SiteOperations()
         guard let resolved = await ops.site(id: site.id) else {
             return .result(dialog: "Couldn't find \(site.displayName).")
         }
-        let result = await ops.deploy(site: resolved)
+        // Deploys (build + wrangler) routinely exceed the default budget — run as long-running.
+        let result = try await performBackgroundTask {
+            await ops.deploy(site: resolved)
+        }
         return .result(dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forDeploy: result)))
     }
 }
@@ -47,7 +53,7 @@ struct BackupSiteIntent: AppIntent {
     }
 }
 
-struct AuditSiteIntent: AppIntent {
+struct AuditSiteIntent: LongRunningIntent {
     static var title: LocalizedStringResource = "Check Site"
     static var description = IntentDescription("Run an Anglesite audit and report findings.")
 
@@ -61,7 +67,10 @@ struct AuditSiteIntent: AppIntent {
         guard let resolved = await ops.site(id: site.id) else {
             return .result(value: site, dialog: "Couldn't find \(site.displayName).")
         }
-        let result = await ops.audit(site: resolved)
+        // A full audit runs a site build + runners — can exceed the default budget.
+        let result = try await performBackgroundTask {
+            await ops.audit(site: resolved)
+        }
         return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forAudit: result)))
     }
 }
