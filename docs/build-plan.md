@@ -148,7 +148,7 @@ These issues target macOS 27 APIs available with Xcode 27 / Swift 6.4:
 - 🔲 **SwiftUI toolbar APIs** (#107) — adopt macOS 27 native toolbar for the site window action bar.
 - 🔲 **Structured UI for common tasks** (#94) — reduce chat to open-ended tasks; direct UI for deploy, backup, audit.
   - 🔲 Wire deploy button directly (#84), backup (#85), audit (#86), swipe-to-resolve (#87).
-- 🔲 **App Intents + Shortcuts** (#88, #89, #90) — `SiteEntity`, deploy/backup/audit intents, Shortcuts integration.
+- ✅ **App Intents + Shortcuts** (#88, #89, #90) — Phase B landed. `SiteEntity` + `EntityStringQuery` (fuzzy name match, single-site auto-select, live `SiteStore` read); four intents (`DeploySiteIntent` — confirms before pushing, pre-deploy scan still gates; `BackupSiteIntent`; `AuditSiteIntent` — returns the site for audit→deploy chaining; `OpenSiteIntent` via `WindowRouter`); `AnglesiteShortcuts` curated phrases. Intents wrap the deterministic command actors through a Core `SiteOperations` + `CommandFactory` seam (unit-tested Result→dialog mapping) and a target-gated `SiteAccess` helper (DevID pass-through; MAS resolves the persisted security-scoped bookmark so backups run headless with no window). Builds clean on both targets. **Deferred:** real-signed MAS background-backup smoke (gated on the #81 signed build). Design/plan: [`docs/superpowers/specs/2026-06-10-app-intents-phase-b-design.md`](superpowers/specs/2026-06-10-app-intents-phase-b-design.md).
 - 🔲 **On-device summarization** (#93), **Image Playground** (#92), **Writing Tools** (#91).
 - 🔲 **Accessibility** — VoiceOver pass (#80), Dynamic Type audit (#79).
 - 🔲 **Misc** — oxlint for JS overlay (#73), reframe "filesystem is source of truth" → "Git is source of truth" (#72).
