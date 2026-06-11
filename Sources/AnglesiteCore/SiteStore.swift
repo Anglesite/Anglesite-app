@@ -52,10 +52,17 @@ public actor SiteStore {
         case invalidProject(URL, missing: [String])
     }
 
+    /// Async callback invoked with the new site list after every mutation that changes the
+    /// visible registry (load/refresh/add/remove). Bookmark-only updates are not emitted —
+    /// they don't affect what consumers like `SpotlightIndexer` care about. Single-subscriber
+    /// by design; the indexer is the only known consumer today.
+    public typealias ChangeHandler = @Sendable ([Site]) async -> Void
+
     private let fileManager: FileManager
     private let settings: AppSettings
     private let persistenceURL: URL
     private(set) public var sites: [Site] = []
+    private var changeHandler: ChangeHandler?
 
     /// - Parameters:
     ///   - settings: settings store consulted for `sitesRoot`.
@@ -72,21 +79,30 @@ public actor SiteStore {
         self.persistenceURL = persistenceURL ?? Self.defaultPersistenceURL(fileManager: fileManager)
     }
 
+    /// Install (or replace, or clear with `nil`) the post-mutation change handler. Invoked on
+    /// the actor's executor after `sites` is updated and persisted, with the new list.
+    public func setChangeHandler(_ handler: ChangeHandler?) {
+        changeHandler = handler
+    }
+
     /// Loads the persisted site list from disk into memory. Safe to call before `refresh()`
     /// when the UI wants to render quickly without waiting for filesystem validation.
-    public func load() throws {
+    /// Skips the change emit on a fresh-install no-file path — there's nothing to propagate,
+    /// and we'd otherwise wake the SpotlightIndexer for a no-op on every cold launch.
+    public func load() async throws {
         guard fileManager.fileExists(atPath: persistenceURL.path) else {
             sites = []
             return
         }
         let data = try Data(contentsOf: persistenceURL)
         sites = try Self.decoder.decode([Site].self, from: data)
+        await emitChange()
     }
 
     /// Scans `settings.sitesRoot` for project directories, validates each, merges with the
     /// existing in-memory list, and persists. Returns the new list.
     @discardableResult
-    public func refresh() throws -> [Site] {
+    public func refresh() async throws -> [Site] {
         let root = settings.sitesRoot
         let discovered: [Site]
         if fileManager.fileExists(atPath: root.path) {
@@ -129,12 +145,13 @@ public actor SiteStore {
         }
         sites = byID.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         try persist()
+        await emitChange()
         return sites
     }
 
     /// Adds a site by absolute path. Validates first; throws if the directory isn't an Anglesite project.
     @discardableResult
-    public func add(_ url: URL) throws -> Site {
+    public func add(_ url: URL) async throws -> Site {
         var isDir: ObjCBool = false
         guard fileManager.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
             throw StoreError.notADirectory(url)
@@ -159,13 +176,15 @@ public actor SiteStore {
         sites.append(site)
         sites.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         try persist()
+        await emitChange()
         return site
     }
 
     /// Removes a site from the list. Does not delete files on disk.
-    public func remove(id: String) throws {
+    public func remove(id: String) async throws {
         sites.removeAll { $0.id == id }
         try persist()
+        await emitChange()
     }
 
     /// Look up a site by id. Convenience used by window scenes that receive the id as a
@@ -185,6 +204,13 @@ public actor SiteStore {
         guard let index = sites.firstIndex(where: { $0.id == id }) else { return }
         sites[index].bookmarkData = data
         try persist()
+    }
+
+    // MARK: - Change notification
+
+    private func emitChange() async {
+        guard let handler = changeHandler else { return }
+        await handler(sites)
     }
 
     // MARK: - Persistence

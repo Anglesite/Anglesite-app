@@ -163,4 +163,121 @@ final class SiteStoreTests {
         #expect(remaining.isEmpty)
         #expect(fileManager.fileExists(atPath: dir.path), "files on disk must be untouched")
     }
+
+    // MARK: - Change handler (#102)
+
+    /// Captures change-handler emissions so each test can assert on the post-mutation snapshot.
+    actor ChangeRecorder {
+        private(set) var snapshots: [[SiteStore.Site]] = []
+        func record(_ sites: [SiteStore.Site]) { snapshots.append(sites) }
+        var count: Int { snapshots.count }
+        var last: [SiteStore.Site]? { snapshots.last }
+    }
+
+    @Test("Change handler fires on refresh")
+    func changeHandlerFiresOnRefresh() async throws {
+        _ = try makeValidSite(named: "alpha")
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let recorder = ChangeRecorder()
+        await store.setChangeHandler { sites in await recorder.record(sites) }
+
+        try await store.refresh()
+
+        let count = await recorder.count
+        let last = await recorder.last
+        #expect(count == 1)
+        #expect(last?.map(\.name) == ["alpha"])
+    }
+
+    @Test("Change handler fires on add")
+    func changeHandlerFiresOnAdd() async throws {
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let recorder = ChangeRecorder()
+        await store.setChangeHandler { sites in await recorder.record(sites) }
+
+        let dir = try makeValidSite(named: "alpha")
+        _ = try await store.add(dir)
+
+        let last = await recorder.last
+        #expect(last?.map(\.name) == ["alpha"])
+    }
+
+    @Test("Change handler fires on remove")
+    func changeHandlerFiresOnRemove() async throws {
+        _ = try makeValidSite(named: "alpha")
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        try await store.refresh()
+        let id = try #require(await store.sites.first).id
+
+        let recorder = ChangeRecorder()
+        await store.setChangeHandler { sites in await recorder.record(sites) }
+
+        try await store.remove(id: id)
+
+        let last = await recorder.last
+        #expect(last?.isEmpty == true)
+    }
+
+    @Test("Change handler fires on load")
+    func changeHandlerFiresOnLoad() async throws {
+        _ = try makeValidSite(named: "alpha")
+        // Seed sites.json by refreshing through a separate store.
+        let writer = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        try await writer.refresh()
+
+        let reader = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let recorder = ChangeRecorder()
+        await reader.setChangeHandler { sites in await recorder.record(sites) }
+
+        try await reader.load()
+
+        let last = await recorder.last
+        #expect(last?.map(\.name) == ["alpha"])
+    }
+
+    @Test("Change handler does not fire on setBookmark")
+    func changeHandlerDoesNotFireOnSetBookmark() async throws {
+        let dir = try makeValidSite(named: "alpha")
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let site = try await store.add(dir)
+
+        let recorder = ChangeRecorder()
+        await store.setChangeHandler { sites in await recorder.record(sites) }
+        // Bookmark-only updates don't change the visible entity surface, so they don't emit —
+        // avoids re-indexing Spotlight on every panel grant.
+        try await store.setBookmark(Data([0x01, 0x02]), for: site.id)
+
+        let count = await recorder.count
+        #expect(count == 0)
+    }
+
+    @Test("Change handler can be cleared")
+    func changeHandlerCanBeCleared() async throws {
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let recorder = ChangeRecorder()
+        await store.setChangeHandler { sites in await recorder.record(sites) }
+
+        let dir = try makeValidSite(named: "alpha")
+        _ = try await store.add(dir)
+        await store.setChangeHandler(nil)
+        let id = try #require(await store.sites.first).id
+        try await store.remove(id: id)
+
+        let count = await recorder.count
+        #expect(count == 1, "the post-clear remove must not emit")
+    }
+
+    @Test("Change handler does not fire on no-file load")
+    func changeHandlerDoesNotFireOnNoFileLoad() async throws {
+        // Fresh install: no sites.json. The handler should not be woken for a snapshot
+        // that didn't change — the indexer would just no-op against its own prior state.
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let recorder = ChangeRecorder()
+        await store.setChangeHandler { sites in await recorder.record(sites) }
+
+        try await store.load()
+
+        let count = await recorder.count
+        #expect(count == 0)
+    }
 }
