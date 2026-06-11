@@ -19,9 +19,6 @@ import SwiftUI
 /// Xcode 26.3. On the fallback toolchain the modifier becomes a no-op — voice "deploy this"
 /// falls back to the EntityStringQuery prompt, which is the pre-#103 behavior.
 ///
-/// **API deviation from plan:** `View.appEntityIdentifier` takes `EntityIdentifier?`, not a
-/// raw `String`. The plan's `self.appEntityIdentifier(entity.id)` (a String) would not
-/// compile. Corrected to `EntityIdentifier(for: entity)`.
 extension View {
     @ViewBuilder
     func annotatedAsSite(_ site: SiteStore.Site) -> some View {
@@ -30,6 +27,11 @@ extension View {
         self
             .appEntityIdentifier(EntityIdentifier(for: entity))
             .userActivity(SiteEntityAnnotation.activityType, isActive: true) { activity in
+                // The closure fires on every body re-evaluation while the modifier is active.
+                // Skip if the activity is already configured for this site — saves an EntityIdentifier
+                // allocation and six field copies per render. The userInfo siteID is set in
+                // SiteEntityAnnotation.makeSiteUserActivity and is the reliable identity signal.
+                if activity.userInfo?["siteID"] as? String == entity.id { return }
                 let fresh = SiteEntityAnnotation.makeSiteUserActivity(entity)
                 activity.title = fresh.title
                 activity.userInfo = fresh.userInfo
