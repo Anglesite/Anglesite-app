@@ -207,7 +207,7 @@ final class SiteStoreTests {
         _ = try makeValidSite(named: "alpha")
         let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
         try await store.refresh()
-        let id = await store.sites.first!.id
+        let id = try #require(await store.sites.first).id
 
         let recorder = ChangeRecorder()
         await store.setChangeHandler { sites in await recorder.record(sites) }
@@ -260,9 +260,24 @@ final class SiteStoreTests {
         let dir = try makeValidSite(named: "alpha")
         _ = try await store.add(dir)
         await store.setChangeHandler(nil)
-        try await store.remove(id: await store.sites.first!.id)
+        let id = try #require(await store.sites.first).id
+        try await store.remove(id: id)
 
         let count = await recorder.count
         #expect(count == 1, "the post-clear remove must not emit")
+    }
+
+    @Test("Change handler does not fire on no-file load")
+    func changeHandlerDoesNotFireOnNoFileLoad() async throws {
+        // Fresh install: no sites.json. The handler should not be woken for a snapshot
+        // that didn't change — the indexer would just no-op against its own prior state.
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let recorder = ChangeRecorder()
+        await store.setChangeHandler { sites in await recorder.record(sites) }
+
+        try await store.load()
+
+        let count = await recorder.count
+        #expect(count == 0)
     }
 }

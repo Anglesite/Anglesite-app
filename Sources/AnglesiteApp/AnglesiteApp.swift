@@ -10,7 +10,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Register App Intents dependencies before the app surface comes up so backgrounded
         // intent processes (and #101's system MCP entry, later) can resolve immediately.
-        AnglesiteIntents.bootstrap()
+        // `bootstrap()` is async (it awaits the Spotlight handler installation on `SiteStore`);
+        // we kick it off here without waiting — the launcher view's `task` modifier doesn't
+        // block on it, and bootstrap's own defensive `load()` closes any race.
+        Task { await AnglesiteIntents.bootstrap() }
 
         // Extract the bundled npm cache into Application Support so the first site `npm install`
         // is offline-fast. No-op when nothing's bundled or it's already current; logged either way.

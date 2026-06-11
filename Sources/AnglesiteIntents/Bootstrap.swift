@@ -1,32 +1,39 @@
 import AppIntents
 import AnglesiteCore
+import OSLog
+
+private let log = Logger(subsystem: "dev.anglesite.app", category: "spotlight-indexer")
 
 /// Public entry point that registers production dependencies with `AppDependencyManager` and
 /// hooks the Spotlight indexer to `SiteStore.shared`.
 ///
-/// Called once from `AppDelegate.applicationDidFinishLaunching` today. #101 (system MCP)
-/// will reuse this from a non-UI process so a backgrounded intent can resolve `SiteOperationsService`
-/// before any window is opened.
+/// Async so the call site can await handler installation before driving any `SiteStore`
+/// mutations — that way a caller in an async context (e.g. #101's system MCP entry from a
+/// non-UI process) gets the indexer reliably set up before they touch the store.
+///
+/// The kicker `try await SiteStore.shared.load()` inside is belt-and-suspenders for the
+/// SwiftUI case: `AppDelegate.applicationDidFinishLaunching` can only fire-and-forget us in a
+/// `Task`, which races with the launcher view's own `task` modifier. The handler is registered
+/// before the load here, so the load *will* emit even if the launcher already raced ahead and
+/// missed it — emission is idempotent (the indexer dedups by id set).
 public enum AnglesiteIntents {
-    public static func bootstrap() {
+    public static func bootstrap() async {
         AppDependencyManager.shared.add { () -> any SiteOperationsService in
             SiteOperations(factory: LiveCommandFactory())
         }
 
-        // Wire the Spotlight indexer to the shared SiteStore. From now on, every load /
-        // refresh / add / remove fires the handler, which reindexes the semantic index — so
-        // Siri can resolve "back up my portfolio" against current registry state without us
-        // having to call into the indexer at every mutation site.
-        Task {
-            await SiteStore.shared.setChangeHandler { sites in
-                do {
-                    try await SpotlightIndexer.shared.reindex(sites)
-                } catch {
-                    // Index failures are non-fatal — the app still works, the user just doesn't
-                    // get Spotlight discoverability for that snapshot. Logged via os_log; we
-                    // don't surface UI for it.
-                }
+        await SiteStore.shared.setChangeHandler { sites in
+            do {
+                let outcome = try await SpotlightIndexer.shared.reindex(sites)
+                log.info("indexed=\(outcome.indexed, privacy: .public) removed=\(outcome.removed, privacy: .public)")
+            } catch {
+                log.error("reindex failed: \(error.localizedDescription, privacy: .public)")
             }
+        }
+        do {
+            try await SiteStore.shared.load()
+        } catch {
+            log.error("initial load failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

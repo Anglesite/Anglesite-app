@@ -39,8 +39,12 @@ public actor SpotlightIndexer {
     }
 
     /// Compute the diff against the previously-indexed set, delete anything dropped, then
-    /// upsert the current set. Resets the tracked set even if the backend throws on upsert —
-    /// the caller can retry; we don't want to wedge into "everything looks deleted" state.
+    /// upsert the current set. `lastIndexedIDs` only advances on full success — if
+    /// `backend.index` throws after a successful delete, the tracked set stays at its
+    /// pre-call value, so the next `reindex` replays the (id-set-idempotent) delete and
+    /// retries the upsert. That's the intended retry posture; it costs one extra harmless
+    /// delete on the daemon but avoids drifting into "the indexer thinks it published this
+    /// but the index is missing entries" state.
     @discardableResult
     public func reindex(_ sites: [SiteStore.Site]) async throws -> Outcome {
         let entities = sites.map(SiteEntity.init)

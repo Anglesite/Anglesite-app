@@ -87,13 +87,15 @@ public actor SiteStore {
 
     /// Loads the persisted site list from disk into memory. Safe to call before `refresh()`
     /// when the UI wants to render quickly without waiting for filesystem validation.
+    /// Skips the change emit on a fresh-install no-file path — there's nothing to propagate,
+    /// and we'd otherwise wake the SpotlightIndexer for a no-op on every cold launch.
     public func load() async throws {
-        if fileManager.fileExists(atPath: persistenceURL.path) {
-            let data = try Data(contentsOf: persistenceURL)
-            sites = try Self.decoder.decode([Site].self, from: data)
-        } else {
+        guard fileManager.fileExists(atPath: persistenceURL.path) else {
             sites = []
+            return
         }
+        let data = try Data(contentsOf: persistenceURL)
+        sites = try Self.decoder.decode([Site].self, from: data)
         await emitChange()
     }
 
