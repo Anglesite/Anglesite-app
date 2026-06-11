@@ -19,7 +19,8 @@ let package = Package(
     ],
     products: [
         .library(name: "AnglesiteCore", targets: ["AnglesiteCore"]),
-        .library(name: "AnglesiteBridge", targets: ["AnglesiteBridge"])
+        .library(name: "AnglesiteBridge", targets: ["AnglesiteBridge"]),
+        .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"])
     ],
     targets: [
         .target(
@@ -33,6 +34,12 @@ let package = Package(
             path: "Sources/AnglesiteBridge",
             swiftSettings: strictConcurrency
         ),
+        .target(
+            name: "AnglesiteIntents",
+            dependencies: ["AnglesiteCore"],
+            path: "Sources/AnglesiteIntents",
+            swiftSettings: strictConcurrency
+        ),
         .testTarget(
             name: "AnglesiteCoreTests",
             dependencies: ["AnglesiteCore"],
@@ -43,6 +50,12 @@ let package = Package(
             name: "AnglesiteBridgeTests",
             dependencies: ["AnglesiteBridge"],
             path: "Tests/AnglesiteBridgeTests",
+            swiftSettings: strictConcurrency
+        ),
+        .testTarget(
+            name: "AnglesiteIntentsTests",
+            dependencies: ["AnglesiteIntents", "AnglesiteCore"],
+            path: "Tests/AnglesiteIntentsTests",
             swiftSettings: strictConcurrency
         )
     ]
