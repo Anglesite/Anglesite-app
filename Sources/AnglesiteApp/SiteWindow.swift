@@ -60,7 +60,6 @@ struct SiteWindow: View {
         }
     }
 
-    @ViewBuilder
     private func siteUI(for site: SiteStore.Site) -> some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
@@ -128,6 +127,7 @@ struct SiteWindow: View {
                 onRunAgain: { audit.audit(siteID: site.id, siteDirectory: site.path) }
             )
         }
+        .annotatedAsSite(site)   // #103 — view annotation + NSUserActivity for "deploy this"
     }
 
     @ViewBuilder
