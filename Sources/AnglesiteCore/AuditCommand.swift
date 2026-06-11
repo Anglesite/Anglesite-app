@@ -142,7 +142,14 @@ public actor AuditCommand {
             return .failure(.failed(reason: "couldn't spawn build: \(error)", exitCode: nil, logTail: []))
         }
 
-        let reason = await supervisor.waitForExit(handle)
+        let reason = await withTaskCancellationHandler {
+            await supervisor.waitForExit(handle)
+        } onCancel: {
+            // The audit was cancelled (e.g. a Shortcuts/Siri CancellableIntent). The backend
+            // resumes our wait as `.terminated`, but the OS build process would otherwise keep
+            // running — actually SIGTERM it so it doesn't finish after we've reported cancellation.
+            Task { await supervisor.terminate(handle) }
+        }
         // `waitForExit` only returns after the supervisor's per-pipe drain Tasks have finished,
         // so every byte the build wrote is already in `LogCenter` — filtering the snapshot by
         // source gives us the complete captured output for this build run.

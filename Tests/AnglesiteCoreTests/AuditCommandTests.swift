@@ -34,6 +34,40 @@ struct AuditCommandTests {
         .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script])
     }
 
+    // MARK: Cancellation
+
+    /// Poll `center` for a marker line up to `timeout`. Returns true once it appears.
+    private func waitForMarker(_ marker: String, in center: LogCenter, timeout: Duration = .seconds(3)) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            if await center.snapshot().contains(where: { $0.text.contains(marker) }) { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return false
+    }
+
+    @Test("Cancelling the task actually SIGTERMs the in-flight build subprocess")
+    func cancellationTerminatesBuild() async {
+        // The fixture sets a SIGTERM trap, echoes __STARTED__, then blocks. We cancel exactly once
+        // the build is running (synchronized on __STARTED__, not a fixed delay), and assert the
+        // result is `.failed(terminated)` AND the process reports the SIGTERM trap — proving it was
+        // actually killed, not orphaned.
+        let (cmd, _, center) = makeCommand(
+            runners: [FakeAuditRunner(category: .accessibility, result: .success([]))],
+            build: { _ in self.shFixture("trap 'echo __SIGTERM__; exit 143' TERM; echo __STARTED__; sleep 20; echo __COMPLETED__") }
+        )
+        let task = Task { await cmd.audit(siteID: "site", siteDirectory: tmpDir) }
+        #expect(await waitForMarker("__STARTED__", in: center, timeout: .seconds(10)), "build never started")
+        task.cancel()
+        let result = await task.value
+        guard case .failed(let reason, _, _) = result else {
+            Issue.record("expected .failed(terminated), got \(result)")
+            return
+        }
+        #expect(reason.contains("terminated"))
+        #expect(await waitForMarker("__SIGTERM__", in: center, timeout: .seconds(10)), "build subprocess was not actually SIGTERM'd")
+    }
+
     // MARK: Build failure
 
     @Test("Fails when the build step exits non-zero")

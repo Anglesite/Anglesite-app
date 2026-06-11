@@ -148,7 +148,15 @@ public actor DeployCommand {
             return .failed(reason: "couldn't spawn wrangler: \(error)", exitCode: nil)
         }
 
-        let reason = await supervisor.waitForExit(handle)
+        let reason = await withTaskCancellationHandler {
+            await supervisor.waitForExit(handle)
+        } onCancel: {
+            // The deploy was cancelled (e.g. a Shortcuts/Siri CancellableIntent). The backend
+            // resumes our wait as `.terminated`, but the OS process would otherwise keep running —
+            // actually SIGTERM it so the build/wrangler doesn't finish (and, for wrangler, doesn't
+            // keep publishing to production) after we've reported cancellation.
+            Task { await supervisor.terminate(handle) }
+        }
         let duration = Date().timeIntervalSince(started)
 
         // `waitForExit` only resumes after the supervisor's per-pipe drain Tasks have
@@ -206,7 +214,15 @@ public actor DeployCommand {
             return .failure(.failed(reason: "couldn't spawn build: \(error)", exitCode: nil))
         }
 
-        let reason = await supervisor.waitForExit(handle)
+        let reason = await withTaskCancellationHandler {
+            await supervisor.waitForExit(handle)
+        } onCancel: {
+            // The deploy was cancelled (e.g. a Shortcuts/Siri CancellableIntent). The backend
+            // resumes our wait as `.terminated`, but the OS process would otherwise keep running —
+            // actually SIGTERM it so the build/wrangler doesn't finish (and, for wrangler, doesn't
+            // keep publishing to production) after we've reported cancellation.
+            Task { await supervisor.terminate(handle) }
+        }
         switch reason {
         case .exited(let code) where code == 0:
             return .success
