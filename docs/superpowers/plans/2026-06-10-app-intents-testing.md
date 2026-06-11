@@ -412,9 +412,9 @@ struct SitesWindowRoot: View {
 }
 ```
 
-- [ ] **Step 3: Create `Sources/AnglesiteIntents/SiteIntents.swift`** (intents now in their own module; still using `let ops = SiteOperations()` — Task 7 swaps that for @Dependency)
+- [ ] **Step 3: Create `Sources/AnglesiteIntents/SiteIntents.swift`** (intents now in their own module; still using `let ops = SiteOperations()` — Task 6 swaps that for @Dependency)
 
-Write `Sources/AnglesiteIntents/SiteIntents.swift`:
+Write `Sources/AnglesiteIntents/SiteIntents.swift`. **Note:** post-#125, `DeploySiteIntent` and `AuditSiteIntent` conform to `LongRunningIntent` (not `AppIntent`) and wrap their ops calls in `performBackgroundTask { ... }`. Deploy uses the non-deprecated `requestConfirmation(dialog:)`. Preserve these from main when moving the file:
 
 ```swift
 import AppIntents
@@ -424,7 +424,10 @@ import AnglesiteCore
 /// the testable Result→dialog logic. No Claude/LLM process is involved — the intents drive the
 /// deterministic command actors directly.
 
-public struct DeploySiteIntent: AppIntent {
+// `LongRunningIntent` (→ `ProgressReportingIntent` → `AppIntent`) tells the system this work
+// can exceed the default intent execution budget, so a real deploy/audit invoked from Siri or
+// a background Shortcut isn't killed mid-run. The actual work runs inside `performBackgroundTask`.
+public struct DeploySiteIntent: LongRunningIntent {
     public static var title: LocalizedStringResource = "Deploy Site"
     public static var description = IntentDescription("Deploy a site to production with Anglesite.")
 
@@ -436,13 +439,15 @@ public struct DeploySiteIntent: AppIntent {
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
         try await requestConfirmation(
-            result: .result(dialog: "Deploy \(site.displayName) to production?")
+            dialog: "Deploy \(site.displayName) to production?"
         )
         let ops = SiteOperations()
         guard let resolved = await ops.site(id: site.id) else {
             return .result(dialog: "Couldn't find \(site.displayName).")
         }
-        let result = await ops.deploy(site: resolved)
+        let result = try await performBackgroundTask {
+            await ops.deploy(site: resolved)
+        }
         return .result(dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forDeploy: result)))
     }
 }
@@ -467,7 +472,7 @@ public struct BackupSiteIntent: AppIntent {
     }
 }
 
-public struct AuditSiteIntent: AppIntent {
+public struct AuditSiteIntent: LongRunningIntent {
     public static var title: LocalizedStringResource = "Check Site"
     public static var description = IntentDescription("Run an Anglesite audit and report findings.")
 
@@ -482,7 +487,9 @@ public struct AuditSiteIntent: AppIntent {
         guard let resolved = await ops.site(id: site.id) else {
             return .result(value: site, dialog: "Couldn't find \(site.displayName).")
         }
-        let result = await ops.audit(site: resolved)
+        let result = try await performBackgroundTask {
+            await ops.audit(site: resolved)
+        }
         return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forAudit: result)))
     }
 }
@@ -604,12 +611,12 @@ git commit -m "refactor(intents): move SiteIntents/Shortcuts/WindowRouter into A
 
 - [ ] **Step 1: Replace `let ops = SiteOperations()` in each of the four intents with `@Dependency`**
 
-Edit `Sources/AnglesiteIntents/SiteIntents.swift`. For each intent struct, remove the local `let ops = ...` line and add a stored property at the top of the struct.
+Edit `Sources/AnglesiteIntents/SiteIntents.swift`. For each intent struct, remove the local `let ops = ...` line and add a stored property at the top of the struct. The `performBackgroundTask` wrapping (for Deploy/Audit) is preserved — `ops` is captured by the closure as a regular stored property.
 
-For `DeploySiteIntent` (after the `@Parameter` line):
+For `DeploySiteIntent` (LongRunningIntent):
 
 ```swift
-public struct DeploySiteIntent: AppIntent {
+public struct DeploySiteIntent: LongRunningIntent {
     public static var title: LocalizedStringResource = "Deploy Site"
     public static var description = IntentDescription("Deploy a site to production with Anglesite.")
 
@@ -622,20 +629,65 @@ public struct DeploySiteIntent: AppIntent {
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
         try await requestConfirmation(
-            result: .result(dialog: "Deploy \(site.displayName) to production?")
+            dialog: "Deploy \(site.displayName) to production?"
         )
         guard let resolved = await ops.site(id: site.id) else {
             return .result(dialog: "Couldn't find \(site.displayName).")
         }
-        let result = await ops.deploy(site: resolved)
+        let result = try await performBackgroundTask {
+            await ops.deploy(site: resolved)
+        }
         return .result(dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forDeploy: result)))
     }
 }
 ```
 
-Apply the same pattern (add `@Dependency private var ops: any SiteOperationsProtocol`; drop the `let ops = SiteOperations()` line) to `BackupSiteIntent`, `AuditSiteIntent`. `OpenSiteIntent` doesn't touch `SiteOperations` — leave it alone.
+For `AuditSiteIntent` (LongRunningIntent):
 
-The dialog mapping `SiteOperations.dialog(forDeploy:)` is a static, still callable through the concrete type — no change.
+```swift
+public struct AuditSiteIntent: LongRunningIntent {
+    public static var title: LocalizedStringResource = "Check Site"
+    public static var description = IntentDescription("Run an Anglesite audit and report findings.")
+
+    @Parameter(title: "Site") public var site: SiteEntity
+    @Dependency private var ops: any SiteOperationsProtocol
+
+    public init() {}
+
+    public static var parameterSummary: some ParameterSummary { Summary("Check \(\.$site)") }
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<SiteEntity> {
+        guard let resolved = await ops.site(id: site.id) else {
+            return .result(value: site, dialog: "Couldn't find \(site.displayName).")
+        }
+        let result = try await performBackgroundTask {
+            await ops.audit(site: resolved)
+        }
+        return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forAudit: result)))
+    }
+}
+```
+
+For `BackupSiteIntent` (plain AppIntent, no `performBackgroundTask`):
+
+```swift
+public struct BackupSiteIntent: AppIntent {
+    // ... title/description/init/parameterSummary unchanged ...
+
+    @Parameter(title: "Site") public var site: SiteEntity
+    @Dependency private var ops: any SiteOperationsProtocol
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let resolved = await ops.site(id: site.id) else {
+            return .result(dialog: "Couldn't find \(site.displayName).")
+        }
+        let result = await ops.backup(site: resolved)
+        return .result(dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forBackup: result)))
+    }
+}
+```
+
+`OpenSiteIntent` doesn't touch `SiteOperations` — leave it alone. The static dialog mappings (`SiteOperations.dialog(forDeploy:)` etc.) are unchanged.
 
 - [ ] **Step 2: Build**
 
