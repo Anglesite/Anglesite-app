@@ -52,9 +52,9 @@ public struct SiteOperations: Sendable {
                 await factory.audit().audit(siteID: site.id, siteDirectory: url)
             }
         } catch let SiteAccess.AccessError.noGrant(message) {
-            return .failed(reason: message, exitCode: nil)
+            return .failed(reason: message, exitCode: nil, logTail: [])
         } catch {
-            return .failed(reason: error.localizedDescription, exitCode: nil)
+            return .failed(reason: error.localizedDescription, exitCode: nil, logTail: [])
         }
     }
 
@@ -91,7 +91,7 @@ public struct SiteOperations: Sendable {
             let w = report.findings.filter { $0.severity == .warning }.count
             let i = report.findings.filter { $0.severity == .info }.count
             return "Audit complete: \(c) critical, \(w) warning, \(i) info."
-        case .failed(let reason, _):
+        case .failed(let reason, _, _):
             return "Audit failed: \(reason)"
         }
     }
