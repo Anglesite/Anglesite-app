@@ -160,4 +160,16 @@ public actor SiteContentGraph {
     public func images(for siteID: String) -> [Image] {
         images.values.filter { $0.siteID == siteID }
     }
+
+    // MARK: - Incremental upsert
+
+    public func upsertPage(_ page: Page) async {
+        if pages[page.id] == page { return }
+        pages[page.id] = page
+        await emitChange(page.siteID)
+    }
+
+    // MARK: - Queries (single)
+
+    public func page(id: String) -> Page? { pages[id] }
 }

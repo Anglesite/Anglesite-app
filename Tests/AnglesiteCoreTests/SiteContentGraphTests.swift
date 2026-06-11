@@ -158,4 +158,51 @@ struct SiteContentGraphTests {
         #expect(afterSecond == 2)
         #expect(last == Self.siteA)
     }
+
+    @Test("upsertPage emits change and is queryable by id")
+    func upsertPageEmitsChange() async {
+        let graph = SiteContentGraph()
+        let counter = TestCounter()
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+
+        let page = Self.page()
+        await graph.upsertPage(page)
+
+        let stored = await graph.page(id: page.id)
+        let count = await counter.count
+        #expect(stored == page)
+        #expect(count == 1)
+    }
+
+    @Test("upsertPage with identical value does not emit")
+    func upsertPageIdenticalSuppressesEmit() async {
+        let graph = SiteContentGraph()
+        let counter = TestCounter()
+        let page = Self.page()
+        await graph.upsertPage(page)
+
+        // Install handler AFTER the first upsert so we only count the second.
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+        await graph.upsertPage(page)  // identical
+
+        let count = await counter.count
+        #expect(count == 0)
+    }
+
+    @Test("upsertPage with same id but different value emits and overwrites")
+    func upsertPageDifferentValueEmits() async {
+        let graph = SiteContentGraph()
+        let counter = TestCounter()
+        let original = Self.page(title: "About")
+        await graph.upsertPage(original)
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+
+        let revised = Self.page(title: "About Us")  // same route -> same id
+        await graph.upsertPage(revised)
+
+        let stored = await graph.page(id: original.id)
+        let count = await counter.count
+        #expect(stored?.title == "About Us")
+        #expect(count == 1)
+    }
 }
