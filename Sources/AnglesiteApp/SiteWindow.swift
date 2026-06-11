@@ -60,6 +60,7 @@ struct SiteWindow: View {
         }
     }
 
+    @ViewBuilder
     private func siteUI(for site: SiteStore.Site) -> some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
