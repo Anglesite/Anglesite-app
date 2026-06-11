@@ -201,6 +201,24 @@ public actor SiteContentGraph {
         await emitChange(removed.siteID)
     }
 
+    // MARK: - Teardown
+
+    /// Drops all entries (pages, posts, images) for `siteID` and emits a change. Always
+    /// emits — even if the site had no entries, subscribers may want the "site empty now"
+    /// signal to prune internal tracking (e.g., A.3 Spotlight indexer's last-indexed set).
+    public func unload(siteID: String) async {
+        for id in pages.compactMap({ $0.value.siteID == siteID ? $0.key : nil }) {
+            pages.removeValue(forKey: id)
+        }
+        for id in posts.compactMap({ $0.value.siteID == siteID ? $0.key : nil }) {
+            posts.removeValue(forKey: id)
+        }
+        for id in images.compactMap({ $0.value.siteID == siteID ? $0.key : nil }) {
+            images.removeValue(forKey: id)
+        }
+        await emitChange(siteID)
+    }
+
     // MARK: - Queries (single)
 
     public func page(id: String) -> Page? { pages[id] }

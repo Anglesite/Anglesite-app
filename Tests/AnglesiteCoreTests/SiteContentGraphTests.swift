@@ -319,4 +319,46 @@ struct SiteContentGraphTests {
         #expect(stored == nil)
         #expect(count == 1)
     }
+
+    @Test("unload drops all entries for the siteID (pages, posts, images)")
+    func unloadDropsAllEntriesForSite() async {
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [Self.page()],
+            posts: [Self.post()],
+            images: [Self.image()]
+        )
+        await graph.load(
+            siteID: Self.siteB,
+            pages: [Self.page(site: Self.siteB, route: "/b")],
+            posts: [],
+            images: []
+        )
+
+        await graph.unload(siteID: Self.siteA)
+
+        let aPages = await graph.pages(for: Self.siteA)
+        let aPosts = await graph.posts(for: Self.siteA)
+        let aImages = await graph.images(for: Self.siteA)
+        let bPages = await graph.pages(for: Self.siteB)
+        #expect(aPages.isEmpty)
+        #expect(aPosts.isEmpty)
+        #expect(aImages.isEmpty)
+        #expect(bPages.map(\.route) == ["/b"])
+    }
+
+    @Test("unload always emits a change, even when the siteID had no entries")
+    func unloadAlwaysEmitsChange() async {
+        let graph = SiteContentGraph()
+        let counter = TestCounter()
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+
+        await graph.unload(siteID: Self.siteA)
+
+        let count = await counter.count
+        let last = await counter.lastSiteID
+        #expect(count == 1)
+        #expect(last == Self.siteA)
+    }
 }
