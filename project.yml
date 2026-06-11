@@ -97,6 +97,8 @@ targets:
         product: AnglesiteCore
       - package: Anglesite
         product: AnglesiteBridge
+      - package: Anglesite
+        product: AnglesiteIntents
       - package: Sparkle
 
   AnglesiteMAS:
@@ -179,6 +181,8 @@ targets:
         product: AnglesiteCore
       - package: Anglesite
         product: AnglesiteBridge
+      - package: Anglesite
+        product: AnglesiteIntents
 
 schemes:
   Anglesite:

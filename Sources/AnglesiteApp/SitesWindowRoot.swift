@@ -1,20 +1,5 @@
-import Foundation
-import Observation
 import SwiftUI
-
-/// Lets `OpenSiteIntent` (which can't call SwiftUI's `openWindow`) request a site window.
-/// The "Sites" scene observes `requested` and opens/focuses the matching per-site window.
-@MainActor
-@Observable
-final class WindowRouter {
-    static let shared = WindowRouter()
-    private init() {}
-
-    /// The site id the intent asked to open; the scene clears it after handling.
-    var requested: String?
-
-    func requestOpen(siteID: String) { requested = siteID }
-}
+import AnglesiteIntents
 
 /// Root content for the "Sites" window. Wraps `SitesLauncherView` and bridges
 /// `WindowRouter` requests (from `OpenSiteIntent`) to `openWindow(value:)`. Holding the router

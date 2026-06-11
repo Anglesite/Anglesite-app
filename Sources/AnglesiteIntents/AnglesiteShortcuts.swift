@@ -6,8 +6,8 @@ import AppIntents
 /// The audit→deploy chain is composed in the Shortcuts editor: `AuditSiteIntent` returns a
 /// `SiteEntity` value that the user pipes into `DeploySiteIntent`, whose confirmation still
 /// gates the deploy. No extra `opensIntent` plumbing is needed for v0.
-struct AnglesiteShortcuts: AppShortcutsProvider {
-    static var appShortcuts: [AppShortcut] {
+public struct AnglesiteShortcuts: AppShortcutsProvider {
+    public static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: DeploySiteIntent(),
             phrases: ["Deploy my site with \(.applicationName)"],

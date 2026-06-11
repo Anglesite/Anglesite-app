@@ -100,4 +100,22 @@ struct SiteOperationsTests {
         #expect(!dialog.lowercased().contains("force"))
         #expect(!dialog.lowercased().contains("override"))
     }
+
+    @Test("deploy failure dialog surfaces the reason")
+    func deployFailureDialog() {
+        let dialog = SiteOperations.dialog(forDeploy: .failed(reason: "network down", exitCode: 1))
+        #expect(dialog == "Deploy failed: network down")
+    }
+
+    @Test("backup failure dialog surfaces the reason")
+    func backupFailureDialog() {
+        let dialog = SiteOperations.dialog(forBackup: .failed(reason: "push rejected", exitCode: 1))
+        #expect(dialog == "Backup failed: push rejected")
+    }
+
+    @Test("audit failure dialog surfaces the reason")
+    func auditFailureDialog() {
+        let dialog = SiteOperations.dialog(forAudit: .failed(reason: "config missing", exitCode: 1, logTail: []))
+        #expect(dialog == "Audit failed: config missing")
+    }
 }
