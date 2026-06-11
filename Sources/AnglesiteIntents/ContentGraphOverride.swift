@@ -9,7 +9,11 @@ import AnglesiteCore
 /// `ContentGraphOverride.scoped ?? graph` so the override takes precedence when set. In
 /// production the override is always `nil` and resolution flows through `@Dependency` as designed.
 ///
+/// `internal` (not `public`) so third-party intent extensions can't silently override the
+/// production graph by reaching in from their own modules. Tests reach in via
+/// `@testable import AnglesiteIntents`.
+///
 /// Mirrors `SiteOperationsOverride.scoped` (see #104, #127).
-public enum ContentGraphOverride {
-    @TaskLocal public static var scoped: SiteContentGraph?
+enum ContentGraphOverride {
+    @TaskLocal static var scoped: SiteContentGraph?
 }

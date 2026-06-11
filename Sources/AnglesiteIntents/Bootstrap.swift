@@ -25,6 +25,9 @@ private let log = Logger(subsystem: "dev.anglesite.app", category: "spotlight-in
 /// missed it — emission is idempotent (the indexer dedups by id set).
 public enum AnglesiteIntents {
     public static func bootstrap(contentGraph: SiteContentGraph) async {
+        // Singleton-factory: the closure always returns the same pre-constructed `contentGraph`
+        // instance. `AppDependencyManager.add` accepts a factory because dependencies may be
+        // per-resolution, but our graph is process-wide, so we capture and re-yield.
         AppDependencyManager.shared.add { () -> SiteContentGraph in contentGraph }
         AppDependencyManager.shared.add { () -> any SiteOperationsService in
             SiteOperations(factory: LiveCommandFactory())

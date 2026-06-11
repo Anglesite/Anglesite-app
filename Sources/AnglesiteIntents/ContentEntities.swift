@@ -28,6 +28,8 @@ public struct PageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     }
 }
 
+/// Resolves `PageEntity` references from `SiteContentGraph`. Used by Siri/Shortcuts for both
+/// id round-trip (`entities(for:)`) and natural-language match (`entities(matching:)`).
 public struct PageEntityQuery: EntityStringQuery {
     @Dependency private var graph: SiteContentGraph
 
@@ -61,7 +63,11 @@ public struct PageEntityQuery: EntityStringQuery {
             matches.append(contentsOf: await g.searchPages(siteID: siteID, matching: string))
         }
         return matches
-            .sorted { $0.lastModified > $1.lastModified }
+            .sorted {
+                $0.lastModified != $1.lastModified
+                    ? $0.lastModified > $1.lastModified
+                    : $0.id < $1.id
+            }
             .map(PageEntity.init)
     }
 
@@ -72,7 +78,11 @@ public struct PageEntityQuery: EntityStringQuery {
             all.append(contentsOf: await g.pages(for: siteID))
         }
         return all
-            .sorted { $0.lastModified > $1.lastModified }
+            .sorted {
+                $0.lastModified != $1.lastModified
+                    ? $0.lastModified > $1.lastModified
+                    : $0.id < $1.id
+            }
             .map(PageEntity.init)
     }
 
@@ -113,6 +123,8 @@ public struct PostEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     }
 }
 
+/// Resolves `PostEntity` references from `SiteContentGraph`. Search covers title, slug, tags,
+/// and collection name (delegated to `SiteContentGraph.searchPosts`).
 public struct PostEntityQuery: EntityStringQuery {
     @Dependency private var graph: SiteContentGraph
 
@@ -144,7 +156,11 @@ public struct PostEntityQuery: EntityStringQuery {
             matches.append(contentsOf: await g.searchPosts(siteID: siteID, matching: string))
         }
         return matches
-            .sorted { $0.lastModified > $1.lastModified }
+            .sorted {
+                $0.lastModified != $1.lastModified
+                    ? $0.lastModified > $1.lastModified
+                    : $0.id < $1.id
+            }
             .map(PostEntity.init)
     }
 
@@ -155,7 +171,11 @@ public struct PostEntityQuery: EntityStringQuery {
             all.append(contentsOf: await g.posts(for: siteID))
         }
         return all
-            .sorted { $0.lastModified > $1.lastModified }
+            .sorted {
+                $0.lastModified != $1.lastModified
+                    ? $0.lastModified > $1.lastModified
+                    : $0.id < $1.id
+            }
             .map(PostEntity.init)
     }
 
@@ -170,6 +190,10 @@ public struct ImageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public let displayName: String   // fileName
     public let relativePath: String
     public let siteID: String
+    /// Page routes that reference this image. Carried in the struct (not surfaced in
+    /// `displayRepresentation` today) so adding it later isn't a source-breaking AppEntity
+    /// schema change for Shortcuts persistence / donated interactions.
+    public let usedOnPages: [String]
 
     public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Image" }
 
@@ -184,9 +208,12 @@ public struct ImageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
         self.displayName = image.fileName
         self.relativePath = image.relativePath
         self.siteID = image.siteID
+        self.usedOnPages = image.usedOnPages
     }
 }
 
+/// Resolves `ImageEntity` references from `SiteContentGraph`. Search covers fileName and
+/// relativePath (delegated to `SiteContentGraph.searchImages`).
 public struct ImageEntityQuery: EntityStringQuery {
     @Dependency private var graph: SiteContentGraph
 
@@ -207,27 +234,22 @@ public struct ImageEntityQuery: EntityStringQuery {
         return found
     }
 
-    /// Case-insensitive substring scan on `fileName` and `relativePath`. Done locally rather
-    /// than via the graph: A.1 only shipped `searchPages` / `searchPosts`, and adding
-    /// `searchImages` to the graph is out of scope for A.2 (see spec follow-ups).
     public func entities(matching string: String) async throws -> [ImageEntity] {
-        // Empty / whitespace-only query → []. The local substring scan would match every
-        // image (since `"".contains` is true for all strings); surfacing that here would
-        // double up with suggestedEntities() during AppIntents disambiguation prefetch.
+        // Empty / whitespace-only query → []. The graph's searchImages returns everything on
+        // empty input; surfacing that here would double up with suggestedEntities() during
+        // AppIntents disambiguation prefetch. Keep the two surfaces distinct.
         guard !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         let g = resolved
-        let needle = string.lowercased()
         var matches: [SiteContentGraph.Image] = []
         for siteID in await g.knownSiteIDs() {
-            let scoped = await g.images(for: siteID)
-            matches.append(contentsOf: scoped.filter { image in
-                if image.fileName.lowercased().contains(needle) { return true }
-                if image.relativePath.lowercased().contains(needle) { return true }
-                return false
-            })
+            matches.append(contentsOf: await g.searchImages(siteID: siteID, matching: string))
         }
         return matches
-            .sorted { $0.lastModified > $1.lastModified }
+            .sorted {
+                $0.lastModified != $1.lastModified
+                    ? $0.lastModified > $1.lastModified
+                    : $0.id < $1.id
+            }
             .map(ImageEntity.init)
     }
 
@@ -238,7 +260,11 @@ public struct ImageEntityQuery: EntityStringQuery {
             all.append(contentsOf: await g.images(for: siteID))
         }
         return all
-            .sorted { $0.lastModified > $1.lastModified }
+            .sorted {
+                $0.lastModified != $1.lastModified
+                    ? $0.lastModified > $1.lastModified
+                    : $0.id < $1.id
+            }
             .map(ImageEntity.init)
     }
 
