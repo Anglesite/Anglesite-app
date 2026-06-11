@@ -89,4 +89,60 @@ struct SiteContentGraphTests {
         #expect(p1.id == "\(Self.siteA):page:/about")
         #expect(p1.id == p1.id) // exists as Identifiable.ID
     }
+
+    @Test("load replaces existing entries for the siteID")
+    func loadReplacesExistingEntries() async {
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [Self.page(route: "/about"), Self.page(route: "/contact")],
+            posts: [],
+            images: []
+        )
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [Self.page(route: "/about")],
+            posts: [],
+            images: []
+        )
+
+        let pages = await graph.pages(for: Self.siteA)
+        #expect(pages.map(\.route).sorted() == ["/about"])
+    }
+
+    @Test("load does not affect entries for other siteIDs")
+    func loadDoesNotAffectOtherSites() async {
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [Self.page(site: Self.siteA, route: "/a-home")],
+            posts: [],
+            images: []
+        )
+        await graph.load(
+            siteID: Self.siteB,
+            pages: [Self.page(site: Self.siteB, route: "/b-home")],
+            posts: [],
+            images: []
+        )
+
+        let a = await graph.pages(for: Self.siteA)
+        let b = await graph.pages(for: Self.siteB)
+        #expect(a.map(\.route) == ["/a-home"])
+        #expect(b.map(\.route) == ["/b-home"])
+    }
+
+    @Test("load emits change for the loaded siteID")
+    func loadEmitsChange() async {
+        let graph = SiteContentGraph()
+        let counter = TestCounter()
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+
+        await graph.load(siteID: Self.siteA, pages: [Self.page()], posts: [], images: [])
+
+        let count = await counter.count
+        let last = await counter.lastSiteID
+        #expect(count == 1)
+        #expect(last == Self.siteA)
+    }
 }

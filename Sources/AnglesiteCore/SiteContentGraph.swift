@@ -121,4 +121,37 @@ public actor SiteContentGraph {
         guard let handler = changeHandler else { return }
         await handler(siteID)
     }
+
+    // MARK: - Bulk load
+
+    /// Replaces all entries for `siteID` with the supplied payload. Existing entries for
+    /// other siteIDs are untouched. Always emits a change for `siteID`.
+    public func load(
+        siteID: String,
+        pages: [Page],
+        posts: [Post],
+        images: [Image]
+    ) async {
+        self.pages = self.pages.filter { $0.value.siteID != siteID }
+        self.posts = self.posts.filter { $0.value.siteID != siteID }
+        self.images = self.images.filter { $0.value.siteID != siteID }
+        for page in pages { self.pages[page.id] = page }
+        for post in posts { self.posts[post.id] = post }
+        for image in images { self.images[image.id] = image }
+        await emitChange(siteID)
+    }
+
+    // MARK: - Queries (per-site)
+
+    public func pages(for siteID: String) -> [Page] {
+        pages.values.filter { $0.siteID == siteID }
+    }
+
+    public func posts(for siteID: String) -> [Post] {
+        posts.values.filter { $0.siteID == siteID }
+    }
+
+    public func images(for siteID: String) -> [Image] {
+        images.values.filter { $0.siteID == siteID }
+    }
 }
