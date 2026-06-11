@@ -143,7 +143,7 @@ These issues target macOS 27 APIs available with Xcode 27 / Swift 6.4:
 - 🔲 **Native chat on Foundation Models** (#105) — replace Claude CLI subprocess with the on-device `LanguageModel` protocol for the MAS build.
 - 🔲 **System-wide MCP** (#101) — expose Anglesite actions to system AI via macOS 27's system-wide MCP.
 - ✅ **Spotlight semantic index** (#102) — `SiteEntity: IndexedEntity` + `SpotlightIndexer` actor (diff-based, fake-backend testable); `OpenSiteIntent` upgraded to `OpenIntent` so Spotlight result clicks route through `WindowRouter`; `SiteStore` change-handler installed in `AnglesiteIntents.bootstrap` keeps the index in sync with launcher add/remove without coupling Core → Intents. Site-level only for v0; per-page/post indexing deferred until usage shows whether the index churn is worth it.
-- 🔲 **View Annotations for Siri** (#103) — onscreen awareness on the preview pane.
+- ✅ **View Annotations for Siri** (#103) — `SiteEntityAnnotation` helper (Foundation-only, unit-tested) builds an `NSUserActivity` carrying the entity id; `View.annotatedAsSite(_:)` modifier wires both `View.appEntityIdentifier(_:)` (onscreen hit-test path) and `.userActivity(_:isActive:_:)` (Siri voice path); applied at the `SiteWindow` root so "deploy this site" / "back this up" resolve to the frontmost site without naming it. `NSUserActivityTypes` registered on both Info.plists. Closes the last tracked checkbox in #124 — Phase B is now complete.
 - 🔲 **App Intents Testing** (#104) — adopt the framework for intent coverage.
 - 🔲 **SwiftUI toolbar APIs** (#107) — adopt macOS 27 native toolbar for the site window action bar.
 - 🔲 **Structured UI for common tasks** (#94) — reduce chat to open-ended tasks; direct UI for deploy, backup, audit.
