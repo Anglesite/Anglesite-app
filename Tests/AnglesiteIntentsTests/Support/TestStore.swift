@@ -7,7 +7,9 @@ enum TestStore {
     static func with(_ sites: [SiteStore.Site]) async throws -> SiteStore {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("anglesite-intents-test-\(UUID().uuidString).json")
-        try JSONEncoder().encode(sites).write(to: url)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(sites).write(to: url)
         let store = SiteStore(persistenceURL: url)
         try await store.load()
         return store
