@@ -9,12 +9,19 @@ extension AppIntentsTests {
     /// doesn't hit-test through SwiftUI.
     @Suite("SiteEntityAnnotation")
     struct SiteEntityAnnotationTests {
+        @Test("activity registers the correct routing type")
+        func activityRegistersRoutingType() throws {
+            let site = TestStore.site(id: "s1", name: "Portfolio")
+            let activity = SiteEntityAnnotation.makeSiteUserActivity(SiteEntity(site))
+
+            #expect(activity.activityType == SiteEntityAnnotation.activityType)
+        }
+
         @Test("activity carries the entity id and a display title")
         func activityCarriesEntityIDAndTitle() throws {
             let site = TestStore.site(id: "s1", name: "Portfolio")
             let activity = SiteEntityAnnotation.makeSiteUserActivity(SiteEntity(site))
 
-            #expect(activity.activityType == SiteEntityAnnotation.activityType)
             #expect(activity.title == "Portfolio")
             #expect(activity.userInfo?["siteID"] as? String == "s1")
         }
@@ -26,9 +33,10 @@ extension AppIntentsTests {
 
             // We don't want this activity syncing to other devices — the frontmost-site
             // signal is local to this Mac's UI state. Until #71's iOS thin client + #124's
-            // SyncableEntity work lands, eligibility must stay off.
+            // SyncableEntity work lands, every cross-device path must stay off.
             #expect(activity.isEligibleForHandoff == false)
             #expect(activity.isEligibleForPublicIndexing == false)
+            #expect(activity.isEligibleForSearch == false)
         }
     }
 }
