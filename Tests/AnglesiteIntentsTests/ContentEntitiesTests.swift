@@ -341,4 +341,119 @@ extension AppIntentsTests {
             }
         }
     }
+
+    @Suite("ImageEntityQuery")
+    struct ImageEntityQueryTests {
+
+        @Test("ImageEntity displayName is the file name")
+        func displayRepresentation_fileName() {
+            let entity = ImageEntity(AppIntentsTests.gImage(relativePath: "public/images/hero.jpg", fileName: "hero.jpg"))
+            #expect(entity.displayName == "hero.jpg")
+            #expect(entity.relativePath == "public/images/hero.jpg")
+            #expect(entity.siteID == AppIntentsTests.aSite)
+        }
+
+        @Test("entities(for:) returns matching ids")
+        func entitiesForIds_returnsMatching() async throws {
+            let graph = SiteContentGraph()
+            let img = AppIntentsTests.gImage()
+            await graph.upsertImage(img)
+
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let results = try await ImageEntityQuery().entities(for: [img.id])
+                #expect(results.map(\.id) == [img.id])
+            }
+        }
+
+        @Test("entities(for:) silently skips unknown ids")
+        func entitiesForIds_skipsUnknown() async throws {
+            let graph = SiteContentGraph()
+            let img = AppIntentsTests.gImage()
+            await graph.upsertImage(img)
+
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let results = try await ImageEntityQuery().entities(for: [img.id, "nonexistent:image:nope.png"])
+                #expect(results.map(\.id) == [img.id])
+            }
+        }
+
+        @Test("entities(for:) with empty array returns empty")
+        func entitiesForIds_emptyArrayReturnsEmpty() async throws {
+            let graph = SiteContentGraph()
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let results = try await ImageEntityQuery().entities(for: [])
+                #expect(results.isEmpty)
+            }
+        }
+
+        @Test("entities(matching:) matches fileName case-insensitively")
+        func entitiesMatching_byFileName() async throws {
+            let graph = SiteContentGraph()
+            await graph.upsertImage(AppIntentsTests.gImage(relativePath: "public/images/hero.jpg", fileName: "hero.jpg"))
+            await graph.upsertImage(AppIntentsTests.gImage(relativePath: "public/images/avatar.png", fileName: "avatar.png"))
+
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let results = try await ImageEntityQuery().entities(matching: "HERO")
+                #expect(results.map(\.relativePath) == ["public/images/hero.jpg"])
+            }
+        }
+
+        @Test("entities(matching:) matches relativePath case-insensitively")
+        func entitiesMatching_byRelativePath() async throws {
+            let graph = SiteContentGraph()
+            await graph.upsertImage(AppIntentsTests.gImage(relativePath: "public/images/hero.jpg", fileName: "hero.jpg"))
+            await graph.upsertImage(AppIntentsTests.gImage(relativePath: "public/icons/star.svg", fileName: "star.svg"))
+
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let results = try await ImageEntityQuery().entities(matching: "icons")
+                #expect(results.map(\.relativePath) == ["public/icons/star.svg"])
+            }
+        }
+
+        @Test("entities(matching:) sorts results by lastModified DESC")
+        func entitiesMatching_sortedByLastModifiedDesc() async throws {
+            let graph = SiteContentGraph()
+            let older = AppIntentsTests.gImage(relativePath: "public/images/old.jpg", fileName: "old.jpg", modified: AppIntentsTests.t0)
+            let newer = AppIntentsTests.gImage(relativePath: "public/images/new.jpg", fileName: "new.jpg", modified: AppIntentsTests.t0.addingTimeInterval(60))
+            await graph.upsertImage(older)
+            await graph.upsertImage(newer)
+
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let results = try await ImageEntityQuery().entities(matching: ".jpg")
+                #expect(results.map(\.relativePath) == ["public/images/new.jpg", "public/images/old.jpg"])
+            }
+        }
+
+        @Test("suggestedEntities() returns all images across sites, sorted by lastModified DESC")
+        func suggestedEntities_returnsAllAcrossSites() async throws {
+            let graph = SiteContentGraph()
+            let oldA = AppIntentsTests.gImage(site: AppIntentsTests.aSite, relativePath: "public/images/a.jpg", fileName: "a.jpg", modified: AppIntentsTests.t0)
+            let newB = AppIntentsTests.gImage(site: AppIntentsTests.bSite, relativePath: "public/images/b.jpg", fileName: "b.jpg", modified: AppIntentsTests.t0.addingTimeInterval(60))
+            await graph.upsertImage(oldA)
+            await graph.upsertImage(newB)
+
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let results = try await ImageEntityQuery().suggestedEntities()
+                #expect(results.map(\.relativePath) == ["public/images/b.jpg", "public/images/a.jpg"])
+            }
+        }
+
+        @Test("suggestedEntities() on empty graph returns empty")
+        func suggestedEntities_emptyGraphReturnsEmpty() async throws {
+            let graph = SiteContentGraph()
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let results = try await ImageEntityQuery().suggestedEntities()
+                #expect(results.isEmpty)
+            }
+        }
+
+        @Test("defaultResult() returns nil for v0")
+        func defaultResult_returnsNil() async {
+            let graph = SiteContentGraph()
+            await ContentGraphOverride.$scoped.withValue(graph) {
+                let result = await ImageEntityQuery().defaultResult()
+                #expect(result == nil)
+            }
+        }
+    }
 }

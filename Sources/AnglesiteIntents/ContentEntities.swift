@@ -153,3 +153,82 @@ public struct PostEntityQuery: EntityStringQuery {
 
     public func defaultResult() async -> PostEntity? { nil }
 }
+
+// MARK: - ImageEntity
+
+/// An image asset under `public/images/` (or anywhere referenced), addressable by Siri/Shortcuts.
+public struct ImageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
+    public let id: String            // "{siteID}:image:{relativePath}"
+    public let displayName: String   // fileName
+    public let relativePath: String
+    public let siteID: String
+
+    public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Image" }
+
+    public var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(displayName)", subtitle: "\(relativePath)")
+    }
+
+    public static var defaultQuery = ImageEntityQuery()
+
+    public init(_ image: SiteContentGraph.Image) {
+        self.id = image.id
+        self.displayName = image.fileName
+        self.relativePath = image.relativePath
+        self.siteID = image.siteID
+    }
+}
+
+public struct ImageEntityQuery: EntityStringQuery {
+    @Dependency private var graph: SiteContentGraph
+
+    public init() {}
+
+    private var resolved: SiteContentGraph {
+        ContentGraphOverride.scoped ?? graph
+    }
+
+    public func entities(for identifiers: [String]) async throws -> [ImageEntity] {
+        let g = resolved
+        var found: [ImageEntity] = []
+        for id in identifiers {
+            if let image = await g.image(id: id) {
+                found.append(ImageEntity(image))
+            }
+        }
+        return found
+    }
+
+    /// Case-insensitive substring scan on `fileName` and `relativePath`. Done locally rather
+    /// than via the graph: A.1 only shipped `searchPages` / `searchPosts`, and adding
+    /// `searchImages` to the graph is out of scope for A.2 (see spec follow-ups).
+    public func entities(matching string: String) async throws -> [ImageEntity] {
+        let g = resolved
+        let needle = string.lowercased()
+        var matches: [SiteContentGraph.Image] = []
+        for siteID in await g.knownSiteIDs() {
+            let scoped = await g.images(for: siteID)
+            matches.append(contentsOf: scoped.filter { image in
+                if image.fileName.lowercased().contains(needle) { return true }
+                if image.relativePath.lowercased().contains(needle) { return true }
+                return false
+            })
+        }
+        return matches
+            .sorted { $0.lastModified > $1.lastModified }
+            .map(ImageEntity.init)
+    }
+
+    public func suggestedEntities() async throws -> [ImageEntity] {
+        let g = resolved
+        var all: [SiteContentGraph.Image] = []
+        for siteID in await g.knownSiteIDs() {
+            all.append(contentsOf: await g.images(for: siteID))
+        }
+        return all
+            .sorted { $0.lastModified > $1.lastModified }
+            .map(ImageEntity.init)
+    }
+
+    public func defaultResult() async -> ImageEntity? { nil }
+}
