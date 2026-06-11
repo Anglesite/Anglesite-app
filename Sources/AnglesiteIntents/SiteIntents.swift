@@ -8,15 +8,13 @@ import AnglesiteCore
 /// Tests bypass `@Dependency` and `requestConfirmation` through `SiteOperationsOverride.scoped`.
 /// `@Dependency` is gated by the AppIntents runtime to its own perform flow — direct
 /// `intent.perform()` calls from unit tests would otherwise crash. See `SiteOperationsOverride`.
+///
+/// macOS 27 — `LongRunningIntent` / `CancellableIntent` / `performBackgroundTask(onCancel:)` —
+/// are gated behind `#if compiler(>=6.4)` until GH ships Xcode 27 on the macos-15 runner. On
+/// Xcode 26.3 (Swift 6.3) the intents fall back to plain `AppIntent` with inline `await` calls
+/// (no extended budget, no Cancel UI). See #128 for cleanup once CI catches up.
 
-// `LongRunningIntent` (→ `ProgressReportingIntent` → `AppIntent`) tells the system this work
-// can exceed the default intent execution budget, so a real deploy/audit/backup invoked from
-// Siri or a background Shortcut isn't killed mid-run. `CancellableIntent` lets the system
-// offer a Cancel affordance; cancellation propagates into the operation task, whose command
-// actor SIGTERMs the running build/wrangler/git so it actually stops (see DeployCommand,
-// AuditCommand). Backup uses the same conformance because `git push` over a slow connection
-// on a large repo can exceed the default budget too.
-public struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
+public struct DeploySiteIntent: AppIntent {
     public static var title: LocalizedStringResource = "Deploy Site"
     public static var description = IntentDescription("Deploy a site to production with Anglesite.")
 
@@ -45,24 +43,27 @@ public struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
         guard let resolved = await ops.site(id: site.id) else {
             return .result(dialog: "Couldn't find \(site.displayName).")
         }
-        // Deploys (build + wrangler) routinely exceed the default budget — run as long-running,
-        // cancellable work. On cancel the operation task is cancelled, which terminates the
-        // subprocess inside DeployCommand; `onCancel` is the system's acknowledgement hook.
-        // In test scope `performBackgroundTask` isn't available (no AppIntents runtime), so we
-        // run the closure inline; cancellation isn't exercised under `swift test`.
+        // Deploys (build + wrangler) routinely exceed the default budget. On Xcode 27 we run via
+        // `performBackgroundTask(onCancel:)` so the system can offer Cancel and we get extended
+        // execution time. On Xcode 26.3 those APIs don't exist; fall back to inline await — the
+        // deploy will run but isn't cancellable from the system UI.
         let result: DeployCommand.Result
         if scoped != nil {
             result = await ops.deploy(site: resolved)
         } else {
+            #if compiler(>=6.4)
             result = try await performBackgroundTask {
                 await ops.deploy(site: resolved)
             } onCancel: { _ in }
+            #else
+            result = await ops.deploy(site: resolved)
+            #endif
         }
         return .result(dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forDeploy: result)))
     }
 }
 
-public struct BackupSiteIntent: LongRunningIntent, CancellableIntent {
+public struct BackupSiteIntent: AppIntent {
     public static var title: LocalizedStringResource = "Back Up Site"
     public static var description = IntentDescription("Commit and push a site backup with Anglesite.")
 
@@ -79,21 +80,25 @@ public struct BackupSiteIntent: LongRunningIntent, CancellableIntent {
         guard let resolved = await ops.site(id: site.id) else {
             return .result(dialog: "Couldn't find \(site.displayName).")
         }
-        // Backups (commit + push) can run long on slow networks / large repos — long-running,
-        // cancellable. On cancel the git subprocess is terminated inside BackupCommand.
+        // git push on a slow connection or large repo can exceed the default budget. Same
+        // long-running + cancellable adoption as deploy/audit on Xcode 27; fallback on 26.3.
         let result: BackupCommand.Result
         if scoped != nil {
             result = await ops.backup(site: resolved)
         } else {
+            #if compiler(>=6.4)
             result = try await performBackgroundTask {
                 await ops.backup(site: resolved)
             } onCancel: { _ in }
+            #else
+            result = await ops.backup(site: resolved)
+            #endif
         }
         return .result(dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forBackup: result)))
     }
 }
 
-public struct AuditSiteIntent: LongRunningIntent, CancellableIntent {
+public struct AuditSiteIntent: AppIntent {
     public static var title: LocalizedStringResource = "Check Site"
     public static var description = IntentDescription("Run an Anglesite audit and report findings.")
 
@@ -111,15 +116,19 @@ public struct AuditSiteIntent: LongRunningIntent, CancellableIntent {
         guard let resolved = await ops.site(id: site.id) else {
             return .result(value: site, dialog: "Couldn't find \(site.displayName).")
         }
-        // A full audit runs a site build + runners — can exceed the default budget. Cancellable:
-        // on cancel the build subprocess is terminated inside AuditCommand.
+        // A full audit (build + runners) can exceed the default budget. Same long-running +
+        // cancellable adoption as deploy/backup on Xcode 27; fallback on 26.3.
         let result: AuditCommand.Result
         if scoped != nil {
             result = await ops.audit(site: resolved)
         } else {
+            #if compiler(>=6.4)
             result = try await performBackgroundTask {
                 await ops.audit(site: resolved)
             } onCancel: { _ in }
+            #else
+            result = await ops.audit(site: resolved)
+            #endif
         }
         return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forAudit: result)))
     }
@@ -142,3 +151,16 @@ public struct OpenSiteIntent: AppIntent {
         return .result(dialog: "Opening \(site.displayName).")
     }
 }
+
+// `LongRunningIntent` (→ `ProgressReportingIntent` → `AppIntent`) tells the system this work
+// can exceed the default intent execution budget, so a real deploy/audit/backup invoked from
+// Siri or a background Shortcut isn't killed mid-run. `CancellableIntent` lets the system
+// offer a Cancel affordance; cancellation propagates into the operation task, whose command
+// actor SIGTERMs the running build/wrangler/git so it actually stops (see DeployCommand,
+// AuditCommand, BackupCommand). Both protocols are marker-only — no required methods —
+// so empty conditional conformance extensions are sufficient. Gated until #128 lands.
+#if compiler(>=6.4)
+extension DeploySiteIntent: LongRunningIntent, CancellableIntent {}
+extension BackupSiteIntent: LongRunningIntent, CancellableIntent {}
+extension AuditSiteIntent: LongRunningIntent, CancellableIntent {}
+#endif
