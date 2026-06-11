@@ -5,9 +5,14 @@ import Foundation
 /// Records calls and vends configurable Results. Each test sets up the result it expects and
 /// reads back call records after the intent runs.
 ///
-/// Class (not struct) so `AppDependencyManager.shared.add(fakeOps)` lets every test reads see
-/// the same mutated instance — the stored-instance form intentionally skips the closure path
-/// that would otherwise allocate a fresh instance per access.
+/// Class (not struct) so the override-scoped reference semantics let every test see the same
+/// mutated instance — the intent's `SiteOperationsOverride.scoped ?? self.ops` reads the
+/// captured `fake` instance directly rather than a copy.
+///
+/// Thread-safety: `@unchecked Sendable` is safe only because each test uses its own instance
+/// scoped to a single Task (via `SiteOperationsOverride.$scoped.withValue`) and the root
+/// `@Suite("AppIntents", .serialized)` prevents inter-suite parallel access. Sharing a
+/// single `FakeOperations` across concurrent tasks would race silently — don't.
 final class FakeOperations: SiteOperationsService, @unchecked Sendable {
     var sites: [String: SiteStore.Site] = [:]
     var deployResult: DeployCommand.Result = .failed(reason: "unstubbed deploy", exitCode: nil)

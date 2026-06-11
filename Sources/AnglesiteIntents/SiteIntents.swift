@@ -10,10 +10,12 @@ import AnglesiteCore
 /// `intent.perform()` calls from unit tests would otherwise crash. See `SiteOperationsOverride`.
 
 // `LongRunningIntent` (→ `ProgressReportingIntent` → `AppIntent`) tells the system this work
-// can exceed the default intent execution budget, so a real deploy/audit invoked from Siri or
-// a background Shortcut isn't killed mid-run. `CancellableIntent` lets the system offer a Cancel
-// affordance; cancellation propagates into the operation task, whose command actor SIGTERMs the
-// running build/wrangler so it actually stops (see DeployCommand/AuditCommand).
+// can exceed the default intent execution budget, so a real deploy/audit/backup invoked from
+// Siri or a background Shortcut isn't killed mid-run. `CancellableIntent` lets the system
+// offer a Cancel affordance; cancellation propagates into the operation task, whose command
+// actor SIGTERMs the running build/wrangler/git so it actually stops (see DeployCommand,
+// AuditCommand). Backup uses the same conformance because `git push` over a slow connection
+// on a large repo can exceed the default budget too.
 public struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
     public static var title: LocalizedStringResource = "Deploy Site"
     public static var description = IntentDescription("Deploy a site to production with Anglesite.")
@@ -26,8 +28,9 @@ public struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
     public static var parameterSummary: some ParameterSummary { Summary("Deploy \(\.$site)") }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
+        let scoped = SiteOperationsOverride.scoped
         let ops: any SiteOperationsService
-        if let scoped = SiteOperationsOverride.scoped {
+        if let scoped {
             // Test scope: skip the confirmation prompt (no UI surface) and bypass @Dependency.
             ops = scoped
         } else {
@@ -48,7 +51,7 @@ public struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
         // In test scope `performBackgroundTask` isn't available (no AppIntents runtime), so we
         // run the closure inline; cancellation isn't exercised under `swift test`.
         let result: DeployCommand.Result
-        if SiteOperationsOverride.scoped != nil {
+        if scoped != nil {
             result = await ops.deploy(site: resolved)
         } else {
             result = try await performBackgroundTask {
@@ -59,7 +62,7 @@ public struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
     }
 }
 
-public struct BackupSiteIntent: AppIntent {
+public struct BackupSiteIntent: LongRunningIntent, CancellableIntent {
     public static var title: LocalizedStringResource = "Back Up Site"
     public static var description = IntentDescription("Commit and push a site backup with Anglesite.")
 
@@ -71,11 +74,21 @@ public struct BackupSiteIntent: AppIntent {
     public static var parameterSummary: some ParameterSummary { Summary("Back up \(\.$site)") }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
-        let ops = SiteOperationsOverride.scoped ?? self.ops
+        let scoped = SiteOperationsOverride.scoped
+        let ops = scoped ?? self.ops
         guard let resolved = await ops.site(id: site.id) else {
             return .result(dialog: "Couldn't find \(site.displayName).")
         }
-        let result = await ops.backup(site: resolved)
+        // Backups (commit + push) can run long on slow networks / large repos — long-running,
+        // cancellable. On cancel the git subprocess is terminated inside BackupCommand.
+        let result: BackupCommand.Result
+        if scoped != nil {
+            result = await ops.backup(site: resolved)
+        } else {
+            result = try await performBackgroundTask {
+                await ops.backup(site: resolved)
+            } onCancel: { _ in }
+        }
         return .result(dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forBackup: result)))
     }
 }
@@ -93,14 +106,15 @@ public struct AuditSiteIntent: LongRunningIntent, CancellableIntent {
 
     // Returns the site as a value so a Shortcut can pipe it straight into Deploy (audit→deploy).
     public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<SiteEntity> {
-        let ops = SiteOperationsOverride.scoped ?? self.ops
+        let scoped = SiteOperationsOverride.scoped
+        let ops = scoped ?? self.ops
         guard let resolved = await ops.site(id: site.id) else {
             return .result(value: site, dialog: "Couldn't find \(site.displayName).")
         }
         // A full audit runs a site build + runners — can exceed the default budget. Cancellable:
         // on cancel the build subprocess is terminated inside AuditCommand.
         let result: AuditCommand.Result
-        if SiteOperationsOverride.scoped != nil {
+        if scoped != nil {
             result = await ops.audit(site: resolved)
         } else {
             result = try await performBackgroundTask {

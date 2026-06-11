@@ -59,8 +59,19 @@ jobs:
         working-directory: anglesite-plugin
         run: npm ci --no-audit --no-fund
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.app
+      - name: Select latest available Xcode
+        # CLAUDE.md mandates Xcode 27+ (macOS 27 SDK — LongRunningIntent / CancellableIntent /
+        # SwiftUI 27 @State macro semantics). The previous hardcoded Xcode 16 worked only
+        # because `swift build` didn't compile the macOS-27-API code path (it was in the app
+        # target). #104 moves the App Intents into a SwiftPM library and surfaces the gap.
+        # Pick the newest Xcode pre-installed on the runner; the runner image determines what's
+        # available (macos-15 typically ships Xcode 16/26 betas).
+        run: |
+          set -euo pipefail
+          ls -d /Applications/Xcode*.app 2>/dev/null | sort -V
+          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          echo "Selecting: $LATEST"
+          sudo xcode-select -s "$LATEST"
 
       - name: Show toolchain versions
         run: |
