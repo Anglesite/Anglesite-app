@@ -46,14 +46,16 @@ struct DeployCommandTests {
     func cancellationTerminatesWrangler() async {
         // Token + build (/usr/bin/true) + preflight pass quickly, then wrangler blocks. Cancelling
         // the deploy must kill wrangler (not orphan it mid-publish): `.failed(terminated)` AND the
-        // process reports the SIGTERM trap.
+        // process reports the SIGTERM trap. The fixture sets the trap, then echoes __STARTED__ so
+        // we cancel exactly once wrangler is running (no fixed-delay race — `__STARTED__` is unique
+        // to wrangler since the build step is silent /usr/bin/true).
         let (cmd, _, center) = makeCommand(
-            resolve: { _ in self.shFixture("trap 'echo __SIGTERM__; exit 143' TERM; sleep 20; echo __COMPLETED__") },
+            resolve: { _ in self.shFixture("trap 'echo __SIGTERM__; exit 143' TERM; echo __STARTED__; sleep 20; echo __COMPLETED__") },
             token: { "tok" }
         )
         let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let task = Task { await cmd.deploy(siteID: "site", siteDirectory: dir) }
-        try? await Task.sleep(for: .milliseconds(400))  // past build+preflight, into wrangler
+        #expect(await waitForMarker("__STARTED__", in: center, timeout: .seconds(10)), "wrangler never started")
         task.cancel()
         let result = await task.value
         guard case .failed(let reason, _) = result else {
@@ -61,7 +63,7 @@ struct DeployCommandTests {
             return
         }
         #expect(reason.contains("terminated"))
-        #expect(await waitForMarker("__SIGTERM__", in: center), "wrangler subprocess was not actually SIGTERM'd")
+        #expect(await waitForMarker("__SIGTERM__", in: center, timeout: .seconds(10)), "wrangler subprocess was not actually SIGTERM'd")
     }
 
     // MARK: Pre-spawn refusal (no work wasted)

@@ -48,15 +48,16 @@ struct AuditCommandTests {
 
     @Test("Cancelling the task actually SIGTERMs the in-flight build subprocess")
     func cancellationTerminatesBuild() async {
-        // The fixture echoes a marker only if it receives SIGTERM; otherwise it sleeps and prints
-        // a different marker. Cancelling the audit task must kill the build (not orphan it), so the
-        // result is `.failed(terminated)` AND the process reports the SIGTERM trap.
+        // The fixture sets a SIGTERM trap, echoes __STARTED__, then blocks. We cancel exactly once
+        // the build is running (synchronized on __STARTED__, not a fixed delay), and assert the
+        // result is `.failed(terminated)` AND the process reports the SIGTERM trap — proving it was
+        // actually killed, not orphaned.
         let (cmd, _, center) = makeCommand(
             runners: [FakeAuditRunner(category: .accessibility, result: .success([]))],
-            build: { _ in self.shFixture("trap 'echo __SIGTERM__; exit 143' TERM; sleep 20; echo __COMPLETED__") }
+            build: { _ in self.shFixture("trap 'echo __SIGTERM__; exit 143' TERM; echo __STARTED__; sleep 20; echo __COMPLETED__") }
         )
         let task = Task { await cmd.audit(siteID: "site", siteDirectory: tmpDir) }
-        try? await Task.sleep(for: .milliseconds(300))  // let the supervisor actually spawn it
+        #expect(await waitForMarker("__STARTED__", in: center, timeout: .seconds(10)), "build never started")
         task.cancel()
         let result = await task.value
         guard case .failed(let reason, _, _) = result else {
@@ -64,7 +65,7 @@ struct AuditCommandTests {
             return
         }
         #expect(reason.contains("terminated"))
-        #expect(await waitForMarker("__SIGTERM__", in: center), "build subprocess was not actually SIGTERM'd")
+        #expect(await waitForMarker("__SIGTERM__", in: center, timeout: .seconds(10)), "build subprocess was not actually SIGTERM'd")
     }
 
     // MARK: Build failure
