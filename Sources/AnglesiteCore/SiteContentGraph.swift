@@ -169,7 +169,21 @@ public actor SiteContentGraph {
         await emitChange(page.siteID)
     }
 
+    public func upsertPost(_ post: Post) async {
+        if posts[post.id] == post { return }
+        posts[post.id] = post
+        await emitChange(post.siteID)
+    }
+
+    public func upsertImage(_ image: Image) async {
+        if images[image.id] == image { return }
+        images[image.id] = image
+        await emitChange(image.siteID)
+    }
+
     // MARK: - Queries (single)
 
     public func page(id: String) -> Page? { pages[id] }
+    public func post(id: String) -> Post? { posts[id] }
+    public func image(id: String) -> Image? { images[id] }
 }

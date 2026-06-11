@@ -205,4 +205,58 @@ struct SiteContentGraphTests {
         #expect(stored?.title == "About Us")
         #expect(count == 1)
     }
+
+    @Test("upsertPost with identical value does not emit")
+    func upsertPostIdenticalSuppressesEmit() async {
+        let graph = SiteContentGraph()
+        let counter = TestCounter()
+        let post = Self.post()
+        await graph.upsertPost(post)
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+        await graph.upsertPost(post)
+
+        let count = await counter.count
+        #expect(count == 0)
+    }
+
+    @Test("upsertPost emits change and is queryable")
+    func upsertPostEmitsChange() async {
+        let graph = SiteContentGraph()
+        let counter = TestCounter()
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+        let post = Self.post()
+        await graph.upsertPost(post)
+
+        let stored = await graph.post(id: post.id)
+        let count = await counter.count
+        #expect(stored == post)
+        #expect(count == 1)
+    }
+
+    @Test("upsertImage with identical value does not emit")
+    func upsertImageIdenticalSuppressesEmit() async {
+        let graph = SiteContentGraph()
+        let counter = TestCounter()
+        let image = Self.image()
+        await graph.upsertImage(image)
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+        await graph.upsertImage(image)
+
+        let count = await counter.count
+        #expect(count == 0)
+    }
+
+    @Test("upsertImage emits change and is queryable")
+    func upsertImageEmitsChange() async {
+        let graph = SiteContentGraph()
+        let counter = TestCounter()
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+        let image = Self.image()
+        await graph.upsertImage(image)
+
+        let stored = await graph.image(id: image.id)
+        let count = await counter.count
+        #expect(stored == image)
+        #expect(count == 1)
+    }
 }
