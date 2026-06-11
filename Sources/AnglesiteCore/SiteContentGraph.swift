@@ -254,4 +254,16 @@ public actor SiteContentGraph {
             return false
         }
     }
+
+    // MARK: - Enumeration
+
+    /// The set of siteIDs that currently have any pages, posts, or images. Used by A.3
+    /// `ContentSpotlightIndexer` to know which sites it has live state for.
+    public func knownSiteIDs() -> Set<String> {
+        var ids: Set<String> = []
+        ids.formUnion(pages.values.map(\.siteID))
+        ids.formUnion(posts.values.map(\.siteID))
+        ids.formUnion(images.values.map(\.siteID))
+        return ids
+    }
 }

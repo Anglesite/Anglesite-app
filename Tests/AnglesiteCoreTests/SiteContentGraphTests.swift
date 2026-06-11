@@ -425,4 +425,37 @@ struct SiteContentGraphTests {
         #expect(Set(pages.map(\.route)) == ["/a", "/b"])
         #expect(Set(posts.map(\.slug)) == ["p1", "p2"])
     }
+
+    @Test("knownSiteIDs reflects current content across pages, posts, and images")
+    func knownSiteIDsReflectsCurrentContent() async {
+        let graph = SiteContentGraph()
+        let initiallyEmpty = await graph.knownSiteIDs()
+        #expect(initiallyEmpty.isEmpty)
+
+        await graph.upsertPage(Self.page(site: Self.siteA))
+        await graph.upsertPost(Self.post(site: Self.siteB))
+
+        let afterUpserts = await graph.knownSiteIDs()
+        #expect(afterUpserts == Set([Self.siteA, Self.siteB]))
+
+        await graph.unload(siteID: Self.siteA)
+        let afterUnload = await graph.knownSiteIDs()
+        #expect(afterUnload == Set([Self.siteB]))
+    }
+
+    @Test("setChangeHandler(nil) detaches: subsequent mutations do not emit")
+    func setChangeHandlerNilRemovesHandler() async {
+        let graph = SiteContentGraph()
+        let counter = TestCounter()
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+        await graph.upsertPage(Self.page())
+        let baseline = await counter.count
+
+        await graph.setChangeHandler(nil)
+        await graph.upsertPage(Self.page(route: "/contact"))
+        let final = await counter.count
+
+        #expect(baseline == 1)
+        #expect(final == baseline)
+    }
 }
