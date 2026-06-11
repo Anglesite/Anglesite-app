@@ -1,5 +1,15 @@
 # View Annotations for Siri Onscreen Awareness Implementation Plan
 
+> ⚠️ **Archive — executed in PR #167.** This plan is preserved as a trace artifact, not a live work item. The unchecked `- [ ]` boxes are the *original* task list, not current state. Three of the code snippets below were corrected against the Xcode 27 SDK during execution and **do not match what shipped**:
+>
+> - Task 1 specified `extension SiteEntity: AppEntityAnnotatable {}` — dropped. `AppEntityAnnotatable` is a holder-side protocol (NSUserActivity, NSView conform via the SDK), not an entity-side marker. The functional goal is met by setting `activity.appEntityIdentifier` directly on `NSUserActivity`.
+> - Task 1 specified `EntityIdentifier(entity.id, ofType: SiteEntity.self)` — that initializer does not exist. Replaced with `EntityIdentifier(for: entity)`.
+> - Task 2 specified `View.appEntityIdentifier(entity.id)` (a `String`) — actual signature is `appEntityIdentifier(_ identifier: EntityIdentifier?)`. Replaced with `EntityIdentifier(for: entity)` here too.
+>
+> Task 4 also undercounted the new tests: 3 added (`activityRegistersRoutingType`, `activityCarriesEntityIDAndTitle`, `activityIsSessionLocal`), not 2 — total is 273, not 272.
+>
+> The shipped code is the source of truth; read `Sources/AnglesiteIntents/SiteEntityAnnotation.swift` and `Sources/AnglesiteApp/SiteAnnotationModifier.swift` over the snippets below if you're using this as reference for future work.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Adopt the macOS 27 View Annotations API on `SiteWindow` so that "deploy this site" / "back this up" via Siri (or onscreen-aware Apple Intelligence prompts) resolve to the frontmost site without the user having to name it. Closes #103 and the remaining tracked checkbox in #124.

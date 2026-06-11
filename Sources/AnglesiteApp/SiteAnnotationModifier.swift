@@ -18,12 +18,11 @@ import SwiftUI
 /// Both are gated on `#if compiler(>=6.4)` because the macOS 27 APIs they call don't exist on
 /// Xcode 26.3. On the fallback toolchain the modifier becomes a no-op — voice "deploy this"
 /// falls back to the EntityStringQuery prompt, which is the pre-#103 behavior.
-///
 extension View {
     @ViewBuilder
     func annotatedAsSite(_ site: SiteStore.Site) -> some View {
-        let entity = SiteEntity(site)
         #if compiler(>=6.4)
+        let entity = SiteEntity(site)
         self
             .appEntityIdentifier(EntityIdentifier(for: entity))
             .userActivity(SiteEntityAnnotation.activityType, isActive: true) { activity in

@@ -128,7 +128,7 @@ struct SiteWindow: View {
                 onRunAgain: { audit.audit(siteID: site.id, siteDirectory: site.path) }
             )
         }
-        .annotatedAsSite(site)   // #103 — view annotation + NSUserActivity for "deploy this"
+        .annotatedAsSite(site)
     }
 
     @ViewBuilder
