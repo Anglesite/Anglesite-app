@@ -30,6 +30,40 @@ struct DeployCommandTests {
         .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script] + args)
     }
 
+    // MARK: Cancellation
+
+    /// Poll `center` for a marker line up to `timeout`. Returns true once it appears.
+    private func waitForMarker(_ marker: String, in center: LogCenter, timeout: Duration = .seconds(3)) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            if await center.snapshot().contains(where: { $0.text.contains(marker) }) { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return false
+    }
+
+    @Test("Cancelling the task actually SIGTERMs the in-flight wrangler subprocess")
+    func cancellationTerminatesWrangler() async {
+        // Token + build (/usr/bin/true) + preflight pass quickly, then wrangler blocks. Cancelling
+        // the deploy must kill wrangler (not orphan it mid-publish): `.failed(terminated)` AND the
+        // process reports the SIGTERM trap.
+        let (cmd, _, center) = makeCommand(
+            resolve: { _ in self.shFixture("trap 'echo __SIGTERM__; exit 143' TERM; sleep 20; echo __COMPLETED__") },
+            token: { "tok" }
+        )
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let task = Task { await cmd.deploy(siteID: "site", siteDirectory: dir) }
+        try? await Task.sleep(for: .milliseconds(400))  // past build+preflight, into wrangler
+        task.cancel()
+        let result = await task.value
+        guard case .failed(let reason, _) = result else {
+            Issue.record("expected .failed(terminated), got \(result)")
+            return
+        }
+        #expect(reason.contains("terminated"))
+        #expect(await waitForMarker("__SIGTERM__", in: center), "wrangler subprocess was not actually SIGTERM'd")
+    }
+
     // MARK: Pre-spawn refusal (no work wasted)
 
     @Test("Refuses before spawn when token source returns nil") func refusesBeforeSpawnWhenTokenSourceReturnsNil() async {

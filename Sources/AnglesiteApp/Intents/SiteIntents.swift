@@ -7,8 +7,10 @@ import AnglesiteCore
 
 // `LongRunningIntent` (→ `ProgressReportingIntent` → `AppIntent`) tells the system this work
 // can exceed the default intent execution budget, so a real deploy/audit invoked from Siri or
-// a background Shortcut isn't killed mid-run. The actual work runs inside `performBackgroundTask`.
-struct DeploySiteIntent: LongRunningIntent {
+// a background Shortcut isn't killed mid-run. `CancellableIntent` lets the system offer a Cancel
+// affordance; cancellation propagates into the operation task, whose command actor SIGTERMs the
+// running build/wrangler so it actually stops (see DeployCommand/AuditCommand).
+struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
     static var title: LocalizedStringResource = "Deploy Site"
     static var description = IntentDescription("Deploy a site to production with Anglesite.")
 
@@ -27,10 +29,12 @@ struct DeploySiteIntent: LongRunningIntent {
         guard let resolved = await ops.site(id: site.id) else {
             return .result(dialog: "Couldn't find \(site.displayName).")
         }
-        // Deploys (build + wrangler) routinely exceed the default budget — run as long-running.
+        // Deploys (build + wrangler) routinely exceed the default budget — run as long-running,
+        // cancellable work. On cancel the operation task is cancelled, which terminates the
+        // subprocess inside DeployCommand; `onCancel` is the system's acknowledgement hook.
         let result = try await performBackgroundTask {
             await ops.deploy(site: resolved)
-        }
+        } onCancel: { _ in }
         return .result(dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forDeploy: result)))
     }
 }
@@ -53,7 +57,7 @@ struct BackupSiteIntent: AppIntent {
     }
 }
 
-struct AuditSiteIntent: LongRunningIntent {
+struct AuditSiteIntent: LongRunningIntent, CancellableIntent {
     static var title: LocalizedStringResource = "Check Site"
     static var description = IntentDescription("Run an Anglesite audit and report findings.")
 
@@ -67,10 +71,11 @@ struct AuditSiteIntent: LongRunningIntent {
         guard let resolved = await ops.site(id: site.id) else {
             return .result(value: site, dialog: "Couldn't find \(site.displayName).")
         }
-        // A full audit runs a site build + runners — can exceed the default budget.
+        // A full audit runs a site build + runners — can exceed the default budget. Cancellable:
+        // on cancel the build subprocess is terminated inside AuditCommand.
         let result = try await performBackgroundTask {
             await ops.audit(site: resolved)
-        }
+        } onCancel: { _ in }
         return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forAudit: result)))
     }
 }
