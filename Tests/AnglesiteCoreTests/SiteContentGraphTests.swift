@@ -458,4 +458,19 @@ struct SiteContentGraphTests {
         #expect(baseline == 1)
         #expect(final == baseline)
     }
+
+    @Test("Concurrent upserts are serialized: 100 parallel upserts yield 100 entries")
+    func concurrentUpsertsAreSerialized() async {
+        let graph = SiteContentGraph()
+        await withTaskGroup(of: Void.self) { group in
+            for i in 0..<100 {
+                group.addTask {
+                    await graph.upsertPage(Self.page(route: "/p\(i)"))
+                }
+            }
+        }
+        let pages = await graph.pages(for: Self.siteA)
+        #expect(pages.count == 100)
+        #expect(Set(pages.map(\.route)).count == 100)
+    }
 }
