@@ -4,6 +4,10 @@ import AnglesiteCore
 /// The four App Intents. Each is a thin adapter over `SiteOperations` (Core), which holds all
 /// the testable Result→dialog logic. No Claude/LLM process is involved — the intents drive the
 /// deterministic command actors directly.
+///
+/// Tests bypass `@Dependency` and `requestConfirmation` through `SiteOperationsOverride.scoped`.
+/// `@Dependency` is gated by the AppIntents runtime to its own perform flow — direct
+/// `intent.perform()` calls from unit tests would otherwise crash. See `SiteOperationsOverride`.
 
 // `LongRunningIntent` (→ `ProgressReportingIntent` → `AppIntent`) tells the system this work
 // can exceed the default intent execution budget, so a real deploy/audit invoked from Siri or
@@ -22,21 +26,35 @@ public struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
     public static var parameterSummary: some ParameterSummary { Summary("Deploy \(\.$site)") }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
-        // Deploy is outward-facing (pushes to production), so confirm before running. The
-        // pre-deploy security scan still gates inside DeployCommand — confirmation is an
-        // additional guard against accidental voice/Shortcut triggers, not a replacement.
-        try await requestConfirmation(
-            dialog: "Deploy \(site.displayName) to production?"
-        )
+        let ops: any SiteOperationsService
+        if let scoped = SiteOperationsOverride.scoped {
+            // Test scope: skip the confirmation prompt (no UI surface) and bypass @Dependency.
+            ops = scoped
+        } else {
+            // Deploy is outward-facing (pushes to production), so confirm before running. The
+            // pre-deploy security scan still gates inside DeployCommand — confirmation is an
+            // additional guard against accidental voice/Shortcut triggers, not a replacement.
+            try await requestConfirmation(
+                dialog: "Deploy \(site.displayName) to production?"
+            )
+            ops = self.ops
+        }
         guard let resolved = await ops.site(id: site.id) else {
             return .result(dialog: "Couldn't find \(site.displayName).")
         }
         // Deploys (build + wrangler) routinely exceed the default budget — run as long-running,
         // cancellable work. On cancel the operation task is cancelled, which terminates the
         // subprocess inside DeployCommand; `onCancel` is the system's acknowledgement hook.
-        let result = try await performBackgroundTask {
-            await ops.deploy(site: resolved)
-        } onCancel: { _ in }
+        // In test scope `performBackgroundTask` isn't available (no AppIntents runtime), so we
+        // run the closure inline; cancellation isn't exercised under `swift test`.
+        let result: DeployCommand.Result
+        if SiteOperationsOverride.scoped != nil {
+            result = await ops.deploy(site: resolved)
+        } else {
+            result = try await performBackgroundTask {
+                await ops.deploy(site: resolved)
+            } onCancel: { _ in }
+        }
         return .result(dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forDeploy: result)))
     }
 }
@@ -53,6 +71,7 @@ public struct BackupSiteIntent: AppIntent {
     public static var parameterSummary: some ParameterSummary { Summary("Back up \(\.$site)") }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
+        let ops = SiteOperationsOverride.scoped ?? self.ops
         guard let resolved = await ops.site(id: site.id) else {
             return .result(dialog: "Couldn't find \(site.displayName).")
         }
@@ -74,14 +93,20 @@ public struct AuditSiteIntent: LongRunningIntent, CancellableIntent {
 
     // Returns the site as a value so a Shortcut can pipe it straight into Deploy (audit→deploy).
     public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<SiteEntity> {
+        let ops = SiteOperationsOverride.scoped ?? self.ops
         guard let resolved = await ops.site(id: site.id) else {
             return .result(value: site, dialog: "Couldn't find \(site.displayName).")
         }
         // A full audit runs a site build + runners — can exceed the default budget. Cancellable:
         // on cancel the build subprocess is terminated inside AuditCommand.
-        let result = try await performBackgroundTask {
-            await ops.audit(site: resolved)
-        } onCancel: { _ in }
+        let result: AuditCommand.Result
+        if SiteOperationsOverride.scoped != nil {
+            result = await ops.audit(site: resolved)
+        } else {
+            result = try await performBackgroundTask {
+                await ops.audit(site: resolved)
+            } onCancel: { _ in }
+        }
         return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forAudit: result)))
     }
 }
