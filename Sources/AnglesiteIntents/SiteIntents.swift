@@ -1,6 +1,5 @@
 import AppIntents
 import AnglesiteCore
-import AnglesiteIntents  // for SiteEntity
 
 /// The four App Intents. Each is a thin adapter over `SiteOperations` (Core), which holds all
 /// the testable Result→dialog logic. No Claude/LLM process is involved — the intents drive the
@@ -11,15 +10,17 @@ import AnglesiteIntents  // for SiteEntity
 // a background Shortcut isn't killed mid-run. `CancellableIntent` lets the system offer a Cancel
 // affordance; cancellation propagates into the operation task, whose command actor SIGTERMs the
 // running build/wrangler so it actually stops (see DeployCommand/AuditCommand).
-struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
-    static var title: LocalizedStringResource = "Deploy Site"
-    static var description = IntentDescription("Deploy a site to production with Anglesite.")
+public struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
+    public static var title: LocalizedStringResource = "Deploy Site"
+    public static var description = IntentDescription("Deploy a site to production with Anglesite.")
 
-    @Parameter(title: "Site") var site: SiteEntity
+    @Parameter(title: "Site") public var site: SiteEntity
 
-    static var parameterSummary: some ParameterSummary { Summary("Deploy \(\.$site)") }
+    public init() {}
 
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    public static var parameterSummary: some ParameterSummary { Summary("Deploy \(\.$site)") }
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog {
         // Deploy is outward-facing (pushes to production), so confirm before running. The
         // pre-deploy security scan still gates inside DeployCommand — confirmation is an
         // additional guard against accidental voice/Shortcut triggers, not a replacement.
@@ -40,15 +41,17 @@ struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
     }
 }
 
-struct BackupSiteIntent: AppIntent {
-    static var title: LocalizedStringResource = "Back Up Site"
-    static var description = IntentDescription("Commit and push a site backup with Anglesite.")
+public struct BackupSiteIntent: AppIntent {
+    public static var title: LocalizedStringResource = "Back Up Site"
+    public static var description = IntentDescription("Commit and push a site backup with Anglesite.")
 
-    @Parameter(title: "Site") var site: SiteEntity
+    @Parameter(title: "Site") public var site: SiteEntity
 
-    static var parameterSummary: some ParameterSummary { Summary("Back up \(\.$site)") }
+    public init() {}
 
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    public static var parameterSummary: some ParameterSummary { Summary("Back up \(\.$site)") }
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog {
         let ops = SiteOperations()
         guard let resolved = await ops.site(id: site.id) else {
             return .result(dialog: "Couldn't find \(site.displayName).")
@@ -58,16 +61,18 @@ struct BackupSiteIntent: AppIntent {
     }
 }
 
-struct AuditSiteIntent: LongRunningIntent, CancellableIntent {
-    static var title: LocalizedStringResource = "Check Site"
-    static var description = IntentDescription("Run an Anglesite audit and report findings.")
+public struct AuditSiteIntent: LongRunningIntent, CancellableIntent {
+    public static var title: LocalizedStringResource = "Check Site"
+    public static var description = IntentDescription("Run an Anglesite audit and report findings.")
 
-    @Parameter(title: "Site") var site: SiteEntity
+    @Parameter(title: "Site") public var site: SiteEntity
 
-    static var parameterSummary: some ParameterSummary { Summary("Check \(\.$site)") }
+    public init() {}
+
+    public static var parameterSummary: some ParameterSummary { Summary("Check \(\.$site)") }
 
     // Returns the site as a value so a Shortcut can pipe it straight into Deploy (audit→deploy).
-    func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<SiteEntity> {
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<SiteEntity> {
         let ops = SiteOperations()
         guard let resolved = await ops.site(id: site.id) else {
             return .result(value: site, dialog: "Couldn't find \(site.displayName).")
@@ -81,17 +86,19 @@ struct AuditSiteIntent: LongRunningIntent, CancellableIntent {
     }
 }
 
-struct OpenSiteIntent: AppIntent {
-    static var title: LocalizedStringResource = "Open Site"
-    static var description = IntentDescription("Open a site window in Anglesite.")
-    static var openAppWhenRun = true
+public struct OpenSiteIntent: AppIntent {
+    public static var title: LocalizedStringResource = "Open Site"
+    public static var description = IntentDescription("Open a site window in Anglesite.")
+    public static var openAppWhenRun = true
 
-    @Parameter(title: "Site") var site: SiteEntity
+    @Parameter(title: "Site") public var site: SiteEntity
 
-    static var parameterSummary: some ParameterSummary { Summary("Open \(\.$site)") }
+    public init() {}
+
+    public static var parameterSummary: some ParameterSummary { Summary("Open \(\.$site)") }
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    public func perform() async throws -> some IntentResult & ProvidesDialog {
         WindowRouter.shared.requestOpen(siteID: site.id)
         return .result(dialog: "Opening \(site.displayName).")
     }

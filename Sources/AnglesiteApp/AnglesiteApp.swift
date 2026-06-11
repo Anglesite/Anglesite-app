@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import AnglesiteCore
 import AnglesiteBridge
+import AnglesiteIntents
 
 /// Owns process-level lifecycle that SwiftUI's `App` value type can't: prime the npm cache on
 /// launch, and drain every supervised child on quit so nothing outlives the app.
