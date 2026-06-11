@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Land the design from `docs/superpowers/specs/2026-06-10-app-intents-testing-design.md` (#104) — extract `Sources/AnglesiteApp/Intents/*` into a new SwiftPM library `AnglesiteIntents`, switch the four App Intents to `@Dependency`-injected `SiteOperationsProtocol`, and add ~19 tests in a new `AnglesiteIntentsTests` target running under `swift test --parallel`.
+**Goal:** Land the design from `docs/superpowers/specs/2026-06-10-app-intents-testing-design.md` (#104) — extract `Sources/AnglesiteApp/Intents/*` into a new SwiftPM library `AnglesiteIntents`, switch the four App Intents to `@Dependency`-injected `SiteOperationsService`, and add ~19 tests in a new `AnglesiteIntentsTests` target running under `swift test --parallel`.
 
 **Architecture:** New SPM library `AnglesiteIntents` (depends on `AnglesiteCore`, system `AppIntents`, `Observation`) holds the four intents + `SiteEntity` + `SiteEntityQuery` + `AnglesiteShortcuts` + the `WindowRouter` class. The app target keeps `SitesWindowRoot` (SwiftUI scene infra) and gains a one-line `AnglesiteIntents.bootstrap()` call at launch that registers a live `SiteOperations` with `AppDependencyManager.shared`. Tests register fakes via the same manager; all suites nest under a single `@Suite("AppIntents", .serialized)` root to serialize mutations of the shared dependency registry.
 
@@ -12,10 +12,10 @@
 
 ## Phase A — Protocol + scaffolding
 
-### Task 1: Extract `SiteOperationsProtocol` in `AnglesiteCore`
+### Task 1: Extract `SiteOperationsService` in `AnglesiteCore`
 
 **Files:**
-- Create: `Sources/AnglesiteCore/SiteOperationsProtocol.swift`
+- Create: `Sources/AnglesiteCore/SiteOperationsService.swift`
 - Modify: `Sources/AnglesiteCore/SiteOperations.swift` (no behavioral changes; just add conformance via extension)
 - Test: `Tests/AnglesiteCoreTests/SiteOperationsTests.swift` (existing, must stay green)
 
@@ -26,7 +26,7 @@ Expected: all SiteOperationsTests pass (4 tests).
 
 - [ ] **Step 2: Create the protocol file**
 
-Write `Sources/AnglesiteCore/SiteOperationsProtocol.swift`:
+Write `Sources/AnglesiteCore/SiteOperationsService.swift`:
 
 ```swift
 import Foundation
@@ -37,14 +37,14 @@ import Foundation
 /// `SiteOperations` is the production conformance. Tests register a fake conforming type
 /// with `AppDependencyManager.shared` to drive intent suites; see the AnglesiteIntents
 /// test target.
-public protocol SiteOperationsProtocol: Sendable {
+public protocol SiteOperationsService: Sendable {
     func site(id: String) async -> SiteStore.Site?
     func deploy(site: SiteStore.Site) async -> DeployCommand.Result
     func backup(site: SiteStore.Site) async -> BackupCommand.Result
     func audit(site: SiteStore.Site) async -> AuditCommand.Result
 }
 
-extension SiteOperations: SiteOperationsProtocol {}
+extension SiteOperations: SiteOperationsService {}
 ```
 
 - [ ] **Step 3: Verify the build is still clean**
@@ -60,8 +60,8 @@ Expected: all 4 tests still pass — the protocol extraction is a no-op for exis
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/AnglesiteCore/SiteOperationsProtocol.swift
-git commit -m "feat(intents): extract SiteOperationsProtocol seam for App Intents testing (#104)"
+git add Sources/AnglesiteCore/SiteOperationsService.swift
+git commit -m "feat(intents): extract SiteOperationsService seam for App Intents testing (#104)"
 ```
 
 ---
@@ -604,7 +604,7 @@ git commit -m "refactor(intents): move SiteIntents/Shortcuts/WindowRouter into A
 
 ## Phase C — `@Dependency` wiring
 
-### Task 6: Switch intents to `@Dependency private var ops: any SiteOperationsProtocol`
+### Task 6: Switch intents to `@Dependency private var ops: any SiteOperationsService`
 
 **Files:**
 - Modify: `Sources/AnglesiteIntents/SiteIntents.swift`
@@ -621,7 +621,7 @@ public struct DeploySiteIntent: LongRunningIntent {
     public static var description = IntentDescription("Deploy a site to production with Anglesite.")
 
     @Parameter(title: "Site") public var site: SiteEntity
-    @Dependency private var ops: any SiteOperationsProtocol
+    @Dependency private var ops: any SiteOperationsService
 
     public init() {}
 
@@ -650,7 +650,7 @@ public struct AuditSiteIntent: LongRunningIntent {
     public static var description = IntentDescription("Run an Anglesite audit and report findings.")
 
     @Parameter(title: "Site") public var site: SiteEntity
-    @Dependency private var ops: any SiteOperationsProtocol
+    @Dependency private var ops: any SiteOperationsService
 
     public init() {}
 
@@ -675,7 +675,7 @@ public struct BackupSiteIntent: AppIntent {
     // ... title/description/init/parameterSummary unchanged ...
 
     @Parameter(title: "Site") public var site: SiteEntity
-    @Dependency private var ops: any SiteOperationsProtocol
+    @Dependency private var ops: any SiteOperationsService
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
         guard let resolved = await ops.site(id: site.id) else {
@@ -725,11 +725,11 @@ import AnglesiteCore
 /// Public entry point that registers production dependencies with `AppDependencyManager`.
 ///
 /// Called once from `AppDelegate.applicationDidFinishLaunching` today. #101 (system MCP)
-/// will reuse this from a non-UI process so a backgrounded intent can resolve `SiteOperationsProtocol`
+/// will reuse this from a non-UI process so a backgrounded intent can resolve `SiteOperationsService`
 /// before any window is opened.
 public enum AnglesiteIntents {
     public static func bootstrap() {
-        AppDependencyManager.shared.add { () -> any SiteOperationsProtocol in
+        AppDependencyManager.shared.add { () -> any SiteOperationsService in
             SiteOperations(factory: LiveCommandFactory())
         }
     }
@@ -799,7 +799,7 @@ import Foundation
 /// Class (not struct) so `AppDependencyManager.shared.add(fakeOps)` lets every test reads see
 /// the same mutated instance — the stored-instance form intentionally skips the closure path
 /// that would otherwise allocate a fresh instance per access.
-final class FakeOperations: SiteOperationsProtocol, @unchecked Sendable {
+final class FakeOperations: SiteOperationsService, @unchecked Sendable {
     var sites: [String: SiteStore.Site] = [:]
     var deployResult: DeployCommand.Result = .failed(reason: "unstubbed deploy", exitCode: nil)
     var backupResult: BackupCommand.Result = .failed(reason: "unstubbed backup", exitCode: nil)
@@ -1054,7 +1054,7 @@ extension AppIntentsTests {
         init() async {
             self.site = TestStore.site(id: "s1", name: "Portfolio")
             fake.sites = [site.id: site]
-            await AppDependencyManager.shared.add(fake as any SiteOperationsProtocol)
+            await AppDependencyManager.shared.add(fake as any SiteOperationsService)
         }
 
         @Test("succeeds and reports the deployed URL")
@@ -1118,7 +1118,7 @@ extension AppIntentsTests {
         init() async {
             self.site = TestStore.site(id: "s1", name: "Portfolio")
             fake.sites = [site.id: site]
-            await AppDependencyManager.shared.add(fake as any SiteOperationsProtocol)
+            await AppDependencyManager.shared.add(fake as any SiteOperationsService)
         }
 
         @Test("succeeded result reports short SHA and remote")
@@ -1175,7 +1175,7 @@ extension AppIntentsTests {
         init() async {
             self.site = TestStore.site(id: "s1", name: "Portfolio")
             fake.sites = [site.id: site]
-            await AppDependencyManager.shared.add(fake as any SiteOperationsProtocol)
+            await AppDependencyManager.shared.add(fake as any SiteOperationsService)
         }
 
         private func finding(_ severity: AuditReport.Finding.Severity) -> AuditReport.Finding {
@@ -1301,7 +1301,7 @@ extension AppIntentsTests {
             let report = AuditReport(findings: [], runnersExecuted: [.seo], runnersSkipped: [])
             fake.auditResult = .succeeded(report: report, duration: 1)
             fake.deployResult = .succeeded(url: URL(string: "https://example.com")!, duration: 1)
-            await AppDependencyManager.shared.add(fake as any SiteOperationsProtocol)
+            await AppDependencyManager.shared.add(fake as any SiteOperationsService)
         }
 
         @Test("audit output (a SiteEntity) flows into deploy as input")
@@ -1409,9 +1409,9 @@ git push -u origin feat/app-intents-testing-104
 gh pr create --title "test(intents): App Intents Testing framework adoption (#104)" --body "$(cat <<'EOF'
 ## Summary
 
-Closes #104. Extracts the four App Intents from #122 into a new `AnglesiteIntents` SPM library, switches them to `@Dependency`-injected `SiteOperationsProtocol`, and adds 19 tests across 7 nested suites under a single `.serialized` root.
+Closes #104. Extracts the four App Intents from #122 into a new `AnglesiteIntents` SPM library, switches them to `@Dependency`-injected `SiteOperationsService`, and adds 19 tests across 7 nested suites under a single `.serialized` root.
 
-- `AnglesiteCore`: new `SiteOperationsProtocol` over the four existing `SiteOperations` methods.
+- `AnglesiteCore`: new `SiteOperationsService` over the four existing `SiteOperations` methods.
 - New `AnglesiteIntents` library: holds `SiteEntity`, the four intents, `AnglesiteShortcuts`, the `WindowRouter` class, and `bootstrap()`. Depends on `AnglesiteCore` + system `AppIntents` + `Observation`.
 - App target keeps `SitesWindowRoot` (the SwiftUI view) and calls `AnglesiteIntents.bootstrap()` from `AppDelegate.applicationDidFinishLaunching`.
 - `SiteEntityQuery` now accepts an injectable `SiteStore` (defaults to `.shared`) so tests can populate a throwaway store.
@@ -1442,4 +1442,4 @@ EOF
 
 **2. Placeholder scan:** No "TBD"/"TODO"/"appropriate"-style placeholders. Each step shows the actual code or commands. Task 5's Step 1 was reordered after self-review because the original plan would have left a broken intermediate state (intents in AnglesiteIntents referencing app-target WindowRouter); the revised Task 5 moves both in the same commit.
 
-**3. Type consistency:** `SiteOperationsProtocol` signature is identical in T1 (definition), T6 (intent uses), T7 (bootstrap registers), T8 (fake conforms). `FakeOperations` API used in T10–T11 matches what's defined in T8. `WindowRouter.shared.requested` matches across T10 and source. `AppDependencyManager.shared.add` is called with the stored-instance form (`fake as any SiteOperationsProtocol`) in tests and the closure form `{ () -> any SiteOperationsProtocol in ... }` in `bootstrap()` — consistent with the design's risk-mitigation note.
+**3. Type consistency:** `SiteOperationsService` signature is identical in T1 (definition), T6 (intent uses), T7 (bootstrap registers), T8 (fake conforms). `FakeOperations` API used in T10–T11 matches what's defined in T8. `WindowRouter.shared.requested` matches across T10 and source. `AppDependencyManager.shared.add` is called with the stored-instance form (`fake as any SiteOperationsService`) in tests and the closure form `{ () -> any SiteOperationsService in ... }` in `bootstrap()` — consistent with the design's risk-mitigation note.

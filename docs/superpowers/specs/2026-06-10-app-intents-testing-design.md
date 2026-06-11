@@ -74,18 +74,18 @@ Moves from `Sources/AnglesiteApp/Intents/` into `Sources/AnglesiteIntents/`:
 
 **App target now depends on:** `AnglesiteCore`, `AnglesiteBridge`, `AnglesiteIntents`.
 
-### `SiteOperationsProtocol` in `AnglesiteCore`
+### `SiteOperationsService` in `AnglesiteCore`
 
 Extract a protocol over `SiteOperations`'s four entry points:
 
 ```swift
-public protocol SiteOperationsProtocol: Sendable {
+public protocol SiteOperationsService: Sendable {
     func site(id: String) async -> SiteStore.Site?
     func deploy(site: SiteStore.Site) async -> DeployCommand.Result
     func backup(site: SiteStore.Site) async -> BackupCommand.Result
     func audit(site: SiteStore.Site) async -> AuditCommand.Result
 }
-extension SiteOperations: SiteOperationsProtocol {}
+extension SiteOperations: SiteOperationsService {}
 ```
 
 `@Dependency` registers/resolves on the protocol, so test fakes substitute trivially.
@@ -104,7 +104,7 @@ public enum AnglesiteIntents {
     /// Idempotent. Called once from AppDelegate at launch today; reused by #101's
     /// system MCP entry from a non-UI process.
     public static func bootstrap() {
-        AppDependencyManager.shared.add { () -> any SiteOperationsProtocol in
+        AppDependencyManager.shared.add { () -> any SiteOperationsService in
             SiteOperations(factory: LiveCommandFactory())
         }
     }
@@ -119,7 +119,7 @@ alongside the existing npm-cache prime.
 Each of the four intents replaces `let ops = SiteOperations()` with:
 
 ```swift
-@Dependency private var ops: any SiteOperationsProtocol
+@Dependency private var ops: any SiteOperationsService
 ```
 
 `@Dependency` is lazy — resolves from `AppDependencyManager.shared` on first access.
@@ -199,7 +199,7 @@ records the call and vends a configurable `Result`.
 `Tests/AnglesiteIntentsTests/Support/FakeOperations.swift`:
 
 ```swift
-final class FakeOperations: SiteOperationsProtocol {
+final class FakeOperations: SiteOperationsService {
     var siteToReturn: SiteStore.Site?
     var deployResult: DeployCommand.Result = .failed(reason: "unstubbed", exitCode: nil)
     var backupResult: BackupCommand.Result = .failed(reason: "unstubbed", exitCode: nil)
@@ -228,7 +228,7 @@ test reads back `fake.deployCalls` after `perform()` runs.
 
 Reviewable as a stack:
 
-1. **AnglesiteCore: extract `SiteOperationsProtocol`.** `SiteOperations` conforms.
+1. **AnglesiteCore: extract `SiteOperationsService`.** `SiteOperations` conforms.
    No call-site changes.
 2. **Create SPM library target `AnglesiteIntents`** in `Package.swift`. Depends on
    `AnglesiteCore` + system `AppIntents` framework.
@@ -236,7 +236,7 @@ Reviewable as a stack:
    Split `WindowRouter.swift`: `WindowRouter` class moves; `SitesWindowRoot` view
    stays in app target.
 4. **Refactor `SiteEntityQuery`** to `init(store: SiteStore = .shared)`.
-5. **Switch intents** to `@Dependency private var ops: any SiteOperationsProtocol`.
+5. **Switch intents** to `@Dependency private var ops: any SiteOperationsService`.
 6. **Add `AnglesiteIntents.bootstrap()`** in `Sources/AnglesiteIntents/Bootstrap.swift`.
 7. **`AppDelegate.applicationDidFinishLaunching`** calls `AnglesiteIntents.bootstrap()`.
 8. **`project.yml`**: add `AnglesiteIntents` to `dependencies:` for both `Anglesite`
