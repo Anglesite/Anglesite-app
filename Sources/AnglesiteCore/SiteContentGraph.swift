@@ -255,6 +255,20 @@ public actor SiteContentGraph {
         }
     }
 
+    /// Case-insensitive substring search on an image's `fileName` and `relativePath`. Empty
+    /// `query` returns all images for the siteID (no filtering). Matches the empty-query
+    /// convention of `searchPages` / `searchPosts`.
+    public func searchImages(siteID: String, matching query: String) -> [Image] {
+        let scoped = images.values.filter { $0.siteID == siteID }
+        guard !query.isEmpty else { return Array(scoped) }
+        let needle = query.lowercased()
+        return scoped.filter { image in
+            if image.fileName.lowercased().contains(needle) { return true }
+            if image.relativePath.lowercased().contains(needle) { return true }
+            return false
+        }
+    }
+
     // MARK: - Enumeration
 
     /// The set of siteIDs that currently have any pages, posts, or images. Used by A.3
