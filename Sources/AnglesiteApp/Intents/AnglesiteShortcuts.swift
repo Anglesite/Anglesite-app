@@ -1,4 +1,5 @@
 import AppIntents
+import AnglesiteIntents  // for DeploySiteIntent, BackupSiteIntent, AuditSiteIntent (move-pending)
 
 /// Curated Siri phrases. They appear in Spotlight and Siri suggestions. `\(.applicationName)`
 /// resolves to the app's display name ("Anglesite") on both targets.

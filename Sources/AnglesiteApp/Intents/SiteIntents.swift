@@ -1,5 +1,6 @@
 import AppIntents
 import AnglesiteCore
+import AnglesiteIntents  // for SiteEntity
 
 /// The four App Intents. Each is a thin adapter over `SiteOperations` (Core), which holds all
 /// the testable Result→dialog logic. No Claude/LLM process is involved — the intents drive the
