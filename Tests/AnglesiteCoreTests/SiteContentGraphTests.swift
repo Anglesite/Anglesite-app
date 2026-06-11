@@ -110,39 +110,52 @@ struct SiteContentGraphTests {
         #expect(pages.map(\.route).sorted() == ["/about"])
     }
 
-    @Test("load does not affect entries for other siteIDs")
+    @Test("load does not affect entries for other siteIDs (pages, posts, images)")
     func loadDoesNotAffectOtherSites() async {
         let graph = SiteContentGraph()
         await graph.load(
             siteID: Self.siteA,
             pages: [Self.page(site: Self.siteA, route: "/a-home")],
-            posts: [],
-            images: []
+            posts: [Self.post(site: Self.siteA, slug: "a-post")],
+            images: [Self.image(site: Self.siteA, relativePath: "public/images/a.jpg")]
         )
         await graph.load(
             siteID: Self.siteB,
             pages: [Self.page(site: Self.siteB, route: "/b-home")],
-            posts: [],
-            images: []
+            posts: [Self.post(site: Self.siteB, slug: "b-post")],
+            images: [Self.image(site: Self.siteB, relativePath: "public/images/b.jpg")]
         )
 
-        let a = await graph.pages(for: Self.siteA)
-        let b = await graph.pages(for: Self.siteB)
-        #expect(a.map(\.route) == ["/a-home"])
-        #expect(b.map(\.route) == ["/b-home"])
+        let aPages = await graph.pages(for: Self.siteA)
+        let aPosts = await graph.posts(for: Self.siteA)
+        let aImages = await graph.images(for: Self.siteA)
+        let bPages = await graph.pages(for: Self.siteB)
+        let bPosts = await graph.posts(for: Self.siteB)
+        let bImages = await graph.images(for: Self.siteB)
+
+        #expect(aPages.map(\.route) == ["/a-home"])
+        #expect(aPosts.map(\.slug) == ["a-post"])
+        #expect(aImages.map(\.relativePath) == ["public/images/a.jpg"])
+        #expect(bPages.map(\.route) == ["/b-home"])
+        #expect(bPosts.map(\.slug) == ["b-post"])
+        #expect(bImages.map(\.relativePath) == ["public/images/b.jpg"])
     }
 
-    @Test("load emits change for the loaded siteID")
+    @Test("load always emits a change for the loaded siteID, even when re-loaded with identical payload")
     func loadEmitsChange() async {
         let graph = SiteContentGraph()
         let counter = TestCounter()
         await graph.setChangeHandler { siteID in await counter.record(siteID) }
 
         await graph.load(siteID: Self.siteA, pages: [Self.page()], posts: [], images: [])
+        let afterFirst = await counter.count
 
-        let count = await counter.count
+        await graph.load(siteID: Self.siteA, pages: [Self.page()], posts: [], images: [])
+        let afterSecond = await counter.count
         let last = await counter.lastSiteID
-        #expect(count == 1)
+
+        #expect(afterFirst == 1)
+        #expect(afterSecond == 2)
         #expect(last == Self.siteA)
     }
 }

@@ -132,9 +132,15 @@ public actor SiteContentGraph {
         posts: [Post],
         images: [Image]
     ) async {
-        self.pages = self.pages.filter { $0.value.siteID != siteID }
-        self.posts = self.posts.filter { $0.value.siteID != siteID }
-        self.images = self.images.filter { $0.value.siteID != siteID }
+        for key in self.pages.compactMap({ $0.value.siteID == siteID ? $0.key : nil }) {
+            self.pages.removeValue(forKey: key)
+        }
+        for key in self.posts.compactMap({ $0.value.siteID == siteID ? $0.key : nil }) {
+            self.posts.removeValue(forKey: key)
+        }
+        for key in self.images.compactMap({ $0.value.siteID == siteID ? $0.key : nil }) {
+            self.images.removeValue(forKey: key)
+        }
         for page in pages { self.pages[page.id] = page }
         for post in posts { self.posts[post.id] = post }
         for image in images { self.images[image.id] = image }
