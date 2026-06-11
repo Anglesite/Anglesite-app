@@ -361,4 +361,68 @@ struct SiteContentGraphTests {
         #expect(count == 1)
         #expect(last == Self.siteA)
     }
+
+    @Test("searchPages matches title and route case-insensitively")
+    func searchPagesMatchesTitleAndRouteCaseInsensitive() async {
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [
+                Self.page(route: "/about", title: "About Us"),
+                Self.page(route: "/contact", title: "Contact"),
+                Self.page(route: "/team", title: nil)
+            ],
+            posts: [],
+            images: []
+        )
+
+        let byTitle = await graph.searchPages(siteID: Self.siteA, matching: "ABOUT")
+        let byRoute = await graph.searchPages(siteID: Self.siteA, matching: "tact")
+        let none = await graph.searchPages(siteID: Self.siteA, matching: "zzzz")
+
+        #expect(byTitle.map(\.route) == ["/about"])
+        #expect(byRoute.map(\.route) == ["/contact"])
+        #expect(none.isEmpty)
+    }
+
+    @Test("searchPosts matches title, slug, tags, and collection name")
+    func searchPostsMatchesTitleSlugTagsCollection() async {
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [],
+            posts: [
+                Self.post(slug: "hello-world", title: "Hello World", tags: ["intro"], collection: "blog"),
+                Self.post(slug: "swift-actors", title: "Swift Actors", tags: ["swift", "concurrency"], collection: "blog"),
+                Self.post(slug: "first-post", title: "Day One", tags: [], collection: "diary")
+            ],
+            images: []
+        )
+
+        let byTitle = await graph.searchPosts(siteID: Self.siteA, matching: "Hello")
+        let bySlug = await graph.searchPosts(siteID: Self.siteA, matching: "swift-actors")
+        let byTag = await graph.searchPosts(siteID: Self.siteA, matching: "concurrency")
+        let byCollection = await graph.searchPosts(siteID: Self.siteA, matching: "diary")
+
+        #expect(byTitle.map(\.slug) == ["hello-world"])
+        #expect(bySlug.map(\.slug) == ["swift-actors"])
+        #expect(byTag.map(\.slug) == ["swift-actors"])
+        #expect(byCollection.map(\.slug) == ["first-post"])
+    }
+
+    @Test("search with empty query returns all entries for the siteID")
+    func searchWithEmptyQueryReturnsAll() async {
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [Self.page(route: "/a"), Self.page(route: "/b")],
+            posts: [Self.post(slug: "p1"), Self.post(slug: "p2")],
+            images: []
+        )
+
+        let pages = await graph.searchPages(siteID: Self.siteA, matching: "")
+        let posts = await graph.searchPosts(siteID: Self.siteA, matching: "")
+        #expect(Set(pages.map(\.route)) == ["/a", "/b"])
+        #expect(Set(posts.map(\.slug)) == ["p1", "p2"])
+    }
 }

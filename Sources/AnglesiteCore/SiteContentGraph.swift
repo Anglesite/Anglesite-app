@@ -224,4 +224,34 @@ public actor SiteContentGraph {
     public func page(id: String) -> Page? { pages[id] }
     public func post(id: String) -> Post? { posts[id] }
     public func image(id: String) -> Image? { images[id] }
+
+    // MARK: - Search
+
+    /// Case-insensitive substring search on a page's `title` and `route`. Empty `query`
+    /// returns all pages for the siteID (no filtering).
+    public func searchPages(siteID: String, matching query: String) -> [Page] {
+        let scoped = pages.values.filter { $0.siteID == siteID }
+        guard !query.isEmpty else { return Array(scoped) }
+        let needle = query.lowercased()
+        return scoped.filter { page in
+            if page.route.lowercased().contains(needle) { return true }
+            if let title = page.title?.lowercased(), title.contains(needle) { return true }
+            return false
+        }
+    }
+
+    /// Case-insensitive substring search on a post's `title`, `slug`, `tags`, and
+    /// `collection`. Empty `query` returns all posts for the siteID (no filtering).
+    public func searchPosts(siteID: String, matching query: String) -> [Post] {
+        let scoped = posts.values.filter { $0.siteID == siteID }
+        guard !query.isEmpty else { return Array(scoped) }
+        let needle = query.lowercased()
+        return scoped.filter { post in
+            if post.title.lowercased().contains(needle) { return true }
+            if post.slug.lowercased().contains(needle) { return true }
+            if post.collection.lowercased().contains(needle) { return true }
+            if post.tags.contains(where: { $0.lowercased().contains(needle) }) { return true }
+            return false
+        }
+    }
 }
