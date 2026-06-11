@@ -14,7 +14,7 @@ extension AppIntentsTests {
             WindowRouter.shared.requested = nil   // reset between runs
             let site = TestStore.site(id: "s1", name: "Portfolio")
             var intent = OpenSiteIntent()
-            intent.site = SiteEntity(site)
+            intent.target = SiteEntity(site)
             _ = try await intent.perform()
             #expect(WindowRouter.shared.requested == "s1")
         }

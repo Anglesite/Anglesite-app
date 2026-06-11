@@ -134,21 +134,25 @@ public struct AuditSiteIntent: AppIntent {
     }
 }
 
-public struct OpenSiteIntent: AppIntent {
+/// `OpenIntent` (not just `AppIntent`) so Spotlight's semantic-index hits on `SiteEntity` know
+/// which verb to run when the user clicks a result. The `OpenIntent` protocol requires the
+/// entity parameter to be named `target` — that contract is also why Shortcuts can chain
+/// "find a site" → "open that site" by piping the resolved entity straight in.
+public struct OpenSiteIntent: OpenIntent {
     public static var title: LocalizedStringResource = "Open Site"
     public static var description = IntentDescription("Open a site window in Anglesite.")
     public static var openAppWhenRun = true
 
-    @Parameter(title: "Site") public var site: SiteEntity
+    @Parameter(title: "Site") public var target: SiteEntity
 
     public init() {}
 
-    public static var parameterSummary: some ParameterSummary { Summary("Open \(\.$site)") }
+    public static var parameterSummary: some ParameterSummary { Summary("Open \(\.$target)") }
 
     @MainActor
     public func perform() async throws -> some IntentResult & ProvidesDialog {
-        WindowRouter.shared.requestOpen(siteID: site.id)
-        return .result(dialog: "Opening \(site.displayName).")
+        WindowRouter.shared.requestOpen(siteID: target.id)
+        return .result(dialog: "Opening \(target.displayName).")
     }
 }
 
