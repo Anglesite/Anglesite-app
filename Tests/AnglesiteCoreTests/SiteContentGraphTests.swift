@@ -259,4 +259,64 @@ struct SiteContentGraphTests {
         #expect(stored == image)
         #expect(count == 1)
     }
+
+    @Test("removePage emits change and drops the entry")
+    func removePageEmitsChange() async {
+        let graph = SiteContentGraph()
+        let page = Self.page()
+        await graph.upsertPage(page)
+        let counter = TestCounter()
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+
+        await graph.removePage(id: page.id)
+
+        let stored = await graph.page(id: page.id)
+        let count = await counter.count
+        #expect(stored == nil)
+        #expect(count == 1)
+    }
+
+    @Test("removePage is silent and no-op when id is unknown")
+    func removePageUnknownIdSilent() async {
+        let graph = SiteContentGraph()
+        let counter = TestCounter()
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+
+        await graph.removePage(id: "nonexistent:page:/whatever")
+
+        let count = await counter.count
+        #expect(count == 0)
+    }
+
+    @Test("removePost emits change and drops the entry")
+    func removePostEmitsChange() async {
+        let graph = SiteContentGraph()
+        let post = Self.post()
+        await graph.upsertPost(post)
+        let counter = TestCounter()
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+
+        await graph.removePost(id: post.id)
+
+        let stored = await graph.post(id: post.id)
+        let count = await counter.count
+        #expect(stored == nil)
+        #expect(count == 1)
+    }
+
+    @Test("removeImage emits change and drops the entry")
+    func removeImageEmitsChange() async {
+        let graph = SiteContentGraph()
+        let image = Self.image()
+        await graph.upsertImage(image)
+        let counter = TestCounter()
+        await graph.setChangeHandler { siteID in await counter.record(siteID) }
+
+        await graph.removeImage(id: image.id)
+
+        let stored = await graph.image(id: image.id)
+        let count = await counter.count
+        #expect(stored == nil)
+        #expect(count == 1)
+    }
 }

@@ -181,6 +181,26 @@ public actor SiteContentGraph {
         await emitChange(image.siteID)
     }
 
+    // MARK: - Incremental remove
+
+    /// Removes the page with the given id. Silently no-ops (no emit) if the id is unknown —
+    /// reflects the file-watch reality where the plugin may report removals for files the
+    /// graph never received via `upsert*` (out-of-order events on startup, etc).
+    public func removePage(id: String) async {
+        guard let removed = pages.removeValue(forKey: id) else { return }
+        await emitChange(removed.siteID)
+    }
+
+    public func removePost(id: String) async {
+        guard let removed = posts.removeValue(forKey: id) else { return }
+        await emitChange(removed.siteID)
+    }
+
+    public func removeImage(id: String) async {
+        guard let removed = images.removeValue(forKey: id) else { return }
+        await emitChange(removed.siteID)
+    }
+
     // MARK: - Queries (single)
 
     public func page(id: String) -> Page? { pages[id] }
