@@ -51,6 +51,10 @@ public struct PageEntityQuery: EntityStringQuery {
     }
 
     public func entities(matching string: String) async throws -> [PageEntity] {
+        // Empty / whitespace-only query → []. The graph's searchPages returns everything on
+        // empty input; surfacing that here would double up with suggestedEntities() during
+        // AppIntents disambiguation prefetch. Keep the two surfaces distinct.
+        guard !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         let g = resolved
         var matches: [SiteContentGraph.Page] = []
         for siteID in await g.knownSiteIDs() {
@@ -130,6 +134,10 @@ public struct PostEntityQuery: EntityStringQuery {
     }
 
     public func entities(matching string: String) async throws -> [PostEntity] {
+        // Empty / whitespace-only query → []. The graph's searchPosts returns everything on
+        // empty input; surfacing that here would double up with suggestedEntities() during
+        // AppIntents disambiguation prefetch. Keep the two surfaces distinct.
+        guard !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         let g = resolved
         var matches: [SiteContentGraph.Post] = []
         for siteID in await g.knownSiteIDs() {
@@ -203,6 +211,10 @@ public struct ImageEntityQuery: EntityStringQuery {
     /// than via the graph: A.1 only shipped `searchPages` / `searchPosts`, and adding
     /// `searchImages` to the graph is out of scope for A.2 (see spec follow-ups).
     public func entities(matching string: String) async throws -> [ImageEntity] {
+        // Empty / whitespace-only query → []. The local substring scan would match every
+        // image (since `"".contains` is true for all strings); surfacing that here would
+        // double up with suggestedEntities() during AppIntents disambiguation prefetch.
+        guard !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         let g = resolved
         let needle = string.lowercased()
         var matches: [SiteContentGraph.Image] = []

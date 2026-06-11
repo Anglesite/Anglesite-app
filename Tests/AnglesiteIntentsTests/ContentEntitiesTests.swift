@@ -188,6 +188,20 @@ extension AppIntentsTests {
                 #expect(result == nil)
             }
         }
+
+        @Test("entities(matching:) with empty string returns empty (not all pages)")
+        func entitiesMatching_emptyStringReturnsEmpty() async throws {
+            let graph = SiteContentGraph()
+            await graph.upsertPage(AppIntentsTests.gPage(route: "/about"))
+            await graph.upsertPage(AppIntentsTests.gPage(route: "/contact"))
+
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let empty = try await PageEntityQuery().entities(matching: "")
+                let whitespace = try await PageEntityQuery().entities(matching: "   ")
+                #expect(empty.isEmpty)
+                #expect(whitespace.isEmpty)
+            }
+        }
     }
 
     @Suite("PostEntityQuery")
@@ -340,6 +354,20 @@ extension AppIntentsTests {
                 #expect(result == nil)
             }
         }
+
+        @Test("entities(matching:) with empty string returns empty (not all posts)")
+        func entitiesMatching_emptyStringReturnsEmpty() async throws {
+            let graph = SiteContentGraph()
+            await graph.upsertPost(AppIntentsTests.gPost(slug: "hello"))
+            await graph.upsertPost(AppIntentsTests.gPost(slug: "world"))
+
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let empty = try await PostEntityQuery().entities(matching: "")
+                let whitespace = try await PostEntityQuery().entities(matching: "   ")
+                #expect(empty.isEmpty)
+                #expect(whitespace.isEmpty)
+            }
+        }
     }
 
     @Suite("ImageEntityQuery")
@@ -453,6 +481,20 @@ extension AppIntentsTests {
             await ContentGraphOverride.$scoped.withValue(graph) {
                 let result = await ImageEntityQuery().defaultResult()
                 #expect(result == nil)
+            }
+        }
+
+        @Test("entities(matching:) with empty string returns empty (not all images)")
+        func entitiesMatching_emptyStringReturnsEmpty() async throws {
+            let graph = SiteContentGraph()
+            await graph.upsertImage(AppIntentsTests.gImage(relativePath: "public/images/hero.jpg", fileName: "hero.jpg"))
+            await graph.upsertImage(AppIntentsTests.gImage(relativePath: "public/images/avatar.png", fileName: "avatar.png"))
+
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let empty = try await ImageEntityQuery().entities(matching: "")
+                let whitespace = try await ImageEntityQuery().entities(matching: "   ")
+                #expect(empty.isEmpty)
+                #expect(whitespace.isEmpty)
             }
         }
     }
