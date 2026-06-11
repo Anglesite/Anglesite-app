@@ -7,13 +7,20 @@ import AnglesiteIntents
 /// Owns process-level lifecycle that SwiftUI's `App` value type can't: prime the npm cache on
 /// launch, and drain every supervised child on quit so nothing outlives the app.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Single shared `SiteContentGraph` for the app's lifetime. Passed into
+    /// `AnglesiteIntents.bootstrap` so it can be registered with `AppDependencyManager`;
+    /// will also be threaded into `LocalSiteRuntime` in A.8 (#142).
+    let contentGraph = SiteContentGraph()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Register App Intents dependencies before the app surface comes up so backgrounded
         // intent processes (and #101's system MCP entry, later) can resolve immediately.
         // `bootstrap()` is async (it awaits the Spotlight handler installation on `SiteStore`);
         // we kick it off here without waiting — the launcher view's `task` modifier doesn't
         // block on it, and bootstrap's own defensive `load()` closes any race.
-        Task { await AnglesiteIntents.bootstrap() }
+        Task { [contentGraph] in
+            await AnglesiteIntents.bootstrap(contentGraph: contentGraph)
+        }
 
         // Extract the bundled npm cache into Application Support so the first site `npm install`
         // is offline-fast. No-op when nothing's bundled or it's already current; logged either way.
