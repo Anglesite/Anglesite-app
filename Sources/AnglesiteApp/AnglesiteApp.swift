@@ -8,6 +8,10 @@ import AnglesiteIntents
 /// launch, and drain every supervised child on quit so nothing outlives the app.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Register App Intents dependencies before the app surface comes up so backgrounded
+        // intent processes (and #101's system MCP entry, later) can resolve immediately.
+        AnglesiteIntents.bootstrap()
+
         // Extract the bundled npm cache into Application Support so the first site `npm install`
         // is offline-fast. No-op when nothing's bundled or it's already current; logged either way.
         Task {
