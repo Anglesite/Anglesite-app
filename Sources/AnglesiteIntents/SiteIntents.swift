@@ -15,6 +15,7 @@ public struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
     public static var description = IntentDescription("Deploy a site to production with Anglesite.")
 
     @Parameter(title: "Site") public var site: SiteEntity
+    @Dependency private var ops: any SiteOperationsService
 
     public init() {}
 
@@ -27,7 +28,6 @@ public struct DeploySiteIntent: LongRunningIntent, CancellableIntent {
         try await requestConfirmation(
             dialog: "Deploy \(site.displayName) to production?"
         )
-        let ops = SiteOperations()
         guard let resolved = await ops.site(id: site.id) else {
             return .result(dialog: "Couldn't find \(site.displayName).")
         }
@@ -46,13 +46,13 @@ public struct BackupSiteIntent: AppIntent {
     public static var description = IntentDescription("Commit and push a site backup with Anglesite.")
 
     @Parameter(title: "Site") public var site: SiteEntity
+    @Dependency private var ops: any SiteOperationsService
 
     public init() {}
 
     public static var parameterSummary: some ParameterSummary { Summary("Back up \(\.$site)") }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
-        let ops = SiteOperations()
         guard let resolved = await ops.site(id: site.id) else {
             return .result(dialog: "Couldn't find \(site.displayName).")
         }
@@ -66,6 +66,7 @@ public struct AuditSiteIntent: LongRunningIntent, CancellableIntent {
     public static var description = IntentDescription("Run an Anglesite audit and report findings.")
 
     @Parameter(title: "Site") public var site: SiteEntity
+    @Dependency private var ops: any SiteOperationsService
 
     public init() {}
 
@@ -73,7 +74,6 @@ public struct AuditSiteIntent: LongRunningIntent, CancellableIntent {
 
     // Returns the site as a value so a Shortcut can pipe it straight into Deploy (audit→deploy).
     public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<SiteEntity> {
-        let ops = SiteOperations()
         guard let resolved = await ops.site(id: site.id) else {
             return .result(value: site, dialog: "Couldn't find \(site.displayName).")
         }
