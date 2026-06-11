@@ -126,26 +126,63 @@ Each of the four intents replaces `let ops = SiteOperations()` with:
 Intent struct stays `init()`-trivial (`AppIntent` requirement). Tests register a fake
 *after* the intent struct is constructed.
 
-### Test registration
+### Test registration — `@TaskLocal` escape hatch
 
-Each suite's `init()` registers a fake using the stored-instance form (not the
-closure form):
+**Implementation finding:** the original design assumed
+`AppDependencyManager.shared.add(fake)` plus a direct `intent.perform()` call
+would resolve `@Dependency` to the fake. It does not — macOS 27's AppIntents
+runtime gates `@Dependency` resolution to its own intent perform flow and
+crashes (`AppDependency of type … was not initialized prior to access`) when
+accessed from a regular test context. Two probes confirmed this:
+
+1. **SwiftPM test binary**: even with `AppDependencyManager.shared.add(dependency:)`
+   set ahead of time, accessing `self.ops` (the `@Dependency`) from inside
+   `perform()` crashes.
+2. **macOS 27 `AppIntentsTesting` framework**: links cleanly via
+   `linkerSettings: [.linkedFramework("AppIntentsTesting")]`. `IntentDefinitions`
+   can construct intent references. But `.run()` (the framework's E2E execution
+   path) fails with `transportCancelled` from both (a) a SwiftPM test binary
+   and (b) an XCTest target hosted in the real Anglesite.app build. The
+   framework requires a foregrounded, Launch-Services-registered app bundle
+   (the system `intentsd` must broker the IPC), which isn't achievable in a
+   normal local-dev or CI workflow.
+
+The shipped mechanism is a `@TaskLocal` escape hatch:
 
 ```swift
-@Suite("AppIntents", .serialized) struct AppIntentsTests {
-    @Suite struct DeploySiteIntentTests {
-        let fake = FakeOperations()
-        init() {
-            AppDependencyManager.shared.add(fake)
-        }
-        // ...
-    }
+// Sources/AnglesiteIntents/SiteOperationsOverride.swift
+public enum SiteOperationsOverride {
+    @TaskLocal public static var scoped: (any SiteOperationsService)?
 }
 ```
 
-The `.serialized` trait on the root `AppIntentsTests` suite ensures cross-suite
-serialization, so `AppDependencyManager.shared` and `WindowRouter.shared` are mutated
-by exactly one test at a time even under `swift test --parallel`.
+Each intent's `perform()` reads `SiteOperationsOverride.scoped ?? self.ops`
+— the `??` short-circuit avoids touching the `@Dependency` wrapper when a
+scoped override is set, sidestepping the runtime crash. Production code path
+is unchanged (override is always `nil` outside tests). Deploy and Audit also
+skip `requestConfirmation` / `performBackgroundTask` when scoped (those
+require system surfaces unavailable in `swift test`).
+
+Tests use:
+
+```swift
+try await SiteOperationsOverride.$scoped.withValue(fake) {
+    var intent = BackupSiteIntent()
+    intent.site = SiteEntity(site)
+    _ = try await intent.perform()
+}
+#expect(fake.backupCalls.count == 1)
+```
+
+The `@TaskLocal` scope is naturally per-test (Swift Testing runs each test in
+its own Task) and Sendable, so no global mutex/serialization is required. The
+root `@Suite("AppIntents", .serialized)` is retained but its primary role is
+now serializing `WindowRouter.shared` access from `OpenSiteIntentTests` (and
+defending against future tests adding shared state).
+
+**Cost of the escape hatch:** ~14 lines (`SiteOperationsOverride.swift`) plus
+the conditional `ops` resolution in three intent perform bodies (~5 lines
+each). The runtime branch is read-once and tightly scoped to the test path.
 
 ## Test coverage
 
@@ -248,9 +285,11 @@ Reviewable as a stack:
 
 | Risk | Mitigation |
 |---|---|
-| `@Dependency` closure form returns fresh instance per access; tests reading recorded-call state on a fake see stale data. | Use `add(fakeOps)` (stored-instance form) in tests; closure form only in production for lazy init. |
-| `WindowRouter.shared` is a singleton — tests share state. | `OpenSiteIntentTests` resets `WindowRouter.shared.requested = nil` in suite `init()`. |
-| `requestConfirmation` under test framework not fully documented at design time. | Spec assumes auto-confirm under test (the most likely behavior). Spike during implementation; fallback is factoring confirmation behind a `requestConfirmationHook` closure (~10 LoC). |
+| `@Dependency` access from outside the AppIntents perform flow fatal-errors. (Discovered during implementation; design originally assumed `AppDependencyManager.shared.add` was sufficient.) | `SiteOperationsOverride` `@TaskLocal` escape hatch — see "Test registration" above. |
+| `requestConfirmation(dialog:)` requires a system UI surface. | Same override mechanism short-circuits the confirmation call in scoped tests. |
+| `performBackgroundTask` requires an extended-budget runtime not present in `swift test`. | Same override mechanism falls back to inline `await` when scoped. |
+| `WindowRouter.shared` is a singleton — tests share state. | `OpenSiteIntentTests` resets `WindowRouter.shared.requested = nil` before invoking the intent. |
+| The macOS 27 `AppIntentsTesting` framework — the issue's title-line dependency — is **not** viable under `swift test` (confirmed by two probes). | The `@TaskLocal` escape hatch is the shipped substitute. A follow-up issue should track "real `AppIntentsTesting`-based E2E via an installed app bundle" if the user wants framework-faithful coverage someday. |
 | AppleScript-quit drain timing flagged during #122 smoke. | Out of scope; file separate issue if it bites again. |
 
 ## Manual verification before merge
