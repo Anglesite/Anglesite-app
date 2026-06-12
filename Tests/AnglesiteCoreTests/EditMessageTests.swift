@@ -1,6 +1,5 @@
 import Testing
-@testable import AnglesiteBridge
-import AnglesiteCore
+@testable import AnglesiteCore
 
 struct EditMessageTests {
     /// Matches the `ElementInfo` shape the JS overlay sends — the plugin's `server/selector.mjs`

@@ -1,7 +1,6 @@
 import Testing
 import Foundation
-@testable import AnglesiteBridge
-import AnglesiteCore
+@testable import AnglesiteCore
 
 struct EditReplyAndRouterTests {
 

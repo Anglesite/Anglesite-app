@@ -1,5 +1,4 @@
 import Foundation
-import AnglesiteCore
 
 /// One edit request flowing JS → native, decoded from the `WKScriptMessage.body` JSON dict.
 ///

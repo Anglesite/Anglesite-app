@@ -1,5 +1,4 @@
 import Foundation
-import AnglesiteCore
 
 /// `EditRouter` backed by an `MCPClient` `tools/call` to the plugin's `apply_edit` tool.
 ///

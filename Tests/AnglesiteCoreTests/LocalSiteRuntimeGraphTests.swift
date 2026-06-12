@@ -118,6 +118,24 @@ struct LocalSiteRuntimeGraphTests {
         #expect(await graph.knownSiteIDs().isEmpty)
     }
 
+    @Test("startHeadlessMCP spawns only the MCP client — no dev server, no graph population", .enabled(if: pythonAvailable))
+    func startHeadlessMCPSpawnsMCPOnly() async throws {
+        let graph = SiteContentGraph()
+        let runtime = makeRuntime(graph: graph, mcpScript: Self.populatingScript)
+
+        let ok = await runtime.startHeadlessMCP(siteID: Self.siteID, siteDirectory: tmpDir)
+
+        #expect(ok)
+        #expect(await runtime.mcpClient.isRunning)
+        // No dev server spawned → the UI state machine is never driven.
+        #expect(await runtime.state == .idle)
+        // Headless start does not run list_content population — the graph stays empty.
+        #expect(await graph.knownSiteIDs().isEmpty)
+
+        await runtime.stop()
+        #expect(await runtime.mcpClient.isRunning == false)
+    }
+
     @Test("Missing list_content tool leaves the graph empty and preview ready", .enabled(if: pythonAvailable))
     func missingToolIsGracefulFallback() async throws {
         let graph = SiteContentGraph()

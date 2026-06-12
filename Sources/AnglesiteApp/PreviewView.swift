@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import AnglesiteBridge
+import AnglesiteCore
 
 /// SwiftUI wrapper around a `WKWebView` showing the live Astro dev server.
 ///
