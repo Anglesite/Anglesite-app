@@ -26,5 +26,53 @@ public struct AnglesiteShortcuts: AppShortcutsProvider {
             shortTitle: "Check Site",
             systemImageName: "checkmark.seal"
         )
+        // Phase A content intents (A.7, #141). Phrases avoid colliding with "Check my site"
+        // (AuditSiteIntent) above. Each intent's required parameters (site, query, name, …) are
+        // prompted by Siri when not supplied in the phrase, same as deploy/backup/audit.
+        AppShortcut(
+            intent: SearchContentIntent(),
+            phrases: [
+                "What's on my site with \(.applicationName)",
+                "Search my site with \(.applicationName)",
+            ],
+            shortTitle: "Search Content",
+            systemImageName: "magnifyingglass"
+        )
+        AppShortcut(
+            intent: SiteStatusIntent(),
+            phrases: [
+                "How is my site doing with \(.applicationName)",
+                "My site status with \(.applicationName)",
+            ],
+            shortTitle: "Site Status",
+            systemImageName: "chart.bar.doc.horizontal"
+        )
+        AppShortcut(
+            intent: AddPageIntent(),
+            phrases: [
+                "Add a page to my site with \(.applicationName)",
+                "Add a page with \(.applicationName)",
+            ],
+            shortTitle: "Add Page",
+            systemImageName: "doc.badge.plus"
+        )
+        AppShortcut(
+            intent: AddPostIntent(),
+            phrases: [
+                "Add a post to my site with \(.applicationName)",
+                "Add a post with \(.applicationName)",
+            ],
+            shortTitle: "Add Post",
+            systemImageName: "square.and.pencil"
+        )
+        AppShortcut(
+            intent: PreviewSiteIntent(),
+            phrases: [
+                "Preview my site with \(.applicationName)",
+                "Open my site preview with \(.applicationName)",
+            ],
+            shortTitle: "Preview Site",
+            systemImageName: "eye"
+        )
     }
 }
