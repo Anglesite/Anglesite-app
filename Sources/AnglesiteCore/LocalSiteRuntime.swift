@@ -29,6 +29,11 @@ public actor LocalSiteRuntime: SiteRuntime {
     /// through it. If MCP spawn fails (graceful), `isRunning` stays false and tool calls
     /// throw `.notInitialized` — preview still works without the edit pipeline.
     public let mcpClient: MCPClient
+    /// Shared, app-lifetime projection of every open site's content (A.1 #136). Populated from
+    /// the plugin's `list_content` MCP tool once this site is ready (#142), and evicted on stop.
+    /// `nil` in headless/test contexts that don't care about the graph — population is then a
+    /// no-op. The App Intents entity queries (A.2 #137) and Spotlight indexer (A.3) read from it.
+    private let contentGraph: SiteContentGraph?
     private let logCenter: LogCenter
     private let resolveCommand: CommandResolver
     private let resolveMCPCommand: MCPCommandResolver
@@ -39,10 +44,14 @@ public actor LocalSiteRuntime: SiteRuntime {
     private var observers: [UUID: AsyncStream<SiteRuntimeState>.Continuation] = [:]
     /// Bumped on every `start(...)`; lets a slow `devServer.start` await know it was superseded.
     private var generation = 0
+    /// The siteID whose content this runtime last loaded into `contentGraph`, so `stop()` /
+    /// a site switch can evict exactly that site. `nil` when nothing is loaded.
+    private var loadedGraphSiteID: String?
 
     public init(
         devServer: AstroDevServer? = nil,
         mcpClient: MCPClient? = nil,
+        contentGraph: SiteContentGraph? = nil,
         supervisor: ProcessSupervisor = .shared,
         logCenter: LogCenter = .shared,
         resolveCommand: @escaping CommandResolver = LocalSiteRuntime.resolveAstroCommand,
@@ -52,6 +61,7 @@ public actor LocalSiteRuntime: SiteRuntime {
     ) {
         self.devServer = devServer ?? AstroDevServer(supervisor: supervisor, logCenter: logCenter)
         self.mcpClient = mcpClient ?? MCPClient(supervisor: supervisor, logCenter: logCenter)
+        self.contentGraph = contentGraph
         self.logCenter = logCenter
         self.resolveCommand = resolveCommand
         self.resolveMCPCommand = resolveMCPCommand
@@ -105,6 +115,10 @@ public actor LocalSiteRuntime: SiteRuntime {
                 // anyway (preview is the primary feature; the edit pipeline is an enhancement).
                 await startMCPClient(siteID: siteID, siteDirectory: siteDirectory)
                 guard gen == generation else { return }
+                // Populate the content graph from the now-initialized MCP server. Best-effort:
+                // a missing/erroring `list_content` (older plugin) just leaves the graph empty.
+                await populateContentGraph(siteID: siteID, generation: gen)
+                guard gen == generation else { return }
                 setState(.ready(siteID: siteID, url: url))
             } catch {
                 guard gen == generation else { return }
@@ -125,6 +139,49 @@ public actor LocalSiteRuntime: SiteRuntime {
     private func stopSubprocesses() async {
         await devServer.stop()
         await mcpClient.stop()
+        if let siteID = loadedGraphSiteID {
+            await contentGraph?.unload(siteID: siteID)
+            loadedGraphSiteID = nil
+        }
+    }
+
+    /// Call the plugin's `list_content` MCP tool and load the result into `contentGraph`. A no-op
+    /// when no graph is attached. The whole path is best-effort: a missing tool (older plugin,
+    /// surfaced as `MCPError.rpcError`), an `isError` result, a malformed payload, or the MCP
+    /// client not running all log a warning and leave the graph empty — preview is unaffected.
+    private func populateContentGraph(siteID: String, generation gen: Int) async {
+        guard let graph = contentGraph else { return }
+        guard await mcpClient.isRunning else { return }
+        do {
+            let result = try await mcpClient.callTool(name: "list_content")
+            // A newer start() may have superseded us during the call — don't pollute the shared
+            // graph with a site this window is no longer showing; that start() loads its own.
+            guard gen == generation else { return }
+            guard !result.isError else {
+                await logCenter.append(
+                    source: "mcp:\(siteID)", stream: .stderr,
+                    text: "list_content returned an error result — content graph left empty"
+                )
+                return
+            }
+            let text = result.content.first(where: { $0.type == "text" })?.text ?? ""
+            let listing = try ContentListing.parse(jsonText: text, siteID: siteID)
+            await graph.load(siteID: siteID, pages: listing.pages, posts: listing.posts, images: listing.images)
+            loadedGraphSiteID = siteID
+        } catch let MCPClient.MCPError.rpcError(code, _) where code == -32601 {
+            // Method-not-found: older plugin without the tool — expected, not worth alarming about.
+            // Any *other* RPC error means `list_content` exists but failed, so it falls through to
+            // the stderr branch below where it stays visible in the Debug pane (logs are sacred).
+            await logCenter.append(
+                source: "mcp:\(siteID)", stream: .stdout,
+                text: "list_content not available (older plugin) — content graph left empty"
+            )
+        } catch {
+            await logCenter.append(
+                source: "mcp:\(siteID)", stream: .stderr,
+                text: "list_content population failed: \(error) — content graph left empty"
+            )
+        }
     }
 
     private func startMCPClient(siteID: String, siteDirectory: URL) async {

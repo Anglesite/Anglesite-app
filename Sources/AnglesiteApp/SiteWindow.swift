@@ -14,6 +14,16 @@ struct SiteWindow: View {
     /// nil payload — see `loadAndStart()` for how that's handled.
     let siteID: String?
 
+    /// The app-lifetime content graph (held by `AppDelegate`), seeded into this window's
+    /// `PreviewModel` so opening the site populates the shared graph (A.8, #142).
+    private let contentGraph: SiteContentGraph
+
+    init(siteID: String?, contentGraph: SiteContentGraph) {
+        self.siteID = siteID
+        self.contentGraph = contentGraph
+        _preview = State(initialValue: PreviewModel(contentGraph: contentGraph))
+    }
+
     @State private var site: SiteStore.Site?
 
     #if ANGLESITE_MAS
@@ -23,7 +33,7 @@ struct SiteWindow: View {
     @State private var scopedURL: URL?
     #endif
 
-    @State private var preview = PreviewModel()
+    @State private var preview: PreviewModel
     @State private var deploy = DeployModel()
     @State private var backup = BackupModel()
     @State private var audit = AuditModel()
