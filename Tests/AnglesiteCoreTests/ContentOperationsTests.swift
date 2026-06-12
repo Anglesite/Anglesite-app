@@ -4,6 +4,7 @@ import Foundation
 
 /// Tests for `ContentOperations` (A.5, #139): `parseCreated` reply parsing (unit) and the full
 /// create path through a real `HeadlessRuntimePool` driving a Python fake MCP server (integration).
+@Suite(.serialized)  // serial subprocess spawns — see MCPClientTests rationale (CI-flakiness fix)
 struct ContentOperationsTests {
     private let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
 

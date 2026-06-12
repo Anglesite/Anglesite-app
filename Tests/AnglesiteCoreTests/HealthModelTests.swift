@@ -111,13 +111,15 @@ final class HealthModelTests: XCTestCase {
         let runner = GateRunner()
         let model = HealthModel(runner: runner)
 
-        // Kick off two recheck calls back-to-back. The runner queues each pending
-        // continuation; the first one will be cancelled.
+        // Kick off two recheck calls. We must pin the registration ORDER so `respondOldestPending`
+        // (FIFO) targets the right task: wait for the first call to register before starting the
+        // second (which cancels the first), then wait for the second to register. Without this the
+        // task-start order is unspecified and the cancellation can land on the latest call,
+        // leaving badgeState `.unknown` (the flake).
         let first = model.recheck(siteID: "s", siteDirectory: tmpURL)
-        let second = model.recheck(siteID: "s", siteDirectory: tmpURL)
-
-        // Yield so both @MainActor tasks start and register their continuations.
-        await Task.yield()
+        await runner.waitForPending(1)                                   // first registered
+        let second = model.recheck(siteID: "s", siteDirectory: tmpURL)   // cancels first
+        await runner.waitForPending(2)                                   // second registered
 
         // Cancellation propagates to the gated runner via CancellationError; respond
         // to the second call with a blocked outcome.
@@ -209,6 +211,18 @@ final class GateRunner: HealthCheckRunner, @unchecked Sendable {
     func respondOldestPending(with result: Result<PreDeployCheck.Outcome, Error>) async {
         let cont = await dequeueOldest()
         deliver(cont, result)
+    }
+
+    /// Number of in-flight `run` calls currently suspended. Lets the cancellation test wait for a
+    /// known registration order before responding (see `waitForPending`).
+    var pendingCount: Int { lock.withLock { pending.count } }
+
+    /// Await until at least `count` `run` calls have registered their continuations. Makes the
+    /// cancellation test deterministic: without it the order in which the two back-to-back recheck
+    /// tasks reach `run` is unspecified, so `respondOldestPending` could deliver the cancellation
+    /// to the wrong task and leave the latest result unset (flaky `.unknown`).
+    func waitForPending(_ count: Int) async {
+        while pendingCount < count { try? await Task.sleep(for: .milliseconds(5)) }
     }
 
     private func dequeueOldest() async -> CheckedContinuation<PreDeployCheck.Outcome, Error> {

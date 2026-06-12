@@ -2,6 +2,11 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
+/// `.serialized` so this suite's many subprocess spawns (a fresh fake MCP server per test) don't
+/// run concurrently with each other under `swift test --parallel`. With ~6 subprocess suites each
+/// spawning serially, peak concurrent Node/Python spawns stays low enough that the `initialize`
+/// handshake doesn't time out on a CPU-saturated CI runner (the flake). See CI-flakiness fix.
+@Suite(.serialized)
 struct MCPClientTests {
     /// Python fake MCP server speaking JSON-RPC 2.0 over stdio. `-u` keeps it unbuffered.
     private static let fakeServerScript = """

@@ -10,6 +10,7 @@ import Darwin
 /// Skips (throws `SkipReason`) when the sibling plugin checkout / its node_modules / Node aren't
 /// present. Resolve the plugin via `ANGLESITE_PLUGIN_PATH` (default `../anglesite`); resolve Node via
 /// `NODE_BINARY`, common paths, or `~/.nvm/versions/node/*/bin/node`.
+@Suite(.serialized)  // serial subprocess spawns — see MCPClientTests rationale (CI-flakiness fix)
 struct MCPClientHTTPEndToEndTests {
     @Test("HTTP end-to-end: connect, list tools, call list_annotations") func httpEndToEnd() async throws {
         let pluginRoot = try Self.requireSiblingPlugin()
