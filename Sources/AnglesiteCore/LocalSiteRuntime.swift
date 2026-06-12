@@ -10,7 +10,7 @@ import Foundation
 ///
 /// This is the transitional implementation that keeps today's behavior; the Cloudflare (#66) and
 /// local-container (#69) runtimes will be alternate `SiteRuntime` conformers.
-public actor LocalSiteRuntime: SiteRuntime {
+public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
     /// How to run `astro dev` for a site directory — or why it can't be run.
     public enum LaunchPlan: Sendable, Equatable {
         case run(executable: URL, arguments: [String])
@@ -125,6 +125,15 @@ public actor LocalSiteRuntime: SiteRuntime {
                 setState(.failed(siteID: siteID, message: Self.friendlyMessage(for: error)))
             }
         }
+    }
+
+    /// Spawn only the MCP client for `siteID` — no dev server, no UI state machine. This is the
+    /// headless path `HeadlessRuntimePool` uses to serve intent-driven edits / `create_page` calls
+    /// when no site window is open. Returns whether the MCP client is running afterward; failures
+    /// are logged (via `startMCPClient`) and surface as `false` so the pool doesn't cache a dud.
+    public func startHeadlessMCP(siteID: String, siteDirectory: URL) async -> Bool {
+        await startMCPClient(siteID: siteID, siteDirectory: siteDirectory)
+        return await mcpClient.isRunning
     }
 
     /// Stop the dev server + MCP client and return to `.idle`.
