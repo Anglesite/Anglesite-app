@@ -23,7 +23,11 @@ final class PreviewModel {
     /// failure), `MCPApplyEditRouter` returns `.failed("MCP not running")` per its existing shape.
     private(set) var editRouter: EditRouter
 
-    init(runtime: any SiteRuntime = LocalSiteRuntime()) {
+    /// `contentGraph` is the app-lifetime `SiteContentGraph` (held by `AppDelegate`); it's threaded
+    /// into the default `LocalSiteRuntime` so opening this site populates the shared graph (A.8,
+    /// #142). Tests inject an explicit `runtime` and leave the graph `nil`.
+    init(contentGraph: SiteContentGraph? = nil, runtime: (any SiteRuntime)? = nil) {
+        let runtime = runtime ?? LocalSiteRuntime(contentGraph: contentGraph)
         self.runtime = runtime
         self.editRouter = MCPApplyEditRouter(mcpClient: { [weak runtime] in
             // `runtime` is the actor instance; reading `mcpClient` hops onto the actor.

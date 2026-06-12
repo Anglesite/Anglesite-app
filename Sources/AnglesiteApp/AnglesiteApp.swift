@@ -110,7 +110,7 @@ struct AnglesiteApp: App {
             // route to the launcher when restoration hands us a nil or unresolvable
             // id. If we short-circuit with `if let siteID` here the SiteWindow never
             // instantiates and an empty restored window strands the user.
-            SiteWindow(siteID: siteID)
+            SiteWindow(siteID: siteID, contentGraph: appDelegate.contentGraph)
                 .frame(minWidth: 960, minHeight: 600)
         }
         .windowStyle(.titleBar)
