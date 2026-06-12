@@ -1,5 +1,4 @@
 import Foundation
-import AnglesiteCore
 
 /// What the bridge says back to the overlay after handling an `EditMessage`. The struct is
 /// `Encodable` because it gets `JSONEncoder()`'d straight into a `evaluateJavaScript` call —

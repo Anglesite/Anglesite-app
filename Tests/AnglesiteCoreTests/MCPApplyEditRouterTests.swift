@@ -1,6 +1,5 @@
 import Testing
-@testable import AnglesiteBridge
-import AnglesiteCore
+@testable import AnglesiteCore
 
 struct MCPApplyEditRouterTests {
     private static let sampleSelector: JSONValue = .object([
