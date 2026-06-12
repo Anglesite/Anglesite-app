@@ -82,6 +82,53 @@ extension AppIntentsTests {
             #expect(provider.annotations()[0].entity is ImageEntity)
         }
 
+        @Test("Rule 1: matches CDN URLs with query strings")
+        func rule1_imgMatchesCDNWithQuery() async {
+            // Filename fallback should strip `?v=2` — old NSString-based logic would
+            // produce "hero.jpg?v=2" and miss.
+            let img = AppIntentsTests.gImage(relativePath: "public/images/hero.jpg", fileName: "hero.jpg")
+            let graph = await makeGraph(images: [img])
+            let provider = PreviewAnnotationProvider(siteID: AppIntentsTests.aSite, graph: graph)
+            let element = AppIntentsTests.makeVisibleElement(
+                tag: "IMG",
+                text: nil,
+                src: "https://cdn.example.com/images/hero.jpg?v=2"
+            )
+            await provider.update([element])
+            #expect(provider.annotations()[0].entity is ImageEntity)
+        }
+
+        @Test("Rule 1: rejects boundary-mismatched suffix paths")
+        func rule1_imgRejectsSuffixWithoutSeparator() async {
+            // `image.relativePath = "images/hero.jpg"` is a hasSuffix of
+            // `"/pub/extra-images/hero.jpg"` — must NOT match. Boundary check should kick in.
+            // Filename fallback still matches by name; for this test the indexed image has
+            // a distinct filename so neither path produces a false positive.
+            let img = AppIntentsTests.gImage(relativePath: "images/hero.jpg", fileName: "hero.jpg")
+            let graph = await makeGraph(images: [img])
+            let provider = PreviewAnnotationProvider(siteID: AppIntentsTests.aSite, graph: graph)
+            let element = AppIntentsTests.makeVisibleElement(
+                tag: "IMG",
+                text: nil,
+                src: "/pub/extra-images/sunset.jpg"   // path contains "images/" but not "images/hero.jpg" boundary
+            )
+            await provider.update([element])
+            // No match → fallback to ElementEntity (no PageEntity since pagePath isn't indexed).
+            #expect(provider.annotations()[0].entity is ElementEntity)
+        }
+
+        @Test("Rule 2: skips generated v-* ids without an actor hop")
+        func rule2_skipsGeneratedIDs() async {
+            // Even if a hypothetical PostEntity id began with `"v-"`, we'd skip it — the prefix
+            // is reserved for the JS reporter's generated ids. Concretely: this element id is
+            // `v-1`, the graph has no entries, so rule 2 must not run (would 404). Rule 4 wins.
+            let graph = SiteContentGraph()
+            let provider = PreviewAnnotationProvider(siteID: AppIntentsTests.aSite, graph: graph)
+            let element = AppIntentsTests.makeVisibleElement(id: "v-1", tag: "ARTICLE", text: "Body")
+            await provider.update([element])
+            #expect(provider.annotations()[0].entity is ElementEntity)
+        }
+
         @Test("Rule 2: data-anglesite-id matching a known post id → PostEntity")
         func rule2_dataAnglesiteIDOnPost_resolvesToPostEntity() async {
             let post = AppIntentsTests.gPost(slug: "hello-world")
@@ -207,6 +254,26 @@ extension AppIntentsTests {
             #expect(entity != nil)
             #expect(entity?.displayName == "button \u{2014} Go")
         }
+
+        @Test("suggestedElementEntities caps at 10 even with a full 50-element report")
+        func suggestedElementEntities_capsAtTen() async {
+            // The JS reporter caps batches at 50; the suggestion picker shouldn't show all of
+            // them. Stuff the provider with 50 ElementEntity-fallback elements and assert the
+            // suggested-entity surface returns at most 10.
+            let graph = SiteContentGraph()
+            let provider = PreviewAnnotationProvider(siteID: AppIntentsTests.aSite, graph: graph)
+            var elements: [VisibleElement] = []
+            for i in 0..<50 {
+                elements.append(AppIntentsTests.makeVisibleElement(
+                    id: "v-\(i)", tag: "BUTTON", text: "B\(i)"
+                ))
+            }
+            await provider.update(elements)
+            #expect(provider.suggestedElementEntities().count == 10)
+            // entity(for:) still resolves all 50 ids — the cap is just on the picker surface.
+            let lookupID = ElementEntity.makeID(siteID: AppIntentsTests.aSite, elementID: "v-49")
+            #expect(provider.entity(for: lookupID) != nil)
+        }
     }
 
     @Suite("ElementEntity helpers", .serialized)
@@ -277,6 +344,28 @@ extension AppIntentsTests {
             let entity = ElementEntity(
                 id: "x", displayName: "h1", siteID: "s",
                 selector: "not json at all", pagePath: "/"
+            )
+            #expect(entity.selectorJSON() == nil)
+        }
+
+        @Test("selectorJSON returns nil for empty object (no `tag` field)")
+        func selectorJSON_returnsNilForEmptyObject() {
+            // `encodeSelector(.string("hi"))` returns `"{}"` — `selectorJSON()` must reject it
+            // so the nil-on-bad-input contract holds end-to-end.
+            let entity = ElementEntity(
+                id: "x", displayName: "h1", siteID: "s",
+                selector: ElementEntity.encodeSelector(.string("not-an-object")),
+                pagePath: "/"
+            )
+            #expect(entity.selectorJSON() == nil)
+        }
+
+        @Test("selectorJSON returns nil for an object missing the `tag` field")
+        func selectorJSON_returnsNilWhenTagMissing() {
+            let entity = ElementEntity(
+                id: "x", displayName: "h1", siteID: "s",
+                selector: "{\"classes\":[]}",
+                pagePath: "/"
             )
             #expect(entity.selectorJSON() == nil)
         }

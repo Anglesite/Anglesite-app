@@ -60,18 +60,25 @@ extension ElementEntity {
     }
 
     /// Decode the JSON-string selector back into the structured `JSONValue` shape that
-    /// `EditMessage.selector` requires. Returns `nil` if the string isn't valid JSON object —
-    /// callers treat that as "drop the edit", matching how `EditMessage.decode` rejects
+    /// `EditMessage.selector` requires. Returns `nil` when the string isn't a usable selector
+    /// — callers treat that as "drop the edit", matching how `EditMessage.decode` rejects
     /// non-object selectors at the WKWebView boundary.
+    ///
+    /// "Usable" means: parses as JSON, is a JSON object, AND carries the `tag` field the
+    /// plugin's `server/selector.mjs` needs to resolve. The `tag` guard is what catches the
+    /// `encodeSelector("{}")` round-trip case — an empty object is technically valid JSON but
+    /// would otherwise pass downstream and fail at the plugin with a less-actionable error.
     public func selectorJSON() -> JSONValue? {
         guard let data = selector.data(using: .utf8) else { return nil }
         guard let raw = try? JSONSerialization.jsonObject(with: data) else { return nil }
-        guard let jv = JSONValue.from(raw), case .object = jv else { return nil }
+        guard let jv = JSONValue.from(raw), case .object(let dict) = jv else { return nil }
+        guard dict["tag"] != nil else { return nil }
         return jv
     }
 
     /// Encode a structured selector to the string form stored on the entity. Round-trips with
-    /// `selectorJSON()`.
+    /// `selectorJSON()`. Non-object inputs return `"{}"` — `selectorJSON()`'s `tag` guard then
+    /// rejects them on the way back, so the nil-on-bad-input contract holds end-to-end.
     public static func encodeSelector(_ selector: JSONValue) -> String {
         guard case .object = selector else { return "{}" }
         guard let data = try? JSONSerialization.data(withJSONObject: selector.rawValue) else { return "{}" }

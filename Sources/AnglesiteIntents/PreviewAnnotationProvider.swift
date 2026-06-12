@@ -38,6 +38,10 @@ public final class PreviewAnnotationProvider: ElementEntityProviding {
     /// require tracking removals we don't otherwise need.
     public func update(_ elements: [VisibleElement]) async {
         let resolvedGraph = ContentGraphOverride.scoped ?? graph
+        // Hoist the per-site image list out of the per-element loop. Each `resolve` call only
+        // reads it; doing it once cuts O(n) actor hops to one, regardless of how many IMG
+        // elements are in the batch.
+        let siteImages = await resolvedGraph.images(for: siteID)
         var nextAnnotated: [(rect: CGRect, entity: any AppEntity)] = []
         var nextElements: [String: ElementEntity] = [:]
         nextAnnotated.reserveCapacity(elements.count)
@@ -49,7 +53,7 @@ public final class PreviewAnnotationProvider: ElementEntityProviding {
                 width: element.rect.width,
                 height: element.rect.height
             )
-            let entity = await resolve(element, graph: resolvedGraph)
+            let entity = await resolve(element, graph: resolvedGraph, siteImages: siteImages)
             nextAnnotated.append((rect: rect, entity: entity))
             if let elementEntity = entity as? ElementEntity {
                 nextElements[elementEntity.id] = elementEntity
@@ -79,22 +83,41 @@ public final class PreviewAnnotationProvider: ElementEntityProviding {
         elementsByID[id]
     }
 
+    /// Suggested entities shown to Siri in the disambiguation picker. AppIntents calls this
+    /// during prefetch; with the reporter's 50-element cap an uncapped pass-through would
+    /// flood the picker. 10 is a comfortable Shortcuts-UI ceiling — same order of magnitude
+    /// as the `IndexedEntity` queries' `suggestedEntities()`.
     public func suggestedElementEntities() -> [ElementEntity] {
-        Array(elementsByID.values)
+        Array(elementsByID.values.prefix(SUGGESTED_ENTITY_CAP))
     }
 
     // MARK: mapping
 
-    private func resolve(_ element: VisibleElement, graph: SiteContentGraph) async -> any AppEntity {
-        // Rule 1: image src matches an indexed asset for this site.
+    /// Generated `VisibleElement.id`s are `v-<base36>`; `data-anglesite-id` values are
+    /// author-chosen strings. Rule 2's `graph.post(id:)` lookup should only run when the id
+    /// could plausibly be an author-tagged PostEntity id — the prefix-test below cheaply
+    /// avoids the actor hop for every generated id. Source of truth for the prefix is
+    /// `JS/edit-overlay/src/visible-elements.ts`'s `idFor()`.
+    private static let generatedIDPrefix = "v-"
+
+    private func resolve(
+        _ element: VisibleElement,
+        graph: SiteContentGraph,
+        siteImages: [SiteContentGraph.Image]
+    ) async -> any AppEntity {
+        // Rule 1: image src matches an indexed asset for this site. `siteImages` is hoisted
+        // by `update(_:)` — we iterate the in-memory list, no actor hop per element.
         if element.tag.uppercased() == "IMG", let src = element.src {
-            for image in await graph.images(for: siteID) where imageMatches(image, src: src) {
+            for image in siteImages where imageMatches(image, src: src) {
                 return ImageEntity(image)
             }
         }
-        // Rule 2: data-anglesite-id (which the JS reporter surfaces as `element.id` when
-        // present) looks like a known PostEntity id.
-        if let post = await graph.post(id: element.id) {
+        // Rule 2: `data-anglesite-id` (sourced verbatim from the JS reporter's `element.id`
+        // when an author tagged the element — see `idFor()` in visible-elements.ts) matches
+        // a known PostEntity id. Generated ids start with `"v-"` and can't match any indexed
+        // entity, so we skip them rather than burn an actor hop on a guaranteed miss.
+        if !element.id.hasPrefix(Self.generatedIDPrefix),
+           let post = await graph.post(id: element.id) {
             return PostEntity(post)
         }
         // Rule 3: pagePath matches a known page route.
@@ -114,13 +137,34 @@ public final class PreviewAnnotationProvider: ElementEntityProviding {
     }
 }
 
-/// Match an image `src` against an indexed `SiteContentGraph.Image`. Sites reference images
-/// in lots of shapes — absolute `/images/foo.png`, relative `images/foo.png`, and full URLs.
-/// We compare on the trailing path segment first (cheap, catches the common case) and fall
-/// back to a `hasSuffix` over the relative path (handles same-name files in different dirs).
+/// Cap on `suggestedElementEntities()` — see the method doc for the rationale.
+private let SUGGESTED_ENTITY_CAP = 10
+
+/// Match an image `src` against an indexed `SiteContentGraph.Image`.
+///
+/// Sites reference images in three shapes:
+///   - Absolute relative path:  `/public/images/hero.jpg`
+///   - Bare relative path:      `images/hero.jpg`
+///   - Full URL (CDN):          `https://cdn.example.com/hero.jpg?v=2`
+///
+/// **Path-suffix match (preferred).** Equality, or `relativePath` preceded by `/`. The
+/// boundary check rejects accidental substring overlaps — without it, `"/pub/extra-images/hero.jpg"`
+/// would match `image.relativePath = "images/hero.jpg"` because `"images/hero.jpg"` is a
+/// hasSuffix of the longer string.
+///
+/// **Filename fallback.** Compare the last path component. `URL(string:)` strips query strings
+/// and fragments before extracting `lastPathComponent` — otherwise a CDN URL with `?v=2` would
+/// produce `"hero.jpg?v=2"` and never match. Falls back to NSString's split-on-`/`-only behavior
+/// when `URL` can't parse the input (e.g., paths with whitespace that haven't been
+/// percent-encoded).
+///
+/// The filename fallback is deliberately loose — same name in different dirs collapses to one
+/// match. That's the right trade-off for hover-to-edit-the-image, where the user has only
+/// pointed at one thing.
 private func imageMatches(_ image: SiteContentGraph.Image, src: String) -> Bool {
-    if src.hasSuffix(image.relativePath) { return true }
-    let srcFile = (src as NSString).lastPathComponent
+    if src == image.relativePath { return true }
+    if src.hasSuffix("/\(image.relativePath)") { return true }
+    let srcFile = URL(string: src)?.lastPathComponent ?? (src as NSString).lastPathComponent
     if !srcFile.isEmpty, srcFile == image.fileName { return true }
     return false
 }

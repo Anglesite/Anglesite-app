@@ -71,13 +71,7 @@ public struct VisibleElementReport: Sendable, Equatable {
         case missingField(String)
         case wrongType(field: String, expected: String)
         case unknownType(String)
-        case malformedElement(index: Int, error: ElementDecodeError)
-    }
-
-    public enum ElementDecodeError: Error, Sendable, Equatable {
-        case notAnObject
-        case missingField(String)
-        case wrongType(field: String, expected: String)
+        case malformedElement(index: Int, error: VisibleElement.DecodeError)
     }
 
     /// Validate every field at the JS boundary; never throw. Same flat `Result` shape as
@@ -108,11 +102,20 @@ public struct VisibleElementReport: Sendable, Equatable {
 }
 
 extension VisibleElement {
+    /// Per-element decode failure shape. Paired with `VisibleElement.decode` (the same
+    /// `Type.DecodeError` pairing `EditMessage` uses), and surfaced from the report's
+    /// `DecodeError.malformedElement(index:error:)` case when one element in a batch fails.
+    public enum DecodeError: Error, Sendable, Equatable {
+        case notAnObject
+        case missingField(String)
+        case wrongType(field: String, expected: String)
+    }
+
     /// Validate one element. Public so callers that already have a `[String: Any]` element
     /// (e.g. tests, alternate transports) can decode without going through the report wrapper.
-    public static func decode(from body: Any) -> Result<VisibleElement, VisibleElementReport.ElementDecodeError> {
+    public static func decode(from body: Any) -> Result<VisibleElement, VisibleElement.DecodeError> {
         guard let dict = body as? [String: Any] else { return .failure(.notAnObject) }
-        func requireString(_ field: String) -> Result<String, VisibleElementReport.ElementDecodeError> {
+        func requireString(_ field: String) -> Result<String, VisibleElement.DecodeError> {
             guard let raw = dict[field] else { return .failure(.missingField(field)) }
             guard let s = raw as? String else { return .failure(.wrongType(field: field, expected: "string")) }
             return .success(s)
