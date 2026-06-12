@@ -23,6 +23,17 @@ import Foundation
 /// in-progress smoke testing will hit `.failed` until the paired plugin change ships. The
 /// failure path is well-tested and the dialog explains the situation — shipping the app side
 /// now unblocks the plugin work to land independently.
+///
+/// **Known cancellation limitation.** The type conforms to `CancellableIntent`
+/// (gated below) but doesn't implement `onCancel()`. The bridge's `applyEdit` is awaited
+/// inside `perform()`; Swift cooperative cancellation reaches `perform`'s task, but the
+/// downstream MCP `apply_edit` call doesn't currently propagate cancellation through
+/// `MCPClient.callTool`. Net effect: a Siri-cancelled intent surfaces a `.failed` dialog to
+/// the user, but the patch can still land on disk if the plugin has already committed it
+/// when the cancellation arrives. Threading `Task.isCancelled` checks through the MCP
+/// callsite is tracked as follow-up; the user-facing impact is bounded because the next
+/// edit naturally supersedes a stale one, and the chat panel's edit log surfaces the
+/// landed-but-cancelled patch for inspection.
 public struct EditContentIntent: AppIntent {
     public static var title: LocalizedStringResource = "Edit Content"
     public static var description = IntentDescription(
@@ -58,10 +69,18 @@ public struct EditContentIntent: AppIntent {
     }
 }
 
+// `LongRunningIntent` + `CancellableIntent` gate the MCP-spawn-on-first-edit budget the way
+// `AddPageIntent` / `AddPostIntent` do (see `ContentIntents.swift`).
+//
+// **Why the `#if compiler(>=6.4)` guard is load-bearing.** `Package.swift` only includes the
+// `AnglesiteIntentsTests` test target when `compiler(>=6.4)`. The `AnglesiteIntents` library
+// target itself, however, compiles on whatever toolchain `swift build` is using — including
+// the Xcode 26.3 / Swift 6.3 CI runner that GH's `macos-15` provides today (the runner that
+// runs `swift test` against `AnglesiteCoreTests` and `AnglesiteBridgeTests`). `LongRunningIntent`
+// and `CancellableIntent` are macOS 26+ symbols not present on that toolchain, so an
+// unconditional conformance would fail to compile in CI. Same gate as the create intents.
+// Tracking removal in #128 once GH's runner ships Xcode 27.
 #if compiler(>=6.4)
-// The MCP server may need to be spawned on first edit, which can exceed the default budget;
-// gate by `LongRunningIntent` + `CancellableIntent` the way the create intents do (see
-// `ContentIntents.swift`). Removed in #128 once macos-15 ships with Xcode 27.
 extension EditContentIntent: LongRunningIntent, CancellableIntent {}
 #endif
 
