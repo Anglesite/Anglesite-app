@@ -225,6 +225,17 @@ public actor SiteContentGraph {
     public func post(id: String) -> Post? { posts[id] }
     public func image(id: String) -> Image? { images[id] }
 
+    // MARK: - Batched id lookup
+
+    /// Resolve many ids in a single actor hop (#170). Returns matches in the input order, skipping
+    /// unknown ids — same semantics as a serial `page(id:)` loop, but one hop instead of N. Used by
+    /// `PageEntityQuery.entities(for:)` etc., which Shortcuts re-resolution can call with dozens of
+    /// ids after a multi-pick. Takes an ordered `[String]` (not a `Set`) to preserve the
+    /// input-order contract the entity queries' tests assert.
+    public func pages(ids: [String]) -> [Page] { ids.compactMap { pages[$0] } }
+    public func posts(ids: [String]) -> [Post] { ids.compactMap { posts[$0] } }
+    public func images(ids: [String]) -> [Image] { ids.compactMap { images[$0] } }
+
     // MARK: - Search
 
     /// Case-insensitive substring search on a page's `title` and `route`. Empty `query`

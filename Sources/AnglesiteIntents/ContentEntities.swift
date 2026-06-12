@@ -42,14 +42,8 @@ public struct PageEntityQuery: EntityStringQuery {
     }
 
     public func entities(for identifiers: [String]) async throws -> [PageEntity] {
-        let g = resolved
-        var found: [PageEntity] = []
-        for id in identifiers {
-            if let page = await g.page(id: id) {
-                found.append(PageEntity(page))
-            }
-        }
-        return found
+        // Single actor hop for all ids (#170); the graph preserves input order and skips unknowns.
+        await resolved.pages(ids: identifiers).map(PageEntity.init)
     }
 
     public func entities(matching string: String) async throws -> [PageEntity] {
@@ -135,14 +129,8 @@ public struct PostEntityQuery: EntityStringQuery {
     }
 
     public func entities(for identifiers: [String]) async throws -> [PostEntity] {
-        let g = resolved
-        var found: [PostEntity] = []
-        for id in identifiers {
-            if let post = await g.post(id: id) {
-                found.append(PostEntity(post))
-            }
-        }
-        return found
+        // Single actor hop for all ids (#170); the graph preserves input order and skips unknowns.
+        await resolved.posts(ids: identifiers).map(PostEntity.init)
     }
 
     public func entities(matching string: String) async throws -> [PostEntity] {
@@ -224,14 +212,8 @@ public struct ImageEntityQuery: EntityStringQuery {
     }
 
     public func entities(for identifiers: [String]) async throws -> [ImageEntity] {
-        let g = resolved
-        var found: [ImageEntity] = []
-        for id in identifiers {
-            if let image = await g.image(id: id) {
-                found.append(ImageEntity(image))
-            }
-        }
-        return found
+        // Single actor hop for all ids (#170); the graph preserves input order and skips unknowns.
+        await resolved.images(ids: identifiers).map(ImageEntity.init)
     }
 
     public func entities(matching string: String) async throws -> [ImageEntity] {

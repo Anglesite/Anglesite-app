@@ -525,4 +525,57 @@ struct SiteContentGraphTests {
         #expect(pages.count == 100)
         #expect(Set(pages.map(\.route)).count == 100)
     }
+
+    // MARK: - Batched id lookup (#170)
+
+    @Test("pages(ids:) returns matches in input order, skipping unknown ids")
+    func batchedPagesPreserveOrderAndSkipUnknown() async {
+        let graph = SiteContentGraph()
+        let a = Self.page(route: "/a"), b = Self.page(route: "/b"), c = Self.page(route: "/c")
+        await graph.load(siteID: Self.siteA, pages: [a, b, c], posts: [], images: [])
+
+        let result = await graph.pages(ids: [c.id, "unknown:page:/zzz", a.id, b.id])
+        #expect(result.map(\.id) == [c.id, a.id, b.id])
+    }
+
+    @Test("posts(ids:) returns matches in input order, skipping unknown ids")
+    func batchedPostsPreserveOrderAndSkipUnknown() async {
+        let graph = SiteContentGraph()
+        let a = Self.post(slug: "a"), b = Self.post(slug: "b")
+        await graph.load(siteID: Self.siteA, pages: [], posts: [a, b], images: [])
+
+        let result = await graph.posts(ids: [b.id, "unknown:post:zzz", a.id])
+        #expect(result.map(\.id) == [b.id, a.id])
+    }
+
+    @Test("images(ids:) returns matches in input order, skipping unknown ids")
+    func batchedImagesPreserveOrderAndSkipUnknown() async {
+        let graph = SiteContentGraph()
+        let a = Self.image(relativePath: "public/a.png"), b = Self.image(relativePath: "public/b.png")
+        await graph.load(siteID: Self.siteA, pages: [], posts: [], images: [a, b])
+
+        let result = await graph.images(ids: [b.id, a.id, "unknown:image:zzz.png"])
+        #expect(result.map(\.id) == [b.id, a.id])
+    }
+
+    @Test("batched lookups return empty for an empty id list")
+    func batchedEmpty() async {
+        let graph = SiteContentGraph()
+        await graph.load(siteID: Self.siteA, pages: [Self.page()], posts: [Self.post()], images: [Self.image()])
+        #expect(await graph.pages(ids: []).isEmpty)
+        #expect(await graph.posts(ids: []).isEmpty)
+        #expect(await graph.images(ids: []).isEmpty)
+    }
+
+    @Test("batched lookups resolve ids across sites by id alone")
+    func batchedCrossSite() async {
+        let graph = SiteContentGraph()
+        let pa = Self.page(site: Self.siteA, route: "/a")
+        let pb = Self.page(site: Self.siteB, route: "/b")
+        await graph.load(siteID: Self.siteA, pages: [pa], posts: [], images: [])
+        await graph.load(siteID: Self.siteB, pages: [pb], posts: [], images: [])
+
+        let result = await graph.pages(ids: [pb.id, pa.id])
+        #expect(result.map(\.id) == [pb.id, pa.id])
+    }
 }
