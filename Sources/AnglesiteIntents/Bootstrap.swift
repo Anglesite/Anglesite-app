@@ -39,6 +39,15 @@ public enum AnglesiteIntents {
         AppDependencyManager.shared.add { () -> any ContentOperationsService in
             ContentOperations(pool: headlessPool, siteDirectory: { id in await SiteStore.shared.find(id: id)?.path })
         }
+        // `EditContentIntent` (B.5 / #149) routes natural-language edits through
+        // `IntentEditBridge`, which asks `EditRouterRegistry.shared` for the live edit router of
+        // the requested site. The registry is populated by `PreviewModel.open()` and cleared by
+        // `PreviewModel.close()` — so an edit from Siri only resolves while the site's window
+        // is open. The headless fallback is deferred (out of scope for B.5).
+        let editBridge = IntentEditBridge(
+            routerProvider: { siteID in await EditRouterRegistry.shared.router(for: siteID) }
+        )
+        AppDependencyManager.shared.add { () -> IntentEditBridge in editBridge }
 
         await SiteStore.shared.setChangeHandler { sites in
             do {
