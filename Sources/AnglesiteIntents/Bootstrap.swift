@@ -11,13 +11,24 @@ private let log = Logger(subsystem: "dev.anglesite.app", category: "spotlight-in
 /// mutations — that way a caller in an async context (e.g. #101's system MCP entry from a
 /// non-UI process) gets the indexer reliably set up before they touch the store.
 ///
+/// `contentGraph` is the single, app-lifetime `SiteContentGraph` instance the app owns and
+/// passes in. We register it with `AppDependencyManager` so `@Dependency private var graph:
+/// SiteContentGraph` resolves to the same instance in every `PageEntityQuery` /
+/// `PostEntityQuery` / `ImageEntityQuery` instantiation by the AppIntents runtime. A.1's
+/// design explicitly rules out a process-wide `SiteContentGraph.shared` — ownership stays
+/// with the app, threaded through here.
+///
 /// The kicker `try await SiteStore.shared.load()` inside is belt-and-suspenders for the
 /// SwiftUI case: `AppDelegate.applicationDidFinishLaunching` can only fire-and-forget us in a
 /// `Task`, which races with the launcher view's own `task` modifier. The handler is registered
 /// before the load here, so the load *will* emit even if the launcher already raced ahead and
 /// missed it — emission is idempotent (the indexer dedups by id set).
 public enum AnglesiteIntents {
-    public static func bootstrap() async {
+    public static func bootstrap(contentGraph: SiteContentGraph) async {
+        // Singleton-factory: the closure always returns the same pre-constructed `contentGraph`
+        // instance. `AppDependencyManager.add` accepts a factory because dependencies may be
+        // per-resolution, but our graph is process-wide, so we capture and re-yield.
+        AppDependencyManager.shared.add { () -> SiteContentGraph in contentGraph }
         AppDependencyManager.shared.add { () -> any SiteOperationsService in
             SiteOperations(factory: LiveCommandFactory())
         }

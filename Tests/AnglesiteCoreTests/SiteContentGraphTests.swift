@@ -410,6 +410,58 @@ struct SiteContentGraphTests {
         #expect(byCollection.map(\.slug) == ["first-post"])
     }
 
+    @Test("searchImages matches fileName and relativePath case-insensitively")
+    func searchImagesMatchesFileNameAndRelativePathCaseInsensitive() async {
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [],
+            posts: [],
+            images: [
+                Self.image(relativePath: "public/images/hero.jpg", fileName: "hero.jpg"),
+                Self.image(relativePath: "public/icons/star.svg", fileName: "star.svg"),
+                Self.image(relativePath: "public/images/avatar.png", fileName: "avatar.png")
+            ]
+        )
+
+        let byFileName = await graph.searchImages(siteID: Self.siteA, matching: "HERO")
+        let byPath = await graph.searchImages(siteID: Self.siteA, matching: "icons")
+        let none = await graph.searchImages(siteID: Self.siteA, matching: "zzzz")
+
+        #expect(byFileName.map(\.relativePath) == ["public/images/hero.jpg"])
+        #expect(byPath.map(\.relativePath) == ["public/icons/star.svg"])
+        #expect(none.isEmpty)
+    }
+
+    @Test("searchImages with empty query returns all images for the siteID")
+    func searchImagesEmptyQueryReturnsAll() async {
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [],
+            posts: [],
+            images: [
+                Self.image(relativePath: "public/images/a.jpg", fileName: "a.jpg"),
+                Self.image(relativePath: "public/images/b.jpg", fileName: "b.jpg")
+            ]
+        )
+
+        let all = await graph.searchImages(siteID: Self.siteA, matching: "")
+        #expect(Set(all.map(\.relativePath)) == ["public/images/a.jpg", "public/images/b.jpg"])
+    }
+
+    @Test("searchImages scopes to siteID")
+    func searchImagesScopesToSiteID() async {
+        let graph = SiteContentGraph()
+        await graph.upsertImage(Self.image(site: Self.siteA, relativePath: "public/images/a.jpg", fileName: "a.jpg"))
+        await graph.upsertImage(Self.image(site: Self.siteB, relativePath: "public/images/b.jpg", fileName: "b.jpg"))
+
+        let a = await graph.searchImages(siteID: Self.siteA, matching: ".jpg")
+        let b = await graph.searchImages(siteID: Self.siteB, matching: ".jpg")
+        #expect(a.map(\.relativePath) == ["public/images/a.jpg"])
+        #expect(b.map(\.relativePath) == ["public/images/b.jpg"])
+    }
+
     @Test("search with empty query returns all entries for the siteID")
     func searchWithEmptyQueryReturnsAll() async {
         let graph = SiteContentGraph()
