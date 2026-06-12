@@ -1,5 +1,13 @@
 import Foundation
+
+// `FoundationModels` ships in the macOS 26 SDK but is absent from GitHub's `macos-15`
+// runner at *runtime* — linking it into the package makes the whole test bundle fail to
+// `dlopen`. Gate it behind the Xcode-27 toolchain (Swift 6.4) so CI on Xcode 26.3 builds
+// and loads the reduced surface, while production (always Xcode 27) gets the full protocol.
+// Same pattern + tracking as the long-running-intent guards — see #128.
+#if compiler(>=6.4)
 import FoundationModels
+#endif
 
 /// Provider-agnostic surface for LLM-backed content assistance.
 ///
@@ -25,11 +33,16 @@ public protocol ContentAssistant: Sendable {
 
     /// Produces a guided-generation result conforming to `Generable` — the structured-output
     /// path used for edit commands, page metadata, alt text, summaries, and classification.
+    ///
+    /// - Note: Requires `FoundationModels`, so it's gated to the Xcode-27 toolchain (#128).
+    ///   Production builds always have it; CI on Xcode 26.3 sees the streaming surface only.
+    #if compiler(>=6.4)
     func generateStructured<T: Generable>(
         prompt: String,
         context: AssistantContext,
         resultType: T.Type
     ) async throws -> T
+    #endif
 
     /// Static description of what this backend can do. Callers gate UI and routing on this
     /// rather than type-checking the concrete conformer.

@@ -1,7 +1,11 @@
 import Testing
 import Foundation
-import FoundationModels
 @testable import AnglesiteCore
+
+// FoundationModels (and thus the `generateStructured` / `Generable` surface) is only
+// available on the Xcode-27 toolchain — see ContentAssistant.swift and #128.
+#if compiler(>=6.4)
+import FoundationModels
 
 /// A minimal `Generable` value used to exercise the protocol's structured-output surface.
 @Generable
@@ -9,13 +13,16 @@ struct StubGeneratedResult: Equatable {
     @Guide(description: "A generated title")
     var title: String
 }
+#endif
 
 /// In-memory `ContentAssistant` conformer. Proves the protocol is usable as written: a backend
 /// can satisfy the streaming, structured, and capabilities requirements with no provider SDK.
 private struct StubAssistant: ContentAssistant {
     let chunks: [String]
-    let structured: StubGeneratedResult
     let capabilities: AssistantCapabilities
+    #if compiler(>=6.4)
+    let structured: StubGeneratedResult
+    #endif
 
     func generate(prompt: String, context: AssistantContext) async throws -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
@@ -24,6 +31,7 @@ private struct StubAssistant: ContentAssistant {
         }
     }
 
+    #if compiler(>=6.4)
     func generateStructured<T: Generable>(
         prompt: String,
         context: AssistantContext,
@@ -36,26 +44,26 @@ private struct StubAssistant: ContentAssistant {
     }
 
     enum StubError: Error { case unsupportedResultType }
+    #endif
 }
 
 @Suite("ContentAssistant")
 struct ContentAssistantTests {
-    private func makeAssistant(
-        chunks: [String] = [],
-        structured: StubGeneratedResult = StubGeneratedResult(title: "x")
-    ) -> StubAssistant {
-        StubAssistant(
-            chunks: chunks,
-            structured: structured,
-            capabilities: AssistantCapabilities(
-                supportsStreaming: true,
-                supportsStructuredOutput: true,
-                supportsVision: false,
-                supportsTools: true,
-                maxContextTokens: 4096,
-                providerName: "Test"
-            )
-        )
+    private static let testCapabilities = AssistantCapabilities(
+        supportsStreaming: true,
+        supportsStructuredOutput: true,
+        supportsVision: false,
+        supportsTools: true,
+        maxContextTokens: 4096,
+        providerName: "Test"
+    )
+
+    private func makeAssistant(chunks: [String] = []) -> StubAssistant {
+        #if compiler(>=6.4)
+        StubAssistant(chunks: chunks, capabilities: Self.testCapabilities, structured: StubGeneratedResult(title: "x"))
+        #else
+        StubAssistant(chunks: chunks, capabilities: Self.testCapabilities)
+        #endif
     }
 
     private func makeContext(history: [AssistantMessage] = []) -> AssistantContext {
@@ -87,10 +95,11 @@ struct ContentAssistantTests {
         #expect(collected == "Hello, world!")
     }
 
+    #if compiler(>=6.4)
     @Test("generateStructured returns the requested Generable type")
     func structuredReturnsTypedValue() async throws {
         let expected = StubGeneratedResult(title: "Generated")
-        let assistant = makeAssistant(structured: expected)
+        let assistant = StubAssistant(chunks: [], capabilities: Self.testCapabilities, structured: expected)
         let result = try await assistant.generateStructured(
             prompt: "make a title",
             context: makeContext(),
@@ -98,6 +107,7 @@ struct ContentAssistantTests {
         )
         #expect(result == expected)
     }
+    #endif
 
     @Test("AssistantMessage is value-equatable")
     func messageEquatable() {
