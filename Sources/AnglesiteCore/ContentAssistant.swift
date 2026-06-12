@@ -58,8 +58,11 @@ public struct AssistantContext: Sendable {
     public let currentPageRoute: String?
     /// Source content of the current page, if the caller has it loaded.
     public let currentPageContent: String?
-    /// CSS selector for the element the user has selected in the overlay, if any.
-    public let selectedElementSelector: String?
+    /// Structured `ElementInfo` (a `JSONValue` object, e.g. `{"tag":"h1","index":0}`) for the
+    /// element the user selected in the overlay, if any. Matches `EditMessage.selector` /
+    /// `IntentEditBridge` so a conformer can route an edit without re-deriving a selector — the
+    /// plugin's `server/selector.mjs` builds the CSS string server-side. See #18.
+    public let selectedElementSelector: JSONValue?
     /// Prior turns, oldest first.
     public let conversationHistory: [AssistantMessage]
 
@@ -68,7 +71,7 @@ public struct AssistantContext: Sendable {
         siteDirectory: URL,
         currentPageRoute: String? = nil,
         currentPageContent: String? = nil,
-        selectedElementSelector: String? = nil,
+        selectedElementSelector: JSONValue? = nil,
         conversationHistory: [AssistantMessage] = []
     ) {
         self.siteID = siteID
@@ -82,14 +85,14 @@ public struct AssistantContext: Sendable {
 
 /// One turn in a ``AssistantContext/conversationHistory``.
 public struct AssistantMessage: Sendable, Equatable {
-    public let role: AssistantRole
+    public let role: Role
     public let content: String
 
-    public enum AssistantRole: Sendable, Equatable {
+    public enum Role: Sendable, Equatable {
         case user, assistant, system
     }
 
-    public init(role: AssistantRole, content: String) {
+    public init(role: Role, content: String) {
         self.role = role
         self.content = content
     }
@@ -97,7 +100,7 @@ public struct AssistantMessage: Sendable, Equatable {
 
 /// Static capability descriptor for a ``ContentAssistant`` backend. Used to gate features
 /// (vision, tools) and route requests by tier (on-device vs. PCC vs. Claude).
-public struct AssistantCapabilities: Sendable {
+public struct AssistantCapabilities: Sendable, Equatable {
     public let supportsStreaming: Bool
     public let supportsStructuredOutput: Bool
     public let supportsVision: Bool

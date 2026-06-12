@@ -13,6 +13,13 @@ struct StubGeneratedResult: Equatable {
     @Guide(description: "A generated title")
     var title: String
 }
+
+/// A second `Generable` type the stub can't produce — drives the error path.
+@Generable
+struct UnrelatedGeneratedResult: Equatable {
+    @Guide(description: "A count")
+    var count: Int
+}
 #endif
 
 /// In-memory `ContentAssistant` conformer. Proves the protocol is usable as written: a backend
@@ -107,6 +114,22 @@ struct ContentAssistantTests {
         )
         #expect(result == expected)
     }
+
+    @Test("generateStructured surfaces a backend failure")
+    func structuredPropagatesError() async {
+        let assistant = StubAssistant(
+            chunks: [],
+            capabilities: Self.testCapabilities,
+            structured: StubGeneratedResult(title: "x")
+        )
+        await #expect(throws: StubAssistant.StubError.self) {
+            _ = try await assistant.generateStructured(
+                prompt: "give me a count",
+                context: makeContext(),
+                resultType: UnrelatedGeneratedResult.self
+            )
+        }
+    }
     #endif
 
     @Test("AssistantMessage is value-equatable")
@@ -125,13 +148,13 @@ struct ContentAssistantTests {
             siteDirectory: URL(fileURLWithPath: "/tmp/abc"),
             currentPageRoute: "/about",
             currentPageContent: "# About",
-            selectedElementSelector: "h1",
+            selectedElementSelector: .object(["tag": .string("h1"), "index": .int(0)]),
             conversationHistory: history
         )
         #expect(context.siteID == "abc")
         #expect(context.currentPageRoute == "/about")
         #expect(context.currentPageContent == "# About")
-        #expect(context.selectedElementSelector == "h1")
+        #expect(context.selectedElementSelector == .object(["tag": .string("h1"), "index": .int(0)]))
         #expect(context.conversationHistory == history)
     }
 }
