@@ -1,7 +1,15 @@
 import AppIntents
+import AppKit
 import AnglesiteCore
 import CoreGraphics
 import Foundation
+
+// `AppEntityUIElement` and `AppEntityUIElementsContext` are defined by the
+// `_AppIntents_AppKit` cross-import overlay, which auto-loads when both `AppIntents` and
+// `AppKit` are imported explicitly in the consuming file. Swift's `MemberImportVisibility`
+// upcoming-feature (enabled by the macOS 27 SDK module flags) requires both base modules
+// here — transitive imports through other frameworks aren't enough, and the compile error
+// blames the type rather than the missing import.
 
 /// Per-WKWebView state holding the latest `VisibleElementReport` and mapping each element to
 /// an `AppEntity`. AppKit's `appEntityUIElementProvider` (B.4 / #148) reads from this when
