@@ -274,6 +274,60 @@ extension AppIntentsTests {
             let lookupID = ElementEntity.makeID(siteID: AppIntentsTests.aSite, elementID: "v-49")
             #expect(provider.entity(for: lookupID) != nil)
         }
+
+        @Test(".visible(rect:) returns only elements intersecting the rect")
+        func uiElements_visibleRectFiltersByIntersection() async {
+            let graph = SiteContentGraph()
+            let provider = PreviewAnnotationProvider(siteID: AppIntentsTests.aSite, graph: graph)
+            // Three elements at different x positions; the requested visible rect covers x: 0..100.
+            await provider.update([
+                AppIntentsTests.makeVisibleElement(id: "v-a", tag: "H1", x: 0,   width: 50),
+                AppIntentsTests.makeVisibleElement(id: "v-b", tag: "H2", x: 200, width: 50),
+                AppIntentsTests.makeVisibleElement(id: "v-c", tag: "H3", x: 90,  width: 100),
+            ])
+            let requests: Set<AppEntityUIElementsContext.ElementsRequest> = [
+                .visible(rect: CGRect(x: 0, y: 0, width: 100, height: 1000))
+            ]
+            let elements = provider.uiElements(forRequests: requests)
+            #expect(elements.count == 2)
+            #expect(elements.map(\.bounds.minX).sorted() == [0, 90])
+        }
+
+        @Test(".selected request returns empty (no selection model)")
+        func uiElements_selectedRequestIsEmpty() async {
+            let graph = SiteContentGraph()
+            let provider = PreviewAnnotationProvider(siteID: AppIntentsTests.aSite, graph: graph)
+            await provider.update([AppIntentsTests.makeVisibleElement(id: "v-a", tag: "H1")])
+            #expect(provider.uiElements(forRequests: [.selected]).isEmpty)
+        }
+
+        @Test("Mixed .visible + .selected returns only visible matches")
+        func uiElements_mixedRequestsReturnVisibleOnly() async {
+            let graph = SiteContentGraph()
+            let provider = PreviewAnnotationProvider(siteID: AppIntentsTests.aSite, graph: graph)
+            await provider.update([AppIntentsTests.makeVisibleElement(id: "v-a", tag: "H1", x: 0)])
+            let requests: Set<AppEntityUIElementsContext.ElementsRequest> = [
+                .visible(rect: CGRect(x: 0, y: 0, width: 1000, height: 1000)),
+                .selected,
+            ]
+            #expect(provider.uiElements(forRequests: requests).count == 1)
+        }
+
+        @Test("uiElements bounds equal the stored annotation rects")
+        func uiElements_boundsMatchAnnotations() async {
+            let graph = SiteContentGraph()
+            let provider = PreviewAnnotationProvider(siteID: AppIntentsTests.aSite, graph: graph)
+            await provider.update([
+                AppIntentsTests.makeVisibleElement(id: "v-a", tag: "H1",
+                    x: 10, y: 20, width: 300, height: 40)
+            ])
+            let requests: Set<AppEntityUIElementsContext.ElementsRequest> = [
+                .visible(rect: CGRect(x: 0, y: 0, width: 1000, height: 1000))
+            ]
+            let elements = provider.uiElements(forRequests: requests)
+            #expect(elements.count == 1)
+            #expect(elements[0].bounds == CGRect(x: 10, y: 20, width: 300, height: 40))
+        }
     }
 
     @Suite("ElementEntity helpers", .serialized)
