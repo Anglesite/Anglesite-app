@@ -3,6 +3,7 @@ import AnglesiteCore
 import OSLog
 
 private let log = Logger(subsystem: "dev.anglesite.app", category: "spotlight-indexer")
+private let contentLog = Logger(subsystem: "dev.anglesite.app", category: "content-spotlight-indexer")
 
 /// Public entry point that registers production dependencies with `AppDependencyManager` and
 /// hooks the Spotlight indexer to `SiteStore.shared`.
@@ -39,6 +40,20 @@ public enum AnglesiteIntents {
                 log.info("indexed=\(outcome.indexed, privacy: .public) removed=\(outcome.removed, privacy: .public)")
             } catch {
                 log.error("reindex failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+
+        // Mirror the content graph (pages/posts/images) into the Spotlight semantic index the same
+        // way (A.3, #144). The handler fires per-siteID after every graph mutation — load on site
+        // open, upsert/remove on file-watch, unload on site close — and the indexer diffs that
+        // site's current snapshot against what it last published.
+        let contentIndexer = ContentSpotlightIndexer(graph: contentGraph, backend: LiveContentSpotlightBackend())
+        await contentGraph.setChangeHandler { siteID in
+            do {
+                let outcome = try await contentIndexer.reindex(siteID: siteID)
+                contentLog.info("indexed=\(outcome.indexed, privacy: .public) removed=\(outcome.removed, privacy: .public)")
+            } catch {
+                contentLog.error("reindex failed: \(error.localizedDescription, privacy: .public)")
             }
         }
         do {
