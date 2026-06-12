@@ -13,6 +13,7 @@ import {
   type EditReply,
 } from "./messages.js";
 import { showToast } from "./toast.js";
+import { installVisibleElementsReporter } from "./visible-elements.js";
 
 export const HOVER_CLASS = "anglesite-hover";
 export const EDITABLE_CLASS = "anglesite-editing";
@@ -196,4 +197,5 @@ export function install(): void {
   attachHover();
   attachClickToEdit(awaitReply);
   attachImageDrop(awaitReply);
+  installVisibleElementsReporter();
 }
