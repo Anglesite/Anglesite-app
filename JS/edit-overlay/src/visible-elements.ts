@@ -22,10 +22,20 @@ export interface VisibleElement {
   /** Structured selector payload — same shape used by `apply-edit` messages. */
   selector: ElementInfo;
   rect: { x: number; y: number; width: number; height: number };
-  /** `innerText` whitespace-collapsed and truncated to 120 chars. Absent if empty. */
+  /** `textContent` whitespace-collapsed and truncated to 120 chars. Absent if empty.
+   *  Deliberately not `innerText` — `innerText` forces a layout flush per read, which would
+   *  pile up to 50× per emit on busy pages. `textContent` is essentially free; the trade-off
+   *  is that it can include hidden text (`display:none`, `aria-hidden`). For the Siri-match
+   *  use case the false positives are bounded and self-correcting (the user can rephrase). */
   text?: string;
   /** Present for `<img>` only. */
   src?: string;
+  /** `alt` attribute — only populated for `<img>`. Critical for the Siri use case: `<img>` has
+   *  no `textContent`, so without `alt` the only name to match against is the `src` path. */
+  alt?: string;
+  /** `aria-label` attribute, when present. Fills the name role for icon controls and other
+   *  elements whose visible text doesn't describe them ("✕" buttons, glyph-only links, etc.). */
+  ariaLabel?: string;
   /** ARIA `role` attribute, if any. */
   role?: string;
   /** Current page route at report time (`location.pathname`). */
@@ -117,7 +127,10 @@ function shape(el: Element, pagePath: string): VisibleElement {
   const rect = el.getBoundingClientRect();
   const text = condenseText(el.textContent ?? "");
   const role = el.getAttribute("role") ?? undefined;
-  const src = el.tagName === "IMG" ? (el as HTMLImageElement).getAttribute("src") ?? undefined : undefined;
+  const isImg = el.tagName === "IMG";
+  const src = isImg ? (el as HTMLImageElement).getAttribute("src") ?? undefined : undefined;
+  const alt = isImg ? (el as HTMLImageElement).getAttribute("alt") ?? undefined : undefined;
+  const ariaLabel = el.getAttribute("aria-label") ?? undefined;
   const out: VisibleElement = {
     id: idFor(el),
     tag: el.tagName,
@@ -127,6 +140,8 @@ function shape(el: Element, pagePath: string): VisibleElement {
   };
   if (text) out.text = text;
   if (src) out.src = src;
+  if (alt) out.alt = alt;
+  if (ariaLabel) out.ariaLabel = ariaLabel;
   if (role) out.role = role;
   return out;
 }
@@ -138,6 +153,13 @@ function shape(el: Element, pagePath: string): VisibleElement {
  * same input list, and the same `pagePath`, returns the same output. Stable sort within a
  * category preserves DOM order, which gives Siri a predictable "first heading", "first image",
  * etc.
+ *
+ * Performance: each `shape()` call invokes `getBoundingClientRect()`, which can force a
+ * style/layout flush. For pages with many priority elements this is a known cost — bounded
+ * by the 50-element cap. If it becomes a hot spot in real-world traces, the path forward is
+ * to cache `entry.boundingClientRect` from the `IntersectionObserver` callback (it's already
+ * computed by the browser at zero cost) and only fall back to a live read in the scroll /
+ * resize / mutation paths.
  */
 export function collectVisibleElements(
   candidates: Element[],
@@ -183,6 +205,10 @@ interface InstallableWindow {
  *
  * Idempotent — a second call is a no-op. Returns silently when `IntersectionObserver` is
  * unavailable (older environments / non-WKWebView hosts).
+ *
+ * Internal `emit()` posts via the default `window` — same convention as `messages.ts`'s
+ * `attachClickToEdit` etc. The `postVisibleElements` `win` seam exists for unit-test direct
+ * invocation; the install path is integration-tested via the global `window.webkit` stub.
  */
 export function installVisibleElementsReporter(): void {
   const win = window as unknown as InstallableWindow;
@@ -192,6 +218,9 @@ export function installVisibleElementsReporter(): void {
 
   const visible = new Set<Element>();
   const observed = new Set<Element>();
+  // Dedup key for the last-sent report — the sorted, joined `id` list. Avoids redundant IPC
+  // when the user scrolls slowly within a region whose visible set doesn't change.
+  let lastEmittedKey = "";
 
   const observer = new IntersectionObserver((entries) => {
     let changed = false;
@@ -221,7 +250,11 @@ export function installVisibleElementsReporter(): void {
         observed.add(el);
       }
     }
-    for (const el of observed) {
+    // Snapshot-then-iterate: mutating a `Set` during `for…of` is safe per ES2019 iterator
+    // semantics, but it reads like a bug. The spread copy is O(n) and n is bounded by the
+    // candidate count (≤50 in practice). Lint sees the spread as redundant — it isn't here.
+    // oxlint-disable-next-line no-useless-spread
+    for (const el of [...observed]) {
       if (!candidates.has(el)) {
         observer.unobserve(el);
         observed.delete(el);
@@ -232,11 +265,15 @@ export function installVisibleElementsReporter(): void {
 
   function emit(): void {
     if (visible.size === 0) return;
-    const report: VisibleElementReport = {
-      type: "anglesite:visible-elements",
-      elements: collectVisibleElements(Array.from(visible), location.pathname),
-    };
-    if (report.elements.length === 0) return;
+    const elements = collectVisibleElements(Array.from(visible), location.pathname);
+    if (elements.length === 0) return;
+    // Dedup against the previous report's id set (sorted so visible-set permutations don't
+    // count as changes). Rects-only changes between reports don't trigger a re-emit; the
+    // next mutation / resize will get a fresh batch when geometry actually matters.
+    const key = elements.map((e) => e.id).sort().join(",");
+    if (key === lastEmittedKey) return;
+    lastEmittedKey = key;
+    const report: VisibleElementReport = { type: "anglesite:visible-elements", elements };
     postVisibleElements(report);
   }
 
@@ -263,16 +300,22 @@ export function installVisibleElementsReporter(): void {
       reconcileObservations();
       emit();
     }, RESIZE_DEBOUNCE_MS);
-  });
+  }, { passive: true });
 
   // DOM mutations: debounced. Re-reconcile so newly-added candidates start being observed
-  // (and removed ones are dropped from the visible set).
+  // (and removed ones are dropped from the visible set). `alt` and `aria-label` are in the
+  // filter because `shape()` reads them — changes should refresh the report so Siri picks up
+  // renamed assets / relabeled controls without waiting for the next mutation cycle.
   let mutationTimer: ReturnType<typeof setTimeout> | undefined;
   const mutationObserver = new MutationObserver(() => {
     if (mutationTimer !== undefined) clearTimeout(mutationTimer);
     mutationTimer = setTimeout(() => {
       mutationTimer = undefined;
       reconcileObservations();
+      // Dedup is based on id set, which doesn't change just because `alt` changed. Force a
+      // re-emit by clearing the cache here — geometry / attribute changes are exactly the
+      // case the mutation trigger exists to surface.
+      lastEmittedKey = "";
       emit();
     }, MUTATION_DEBOUNCE_MS);
   });

@@ -104,6 +104,27 @@ describe("collectVisibleElements (pure shape)", () => {
     expect(r.role).toBe("button");
   });
 
+  it("captures alt for images", () => {
+    const img = makeEl(document.body, "img", { src: "/a.png", alt: "beach sunset" });
+    stubRect(img);
+    const r = collectVisibleElements([img], "/")[0]!;
+    expect(r.alt).toBe("beach sunset");
+  });
+
+  it("does not set alt for non-image elements", () => {
+    const h1 = makeEl(document.body, "h1", { alt: "ignored" }, "Hi");
+    stubRect(h1);
+    const r = collectVisibleElements([h1], "/")[0]!;
+    expect(r.alt).toBeUndefined();
+  });
+
+  it("captures aria-label on any element", () => {
+    const btn = makeEl(document.body, "button", { "aria-label": "Close dialog" }, "✕");
+    stubRect(btn);
+    const r = collectVisibleElements([btn], "/")[0]!;
+    expect(r.ariaLabel).toBe("Close dialog");
+  });
+
   it("orders heading > image > nav-item > interactive", () => {
     const nav = makeEl(document.body, "nav");
     const navLink = makeEl(nav, "a", { href: "/x" }, "Link");
@@ -209,6 +230,38 @@ describe("installVisibleElementsReporter", () => {
     installVisibleElementsReporter();
     expect(observed.length).toBe(after1);
   });
+
+  it("dedupes identical reports — same visible set fires once", () => {
+    const h1 = makeEl(document.body, "h1", {}, "Title");
+    stubRect(h1);
+    installVisibleElementsReporter();
+    // Same element, two IO callbacks (e.g. the user scrolls but the visible set is stable).
+    lastCallback?.([{ target: h1, isIntersecting: true }]);
+    lastCallback?.([{ target: h1, isIntersecting: true }]);
+    const reports = sent.filter(
+      (m): m is VisibleElementReport =>
+        typeof m === "object" && m !== null && (m as { type?: string }).type === "anglesite:visible-elements",
+    );
+    // First fire emits; second is a no-op because the id key matches.
+    expect(reports.length).toBe(1);
+  });
+
+  it("emits a new report when the visible set changes", () => {
+    const h1 = makeEl(document.body, "h1", {}, "A");
+    const h2 = makeEl(document.body, "h2", {}, "B");
+    stubRect(h1);
+    stubRect(h2);
+    installVisibleElementsReporter();
+    lastCallback?.([{ target: h1, isIntersecting: true }]);
+    lastCallback?.([{ target: h2, isIntersecting: true }]);
+    const reports = sent.filter(
+      (m): m is VisibleElementReport =>
+        typeof m === "object" && m !== null && (m as { type?: string }).type === "anglesite:visible-elements",
+    );
+    // First report: just h1. Second: h1 + h2 — different id key, emits.
+    expect(reports.length).toBe(2);
+    expect(reports[1]!.elements.map((e) => e.tag).sort()).toEqual(["H1", "H2"]);
+  });
 });
 
 describe("VisibleElement type contract", () => {
@@ -219,8 +272,10 @@ describe("VisibleElement type contract", () => {
       tag: "IMG",
       selector: { tag: "IMG", classes: [], nthChild: 1 },
       rect: { x: 0, y: 0, width: 1, height: 1 },
-      text: "alt",
+      text: "alt text fallback",
       src: "/a.png",
+      alt: "alt",
+      ariaLabel: "label",
       role: "img",
       pagePath: "/",
     };
