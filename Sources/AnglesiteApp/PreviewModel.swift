@@ -47,7 +47,10 @@ final class PreviewModel {
     /// `ChatModel.recordEdit(_:)` — surfacing the edit as an `.edit` row in the chat panel.
     ///
     /// Subsequent calls replace the prior observer (the router is fully reconstructed each time
-    /// with the same `mcpClient` getter; `MCPApplyEditRouter` is a struct so this is cheap).
+    /// with the same `mcpClient` getter; `MCPApplyEditRouter` is a struct so this is cheap). The
+    /// new router is re-registered in `EditRouterRegistry.shared` so `EditContentIntent`
+    /// (B.5 / #149) routes through the same observer-equipped instance — otherwise the chat
+    /// panel would miss Siri-driven edits.
     func setEditObserver(_ onEdit: @escaping MCPApplyEditRouter.EditObserver) {
         self.editRouter = MCPApplyEditRouter(
             mcpClient: { [weak self] in
@@ -56,16 +59,33 @@ final class PreviewModel {
             },
             onEdit: onEdit
         )
+        if let siteID = openSiteID {
+            let current = self.editRouter
+            Task { await EditRouterRegistry.shared.register(current, for: siteID) }
+        }
     }
 
     func open(siteID: String, siteDirectory: URL) {
         openSiteID = siteID
-        Task { await runtime.start(siteID: siteID, siteDirectory: siteDirectory) }
+        let router = self.editRouter
+        Task {
+            // Register before starting the runtime so a Siri edit fired during dev-server boot
+            // hits the router (and gets an "MCP not running" failure reply) rather than
+            // returning the bridge's no-router fallback message.
+            await EditRouterRegistry.shared.register(router, for: siteID)
+            await runtime.start(siteID: siteID, siteDirectory: siteDirectory)
+        }
     }
 
     func close() {
+        let previousSiteID = openSiteID
         openSiteID = nil
-        Task { await runtime.stop() }
+        Task {
+            if let previousSiteID {
+                await EditRouterRegistry.shared.unregister(siteID: previousSiteID)
+            }
+            await runtime.stop()
+        }
     }
 
     /// The ready preview URL, if the session is currently `.ready`.

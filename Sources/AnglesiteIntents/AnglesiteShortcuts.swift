@@ -74,5 +74,17 @@ public struct AnglesiteShortcuts: AppShortcutsProvider {
             shortTitle: "Preview Site",
             systemImageName: "eye"
         )
+        // B.5 (#149). Phrases resolve `element` via the WKWebView's `appEntityUIElementProvider`
+        // (#148), so "edit this" naturally maps to whatever the user is looking at. The
+        // `instruction` parameter is the user's NL phrase — Siri prompts for it when omitted.
+        AppShortcut(
+            intent: EditContentIntent(),
+            phrases: [
+                "Edit this with \(.applicationName)",
+                "Change this with \(.applicationName)",
+            ],
+            shortTitle: "Edit Content",
+            systemImageName: "pencil"
+        )
     }
 }
