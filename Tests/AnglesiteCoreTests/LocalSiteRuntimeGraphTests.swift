@@ -6,6 +6,7 @@ import Foundation
 /// MCP tool after the dev server is ready and the MCP client has initialized, and evicts the
 /// site's content from the graph on stop. A missing/erroring `list_content` (older plugin) is a
 /// no-op: the graph stays empty and preview is unaffected.
+@Suite(.serialized)  // serial subprocess spawns — see MCPClientTests rationale (CI-flakiness fix)
 struct LocalSiteRuntimeGraphTests {
     private let alwaysReady: AstroDevServer.ReadinessProbe = { _ in true }
     private let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)

@@ -2,6 +2,7 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
+@Suite(.serialized)  // serial subprocess spawns — see MCPClientTests rationale (CI-flakiness fix)
 struct LocalSiteRuntimeTests {
     private let alwaysReady: AstroDevServer.ReadinessProbe = { _ in true }
     /// A real, existing directory — the supervisor `cd`s into the site dir before spawning, so a
@@ -81,9 +82,17 @@ struct LocalSiteRuntimeTests {
         let first = await runtime.state
         #expect(first == .ready(siteID: "mysite", url: URL(string: "http://localhost:9201/")!))
 
-        try? await Task.sleep(nanoseconds: 700_000_000)
-        let updated = await runtime.state
-        #expect(updated == .ready(siteID: "mysite", url: URL(string: "http://localhost:9202/")!))
+        // The dev server exits and is restarted on a new port. Wait for that transition rather
+        // than guessing a fixed delay — the crash→backoff→respawn→ready cycle can exceed any
+        // fixed sleep under CI load (this was flaky). Poll the state until it lands on 9202.
+        let target = SiteRuntimeState.ready(siteID: "mysite", url: URL(string: "http://localhost:9202/")!)
+        var reachedNewPort = false
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline {
+            if await runtime.state == target { reachedNewPort = true; break }
+            try? await Task.sleep(nanoseconds: 20_000_000)  // 20ms
+        }
+        #expect(reachedNewPort, "runtime did not reach the restarted port 9202 within 15s")
 
         await runtime.stop()
     }
