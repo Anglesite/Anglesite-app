@@ -11,6 +11,14 @@ import AnglesiteCore
 ///
 /// The interesting logic lives in `dispatch(body:via:onVisibleElements:)` — it's unit-tested
 /// independent of `WKScriptMessage`, which has no public initializer and is awkward to fake.
+///
+/// **API change vs prior versions:** the static `handle(body:via:)` method is gone, replaced
+/// by `dispatch(body:via:onVisibleElements:)`. All current callers are internal to this repo
+/// (the `WKScriptMessageHandler` impl below, the unit tests, and `PreviewView`'s production
+/// init); no deprecated shim is provided. If you're a downstream framework consumer hitting
+/// this, the migration is mechanical: rename `handle` → `dispatch`, pass `nil` for
+/// `onVisibleElements` to preserve the apply-edit-only behavior, and match on the richer
+/// `DispatchResult` enum instead of `Result<EditReply, EditMessage.DecodeError>`.
 public final class AnglesiteScriptHandler: NSObject, WKScriptMessageHandler {
     public typealias VisibleElementsHandler = @Sendable ([VisibleElement]) async -> Void
 
@@ -109,8 +117,18 @@ public final class AnglesiteScriptHandler: NSObject, WKScriptMessageHandler {
                 await MainActor.run {
                     webView.evaluateJavaScript(script)
                 }
-            case .visibleElementsHandled, .visibleElementsDropped:
+            case .visibleElementsHandled:
                 return
+            case .visibleElementsDropped:
+                // A visible-elements message arrived but no `onVisibleElements` handler is
+                // installed. Production wiring (PreviewView with an annotationProvider)
+                // always installs one; reaching here implies a regression. Log so the wiring
+                // failure is observable rather than silently swallowing all Siri reports.
+                await logCenter.append(
+                    source: "bridge",
+                    stream: .stderr,
+                    text: "visible-elements message dropped: no handler installed (provider not threaded through PreviewView?)"
+                )
             case .rejected(let reason):
                 await logCenter.append(
                     source: "bridge",

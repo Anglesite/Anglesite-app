@@ -110,11 +110,15 @@ public final class PreviewAnnotationProvider: ElementEntityProviding, Sendable {
     /// generic over a concrete entity type; each of the four concrete types we map to gets a
     /// dedicated branch so the compiler can specialize. The trailing fallback exists only to
     /// satisfy the type checker — the four cases above are exhaustive given `resolve`'s rules.
+    /// If a fifth entity type is ever returned by `resolve` without updating this switch, the
+    /// `assertionFailure` makes the regression loud in debug builds; release builds fall through
+    /// to the placeholder so production keeps working.
     private func makeUIElement(entity: any AppEntity, bounds: CGRect) -> AppEntityUIElement {
         if let e = entity as? PageEntity { return AppEntityUIElement(e, bounds: bounds) }
         if let e = entity as? PostEntity { return AppEntityUIElement(e, bounds: bounds) }
         if let e = entity as? ImageEntity { return AppEntityUIElement(e, bounds: bounds) }
         if let e = entity as? ElementEntity { return AppEntityUIElement(e, bounds: bounds) }
+        assertionFailure("makeUIElement: unhandled entity type \(type(of: entity)) — extend the switch in PreviewAnnotationProvider")
         let placeholder = ElementEntity(
             id: "unknown", displayName: "unknown", siteID: siteID,
             selector: "{}", pagePath: "/"
