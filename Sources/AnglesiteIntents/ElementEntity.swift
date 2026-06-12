@@ -86,20 +86,22 @@ extension ElementEntity {
     }
 }
 
-/// Resolves `ElementEntity` references from `PreviewAnnotationProvider`'s live state — not
-/// from `SiteContentGraph`. The provider is a `@MainActor` reference, so the query bounces
-/// through the main actor for each lookup.
+/// Resolves `ElementEntity` references from a live `PreviewAnnotationProvider`.
+///
+/// **Resolution chain** (first hit wins):
+/// 1. `ElementEntityProviderOverride.scoped` — short-lived `@TaskLocal` for test injection.
+/// 2. `PreviewAnnotationProviderRegistry.shared` — long-lived per-siteID registry the app
+///    populates from `SiteWindow`'s lifecycle (B.4 / #148 wiring).
+///
+/// In production the registry path is the one that fires; the TaskLocal exists so unit tests
+/// can drive a stub without coupling to `@MainActor` shared state.
 public struct ElementEntityQuery: EntityQuery {
     public init() {}
 
     public func entities(for identifiers: [String]) async throws -> [ElementEntity] {
-        // No global registry of providers (each WKWebView owns one); resolution at this layer
-        // is best-effort against the active scoped provider. Tests + the upcoming B.4 hookup
-        // bind the override; production query paths run through the bound provider.
-        guard let provider = await ElementEntityProviderOverride.scoped else { return [] }
         var out: [ElementEntity] = []
         for id in identifiers {
-            if let entity = await provider.elementEntity(forID: id) {
+            if let entity = await resolve(id) {
                 out.append(entity)
             }
         }
@@ -107,14 +109,34 @@ public struct ElementEntityQuery: EntityQuery {
     }
 
     public func suggestedEntities() async throws -> [ElementEntity] {
-        guard let provider = await ElementEntityProviderOverride.scoped else { return [] }
-        return await provider.suggestedElementEntities()
+        if let provider = await ElementEntityProviderOverride.scoped {
+            return await provider.suggestedElementEntities()
+        }
+        // Production: aggregate suggestions across every registered provider. With one window
+        // open this is just that window's set; multi-window users get the union. The provider
+        // already caps each contribution at 10 (`suggestedEntityCap`).
+        var merged: [ElementEntity] = []
+        for siteID in await PreviewAnnotationProviderRegistry.shared.knownSiteIDs() {
+            if let p = await PreviewAnnotationProviderRegistry.shared.provider(for: siteID) {
+                merged.append(contentsOf: await p.suggestedElementEntities())
+            }
+        }
+        return merged
+    }
+
+    private func resolve(_ id: String) async -> ElementEntity? {
+        if let provider = await ElementEntityProviderOverride.scoped,
+           let entity = await provider.elementEntity(forID: id) {
+            return entity
+        }
+        return await PreviewAnnotationProviderRegistry.shared.resolveElement(entityID: id)
     }
 }
 
-/// Indirection so `ElementEntityQuery` can find the live provider without coupling
-/// `AnglesiteIntents` to a singleton. The app-level hookup (B.4) binds this at WKWebView
-/// install time; tests bind a stub. `@MainActor` because `PreviewAnnotationProvider` is.
+/// Indirection so `ElementEntityQuery` can find a stub provider without coupling
+/// `AnglesiteIntents` to its `@MainActor` registry. `@TaskLocal` — only ever set by tests
+/// (`Override.$scoped.withValue(provider) { ... }`). In production this is `nil` and
+/// resolution falls through to `PreviewAnnotationProviderRegistry.shared`.
 @MainActor
 public enum ElementEntityProviderOverride {
     @TaskLocal public static var scoped: ElementEntityProviding?

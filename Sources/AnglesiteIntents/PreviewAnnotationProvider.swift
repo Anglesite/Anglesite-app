@@ -88,7 +88,7 @@ public final class PreviewAnnotationProvider: ElementEntityProviding {
     /// flood the picker. 10 is a comfortable Shortcuts-UI ceiling — same order of magnitude
     /// as the `IndexedEntity` queries' `suggestedEntities()`.
     public func suggestedElementEntities() -> [ElementEntity] {
-        Array(elementsByID.values.prefix(SUGGESTED_ENTITY_CAP))
+        Array(elementsByID.values.prefix(suggestedEntityCap))
     }
 
     // MARK: mapping
@@ -138,7 +138,7 @@ public final class PreviewAnnotationProvider: ElementEntityProviding {
 }
 
 /// Cap on `suggestedElementEntities()` — see the method doc for the rationale.
-private let SUGGESTED_ENTITY_CAP = 10
+private let suggestedEntityCap = 10
 
 /// Match an image `src` against an indexed `SiteContentGraph.Image`.
 ///
@@ -152,6 +152,12 @@ private let SUGGESTED_ENTITY_CAP = 10
 /// would match `image.relativePath = "images/hero.jpg"` because `"images/hero.jpg"` is a
 /// hasSuffix of the longer string.
 ///
+/// **Assumes `relativePath` has no leading slash.** Production constructs `Image.relativePath`
+/// from the plugin's `list_content` DTO (see `ContentListing.swift`'s `ImageDTO.image(siteID:)`),
+/// which yields bare paths like `"public/images/hero.jpg"`. We defensively strip a leading
+/// slash before the suffix check anyway so a future plugin change doesn't silently break
+/// matching — the suffix check would otherwise look for `//images/hero.jpg` and never match.
+///
 /// **Filename fallback.** Compare the last path component. `URL(string:)` strips query strings
 /// and fragments before extracting `lastPathComponent` — otherwise a CDN URL with `?v=2` would
 /// produce `"hero.jpg?v=2"` and never match. Falls back to NSString's split-on-`/`-only behavior
@@ -162,8 +168,14 @@ private let SUGGESTED_ENTITY_CAP = 10
 /// match. That's the right trade-off for hover-to-edit-the-image, where the user has only
 /// pointed at one thing.
 private func imageMatches(_ image: SiteContentGraph.Image, src: String) -> Bool {
-    if src == image.relativePath { return true }
-    if src.hasSuffix("/\(image.relativePath)") { return true }
+    // Defensive normalize: strip a leading slash so a hypothetical future leading-slash
+    // change in the plugin DTO doesn't break the suffix check (which would otherwise look
+    // for `//images/hero.jpg`).
+    let normalized = image.relativePath.hasPrefix("/")
+        ? String(image.relativePath.dropFirst())
+        : image.relativePath
+    if src == normalized { return true }
+    if src.hasSuffix("/\(normalized)") { return true }
     let srcFile = URL(string: src)?.lastPathComponent ?? (src as NSString).lastPathComponent
     if !srcFile.isEmpty, srcFile == image.fileName { return true }
     return false
