@@ -86,15 +86,19 @@ extension AppIntentsTests {
             #expect(entity.displayName == "/about")
         }
 
-        @Test("entities(for:) returns matching ids")
+        @Test("entities(for:) returns matching ids with all fields populated")
         func entitiesForIds_returnsMatching() async throws {
             let graph = SiteContentGraph()
-            let p = AppIntentsTests.gPage()
+            let p = AppIntentsTests.gPage(route: "/about", title: "About")
             await graph.upsertPage(p)
 
             try await ContentGraphOverride.$scoped.withValue(graph) {
                 let results = try await PageEntityQuery().entities(for: [p.id])
-                #expect(results.map(\.id) == [p.id])
+                #expect(results.count == 1)
+                #expect(results.first?.id == p.id)
+                #expect(results.first?.route == "/about")
+                #expect(results.first?.displayName == "About")
+                #expect(results.first?.siteID == AppIntentsTests.aSite)
             }
         }
 
@@ -143,17 +147,21 @@ extension AppIntentsTests {
             }
         }
 
-        @Test("entities(matching:) sorts results by lastModified DESC")
+        @Test("entities(matching:) sorts by lastModified DESC then id ASC for tie-break")
         func entitiesMatching_sortedByLastModifiedDesc() async throws {
             let graph = SiteContentGraph()
-            let older = AppIntentsTests.gPage(route: "/about-old", title: "About Old", modified: AppIntentsTests.t0)
-            let newer = AppIntentsTests.gPage(route: "/about-new", title: "About New", modified: AppIntentsTests.t0.addingTimeInterval(60))
-            await graph.upsertPage(older)
+            // Two items share `t0` (tie-break test); a third is newer.
+            let tieA = AppIntentsTests.gPage(route: "/about-a", title: "About A", modified: AppIntentsTests.t0)
+            let tieB = AppIntentsTests.gPage(route: "/about-b", title: "About B", modified: AppIntentsTests.t0)
+            let newer = AppIntentsTests.gPage(route: "/about-z", title: "About Z", modified: AppIntentsTests.t0.addingTimeInterval(60))
+            await graph.upsertPage(tieA)
+            await graph.upsertPage(tieB)
             await graph.upsertPage(newer)
 
             try await ContentGraphOverride.$scoped.withValue(graph) {
                 let results = try await PageEntityQuery().entities(matching: "about")
-                #expect(results.map(\.route) == ["/about-new", "/about-old"])
+                // Newer first; on a timestamp tie, id ASC sorts /about-a before /about-b.
+                #expect(results.map(\.route) == ["/about-z", "/about-a", "/about-b"])
             }
         }
 
@@ -202,6 +210,23 @@ extension AppIntentsTests {
                 #expect(whitespace.isEmpty)
             }
         }
+
+        @Test("entities(for:) preserves input order")
+        func entitiesForIds_preservesInputOrder() async throws {
+            let graph = SiteContentGraph()
+            let p1 = AppIntentsTests.gPage(route: "/one", title: "One")
+            let p2 = AppIntentsTests.gPage(route: "/two", title: "Two")
+            let p3 = AppIntentsTests.gPage(route: "/three", title: "Three")
+            await graph.upsertPage(p1)
+            await graph.upsertPage(p2)
+            await graph.upsertPage(p3)
+
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let q = PageEntityQuery()
+                let reversed = try await q.entities(for: [p3.id, p1.id, p2.id])
+                #expect(reversed.map(\.route) == ["/three", "/one", "/two"])
+            }
+        }
     }
 
     @Suite("PostEntityQuery")
@@ -219,24 +244,33 @@ extension AppIntentsTests {
 
         @Test("PostEntity displayRepresentation subtitle includes (draft) when draft")
         func displayRepresentation_includesDraftSuffix() {
-            let draft = PostEntity(AppIntentsTests.gPost(draft: true))
-            let published = PostEntity(AppIntentsTests.gPost(draft: false))
-            #expect(draft.isDraft == true)
-            #expect(published.isDraft == false)
-            // Subtitle is rendered by AppIntents from the DisplayRepresentation we returned.
-            // Verify our struct still carries the boolean — Siri's rendering layer is what
-            // turns it into "(draft)" via the format string we declared.
+            let draft = PostEntity(AppIntentsTests.gPost(slug: "hello-world", draft: true, collection: "blog"))
+            let published = PostEntity(AppIntentsTests.gPost(slug: "hello-world", draft: false, collection: "blog"))
+
+            // The subtitle is built from our template literal; assert it directly rather than
+            // relying on the AppIntents rendering layer to do it.
+            let draftSubtitle = String(localized: draft.displayRepresentation.subtitle ?? "")
+            let publishedSubtitle = String(localized: published.displayRepresentation.subtitle ?? "")
+
+            #expect(draftSubtitle == "blog/hello-world (draft)")
+            #expect(publishedSubtitle == "blog/hello-world")
         }
 
-        @Test("entities(for:) returns matching ids")
+        @Test("entities(for:) returns matching ids with all fields populated")
         func entitiesForIds_returnsMatching() async throws {
             let graph = SiteContentGraph()
-            let p = AppIntentsTests.gPost()
+            let p = AppIntentsTests.gPost(slug: "hello-world", title: "Hello World", tags: ["intro"], collection: "blog")
             await graph.upsertPost(p)
 
             try await ContentGraphOverride.$scoped.withValue(graph) {
                 let results = try await PostEntityQuery().entities(for: [p.id])
-                #expect(results.map(\.id) == [p.id])
+                #expect(results.count == 1)
+                #expect(results.first?.id == p.id)
+                #expect(results.first?.slug == "hello-world")
+                #expect(results.first?.displayName == "Hello World")
+                #expect(results.first?.collection == "blog")
+                #expect(results.first?.tags == ["intro"])
+                #expect(results.first?.siteID == AppIntentsTests.aSite)
             }
         }
 
@@ -309,17 +343,20 @@ extension AppIntentsTests {
             }
         }
 
-        @Test("entities(matching:) sorts results by lastModified DESC")
+        @Test("entities(matching:) sorts by lastModified DESC then id ASC for tie-break")
         func entitiesMatching_sortedByLastModifiedDesc() async throws {
             let graph = SiteContentGraph()
-            let older = AppIntentsTests.gPost(slug: "swift-old", title: "Swift Old", modified: AppIntentsTests.t0)
-            let newer = AppIntentsTests.gPost(slug: "swift-new", title: "Swift New", modified: AppIntentsTests.t0.addingTimeInterval(60))
-            await graph.upsertPost(older)
+            let tieA = AppIntentsTests.gPost(slug: "swift-a", title: "Swift A", modified: AppIntentsTests.t0)
+            let tieB = AppIntentsTests.gPost(slug: "swift-b", title: "Swift B", modified: AppIntentsTests.t0)
+            let newer = AppIntentsTests.gPost(slug: "swift-z", title: "Swift Z", modified: AppIntentsTests.t0.addingTimeInterval(60))
+            await graph.upsertPost(tieA)
+            await graph.upsertPost(tieB)
             await graph.upsertPost(newer)
 
             try await ContentGraphOverride.$scoped.withValue(graph) {
                 let results = try await PostEntityQuery().entities(matching: "swift")
-                #expect(results.map(\.slug) == ["swift-new", "swift-old"])
+                // Newer first; on tie, id ASC.
+                #expect(results.map(\.slug) == ["swift-z", "swift-a", "swift-b"])
             }
         }
 
@@ -368,6 +405,23 @@ extension AppIntentsTests {
                 #expect(whitespace.isEmpty)
             }
         }
+
+        @Test("entities(for:) preserves input order")
+        func entitiesForIds_preservesInputOrder() async throws {
+            let graph = SiteContentGraph()
+            let p1 = AppIntentsTests.gPost(slug: "one", title: "One")
+            let p2 = AppIntentsTests.gPost(slug: "two", title: "Two")
+            let p3 = AppIntentsTests.gPost(slug: "three", title: "Three")
+            await graph.upsertPost(p1)
+            await graph.upsertPost(p2)
+            await graph.upsertPost(p3)
+
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let q = PostEntityQuery()
+                let reversed = try await q.entities(for: [p3.id, p1.id, p2.id])
+                #expect(reversed.map(\.slug) == ["three", "one", "two"])
+            }
+        }
     }
 
     @Suite("ImageEntityQuery")
@@ -381,15 +435,19 @@ extension AppIntentsTests {
             #expect(entity.siteID == AppIntentsTests.aSite)
         }
 
-        @Test("entities(for:) returns matching ids")
+        @Test("entities(for:) returns matching ids with all fields populated")
         func entitiesForIds_returnsMatching() async throws {
             let graph = SiteContentGraph()
-            let img = AppIntentsTests.gImage()
+            let img = AppIntentsTests.gImage(relativePath: "public/images/hero.jpg", fileName: "hero.jpg")
             await graph.upsertImage(img)
 
             try await ContentGraphOverride.$scoped.withValue(graph) {
                 let results = try await ImageEntityQuery().entities(for: [img.id])
-                #expect(results.map(\.id) == [img.id])
+                #expect(results.count == 1)
+                #expect(results.first?.id == img.id)
+                #expect(results.first?.displayName == "hero.jpg")
+                #expect(results.first?.relativePath == "public/images/hero.jpg")
+                #expect(results.first?.siteID == AppIntentsTests.aSite)
             }
         }
 
@@ -438,17 +496,19 @@ extension AppIntentsTests {
             }
         }
 
-        @Test("entities(matching:) sorts results by lastModified DESC")
+        @Test("entities(matching:) sorts by lastModified DESC then id ASC for tie-break")
         func entitiesMatching_sortedByLastModifiedDesc() async throws {
             let graph = SiteContentGraph()
-            let older = AppIntentsTests.gImage(relativePath: "public/images/old.jpg", fileName: "old.jpg", modified: AppIntentsTests.t0)
-            let newer = AppIntentsTests.gImage(relativePath: "public/images/new.jpg", fileName: "new.jpg", modified: AppIntentsTests.t0.addingTimeInterval(60))
-            await graph.upsertImage(older)
+            let tieA = AppIntentsTests.gImage(relativePath: "public/images/a.jpg", fileName: "a.jpg", modified: AppIntentsTests.t0)
+            let tieB = AppIntentsTests.gImage(relativePath: "public/images/b.jpg", fileName: "b.jpg", modified: AppIntentsTests.t0)
+            let newer = AppIntentsTests.gImage(relativePath: "public/images/z.jpg", fileName: "z.jpg", modified: AppIntentsTests.t0.addingTimeInterval(60))
+            await graph.upsertImage(tieA)
+            await graph.upsertImage(tieB)
             await graph.upsertImage(newer)
 
             try await ContentGraphOverride.$scoped.withValue(graph) {
                 let results = try await ImageEntityQuery().entities(matching: ".jpg")
-                #expect(results.map(\.relativePath) == ["public/images/new.jpg", "public/images/old.jpg"])
+                #expect(results.map(\.relativePath) == ["public/images/z.jpg", "public/images/a.jpg", "public/images/b.jpg"])
             }
         }
 
@@ -496,6 +556,48 @@ extension AppIntentsTests {
                 #expect(empty.isEmpty)
                 #expect(whitespace.isEmpty)
             }
+        }
+
+        @Test("entities(for:) preserves input order")
+        func entitiesForIds_preservesInputOrder() async throws {
+            let graph = SiteContentGraph()
+            let i1 = AppIntentsTests.gImage(relativePath: "public/images/one.jpg", fileName: "one.jpg")
+            let i2 = AppIntentsTests.gImage(relativePath: "public/images/two.jpg", fileName: "two.jpg")
+            let i3 = AppIntentsTests.gImage(relativePath: "public/images/three.jpg", fileName: "three.jpg")
+            await graph.upsertImage(i1)
+            await graph.upsertImage(i2)
+            await graph.upsertImage(i3)
+
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let q = ImageEntityQuery()
+                let reversed = try await q.entities(for: [i3.id, i1.id, i2.id])
+                #expect(reversed.map(\.displayName) == ["three.jpg", "one.jpg", "two.jpg"])
+            }
+        }
+    }
+
+    @Suite("Bootstrap")
+    struct BootstrapSmokeTests {
+
+        @Test("bootstrap(contentGraph:) completes without crashing")
+        func bootstrapCompletes() async {
+            // Smoke test: AppDependencyManager.add registration is the critical path that
+            // makes @Dependency resolve in production. Full @Dependency resolution requires
+            // intentsd context which isn't available under `swift test`, so we verify only
+            // that bootstrap completes — a typo in the closure factory signature or a
+            // duplicate registration would crash here.
+            let graph = SiteContentGraph()
+            await AnglesiteIntents.bootstrap(contentGraph: graph)
+        }
+
+        @Test("bootstrap(contentGraph:) is safe to call multiple times")
+        func bootstrapIsIdempotent() async {
+            // Calling bootstrap twice is what happens during test reruns / restart flows.
+            // AppDependencyManager replaces prior registrations; the call should not crash.
+            let g1 = SiteContentGraph()
+            let g2 = SiteContentGraph()
+            await AnglesiteIntents.bootstrap(contentGraph: g1)
+            await AnglesiteIntents.bootstrap(contentGraph: g2)
         }
     }
 }
