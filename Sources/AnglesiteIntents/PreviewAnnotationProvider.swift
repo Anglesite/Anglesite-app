@@ -22,7 +22,7 @@ import Foundation
 /// so rule 3 would make the PostEntity rule unreachable. The corrected order has data-id (an
 /// explicit author annotation) outrank generic-page fallback.
 @MainActor
-public final class PreviewAnnotationProvider: ElementEntityProviding {
+public final class PreviewAnnotationProvider: ElementEntityProviding, Sendable {
     public let siteID: String
     private let graph: SiteContentGraph
     private var annotated: [(rect: CGRect, entity: any AppEntity)] = []
@@ -75,6 +75,51 @@ public final class PreviewAnnotationProvider: ElementEntityProviding {
     /// which preserves the JS reporter's priority sort (heading > image > nav > interactive).
     public func annotations() -> [(rect: CGRect, entity: any AppEntity)] {
         annotated
+    }
+
+    /// Shape annotations into `[AppEntityUIElement]` for `NSView.appEntityUIElementProvider`
+    /// (B.4 / #148). The system asks for either `.visible(rect:)` — return everything whose
+    /// stored rect intersects `rect` — or `.selected`. We don't track an in-page selection
+    /// model (the overlay's hover/click states are transient), so `.selected` yields `[]`.
+    public func uiElements(for context: AppEntityUIElementsContext) -> [AppEntityUIElement] {
+        uiElements(forRequests: context.requests)
+    }
+
+    /// Inner helper taking the raw request set so tests can drive it directly —
+    /// `AppEntityUIElementsContext` has no public initializer.
+    public func uiElements(
+        forRequests requests: Set<AppEntityUIElementsContext.ElementsRequest>
+    ) -> [AppEntityUIElement] {
+        var out: [AppEntityUIElement] = []
+        for request in requests {
+            switch request {
+            case .visible(let rect):
+                for (annoRect, entity) in annotated where annoRect.intersects(rect) {
+                    out.append(makeUIElement(entity: entity, bounds: annoRect))
+                }
+            case .selected:
+                continue
+            @unknown default:
+                continue
+            }
+        }
+        return out
+    }
+
+    /// Existential-opening helper. `AppEntityUIElement.init<E: AppEntity>(_ entity:, bounds:)` is
+    /// generic over a concrete entity type; each of the four concrete types we map to gets a
+    /// dedicated branch so the compiler can specialize. The trailing fallback exists only to
+    /// satisfy the type checker — the four cases above are exhaustive given `resolve`'s rules.
+    private func makeUIElement(entity: any AppEntity, bounds: CGRect) -> AppEntityUIElement {
+        if let e = entity as? PageEntity { return AppEntityUIElement(e, bounds: bounds) }
+        if let e = entity as? PostEntity { return AppEntityUIElement(e, bounds: bounds) }
+        if let e = entity as? ImageEntity { return AppEntityUIElement(e, bounds: bounds) }
+        if let e = entity as? ElementEntity { return AppEntityUIElement(e, bounds: bounds) }
+        let placeholder = ElementEntity(
+            id: "unknown", displayName: "unknown", siteID: siteID,
+            selector: "{}", pagePath: "/"
+        )
+        return AppEntityUIElement(placeholder, bounds: bounds)
     }
 
     // MARK: ElementEntityProviding

@@ -1,5 +1,6 @@
 import SwiftUI
 import AnglesiteCore
+import AnglesiteIntents
 
 /// Root view for a single per-site window. Owns the site's `PreviewModel`,
 /// `DeployModel`, and `ChatModel` as `@State` — lifecycle is bound to the window:
@@ -34,6 +35,11 @@ struct SiteWindow: View {
     #endif
 
     @State private var preview: PreviewModel
+    /// One per site window. Created lazily in `loadAndStart` once `siteID` is known; threaded
+    /// into `PreviewView` so the WKWebView's script handler can route `anglesite:visible-elements`
+    /// reports into it and AppKit's `appEntityUIElementProvider` can hit-test against its
+    /// annotations (Siri AI Phase B / #146 + #148).
+    @State private var annotationProvider: PreviewAnnotationProvider?
     @State private var deploy = DeployModel()
     @State private var backup = BackupModel()
     @State private var audit = AuditModel()
@@ -227,7 +233,7 @@ struct SiteWindow: View {
 
             switch preview.state {
             case .ready(_, let url):
-                PreviewView(url: url, router: preview.editRouter)
+                PreviewView(url: url, router: preview.editRouter, annotationProvider: annotationProvider)
             case .starting:
                 centeredStatus { ProgressView("Starting dev server for \(site.name)…") }
             case .failed(_, let message):
@@ -287,6 +293,10 @@ struct SiteWindow: View {
         #if ANGLESITE_MAS
         await acquireGrant(for: resolved, in: store)
         #endif
+
+        if annotationProvider == nil {
+            annotationProvider = PreviewAnnotationProvider(siteID: resolved.id, graph: contentGraph)
+        }
 
         preview.open(siteID: resolved.id, siteDirectory: resolved.path)
         #if !ANGLESITE_MAS
