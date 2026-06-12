@@ -85,6 +85,13 @@ public final class PreviewAnnotationProvider: ElementEntityProviding, Sendable {
         annotated
     }
 
+    // `AppEntityUIElement` and `AppEntityUIElementsContext` are macOS 26+ symbols (Xcode 27 /
+    // Swift 6.4 SDK). CI's `macos-15` runner currently ships Xcode 26.3 / Swift 6.3 and doesn't
+    // have these types, so the methods that reference them are gated. Local Xcode 27 builds get
+    // the full surface; CI compiles the library without it. Same pattern as `Package.swift`'s
+    // `#if compiler(>=6.4)` gate around `AnglesiteIntentsTests`. Tracked for removal in #128
+    // when GH's runner ships Xcode 27.
+    #if compiler(>=6.4)
     /// Shape annotations into `[AppEntityUIElement]` for `NSView.appEntityUIElementProvider`
     /// (B.4 / #148). The system asks for either `.visible(rect:)` — return everything whose
     /// stored rect intersects `rect` — or `.selected`. We don't track an in-page selection
@@ -133,6 +140,7 @@ public final class PreviewAnnotationProvider: ElementEntityProviding, Sendable {
         )
         return AppEntityUIElement(placeholder, bounds: bounds)
     }
+    #endif
 
     // MARK: ElementEntityProviding
 
