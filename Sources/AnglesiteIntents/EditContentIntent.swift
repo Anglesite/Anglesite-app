@@ -61,7 +61,7 @@ public struct EditContentIntent: AppIntent {
             siteID: element.siteID,
             filePath: element.pagePath,
             selector: selector,
-            op: "apply-instruction",
+            op: EditMessage.Op.applyInstruction,
             value: .string(instruction)
         )
         let dialog = ContentDialogs.editReply(reply, displayName: element.displayName)

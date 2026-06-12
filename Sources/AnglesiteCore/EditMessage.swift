@@ -13,6 +13,27 @@ public struct EditMessage: Sendable, Equatable {
         case applyEdit = "anglesite:apply-edit"
     }
 
+    /// App-side conveniences for `op` strings, so callers don't sprinkle free string literals
+    /// across the codebase. The wire format stays a `String` (the plugin defines the
+    /// authoritative `apply_edit` op set in its MCP schema) — these are just typed names that
+    /// make the app↔plugin pairing grep-able and rename-safe on our side.
+    ///
+    /// New ops on the plugin side need a paired entry here so call sites get a compile-time
+    /// reference rather than a runtime mismatch via typo.
+    public enum Op {
+        /// `"replace-text"` — overlay click-to-edit, structured text replacement.
+        public static let replaceText = "replace-text"
+        /// `"replace-image-src"` — overlay image-drop replacement.
+        public static let replaceImageSrc = "replace-image-src"
+        /// `"replace-attr"` — generic attribute set (e.g. `href`, `alt`).
+        public static let replaceAttr = "replace-attr"
+        /// `"apply-instruction"` — natural-language edit forwarded to the plugin for
+        /// interpretation. Used by Siri AI's `EditContentIntent` (B.5 / #149). Paired plugin
+        /// support is forward-looking; until it lands, `apply_edit` returns `.failed` for
+        /// this op and the intent's dialog explains the situation.
+        public static let applyInstruction = "apply-instruction"
+    }
+
     /// Overlay-generated correlation ID so the JS side can match replies to the original message.
     public let id: String
     public let type: MessageType

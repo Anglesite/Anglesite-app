@@ -68,7 +68,7 @@ extension AppIntentsTests {
             #expect(captured.count == 1)
             let msg = captured[0]
             #expect(msg.path == "/about/")
-            #expect(msg.op == "apply-instruction")
+            #expect(msg.op == EditMessage.Op.applyInstruction)
             #expect(msg.value == .string("make it bigger"))
             guard case .object(let dict) = msg.selector else {
                 Issue.record("expected .object selector")

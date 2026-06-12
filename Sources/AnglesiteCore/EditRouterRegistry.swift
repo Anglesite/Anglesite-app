@@ -19,7 +19,10 @@ public actor EditRouterRegistry {
 
     private var routers: [String: EditRouter] = [:]
 
-    public init() {}
+    /// `internal` (not `public`) — production callers go through `.shared`; tests reach in
+    /// via `@testable import AnglesiteCore` to construct isolated instances. Prevents
+    /// accidental external instances from silently routing edits to the wrong store.
+    internal init() {}
 
     public func register(_ router: EditRouter, for siteID: String) {
         routers[siteID] = router
