@@ -96,6 +96,37 @@ public final class AnglesiteScriptHandler: NSObject, WKScriptMessageHandler {
         }
     }
 
+    /// Deprecated forwarder for the old `handle(body:via:)` signature so out-of-tree adopters
+    /// get a fix-it instead of a cryptic missing-member error. Always passes `nil` for
+    /// `onVisibleElements`, matching the prior behavior (apply-edit only). Returns the same
+    /// `Result<EditReply, EditMessage.DecodeError>` shape callers were already matching on —
+    /// rejection reasons map back into the legacy decode-error type.
+    @available(*, deprecated, renamed: "dispatch(body:via:onVisibleElements:)",
+               message: "handle() is apply-edit only and returns a less expressive shape. Use dispatch(body:via:onVisibleElements:) — it covers visible-elements routing too and exposes the richer DispatchResult.")
+    public static func handle(body: Any, via router: EditRouter) async -> Result<EditReply, EditMessage.DecodeError> {
+        switch await dispatch(body: body, via: router, onVisibleElements: nil) {
+        case .editReply(let reply):
+            return .success(reply)
+        case .rejected(.editDecode(let error)):
+            return .failure(error)
+        case .rejected(.notAnObject):
+            return .failure(.notAnObject)
+        case .rejected(.missingType):
+            return .failure(.missingField("type"))
+        case .rejected(.wrongType):
+            return .failure(.wrongType(field: "type", expected: "string"))
+        case .rejected(.unknownType(let s)):
+            return .failure(.unknownType(s))
+        case .rejected(.visibleElementsDecode):
+            // Unreachable under `handle`'s contract (apply-edit only). Bubble up as
+            // unknown-type rather than crash; deprecated path, callers should migrate.
+            return .failure(.unknownType(VisibleElementReport.messageType))
+        case .visibleElementsHandled, .visibleElementsDropped:
+            // Unreachable: handler is nil. Same fallthrough as above.
+            return .failure(.unknownType(VisibleElementReport.messageType))
+        }
+    }
+
     public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == WebViewBridge.scriptMessageNamespace else { return }
         let body = message.body

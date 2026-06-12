@@ -66,6 +66,13 @@ struct SiteWindow: View {
         .task(id: siteID) { await loadAndStart() }
         .onDisappear {
             preview.close()
+            // Unregister the annotation provider from the shared registry so
+            // `ElementEntityQuery` stops resolving stale entity ids for a window that's no
+            // longer on screen.
+            if let provider = annotationProvider {
+                PreviewAnnotationProviderRegistry.shared.unregister(siteID: provider.siteID)
+                annotationProvider = nil
+            }
             #if !ANGLESITE_MAS
             chat = nil
             #endif
@@ -294,8 +301,19 @@ struct SiteWindow: View {
         await acquireGrant(for: resolved, in: store)
         #endif
 
-        if annotationProvider == nil {
-            annotationProvider = PreviewAnnotationProvider(siteID: resolved.id, graph: contentGraph)
+        // Recreate the provider whenever the resolved siteID changes — SwiftUI's
+        // `WindowGroup` can replay a different value into the same view instance on restore,
+        // so a `nil` check alone isn't enough; a stale provider would hold the wrong siteID
+        // and Siri would hit-test against the wrong site's entities.
+        if annotationProvider?.siteID != resolved.id {
+            if let old = annotationProvider {
+                PreviewAnnotationProviderRegistry.shared.unregister(siteID: old.siteID)
+            }
+            let provider = PreviewAnnotationProvider(siteID: resolved.id, graph: contentGraph)
+            annotationProvider = provider
+            // Register so `ElementEntityQuery` resolves entity ids in production (not just
+            // under the `ElementEntityProviderOverride.scoped` TaskLocal that tests use).
+            PreviewAnnotationProviderRegistry.shared.register(provider, for: resolved.id)
         }
 
         preview.open(siteID: resolved.id, siteDirectory: resolved.path)
