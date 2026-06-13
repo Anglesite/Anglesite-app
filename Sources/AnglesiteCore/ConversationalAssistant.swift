@@ -6,6 +6,7 @@ import Foundation
 /// chat UI ignores (`messageID` on text, `stopReason` on completion) are intentionally dropped so
 /// a non-Claude backend (Foundation Models, #155) can populate the same surface without faking a
 /// subprocess. See `docs/superpowers/specs/2026-06-13-content-assistant-refactor-design.md`.
+/// The `toolUse`/`toolResult` cases use `id:` instead of `ClaudeAgent.Event`'s `toolUseID:` deliberately — `id` is provider-neutral.
 public enum AssistantEvent: Sendable, Equatable {
     /// First event of a turn: the resolved model and the tool names available this turn.
     case started(model: String?, toolNames: [String])
@@ -28,6 +29,8 @@ public enum AssistantEvent: Sendable, Equatable {
 }
 
 /// Token/cost telemetry for one completed turn.
+///
+/// `ClaudeAgent.Usage`'s `cacheReadInputTokens`/`cacheCreationInputTokens` are intentionally omitted here; callers that need them should read `ClaudeAgent.Usage` directly.
 public struct AssistantUsage: Sendable, Equatable {
     public let inputTokens: Int
     public let outputTokens: Int
