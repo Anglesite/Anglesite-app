@@ -30,7 +30,6 @@ public enum FoundationModelTier: Sendable, Equatable {
 public actor FoundationModelAssistant: ContentAssistant {
     private let tier: FoundationModelTier
     private let logger = Logger(subsystem: "dev.anglesite.app", category: "FoundationModelAssistant")
-    private var session: LanguageModelSession?
 
     public init(tier: FoundationModelTier = .onDevice) {
         self.tier = tier
@@ -92,15 +91,15 @@ public actor FoundationModelAssistant: ContentAssistant {
         return try await session.respond(to: prompt, generating: T.self).content
     }
 
-    public func cancel() { session = nil }
-    public func resetSession() { session = nil }
-
     // MARK: Session
 
-    /// Lazily builds (and caches) a session, throwing ``AssistantError/unavailable(_:)`` when the
+    /// Builds a fresh session for `context`, throwing ``AssistantError/unavailable(_:)`` when the
     /// on-device model can't be used on this host.
+    ///
+    /// A new session per call ensures the current page route/content is always reflected: the base
+    /// ``ContentAssistant`` API is one-shot and carries no cross-call session-persistence contract,
+    /// so caching a session from an earlier call would answer later calls with stale context.
     private func makeSession(context: AssistantContext) throws -> LanguageModelSession {
-        if let session { return session }
         switch SystemLanguageModel.default.availability {
         case .available:
             break
@@ -111,9 +110,7 @@ public actor FoundationModelAssistant: ContentAssistant {
         @unknown default:
             throw AssistantError.unavailable("The on-device model is unavailable on this device.")
         }
-        let session = LanguageModelSession(instructions: Self.instructions(for: context))
-        self.session = session
-        return session
+        return LanguageModelSession(instructions: Self.instructions(for: context))
     }
 
     /// Folds the situational ``AssistantContext`` into session instructions.
