@@ -140,8 +140,10 @@ public actor SiteStore {
             // grant is activated, a query for the site path is denied (returns false) and is not
             // proof the folder is gone. Dropping it here would strip the bookmark on the first
             // sandboxed relaunch `refresh()` — which runs before `acquireGrant` — leaving the
-            // preview and the content graph with no folder access (#184). A genuinely-deleted
-            // bookmarked site is pruned later, once a grant is held and absence is confirmed.
+            // preview and the content graph with no folder access (#184). Consequence: a bookmarked
+            // entry is never pruned by `refresh()`, even if its folder is genuinely deleted — the
+            // grant scopes only the site folder, not its parent, so a later scan can't re-evaluate
+            // it. Removing such an entry requires an explicit `remove(id:)`.
             if site.bookmarkData != nil || fileManager.fileExists(atPath: site.path.path) {
                 byID[site.id] = site
             }

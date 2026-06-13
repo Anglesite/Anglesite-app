@@ -317,9 +317,25 @@ final class SiteStoreTests {
         try await relaunch.refresh()
 
         let bookmark = await relaunch.bookmarkData(for: site.id)
-        #expect(bookmark != nil, "a sandbox fileExists denial must not strip a persisted bookmark")
+        #expect(bookmark == Data([0xBE, 0xEF]), "the persisted bookmark must survive a no-grant refresh byte-for-byte")
         let names = await relaunch.sites.map(\.name)
         #expect(names == ["smoke"], "the bookmarked site must survive a no-grant refresh")
+    }
+
+    @Test("Refresh carries bookmark forward when a site is re-discovered normally")
+    func refreshCarriesBookmarkForwardOnRediscovery() async throws {
+        // The non-sandboxed (DevID) path: the site is still on disk, so `refresh()` re-discovers
+        // it from the filesystem (rebuilt with no bookmark) and the merge step must carry the
+        // persisted bookmark forward rather than silently dropping it.
+        let dir = try makeValidSite(named: "live")
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let site = try await store.add(dir)
+        try await store.setBookmark(Data([0xCA, 0xFE]), for: site.id)
+
+        try await store.refresh()
+
+        let bookmark = await store.bookmarkData(for: site.id)
+        #expect(bookmark == Data([0xCA, 0xFE]), "a normal refresh must preserve the bookmark through re-discovery")
     }
 
     @Test("Change handler does not fire on no-file load")
