@@ -21,6 +21,14 @@ struct SitesLauncherView: View {
     @State private var loadError: String?
     @State private var deciding = true
     @State private var showingNewSite = false
+    /// The site awaiting a remove confirmation, or nil when no prompt is up. Drives the
+    /// `.confirmationDialog`; SwiftUI clears it (via the `isPresented` binding) when any dialog
+    /// button is tapped.
+    @State private var siteToRemove: SiteStore.Site?
+    /// The name shown in the confirmation title. Held separately from `siteToRemove` so the title
+    /// stays stable through the dismiss animation — reading `siteToRemove?.name` directly would
+    /// collapse to "" the instant the dialog clears the optional.
+    @State private var siteToRemoveName = ""
     @State private var wizardModel: NewSiteWizardModel?
     @State private var scaffolder: SiteScaffolder?
     @State private var sitesRootScopedURL: URL?
@@ -125,8 +133,34 @@ struct SitesLauncherView: View {
             .help(site.isValid
                   ? "Open \(site.name) in its own window"
                   : "Site is missing required files: \(site.missingSentinels.joined(separator: ", "))")
+            .contextMenu {
+                Button("Remove from Anglesite…", systemImage: "minus.circle", role: .destructive) {
+                    promptRemove(site)
+                }
+            }
+            .swipeActions(edge: .trailing) {
+                Button("Remove", systemImage: "minus.circle", role: .destructive) {
+                    promptRemove(site)
+                }
+            }
         }
         .listStyle(.inset)
+        .confirmationDialog(
+            "Remove “\(siteToRemoveName)” from Anglesite?",
+            isPresented: Binding(
+                get: { siteToRemove != nil },
+                set: { if !$0 { siteToRemove = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: siteToRemove
+        ) { site in
+            Button("Remove from Anglesite", role: .destructive) { removeSite(site) }
+            Button("Cancel", role: .cancel) {}
+        } message: { site in
+            // Removal only forgets the site here — the folder on disk is untouched, matching
+            // `SiteStore.remove(id:)`. Owners can still open it in Finder, VS Code, or the CLI.
+            Text("This removes it from Anglesite's list only. The files in \(site.path.path) are left on disk.")
+        }
     }
 
     private var emptyState: some View {
@@ -178,6 +212,34 @@ struct SitesLauncherView: View {
     private func open(site: SiteStore.Site) {
         openWindow(value: site.id)
         dismissWindow()
+    }
+
+    /// Raise the remove-confirmation dialog for `site`. `siteToRemoveName` is captured here so the
+    /// dialog title survives the dismiss animation (see the property's note).
+    private func promptRemove(_ site: SiteStore.Site) {
+        siteToRemoveName = site.name
+        siteToRemove = site
+    }
+
+    /// Forget `site` from the registry without touching its files. On MAS this also drops the
+    /// site's persisted security-scoped bookmark, since that lives inline in the `Site` entry.
+    /// We prune the local list directly rather than re-running `refreshSites()`: a DevID rescan
+    /// of `~/Sites` would immediately rediscover a still-present in-root folder, undoing the
+    /// removal visually. Persistence is handled by `remove(id:)`.
+    ///
+    /// Note: an already-open `SiteWindow` for this site is *not* signalled — `SiteStore`'s change
+    /// handler is single-subscriber (the Spotlight indexer), so the window keeps running its
+    /// dev-server/MCP subprocess against a now-orphaned entry until the user closes it. Closing or
+    /// warning the open window is left as a follow-up.
+    private func removeSite(_ site: SiteStore.Site) {
+        Task {
+            do {
+                try await SiteStore.shared.remove(id: site.id)
+                sites.removeAll { $0.id == site.id }
+            } catch {
+                loadError = "Couldn't remove \(site.name): \(error)"
+            }
+        }
     }
 
     private func openFolder() {
