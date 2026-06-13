@@ -164,6 +164,34 @@ final class SiteStoreTests {
         #expect(fileManager.fileExists(atPath: dir.path), "files on disk must be untouched")
     }
 
+    /// The #186 case: a bookmarked entry must stay gone after removal, even across a reload +
+    /// refresh that can't rediscover it. This is the only way to drop a bookmarked site, since
+    /// `refresh()` deliberately never prunes one (#184/#185). The site lives *outside* the scanned
+    /// root so the post-remove refresh has no chance to re-add it, and removing the inline-stored
+    /// `bookmarkData` is what drops the MAS security-scoped grant.
+    @Test("Remove drops a bookmarked entry permanently across reload")
+    func removeBookmarkedSitePermanent() async throws {
+        let outside = tempDir.appendingPathComponent("external-site", isDirectory: true)
+        try fileManager.createDirectory(at: outside, withIntermediateDirectories: true)
+        for sentinel in ProjectValidator.sentinels {
+            try Data().write(to: outside.appendingPathComponent(sentinel))
+        }
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let site = try await store.add(outside)
+        try await store.setBookmark(Data([0xAB, 0xCD]), for: site.id)
+        #expect(await store.bookmarkData(for: site.id) != nil)
+
+        try await store.remove(id: site.id)
+
+        // A fresh store proves the entry (and its bookmark) is gone from sites.json and stays gone
+        // even after a refresh that scans the root it never lived under.
+        let reloaded = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        try await reloaded.load()
+        let afterRefresh = try await reloaded.refresh()
+        #expect(afterRefresh.isEmpty)
+        #expect(await reloaded.bookmarkData(for: site.id) == nil)
+    }
+
     // MARK: - Change handler (#102)
 
     /// Captures change-handler emissions so each test can assert on the post-mutation snapshot.
