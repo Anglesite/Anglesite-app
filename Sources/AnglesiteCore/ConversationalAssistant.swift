@@ -49,8 +49,10 @@ public struct AssistantUsage: Sendable, Equatable {
 /// backend (e.g. Claude cannot do FoundationModels guided generation).
 public enum AssistantError: Error, Sendable, Equatable {
     case unsupported(String)
-    /// An in-band failure reported by the backend mid-stream (e.g. the claude process emitted a
-    /// top-level error line) — distinct from `unsupported`, which means a capability gap.
+    /// Thrown by ``ContentAssistant/generate(prompt:context:)`` when the underlying stream produces
+    /// a `.failed` event — i.e. the backend reported an in-band error that `generate()` cannot yield
+    /// as a text chunk. Distinct from the in-stream form `AssistantEvent.failed`, which
+    /// ``ConversationalAssistant/converse(prompt:context:)`` surfaces as a yielded value (not a throw).
     case streamFailed(String)
 }
 

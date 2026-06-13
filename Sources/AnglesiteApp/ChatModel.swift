@@ -357,7 +357,7 @@ final class ChatModel {
         } catch {
             inFlightAssistantIndex = nil
             isStreaming = false
-            lastError = "couldn't start claude: \(error)"
+            lastError = "couldn't start \(assistant.capabilities.providerName): \(error)"
             return
         }
 
@@ -423,7 +423,7 @@ final class ChatModel {
 
         case .backendExited(let code):
             if code != 0 && code != -15 {
-                let note = "claude exited with code \(code)"
+                let note = "\(assistant.capabilities.providerName) backend exited with code \(code)"
                 lastError = note
                 messages.append(.init(role: .error, content: note))
             }

@@ -60,4 +60,39 @@ struct ClaudeAssistantTests {
         #expect(!caps.supportsStructuredOutput)
         #expect(!caps.supportsVision)
     }
+
+    @Test("generate yields only text chunks, dropping tool-use and telemetry events")
+    func generateYieldsTextChunksOnly() async throws {
+        let lines = [
+            #"{"type":"system","subtype":"init","session_id":"s1","model":"m","tools":[]}"#,
+            #"{"type":"assistant","message":{"id":"a1","content":[{"type":"text","text":"Hello "}]}}"#,
+            #"{"type":"assistant","message":{"id":"a2","content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}]}}"#,
+            #"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok","is_error":false}]}}"#,
+            #"{"type":"assistant","message":{"id":"a3","content":[{"type":"text","text":"world"}]}}"#,
+            #"{"type":"result","subtype":"success","usage":{"input_tokens":1,"output_tokens":1}}"#,
+        ]
+        let assistant = ClaudeAssistant(agent: makeAgent(lines: lines, exit: 0))
+        let context = AssistantContext(siteID: "s", siteDirectory: URL(fileURLWithPath: "/tmp/site"))
+
+        var chunks: [String] = []
+        for try await chunk in try await assistant.generate(prompt: "hi", context: context) {
+            chunks.append(chunk)
+        }
+        // Only the two text blocks survive — started/tool-use/tool-result/turn-complete/exit are dropped.
+        #expect(chunks == ["Hello ", "world"])
+    }
+
+    @Test("generate throws streamFailed when the stream reports an in-band error")
+    func generateThrowsStreamFailedOnError() async throws {
+        let lines = [
+            #"{"type":"assistant","message":{"id":"a1","content":[{"type":"text","text":"partial"}]}}"#,
+            #"{"type":"error","message":"boom"}"#,
+        ]
+        let assistant = ClaudeAssistant(agent: makeAgent(lines: lines, exit: 1))
+        let context = AssistantContext(siteID: "s", siteDirectory: URL(fileURLWithPath: "/tmp/site"))
+
+        await #expect(throws: AssistantError.streamFailed("boom")) {
+            for try await _ in try await assistant.generate(prompt: "hi", context: context) {}
+        }
+    }
 }

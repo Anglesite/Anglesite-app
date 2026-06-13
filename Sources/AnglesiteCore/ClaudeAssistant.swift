@@ -48,6 +48,10 @@ public actor ClaudeAssistant: ConversationalAssistant {
     }
 
     public func converse(prompt: String, context: AssistantContext) async throws -> AsyncStream<AssistantEvent> {
+        // `context.currentPageRoute` / `selectedElementSelector` are intentionally not forwarded:
+        // the wrapped agent is bound to its site at construction, and prompt enrichment from those
+        // fields is future onscreen-edit scope. Callers that populate them get no effect here yet.
+        _ = context
         let upstream = try await agent.send(prompt: prompt)
         return AsyncStream { continuation in
             let task = Task {
@@ -66,6 +70,7 @@ public actor ClaudeAssistant: ConversationalAssistant {
     // MARK: ContentAssistant (base) — text + structured
 
     public func generate(prompt: String, context: AssistantContext) async throws -> AsyncThrowingStream<String, Error> {
+        _ = context  // not forwarded yet — see note in `converse`.
         let upstream = try await agent.send(prompt: prompt)
         return AsyncThrowingStream { continuation in
             let task = Task {
