@@ -1,7 +1,7 @@
 # `@Generable` types + `FoundationModelAssistant` — design
 
 **Date:** 2026-06-13
-**Issues:** #154 (C.4 — `@Generable` types), #155 (C.5 — `FoundationModelAssistant`)
+**Issues:** #154 (C.4 — `@Generable` types), #155 (C.5 — `FoundationModelAssistant` )
 **Parent:** #134 (Siri AI Phase C — Foundation Models for on-device intelligence)
 **Depends on:** #151 (C.1 — `ContentAssistant` protocol, landed)
 
@@ -32,9 +32,9 @@ types, each field annotated with `@Guide(description:)` so the model fills them 
 1. **`GeneratedEditCommand`**
    - `filePath: String`
    - `selector: String`
-   - `operation: EditOperation` — `@Generable` enum: `replaceText`, `setAttribute`,
-     `insertBefore`, `insertAfter`, `remove`. Tied to the existing `EditMessage` operation
-     vocabulary so a generated command maps onto the real edit pipeline.
+   - `operation: EditOperation` — `@Generable` enum mirroring `EditMessage.Op` exactly:
+     `replaceText`, `replaceAttr`, `replaceImageSrc`, `applyInstruction`. Tied to the real edit
+     pipeline vocabulary so a generated command maps onto it without translation.
    - `value: String`
    - `explanation: String`
 2. **`GeneratedPageMeta`** — `title: String`, `description: String`, `slug: String`, `tags: [String]`
