@@ -7,14 +7,14 @@ import Observation
 import AnglesiteBridge
 import AnglesiteCore
 
-/// SwiftUI-facing wrapper around `ClaudeAgent` for one site. Owns the agent, accumulates
-/// streamed events into typed `Message` values, persists every user/assistant/tool entry to
-/// `<site>/.anglesite/chat-history.jsonl`, and exposes the streaming + cancel surface that
-/// `ChatView` binds to.
+/// SwiftUI-facing wrapper around ``ConversationalAssistant`` for one site. Owns the
+/// assistant, accumulates streamed events into typed `Message` values, persists every
+/// user/assistant/tool entry to `<site>/.anglesite/chat-history.jsonl`, and exposes the
+/// streaming + cancel surface that `ChatView` binds to.
 ///
-/// Threading: this model is `@MainActor` so all SwiftUI bindings stay on the main actor. The
-/// `ClaudeAgent` actor produces events on its own executor; we iterate the `AsyncStream` on
-/// the main actor (the iteration hops between executors at each `await`).
+/// Threading: this model is `@MainActor` so all SwiftUI bindings stay on the main actor.
+/// The assistant produces ``AssistantEvent`` values on its own executor; we iterate the
+/// `AsyncStream` on the main actor (the iteration hops between executors at each `await`).
 ///
 /// Persistence rule: every terminal piece of content gets persisted at the moment it's
 /// considered "done." User prompts persist on send; assistant text persists when the *next*
@@ -149,7 +149,7 @@ final class ChatModel {
         self.undoCommand = undoCommand
     }
 
-    /// Test/injecting initializer: supply the assistant (typically a fixture-backed `ClaudeAssistant`)
+    /// Test/injecting initializer: supply the assistant (typically a stub or fixture conforming to `ConversationalAssistant`)
     /// and an optional history-store override.
     init(siteID: String, siteDirectory: URL, assistant: any ConversationalAssistant, history: ChatHistoryStore? = nil, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
         self.siteID = siteID
@@ -254,7 +254,7 @@ final class ChatModel {
 
         isStreaming = true
         streamTask = Task { @MainActor [weak self] in
-            await self?.consumeAgentStream(prompt: trimmed)
+            await self?.consumeAssistantStream(prompt: trimmed)
         }
     }
 
@@ -346,7 +346,7 @@ final class ChatModel {
 
     // MARK: Event consumption
 
-    private func consumeAgentStream(prompt: String) async {
+    private func consumeAssistantStream(prompt: String) async {
         let stream: AsyncStream<AssistantEvent>
         do {
             let context = AssistantContext(siteID: siteID, siteDirectory: siteDirectory)
