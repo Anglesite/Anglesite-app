@@ -1,7 +1,8 @@
-// The chat panel ships in the Developer ID build only. The Mac App Store build (ANGLESITE_MAS)
-// omits it for 10.1; chat returns in 10.2 as a native Anthropic API client (the current panel
-// shells out to the `claude` CLI, which a sandboxed app can't rely on being installed).
-#if !ANGLESITE_MAS
+// `ChatModel` is target-agnostic: it depends on the `ConversationalAssistant` protocol, so it
+// compiles on both the Developer ID and Mac App Store targets. Only the Claude-backed convenience
+// init below is `#if !ANGLESITE_MAS` (the MAS build has no `claude` CLI to shell out to). The MAS
+// chat *backend* (FoundationModelAssistant) and *UI* arrive in #155 / #159; until then the MAS
+// build compiles `ChatModel` but never constructs it (the SiteWindow chat UI stays DevID-gated).
 import Foundation
 import Observation
 import AnglesiteBridge
@@ -139,6 +140,7 @@ final class ChatModel {
     /// don't double-post the same sticky note when the user revisits a site mid-session.
     private var surfacedAnnotationIDs: Set<String> = []
 
+    #if !ANGLESITE_MAS
     init(siteID: String, siteDirectory: URL, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
         self.siteID = siteID
         self.siteDirectory = siteDirectory
@@ -148,6 +150,7 @@ final class ChatModel {
         self.annotationResolver = annotationResolver
         self.undoCommand = undoCommand
     }
+    #endif
 
     /// Test/injecting initializer: supply the assistant (typically a stub or fixture conforming to `ConversationalAssistant`)
     /// and an optional history-store override.
@@ -503,5 +506,3 @@ private extension ChatModel.Message {
         )
     }
 }
-
-#endif
