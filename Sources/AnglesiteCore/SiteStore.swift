@@ -134,8 +134,17 @@ public actor SiteStore {
         // Merge: keep manually-added sites that aren't under `root` (and are still valid),
         // refresh anything we just rediscovered, drop stale entries that no longer exist.
         var byID: [String: Site] = [:]
-        for site in sites where fileManager.fileExists(atPath: site.path.path) {
-            byID[site.id] = site
+        for site in sites {
+            // Keep an entry that's still on disk. Also keep any entry carrying a security-scoped
+            // bookmark even when `fileExists` fails: under the App Sandbox, before the per-site
+            // grant is activated, a query for the site path is denied (returns false) and is not
+            // proof the folder is gone. Dropping it here would strip the bookmark on the first
+            // sandboxed relaunch `refresh()` — which runs before `acquireGrant` — leaving the
+            // preview and the content graph with no folder access (#184). A genuinely-deleted
+            // bookmarked site is pruned later, once a grant is held and absence is confirmed.
+            if site.bookmarkData != nil || fileManager.fileExists(atPath: site.path.path) {
+                byID[site.id] = site
+            }
         }
         for var site in discovered {
             // Re-discovery rebuilds a Site from the filesystem with no bookmark; carry forward
