@@ -62,8 +62,10 @@ comments state the reality explicitly.
 
 ### Construction
 
-`init(tier: FoundationModelTier = .onDevice)`. Lazily creates a `LanguageModelSession`
-over `SystemLanguageModel.default`.
+`init(tier: FoundationModelTier = .onDevice)`. Builds a **fresh** `LanguageModelSession` over
+`SystemLanguageModel.default` per call (in `makeSession`), so each request reflects its own
+`AssistantContext` — the base `ContentAssistant` API is one-shot and carries no cross-call
+session-persistence contract, so caching would answer later calls with stale page context.
 
 ### Surface
 

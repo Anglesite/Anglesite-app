@@ -8,10 +8,13 @@ import Foundation
 #if compiler(>=6.4)
 import FoundationModels
 
-/// The kind of mutation a ``GeneratedEditCommand`` performs. Mirrors `EditMessage.Op` (see
-/// `EditMessage.swift`) — the operation vocabulary of the app's edit pipeline — so a
-/// model-generated command maps onto a real edit without translation. The string forms are
-/// `replace-text`, `replace-attr`, `replace-image-src`, and `apply-instruction`.
+/// The kind of mutation a ``GeneratedEditCommand`` performs. The cases correspond 1:1 to
+/// `EditMessage.Op` (see `EditMessage.swift`) — the operation vocabulary of the app's edit
+/// pipeline (string forms `replace-text`, `replace-attr`, `replace-image-src`,
+/// `apply-instruction`) — so a generated command maps onto a real edit without re-deriving the op.
+///
+/// - Note: This enum carries no `rawValue`; the case→string-constant bridge lives with the
+///   consumer. TODO(#156): `ApplyEditTool` maps these onto `EditMessage.Op` when it lands.
 @Generable
 public enum EditOperation: Equatable, Sendable {
     /// Set the element's text content (`"replace-text"`).
