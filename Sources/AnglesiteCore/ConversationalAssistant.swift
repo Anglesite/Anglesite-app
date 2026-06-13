@@ -49,6 +49,9 @@ public struct AssistantUsage: Sendable, Equatable {
 /// backend (e.g. Claude cannot do FoundationModels guided generation).
 public enum AssistantError: Error, Sendable, Equatable {
     case unsupported(String)
+    /// An in-band failure reported by the backend mid-stream (e.g. the claude process emitted a
+    /// top-level error line) — distinct from `unsupported`, which means a capability gap.
+    case streamFailed(String)
 }
 
 /// A ``ContentAssistant`` that also supports a multi-turn, tool-using conversation with a rich

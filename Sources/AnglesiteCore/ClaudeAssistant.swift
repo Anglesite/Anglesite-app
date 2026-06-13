@@ -68,7 +68,7 @@ public actor ClaudeAssistant: ConversationalAssistant {
                 for await event in upstream {
                     switch Self.map(event) {
                     case .textDelta(let text): continuation.yield(text)
-                    case .failed(let message): continuation.finish(throwing: AssistantError.unsupported(message))
+                    case .failed(let message): continuation.finish(throwing: AssistantError.streamFailed(message))
                     default: break
                     }
                 }
@@ -90,7 +90,7 @@ public actor ClaudeAssistant: ConversationalAssistant {
 
     // MARK: Mapping
 
-    static func map(_ event: ClaudeAgent.Event) -> AssistantEvent {
+    private static func map(_ event: ClaudeAgent.Event) -> AssistantEvent {
         switch event {
         case .sessionStarted(_, let model, let toolNames):
             return .started(model: model, toolNames: toolNames)

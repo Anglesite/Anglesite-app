@@ -1,7 +1,9 @@
-import XCTest
+import Testing
+import Foundation
 @testable import AnglesiteCore
 
-final class ClaudeAssistantTests: XCTestCase {
+@Suite("ClaudeAssistant")
+struct ClaudeAssistantTests {
 
     /// Builds a ClaudeAgent whose launcher replays the given JSONL lines then exits `code`.
     private func makeAgent(lines: [String], exit code: Int32 = 0) -> ClaudeAgent {
@@ -22,7 +24,8 @@ final class ClaudeAssistantTests: XCTestCase {
         )
     }
 
-    func testConverseMapsClaudeEventsToAssistantEvents() async throws {
+    @Test("converse maps ClaudeAgent events to AssistantEvents")
+    func converseMapsClaudeEventsToAssistantEvents() async throws {
         let lines = [
             #"{"type":"system","subtype":"init","session_id":"s1","model":"claude-opus-4-8","tools":["Read"]}"#,
             #"{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"Hi"}]}}"#,
@@ -38,7 +41,7 @@ final class ClaudeAssistantTests: XCTestCase {
             events.append(event)
         }
 
-        XCTAssertEqual(events, [
+        #expect(events == [
             .started(model: "claude-opus-4-8", toolNames: ["Read"]),
             .textDelta("Hi"),
             .toolUse(id: "t1", name: "Read", input: .object(["path": .string("a.md")])),
@@ -48,12 +51,13 @@ final class ClaudeAssistantTests: XCTestCase {
         ])
     }
 
-    func testCapabilitiesReportClaudeProvider() {
+    @Test("capabilities report Claude provider")
+    func capabilitiesReportClaudeProvider() {
         let caps = ClaudeAssistant(agent: makeAgent(lines: [])).capabilities
-        XCTAssertEqual(caps.providerName, "Claude")
-        XCTAssertTrue(caps.supportsStreaming)
-        XCTAssertTrue(caps.supportsTools)
-        XCTAssertFalse(caps.supportsStructuredOutput)
-        XCTAssertFalse(caps.supportsVision)
+        #expect(caps.providerName == "Claude")
+        #expect(caps.supportsStreaming)
+        #expect(caps.supportsTools)
+        #expect(!caps.supportsStructuredOutput)
+        #expect(!caps.supportsVision)
     }
 }
