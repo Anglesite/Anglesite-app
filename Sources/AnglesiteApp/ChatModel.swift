@@ -116,8 +116,9 @@ final class ChatModel {
 
     // MARK: Dependencies
 
+    private let siteID: String
     private let siteDirectory: URL
-    private let agent: ClaudeAgent
+    private let assistant: any ConversationalAssistant
     private let history: ChatHistoryStore
     /// Sticky-note source. Wired to the per-site `SiteRuntime.mcpClient` in production so
     /// `loadAnnotations()` shows the same annotations the edit overlay added; tests inject a
@@ -139,19 +140,21 @@ final class ChatModel {
     private var surfacedAnnotationIDs: Set<String> = []
 
     init(siteID: String, siteDirectory: URL, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
+        self.siteID = siteID
         self.siteDirectory = siteDirectory
-        self.agent = ClaudeAgent(siteID: siteID, siteDirectory: siteDirectory)
+        self.assistant = ClaudeAssistant(siteID: siteID, siteDirectory: siteDirectory)
         self.history = ChatHistoryStore(siteDirectory: siteDirectory)
         self.annotationFeed = annotationFeed
         self.annotationResolver = annotationResolver
         self.undoCommand = undoCommand
     }
 
-    /// Test-facing initializer: inject the agent (typically with a fixture launcher) and an
-    /// optional override of the history store.
-    init(siteDirectory: URL, agent: ClaudeAgent, history: ChatHistoryStore? = nil, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
+    /// Test/injecting initializer: supply the assistant (typically a fixture-backed `ClaudeAssistant`)
+    /// and an optional history-store override.
+    init(siteID: String, siteDirectory: URL, assistant: any ConversationalAssistant, history: ChatHistoryStore? = nil, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
+        self.siteID = siteID
         self.siteDirectory = siteDirectory
-        self.agent = agent
+        self.assistant = assistant
         self.history = history ?? ChatHistoryStore(siteDirectory: siteDirectory)
         self.annotationFeed = annotationFeed
         self.annotationResolver = annotationResolver
@@ -328,25 +331,26 @@ final class ChatModel {
     /// Stops the in-flight turn. The current assistant message is marked finished as-is.
     func cancel() {
         streamTask?.cancel()
-        Task { await agent.cancel() }
+        Task { await assistant.cancel() }
     }
 
-    /// Clears in-memory messages, resets the agent's session, and truncates the history file.
+    /// Clears in-memory messages, resets the assistant's session, and truncates the history file.
     func resetConversation() async {
         cancel()
         streamTask = nil
         messages = []
         inFlightAssistantIndex = nil
-        await agent.resetSession()
+        await assistant.resetSession()
         do { try await history.clear() } catch { lastError = "couldn't clear history: \(error)" }
     }
 
     // MARK: Event consumption
 
     private func consumeAgentStream(prompt: String) async {
-        let stream: AsyncStream<ClaudeAgent.Event>
+        let stream: AsyncStream<AssistantEvent>
         do {
-            stream = try await agent.send(prompt: prompt)
+            let context = AssistantContext(siteID: siteID, siteDirectory: siteDirectory)
+            stream = try await assistant.converse(prompt: prompt, context: context)
         } catch {
             inFlightAssistantIndex = nil
             isStreaming = false
@@ -368,20 +372,18 @@ final class ChatModel {
         isStreaming = false
     }
 
-    private func handle(_ event: ClaudeAgent.Event) {
+    private func handle(_ event: AssistantEvent) {
         guard let idx = inFlightAssistantIndex, messages.indices.contains(idx) else { return }
         switch event {
-        case .sessionStarted:
-            // Surface optionally as a system note; for v0.5 we just stash it on the assistant
-            // message timestamp rather than introducing chrome.
+        case .started:
+            // Surfaced as data only; no chat chrome in v0.5 (matches prior .sessionStarted arm).
             break
 
-        case .assistantText(_, let text):
+        case .textDelta(let text):
             messages[idx].content += text
 
-        case .assistantThinking:
-            // We capture but don't render thinking blocks in v0.5 — the chat would get noisy
-            // and they're already streamed into the Debug pane via LogCenter.
+        case .thinking:
+            // Captured but not rendered — thinking blocks already stream to the Debug pane.
             break
 
         case .toolUse(let toolID, let name, let input):
@@ -399,24 +401,24 @@ final class ChatModel {
                 messages[idx].toolCalls.append(ToolCall(id: toolID, name: "(unbound)", inputDisplay: "", result: content, isError: isError))
             }
 
-        case .turnComplete(let usage, let costUSD, let durationMs, _):
+        case .turnComplete(let usage):
             if let usage {
                 lastUsage = TurnTelemetry(
                     inputTokens: usage.inputTokens,
                     outputTokens: usage.outputTokens,
-                    costUSD: costUSD,
-                    durationMs: durationMs
+                    costUSD: usage.costUSD,
+                    durationMs: usage.durationMs
                 )
             }
 
-        case .streamError(let message):
+        case .failed(let message):
             lastError = message
             messages.append(.init(role: .error, content: message))
 
         case .cancelled:
             messages.append(.init(role: .system, content: "Cancelled."))
 
-        case .processExited(let code):
+        case .backendExited(let code):
             if code != 0 && code != -15 {
                 let note = "claude exited with code \(code)"
                 lastError = note
