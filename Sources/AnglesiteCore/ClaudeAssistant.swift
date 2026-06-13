@@ -9,9 +9,13 @@ import Foundation
 import FoundationModels
 #endif
 
-// Claude is the Developer ID backend only — the Mac App Store build has no `claude` CLI to shell
-// out to. `ChatModel` itself is target-agnostic; only this construction is gated.
-#if !ANGLESITE_MAS
+// `ClaudeAssistant` is compiled into AnglesiteCore on both build targets — an `#if !ANGLESITE_MAS`
+// guard here would be a no-op, since the SPM package is never compiled with the `ANGLESITE_MAS`
+// condition (that's set only on the MAS *app target*; see CLAUDE.md). DevID-only behavior is
+// enforced where it matters: `ClaudeAssistant` shells out to the `claude` CLI (via `ClaudeAgent`),
+// which the sandboxed MAS build can't use, so it is only ever *constructed* by `ChatModel`'s
+// convenience init — and that init is `#if !ANGLESITE_MAS` in the app target. On MAS this type is
+// compiled but never instantiated.
 
 /// Wraps ``ClaudeAgent`` behind ``ConversationalAssistant``, mapping the agent's rich
 /// `ClaudeAgent.Event` stream to provider-agnostic ``AssistantEvent`` values 1:1.
@@ -115,5 +119,3 @@ public actor ClaudeAssistant: ConversationalAssistant {
         }
     }
 }
-
-#endif
