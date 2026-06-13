@@ -267,6 +267,77 @@ final class SiteStoreTests {
         #expect(count == 1, "the post-clear remove must not emit")
     }
 
+    // MARK: - Sandbox bookmark retention (#184)
+
+    /// Simulates the macOS App Sandbox before a per-site security scope is active: any
+    /// filesystem query for a path under `deniedRoot` fails as if the path doesn't exist,
+    /// while the app's own container (where `sites.json` lives) stays readable. This mirrors a
+    /// sandboxed relaunch — `~/Sites/<name>` is unreadable until `acquireGrant` resolves the
+    /// site's bookmark, which happens *after* `SiteWindow` already ran `load()` + `refresh()`.
+    private final class SandboxDenyingFileManager: FileManager, @unchecked Sendable {
+        let deniedRoot: String
+        init(deniedRoot: URL) { self.deniedRoot = deniedRoot.path; super.init() }
+
+        private func isDenied(_ path: String) -> Bool {
+            path == deniedRoot || path.hasPrefix(deniedRoot + "/")
+        }
+
+        override func fileExists(atPath path: String) -> Bool {
+            isDenied(path) ? false : super.fileExists(atPath: path)
+        }
+
+        override func fileExists(atPath path: String, isDirectory: UnsafeMutablePointer<ObjCBool>?) -> Bool {
+            isDenied(path) ? false : super.fileExists(atPath: path, isDirectory: isDirectory)
+        }
+
+        override func contentsOfDirectory(
+            at url: URL,
+            includingPropertiesForKeys keys: [URLResourceKey]?,
+            options mask: FileManager.DirectoryEnumerationOptions
+        ) throws -> [URL] {
+            if isDenied(url.path) { throw CocoaError(.fileReadNoPermission) }
+            return try super.contentsOfDirectory(at: url, includingPropertiesForKeys: keys, options: mask)
+        }
+    }
+
+    @Test("Refresh keeps a bookmarked site when the sandbox denies fileExists")
+    func refreshKeepsBookmarkedSiteUnderSandboxDenial() async throws {
+        // In-session: a real FileManager mints + persists the bookmark to sites.json.
+        let realDir = try makeValidSite(named: "smoke")
+        let writer = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let site = try await writer.add(realDir)
+        try await writer.setBookmark(Data([0xBE, 0xEF]), for: site.id)
+
+        // Relaunch: no grant held yet, so every query under sitesRoot is denied — exactly the
+        // state `refresh()` runs in (it precedes `acquireGrant`). sites.json itself stays
+        // readable because it lives outside sitesRoot.
+        let denying = SandboxDenyingFileManager(deniedRoot: sitesRoot)
+        let relaunch = SiteStore(settings: settings, persistenceURL: persistenceURL, fileManager: denying)
+        try await relaunch.load()
+        try await relaunch.refresh()
+
+        let bookmark = await relaunch.bookmarkData(for: site.id)
+        #expect(bookmark == Data([0xBE, 0xEF]), "the persisted bookmark must survive a no-grant refresh byte-for-byte")
+        let names = await relaunch.sites.map(\.name)
+        #expect(names == ["smoke"], "the bookmarked site must survive a no-grant refresh")
+    }
+
+    @Test("Refresh carries bookmark forward when a site is re-discovered normally")
+    func refreshCarriesBookmarkForwardOnRediscovery() async throws {
+        // The non-sandboxed (DevID) path: the site is still on disk, so `refresh()` re-discovers
+        // it from the filesystem (rebuilt with no bookmark) and the merge step must carry the
+        // persisted bookmark forward rather than silently dropping it.
+        let dir = try makeValidSite(named: "live")
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let site = try await store.add(dir)
+        try await store.setBookmark(Data([0xCA, 0xFE]), for: site.id)
+
+        try await store.refresh()
+
+        let bookmark = await store.bookmarkData(for: site.id)
+        #expect(bookmark == Data([0xCA, 0xFE]), "a normal refresh must preserve the bookmark through re-discovery")
+    }
+
     @Test("Change handler does not fire on no-file load")
     func changeHandlerDoesNotFireOnNoFileLoad() async throws {
         // Fresh install: no sites.json. The handler should not be woken for a snapshot
