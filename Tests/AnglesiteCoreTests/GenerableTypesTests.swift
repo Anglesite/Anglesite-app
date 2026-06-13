@@ -29,6 +29,7 @@ struct GenerableTypesTests {
         #expect(!result.filePath.isEmpty)
         #expect(!result.selector.isEmpty)
         #expect(!result.explanation.isEmpty)
+        #expect(!result.value.isEmpty)
     }
 
     @Test("GeneratedPageMeta parses with non-empty fields")
@@ -40,6 +41,7 @@ struct GenerableTypesTests {
         ).content
         #expect(!result.title.isEmpty)
         #expect(!result.slug.isEmpty)
+        #expect(!result.description.isEmpty)
         #expect(!result.tags.isEmpty)
     }
 
@@ -61,8 +63,9 @@ struct GenerableTypesTests {
             generating: ContentSummary.self
         ).content
         #expect(!result.summary.isEmpty)
-        #expect(result.wordCount >= 0)
+        #expect(result.wordCount > 0)
         #expect(result.readingTimeMinutes >= 0)
+        #expect(!result.topics.isEmpty)
     }
 
     @Test("ContentClassification parses to a known case")
@@ -72,9 +75,10 @@ struct GenerableTypesTests {
             to: "Classify this content: 'Posted March 3rd — my thoughts on the new framework release...'",
             generating: ContentClassification.self
         ).content
-        switch result {
-        case .blogPost, .landingPage, .documentation, .portfolio, .other:
-            #expect(Bool(true))
+        // Any of the five cases is acceptable; assert the `other` case carries a non-empty label
+        // (the known cases are guaranteed valid by the type, so there's nothing more to check).
+        if case .other(let label) = result {
+            #expect(!label.isEmpty)
         }
     }
 }
