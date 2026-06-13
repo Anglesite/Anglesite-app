@@ -8,16 +8,20 @@ import Foundation
 #if compiler(>=6.4)
 import FoundationModels
 
-/// The kind of mutation a ``GeneratedEditCommand`` performs. Mirrors the operation vocabulary
-/// of the app's edit pipeline (`EditMessage`) so a model-generated command maps onto a real edit
-/// without translation.
+/// The kind of mutation a ``GeneratedEditCommand`` performs. Mirrors `EditMessage.Op` (see
+/// `EditMessage.swift`) — the operation vocabulary of the app's edit pipeline — so a
+/// model-generated command maps onto a real edit without translation. The string forms are
+/// `replace-text`, `replace-attr`, `replace-image-src`, and `apply-instruction`.
 @Generable
 public enum EditOperation: Equatable, Sendable {
+    /// Set the element's text content (`"replace-text"`).
     case replaceText
-    case setAttribute
-    case insertBefore
-    case insertAfter
-    case remove
+    /// Set an attribute such as `href` or `alt` (`"replace-attr"`).
+    case replaceAttr
+    /// Swap an image source (`"replace-image-src"`).
+    case replaceImageSrc
+    /// Forward a natural-language edit to the plugin to resolve (`"apply-instruction"`).
+    case applyInstruction
 }
 
 /// A structured edit the on-device model proposes for a single element. Consumed by the
@@ -30,10 +34,10 @@ public struct GeneratedEditCommand: Equatable, Sendable {
     @Guide(description: "CSS selector or element reference identifying what to edit, e.g. 'h1' or 'p:nth-of-type(2)'.")
     public var selector: String
 
-    @Guide(description: "The kind of edit to perform.")
+    @Guide(description: "The kind of edit: replaceText sets element text, replaceAttr sets an attribute, replaceImageSrc swaps an image source, applyInstruction forwards a natural-language change to the plugin.")
     public var operation: EditOperation
 
-    @Guide(description: "The new text, attribute value, or markup to apply. Empty for a 'remove' operation.")
+    @Guide(description: "The replacement text, attribute value, image source, or natural-language instruction to apply, appropriate to the operation.")
     public var value: String
 
     @Guide(description: "One short sentence explaining the change, shown to the user before they confirm it.")
@@ -59,7 +63,7 @@ public struct GeneratedPageMeta: Equatable, Sendable {
 /// Alt text generated for an image, plus whether the image is purely decorative.
 @Generable
 public struct GeneratedAltText: Equatable, Sendable {
-    @Guide(description: "Descriptive alt text under 125 characters. Empty when the image is decorative.")
+    @Guide(description: "Descriptive alt text under 125 characters. Use an empty string when the image is decorative (and set isDecorative to true).")
     public var altText: String
 
     @Guide(description: "True if the image is purely decorative and should have empty alt text.")
