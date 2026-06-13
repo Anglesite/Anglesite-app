@@ -1,5 +1,5 @@
 // `ChatModel` is target-agnostic: it depends on the `ConversationalAssistant` protocol, so it
-// compiles on both the Developer ID and Mac App Store targets. Only the Claude-backed convenience
+// compiles on both the Developer ID and Mac App Store targets. Only the Claude-constructing
 // init below is `#if !ANGLESITE_MAS` (the MAS build has no `claude` CLI to shell out to). The MAS
 // chat *backend* (FoundationModelAssistant) and *UI* arrive in #155 / #159; until then the MAS
 // build compiles `ChatModel` but never constructs it (the SiteWindow chat UI stays DevID-gated).
