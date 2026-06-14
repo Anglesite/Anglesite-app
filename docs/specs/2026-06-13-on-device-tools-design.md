@@ -173,12 +173,15 @@ Optionally (capability assertion, may fold into an existing suite): `FoundationM
 constructed **with** both deps reports `capabilities.supportsTools == true`; **without** them,
 `false`.
 
-## Verify-against-SDK note
+## Verify-against-SDK note (resolved)
 
-The exact `FoundationModels.Tool` surface — `ToolOutput`'s initializer, whether `name`/`description`
-are stored `let`s vs. computed, and the `includesSchemaInInstructions` requirement — will be
-confirmed against the installed SDK during implementation rather than trusted from memory. The
-shapes above are the design intent and may need minor signature tweaks to compile.
+Confirmed against the macOS 26 SDK during implementation:
+- `Tool.call(arguments:) async throws -> Output` where `Output: PromptRepresentable`; `String`
+  conforms, so both tools return `String`.
+- `Tool` requires only `name`, `description`, `call`; `parameters` is defaulted for
+  `Arguments: Generable`.
+- `LanguageModelSession(model:tools:instructions:)` accepts `instructions: String?`, so
+  `LanguageModelSession(tools:instructions:)` compiles.
 
 ## Branch / coordination
 
