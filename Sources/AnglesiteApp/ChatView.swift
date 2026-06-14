@@ -171,7 +171,10 @@ struct ChatView: View {
 
 // MARK: - Shared formatter
 
-nonisolated(unsafe) private let sharedRelativeTimeFormatter: RelativeDateTimeFormatter = {
+// Configured once and only read via `localizedString(for:relativeTo:)` afterward. Apple doesn't
+// document `RelativeDateTimeFormatter` as thread-safe, so `nonisolated(unsafe)` is a deliberate
+// choice asserting that never-mutated-after-init invariant.
+private nonisolated(unsafe) let sharedRelativeTimeFormatter: RelativeDateTimeFormatter = {
     let f = RelativeDateTimeFormatter()
     f.unitsStyle = .short
     return f
