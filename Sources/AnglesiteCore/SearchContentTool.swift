@@ -13,7 +13,7 @@ public struct SearchContentTool: Tool {
 
     @Generable
     public struct Arguments {
-        @Guide(description: "What to search for — words from a page title, route, post slug, or tag.")
+        @Guide(description: "What to search for — words from a page title, route, post slug, tag, or collection.")
         public var query: String
     }
 

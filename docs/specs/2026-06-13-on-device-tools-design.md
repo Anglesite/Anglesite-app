@@ -76,7 +76,7 @@ struct ApplyEditTool: Tool {
     let siteID: String
     let contextSelector: JSONValue?              // captured from AssistantContext per session
 
-    func call(arguments: GeneratedEditCommand) async throws -> ToolOutput
+    func call(arguments: GeneratedEditCommand) async throws -> String
 }
 ```
 
@@ -100,7 +100,7 @@ Reusing the existing `GeneratedEditCommand` (#154) as `Arguments` keeps a single
    - else if `arguments.selector` is a **bare tag** (matches `^[A-Za-z][A-Za-z0-9]*$`) → build a
      minimal `ElementInfo`: `{"tag": <lowercased>, "classes": [], "nthChild": 1}`
      (mirrors `selectorPart`'s `tag:nth-child(n)` fallback).
-   - else → return a **failure `ToolOutput`** ("Couldn't identify which element to edit — select one
+   - else → return a **descriptive failure `String`** ("Couldn't identify which element to edit — select one
      in the preview, or name a simple tag like `h1`."). No fabricated complex selectors; the bridge
      is **not** called.
 
@@ -108,7 +108,7 @@ Reusing the existing `GeneratedEditCommand` (#154) as `Arguments` keeps a single
    For `.applyInstruction`, the value is the natural-language instruction.
 
 Then `await bridge.applyEdit(siteID:filePath:selector:op:value:)` and translate the returned
-`EditReply` (`.applied` / `.failed` + `message`) into the `ToolOutput` the model reads back. The
+`EditReply` (`.applied` / `.ambiguous` / `.failed` + `message`) into the `String` the model reads back. The
 bridge already returns a `.failed` reply with an explanatory message when no router is available
 for the site; that message is surfaced verbatim.
 
@@ -117,18 +117,18 @@ for the site; that message is surfaced verbatim.
 ```swift
 struct SearchContentTool: Tool {
     let name = "searchContent"
-    let description = "Search the current site's pages and posts by title, route, slug, or tag."
+    let description = "Search the current site's pages and posts by title, route, slug, tag, or collection."
 
     @Generable
     struct Arguments {
-        @Guide(description: "What to search for — words from a page title, route, post slug, or tag.")
+        @Guide(description: "What to search for — words from a page title, route, post slug, tag, or collection.")
         var query: String
     }
 
     let contentGraph: SiteContentGraph
     let siteID: String
 
-    func call(arguments: Arguments) async throws -> ToolOutput
+    func call(arguments: Arguments) async throws -> String
 }
 ```
 
@@ -147,7 +147,7 @@ struct SearchContentTool: Tool {
 
 ## Error handling
 
-- Tool `call` returns a **descriptive `ToolOutput`** on failure rather than throwing — the model
+- Tool `call` returns a **descriptive `String`** on failure rather than throwing — the model
   should be able to recover within the loop (re-search, change approach, or report to the user). A
   thrown error would abort the whole generation.
 - The only thrown path remains genuine session setup failure (`AssistantError.unavailable`),
@@ -166,8 +166,8 @@ records the `EditMessage` it received.
 4. `ApplyEditTool` **no** context, bare-tag selector → builds the minimal `ElementInfo`
    (`{tag, classes:[], nthChild:1}`); assert the routed selector.
 5. `ApplyEditTool` **no** context, complex selector (`"p:nth-of-type(2)"`) → graceful failure
-   `ToolOutput`; assert the router was **never** called.
-6. `ApplyEditTool` router returns `.failed` → the failure message is surfaced in the `ToolOutput`.
+   `String`; assert the router was **never** called.
+6. `ApplyEditTool` router returns `.failed` → the failure message is surfaced in the returned `String`.
 
 Optionally (capability assertion, may fold into an existing suite): `FoundationModelAssistant`
 constructed **with** both deps reports `capabilities.supportsTools == true`; **without** them,
