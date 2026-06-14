@@ -1,5 +1,12 @@
 # On-device Tools (`ApplyEditTool` + `SearchContentTool`) Implementation Plan
 
+> ⚠️ **Historical plan — superseded by the shipped code.** The implementation evolved during review:
+> the tools return `String` (not `ToolOutput`), `.ambiguous` gets its own message (so the Task 1
+> Step 3 snippet's `case .failed, .ambiguous` is stale and would fail the tests), and
+> `SearchContentTool` added an empty-query guard, deterministic sorting, and fair per-category cap
+> budgeting. **Follow the committed sources in `Sources/AnglesiteCore/` as authoritative**, not the
+> snippets below.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add two `FoundationModels.Tool` conformances (`ApplyEditTool`, `SearchContentTool`) and wire them into `FoundationModelAssistant`, so the on-device model can search site content and apply structured edits in a local agentic loop with no network calls (#156, C.6).

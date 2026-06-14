@@ -175,6 +175,38 @@ struct SearchContentToolTests {
         let out = try await tool.call(arguments: .init(query: "zzz-no-such-thing"))
         #expect(out == "No matching pages or posts.")
     }
+
+    @Test("a flood of pages does not silently exclude posts; truncation is reported per category")
+    func truncationIsFairAndReportedPerCategory() async throws {
+        let graph = SiteContentGraph()
+        // 20 matching pages + 3 matching posts = 23 > the 20-result cap.
+        for i in 0..<20 {
+            let n = String(format: "%02d", i)
+            await graph.upsertPage(.init(
+                id: "site1:page:/p\(n)", siteID: "site1", route: "/p\(n)",
+                filePath: "src/pages/p\(n).md", title: "Page \(n)",
+                lastModified: Date(timeIntervalSince1970: 0)
+            ))
+        }
+        for i in 0..<3 {
+            await graph.upsertPost(.init(
+                id: "site1:post:post\(i)", siteID: "site1", collection: "posts", slug: "post-\(i)",
+                title: "Post \(i)", draft: false, publishDate: nil, tags: [],
+                filePath: "src/posts/post\(i).md", lastModified: Date(timeIntervalSince1970: 0)
+            ))
+        }
+        let tool = SearchContentTool(contentGraph: graph, siteID: "site1")
+        // "p" matches every page route (/pNN) and every post slug (post-N).
+        let out = try await tool.call(arguments: .init(query: "p"))
+
+        // The bug being fixed: posts must NOT be crowded out by the 20 pages.
+        let postCount = out.split(separator: "\n").filter { $0.hasPrefix("POST") }.count
+        #expect(postCount == 3)
+        // 17 pages shown, 3 hidden; all 3 posts shown, 0 hidden — reported per category.
+        #expect(out.contains("+3 more pages"))
+        #expect(!out.contains("more post"))
+        #expect(out.contains("refine your query to narrow results."))
+    }
 }
 
 @Suite("FoundationModelAssistant tool wiring")

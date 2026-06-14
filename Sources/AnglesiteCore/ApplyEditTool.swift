@@ -9,7 +9,7 @@ import FoundationModels
 /// on a page of the current site, routing through ``IntentEditBridge`` (and on to the plugin's
 /// edit pipeline). Reuses ``GeneratedEditCommand`` (#154) as its arguments so the model speaks one
 /// edit vocabulary.
-public struct ApplyEditTool: Tool {
+public struct ApplyEditTool: Tool, Sendable {
     public let name = "applyEdit"
     public let description = "Apply a structured text, attribute, or image edit to a specific element in a page's source file. Provide the source file path, an element selector (or a simple tag like h1), the operation kind, and the replacement value."
 
@@ -59,6 +59,9 @@ public struct ApplyEditTool: Tool {
         if let contextSelector { return contextSelector }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.isBareTag(trimmed) else { return nil }
+        // Best-effort convenience only: a bare tag always resolves to the FIRST element of that tag
+        // (`nthChild: 1` is synthesized, not parsed). The model cannot target a later occurrence
+        // this way — precise targeting comes from `contextSelector` (a real overlay `ElementInfo`).
         return .object([
             "tag": .string(trimmed.lowercased()),
             "classes": .array([]),

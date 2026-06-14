@@ -7,7 +7,7 @@ import FoundationModels
 /// A FoundationModels ``Tool`` that lets the on-device model search the current site's pages and
 /// posts (by title, route, slug, collection, or tag) via ``SiteContentGraph`` — local RAG with no
 /// network call.
-public struct SearchContentTool: Tool {
+public struct SearchContentTool: Tool, Sendable {
     public let name = "searchContent"
     public let description = "Search the current site's pages and posts by title, route, slug, tag, or collection."
 
@@ -37,21 +37,41 @@ public struct SearchContentTool: Tool {
         let pages = await contentGraph.searchPages(siteID: siteID, matching: query).sorted { $0.route < $1.route }
         let posts = await contentGraph.searchPosts(siteID: siteID, matching: query).sorted { $0.slug < $1.slug }
 
-        var lines: [String] = []
-        for page in pages {
-            lines.append("PAGE  \(page.route)  (\(page.filePath))")
-        }
-        for post in posts {
+        let pageLines = pages.map { "PAGE  \($0.route)  (\($0.filePath))" }
+        let postLines = posts.map { post -> String in
             let draft = post.draft ? " [draft]" : ""
-            lines.append("POST  \(post.slug)\(draft)  (\(post.filePath))")
+            return "POST  \(post.slug)\(draft)  (\(post.filePath))"
         }
 
-        if lines.isEmpty { return "No matching pages or posts." }
-        if lines.count > Self.resultCap {
-            let shown = lines.prefix(Self.resultCap).joined(separator: "\n")
-            return shown + "\n… +\(lines.count - Self.resultCap) more (refine your query to narrow results)."
+        if pageLines.isEmpty && postLines.isEmpty { return "No matching pages or posts." }
+
+        // Budget the combined cap across both categories so a flood of one can't crowd the other
+        // out of the results entirely (a model that only sees pages can't learn there were posts).
+        let (pageTake, postTake) = Self.fairBudget(pages: pageLines.count, posts: postLines.count)
+        var out = (pageLines.prefix(pageTake) + postLines.prefix(postTake)).joined(separator: "\n")
+
+        // Surface truncation per-category so the model knows what kind of result it's missing.
+        let hiddenPages = pageLines.count - pageTake
+        let hiddenPosts = postLines.count - postTake
+        var hidden: [String] = []
+        if hiddenPages > 0 { hidden.append("+\(hiddenPages) more page\(hiddenPages == 1 ? "" : "s")") }
+        if hiddenPosts > 0 { hidden.append("+\(hiddenPosts) more post\(hiddenPosts == 1 ? "" : "s")") }
+        if !hidden.isEmpty {
+            out += "\n… " + hidden.joined(separator: ", ") + " — refine your query to narrow results."
         }
-        return lines.joined(separator: "\n")
+        return out
+    }
+
+    /// Split ``resultCap`` between pages and posts so a flood of one category can't hide the other.
+    /// Each category is guaranteed up to half the budget; whatever half a smaller category leaves
+    /// unused is lent to the larger one. Returns how many of each to show.
+    static func fairBudget(pages: Int, posts: Int) -> (pages: Int, posts: Int) {
+        let cap = resultCap
+        guard pages + posts > cap else { return (pages, posts) }
+        let postFloor = min(posts, cap / 2)
+        let pageTake = min(pages, cap - postFloor)
+        let postTake = min(posts, cap - pageTake)
+        return (pageTake, postTake)
     }
 }
 #endif
