@@ -143,6 +143,66 @@ struct MCPApplyEditRouterTests {
         let captured = await observed.replies
         #expect(captured.isEmpty)
     }
+
+    @Test("postProcess fires with reply and message for an applied edit") func postProcessFiresForAppliedEdit() async {
+        let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","commit":"deadbeef"}"#
+        let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
+            content: [.init(type: "text", text: body)],
+            isError: false
+        )))
+        let observed = ObservedPostProcess()
+        let router = MCPApplyEditRouter(
+            toolCaller: { try await recorder.call(name: $0, arguments: $1) },
+            // The closure records directly (no inner Task); `next()` rendezvouses with the router's
+            // detached post-process task, so the test needs no sleep.
+            postProcess: { reply, message in await observed.record(reply: reply, message: message) }
+        )
+        _ = await router.apply(sampleMessage)
+        let call = await observed.next()
+        #expect(call.reply.status == .applied)
+        #expect(call.message.id == "e-1")
+    }
+
+    @Test("postProcess does not fire for a failed edit") func postProcessSkipsFailedEdit() async {
+        let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
+            content: [.init(type: "text", text: "boom")],
+            isError: true
+        )))
+        let observed = ObservedPostProcess()
+        let router = MCPApplyEditRouter(
+            toolCaller: { try await recorder.call(name: $0, arguments: $1) },
+            postProcess: { reply, message in await observed.record(reply: reply, message: message) }
+        )
+        _ = await router.apply(sampleMessage)
+        // `isError` ⇒ the router returns `.failed` before reaching postProcess, so no detached task is
+        // ever scheduled — the count is settled the moment `apply` returns (no sleep, no race).
+        #expect(await observed.count == 0)
+    }
+}
+
+/// Rendezvous collector for the router's post-process hook: `record` hands the call to a waiting
+/// `next()` (or buffers it), so tests await the hook deterministically instead of sleeping.
+private actor ObservedPostProcess {
+    struct Call: Sendable { let reply: EditReply; let message: EditMessage }
+    private var calls: [Call] = []
+    private var waiters: [CheckedContinuation<Call, Never>] = []
+
+    func record(reply: EditReply, message: EditMessage) {
+        let call = Call(reply: reply, message: message)
+        if waiters.isEmpty {
+            calls.append(call)
+        } else {
+            waiters.removeFirst().resume(returning: call)
+        }
+    }
+
+    /// Awaits the next recorded call, suspending until `record` runs.
+    func next() async -> Call {
+        if !calls.isEmpty { return calls.removeFirst() }
+        return await withCheckedContinuation { waiters.append($0) }
+    }
+
+    var count: Int { calls.count }
 }
 
 /// Thread-safe collector for the `onEdit` callback fired from the router's async context.

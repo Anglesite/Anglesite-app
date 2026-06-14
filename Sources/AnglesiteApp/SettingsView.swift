@@ -16,6 +16,7 @@ private struct AdvancedSettingsView: View {
     @AppStorage(AppSettings.Key.pluginPathOverride) private var pluginPathOverride: String = ""
     @AppStorage(AppSettings.Key.sitesRootOverride) private var sitesRootOverride: String = ""
     @AppStorage(AppSettings.Key.debugPaneEnabled) private var debugPaneEnabled: Bool = false
+    @AppStorage(AppSettings.Key.autoGenerateAltText) private var autoGenerateAltText: Bool = true
 
     var body: some View {
         Form {
@@ -25,6 +26,13 @@ private struct AdvancedSettingsView: View {
             #if !ANGLESITE_MAS
             AssistantSettingsSection()
             #endif
+
+            Section("Editing") {
+                Toggle("Auto-generate alt text for dropped images", isOn: $autoGenerateAltText)
+                Text("When you drop an image onto the preview, Anglesite uses Apple's on-device vision model to write descriptive alt text and applies it automatically. Runs locally; requires Apple Intelligence to be enabled. Purely decorative images get empty alt text and role=\"presentation\".")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Section("Anglesite plugin") {
                 FolderPickerRow(

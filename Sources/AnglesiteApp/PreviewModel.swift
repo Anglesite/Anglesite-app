@@ -51,13 +51,19 @@ final class PreviewModel {
     /// new router is re-registered in `EditRouterRegistry.shared` so `EditContentIntent`
     /// (B.5 / #149) routes through the same observer-equipped instance — otherwise the chat
     /// panel would miss Siri-driven edits.
-    func setEditObserver(_ onEdit: @escaping MCPApplyEditRouter.EditObserver) {
+    /// `postProcess` (optional) runs after each successful edit — wired by `SiteWindow` to
+    /// `AltTextGenerator` so an image drop auto-generates and applies alt text (C.7 / #157).
+    func setEditObserver(
+        _ onEdit: @escaping MCPApplyEditRouter.EditObserver,
+        postProcess: MCPApplyEditRouter.PostProcessor? = nil
+    ) {
         self.editRouter = MCPApplyEditRouter(
             mcpClient: { [weak self] in
                 guard let self else { return nil }
                 return await self.runtime.mcpClient
             },
-            onEdit: onEdit
+            onEdit: onEdit,
+            postProcess: postProcess
         )
         if let siteID = openSiteID {
             let current = self.editRouter

@@ -84,7 +84,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         AssistantCapabilities(
             supportsStreaming: true,
             supportsStructuredOutput: true,
-            supportsVision: false,
+            supportsVision: true,  // macOS 27 on-device model accepts image attachments (C.7, #157)
             supportsTools: editBridge != nil && contentGraph != nil,
             maxContextTokens: tier == .privateCloudCompute ? 32_768 : 4_096,
             providerName: tier == .privateCloudCompute ? "Private Cloud Compute" : "On-Device"
@@ -142,6 +142,24 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         // One-shot, like `generate`: a fresh session, never the cached conversational one.
         let oneShotSession = try makeSession(context: context)
         return try await oneShotSession.respond(to: prompt, generating: T.self).content
+    }
+
+    /// Vision variant of ``generateStructured(prompt:context:resultType:)``: attaches the image at
+    /// `imageURL` to the prompt so the macOS 27 on-device model can describe it (alt text, OCR,
+    /// screenshot analysis). One-shot — a fresh session per call. Throws
+    /// ``AssistantError/unavailable(_:)`` when the on-device model can't run on this host.
+    public func generateStructured<T: Generable>(
+        prompt: String,
+        imageURL: URL,
+        context: AssistantContext,
+        resultType: T.Type
+    ) async throws -> T {
+        let oneShotSession = try makeSession(context: context)
+        let image = Attachment(imageURL: imageURL)
+        return try await oneShotSession.respond(generating: T.self) {
+            prompt
+            image
+        }.content
     }
 
     // MARK: ConversationalAssistant
