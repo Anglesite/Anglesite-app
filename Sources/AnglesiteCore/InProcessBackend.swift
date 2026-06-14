@@ -36,6 +36,12 @@ public actor InProcessBackend: SupervisorBackend {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        // Register before `run()` — a fast child can exit before the await, and a handler set after
+        // termination never fires. Non-blocking, unlike the old `waitUntilExit()` (which deadlocked a
+        // cooperative thread under load; see ProcessSupervisorConcurrencyTests).
+        let exitLatch = ExitLatch()
+        process.terminationHandler = { exitLatch.resume(with: $0.terminationStatus) }
+
         do {
             try process.run()
         } catch {
@@ -45,16 +51,49 @@ public actor InProcessBackend: SupervisorBackend {
         async let stdoutData = Self.readToEnd(stdoutPipe)
         async let stderrData = Self.readToEnd(stderrPipe)
         let (out, err) = await (stdoutData, stderrData)
+        let exitCode = await exitLatch.value()
 
-        process.waitUntilExit()
-
-        return ProcessResult(stdout: out, stderr: err, exitCode: process.terminationStatus)
+        return ProcessResult(stdout: out, stderr: err, exitCode: exitCode)
     }
 
     private static func readToEnd(_ pipe: Pipe) async -> Data {
         await Task.detached(priority: .userInitiated) {
             (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
         }.value
+    }
+
+    /// One-shot async bridge for `Process.terminationHandler`: register before `run()`, then
+    /// `value()` returns the exit status (whether termination landed before or after the await)
+    /// without blocking a thread.
+    private final class ExitLatch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var status: Int32?
+        private var continuation: CheckedContinuation<Int32, Never>?
+
+        func resume(with status: Int32) {
+            lock.lock()
+            if let continuation {
+                self.continuation = nil
+                lock.unlock()
+                continuation.resume(returning: status)
+            } else {
+                self.status = status
+                lock.unlock()
+            }
+        }
+
+        func value() async -> Int32 {
+            await withCheckedContinuation { cont in
+                lock.lock()
+                if let status {
+                    lock.unlock()
+                    cont.resume(returning: status)
+                } else {
+                    continuation = cont
+                    lock.unlock()
+                }
+            }
+        }
     }
 
     // MARK: Long-running launch
