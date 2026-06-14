@@ -1,25 +1,38 @@
 import Foundation
 import OSLog
 
-// Gated to the Xcode-27 toolchain — FoundationModels is absent at runtime on CI (#128).
-// See ContentAssistant.swift / ClaudeAssistant.swift for the same pattern.
-#if compiler(>=6.4)
-import FoundationModels
-
 /// Which Apple model substrate a ``FoundationModelAssistant`` targets.
+///
+/// Declared *outside* the `#if compiler(>=6.4)` gate — it's a plain string enum with no
+/// `FoundationModels` dependency, so `AppSettings` (the #160 tier picker) and the Settings UI can
+/// persist and bind to it on any toolchain. `String`-backed for `UserDefaults`/`@AppStorage`
+/// storage; `CaseIterable` drives the picker.
 ///
 /// - Important: The public `FoundationModels` framework is **on-device**. There is no
 ///   caller-selectable Private Cloud Compute session; PCC is used transparently by some system
 ///   APIs. `.privateCloudCompute` is therefore *modeled* here so callers (`ChatModel`, the #160
 ///   tier picker) can express intent, but **v1 backs it with the same on-device session**. The
 ///   only observable difference today is the advertised ``AssistantCapabilities``.
-public enum FoundationModelTier: Sendable, Equatable {
+public enum FoundationModelTier: String, Sendable, Equatable, CaseIterable {
     /// `SystemLanguageModel.default` — the ~3B on-device model. Free, no network.
     case onDevice
     /// Reserved. Backed by the on-device session in v1 (see type note); advertises a larger
     /// context window via capabilities.
     case privateCloudCompute
+
+    /// Human-readable label for the Settings picker.
+    public var displayName: String {
+        switch self {
+        case .onDevice: return "On-Device (3B)"
+        case .privateCloudCompute: return "Private Cloud Compute"
+        }
+    }
 }
+
+// Gated to the Xcode-27 toolchain — FoundationModels is absent at runtime on CI (#128).
+// See ContentAssistant.swift / ClaudeAssistant.swift for the same pattern.
+#if compiler(>=6.4)
+import FoundationModels
 
 /// A ``ContentAssistant`` backed by Apple's on-device `FoundationModels`. Streams free-form text
 /// and produces ``Generable`` structured output via guided generation.

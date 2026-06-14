@@ -345,9 +345,14 @@ struct SiteWindow: View {
             undoCommand: undoCommand
         )
         #else
-        // Developer ID build: Claude stays the default chat backend (constructed inside the
-        // convenience init). The #160 tier picker will let users opt into the on-device model.
-        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
+        // Developer ID build: Claude is the default backend, but Settings → Assistant lets the user
+        // opt into Apple's on-device Foundation Models (#160). The choice is read here at
+        // construction, so a settings change takes effect for the next-opened site window.
+        let settings = AppSettings.shared
+        let assistant: any ConversationalAssistant = settings.preferFoundationModels
+            ? FoundationModelAssistant(tier: settings.foundationModelTier)
+            : ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.path)
+        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
         #endif
         preview.setEditObserver { [weak chat] reply in
             Task { @MainActor in
