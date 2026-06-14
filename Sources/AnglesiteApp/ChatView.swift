@@ -1,12 +1,11 @@
-// Omitted from the Mac App Store build — see ChatModel.swift.
-#if !ANGLESITE_MAS
 import SwiftUI
 import AppKit
 import AnglesiteCore
 
-/// Chat panel UI. Renders the live conversation between the user and `claude` (driven by
-/// `ChatModel`/`ClaudeAgent`). Designed to live in a right-hand pane of the main window so the
-/// user can see the preview and chat side by side.
+/// Chat panel UI. Renders the live conversation between the user and the site's
+/// ``ConversationalAssistant`` — Claude (`ClaudeAgent`) on the Developer ID build, the on-device
+/// `FoundationModelAssistant` on the Mac App Store build. Designed to live in a right-hand pane of
+/// the main window so the user can see the preview and chat side by side.
 ///
 /// Markdown is rendered via SwiftUI's native `AttributedString(markdown:)` — covers bold,
 /// italic, code spans, and links without pulling in a markdown library. Multi-line code blocks
@@ -124,7 +123,7 @@ struct ChatView: View {
 
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField("Ask Claude…", text: $draft, axis: .vertical)
+            TextField("Ask the assistant…", text: $draft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...6)
                 .focused($inputFocused)
@@ -385,9 +384,11 @@ private struct ToolCallCard: View {
     }
 }
 
+// DevID-only: the no-assistant convenience init below is `#if !ANGLESITE_MAS`. The panel itself
+// compiles on both targets; only this preview needs the Claude-backed convenience init.
+#if !ANGLESITE_MAS
 #Preview {
     ChatView(model: ChatModel(siteID: "preview", siteDirectory: URL(fileURLWithPath: NSTemporaryDirectory())))
         .frame(width: 420, height: 560)
 }
-
 #endif

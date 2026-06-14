@@ -8,7 +8,10 @@ import FoundationModels
 /// posts (by title, route, slug, collection, or tag) via ``SiteContentGraph`` — local RAG with no
 /// network call.
 public struct SearchContentTool: Tool, Sendable {
-    public let name = "searchContent"
+    /// The tool's stable name. Exposed statically so callers (e.g. `FoundationModelAssistant`'s
+    /// `.started` event) can report the attached tools without constructing an instance.
+    public static let toolName = "searchContent"
+    public let name = SearchContentTool.toolName
     public let description = "Search the current site's pages and posts by title, route, slug, tag, or collection."
 
     @Generable
