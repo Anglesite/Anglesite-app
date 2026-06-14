@@ -182,14 +182,12 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// on-device model exposes no discrete tool-use or token-usage telemetry, so tool invocations run
     /// opaquely inside the session and turns carry no usage.
     public func converse(prompt: String, context: AssistantContext) async throws -> AsyncStream<AssistantEvent> {
-        // Re-entrancy: a new turn supersedes any still-running one for the *consumer* — its stream
-        // ends with `.cancelled`. Its background drain is deliberately left to finish (see below).
+        // A new turn supersedes the prior one for the consumer (its stream ends `.cancelled`); the
+        // prior drain is left to finish.
         activeRelay?.cancel()
-        // A superseded/cancelled turn keeps draining on the cached session, which is single-flight;
-        // reusing it would throw "session busy". While any drain is in flight, open a fresh session.
-        // Once a drain finishes the session holds the *complete* response (cancel only hid the tail
-        // from the user, it didn't truncate the model's history), so later turns reuse it and keep
-        // conversation history.
+        // The cached session is single-flight: reusing it while a drain still runs throws "session
+        // busy", so open a fresh one. (Once drained it holds the full response, so later turns reuse
+        // it and keep history.)
         if activeDrains > 0 { session = nil }
 
         let session = try conversationSession(for: context)
@@ -201,21 +199,25 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         activeRelay = relay
         relay.deliver(.started(model: providerName, toolNames: toolNames))
 
-        // Drain the model stream to completion on a task we NEVER cancel: cancelling Apple's
-        // on-device `streamResponse` mid-iteration traps the process (`brk 1`). `cancel()` stops
-        // consumer delivery via the relay instead, and the model finishes generating harmlessly in
-        // the background. `streamResponse` yields *cumulative* snapshots, so diff against the prior
-        // prefix to emit only the newly-appended tail (matching the per-chunk `.textDelta` contract).
+        // Drain to completion on a task we never cancel — cancelling `streamResponse` mid-iteration
+        // traps the process (`brk 1`); `cancel()` stops delivery via the relay instead.
         activeDrains += 1
+        // Unstructured `Task` in an actor inherits the actor's isolation (Swift 6), so these
+        // `activeDrains` mutations are actor-safe — keep it `Task`, not `Task.detached`.
         Task {
             defer { activeDrains -= 1 }
             do {
                 var previous = ""
                 for try await snapshot in session.streamResponse(to: prompt) {
+                    // `streamResponse` yields cumulative snapshots; emit only the newly-appended tail.
                     let full = snapshot.content
-                    let delta = full.hasPrefix(previous) ? String(full.dropFirst(previous.count)) : full
+                    if full.hasPrefix(previous) {
+                        relay.deliver(.textDelta(String(full.dropFirst(previous.count))))
+                    } else {
+                        logger.warning("streamResponse snapshot not cumulative — emitting full content as delta")
+                        relay.deliver(.textDelta(full))
+                    }
                     previous = full
-                    relay.deliver(.textDelta(delta))
                 }
                 relay.complete(.turnComplete(nil))
             } catch {

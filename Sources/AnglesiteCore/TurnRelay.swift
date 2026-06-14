@@ -1,17 +1,10 @@
 import Foundation
 
-/// Relays one conversational turn's ``AssistantEvent`` values to a single consumer `AsyncStream`,
-/// decoupling consumer-side cancellation from the underlying model stream.
-///
-/// The reason this exists: cancelling Apple's on-device `FoundationModels` `streamResponse`
-/// iteration *mid-flight* traps the process (`brk 1`). So ``FoundationModelAssistant`` drains the
-/// model stream to completion on a task it never cancels, funnelling every snapshot through a relay.
-/// `cancel()` here stops *delivering* to the consumer and emits a terminal `.cancelled` — it never
-/// touches the model. All terminal transitions (`complete`/`cancel`/`detach`) are once-only and
-/// thread-safe, since the draining task and the actor's `cancel()` race to end the same turn.
-///
-/// Ungated (no `FoundationModels` dependency) so it is unit-testable on any toolchain, including CI
-/// where the model is absent.
+/// Relays one conversational turn's ``AssistantEvent`` values to a consumer `AsyncStream`, so
+/// ``FoundationModelAssistant`` can stop *delivering* on cancel without cancelling the model stream
+/// (cancelling Apple's `streamResponse` mid-flight traps the process). Terminal transitions
+/// (`complete`/`cancel`/`detach`) are once-only and thread-safe — the draining task and `cancel()`
+/// race to end the same turn. Ungated, so it unit-tests on any toolchain (incl. CI without the model).
 final class TurnRelay: @unchecked Sendable {
     private let lock = NSLock()
     private var finished = false
