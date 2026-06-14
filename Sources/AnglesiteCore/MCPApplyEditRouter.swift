@@ -13,28 +13,37 @@ import Foundation
 public struct MCPApplyEditRouter: EditRouter {
     public typealias ToolCaller = @Sendable (_ name: String, _ arguments: JSONValue) async throws -> MCPClient.ToolCallResult
     public typealias EditObserver = @Sendable (EditReply) -> Void
+    /// Async hook fired (fire-and-forget) after a successful `.applied` edit, with both the reply and
+    /// the originating message. Used by the app to run on-device alt-text generation for image drops
+    /// (C.7 / `AltTextGenerator`) without coupling this router to FoundationModels. It runs detached
+    /// so the overlay's reply isn't blocked on the (multi-second) follow-up work.
+    public typealias PostProcessor = @Sendable (_ reply: EditReply, _ message: EditMessage) async -> Void
 
     private let toolCaller: ToolCaller
     private let onEdit: EditObserver?
+    private let postProcess: PostProcessor?
 
     /// Test seam — inject a closure that mimics `MCPClient.callTool` so the router's mapping
     /// logic is verifiable without a live MCP server.
-    public init(toolCaller: @escaping ToolCaller, onEdit: EditObserver? = nil) {
+    public init(toolCaller: @escaping ToolCaller, onEdit: EditObserver? = nil, postProcess: PostProcessor? = nil) {
         self.toolCaller = toolCaller
         self.onEdit = onEdit
+        self.postProcess = postProcess
     }
 
     /// Production hookup: bind to a getter for the currently-active `MCPClient`. Returns
     /// `.failed("MCP not running")` via a thrown `notInitialized` when the getter is `nil`.
     public init(
         mcpClient: @escaping @Sendable () async -> MCPClient?,
-        onEdit: EditObserver? = nil
+        onEdit: EditObserver? = nil,
+        postProcess: PostProcessor? = nil
     ) {
         self.toolCaller = { name, args in
             guard let client = await mcpClient() else { throw MCPClient.MCPError.notInitialized }
             return try await client.callTool(name: name, arguments: args)
         }
         self.onEdit = onEdit
+        self.postProcess = postProcess
     }
 
     public func apply(_ message: EditMessage) async -> EditReply {
@@ -63,6 +72,11 @@ public struct MCPApplyEditRouter: EditRouter {
                 result: parsed?.result
             )
             if reply.commit != nil { onEdit?(reply) }
+            // Fire-and-forget so the overlay gets its reply immediately; alt-text generation and the
+            // follow-up edit land a moment later (see `AltTextGenerator`).
+            if let postProcess {
+                Task { await postProcess(reply, message) }
+            }
             return reply
         } catch {
             return EditReply(id: message.id, status: .failed, message: "\(error)")

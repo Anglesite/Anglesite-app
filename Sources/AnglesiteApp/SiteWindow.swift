@@ -364,11 +364,36 @@ struct SiteWindow: View {
             : ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.path)
         chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
         #endif
-        preview.setEditObserver { [weak chat] reply in
+        // Auto alt-text (C.7 / #157): after a successful image drop, generate alt text on-device and
+        // apply it to the `<img>`. Target-agnostic — the on-device vision model runs on both builds.
+        // The follow-up edit routes through its own (post-process-free) apply_edit router so it can't
+        // recurse. Best-effort and opt-out via Settings.
+        let altTextGenerator = AltTextGenerator(
+            siteID: resolved.id,
+            siteDirectory: resolved.path,
+            isEnabled: { AppSettings.shared.autoGenerateAltText },
+            produce: { imageURL, context in
+                try await FoundationModelAssistant(tier: .onDevice).generateStructured(
+                    prompt: "Generate concise, descriptive alt text for this image as it would appear on a website. If the image is purely decorative, mark it decorative and use empty alt text.",
+                    imageURL: imageURL,
+                    context: context,
+                    resultType: GeneratedAltText.self
+                )
+            },
+            apply: { edit in
+                _ = await MCPApplyEditRouter(mcpClient: mcpClient).apply(edit)
+            },
+            log: { message in
+                Task { await LogCenter.shared.append(source: "alt-text:\(resolved.id)", stream: .stderr, text: message) }
+            }
+        )
+        preview.setEditObserver({ [weak chat] reply in
             Task { @MainActor in
                 chat?.recordEdit(reply)
             }
-        }
+        }, postProcess: { reply, message in
+            await altTextGenerator.postProcess(reply: reply, message: message)
+        })
         deploy.onScanComplete = { [health] outcome in
             health.ingestDeployOutcome(outcome)
         }

@@ -143,6 +143,47 @@ struct MCPApplyEditRouterTests {
         let captured = await observed.replies
         #expect(captured.isEmpty)
     }
+
+    @Test("postProcess fires with reply and message for an applied edit") func postProcessFiresForAppliedEdit() async {
+        let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","commit":"deadbeef"}"#
+        let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
+            content: [.init(type: "text", text: body)],
+            isError: false
+        )))
+        let observed = ObservedPostProcess()
+        let router = MCPApplyEditRouter(
+            toolCaller: { try await recorder.call(name: $0, arguments: $1) },
+            postProcess: { reply, message in Task { await observed.record(reply: reply, message: message) } }
+        )
+        _ = await router.apply(sampleMessage)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let captured = await observed.calls
+        #expect(captured.count == 1)
+        #expect(captured.first?.reply.status == .applied)
+        #expect(captured.first?.message.id == "e-1")
+    }
+
+    @Test("postProcess does not fire for a failed edit") func postProcessSkipsFailedEdit() async {
+        let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
+            content: [.init(type: "text", text: "boom")],
+            isError: true
+        )))
+        let observed = ObservedPostProcess()
+        let router = MCPApplyEditRouter(
+            toolCaller: { try await recorder.call(name: $0, arguments: $1) },
+            postProcess: { reply, message in Task { await observed.record(reply: reply, message: message) } }
+        )
+        _ = await router.apply(sampleMessage)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(await observed.calls.isEmpty)
+    }
+}
+
+/// Collects `(reply, message)` pairs from the router's post-process hook.
+private actor ObservedPostProcess {
+    struct Call: Sendable { let reply: EditReply; let message: EditMessage }
+    private(set) var calls: [Call] = []
+    func record(reply: EditReply, message: EditMessage) { calls.append(Call(reply: reply, message: message)) }
 }
 
 /// Thread-safe collector for the `onEdit` callback fired from the router's async context.

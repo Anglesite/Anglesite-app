@@ -19,6 +19,7 @@ public final class AppSettings: @unchecked Sendable {
         public static let sitesRootBookmark  = "anglesite.sitesRootBookmark"
         public static let preferFoundationModels = "anglesite.preferFoundationModels"
         public static let foundationModelTier    = "anglesite.foundationModelTier"
+        public static let autoGenerateAltText = "anglesite.autoGenerateAltText"
     }
 
     private let defaults: UserDefaults
@@ -98,6 +99,19 @@ public final class AppSettings: @unchecked Sendable {
     public var foundationModelTier: FoundationModelTier {
         get { FoundationModelTier(rawValue: defaults.string(forKey: Key.foundationModelTier) ?? "") ?? .onDevice }
         set { defaults.set(newValue.rawValue, forKey: Key.foundationModelTier) }
+    }
+
+    /// When on (the default), dropping an image onto the preview auto-generates alt text with the
+    /// on-device vision model and applies it to the `<img>` (C.7, #157). Both targets. No-ops
+    /// gracefully when Apple Intelligence is unavailable. Stored inverted-from-absent so an
+    /// untouched install defaults to `true`.
+    public var autoGenerateAltText: Bool {
+        get {
+            // Absent → on by default; an explicit stored value wins.
+            guard defaults.object(forKey: Key.autoGenerateAltText) != nil else { return true }
+            return defaults.bool(forKey: Key.autoGenerateAltText)
+        }
+        set { defaults.set(newValue, forKey: Key.autoGenerateAltText) }
     }
 
     /// The site that was most-recently focused. Used by the Sites launcher to auto-open

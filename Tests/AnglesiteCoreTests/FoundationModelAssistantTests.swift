@@ -1,5 +1,8 @@
 import Testing
 import Foundation
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 @testable import AnglesiteCore
 
 // Gated like the type under test (#128). Capability/tier assertions run on any toolchain≥6.4;
@@ -30,7 +33,7 @@ struct FoundationModelAssistantTests {
         #expect(caps.supportsStreaming)
         #expect(caps.supportsStructuredOutput)
         #expect(!caps.supportsTools)
-        #expect(!caps.supportsVision)
+        #expect(caps.supportsVision)  // macOS 27 on-device model accepts image attachments (C.7)
     }
 
     @Test("PCC tier advertises a larger context window and PCC provider name")
@@ -95,6 +98,53 @@ struct FoundationModelAssistantTests {
         )
         #expect(!result.title.isEmpty)
     }
+
+    @Test("generateStructured(imageURL:) describes an image into GeneratedAltText")
+    func generateStructuredFromImage() async throws {
+        guard modelAvailable() else { return }
+        let imageURL = try Self.makeTempImage()
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+        let assistant = FoundationModelAssistant()
+        // Proves the image→guided-generation path runs end-to-end. Exact content is model-dependent;
+        // the contract is that it returns a valid `GeneratedAltText` (decorative ⇒ empty alt).
+        let alt = try await assistant.generateStructured(
+            prompt: "Generate concise alt text for this image.",
+            imageURL: imageURL,
+            context: makeContext(),
+            resultType: GeneratedAltText.self
+        )
+        if alt.isDecorative {
+            #expect(alt.altText.isEmpty)
+        } else {
+            #expect(!alt.altText.isEmpty)
+        }
+    }
+
+    /// Writes a small two-color PNG to a temp file so the vision path has a real image to read.
+    private static func makeTempImage() throws -> URL {
+        let side = 64
+        let space = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+            space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { throw AltTextImageError.context }
+        ctx.setFillColor(CGColor(red: 0.1, green: 0.4, blue: 0.9, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fillEllipse(in: CGRect(x: 16, y: 16, width: 32, height: 32))
+        guard let image = ctx.makeImage() else { throw AltTextImageError.render }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("alttext-\(UUID().uuidString).png")
+        guard let dest = CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.png.identifier as CFString, 1, nil
+        ) else { throw AltTextImageError.destination }
+        CGImageDestinationAddImage(dest, image, nil)
+        guard CGImageDestinationFinalize(dest) else { throw AltTextImageError.write }
+        return url
+    }
+
+    private enum AltTextImageError: Error { case context, render, destination, write }
 
     // MARK: ConversationalAssistant conformance (C.9 — MAS chat backend)
 

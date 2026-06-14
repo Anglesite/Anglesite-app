@@ -100,6 +100,21 @@ final class AppSettingsTests {
         #expect(settings.foundationModelTier == .onDevice)
     }
 
+    // MARK: Auto alt-text (C.7 — vision alt-text pipeline)
+
+    @Test("autoGenerateAltText defaults to true (on)") func autoAltTextDefaultsToTrue() {
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.autoGenerateAltText)
+    }
+
+    @Test("autoGenerateAltText round trip") func autoAltTextRoundTrip() {
+        let settings = AppSettings(defaults: defaults)
+        settings.autoGenerateAltText = false
+        #expect(!settings.autoGenerateAltText)
+        settings.autoGenerateAltText = true
+        #expect(settings.autoGenerateAltText)
+    }
+
     // MARK: DebugPaneVisibility
 
     @Test("Debug menu always visible in debug builds") func debugMenuAlwaysVisibleInDebugBuilds() {
