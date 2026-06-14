@@ -122,4 +122,58 @@ struct ApplyEditToolTests {
         #expect(!out.contains("Edit failed"))
     }
 }
+
+@Suite("On-device tools: SearchContentTool")
+struct SearchContentToolTests {
+
+    private func makeGraph() async -> SiteContentGraph {
+        let graph = SiteContentGraph()
+        await graph.upsertPage(.init(
+            id: "site1:page:/about", siteID: "site1", route: "/about",
+            filePath: "src/pages/about.md", title: "About Us",
+            lastModified: Date(timeIntervalSince1970: 0)
+        ))
+        await graph.upsertPost(.init(
+            id: "site1:post:hello", siteID: "site1", collection: "posts", slug: "hello-world",
+            title: "Hello World", draft: true, publishDate: nil, tags: ["intro"],
+            filePath: "src/posts/hello.md", lastModified: Date(timeIntervalSince1970: 0)
+        ))
+        return graph
+    }
+
+    @Test("finds a page by title and formats it")
+    func findsPageByTitle() async throws {
+        let tool = SearchContentTool(contentGraph: await makeGraph(), siteID: "site1")
+        let out = try await tool.call(arguments: .init(query: "about"))
+        #expect(out.contains("PAGE"))
+        #expect(out.contains("/about"))
+        #expect(out.contains("src/pages/about.md"))
+    }
+
+    @Test("marks a draft post and includes its file path")
+    func findsDraftPost() async throws {
+        let tool = SearchContentTool(contentGraph: await makeGraph(), siteID: "site1")
+        let out = try await tool.call(arguments: .init(query: "hello"))
+        #expect(out.contains("POST"))
+        #expect(out.contains("hello-world"))
+        #expect(out.contains("[draft]"))
+        #expect(out.contains("src/posts/hello.md"))
+    }
+
+    @Test("an empty query is rejected without dumping all content")
+    func emptyQueryIsRejected() async throws {
+        let tool = SearchContentTool(contentGraph: await makeGraph(), siteID: "site1")
+        let out = try await tool.call(arguments: .init(query: "   "))
+        #expect(out == "Provide a search term — a word from a page title, route, post slug, or tag.")
+        #expect(!out.contains("PAGE"))
+        #expect(!out.contains("POST"))
+    }
+
+    @Test("no matches returns an explicit message, not an empty string")
+    func noMatchesIsExplicit() async throws {
+        let tool = SearchContentTool(contentGraph: await makeGraph(), siteID: "site1")
+        let out = try await tool.call(arguments: .init(query: "zzz-no-such-thing"))
+        #expect(out == "No matching pages or posts.")
+    }
+}
 #endif
