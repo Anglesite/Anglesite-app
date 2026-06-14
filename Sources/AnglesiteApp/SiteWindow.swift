@@ -333,15 +333,29 @@ struct SiteWindow: View {
                 throw NSError(domain: "AnnotationFeed", code: 2, userInfo: [NSLocalizedDescriptionKey: detail])
             }
         }
+        // Per-site edit bridge for the on-device assistant's `ApplyEditTool` (#193). Resolves the
+        // live router from `EditRouterRegistry` the same way `AnglesiteIntents.bootstrap` does — by
+        // this point `preview.open()` (above) has already registered this window's router under the
+        // site id, and `setEditObserver` (below) re-registers the observer-equipped one, so on-device
+        // edits route through the same instance the chat panel and Siri see. The bridge is a
+        // stateless struct keyed on the siteID passed at call time, so one instance serves the site.
+        let editBridge = IntentEditBridge(
+            routerProvider: { siteID in await EditRouterRegistry.shared.router(for: siteID) }
+        )
         #if ANGLESITE_MAS
         // Sandboxed App Store build: there's no `claude` CLI to shell out to, so chat is backed by
         // the on-device `FoundationModelAssistant` (#159). This is the MAS build's first chat pane.
-        // Constructed tool-less (no editBridge/contentGraph) for now, so `supportsTools` is false;
-        // wiring the on-device tools in is tracked in #193.
+        // The per-site `editBridge` + app-lifetime `contentGraph` attach `ApplyEditTool` +
+        // `SearchContentTool`, so the on-device path advertises `supportsTools` and runs a local
+        // agentic loop with no network (#193).
         chat = ChatModel(
             siteID: resolved.id,
             siteDirectory: resolved.path,
-            assistant: FoundationModelAssistant(tier: .onDevice),
+            assistant: FoundationModelAssistant(
+                tier: .onDevice,
+                editBridge: editBridge,
+                contentGraph: contentGraph
+            ),
             annotationFeed: feed,
             annotationResolver: annotationResolver,
             undoCommand: undoCommand
@@ -356,11 +370,16 @@ struct SiteWindow: View {
         // Xcode 27 / Swift 6.4; the MAS branch above relies on the same assumption. If the toolchain
         // floor ever drops below 6.4, both branches need a `#if compiler(>=6.4)` fallback.
         //
-        // Like the MAS branch, this is constructed tool-less for now (no editBridge/contentGraph);
-        // wiring the on-device tools in is tracked in #193.
+        // Like the MAS branch, the on-device path gets the per-site `editBridge` + app-lifetime
+        // `contentGraph` so it attaches `ApplyEditTool` + `SearchContentTool` and advertises
+        // `supportsTools` (#193). The Claude path carries its own tool surface and ignores these.
         let settings = AppSettings.shared
         let assistant: any ConversationalAssistant = settings.preferFoundationModels
-            ? FoundationModelAssistant(tier: settings.foundationModelTier)
+            ? FoundationModelAssistant(
+                tier: settings.foundationModelTier,
+                editBridge: editBridge,
+                contentGraph: contentGraph
+            )
             : ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.path)
         chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
         #endif
