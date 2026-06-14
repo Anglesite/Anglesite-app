@@ -14,11 +14,20 @@ import OSLog
 ///   tier picker) can express intent, but **v1 backs it with the same on-device session**. The
 ///   only observable difference today is the advertised ``AssistantCapabilities``.
 public enum FoundationModelTier: String, Sendable, Equatable, CaseIterable {
+    // Raw values are pinned explicitly because they are persisted to `UserDefaults` (via the #160
+    // tier picker's `@AppStorage`). Renaming a case must not silently invalidate stored preferences,
+    // so the persisted string is decoupled from the Swift case name.
     /// `SystemLanguageModel.default` — the ~3B on-device model. Free, no network.
-    case onDevice
+    case onDevice            = "onDevice"
     /// Reserved. Backed by the on-device session in v1 (see type note); advertises a larger
     /// context window via capabilities.
-    case privateCloudCompute
+    case privateCloudCompute = "privateCloudCompute"
+
+    /// Tiers offered in the Settings picker. `.privateCloudCompute` is intentionally excluded until
+    /// the real PCC path ships — until then it is functionally identical to `.onDevice` (see type
+    /// note), so surfacing it as a selectable control would be a no-op that reads as a bug. The case
+    /// remains in `allCases` so persistence/serialization stay stable.
+    public static var pickerCases: [FoundationModelTier] { [.onDevice] }
 
     /// Human-readable label for the Settings picker.
     public var displayName: String {

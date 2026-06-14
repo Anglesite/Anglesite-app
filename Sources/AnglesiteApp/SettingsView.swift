@@ -103,11 +103,11 @@ private struct AssistantSettingsSection: View {
 
     var body: some View {
         Section("Assistant") {
-            Toggle("Use Apple's on-device model instead of Claude", isOn: $preferFoundationModels)
+            Toggle("Use Apple Foundation Models instead of Claude", isOn: $preferFoundationModels)
 
             if preferFoundationModels {
                 Picker("Model", selection: $tier) {
-                    ForEach(FoundationModelTier.allCases, id: \.self) { tier in
+                    ForEach(FoundationModelTier.pickerCases, id: \.self) { tier in
                         Text(tier.displayName).tag(tier)
                     }
                 }
