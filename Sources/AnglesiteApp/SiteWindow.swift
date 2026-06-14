@@ -264,6 +264,13 @@ struct SiteWindow: View {
 
     // MARK: - Lifecycle
 
+    /// Per-site edit bridge for the on-device assistant's `ApplyEditTool` (#193). Resolves the live
+    /// router from `EditRouterRegistry` lazily per call, so `setEditObserver`'s re-registration is
+    /// always visible — mirroring `AnglesiteIntents.bootstrap`.
+    private func makeEditBridge() -> IntentEditBridge {
+        IntentEditBridge(routerProvider: { id in await EditRouterRegistry.shared.router(for: id) })
+    }
+
     private func loadAndStart() async {
         // SwiftUI's NSPersistentUIManager will happily restore a WindowGroup with a
         // nil payload, or one whose value no longer matches a known site (sites.json
@@ -333,15 +340,6 @@ struct SiteWindow: View {
                 throw NSError(domain: "AnnotationFeed", code: 2, userInfo: [NSLocalizedDescriptionKey: detail])
             }
         }
-        // Per-site edit bridge for the on-device assistant's `ApplyEditTool` (#193). Resolves the
-        // live router from `EditRouterRegistry` the same way `AnglesiteIntents.bootstrap` does — by
-        // this point `preview.open()` (above) has already registered this window's router under the
-        // site id, and `setEditObserver` (below) re-registers the observer-equipped one, so on-device
-        // edits route through the same instance the chat panel and Siri see. The bridge is a
-        // stateless struct keyed on the siteID passed at call time, so one instance serves the site.
-        let editBridge = IntentEditBridge(
-            routerProvider: { siteID in await EditRouterRegistry.shared.router(for: siteID) }
-        )
         #if ANGLESITE_MAS
         // Sandboxed App Store build: there's no `claude` CLI to shell out to, so chat is backed by
         // the on-device `FoundationModelAssistant` (#159). This is the MAS build's first chat pane.
@@ -353,7 +351,7 @@ struct SiteWindow: View {
             siteDirectory: resolved.path,
             assistant: FoundationModelAssistant(
                 tier: .onDevice,
-                editBridge: editBridge,
+                editBridge: makeEditBridge(),
                 contentGraph: contentGraph
             ),
             annotationFeed: feed,
@@ -374,10 +372,12 @@ struct SiteWindow: View {
         // `contentGraph` so it attaches `ApplyEditTool` + `SearchContentTool` and advertises
         // `supportsTools` (#193). The Claude path carries its own tool surface and ignores these.
         let settings = AppSettings.shared
+        // `makeEditBridge()` is only called in the on-device arm — the ternary doesn't evaluate the
+        // untaken branch, so the Claude path does no bridge work.
         let assistant: any ConversationalAssistant = settings.preferFoundationModels
             ? FoundationModelAssistant(
                 tier: settings.foundationModelTier,
-                editBridge: editBridge,
+                editBridge: makeEditBridge(),
                 contentGraph: contentGraph
             )
             : ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.path)
