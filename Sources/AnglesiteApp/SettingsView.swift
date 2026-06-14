@@ -29,7 +29,7 @@ private struct AdvancedSettingsView: View {
 
             Section("Editing") {
                 Toggle("Auto-generate alt text for dropped images", isOn: $autoGenerateAltText)
-                Text("When you drop an image onto the preview, Anglesite uses Apple's on-device vision model to write descriptive `alt` text and applies it automatically. Runs locally; requires Apple Intelligence to be enabled. Purely decorative images get empty alt text and `role=\"presentation\"`.")
+                Text("When you drop an image onto the preview, Anglesite uses Apple's on-device vision model to write descriptive alt text and applies it automatically. Runs locally; requires Apple Intelligence to be enabled. Purely decorative images get empty alt text and role=\"presentation\".")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

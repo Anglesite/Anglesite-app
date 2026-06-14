@@ -381,7 +381,16 @@ struct SiteWindow: View {
                 )
             },
             apply: { edit in
-                _ = await MCPApplyEditRouter(mcpClient: mcpClient).apply(edit)
+                // Surface a failed apply (MCP down, plugin error) — otherwise the drop would succeed
+                // with no alt text and nothing in the debug pane explaining why. Generation failures
+                // are handled separately via `log`.
+                let reply = await MCPApplyEditRouter(mcpClient: mcpClient).apply(edit)
+                if reply.status == .failed {
+                    await LogCenter.shared.append(
+                        source: "alt-text:\(resolved.id)", stream: .stderr,
+                        text: "applying generated alt text failed: \(reply.message ?? "unknown error")"
+                    )
+                }
             },
             log: { message in
                 Task { await LogCenter.shared.append(source: "alt-text:\(resolved.id)", stream: .stderr, text: message) }

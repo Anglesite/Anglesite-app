@@ -79,7 +79,9 @@ public struct AltTextGenerator: Sendable {
 
     /// The plugin writes dropped images under `public/`, returning a site-relative `src` such as
     /// `/images/hero.webp`. Resolve it back to the on-disk file for the vision model to read.
-    func imageFileURL(forSrc src: String) -> URL {
+    /// Covered by the `resolvesImagePath` test through `postProcess` (which captures the URL it
+    /// passes to `produce`), so it needs no wider visibility.
+    private func imageFileURL(forSrc src: String) -> URL {
         let relative = src.hasPrefix("/") ? String(src.dropFirst()) : src
         return siteDirectory
             .appendingPathComponent("public", isDirectory: true)

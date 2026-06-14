@@ -13,10 +13,15 @@ import Foundation
 public struct MCPApplyEditRouter: EditRouter {
     public typealias ToolCaller = @Sendable (_ name: String, _ arguments: JSONValue) async throws -> MCPClient.ToolCallResult
     public typealias EditObserver = @Sendable (EditReply) -> Void
-    /// Async hook fired (fire-and-forget) after a successful `.applied` edit, with both the reply and
-    /// the originating message. Used by the app to run on-device alt-text generation for image drops
+    /// Async hook fired (fire-and-forget) when an edit is `.applied`, with both the reply and the
+    /// originating message. Used by the app to run on-device alt-text generation for image drops
     /// (C.7 / `AltTextGenerator`) without coupling this router to FoundationModels. It runs detached
     /// so the overlay's reply isn't blocked on the (multi-second) follow-up work.
+    ///
+    /// Unlike ``EditObserver`` (`onEdit`), which requires a `commit`, this fires for *every* applied
+    /// edit — including non-git sites where `commit` is nil — because alt-text post-processing should
+    /// run whenever the image actually landed, committed or not. It never fires for `.failed` /
+    /// `.ambiguous` replies (those return before this point).
     public typealias PostProcessor = @Sendable (_ reply: EditReply, _ message: EditMessage) async -> Void
 
     private let toolCaller: ToolCaller
