@@ -264,9 +264,7 @@ struct SiteWindow: View {
 
     // MARK: - Lifecycle
 
-    /// Per-site edit bridge for the on-device assistant's `ApplyEditTool` (#193). Resolves the live
-    /// router from `EditRouterRegistry` lazily per call, so `setEditObserver`'s re-registration is
-    /// always visible — mirroring `AnglesiteIntents.bootstrap`.
+    // Lazy-resolved so setEditObserver's re-registration is always visible.
     private func makeEditBridge() -> IntentEditBridge {
         IntentEditBridge(routerProvider: { id in await EditRouterRegistry.shared.router(for: id) })
     }
@@ -372,8 +370,6 @@ struct SiteWindow: View {
         // `contentGraph` so it attaches `ApplyEditTool` + `SearchContentTool` and advertises
         // `supportsTools` (#193). The Claude path carries its own tool surface and ignores these.
         let settings = AppSettings.shared
-        // `makeEditBridge()` is only called in the on-device arm — the ternary doesn't evaluate the
-        // untaken branch, so the Claude path does no bridge work.
         let assistant: any ConversationalAssistant = settings.preferFoundationModels
             ? FoundationModelAssistant(
                 tier: settings.foundationModelTier,
