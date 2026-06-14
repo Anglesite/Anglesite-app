@@ -17,6 +17,8 @@ public final class AppSettings: @unchecked Sendable {
         public static let debugPaneEnabled   = "anglesite.debugPaneEnabled"
         public static let lastOpenedSiteID   = "anglesite.lastOpenedSiteID"
         public static let sitesRootBookmark  = "anglesite.sitesRootBookmark"
+        public static let preferFoundationModels = "anglesite.preferFoundationModels"
+        public static let foundationModelTier    = "anglesite.foundationModelTier"
     }
 
     private let defaults: UserDefaults
@@ -79,6 +81,23 @@ public final class AppSettings: @unchecked Sendable {
             if let newValue { defaults.set(newValue, forKey: Key.sitesRootBookmark) }
             else { defaults.removeObject(forKey: Key.sitesRootBookmark) }
         }
+    }
+
+    /// DevID-only (Settings → Assistant): use Apple's on-device Foundation Models for chat instead
+    /// of Claude. Defaults to `false` so Claude stays the default backend. MAS ignores this — it has
+    /// no Claude CLI and always uses Foundation Models. Read at `ChatModel` construction, so a change
+    /// takes effect for the next-opened site window (#160).
+    public var preferFoundationModels: Bool {
+        get { defaults.bool(forKey: Key.preferFoundationModels) }
+        set { defaults.set(newValue, forKey: Key.preferFoundationModels) }
+    }
+
+    /// DevID-only (Settings → Assistant): which Foundation Models tier to use when
+    /// ``preferFoundationModels`` is on. Defaults to ``FoundationModelTier/onDevice``; an unknown
+    /// persisted value also resolves to on-device.
+    public var foundationModelTier: FoundationModelTier {
+        get { FoundationModelTier(rawValue: defaults.string(forKey: Key.foundationModelTier) ?? "") ?? .onDevice }
+        set { defaults.set(newValue.rawValue, forKey: Key.foundationModelTier) }
     }
 
     /// The site that was most-recently focused. Used by the Sites launcher to auto-open

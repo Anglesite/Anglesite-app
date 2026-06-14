@@ -336,6 +336,8 @@ struct SiteWindow: View {
         #if ANGLESITE_MAS
         // Sandboxed App Store build: there's no `claude` CLI to shell out to, so chat is backed by
         // the on-device `FoundationModelAssistant` (#159). This is the MAS build's first chat pane.
+        // Constructed tool-less (no editBridge/contentGraph) for now, so `supportsTools` is false;
+        // wiring the on-device tools in is tracked in #193.
         chat = ChatModel(
             siteID: resolved.id,
             siteDirectory: resolved.path,
@@ -345,9 +347,22 @@ struct SiteWindow: View {
             undoCommand: undoCommand
         )
         #else
-        // Developer ID build: Claude stays the default chat backend (constructed inside the
-        // convenience init). The #160 tier picker will let users opt into the on-device model.
-        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
+        // Developer ID build: Claude is the default backend, but Settings → Assistant lets the user
+        // opt into Apple's on-device Foundation Models (#160). The choice is read here at
+        // construction, so a settings change takes effect for the next-opened site window.
+        //
+        // NOTE: `FoundationModelAssistant` is defined inside `#if compiler(>=6.4)` (see
+        // FoundationModelAssistant.swift). This call site is unguarded because CI builds on
+        // Xcode 27 / Swift 6.4; the MAS branch above relies on the same assumption. If the toolchain
+        // floor ever drops below 6.4, both branches need a `#if compiler(>=6.4)` fallback.
+        //
+        // Like the MAS branch, this is constructed tool-less for now (no editBridge/contentGraph);
+        // wiring the on-device tools in is tracked in #193.
+        let settings = AppSettings.shared
+        let assistant: any ConversationalAssistant = settings.preferFoundationModels
+            ? FoundationModelAssistant(tier: settings.foundationModelTier)
+            : ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.path)
+        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
         #endif
         preview.setEditObserver { [weak chat] reply in
             Task { @MainActor in

@@ -64,6 +64,42 @@ final class AppSettingsTests {
         #expect(!settings.debugPaneEnabled)
     }
 
+    // MARK: Assistant model (C.10 — DevID model tier picker)
+
+    @Test("preferFoundationModels defaults to false (Claude is the default backend)")
+    func preferFoundationModelsDefaultsToFalse() {
+        let settings = AppSettings(defaults: defaults)
+        #expect(!settings.preferFoundationModels)
+    }
+
+    @Test("preferFoundationModels round trip") func preferFoundationModelsRoundTrip() {
+        let settings = AppSettings(defaults: defaults)
+        settings.preferFoundationModels = true
+        #expect(settings.preferFoundationModels)
+        settings.preferFoundationModels = false
+        #expect(!settings.preferFoundationModels)
+    }
+
+    @Test("foundationModelTier defaults to on-device") func foundationModelTierDefaultsToOnDevice() {
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.foundationModelTier == .onDevice)
+    }
+
+    @Test("foundationModelTier round trip") func foundationModelTierRoundTrip() {
+        let settings = AppSettings(defaults: defaults)
+        settings.foundationModelTier = .privateCloudCompute
+        #expect(settings.foundationModelTier == .privateCloudCompute)
+        settings.foundationModelTier = .onDevice
+        #expect(settings.foundationModelTier == .onDevice)
+    }
+
+    @Test("foundationModelTier falls back to on-device for an unknown stored value")
+    func foundationModelTierUnknownFallsBack() {
+        defaults.set("quantum-cloud", forKey: AppSettings.Key.foundationModelTier)
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.foundationModelTier == .onDevice)
+    }
+
     // MARK: DebugPaneVisibility
 
     @Test("Debug menu always visible in debug builds") func debugMenuAlwaysVisibleInDebugBuilds() {
