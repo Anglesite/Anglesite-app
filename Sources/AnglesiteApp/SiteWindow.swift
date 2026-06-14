@@ -333,22 +333,13 @@ struct SiteWindow: View {
                 throw NSError(domain: "AnnotationFeed", code: 2, userInfo: [NSLocalizedDescriptionKey: detail])
             }
         }
-        // Pick the chat backend, then build it via `AssistantSelection.makeAssistant` — which keeps the
-        // "on-device path is always tool-equipped" invariant (#193) in one `AnglesiteCore`-testable
-        // place (see `AssistantSelectionTests`). Only the *selection* differs per target/settings.
-        //
-        // NOTE: `AssistantSelection` is defined inside `#if compiler(>=6.4)` (it constructs the
-        // 6.4-gated assistants). These call sites are unguarded because CI builds on Xcode 27 /
-        // Swift 6.4; if the toolchain floor ever drops below 6.4 they need a `#if compiler(>=6.4)`
-        // fallback.
+        // NOTE: AssistantSelection is compiler(>=6.4)-gated; call sites are unguarded because CI is Xcode 27.
         #if ANGLESITE_MAS
-        // Sandboxed App Store build: there's no `claude` CLI to shell out to, so chat is on-device
-        // only (#159) — the MAS build's first chat pane.
+        // Sandboxed App Store build: no `claude` CLI, so chat is on-device only (#159).
         let selection: AssistantSelection = .foundationModel(tier: .onDevice)
         #else
-        // Developer ID build: Claude is the default backend, but Settings → Assistant lets the user
-        // opt into Apple's on-device Foundation Models (#160). The choice is read here at
-        // construction, so a settings change takes effect for the next-opened site window.
+        // Developer ID build: Claude by default; Settings → Assistant opts into on-device FM (#160),
+        // read here so a change takes effect for the next-opened window.
         let selection: AssistantSelection = AppSettings.shared.preferFoundationModels
             ? .foundationModel(tier: AppSettings.shared.foundationModelTier)
             : .claude
