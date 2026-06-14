@@ -230,5 +230,31 @@ struct FoundationModelAssistantToolWiringTests {
         let partialGraph = FoundationModelAssistant(tier: .onDevice, editBridge: nil, contentGraph: graph)
         #expect(partialGraph.capabilities.supportsTools == false)
     }
+
+    private func modelAvailable() -> Bool {
+        if case .available = SystemLanguageModel.default.availability { return true }
+        return false
+    }
+
+    @Test("converse .started reports the attached tool names when tools are wired")
+    func startedReportsToolNames() async throws {
+        guard modelAvailable() else { return }
+        let router = FakeEditRouter(reply: EditReply(id: "x", status: .applied, message: nil))
+        let assistant = FoundationModelAssistant(
+            tier: .onDevice,
+            editBridge: makeBridge(router),
+            contentGraph: SiteContentGraph()
+        )
+        let context = AssistantContext(siteID: "site-1", siteDirectory: URL(fileURLWithPath: "/tmp/site"))
+
+        var startedToolNames: [String]?
+        for await event in try await assistant.converse(prompt: "Say hi.", context: context) {
+            if case .started(_, let toolNames) = event {
+                startedToolNames = toolNames
+                break  // the names are fixed at turn open; no need to drain the model's response
+            }
+        }
+        #expect(startedToolNames == [ApplyEditTool.toolName, SearchContentTool.toolName])
+    }
 }
 #endif

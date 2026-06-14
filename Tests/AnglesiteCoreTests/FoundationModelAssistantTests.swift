@@ -106,10 +106,10 @@ struct FoundationModelAssistantTests {
         #expect(assistant.capabilities.providerName == "On-Device")
     }
 
-    @Test("resetSession is a safe no-op (fresh session per call)")
+    @Test("resetSession discards the cached session and is safe when none is cached")
     func resetSessionIsSafe() async {
         let assistant = FoundationModelAssistant()
-        await assistant.resetSession()  // must not throw or trap; no session is cached
+        await assistant.resetSession()  // no turn in flight, no session cached yet — must be harmless
     }
 
     @Test("cancel with no active turn is a safe no-op")
@@ -158,6 +158,50 @@ struct FoundationModelAssistantTests {
         // Terminal event is .turnComplete (no in-band failure).
         guard case .turnComplete = events.last else {
             Issue.record("Expected last event to be .turnComplete, got \(String(describing: events.last))")
+            return
+        }
+    }
+
+    @Test("converse retains conversation history across turns")
+    func converseRemembersAcrossTurns() async throws {
+        guard modelAvailable() else { return }
+        let assistant = FoundationModelAssistant()
+        let context = makeContext()
+
+        // Turn 1: plant a fact. Drain the stream fully so the turn completes.
+        for await _ in try await assistant.converse(
+            prompt: "Remember this code word: Falkor. Reply with just 'ok'.",
+            context: context
+        ) {}
+
+        // Turn 2: recall is only possible if the session (and its history) persisted across turns —
+        // the bug this guards against created a fresh, memoryless session per turn.
+        var reply = ""
+        for await event in try await assistant.converse(
+            prompt: "What is the code word I gave you? Reply with only the word.",
+            context: context
+        ) {
+            if case .textDelta(let text) = event { reply += text }
+        }
+        #expect(reply.localizedCaseInsensitiveContains("Falkor"))
+    }
+
+    @Test("cancel mid-stream yields .cancelled and ends the turn")
+    func cancelMidStreamYieldsCancelled() async throws {
+        guard modelAvailable() else { return }
+        let assistant = FoundationModelAssistant()
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(
+            prompt: "Write a long, detailed, multi-paragraph history of typography.",
+            context: makeContext()
+        ) {
+            events.append(event)
+            // Cancel as soon as the model starts emitting text — the turn must wind down to
+            // `.cancelled`, not run to `.turnComplete`.
+            if case .textDelta = event { await assistant.cancel() }
+        }
+        guard case .cancelled = events.last else {
+            Issue.record("Expected last event to be .cancelled, got \(String(describing: events.last))")
             return
         }
     }

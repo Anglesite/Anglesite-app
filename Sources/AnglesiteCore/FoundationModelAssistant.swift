@@ -35,6 +35,10 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// The in-flight ``converse(prompt:context:)`` pump, retained so ``cancel()`` can stop it. The
     /// `generate` text stream it drains tears down transitively via that stream's `onTermination`.
     private var activeTurn: Task<Void, Never>?
+    /// Cached session for the multi-turn ``converse(prompt:context:)`` path, so the on-device model
+    /// retains conversation history across turns. Created lazily on the first turn and cleared by
+    /// ``resetSession()``. The one-shot ``generate(prompt:context:)`` path deliberately bypasses it.
+    private var session: LanguageModelSession?
 
     /// `editBridge` + `contentGraph` are optional. When **both** are supplied, the assistant
     /// attaches ``ApplyEditTool`` + ``SearchContentTool`` to each session (a local agentic loop)
@@ -71,12 +75,21 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         prompt: String,
         context: AssistantContext
     ) async throws -> AsyncThrowingStream<String, Error> {
+        // One-shot: a fresh session per call keeps independent `generate`/`generateStructured`
+        // invocations (tool calls, alt-text, summaries) from bleeding history into one another. The
+        // multi-turn `converse` path deliberately does the opposite — see `conversationSession`.
         let session = try makeSession(context: context)
-        return AsyncThrowingStream { continuation in
+        return Self.textStream(from: session, prompt: prompt)
+    }
+
+    /// Streams a session's response as incremental text deltas. `streamResponse` yields *cumulative*
+    /// snapshots, so we diff against the prior prefix to emit only newly-appended text (matching the
+    /// ``ContentAssistant`` per-chunk contract). Shared by `generate` (fresh session) and `converse`
+    /// (cached session).
+    private static func textStream(from session: LanguageModelSession, prompt: String) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    // `streamResponse` yields cumulative snapshots; diff against the prior prefix
-                    // so callers receive incremental deltas (matching the protocol contract).
                     var previous = ""
                     for try await snapshot in session.streamResponse(to: prompt) {
                         let full = snapshot.content
@@ -104,29 +117,44 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         context: AssistantContext,
         resultType: T.Type
     ) async throws -> T {
-        let session = try makeSession(context: context)
-        return try await session.respond(to: prompt, generating: T.self).content
+        // One-shot, like `generate`: a fresh session, never the cached conversational one.
+        let oneShotSession = try makeSession(context: context)
+        return try await oneShotSession.respond(to: prompt, generating: T.self).content
     }
 
     // MARK: ConversationalAssistant
 
-    /// Adapts the plain-text ``generate(prompt:context:)`` stream into the richer ``AssistantEvent``
-    /// surface `ChatModel` consumes (the seam the C.3 refactor settled on). The on-device model
-    /// exposes no discrete tool-use or token-usage telemetry, so a turn is `.started` →
+    /// Streams a full conversational turn as ``AssistantEvent`` values: `.started` →
     /// `.textDelta`* → `.turnComplete(nil)`. A mid-stream throw becomes `.failed`; cancellation
     /// becomes `.cancelled`. Setup failure (model unavailable) propagates as a thrown error *before*
     /// the turn opens, matching ``ClaudeAssistant/converse(prompt:context:)`` and the protocol.
+    ///
+    /// Unlike ``generate(prompt:context:)``, this reuses a **cached** ``LanguageModelSession`` across
+    /// turns so the on-device model remembers the conversation — without it, every message would hit
+    /// a memoryless session and the chat would be a one-shot query box. The first turn fixes the
+    /// session's instructions from its `context`; later context changes don't retroactively rewrite
+    /// that system prompt (an accepted V1 limitation, consistent with ``ClaudeAssistant``). The
+    /// on-device model exposes no discrete tool-use or token-usage telemetry, so tool invocations run
+    /// opaquely inside the session and turns carry no usage.
     public func converse(prompt: String, context: AssistantContext) async throws -> AsyncStream<AssistantEvent> {
-        let textStream = try await generate(prompt: prompt, context: context)
+        let session = try conversationSession(for: context)
+        let textStream = Self.textStream(from: session, prompt: prompt)
         let providerName = capabilities.providerName
+        let toolNames = attachedToolNames
+        // Re-entrancy: a new turn supersedes any still-running one. Cancel the old task before
+        // dropping its reference so it tears down rather than leaking onto a stream nobody reads.
+        activeTurn?.cancel()
         let (stream, continuation) = AsyncStream.makeStream(of: AssistantEvent.self)
         let turn = Task {
-            continuation.yield(.started(model: providerName, toolNames: []))
+            continuation.yield(.started(model: providerName, toolNames: toolNames))
             do {
                 for try await chunk in textStream {
                     continuation.yield(.textDelta(chunk))
                 }
-                continuation.yield(.turnComplete(nil))
+                // The stream finishing while the turn task is cancelled means `cancel()` (or stream
+                // teardown) stopped us mid-response — `AsyncStream` iteration finishes rather than
+                // throwing on cancellation, so check the flag explicitly.
+                continuation.yield(Task.isCancelled ? .cancelled : .turnComplete(nil))
             } catch is CancellationError {
                 continuation.yield(.cancelled)
             } catch {
@@ -139,28 +167,44 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         return stream
     }
 
-    /// Cancels the in-flight ``converse(prompt:context:)`` turn, if any. No-op otherwise.
+    /// Cancels the in-flight ``converse(prompt:context:)`` turn, if any. The cached session is
+    /// preserved so the conversation can continue; use ``resetSession()`` to discard history.
     public func cancel() async {
         activeTurn?.cancel()
         activeTurn = nil
     }
 
-    /// No carried conversation state to reset — ``makeSession(context:)`` builds a fresh
-    /// `LanguageModelSession` per call, so each turn already starts clean. Cancels any in-flight
-    /// turn for symmetry with ``ClaudeAssistant/resetSession()``.
+    /// Discards the cached ``LanguageModelSession`` (and cancels any in-flight turn) so the next
+    /// ``converse(prompt:context:)`` opens a fresh conversation with no memory of prior turns.
     public func resetSession() async {
         activeTurn?.cancel()
         activeTurn = nil
+        session = nil
+    }
+
+    /// The names of the tools attached to each conversational session, for the `.started` event so
+    /// `ChatModel`/the chat UI can reflect what's actually wired. Empty unless both `editBridge` and
+    /// `contentGraph` were supplied (the same condition ``makeSession(context:)`` gates tools on).
+    private var attachedToolNames: [String] {
+        capabilities.supportsTools ? [ApplyEditTool.toolName, SearchContentTool.toolName] : []
+    }
+
+    /// Returns the cached conversational session, lazily creating it from `context` on first use.
+    /// The session persists across turns to retain history; ``resetSession()`` clears it.
+    private func conversationSession(for context: AssistantContext) throws -> LanguageModelSession {
+        if let session { return session }
+        let created = try makeSession(context: context)
+        session = created
+        return created
     }
 
     // MARK: Session
 
     /// Builds a fresh session for `context`, throwing ``AssistantError/unavailable(_:)`` when the
-    /// on-device model can't be used on this host.
-    ///
-    /// A new session per call ensures the current page route/content is always reflected: the base
-    /// ``ContentAssistant`` API is one-shot and carries no cross-call session-persistence contract,
-    /// so caching a session from an earlier call would answer later calls with stale context.
+    /// on-device model can't be used on this host. Callers decide lifetime: ``generate`` /
+    /// ``generateStructured`` build one per call (one-shot, no history bleed); ``converse`` builds one
+    /// and caches it (multi-turn history). The instructions fold in the context's route/content at
+    /// construction time, so a cached session keeps the first turn's system prompt.
     private func makeSession(context: AssistantContext) throws -> LanguageModelSession {
         switch SystemLanguageModel.default.availability {
         case .available:

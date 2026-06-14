@@ -10,7 +10,10 @@ import FoundationModels
 /// edit pipeline). Reuses ``GeneratedEditCommand`` (#154) as its arguments so the model speaks one
 /// edit vocabulary.
 public struct ApplyEditTool: Tool, Sendable {
-    public let name = "applyEdit"
+    /// The tool's stable name. Exposed statically so callers (e.g. `FoundationModelAssistant`'s
+    /// `.started` event) can report the attached tools without constructing an instance.
+    public static let toolName = "applyEdit"
+    public let name = ApplyEditTool.toolName
     public let description = "Apply a structured text, attribute, or image edit to a specific element in a page's source file. Provide the source file path, an element selector (or a simple tag like h1), the operation kind, and the replacement value."
 
     private let bridge: IntentEditBridge
