@@ -264,11 +264,6 @@ struct SiteWindow: View {
 
     // MARK: - Lifecycle
 
-    // Lazy-resolved so setEditObserver's re-registration is always visible.
-    private func makeEditBridge() -> IntentEditBridge {
-        IntentEditBridge(routerProvider: { id in await EditRouterRegistry.shared.router(for: id) })
-    }
-
     private func loadAndStart() async {
         // SwiftUI's NSPersistentUIManager will happily restore a WindowGroup with a
         // nil payload, or one whose value no longer matches a known site (sites.json
@@ -338,47 +333,39 @@ struct SiteWindow: View {
                 throw NSError(domain: "AnnotationFeed", code: 2, userInfo: [NSLocalizedDescriptionKey: detail])
             }
         }
+        // Pick the chat backend, then build it via `AssistantSelection.makeAssistant` — which keeps the
+        // "on-device path is always tool-equipped" invariant (#193) in one `AnglesiteCore`-testable
+        // place (see `AssistantSelectionTests`). Only the *selection* differs per target/settings.
+        //
+        // NOTE: `AssistantSelection` is defined inside `#if compiler(>=6.4)` (it constructs the
+        // 6.4-gated assistants). These call sites are unguarded because CI builds on Xcode 27 /
+        // Swift 6.4; if the toolchain floor ever drops below 6.4 they need a `#if compiler(>=6.4)`
+        // fallback.
         #if ANGLESITE_MAS
-        // Sandboxed App Store build: there's no `claude` CLI to shell out to, so chat is backed by
-        // the on-device `FoundationModelAssistant` (#159). This is the MAS build's first chat pane.
-        // The per-site `editBridge` + app-lifetime `contentGraph` attach `ApplyEditTool` +
-        // `SearchContentTool`, so the on-device path advertises `supportsTools` and runs a local
-        // agentic loop with no network (#193).
-        chat = ChatModel(
-            siteID: resolved.id,
-            siteDirectory: resolved.path,
-            assistant: FoundationModelAssistant(
-                tier: .onDevice,
-                editBridge: makeEditBridge(),
-                contentGraph: contentGraph
-            ),
-            annotationFeed: feed,
-            annotationResolver: annotationResolver,
-            undoCommand: undoCommand
-        )
+        // Sandboxed App Store build: there's no `claude` CLI to shell out to, so chat is on-device
+        // only (#159) — the MAS build's first chat pane.
+        let selection: AssistantSelection = .foundationModel(tier: .onDevice)
         #else
         // Developer ID build: Claude is the default backend, but Settings → Assistant lets the user
         // opt into Apple's on-device Foundation Models (#160). The choice is read here at
         // construction, so a settings change takes effect for the next-opened site window.
-        //
-        // NOTE: `FoundationModelAssistant` is defined inside `#if compiler(>=6.4)` (see
-        // FoundationModelAssistant.swift). This call site is unguarded because CI builds on
-        // Xcode 27 / Swift 6.4; the MAS branch above relies on the same assumption. If the toolchain
-        // floor ever drops below 6.4, both branches need a `#if compiler(>=6.4)` fallback.
-        //
-        // Like the MAS branch, the on-device path gets the per-site `editBridge` + app-lifetime
-        // `contentGraph` so it attaches `ApplyEditTool` + `SearchContentTool` and advertises
-        // `supportsTools` (#193). The Claude path carries its own tool surface and ignores these.
-        let settings = AppSettings.shared
-        let assistant: any ConversationalAssistant = settings.preferFoundationModels
-            ? FoundationModelAssistant(
-                tier: settings.foundationModelTier,
-                editBridge: makeEditBridge(),
-                contentGraph: contentGraph
-            )
-            : ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.path)
-        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
+        let selection: AssistantSelection = AppSettings.shared.preferFoundationModels
+            ? .foundationModel(tier: AppSettings.shared.foundationModelTier)
+            : .claude
         #endif
+        let assistant = selection.makeAssistant(
+            siteID: resolved.id,
+            siteDirectory: resolved.path,
+            contentGraph: contentGraph
+        )
+        chat = ChatModel(
+            siteID: resolved.id,
+            siteDirectory: resolved.path,
+            assistant: assistant,
+            annotationFeed: feed,
+            annotationResolver: annotationResolver,
+            undoCommand: undoCommand
+        )
         // Auto alt-text (C.7 / #157): after a successful image drop, generate alt text on-device and
         // apply it to the `<img>`. Target-agnostic — the on-device vision model runs on both builds.
         // The follow-up edit routes through its own (post-process-free) apply_edit router so it can't
