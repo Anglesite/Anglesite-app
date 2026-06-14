@@ -26,7 +26,7 @@ public struct ElementEntity: AppEntity, Identifiable, Sendable {
         DisplayRepresentation(title: "\(displayName)", subtitle: "\(pagePath)")
     }
 
-    public static var defaultQuery = ElementEntityQuery()
+    public static let defaultQuery = ElementEntityQuery()
 
     public init(id: String, displayName: String, siteID: String, selector: String, pagePath: String) {
         self.id = id

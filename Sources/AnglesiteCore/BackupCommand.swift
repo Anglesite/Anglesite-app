@@ -48,7 +48,7 @@ public actor BackupCommand {
     public init(
         runner: @escaping GitRunner = BackupCommand.defaultRunner,
         streamer: @escaping GitStreamer = BackupCommand.defaultStreamer,
-        clock: @escaping @Sendable () -> Date = Date.init
+        clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.runner = runner
         self.streamer = streamer
@@ -179,7 +179,11 @@ public actor BackupCommand {
 
     /// ISO-8601 timestamps in commit messages so they sort correctly under `git log` and
     /// stay locale-agnostic. `Backup 2026-06-10T14:13:20Z` — unambiguous, machine-friendly.
-    private static let iso8601Formatter: ISO8601DateFormatter = {
+    ///
+    /// Configured once here and only read via `string(from:)` afterward. Apple doesn't document
+    /// `ISO8601DateFormatter` as thread-safe, so `nonisolated(unsafe)` is a deliberate choice
+    /// asserting that never-mutated-after-init invariant.
+    private nonisolated(unsafe) static let iso8601Formatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f

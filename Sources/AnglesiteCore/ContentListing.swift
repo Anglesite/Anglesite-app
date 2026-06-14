@@ -115,16 +115,23 @@ public struct ContentListing: Sendable, Equatable {
 
     // MARK: - Date parsing
 
-    /// `ISO8601DateFormatter` instances are not cheap to build and are thread-safe once
-    /// configured, so cache one per format variant.
-    private static let plainFormatter = ISO8601DateFormatter()
-    private static let fractionalFormatter: ISO8601DateFormatter = {
+    /// `ISO8601DateFormatter` instances are not cheap to build, so cache one per format
+    /// variant. We configure each once at init and only ever call the read-only `date(from:)`
+    /// thereafter. Apple doesn't *document* `ISO8601DateFormatter` as thread-safe, so the
+    /// `nonisolated(unsafe)` here is a deliberate choice: it asserts the never-mutated-after-init
+    /// invariant we enforce above, accepting responsibility for it rather than relying on a
+    /// documented guarantee.
+    private nonisolated(unsafe) static let plainFormatter = ISO8601DateFormatter()
+    private nonisolated(unsafe) static let fractionalFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
 
-    private static func decodeISO8601(_ decoder: Decoder) throws -> Date {
+    /// `@Sendable` so this can back the `.custom` date-decoding strategy assigned in
+    /// `parse(jsonText:siteID:)` above (`decoder.dateDecodingStrategy = .custom(decodeISO8601)`),
+    /// whose parameter is `@Sendable (any Decoder) throws -> Date`.
+    @Sendable private static func decodeISO8601(_ decoder: Decoder) throws -> Date {
         let raw = try decoder.singleValueContainer().decode(String.self)
         if let date = fractionalFormatter.date(from: raw) ?? plainFormatter.date(from: raw) {
             return date

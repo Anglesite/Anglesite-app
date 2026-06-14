@@ -15,7 +15,7 @@ public struct SiteEntity: AppEntity, Identifiable, Sendable {
         DisplayRepresentation(title: "\(displayName)", subtitle: "\(directory.path)")
     }
 
-    public static var defaultQuery = SiteEntityQuery()
+    public static let defaultQuery = SiteEntityQuery()
 
     public init(_ site: SiteStore.Site) {
         self.id = site.id

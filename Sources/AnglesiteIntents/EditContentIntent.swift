@@ -35,8 +35,8 @@ import Foundation
 /// edit naturally supersedes a stale one, and the chat panel's edit log surfaces the
 /// landed-but-cancelled patch for inspection.
 public struct EditContentIntent: AppIntent {
-    public static var title: LocalizedStringResource = "Edit Content"
-    public static var description = IntentDescription(
+    public static let title: LocalizedStringResource = "Edit Content"
+    public static let description = IntentDescription(
         "Apply a natural-language edit to an onscreen element of a site."
     )
 

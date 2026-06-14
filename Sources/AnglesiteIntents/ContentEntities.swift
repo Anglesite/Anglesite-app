@@ -18,7 +18,7 @@ public struct PageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
         DisplayRepresentation(title: "\(displayName)", subtitle: "\(route)")
     }
 
-    public static var defaultQuery = PageEntityQuery()
+    public static let defaultQuery = PageEntityQuery()
 
     public init(_ page: SiteContentGraph.Page) {
         self.id = page.id
@@ -104,7 +104,7 @@ public struct PostEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
         )
     }
 
-    public static var defaultQuery = PostEntityQuery()
+    public static let defaultQuery = PostEntityQuery()
 
     public init(_ post: SiteContentGraph.Post) {
         self.id = post.id
@@ -189,7 +189,7 @@ public struct ImageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
         DisplayRepresentation(title: "\(displayName)", subtitle: "\(relativePath)")
     }
 
-    public static var defaultQuery = ImageEntityQuery()
+    public static let defaultQuery = ImageEntityQuery()
 
     public init(_ image: SiteContentGraph.Image) {
         self.id = image.id

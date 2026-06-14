@@ -36,8 +36,13 @@ public protocol ContentAssistant: Sendable {
     ///
     /// - Note: Requires `FoundationModels`, so it's gated to the Xcode-27 toolchain (#128).
     ///   Production builds always have it; CI on Xcode 26.3 sees the streaming surface only.
+    /// - Note: `T` is constrained to `Sendable` so the actor-isolated conformers
+    ///   (``FoundationModelAssistant``, ``ClaudeAssistant``) can return it across this
+    ///   `nonisolated` boundary without a data-race warning. Tightening a `public` requirement is
+    ///   technically source-breaking for out-of-module conformers, but every conformer is internal
+    ///   to this app, and all `@Generable` result types already conform to `Sendable`.
     #if compiler(>=6.4)
-    func generateStructured<T: Generable>(
+    func generateStructured<T: Generable & Sendable>(
         prompt: String,
         context: AssistantContext,
         resultType: T.Type
