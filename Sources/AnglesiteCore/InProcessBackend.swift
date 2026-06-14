@@ -36,6 +36,17 @@ public actor InProcessBackend: SupervisorBackend {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        // Bridge termination to async *before* `run()`: a fast child (e.g. `/usr/bin/true`) can exit
+        // before we reach the await, and a `terminationHandler` registered after termination never
+        // fires — the latch captures the status regardless of ordering. Crucially this never blocks a
+        // thread. The previous `process.waitUntilExit()` ran a CFRunLoop on the calling *cooperative*
+        // pool thread; under concurrent one-shot load the pool starved and the exit notification was
+        // never delivered, so the wait hung forever (a 0%-CPU deadlock — see
+        // ProcessSupervisorConcurrencyTests). The long-running `launch` path already avoids this via
+        // `awaitExit`; one-shot now matches.
+        let exitLatch = ExitLatch()
+        process.terminationHandler = { exitLatch.resume(with: $0.terminationStatus) }
+
         do {
             try process.run()
         } catch {
@@ -45,16 +56,51 @@ public actor InProcessBackend: SupervisorBackend {
         async let stdoutData = Self.readToEnd(stdoutPipe)
         async let stderrData = Self.readToEnd(stderrPipe)
         let (out, err) = await (stdoutData, stderrData)
+        let exitCode = await exitLatch.value()
 
-        process.waitUntilExit()
-
-        return ProcessResult(stdout: out, stderr: err, exitCode: process.terminationStatus)
+        return ProcessResult(stdout: out, stderr: err, exitCode: exitCode)
     }
 
     private static func readToEnd(_ pipe: Pipe) async -> Data {
         await Task.detached(priority: .userInitiated) {
             (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
         }.value
+    }
+
+    /// One-shot async bridge for `Process.terminationHandler`, which fires exactly once on a
+    /// libdispatch queue. Register the handler *before* `run()`; `value()` then returns the exit
+    /// status whether termination landed before or after the await, with no thread ever blocked.
+    /// The lock guards the early-exit vs. parked-continuation handoff; the continuation is always
+    /// resumed *outside* the lock.
+    private final class ExitLatch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var status: Int32?
+        private var continuation: CheckedContinuation<Int32, Never>?
+
+        func resume(with status: Int32) {
+            lock.lock()
+            if let continuation {
+                self.continuation = nil
+                lock.unlock()
+                continuation.resume(returning: status)
+            } else {
+                self.status = status
+                lock.unlock()
+            }
+        }
+
+        func value() async -> Int32 {
+            await withCheckedContinuation { cont in
+                lock.lock()
+                if let status {
+                    lock.unlock()
+                    cont.resume(returning: status)
+                } else {
+                    continuation = cont
+                    lock.unlock()
+                }
+            }
+        }
     }
 
     // MARK: Long-running launch
