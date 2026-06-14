@@ -36,14 +36,9 @@ public actor InProcessBackend: SupervisorBackend {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        // Bridge termination to async *before* `run()`: a fast child (e.g. `/usr/bin/true`) can exit
-        // before we reach the await, and a `terminationHandler` registered after termination never
-        // fires — the latch captures the status regardless of ordering. Crucially this never blocks a
-        // thread. The previous `process.waitUntilExit()` ran a CFRunLoop on the calling *cooperative*
-        // pool thread; under concurrent one-shot load the pool starved and the exit notification was
-        // never delivered, so the wait hung forever (a 0%-CPU deadlock — see
-        // ProcessSupervisorConcurrencyTests). The long-running `launch` path already avoids this via
-        // `awaitExit`; one-shot now matches.
+        // Register before `run()` — a fast child can exit before the await, and a handler set after
+        // termination never fires. Non-blocking, unlike the old `waitUntilExit()` (which deadlocked a
+        // cooperative thread under load; see ProcessSupervisorConcurrencyTests).
         let exitLatch = ExitLatch()
         process.terminationHandler = { exitLatch.resume(with: $0.terminationStatus) }
 
@@ -67,11 +62,9 @@ public actor InProcessBackend: SupervisorBackend {
         }.value
     }
 
-    /// One-shot async bridge for `Process.terminationHandler`, which fires exactly once on a
-    /// libdispatch queue. Register the handler *before* `run()`; `value()` then returns the exit
-    /// status whether termination landed before or after the await, with no thread ever blocked.
-    /// The lock guards the early-exit vs. parked-continuation handoff; the continuation is always
-    /// resumed *outside* the lock.
+    /// One-shot async bridge for `Process.terminationHandler`: register before `run()`, then
+    /// `value()` returns the exit status (whether termination landed before or after the await)
+    /// without blocking a thread.
     private final class ExitLatch: @unchecked Sendable {
         private let lock = NSLock()
         private var status: Int32?

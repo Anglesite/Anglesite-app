@@ -2,16 +2,8 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
-/// Regression coverage for the `runOneShot` cooperative-pool deadlock.
-///
-/// The original defect: `InProcessBackend.runOneShot` awaited the child with the synchronous,
-/// run-loop-driven `Process.waitUntilExit()`. Called from `async` actor context it parked a Swift
-/// concurrency *cooperative* thread; under enough concurrent one-shot spawns the pool starved and
-/// the child-exit notification was never delivered, so `waitUntilExit` blocked forever (observed as
-/// a 0%-CPU hang in `swift test`, and as a `brk 1` trap when a concurrent FoundationModels inference
-/// was tipped over by the same starvation).
-///
-/// If the blocking wait is ever reintroduced this test hangs (and CI times out) rather than passing.
+/// Regression coverage for the `runOneShot` cooperative-pool deadlock (blocking `waitUntilExit` on
+/// an async actor thread). If the blocking wait returns, these hang rather than pass.
 struct ProcessSupervisorConcurrencyTests {
 
     @Test("Many concurrent one-shot runs complete without deadlocking the cooperative pool")
