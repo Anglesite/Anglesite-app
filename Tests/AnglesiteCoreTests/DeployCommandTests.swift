@@ -42,6 +42,17 @@ struct DeployCommandTests {
         return false
     }
 
+    /// Budget for observing an asynchronous side-effect (a subprocess marker reaching `LogCenter`).
+    /// Generous on purpose: cancellation resumes `waitForExit` with `.terminated` *immediately*, so
+    /// `task.value` returns before the kill even happens. The marker only lands after a chain of
+    /// fire-and-forget tasks + libdispatch + actor hops (cancel → `Task{terminate}` → SIGTERM → the
+    /// fixture's trap echo → pipe drain → `LogCenter.append`). The line is never dropped — `finalize`
+    /// in InProcessBackend awaits the drain before settling — but under 294 Swift Tests running in
+    /// parallel on a loaded CI runner the cooperative pool can starve those tasks for several seconds
+    /// (this is what made the suite flake at the old 10s budget). Normal completion is ~100ms, so a
+    /// 30s ceiling still surfaces a genuine hang quickly while no longer false-positiving under load.
+    private static let markerObservationTimeout: Duration = .seconds(30)
+
     @Test("Cancelling the task actually SIGTERMs the in-flight wrangler subprocess")
     func cancellationTerminatesWrangler() async {
         // Token + build (/usr/bin/true) + preflight pass quickly, then wrangler blocks. Cancelling
@@ -55,7 +66,7 @@ struct DeployCommandTests {
         )
         let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let task = Task { await cmd.deploy(siteID: "site", siteDirectory: dir) }
-        #expect(await waitForMarker("__STARTED__", in: center, timeout: .seconds(10)), "wrangler never started")
+        #expect(await waitForMarker("__STARTED__", in: center, timeout: Self.markerObservationTimeout), "wrangler never started")
         task.cancel()
         let result = await task.value
         guard case .failed(let reason, _) = result else {
@@ -63,7 +74,7 @@ struct DeployCommandTests {
             return
         }
         #expect(reason.contains("terminated"))
-        #expect(await waitForMarker("__SIGTERM__", in: center, timeout: .seconds(10)), "wrangler subprocess was not actually SIGTERM'd")
+        #expect(await waitForMarker("__SIGTERM__", in: center, timeout: Self.markerObservationTimeout), "wrangler subprocess was not actually SIGTERM'd")
     }
 
     // MARK: Pre-spawn refusal (no work wasted)
