@@ -98,6 +98,12 @@ git commit -m "feat(core): add AssistantError.unavailable for model-not-ready pa
 
 ## Task 2: `GenerableTypes.swift` — the five `@Generable` types
 
+> **Implementation note (the final code diverged from the snippet below):** `EditOperation`'s
+> cases shipped as `replaceText`, `replaceAttr`, `replaceImageSrc`, `applyInstruction` — mirroring
+> `EditMessage.Op` exactly — *not* the `setAttribute`/`insertBefore`/`insertAfter`/`remove` shown
+> in Step 1's code block. See the committed `Sources/AnglesiteCore/GenerableTypes.swift` for the
+> source of truth.
+
 **Files:**
 - Create: `Sources/AnglesiteCore/GenerableTypes.swift`
 
@@ -333,6 +339,14 @@ git commit -m "test(core): round-trip tests for @Generable types (#154)"
 ---
 
 ## Task 4: `FoundationModelAssistant.swift` — the actor
+
+> **Implementation note (the final code diverged from the snippet below):** the session is **not**
+> cached. The committed actor builds a **fresh `LanguageModelSession` per call** in `makeSession`
+> (so each request reflects its own `AssistantContext`; the base `ContentAssistant` API is
+> one-shot), and the `private var session` property plus the `cancel()` / `resetSession()` methods
+> shown in Step 1's code block were **removed** — stream cancellation flows through the
+> `AsyncThrowingStream`'s `onTermination`. See the committed
+> `Sources/AnglesiteCore/FoundationModelAssistant.swift` for the source of truth.
 
 **Files:**
 - Create: `Sources/AnglesiteCore/FoundationModelAssistant.swift`

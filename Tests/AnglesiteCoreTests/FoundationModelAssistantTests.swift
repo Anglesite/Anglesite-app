@@ -46,9 +46,10 @@ struct FoundationModelAssistantTests {
     }
 
     @Test("PCC-tier assistant constructs and remains usable (falls back to on-device)")
-    func pccConstructsAndIsUsable() async {
+    func pccConstructsAndIsUsable() {
+        // `capabilities` is a nonisolated var, so it reads synchronously off the actor.
         let assistant = FoundationModelAssistant(tier: .privateCloudCompute)
-        #expect(await assistant.capabilities.maxContextTokens == 32_768)
+        #expect(assistant.capabilities.maxContextTokens == 32_768)
     }
 
     // MARK: Error path (meaningful only on a host WITHOUT the model)
@@ -57,8 +58,16 @@ struct FoundationModelAssistantTests {
     func generateUnavailableSurfacesError() async {
         guard !modelAvailable() else { return }
         let assistant = FoundationModelAssistant()
-        await #expect(throws: AssistantError.self) {
+        do {
             _ = try await assistant.generate(prompt: "hi", context: makeContext())
+            Issue.record("Expected AssistantError.unavailable but generate succeeded")
+        } catch let error as AssistantError {
+            guard case .unavailable = error else {
+                Issue.record("Expected AssistantError.unavailable, got \(error)")
+                return
+            }
+        } catch {
+            Issue.record("Unexpected non-AssistantError: \(error)")
         }
     }
 

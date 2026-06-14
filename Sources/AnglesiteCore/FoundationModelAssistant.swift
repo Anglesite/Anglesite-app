@@ -66,10 +66,13 @@ public actor FoundationModelAssistant: ContentAssistant {
                     var previous = ""
                     for try await snapshot in session.streamResponse(to: prompt) {
                         let full = snapshot.content
-                        if full.count >= previous.count {
+                        if full.hasPrefix(previous) {
+                            // Confirmed cumulative prefix — emit only the newly-appended tail.
                             continuation.yield(String(full.dropFirst(previous.count)))
                         } else {
-                            continuation.yield(full) // non-monotonic snapshot; yield as-is
+                            // The model revised earlier text (same or different length), so the
+                            // snapshot isn't an extension of `previous`; yield it whole.
+                            continuation.yield(full)
                         }
                         previous = full
                     }
