@@ -95,5 +95,71 @@ struct FoundationModelAssistantTests {
         )
         #expect(!result.title.isEmpty)
     }
+
+    // MARK: ConversationalAssistant conformance (C.9 — MAS chat backend)
+
+    @Test("is usable as any ConversationalAssistant")
+    func conformsToConversationalAssistant() {
+        // Compile-time + runtime proof that the on-device assistant can back `ChatModel`,
+        // whose dependency is `any ConversationalAssistant`.
+        let assistant: any ConversationalAssistant = FoundationModelAssistant(tier: .onDevice)
+        #expect(assistant.capabilities.providerName == "On-Device")
+    }
+
+    @Test("resetSession is a safe no-op (fresh session per call)")
+    func resetSessionIsSafe() async {
+        let assistant = FoundationModelAssistant()
+        await assistant.resetSession()  // must not throw or trap; no session is cached
+    }
+
+    @Test("cancel with no active turn is a safe no-op")
+    func cancelWithoutTurnIsSafe() async {
+        let assistant = FoundationModelAssistant()
+        await assistant.cancel()  // nothing in flight — must be harmless
+    }
+
+    @Test("converse surfaces AssistantError.unavailable when the model is absent")
+    func converseUnavailableSurfacesError() async {
+        guard !modelAvailable() else { return }
+        let assistant = FoundationModelAssistant()
+        do {
+            _ = try await assistant.converse(prompt: "hi", context: makeContext())
+            Issue.record("Expected AssistantError.unavailable but converse succeeded")
+        } catch let error as AssistantError {
+            guard case .unavailable = error else {
+                Issue.record("Expected AssistantError.unavailable, got \(error)")
+                return
+            }
+        } catch {
+            Issue.record("Unexpected non-AssistantError: \(error)")
+        }
+    }
+
+    @Test("converse opens with .started, streams .textDelta, and ends with .turnComplete")
+    func converseEmitsLifecycleEvents() async throws {
+        guard modelAvailable() else { return }
+        let assistant = FoundationModelAssistant()
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(
+            prompt: "Say hello in one short sentence.",
+            context: makeContext()
+        ) {
+            events.append(event)
+        }
+
+        // First event is the turn marker.
+        guard case .started = events.first else {
+            Issue.record("Expected first event to be .started, got \(String(describing: events.first))")
+            return
+        }
+        // At least one text chunk arrived.
+        let deltas = events.filter { if case .textDelta = $0 { return true } else { return false } }
+        #expect(!deltas.isEmpty)
+        // Terminal event is .turnComplete (no in-band failure).
+        guard case .turnComplete = events.last else {
+            Issue.record("Expected last event to be .turnComplete, got \(String(describing: events.last))")
+            return
+        }
+    }
 }
 #endif

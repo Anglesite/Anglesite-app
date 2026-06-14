@@ -27,11 +27,14 @@ public enum FoundationModelTier: Sendable, Equatable {
 /// Compiled into AnglesiteCore on both build targets (an `#if !ANGLESITE_MAS` guard would be a
 /// no-op in the SPM package; see CLAUDE.md). Unlike ``ClaudeAssistant`` it needs no subprocess, so
 /// it is the on-device path usable from the sandboxed MAS build.
-public actor FoundationModelAssistant: ContentAssistant {
+public actor FoundationModelAssistant: ConversationalAssistant {
     private let tier: FoundationModelTier
     private let editBridge: IntentEditBridge?
     private let contentGraph: SiteContentGraph?
     private let logger = Logger(subsystem: "dev.anglesite.app", category: "FoundationModelAssistant")
+    /// The in-flight ``converse(prompt:context:)`` pump, retained so ``cancel()`` can stop it. The
+    /// `generate` text stream it drains tears down transitively via that stream's `onTermination`.
+    private var activeTurn: Task<Void, Never>?
 
     /// `editBridge` + `contentGraph` are optional. When **both** are supplied, the assistant
     /// attaches ``ApplyEditTool`` + ``SearchContentTool`` to each session (a local agentic loop)
@@ -103,6 +106,51 @@ public actor FoundationModelAssistant: ContentAssistant {
     ) async throws -> T {
         let session = try makeSession(context: context)
         return try await session.respond(to: prompt, generating: T.self).content
+    }
+
+    // MARK: ConversationalAssistant
+
+    /// Adapts the plain-text ``generate(prompt:context:)`` stream into the richer ``AssistantEvent``
+    /// surface `ChatModel` consumes (the seam the C.3 refactor settled on). The on-device model
+    /// exposes no discrete tool-use or token-usage telemetry, so a turn is `.started` →
+    /// `.textDelta`* → `.turnComplete(nil)`. A mid-stream throw becomes `.failed`; cancellation
+    /// becomes `.cancelled`. Setup failure (model unavailable) propagates as a thrown error *before*
+    /// the turn opens, matching ``ClaudeAssistant/converse(prompt:context:)`` and the protocol.
+    public func converse(prompt: String, context: AssistantContext) async throws -> AsyncStream<AssistantEvent> {
+        let textStream = try await generate(prompt: prompt, context: context)
+        let providerName = capabilities.providerName
+        let (stream, continuation) = AsyncStream.makeStream(of: AssistantEvent.self)
+        let turn = Task {
+            continuation.yield(.started(model: providerName, toolNames: []))
+            do {
+                for try await chunk in textStream {
+                    continuation.yield(.textDelta(chunk))
+                }
+                continuation.yield(.turnComplete(nil))
+            } catch is CancellationError {
+                continuation.yield(.cancelled)
+            } catch {
+                continuation.yield(.failed(message: error.localizedDescription))
+            }
+            continuation.finish()
+        }
+        activeTurn = turn
+        continuation.onTermination = { _ in turn.cancel() }
+        return stream
+    }
+
+    /// Cancels the in-flight ``converse(prompt:context:)`` turn, if any. No-op otherwise.
+    public func cancel() async {
+        activeTurn?.cancel()
+        activeTurn = nil
+    }
+
+    /// No carried conversation state to reset — ``makeSession(context:)`` builds a fresh
+    /// `LanguageModelSession` per call, so each turn already starts clean. Cancels any in-flight
+    /// turn for symmetry with ``ClaudeAssistant/resetSession()``.
+    public func resetSession() async {
+        activeTurn?.cancel()
+        activeTurn = nil
     }
 
     // MARK: Session

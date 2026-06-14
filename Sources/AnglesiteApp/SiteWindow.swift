@@ -43,10 +43,11 @@ struct SiteWindow: View {
     @State private var deploy = DeployModel()
     @State private var backup = BackupModel()
     @State private var audit = AuditModel()
-    #if !ANGLESITE_MAS
+    // Chat is now on both targets: DevID backs it with Claude (`ClaudeAssistant`), MAS with the
+    // on-device `FoundationModelAssistant` (#159). The backend is chosen at construction in
+    // `loadAndStart()`; the panel UI is target-agnostic.
     @State private var chat: ChatModel?
     @State private var chatPresented = false
-    #endif
     @State private var health = HealthModel(runner: DefaultHealthCheckRunner())
 
     @Environment(\.openWindow) private var openWindow
@@ -73,9 +74,7 @@ struct SiteWindow: View {
                 PreviewAnnotationProviderRegistry.shared.unregister(siteID: provider.siteID)
                 annotationProvider = nil
             }
-            #if !ANGLESITE_MAS
             chat = nil
-            #endif
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()
             scopedURL = nil
@@ -90,7 +89,6 @@ struct SiteWindow: View {
                 HStack(spacing: 0) {
                     mainPane(for: site)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    #if !ANGLESITE_MAS
                     if chatPresented, let chat {
                         Divider()
                         ChatView(model: chat)
@@ -99,11 +97,8 @@ struct SiteWindow: View {
                                 ? .opacity
                                 : .move(edge: .trailing).combined(with: .opacity))
                     }
-                    #endif
                 }
-                #if !ANGLESITE_MAS
                 .animation(.easeInOut(duration: 0.18), value: chatPresented)
-                #endif
                 Divider()
                 Text(BuildInfo.summary)
                     .font(.system(.caption, design: .monospaced))
@@ -180,7 +175,6 @@ struct SiteWindow: View {
                     }
                 )
 
-                #if !ANGLESITE_MAS
                 Button {
                     chatPresented.toggle()
                 } label: {
@@ -192,7 +186,6 @@ struct SiteWindow: View {
                 .controlSize(.small)
                 .help(chatPresented ? "Hide chat panel" : "Show chat panel")
                 .keyboardShortcut("k", modifiers: [.command])
-                #endif
 
                 Button {
                     backup.backup(siteID: site.id, siteDirectory: site.path)
@@ -317,16 +310,16 @@ struct SiteWindow: View {
         }
 
         preview.open(siteID: resolved.id, siteDirectory: resolved.path)
-        #if !ANGLESITE_MAS
-        // The annotation feed, undo command, and edit observer exist only to feed the chat
-        // panel, which the MAS build omits. The edit overlay still applies edits via MCP.
+        // The annotation feed, undo command, and edit observer feed the chat panel. They're all
+        // MCP-based (the edit overlay applies edits via MCP on both targets), so they're wired the
+        // same way regardless of which assistant backs the chat.
         let mcpClient: @Sendable () async -> MCPClient? = { [preview] in
             await preview.mcpClient()
         }
         let feed = AnnotationFeedFactory.viaMCP(mcpClient: mcpClient)
         let undoCommand = UndoCommand(mcpClient: mcpClient)
-        // Resolve directly via the same per-site MCP client the feed uses — no `claude`
-        // process is spawned for a resolve, only a `resolve_annotation` tool call.
+        // Resolve directly via the same per-site MCP client the feed uses — only a
+        // `resolve_annotation` tool call, no chat backend involved.
         let annotationResolver: ChatModel.AnnotationResolver = { id in
             guard let client = await mcpClient() else {
                 throw NSError(domain: "AnnotationFeed", code: 1, userInfo: [NSLocalizedDescriptionKey: "no MCP client"])
@@ -340,13 +333,27 @@ struct SiteWindow: View {
                 throw NSError(domain: "AnnotationFeed", code: 2, userInfo: [NSLocalizedDescriptionKey: detail])
             }
         }
+        #if ANGLESITE_MAS
+        // Sandboxed App Store build: there's no `claude` CLI to shell out to, so chat is backed by
+        // the on-device `FoundationModelAssistant` (#159). This is the MAS build's first chat pane.
+        chat = ChatModel(
+            siteID: resolved.id,
+            siteDirectory: resolved.path,
+            assistant: FoundationModelAssistant(tier: .onDevice),
+            annotationFeed: feed,
+            annotationResolver: annotationResolver,
+            undoCommand: undoCommand
+        )
+        #else
+        // Developer ID build: Claude stays the default chat backend (constructed inside the
+        // convenience init). The #160 tier picker will let users opt into the on-device model.
         chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
+        #endif
         preview.setEditObserver { [weak chat] reply in
             Task { @MainActor in
                 chat?.recordEdit(reply)
             }
         }
-        #endif
         deploy.onScanComplete = { [health] outcome in
             health.ingestDeployOutcome(outcome)
         }
