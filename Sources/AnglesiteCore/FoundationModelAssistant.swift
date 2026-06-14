@@ -54,9 +54,14 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private let editBridge: IntentEditBridge?
     private let contentGraph: SiteContentGraph?
     private let logger = Logger(subsystem: "dev.anglesite.app", category: "FoundationModelAssistant")
-    /// The in-flight ``converse(prompt:context:)`` pump, retained so ``cancel()`` can stop it. The
-    /// `generate` text stream it drains tears down transitively via that stream's `onTermination`.
-    private var activeTurn: Task<Void, Never>?
+    /// The current conversational turn's consumer-facing ``TurnRelay``, retained so ``cancel()`` can
+    /// wind it down. Cancelling stops *delivery* only — it never cancels the model stream, because
+    /// cancelling Apple's on-device `streamResponse` mid-iteration traps the process (see ``converse``).
+    private var activeRelay: TurnRelay?
+    /// How many background drain tasks are still iterating a `streamResponse` to completion. The
+    /// cached ``session`` is single-flight, so while any drain is in flight a new turn must open a
+    /// fresh session rather than reuse a busy one (a cancelled turn keeps draining in the background).
+    private var activeDrains = 0
     /// Cached session for the multi-turn ``converse(prompt:context:)`` path, so the on-device model
     /// retains conversation history across turns. Created lazily on the first turn and cleared by
     /// ``resetSession()``. The one-shot ``generate(prompt:context:)`` path deliberately bypasses it.
@@ -177,48 +182,69 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// on-device model exposes no discrete tool-use or token-usage telemetry, so tool invocations run
     /// opaquely inside the session and turns carry no usage.
     public func converse(prompt: String, context: AssistantContext) async throws -> AsyncStream<AssistantEvent> {
+        // A new turn supersedes the prior one for the consumer (its stream ends `.cancelled`); the
+        // prior drain is left to finish.
+        activeRelay?.cancel()
+        // The cached session is single-flight: reusing it while a drain still runs throws "session
+        // busy", so open a fresh one. (Once drained it holds the full response, so later turns reuse
+        // it and keep history.)
+        if activeDrains > 0 { session = nil }
+
         let session = try conversationSession(for: context)
-        let textStream = Self.textStream(from: session, prompt: prompt)
         let providerName = capabilities.providerName
         let toolNames = attachedToolNames
-        // Re-entrancy: a new turn supersedes any still-running one. Cancel the old task before
-        // dropping its reference so it tears down rather than leaking onto a stream nobody reads.
-        activeTurn?.cancel()
+
         let (stream, continuation) = AsyncStream.makeStream(of: AssistantEvent.self)
-        let turn = Task {
-            continuation.yield(.started(model: providerName, toolNames: toolNames))
+        let relay = TurnRelay(continuation)
+        activeRelay = relay
+        relay.deliver(.started(model: providerName, toolNames: toolNames))
+
+        // Drain to completion on a task we never cancel — cancelling `streamResponse` mid-iteration
+        // traps the process (`brk 1`); `cancel()` stops delivery via the relay instead.
+        activeDrains += 1
+        // Unstructured `Task` in an actor inherits the actor's isolation (Swift 6), so these
+        // `activeDrains` mutations are actor-safe — keep it `Task`, not `Task.detached`.
+        Task {
+            defer { activeDrains -= 1 }
             do {
-                for try await chunk in textStream {
-                    continuation.yield(.textDelta(chunk))
+                var previous = ""
+                for try await snapshot in session.streamResponse(to: prompt) {
+                    // `streamResponse` yields cumulative snapshots; emit only the newly-appended tail.
+                    let full = snapshot.content
+                    if full.hasPrefix(previous) {
+                        relay.deliver(.textDelta(String(full.dropFirst(previous.count))))
+                    } else {
+                        logger.warning("streamResponse snapshot not cumulative — emitting full content as delta")
+                        relay.deliver(.textDelta(full))
+                    }
+                    previous = full
                 }
-                // The stream finishing while the turn task is cancelled means `cancel()` (or stream
-                // teardown) stopped us mid-response — `AsyncStream` iteration finishes rather than
-                // throwing on cancellation, so check the flag explicitly.
-                continuation.yield(Task.isCancelled ? .cancelled : .turnComplete(nil))
-            } catch is CancellationError {
-                continuation.yield(.cancelled)
+                relay.complete(.turnComplete(nil))
             } catch {
-                continuation.yield(.failed(message: error.localizedDescription))
+                relay.complete(.failed(message: error.localizedDescription))
             }
-            continuation.finish()
         }
-        activeTurn = turn
-        continuation.onTermination = { _ in turn.cancel() }
+
+        // Consumer dropped the stream: stop delivering, but keep draining (we never cancel the model).
+        continuation.onTermination = { _ in relay.detach() }
         return stream
     }
 
-    /// Cancels the in-flight ``converse(prompt:context:)`` turn, if any. The cached session is
-    /// preserved so the conversation can continue; use ``resetSession()`` to discard history.
+    /// Winds down the in-flight ``converse(prompt:context:)`` turn for the consumer: the event stream
+    /// ends promptly with `.cancelled`. The underlying model stream is **not** cancelled — it drains
+    /// to completion in the background (cancelling it mid-flight traps the process), leaving the
+    /// cached session coherent so the conversation can continue. Use ``resetSession()`` to forget it.
     public func cancel() async {
-        activeTurn?.cancel()
-        activeTurn = nil
+        activeRelay?.cancel()
+        activeRelay = nil
     }
 
-    /// Discards the cached ``LanguageModelSession`` (and cancels any in-flight turn) so the next
-    /// ``converse(prompt:context:)`` opens a fresh conversation with no memory of prior turns.
+    /// Discards the cached ``LanguageModelSession`` (and winds down any in-flight turn) so the next
+    /// ``converse(prompt:context:)`` opens a fresh conversation with no memory of prior turns. A
+    /// still-running background drain holds its own session reference and finishes harmlessly.
     public func resetSession() async {
-        activeTurn?.cancel()
-        activeTurn = nil
+        activeRelay?.cancel()
+        activeRelay = nil
         session = nil
     }
 
