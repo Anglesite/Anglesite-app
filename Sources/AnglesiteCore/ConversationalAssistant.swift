@@ -54,6 +54,10 @@ public enum AssistantError: Error, Sendable, Equatable {
     /// as a text chunk. Distinct from the in-stream form `AssistantEvent.failed`, which
     /// ``ConversationalAssistant/converse(prompt:context:)`` surfaces as a yielded value (not a throw).
     case streamFailed(String)
+    /// The backend's model isn't usable on this host (e.g. Apple Intelligence not enabled, or the
+    /// on-device model hasn't finished downloading). The associated message is user-facing and should
+    /// direct the user to the fix — for FoundationModels, System Settings → Apple Intelligence.
+    case unavailable(String)
 }
 
 /// A ``ContentAssistant`` that also supports a multi-turn, tool-using conversation with a rich

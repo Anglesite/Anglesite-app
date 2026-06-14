@@ -140,6 +140,14 @@ struct ContentAssistantTests {
         #expect(a != AssistantMessage(role: .user, content: "bye"))
     }
 
+    @Test("AssistantError.unavailable is equatable and carries its message")
+    func unavailableErrorEquatable() {
+        let a = AssistantError.unavailable("Enable Apple Intelligence")
+        #expect(a == AssistantError.unavailable("Enable Apple Intelligence"))
+        #expect(a != AssistantError.unavailable("other"))
+        #expect(a != AssistantError.unsupported("Enable Apple Intelligence"))
+    }
+
     @Test("AssistantContext carries optional fields and history")
     func contextConstruction() {
         let history = [AssistantMessage(role: .system, content: "you are helpful")]
