@@ -117,14 +117,14 @@ public struct ContentListing: Sendable, Equatable {
 
     /// `ISO8601DateFormatter` instances are not cheap to build and are thread-safe once
     /// configured, so cache one per format variant.
-    private static let plainFormatter = ISO8601DateFormatter()
-    private static let fractionalFormatter: ISO8601DateFormatter = {
+    nonisolated(unsafe) private static let plainFormatter = ISO8601DateFormatter()
+    nonisolated(unsafe) private static let fractionalFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
 
-    private static func decodeISO8601(_ decoder: Decoder) throws -> Date {
+    @Sendable private static func decodeISO8601(_ decoder: Decoder) throws -> Date {
         let raw = try decoder.singleValueContainer().decode(String.self)
         if let date = fractionalFormatter.date(from: raw) ?? plainFormatter.date(from: raw) {
             return date

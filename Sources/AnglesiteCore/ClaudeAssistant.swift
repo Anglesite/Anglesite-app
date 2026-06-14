@@ -88,7 +88,7 @@ public actor ClaudeAssistant: ConversationalAssistant {
     }
 
     #if compiler(>=6.4)
-    public func generateStructured<T: Generable>(
+    public func generateStructured<T: Generable & Sendable>(
         prompt: String,
         context: AssistantContext,
         resultType: T.Type

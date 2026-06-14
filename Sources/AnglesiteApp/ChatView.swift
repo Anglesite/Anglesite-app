@@ -171,7 +171,7 @@ struct ChatView: View {
 
 // MARK: - Shared formatter
 
-private let sharedRelativeTimeFormatter: RelativeDateTimeFormatter = {
+nonisolated(unsafe) private let sharedRelativeTimeFormatter: RelativeDateTimeFormatter = {
     let f = RelativeDateTimeFormatter()
     f.unitsStyle = .short
     return f

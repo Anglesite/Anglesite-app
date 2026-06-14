@@ -37,7 +37,7 @@ public protocol ContentAssistant: Sendable {
     /// - Note: Requires `FoundationModels`, so it's gated to the Xcode-27 toolchain (#128).
     ///   Production builds always have it; CI on Xcode 26.3 sees the streaming surface only.
     #if compiler(>=6.4)
-    func generateStructured<T: Generable>(
+    func generateStructured<T: Generable & Sendable>(
         prompt: String,
         context: AssistantContext,
         resultType: T.Type

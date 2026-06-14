@@ -20,8 +20,8 @@ import AnglesiteCore
 // MARK: - Search
 
 public struct SearchContentIntent: AppIntent {
-    public static var title: LocalizedStringResource = "Search Site Content"
-    public static var description = IntentDescription("Search a site's pages, posts, and images.")
+    public static let title: LocalizedStringResource = "Search Site Content"
+    public static let description = IntentDescription("Search a site's pages, posts, and images.")
 
     @Parameter(title: "Site") public var site: SiteEntity
     @Parameter(title: "Search") public var query: String
@@ -51,8 +51,8 @@ public struct SearchContentIntent: AppIntent {
 // MARK: - Status
 
 public struct SiteStatusIntent: AppIntent {
-    public static var title: LocalizedStringResource = "Site Content Status"
-    public static var description = IntentDescription("Report how much content a site has.")
+    public static let title: LocalizedStringResource = "Site Content Status"
+    public static let description = IntentDescription("Report how much content a site has.")
 
     @Parameter(title: "Site") public var site: SiteEntity
     @Dependency private var graph: SiteContentGraph
@@ -89,9 +89,9 @@ public struct SiteStatusIntent: AppIntent {
 /// navigation to that page — delivering the route to the right `SiteWindow`'s WKWebView is a
 /// follow-up. Today the intent opens the site; the dialog deliberately doesn't claim more.
 public struct PreviewSiteIntent: AppIntent {
-    public static var title: LocalizedStringResource = "Preview Site"
-    public static var description = IntentDescription("Open a site's live preview in Anglesite.")
-    public static var openAppWhenRun = true
+    public static let title: LocalizedStringResource = "Preview Site"
+    public static let description = IntentDescription("Open a site's live preview in Anglesite.")
+    public static let openAppWhenRun = true
 
     @Parameter(title: "Site") public var site: SiteEntity
     @Parameter(title: "Page") public var page: PageEntity?
@@ -110,8 +110,8 @@ public struct PreviewSiteIntent: AppIntent {
 // MARK: - Add Page
 
 public struct AddPageIntent: AppIntent {
-    public static var title: LocalizedStringResource = "Add Page"
-    public static var description = IntentDescription("Scaffold a new page on a site with Anglesite.")
+    public static let title: LocalizedStringResource = "Add Page"
+    public static let description = IntentDescription("Scaffold a new page on a site with Anglesite.")
 
     @Parameter(title: "Site") public var site: SiteEntity
     @Parameter(title: "Name") public var name: String
@@ -149,8 +149,8 @@ public struct AddPageIntent: AppIntent {
 // MARK: - Add Post
 
 public struct AddPostIntent: AppIntent {
-    public static var title: LocalizedStringResource = "Add Post"
-    public static var description = IntentDescription("Scaffold a new draft post on a site with Anglesite.")
+    public static let title: LocalizedStringResource = "Add Post"
+    public static let description = IntentDescription("Scaffold a new draft post on a site with Anglesite.")
 
     @Parameter(title: "Site") public var site: SiteEntity
     @Parameter(title: "Title") public var title2: String

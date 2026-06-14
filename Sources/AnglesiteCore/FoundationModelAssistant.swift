@@ -134,7 +134,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         }
     }
 
-    public func generateStructured<T: Generable>(
+    public func generateStructured<T: Generable & Sendable>(
         prompt: String,
         context: AssistantContext,
         resultType: T.Type
@@ -148,7 +148,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// `imageURL` to the prompt so the macOS 27 on-device model can describe it (alt text, OCR,
     /// screenshot analysis). One-shot — a fresh session per call. Throws
     /// ``AssistantError/unavailable(_:)`` when the on-device model can't run on this host.
-    public func generateStructured<T: Generable>(
+    public func generateStructured<T: Generable & Sendable>(
         prompt: String,
         imageURL: URL,
         context: AssistantContext,

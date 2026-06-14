@@ -15,8 +15,8 @@ import AnglesiteCore
 /// (no extended budget, no Cancel UI). See #128 for cleanup once CI catches up.
 
 public struct DeploySiteIntent: AppIntent {
-    public static var title: LocalizedStringResource = "Deploy Site"
-    public static var description = IntentDescription("Deploy a site to production with Anglesite.")
+    public static let title: LocalizedStringResource = "Deploy Site"
+    public static let description = IntentDescription("Deploy a site to production with Anglesite.")
 
     @Parameter(title: "Site") public var site: SiteEntity
     @Dependency private var ops: any SiteOperationsService
@@ -64,8 +64,8 @@ public struct DeploySiteIntent: AppIntent {
 }
 
 public struct BackupSiteIntent: AppIntent {
-    public static var title: LocalizedStringResource = "Back Up Site"
-    public static var description = IntentDescription("Commit and push a site backup with Anglesite.")
+    public static let title: LocalizedStringResource = "Back Up Site"
+    public static let description = IntentDescription("Commit and push a site backup with Anglesite.")
 
     @Parameter(title: "Site") public var site: SiteEntity
     @Dependency private var ops: any SiteOperationsService
@@ -99,8 +99,8 @@ public struct BackupSiteIntent: AppIntent {
 }
 
 public struct AuditSiteIntent: AppIntent {
-    public static var title: LocalizedStringResource = "Check Site"
-    public static var description = IntentDescription("Run an Anglesite audit and report findings.")
+    public static let title: LocalizedStringResource = "Check Site"
+    public static let description = IntentDescription("Run an Anglesite audit and report findings.")
 
     @Parameter(title: "Site") public var site: SiteEntity
     @Dependency private var ops: any SiteOperationsService
@@ -139,9 +139,9 @@ public struct AuditSiteIntent: AppIntent {
 /// entity parameter to be named `target` — that contract is also why Shortcuts can chain
 /// "find a site" → "open that site" by piping the resolved entity straight in.
 public struct OpenSiteIntent: OpenIntent {
-    public static var title: LocalizedStringResource = "Open Site"
-    public static var description = IntentDescription("Open a site window in Anglesite.")
-    public static var openAppWhenRun = true
+    public static let title: LocalizedStringResource = "Open Site"
+    public static let description = IntentDescription("Open a site window in Anglesite.")
+    public static let openAppWhenRun = true
 
     @Parameter(title: "Site") public var target: SiteEntity
 
