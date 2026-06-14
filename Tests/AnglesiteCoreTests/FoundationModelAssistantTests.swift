@@ -87,6 +87,28 @@ struct FoundationModelAssistantTests {
         #expect(!collected.isEmpty)
     }
 
+    @Test("abandoning a generate stream mid-generation drains without trapping (#201)")
+    func abandonGenerateMidStreamDoesNotTrap() async throws {
+        guard modelAvailable() else { return }
+        let assistant = FoundationModelAssistant()
+        // Repeatedly drop the stream after the first chunk while the model is still producing. Before
+        // #201 this fired `task.cancel()` in `onTermination`, cancelling `streamResponse` mid-iteration
+        // and trapping the process (`brk 1`, signal 5); the drain-and-detach fix lets it finish in the
+        // background. The trap is timing-dependent, so loop to make the regression reliable to catch —
+        // against the buggy code this crashes within a handful of iterations.
+        for _ in 0..<10 {
+            for try await _ in try await assistant.generate(
+                prompt: "Write a long, detailed, multi-paragraph history of typography.",
+                context: makeContext()
+            ) {
+                break
+            }
+        }
+        // Give the abandoned background drains time to keep iterating the model stream — if an early
+        // teardown still cancelled one, the trap would crash the test process rather than survive.
+        try await Task.sleep(for: .seconds(1))
+    }
+
     @Test("generateStructured returns the requested Generable type")
     func generateStructuredReturnsType() async throws {
         guard modelAvailable() else { return }
