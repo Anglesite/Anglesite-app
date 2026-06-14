@@ -176,4 +176,27 @@ struct SearchContentToolTests {
         #expect(out == "No matching pages or posts.")
     }
 }
+
+@Suite("FoundationModelAssistant tool wiring")
+struct FoundationModelAssistantToolWiringTests {
+
+    @Test("supportsTools is true only when both dependencies are injected")
+    func capabilitiesReflectDeps() async {
+        let router = FakeEditRouter(reply: EditReply(id: "x", status: .applied, message: nil))
+        let bridge = makeBridge(router)
+        let graph = SiteContentGraph()
+
+        let withTools = FoundationModelAssistant(tier: .onDevice, editBridge: bridge, contentGraph: graph)
+        #expect(withTools.capabilities.supportsTools == true)
+
+        let withoutTools = FoundationModelAssistant(tier: .onDevice)
+        #expect(withoutTools.capabilities.supportsTools == false)
+
+        let partial = FoundationModelAssistant(tier: .onDevice, editBridge: bridge, contentGraph: nil)
+        #expect(partial.capabilities.supportsTools == false)
+
+        let partialGraph = FoundationModelAssistant(tier: .onDevice, editBridge: nil, contentGraph: graph)
+        #expect(partialGraph.capabilities.supportsTools == false)
+    }
+}
 #endif

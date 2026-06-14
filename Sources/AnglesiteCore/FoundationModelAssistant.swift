@@ -29,10 +29,21 @@ public enum FoundationModelTier: Sendable, Equatable {
 /// it is the on-device path usable from the sandboxed MAS build.
 public actor FoundationModelAssistant: ContentAssistant {
     private let tier: FoundationModelTier
+    private let editBridge: IntentEditBridge?
+    private let contentGraph: SiteContentGraph?
     private let logger = Logger(subsystem: "dev.anglesite.app", category: "FoundationModelAssistant")
 
-    public init(tier: FoundationModelTier = .onDevice) {
+    /// `editBridge` + `contentGraph` are optional. When **both** are supplied, the assistant
+    /// attaches ``ApplyEditTool`` + ``SearchContentTool`` to each session (a local agentic loop)
+    /// and advertises `supportsTools`. When either is `nil`, behavior is the tool-less default.
+    public init(
+        tier: FoundationModelTier = .onDevice,
+        editBridge: IntentEditBridge? = nil,
+        contentGraph: SiteContentGraph? = nil
+    ) {
         self.tier = tier
+        self.editBridge = editBridge
+        self.contentGraph = contentGraph
         if tier == .privateCloudCompute {
             // v1 has no separate PCC session; fall back to on-device with a logged warning so the
             // requested tier degrades gracefully rather than erroring (see spec / #155).
@@ -45,7 +56,7 @@ public actor FoundationModelAssistant: ContentAssistant {
             supportsStreaming: true,
             supportsStructuredOutput: true,
             supportsVision: false,
-            supportsTools: false,
+            supportsTools: editBridge != nil && contentGraph != nil,
             maxContextTokens: tier == .privateCloudCompute ? 32_768 : 4_096,
             providerName: tier == .privateCloudCompute ? "Private Cloud Compute" : "On-Device"
         )
@@ -113,7 +124,19 @@ public actor FoundationModelAssistant: ContentAssistant {
         @unknown default:
             throw AssistantError.unavailable("The on-device model is unavailable on this device.")
         }
-        return LanguageModelSession(instructions: Self.instructions(for: context))
+        let instructions = Self.instructions(for: context)
+        if let editBridge, let contentGraph {
+            let tools: [any Tool] = [
+                ApplyEditTool(
+                    bridge: editBridge,
+                    siteID: context.siteID,
+                    contextSelector: context.selectedElementSelector
+                ),
+                SearchContentTool(contentGraph: contentGraph, siteID: context.siteID),
+            ]
+            return LanguageModelSession(tools: tools, instructions: instructions)
+        }
+        return LanguageModelSession(instructions: instructions)
     }
 
     /// Folds the situational ``AssistantContext`` into session instructions.
