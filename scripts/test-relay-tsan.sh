@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Run the relay concurrency suites under ThreadSanitizer. Closes issue #203.
+# Run the relay concurrency suites under ThreadSanitizer.
 #
 # TurnRelay/TextStreamRelay gate event delivery and enforce once-only terminal
 # transitions across a producer/consumer race. The `concurrentDeliver*` tests

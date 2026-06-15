@@ -22,12 +22,13 @@ final class TurnRelay: @unchecked Sendable {
         // `yield`, guaranteeing the terminal event is the last thing the consumer sees. Releasing
         // the lock before yielding (as an earlier version did) lets a `deliver` land *between*
         // `end`'s terminal yield and its `finish()`, leaving a non-terminal event after the
-        // terminal one. `yield` only buffers — it never re-enters the relay — so locking across it
-        // cannot deadlock; `finish()` can re-enter (via `onTermination`), which is why `end`
-        // releases the lock before calling it.
-        lock.lock()
-        defer { lock.unlock() }
-        if !finished { continuation.yield(event) }
+        // terminal one. `yield` is non-blocking (per the `AsyncStream.Continuation` docs it
+        // enqueues into the stream buffer and returns immediately, never calling back into user
+        // code on this thread), so locking across it cannot deadlock; `finish()` *can* re-enter
+        // (via `onTermination`), which is why `end` releases the lock before calling it.
+        lock.withLock {
+            if !finished { continuation.yield(event) }
+        }
     }
 
     /// End the turn with a terminal event the model produced (`.turnComplete`/`.failed`).
@@ -43,21 +44,21 @@ final class TurnRelay: @unchecked Sendable {
     /// Once-only terminal transition: the draining task (`complete`) and the actor (`cancel`/`detach`)
     /// race to end the same turn; the first wins and emits its event, the rest are no-ops.
     private func end(emitting event: AssistantEvent?) {
-        lock.lock()
-        if finished {
-            lock.unlock()
-            return
+        // Critical section: claim the once-only terminal transition and yield the terminal event
+        // under the lock, so a concurrent `deliver` (which checks `finished` and yields under the
+        // same lock) cannot interleave a non-terminal event after it — the terminal stays last in
+        // the buffer. Returns whether *this* call won the race and therefore owns the `finish()`.
+        let didFinish = lock.withLock { () -> Bool in
+            if finished { return false }
+            finished = true
+            if let event { continuation.yield(event) }
+            return true
         }
-        finished = true
-        // Yield the terminal event under the lock so a concurrent `deliver` (which checks
-        // `finished` and yields under the same lock) cannot interleave a non-terminal event after
-        // it — the terminal stays last in the buffer.
-        if let event { continuation.yield(event) }
-        lock.unlock()
-        // `finish()` synchronously runs the consumer's `onTermination`, which re-enters this relay
-        // via `detach()`, so it must be outside the lock to avoid deadlocking on the non-recursive
-        // `NSLock`. By here `finished` is set, so any racing `deliver` that next acquires the lock
-        // sees it and skips — no stray yield can land after the terminal event.
+        guard didFinish else { return }
+        // `finish()` runs *outside* the lock: it synchronously invokes the consumer's
+        // `onTermination`, which re-enters this relay via `detach()`, so locking across it would
+        // deadlock the non-recursive `NSLock`. `finished` is already set, so any racing `deliver`
+        // that next acquires the lock sees it and skips — no stray yield lands after the terminal.
         continuation.finish()
     }
 }
