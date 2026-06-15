@@ -92,4 +92,45 @@ struct TextStreamRelayTests {
         #expect(result.chunks.isEmpty)
         #expect(result.error == nil)
     }
+
+    /// Exercises the actual race the lock guards: a draining producer (`deliver`×N then `complete`)
+    /// against a consumer-teardown `detach`, with the consumer reading concurrently. The sequential
+    /// tests above can't reach this path — they finish all relay calls before the stream is read.
+    /// Repeated trials make a torn read or missing-lock crash likely to surface; each trial asserts
+    /// the consumer never hangs and sees an in-order, gap-free prefix of the delivered chunks.
+    @Test("concurrent deliver/complete vs detach terminates cleanly with ordered chunks")
+    func concurrentDeliverDetachRace() async {
+        let chunkCount = 100
+        for _ in 0..<200 {
+            let (stream, continuation) = AsyncThrowingStream.makeStream(of: String.self)
+            let relay = TextStreamRelay(continuation)
+
+            // Consumer reads concurrently with the producers below.
+            async let collected: [String] = {
+                var chunks: [String] = []
+                do {
+                    for try await chunk in stream { chunks.append(chunk) }
+                } catch {
+                    // A detach/complete race never finishes with an error; tolerate it regardless.
+                }
+                return chunks
+            }()
+
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    for i in 0..<chunkCount { relay.deliver(String(i)) }
+                    relay.complete()
+                }
+                group.addTask { relay.detach() }
+            }
+
+            // Whatever survived the race is a contiguous prefix of 0,1,2,… — a single in-order
+            // producer plus the once-finished gate can drop a suffix but never reorder or skip.
+            let result = await collected
+            for (i, chunk) in result.enumerated() {
+                #expect(chunk == String(i))
+            }
+            #expect(result.count <= chunkCount)
+        }
+    }
 }

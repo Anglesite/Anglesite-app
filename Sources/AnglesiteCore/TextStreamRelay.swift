@@ -26,8 +26,9 @@ final class TextStreamRelay: @unchecked Sendable {
         lock.lock()
         let done = finished
         lock.unlock()
-        // A `yield` after `finish()` is a harmless no-op, so the brief unlocked window before this
-        // line can't double-deliver; the lock is only for `finished`'s memory visibility.
+        // Releasing the lock before `yield` is safe: if `end(throwing:)` races in on another thread
+        // between the unlock and this line, a stale `yield` after `continuation.finish()` is
+        // documented as a no-op. The lock only guards `finished`'s memory visibility.
         if !done { continuation.yield(text) }
     }
 
