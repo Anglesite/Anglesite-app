@@ -89,3 +89,27 @@ jobs:
 
       - name: Build (release)
         run: swift build -c release
+
+  relay-tsan:
+    name: Relay concurrency suites (ThreadSanitizer)
+    runs-on: macos-15
+    timeout-minutes: 15
+    # The relay suites (TurnRelay/TextStreamRelay) have no plugin/Node dependency, so this lane
+    # skips the sibling-plugin checkout. TSan deterministically flags data races the probabilistic
+    # `concurrentDeliver*` tests would otherwise only catch by timing luck (#203).
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest available Xcode
+        # Same toolchain rationale as build-test: CLAUDE.md mandates Xcode 27+.
+        run: |
+          set -euo pipefail
+          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          echo "Selecting: $LATEST"
+          sudo xcode-select -s "$LATEST"
+
+      - name: Show toolchain versions
+        run: swift --version
+
+      - name: Run relay suites under ThreadSanitizer
+        run: scripts/test-relay-tsan.sh
