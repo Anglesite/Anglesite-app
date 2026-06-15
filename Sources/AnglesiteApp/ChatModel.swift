@@ -27,61 +27,24 @@ import AnglesiteCore
 final class ChatModel {
     // MARK: Models
 
-    struct Message: Identifiable, Equatable {
-        let id: UUID
-        let role: Role
-        var content: String
-        var toolCalls: [ToolCall]
-        let timestamp: Date
-        /// Only set on `role: .edit` rows. Carries file + commit + undone flag.
-        var editMetadata: EditMetadata?
-        /// Only set on `role: .annotation` rows. Carries the backing annotation id.
-        var annotationMetadata: AnnotationMetadata?
-
-        enum Role: Equatable { case user, assistant, system, error, edit, annotation }
-
-        init(
-            id: UUID = UUID(),
-            role: Role,
-            content: String,
-            toolCalls: [ToolCall] = [],
-            timestamp: Date = Date(),
-            editMetadata: EditMetadata? = nil,
-            annotationMetadata: AnnotationMetadata? = nil
-        ) {
-            self.id = id
-            self.role = role
-            self.content = content
-            self.toolCalls = toolCalls
-            self.timestamp = timestamp
-            self.editMetadata = editMetadata
-            self.annotationMetadata = annotationMetadata
-        }
-    }
-
-    struct EditMetadata: Equatable {
-        let file: String
-        let commit: String
-        var undone: Bool
-    }
-
-    /// Identifies the backing annotation so its chat row can be resolved via MCP.
-    struct AnnotationMetadata: Equatable {
-        let annotationID: String
-    }
-
-    struct ToolCall: Identifiable, Equatable {
-        /// `toolUseID` from claude — used to pair `tool_use` with its later `tool_result`.
-        let id: String
-        let name: String
-        let inputDisplay: String
-        var result: String?
-        var isError: Bool
-    }
+    // The chat row value types live in `AnglesiteCore` as `ChatMessage`/`ChatToolCall`/… so the
+    // event-accumulation reducer (`ConversationTranscript`) can be unit-tested without the App
+    // shell (#161). They're re-exported here under their original names so `ChatView` and the rest
+    // of this file keep referring to `ChatModel.Message`, `ChatModel.ToolCall`, etc. unchanged.
+    typealias Message = ChatMessage
+    typealias ToolCall = ChatToolCall
+    typealias EditMetadata = ChatEditMetadata
+    typealias AnnotationMetadata = ChatAnnotationMetadata
 
     // MARK: State
 
-    private(set) var messages: [Message] = []
+    /// The provider-agnostic chat-row store + streaming-turn reducer (`AnglesiteCore`). `ChatModel`
+    /// wraps it with the SwiftUI/persistence/undo shell; mutating it (a value type) fires
+    /// `@Observable` change tracking, so SwiftUI re-renders when rows change.
+    private var transcript: ConversationTranscript
+
+    /// Chat rows in display order. Forwards to ``transcript`` so `@Observable` tracks reads.
+    var messages: [Message] { transcript.messages }
     private(set) var isStreaming: Bool = false
     private(set) var lastError: String?
     /// Mirrors the last `turnComplete.usage` claude reported. `ChatView` shows this in the
@@ -133,9 +96,6 @@ final class ChatModel {
     /// chat has no MCP backing yet.
     private let undoCommand: UndoCommand?
     private var streamTask: Task<Void, Never>?
-    /// Tracks the in-flight assistant message — text events extend its `content`, tool events
-    /// push into its `toolCalls`. Nil between turns.
-    private var inFlightAssistantIndex: Int?
     /// IDs of annotations already surfaced in chat, so repeated calls to `loadAnnotations()`
     /// don't double-post the same sticky note when the user revisits a site mid-session.
     private var surfacedAnnotationIDs: Set<String> = []
@@ -144,7 +104,9 @@ final class ChatModel {
     init(siteID: String, siteDirectory: URL, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
         self.siteID = siteID
         self.siteDirectory = siteDirectory
-        self.assistant = ClaudeAssistant(siteID: siteID, siteDirectory: siteDirectory)
+        let assistant = ClaudeAssistant(siteID: siteID, siteDirectory: siteDirectory)
+        self.assistant = assistant
+        self.transcript = ConversationTranscript(providerName: assistant.capabilities.providerName)
         self.history = ChatHistoryStore(siteDirectory: siteDirectory)
         self.annotationFeed = annotationFeed
         self.annotationResolver = annotationResolver
@@ -158,6 +120,7 @@ final class ChatModel {
         self.siteID = siteID
         self.siteDirectory = siteDirectory
         self.assistant = assistant
+        self.transcript = ConversationTranscript(providerName: assistant.capabilities.providerName)
         self.history = history ?? ChatHistoryStore(siteDirectory: siteDirectory)
         self.annotationFeed = annotationFeed
         self.annotationResolver = annotationResolver
@@ -171,7 +134,8 @@ final class ChatModel {
     func loadHistory() async {
         do {
             let entries = try await history.load()
-            messages = entries.map(Message.init(persisted:))
+            transcript.reset()
+            for entry in entries { transcript.append(Message(persisted: entry)) }
         } catch {
             lastError = "couldn't load history: \(error)"
         }
@@ -194,7 +158,7 @@ final class ChatModel {
         for annotation in annotations where !annotation.resolved {
             guard !surfacedAnnotationIDs.contains(annotation.id) else { continue }
             surfacedAnnotationIDs.insert(annotation.id)
-            messages.append(.init(
+            transcript.append(.init(
                 role: .annotation,
                 content: ChatModel.renderAnnotation(annotation),
                 timestamp: annotation.createdAt,
@@ -222,19 +186,17 @@ final class ChatModel {
     /// set makes that re-surface a no-op. On success the row is simply gone (the resolved
     /// annotation is filtered out of future feeds anyway); on failure we re-insert the one row.
     func resolveAnnotation(messageID: UUID) async {
-        guard let idx = messages.firstIndex(where: { $0.id == messageID }),
-              let meta = messages[idx].annotationMetadata,
-              let resolver = annotationResolver else { return }
-
-        let removed = messages.remove(at: idx)              // optimistic: drop from the feed
+        guard let target = messages.first(where: { $0.id == messageID }),
+              let meta = target.annotationMetadata,
+              annotationResolver != nil else { return }
+        guard let removed = transcript.remove(id: messageID) else { return }  // optimistic: drop from the feed
         do {
-            try await resolver(meta.annotationID)
+            try await annotationResolver?(meta.annotationID)
         } catch {
-            // `idx` was captured before the await; messages may have shifted during the
-            // suspension (concurrent resolve, streaming send, loadAnnotations). Re-locate
-            // the chronological insertion point by timestamp instead of trusting idx.
-            let insertIdx = messages.firstIndex { $0.timestamp > removed.timestamp } ?? messages.count
-            messages.insert(removed, at: insertIdx)
+            // The row may have shifted during the suspension (concurrent resolve, streaming send,
+            // loadAnnotations). `insertByTimestamp` re-locates the chronological position rather
+            // than trusting a stale index.
+            transcript.insertByTimestamp(removed)
             lastError = "couldn't resolve annotation: \(error.localizedDescription)"
         }
     }
@@ -246,14 +208,10 @@ final class ChatModel {
         guard !trimmed.isEmpty, !isStreaming else { return }
 
         lastError = nil
-        let userMessage = Message(role: .user, content: trimmed)
-        messages.append(userMessage)
-        persist(userMessage)
-
-        // Empty assistant message; subsequent events extend it.
-        let assistantMessage = Message(role: .assistant, content: "")
-        messages.append(assistantMessage)
-        inFlightAssistantIndex = messages.count - 1
+        // `beginTurn` appends the user prompt and an empty assistant row (which streamed events
+        // extend) and marks the latter in-flight. The user row is second-to-last; persist it.
+        transcript.beginTurn(userPrompt: trimmed)
+        if messages.count >= 2 { persist(messages[messages.count - 2]) }
 
         isStreaming = true
         streamTask = Task { @MainActor [weak self] in
@@ -273,7 +231,7 @@ final class ChatModel {
             content: "Edited \(file)",
             editMetadata: metadata
         )
-        messages.append(message)
+        transcript.append(message)
         let entry = ChatHistoryStore.Entry(
             timestamp: message.timestamp,
             role: .edit,
@@ -291,9 +249,9 @@ final class ChatModel {
     /// row's `undone` flag and persist a sidecar. On working-tree drift, set `conflictPrompt`
     /// so the view shows a sheet. On failure, append an `.error` system message.
     func undoEdit(messageID: UUID, force: Bool = false) async {
-        guard let idx = messages.firstIndex(where: { $0.id == messageID }),
-              messages[idx].role == .edit,
-              let metadata = messages[idx].editMetadata,
+        guard let target = messages.first(where: { $0.id == messageID }),
+              target.role == .edit,
+              let metadata = target.editMetadata,
               !metadata.undone
         else { return }
         guard let undoCommand else {
@@ -303,9 +261,7 @@ final class ChatModel {
         let result = await undoCommand.undo(commit: metadata.commit, force: force)
         switch result {
         case .success(let newCommit):
-            var updated = metadata
-            updated.undone = true
-            messages[idx].editMetadata = updated
+            transcript.update(id: messageID) { $0.editMetadata?.undone = true }
             Task { [history] in
                 try? await history.appendUndone(messageID: messageID, newCommit: newCommit)
             }
@@ -313,7 +269,7 @@ final class ChatModel {
             conflictPrompt = ConflictPrompt(messageID: messageID, commit: metadata.commit, files: files)
         case .failed(let reason, let detail):
             let errorContent = "Couldn't undo: \(detail) (\(reason))"
-            messages.append(Message(role: .error, content: errorContent))
+            transcript.append(Message(role: .error, content: errorContent))
             lastError = errorContent
         }
     }
@@ -341,8 +297,7 @@ final class ChatModel {
     func resetConversation() async {
         cancel()
         streamTask = nil
-        messages = []
-        inFlightAssistantIndex = nil
+        transcript.reset()
         await assistant.resetSession()
         do { try await history.clear() } catch { lastError = "couldn't clear history: \(error)" }
     }
@@ -355,78 +310,41 @@ final class ChatModel {
             let context = AssistantContext(siteID: siteID, siteDirectory: siteDirectory)
             stream = try await assistant.converse(prompt: prompt, context: context)
         } catch {
-            inFlightAssistantIndex = nil
+            transcript.endTurn()
             isStreaming = false
             lastError = "couldn't start \(assistant.capabilities.providerName): \(error)"
             return
         }
 
         for await event in stream {
-            handle(event)
+            // The provider-agnostic accumulation (text deltas, tool pairing, error/cancel rows,
+            // usage capture) lives in `ConversationTranscript` (AnglesiteCore, fully unit-tested);
+            // `ChatModel` just forwards each event and mirrors the resulting telemetry into the
+            // `@Observable` UI properties `ChatView` binds to.
+            transcript.apply(event)
+            syncObservedTelemetry()
         }
 
-        if let idx = inFlightAssistantIndex {
-            let finalMessage = messages[idx]
-            // Persist the assistant turn now that it's complete. Empty text + no tool calls
-            // means the user sent a no-op or got a session-error — we still persist for audit.
+        // Persist the assistant turn now that it's complete. Empty text + no tool calls means the
+        // user sent a no-op or got a session-error — we still persist for audit.
+        if let finalMessage = transcript.endTurn() {
             persist(finalMessage)
         }
-        inFlightAssistantIndex = nil
         isStreaming = false
     }
 
-    private func handle(_ event: AssistantEvent) {
-        guard let idx = inFlightAssistantIndex, messages.indices.contains(idx) else { return }
-        switch event {
-        case .started:
-            // Surfaced as data only; no chat chrome in v0.5 (matches prior .sessionStarted arm).
-            break
-
-        case .textDelta(let text):
-            messages[idx].content += text
-
-        case .thinking:
-            // Captured but not rendered — thinking blocks already stream to the Debug pane.
-            break
-
-        case .toolUse(let toolID, let name, let input):
-            let display = ChatModel.renderJSON(input)
-            messages[idx].toolCalls.append(ToolCall(id: toolID, name: name, inputDisplay: display, result: nil, isError: false))
-
-        case .toolResult(let toolID, let content, let isError):
-            if let i = messages[idx].toolCalls.firstIndex(where: { $0.id == toolID }) {
-                messages[idx].toolCalls[i].result = content
-                messages[idx].toolCalls[i].isError = isError
-            } else {
-                // Result without a matching tool_use — happens if the agent crashed mid-turn
-                // and resumed without the original tool_use. Surface it as an unbound tool
-                // call so the user can still see what happened.
-                messages[idx].toolCalls.append(ToolCall(id: toolID, name: "(unbound)", inputDisplay: "", result: content, isError: isError))
-            }
-
-        case .turnComplete(let usage):
-            if let usage {
-                lastUsage = TurnTelemetry(
-                    inputTokens: usage.inputTokens,
-                    outputTokens: usage.outputTokens,
-                    costUSD: usage.costUSD,
-                    durationMs: usage.durationMs
-                )
-            }
-
-        case .failed(let message):
-            lastError = message
-            messages.append(.init(role: .error, content: message))
-
-        case .cancelled:
-            messages.append(.init(role: .system, content: "Cancelled."))
-
-        case .backendExited(let code):
-            if code != 0 && code != -15 {
-                let note = "\(assistant.capabilities.providerName) backend exited with code \(code)"
-                lastError = note
-                messages.append(.init(role: .error, content: note))
-            }
+    /// Mirrors the transcript's error + usage telemetry into the `@Observable` properties bound by
+    /// `ChatView`. Called after each applied event; the transcript is the source of truth during a
+    /// turn (out-of-band setters — load/undo/annotation failures — write `lastError` directly).
+    private func syncObservedTelemetry() {
+        lastError = transcript.lastError
+        if let usage = transcript.lastUsage {
+            lastUsage = TurnTelemetry(
+                inputTokens: usage.inputTokens,
+                outputTokens: usage.outputTokens,
+                costUSD: usage.costUSD,
+                durationMs: usage.durationMs
+            )
         }
     }
 
@@ -462,22 +380,6 @@ final class ChatModel {
         )
         // Persist async-fire-and-forget: an I/O failure is non-blocking for the UI.
         Task { [history] in try? await history.append(entry) }
-    }
-
-    /// Compact, deterministic pretty-print of a `JSONValue` for the tool-call card. Single-line
-    /// strings get displayed inline; objects/arrays get rendered with two-space indent so they
-    /// don't blow up the chat layout when the tool input is large.
-    static func renderJSON(_ value: JSONValue) -> String {
-        let raw = value.rawValue
-        guard JSONSerialization.isValidJSONObject(raw) || raw is String || raw is NSNumber else {
-            return String(describing: raw)
-        }
-        let opts: JSONSerialization.WritingOptions = [.prettyPrinted, .sortedKeys]
-        if let data = try? JSONSerialization.data(withJSONObject: raw, options: opts),
-           let string = String(data: data, encoding: .utf8) {
-            return string
-        }
-        return String(describing: raw)
     }
 }
 
