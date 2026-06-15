@@ -111,31 +111,37 @@ public actor FoundationModelAssistant: ConversationalAssistant {
 
     /// Streams a session's response as incremental text deltas. `streamResponse` yields *cumulative*
     /// snapshots, so we diff against the prior prefix to emit only newly-appended text (matching the
-    /// ``ContentAssistant`` per-chunk contract). Shared by `generate` (fresh session) and `converse`
-    /// (cached session).
+    /// ``ContentAssistant`` per-chunk contract). Backs the one-shot `generate` path; `converse` runs
+    /// its own ``TurnRelay`` drain over the cached session for the multi-turn `AssistantEvent` stream.
     private static func textStream(from session: LanguageModelSession, prompt: String) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
-            let task = Task {
+            let relay = TextStreamRelay(continuation)
+            // Drain to completion on a task we never cancel — cancelling `streamResponse`
+            // mid-iteration traps the process (`brk 1`, #200/#201). If the consumer drops the stream
+            // early the drain keeps running and its chunks are discarded (the session is per-call and
+            // unreferenced afterwards), mirroring `converse`'s drain-and-detach.
+            Task {
                 do {
                     var previous = ""
                     for try await snapshot in session.streamResponse(to: prompt) {
                         let full = snapshot.content
                         if full.hasPrefix(previous) {
                             // Confirmed cumulative prefix — emit only the newly-appended tail.
-                            continuation.yield(String(full.dropFirst(previous.count)))
+                            relay.deliver(String(full.dropFirst(previous.count)))
                         } else {
                             // The model revised earlier text (same or different length), so the
                             // snapshot isn't an extension of `previous`; yield it whole.
-                            continuation.yield(full)
+                            relay.deliver(full)
                         }
                         previous = full
                     }
-                    continuation.finish()
+                    relay.complete()
                 } catch {
-                    continuation.finish(throwing: error)
+                    relay.fail(error)
                 }
             }
-            continuation.onTermination = { _ in task.cancel() }
+            // Consumer dropped the stream: stop delivering, but keep draining (we never cancel the model).
+            continuation.onTermination = { _ in relay.detach() }
         }
     }
 
