@@ -20,7 +20,6 @@ struct SitesLauncherView: View {
     @State private var sites: [SiteStore.Site] = []
     @State private var loadError: String?
     @State private var deciding = true
-    @State private var showingNewSite = false
     /// The site awaiting a remove confirmation, or nil when no prompt is up. Drives the
     /// `.confirmationDialog`; SwiftUI clears it (via the `isPresented` binding) when any dialog
     /// button is tapped.
@@ -29,8 +28,13 @@ struct SitesLauncherView: View {
     /// stays stable through the dismiss animation — reading `siteToRemove?.name` directly would
     /// collapse to "" the instant the dialog clears the optional.
     @State private var siteToRemoveName = ""
-    @State private var wizardModel: NewSiteWizardModel?
-    @State private var scaffolder: SiteScaffolder?
+    private struct NewSiteSession: Identifiable {
+        let id = UUID()
+        let model: NewSiteWizardModel
+        let scaffolder: SiteScaffolder
+    }
+    /// Non-nil while the New Site wizard is showing; nil dismisses it.
+    @State private var newSiteSession: NewSiteSession?
     @State private var sitesRootScopedURL: URL?
 
     @Environment(\.openWindow) private var openWindow
@@ -65,25 +69,23 @@ struct SitesLauncherView: View {
             footer
         }
         .frame(minWidth: 480, idealWidth: 520, minHeight: 360, idealHeight: 480)
-        .sheet(isPresented: $showingNewSite) {
-            if let wizardModel, let scaffolder {
-                NewSiteWizard(
-                    model: wizardModel,
-                    scaffolder: scaffolder,
-                    onComplete: { siteID in
-                        showingNewSite = false
-                        Task {
-                            await refreshSites()
-                            openWindow(value: siteID)
-                            dismissWindow()
-                        }
-                    },
-                    onCancel: { showingNewSite = false }
-                )
-                .onDisappear {
-                    sitesRootScopedURL?.stopAccessingSecurityScopedResource()
-                    sitesRootScopedURL = nil
-                }
+        .sheet(item: $newSiteSession) { session in
+            NewSiteWizard(
+                model: session.model,
+                scaffolder: session.scaffolder,
+                onComplete: { siteID in
+                    newSiteSession = nil
+                    Task {
+                        await refreshSites()
+                        openWindow(value: siteID)
+                        dismissWindow()
+                    }
+                },
+                onCancel: { newSiteSession = nil }
+            )
+            .onDisappear {
+                sitesRootScopedURL?.stopAccessingSecurityScopedResource()
+                sitesRootScopedURL = nil
             }
         }
     }
@@ -291,7 +293,7 @@ struct SitesLauncherView: View {
 
         let model = NewSiteWizardModel(catalog: catalog, slugTaken: { takenSlugs.contains($0) })
 
-        scaffolder = SiteScaffolder(
+        let scaffolder = SiteScaffolder(
             sitesRoot: sitesRoot,
             pluginURL: pluginURL,
             catalog: catalog,
@@ -307,8 +309,7 @@ struct SitesLauncherView: View {
                 return site
             }
         )
-        wizardModel = model
-        showingNewSite = true
+        newSiteSession = NewSiteSession(model: model, scaffolder: scaffolder)
     }
 
     #if ANGLESITE_MAS
