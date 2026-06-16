@@ -196,10 +196,12 @@ Deploy click
 
 ## Testing
 
-The verification logic lives in `AnglesiteCore` (a real test target) precisely so it can be
-unit-tested. `DeployModel` lives in the `AnglesiteApp` Xcode target, which `swift test` can't reach;
-its orchestration is covered by the **hosted** `AnglesiteAppTests` target (run via
-`xcodebuild test -scheme Anglesite`), added in #207. The view itself stays build-covered.
+The verification logic *and* the verify→persist→proceed orchestration both live in `AnglesiteCore`
+(a real test target) precisely so they can be unit-tested under `swift test` — which runs on CI's
+macOS-15 runners. `DeployModel` is a thin `@MainActor` forwarder over `TokenOnboarding`; the view
+stays build-covered. (Hosting `DeployModel` tests inside `Anglesite.app` was rejected: launching a
+macOS-27 app on the macOS-15 CI runner is blocked by LaunchServices, so a hosted test target can't
+run in CI today.)
 
 - **Parser unit tests** (`AnglesiteCoreTests/CloudflareTokenVerifierTests`): account-name and email
   extraction from captured `wrangler whoami` stdout fixtures (with and without an email line),
@@ -211,9 +213,11 @@ its orchestration is covered by the **hosted** `AnglesiteAppTests` target (run v
 - **Verify-orchestration tests** with an injected runner (no Node spawned): zero-exit → parsed
   account; zero-exit-but-unparsable → success with `nil` name; non-zero auth → `.invalidToken`;
   thrown runner → `.unavailable`.
-- **`DeployModel` hosted tests** (`AnglesiteAppTests/DeployModelTests`, stubbed verifier + trivial
-  `DeployCommand`): cancel-during-verify does **not** dispatch the deploy; a non-cancelled verified
-  token **does**; a failed verification keeps the sheet open and writes nothing to the Keychain.
+- **`TokenOnboarding` orchestration tests** (`AnglesiteCoreTests/TokenOnboardingTests`, stubbed
+  verifier + injected `persist`/`isCancelled`): a non-cancelled verified token → `.proceed`
+  (persisted once); cancellation after verify → `.abort` (no proceed); failed verify → `.stay`
+  (never persists); empty token → `.stay` without verifying; a throwing `persist` → `.stay`. The
+  cancel-race is asserted deterministically via the injected `isCancelled`, not a timing window.
 - **Build verification:** `swift test` (Core) plus `xcodebuild` of both the `Anglesite` and
   `AnglesiteMAS` schemes — the MAS target builds clean since no new entitlement is introduced
   (verification reuses the existing supervised wrangler spawn).

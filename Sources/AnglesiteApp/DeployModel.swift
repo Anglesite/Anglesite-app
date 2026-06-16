@@ -55,7 +55,7 @@ final class DeployModel {
     private let command: DeployCommand
     private let logCenter: LogCenter
     private let keychain: KeychainStore
-    private let verifier: TokenVerifying
+    private let onboarding: TokenOnboarding
     private var inFlight: Task<Void, Never>?
     /// Site to retry once the user pastes a token. `nil` outside the prompt flow.
     private var pendingDeploy: (siteID: String, siteDirectory: URL)?
@@ -69,7 +69,7 @@ final class DeployModel {
         self.command = command
         self.logCenter = logCenter
         self.keychain = keychain
-        self.verifier = verifier
+        self.onboarding = TokenOnboarding(verifier: verifier)
     }
 
     var isRunning: Bool {
@@ -107,11 +107,6 @@ final class DeployModel {
     /// token is stored, the connected account is surfaced briefly, and the parked deploy is
     /// dispatched. On failure the sheet stays open with a specific message.
     func verifyAndSaveToken(_ token: String) async {
-        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            tokenVerification = .failed(message: "Paste your token first.")
-            return
-        }
         guard let pending = pendingDeploy else {
             // The prompt is only shown with a parked deploy; guard defensively.
             tokenVerification = .failed(message: "No deploy is waiting — close this and click Deploy again.")
@@ -119,34 +114,30 @@ final class DeployModel {
         }
 
         tokenVerification = .checking
-        let result = await verifier.verify(token: trimmed, siteDirectory: pending.siteDirectory)
+        // `TokenOnboarding` owns the verify → persist → flash → re-check-cancel ordering; this method
+        // just maps its outcome onto observable state and the parked deploy. `isCancelled` covers
+        // both the user hitting Cancel (which clears `tokenPromptPresented` via `cancelTokenPrompt`)
+        // and the view tearing down (which cancels this Task).
+        let outcome = await onboarding.run(
+            token: token,
+            siteDirectory: pending.siteDirectory,
+            persist: { try keychain.writeCloudflareToken($0) },
+            onConnected: { tokenVerification = .connected(accountName: $0.name) },
+            delay: { try? await Task.sleep(for: .milliseconds(700)) },
+            isCancelled: { Task.isCancelled || !tokenPromptPresented }
+        )
 
-        switch result {
-        case .success(let account):
-            do {
-                try keychain.writeCloudflareToken(trimmed)
-            } catch {
-                tokenVerification = .failed(message: "Couldn’t save to Keychain: \(error)")
-                return
-            }
-            // Let the user see which account they connected before the sheet gives way to the
-            // deploy drawer.
-            tokenVerification = .connected(accountName: account.name)
-            try? await Task.sleep(for: .milliseconds(700))
-            // The user can hit Cancel (or the view can be torn down) during the verify/sleep
-            // suspensions above. `cancelTokenPrompt()` clears `pendingDeploy`/`tokenPromptPresented`,
-            // and a torn-down view cancels this Task — in either case, don't launch a deploy behind
-            // their back. `try?` on the sleep swallows `CancellationError`, so check the Task too.
-            guard !Task.isCancelled, tokenPromptPresented else {
-                tokenVerification = .idle
-                return
-            }
+        switch outcome {
+        case .proceed:
             pendingDeploy = nil
             tokenPromptPresented = false
             tokenVerification = .idle
             deploy(siteID: pending.siteID, siteDirectory: pending.siteDirectory)
-        case .failure(let error):
-            tokenVerification = .failed(message: error.userMessage)
+        case .stay(let message):
+            tokenVerification = .failed(message: message)
+        case .abort:
+            // The user cancelled mid-flow; `cancelTokenPrompt` already cleared the parked deploy.
+            tokenVerification = .idle
         }
     }
 

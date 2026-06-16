@@ -74,7 +74,7 @@ xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debu
 
 Tests: `swift test --package-path .` (270 tests total — 152 Swift Testing `@Test` + 118 XCTest — across `AnglesiteCoreTests` and `AnglesiteBridgeTests`; the apply-edit e2e `XCTSkip`s when the sibling plugin checkout / node aren't present). Most suites were migrated to Swift Testing (#74); the remaining XCTest suites are bridge/e2e tests that still need `XCTSkip`. If `swift build`/`swift test` seems to hang with no output, a stale SwiftPM process is likely holding the `.build` lock — check `pgrep -fl swift-test` and kill the orphan rather than assuming a bad test.
 
-App-target model logic (the SwiftUI `@MainActor` models in `Sources/AnglesiteApp`) isn't reachable from `swift test` — only the SPM library targets are. Those run as **hosted** unit tests in the `AnglesiteAppTests` target via `xcodebuild test -project Anglesite.xcodeproj -scheme Anglesite -destination 'platform=macOS'` (XcodeGen wires `TEST_HOST`/`BUNDLE_LOADER` to `Anglesite.app`, so they `@testable import Anglesite`). Hosted tests launch the app, so they need a GUI session.
+Note: `swift test` runs on CI's older runners even though `Package.swift` declares `.macOS("27.0")` — a SwiftPM CLI test binary tolerates a high deployment target as long as it doesn't call macOS-27-only symbols at runtime. **Hosted** app tests (`xcodebuild test` with `Anglesite.app` as the test host) do *not* work there: launching a macOS-27 `.app` is blocked on a macOS-15 runner by LaunchServices. So app-target logic that needs CI coverage (e.g. `DeployModel`'s token orchestration) is kept thin and pushed into a testable `AnglesiteCore` type (`TokenOnboarding`) rather than tested through a hosted app target.
 
 ## Plan
 
