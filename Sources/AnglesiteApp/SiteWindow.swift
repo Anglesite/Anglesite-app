@@ -245,27 +245,27 @@ struct SiteWindow: View {
     @ViewBuilder
     private func mainPane(for site: SiteStore.Site) -> some View {
         switch preview.state {
-            case .ready(_, let url):
-                PreviewView(url: url, router: preview.editRouter, annotationProvider: annotationProvider)
-            case .starting:
-                centeredStatus { ProgressView("Starting dev server for \(site.name)…") }
-            case .failed(_, let message):
-                centeredStatus {
-                    VStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.largeTitle).foregroundStyle(.orange)
-                        Text("Can't preview \(site.name)").font(.headline)
-                        Text(message)
-                            .font(.callout).foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center).frame(maxWidth: 420)
-                        Button("Retry") {
-                            preview.open(siteID: site.id, siteDirectory: site.path)
-                        }
+        case .ready(_, let url):
+            PreviewView(url: url, router: preview.editRouter, annotationProvider: annotationProvider)
+        case .starting:
+            centeredStatus { ProgressView("Starting dev server for \(site.name)…") }
+        case .failed(_, let message):
+            centeredStatus {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.largeTitle).foregroundStyle(.orange)
+                    Text("Can't preview \(site.name)").font(.headline)
+                    Text(message)
+                        .font(.callout).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).frame(maxWidth: 420)
+                    Button("Retry") {
+                        preview.open(siteID: site.id, siteDirectory: site.path)
                     }
                 }
-            case .idle:
-                centeredStatus { ProgressView() }
             }
+        case .idle:
+            centeredStatus { ProgressView() }
+        }
     }
 
     private func centeredStatus<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {

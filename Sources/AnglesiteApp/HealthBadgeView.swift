@@ -1,8 +1,9 @@
 import SwiftUI
 import AnglesiteCore
 
-/// Circular deploy-readiness indicator + popover, rendered in `SiteWindow`'s
-/// header row to the left of the Chat button.
+/// Circular deploy-readiness indicator + popover, rendered as a `ToolbarItem`
+/// in `SiteWindow`'s window toolbar (high `visibilityPriority`, so it stays
+/// visible as the window narrows).
 ///
 /// The view is intentionally dumb: it reads `HealthModel`'s settled state and
 /// surfaces the same data structures `BlockedDeploySheetView` already renders
