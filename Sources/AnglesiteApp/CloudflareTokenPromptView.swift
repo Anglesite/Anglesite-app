@@ -47,14 +47,18 @@ struct CloudflareTokenPromptView: View {
         return components.url!
     }()
 
-    private var isChecking: Bool {
-        if case .checking = model.tokenVerification { return true }
-        if case .connected = model.tokenVerification { return true }
-        return false
+    /// True once a verification is in flight (`.checking`) and during the brief success flash
+    /// (`.connected`) — i.e. whenever the field and submit button should be locked so the user
+    /// can't edit or re-submit mid-verify.
+    private var isInputLocked: Bool {
+        switch model.tokenVerification {
+        case .checking, .connected: return true
+        case .idle, .failed: return false
+        }
     }
 
     private var canSubmit: Bool {
-        !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isChecking
+        !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isInputLocked
     }
 
     var body: some View {
@@ -87,7 +91,7 @@ struct CloudflareTokenPromptView: View {
             SecureField("API token", text: $token, prompt: Text("paste token"))
                 .textFieldStyle(.roundedBorder)
                 .focused($fieldFocused)
-                .disabled(isChecking)
+                .disabled(isInputLocked)
                 .onSubmit { submit() }
 
             status
@@ -112,7 +116,7 @@ struct CloudflareTokenPromptView: View {
         .task { fieldFocused = true }
     }
 
-    /// A numbered step: a circled index followed by its content.
+    /// A numbered step: a right-aligned plain digit followed by its content.
     @ViewBuilder
     private func step(_ index: Int, @ViewBuilder content: () -> some View) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {

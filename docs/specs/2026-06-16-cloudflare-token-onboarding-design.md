@@ -1,7 +1,7 @@
 # Cloudflare token onboarding — guided paste design
 
 **Date:** 2026-06-16
-**Status:** Design — ready for implementation plan
+**Status:** Implemented (PR #207)
 **Area:** `AnglesiteApp` (token prompt UI, `DeployModel`), `AnglesiteCore` (new token verifier)
 
 ## Problem

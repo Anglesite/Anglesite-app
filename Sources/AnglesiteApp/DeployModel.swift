@@ -133,6 +133,14 @@ final class DeployModel {
             // deploy drawer.
             tokenVerification = .connected(accountName: account.name)
             try? await Task.sleep(for: .milliseconds(700))
+            // The user can hit Cancel (or the view can be torn down) during the verify/sleep
+            // suspensions above. `cancelTokenPrompt()` clears `pendingDeploy`/`tokenPromptPresented`,
+            // and a torn-down view cancels this Task — in either case, don't launch a deploy behind
+            // their back. `try?` on the sleep swallows `CancellationError`, so check the Task too.
+            guard !Task.isCancelled, tokenPromptPresented else {
+                tokenVerification = .idle
+                return
+            }
             pendingDeploy = nil
             tokenPromptPresented = false
             tokenVerification = .idle

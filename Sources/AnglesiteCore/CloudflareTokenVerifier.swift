@@ -123,7 +123,9 @@ public struct WranglerTokenVerifier: TokenVerifying {
     /// network-level failures; anything else is treated as a rejected token.
     static func classifyFailure(stdout: String, stderr: String) -> TokenVerifyError {
         let combined = (stdout + "\n" + stderr).lowercased()
-        let networkMarkers = ["getaddrinfo", "enotfound", "econnrefused", "etimedout", "network", "fetch failed", "socket hang up"]
+        // Specific connectivity signatures only — the bare word "network" appears in auth/config
+        // errors too, and misclassifying those shows the wrong "check your connection" copy.
+        let networkMarkers = ["getaddrinfo", "enotfound", "econnrefused", "etimedout", "fetch failed", "socket hang up"]
         if networkMarkers.contains(where: combined.contains) {
             return .network
         }

@@ -75,6 +75,17 @@ struct CloudflareTokenVerifierTests {
         #expect(err == .network)
     }
 
+    @Test("An error merely mentioning 'network' is not misclassified as a connectivity failure")
+    func ambiguousNetworkWordIsNotNetworkFailure() {
+        // The bare word "network" appears in auth/config errors that aren't connectivity failures;
+        // those must fall through to the safer .invalidToken default, not show "check your connection".
+        let err = WranglerTokenVerifier.classifyFailure(
+            stdout: "",
+            stderr: "Authentication error [code: 10000]: your Workers network configuration is invalid"
+        )
+        #expect(err == .invalidToken)
+    }
+
     // MARK: user-facing copy
 
     @Test("Invalid-token error names the Edit Cloudflare Workers template")
