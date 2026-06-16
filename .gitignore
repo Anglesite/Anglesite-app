@@ -70,3 +70,6 @@ Resources/Anglesite.help/**/*.helpindex
 .claude/
 
 .superpowers/
+
+# Playwright MCP browser-session artifacts
+.playwright-mcp/
