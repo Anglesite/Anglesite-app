@@ -101,6 +101,27 @@ targets:
         product: AnglesiteIntents
       - package: Sparkle
 
+  # Hosted unit tests for the AnglesiteApp target's logic (the SwiftUI models that aren't reachable
+  # from `swift test`, which only sees the SPM library targets). Runs via
+  # `xcodebuild test -scheme Anglesite`. The dependency on the `Anglesite` app makes XcodeGen wire
+  # TEST_HOST/BUNDLE_LOADER, so tests can `@testable import Anglesite`.
+  AnglesiteAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/AnglesiteAppTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.anglesite.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "27.0"
+        SWIFT_VERSION: "5.10"
+        SWIFT_STRICT_CONCURRENCY: complete
+    dependencies:
+      - target: Anglesite
+      - package: Anglesite
+        product: AnglesiteCore
+
   AnglesiteMAS:
     type: application
     platform: macOS
@@ -189,6 +210,10 @@ schemes:
     build:
       targets:
         Anglesite: all
+    test:
+      config: Debug
+      targets:
+        - AnglesiteAppTests
     run:
       config: Debug
     archive:
