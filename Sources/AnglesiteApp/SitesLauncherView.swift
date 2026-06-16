@@ -59,7 +59,7 @@ struct SitesLauncherView: View {
         .task { await onFirstAppear() }
         .onChange(of: router.newSiteRequested) { _, requested in
             guard requested else { return }
-            router.newSiteRequested = false
+            router.clearNewSiteRequest()
             Task { await presentNewSite() }
         }
         .navigationTitle("Sites")
@@ -261,7 +261,8 @@ struct SitesLauncherView: View {
                 await refreshSites()
                 open(site: site)
             } catch {
-                loadError = "Couldn't add the chosen folder: \(error)"
+                // `SiteActions.ImportError.localizedDescription` names the folder and the reason.
+                loadError = error.localizedDescription
             }
         }
     }
@@ -348,7 +349,7 @@ struct SitesLauncherView: View {
         // A File ▸ New Site that opened this launcher set the flag before our `.task` ran;
         // `.onChange` won't fire for that initial value, so consume it here.
         if router.newSiteRequested {
-            router.newSiteRequested = false
+            router.clearNewSiteRequest()
             deciding = false
             await presentNewSite()
             return

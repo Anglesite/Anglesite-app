@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
+@MainActor
 struct AnglesiteApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
@@ -88,7 +89,9 @@ struct AnglesiteApp: App {
         } catch {
             let alert = NSAlert()
             alert.messageText = "Couldn't open that folder"
-            alert.informativeText = "\(error)"
+            // `SiteActions.ImportError.localizedDescription` names the folder and the reason;
+            // other errors fall back to their OS-provided message rather than a raw enum dump.
+            alert.informativeText = error.localizedDescription
             alert.alertStyle = .warning
             alert.runModal()
         }
