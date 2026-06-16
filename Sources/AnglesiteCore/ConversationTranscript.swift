@@ -85,8 +85,11 @@ public struct ConversationTranscript: Equatable, Sendable {
     /// The most recent in-band error (`.failed`) or non-clean backend exit.
     public private(set) var lastError: String?
 
-    /// Index of the in-flight assistant message that streamed events extend. `nil` between turns.
-    private var inFlightAssistantIndex: Int?
+    /// Id of the in-flight assistant message that streamed events extend. `nil` between turns.
+    /// Tracked by id (not array index) so out-of-band mutations during a turn — e.g.
+    /// `resolveAnnotation` calling ``remove(id:)``/``insertByTimestamp(_:)`` on the MainActor while
+    /// the stream loop is suspended — can't shift it onto the wrong row.
+    private var inFlightAssistantID: UUID?
     /// Names the backend in the `.backendExited` error string (e.g. "On-Device", "Claude").
     private let providerName: String
 
@@ -95,28 +98,35 @@ public struct ConversationTranscript: Equatable, Sendable {
     }
 
     /// Begins a turn: appends the user prompt and an empty assistant message (which subsequent
-    /// events extend), and clears any stale error.
-    public mutating func beginTurn(userPrompt: String) {
+    /// events extend), clears any stale error, and returns the appended user message so the caller
+    /// can persist it without relying on its position in ``messages``. Calling this while a turn is
+    /// already in flight simply starts a fresh turn — the previous assistant row is left finalized.
+    @discardableResult
+    public mutating func beginTurn(userPrompt: String) -> ChatMessage {
         lastError = nil
-        messages.append(ChatMessage(role: .user, content: userPrompt))
-        messages.append(ChatMessage(role: .assistant, content: ""))
-        inFlightAssistantIndex = messages.count - 1
+        let userMessage = ChatMessage(role: .user, content: userPrompt)
+        let assistantMessage = ChatMessage(role: .assistant, content: "")
+        messages.append(userMessage)
+        messages.append(assistantMessage)
+        inFlightAssistantID = assistantMessage.id
+        return userMessage
     }
 
     /// Ends the in-flight turn, clearing the in-flight marker. Returns the final assistant message
     /// (so the caller can persist it), or `nil` if no turn was in flight.
     @discardableResult
     public mutating func endTurn() -> ChatMessage? {
-        defer { inFlightAssistantIndex = nil }
-        guard let idx = inFlightAssistantIndex, messages.indices.contains(idx) else { return nil }
-        return messages[idx]
+        defer { inFlightAssistantID = nil }
+        guard let id = inFlightAssistantID else { return nil }
+        return messages.first { $0.id == id }
     }
 
     /// Clears all rows and the in-flight marker for a fresh conversation. Leaves `lastUsage`
-    /// intact (it reflects the last *completed* turn's telemetry, not in-flight state).
+    /// intact (it reflects the last *completed* turn's telemetry, not in-flight state), and leaves
+    /// `lastError` intact so a caller that resets after a failed turn can still inspect the reason.
     public mutating func reset() {
         messages = []
-        inFlightAssistantIndex = nil
+        inFlightAssistantID = nil
     }
 
     /// Appends an out-of-band row (an `.edit` from a successful apply, or an `.annotation`),
@@ -149,7 +159,7 @@ public struct ConversationTranscript: Equatable, Sendable {
     /// Applies one streamed event to the in-flight assistant message. Events that arrive with no
     /// in-flight turn are dropped (mirrors `ChatModel`'s guard — e.g. a late event after `reset`).
     public mutating func apply(_ event: AssistantEvent) {
-        guard let idx = inFlightAssistantIndex, messages.indices.contains(idx) else { return }
+        guard let id = inFlightAssistantID, let idx = messages.firstIndex(where: { $0.id == id }) else { return }
         switch event {
         case .started:
             // Surfaced as data only; no chat chrome.

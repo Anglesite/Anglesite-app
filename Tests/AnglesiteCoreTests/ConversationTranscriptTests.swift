@@ -39,6 +39,27 @@ struct ConversationTranscriptLifecycleTests {
         #expect(t.messages.isEmpty)
     }
 
+    @Test("beginTurn returns the user message it appended")
+    func beginTurnReturnsUserMessage() {
+        var t = ConversationTranscript()
+        let user = t.beginTurn(userPrompt: "hi there")
+        #expect(user.role == .user)
+        #expect(user.content == "hi there")
+        // The returned message is the same one stored in the transcript.
+        #expect(t.messages.contains { $0.id == user.id })
+    }
+
+    @Test("beginTurn while a turn is in flight starts a fresh turn and re-points the in-flight row")
+    func beginTurnWhileInFlightStartsFreshTurn() {
+        var t = ConversationTranscript()
+        t.beginTurn(userPrompt: "first")
+        t.apply(.textDelta("one"))
+        t.beginTurn(userPrompt: "second")
+        t.apply(.textDelta("two"))
+        // The previous assistant row is left finalized; deltas now extend the new assistant row.
+        #expect(t.messages.map(\.content) == ["first", "one", "second", "two"])
+    }
+
     @Test("endTurn returns the in-flight assistant message and clears the in-flight marker")
     func endTurnReturnsAssistantAndClearsInFlight() {
         var t = ConversationTranscript()
@@ -258,6 +279,40 @@ struct ConversationTranscriptAppendTests {
         t.append(ChatMessage(role: .annotation, content: "old", timestamp: base))
         t.insertByTimestamp(ChatMessage(role: .annotation, content: "new", timestamp: base.addingTimeInterval(50)))
         #expect(t.messages.map(\.content) == ["old", "new"])
+    }
+
+    // Regression: `resolveAnnotation` can `remove`/`insertByTimestamp` rows *during* a streaming
+    // turn (it suspends on the MainActor at its `await`, letting the stream loop resume). If the
+    // in-flight assistant row were tracked by array index, these mutations would shift it and send
+    // deltas to the wrong row. The in-flight row is tracked by id, so the turn is unaffected.
+
+    @Test("removing a row before the in-flight assistant keeps deltas on the assistant")
+    func removeBeforeInFlightKeepsDeltasOnAssistant() {
+        var t = ConversationTranscript()
+        let note = ChatMessage(role: .annotation, content: "note", timestamp: Date(timeIntervalSince1970: 1))
+        t.append(note)                  // [note]
+        t.beginTurn(userPrompt: "go")   // [note, user, assistant]
+        t.apply(.textDelta("A"))
+        t.remove(id: note.id)           // [user, assistant] — assistant shifts down by one
+        t.apply(.textDelta("B"))
+        let assistant = t.messages.first { $0.role == .assistant }
+        #expect(assistant?.content == "AB")
+        #expect(t.messages.first?.role == .user)
+    }
+
+    @Test("inserting a row before the in-flight assistant keeps deltas on the assistant")
+    func insertBeforeInFlightKeepsDeltasOnAssistant() {
+        var t = ConversationTranscript()
+        t.beginTurn(userPrompt: "go")   // [user, assistant], both stamped "now"
+        t.apply(.textDelta("A"))
+        // A restored annotation with an older timestamp lands at the front, shifting the assistant.
+        let note = ChatMessage(role: .annotation, content: "note", timestamp: Date(timeIntervalSince1970: 1))
+        t.insertByTimestamp(note)       // [note, user, assistant]
+        t.apply(.textDelta("B"))
+        let assistant = t.messages.first { $0.role == .assistant }
+        #expect(assistant?.content == "AB")
+        // The user row must be untouched (a stale index would have appended "B" here).
+        #expect(t.messages.first { $0.role == .user }?.content == "go")
     }
 }
 

@@ -209,9 +209,9 @@ final class ChatModel {
 
         lastError = nil
         // `beginTurn` appends the user prompt and an empty assistant row (which streamed events
-        // extend) and marks the latter in-flight. The user row is second-to-last; persist it.
-        transcript.beginTurn(userPrompt: trimmed)
-        if messages.count >= 2 { persist(messages[messages.count - 2]) }
+        // extend), marks the latter in-flight, and returns the user row so we persist exactly it.
+        let userMessage = transcript.beginTurn(userPrompt: trimmed)
+        persist(userMessage)
 
         isStreaming = true
         streamTask = Task { @MainActor [weak self] in
