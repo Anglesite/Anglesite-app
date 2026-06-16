@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct AnglesiteApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
+
     /// Live mirror of the site registry for the File ▸ Open Recent submenu. Held as `@State`
     /// so SwiftUI re-evaluates `.commands` when its `sites` change. Started in AppDelegate.
     @State private var recent = RecentSitesModel.shared

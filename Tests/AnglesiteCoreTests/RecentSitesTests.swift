@@ -55,7 +55,14 @@ struct RecentSitesTests {
     func fewerThanLimit() {
         let base = Date(timeIntervalSince1970: 1_000_000)
         let input = [site("a", lastSeen: base), site("b", lastSeen: base.addingTimeInterval(1))]
-        #expect(RecentSites.select(from: input, limit: 10).count == 2)
+        #expect(RecentSites.select(from: input, limit: 10).map(\.name) == ["b", "a"])
+    }
+
+    @Test("limit of 0 returns empty regardless of input")
+    func limitZero() {
+        let base = Date(timeIntervalSince1970: 1_000_000)
+        let input = [site("a", lastSeen: base), site("b", lastSeen: base.addingTimeInterval(1))]
+        #expect(RecentSites.select(from: input, limit: 0).isEmpty)
     }
 
     @Test("includes invalid sites (the menu disables them, it does not hide them)")

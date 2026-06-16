@@ -25,9 +25,12 @@ final class RecentSitesModel {
         started = true
         Task {
             // Populate from disk + scan first so the menu is correct before any mutation.
-            try? await SiteStore.shared.load()
-            if let scanned = try? await SiteStore.shared.refresh() {
+            do {
+                try await SiteStore.shared.load()
+                let scanned = try await SiteStore.shared.refresh()
                 sites = RecentSites.select(from: scanned)
+            } catch {
+                await LogCenter.shared.append(source: "recent-sites", stream: .stderr, text: "initial load failed: \(error)")
             }
             // Then track every mutation. `changeStream()` also re-emits the current snapshot
             // on subscribe, which simply reaffirms what we just set.

@@ -21,6 +21,10 @@ struct SitesLauncherView: View {
     @State private var sites: [SiteStore.Site] = []
     @State private var loadError: String?
     @State private var deciding = true
+    /// Guards `presentNewSite()` against a double-trigger while it is preparing (it `await`s
+    /// before `newSiteSession` is set, so two near-simultaneous callers could both pass a
+    /// `newSiteSession == nil` check). Reset via `defer` on every exit path.
+    @State private var preparingNewSite = false
     /// The site awaiting a remove confirmation, or nil when no prompt is up. Drives the
     /// `.confirmationDialog`; SwiftUI clears it (via the `isPresented` binding) when any dialog
     /// button is tapped.
@@ -264,7 +268,9 @@ struct SitesLauncherView: View {
 
     @MainActor
     private func presentNewSite() async {
-        guard !showingNewSite else { return }
+        guard newSiteSession == nil, !preparingNewSite else { return }
+        preparingNewSite = true
+        defer { preparingNewSite = false }
         let resolution = PluginRuntime.resolve()
         guard let pluginURL = resolution.url else {
             loadError = "Plugin not found — can't create a site. Reinstall the app."
