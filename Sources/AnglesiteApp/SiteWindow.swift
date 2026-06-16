@@ -128,6 +128,98 @@ struct SiteWindow: View {
         .animation(.easeInOut(duration: 0.18), value: deploy.drawerPresented)
         .animation(.easeInOut(duration: 0.18), value: backup.drawerPresented)
         .navigationTitle(site.name)
+        .navigationSubtitle(preview.readyURL?.absoluteString ?? "")
+        .toolbar {
+            // Backup — lowest priority, first to collapse into the native overflow chevron.
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    backup.backup(siteID: site.id, siteDirectory: site.path)
+                } label: {
+                    Label("Backup", systemImage: "externaldrive.fill.badge.icloud")
+                }
+                .disabled(backup.isRunning || audit.isRunning || deploy.isRunning || !site.isValid)
+                .help(site.isValid
+                      ? "Commit and push working-tree changes to your current branch"
+                      : "Site is missing required files")
+            }
+            .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
+
+            // Audit — low priority, collapses before Chat.
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    audit.audit(siteID: site.id, siteDirectory: site.path)
+                } label: {
+                    if audit.isRunning {
+                        Label("Auditing…", systemImage: "magnifyingglass")
+                    } else {
+                        Label("Audit", systemImage: "checkmark.shield.fill")
+                    }
+                }
+                .disabled(audit.isRunning || backup.isRunning || deploy.isRunning || !site.isValid)
+                .help(site.isValid
+                      ? "Run the structured accessibility audit against this site"
+                      : "Site is missing required files")
+            }
+            .visibilityPriority(.low)
+
+            // Chat — default priority, kept above Audit/Backup. Preserves ⌘K.
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    chatPresented.toggle()
+                } label: {
+                    Label("Chat", systemImage: chatPresented
+                        ? "bubble.left.and.bubble.right.fill"
+                        : "bubble.left.and.bubble.right")
+                }
+                .help(chatPresented ? "Hide chat panel" : "Show chat panel")
+                .keyboardShortcut("k", modifiers: [.command])
+            }
+            // .visibilityPriority(.automatic) is the default — left implicit.
+
+            // Open in browser — default priority, only when the dev server is ready.
+            ToolbarItem(placement: .primaryAction) {
+                if let url = preview.readyURL {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Label("Open in browser", systemImage: "arrow.up.forward.app")
+                    }
+                    .help("Open the live preview in your default browser")
+                }
+            }
+            // .visibilityPriority(.automatic) is the default — left implicit.
+
+            // Health badge — high priority, stays visible.
+            ToolbarItem(placement: .primaryAction) {
+                HealthBadgeView(
+                    model: health,
+                    onRecheck: { health.recheck(siteID: site.id, siteDirectory: site.path) },
+                    onAskClaude: {
+                        #if !ANGLESITE_MAS
+                        chatPresented = true
+                        chat?.send("/anglesite:check")
+                        #endif
+                    }
+                )
+            }
+            .visibilityPriority(.high)
+
+            // Deploy — primary action, highest priority so it is the last to collapse.
+            // Declared LAST so it renders at the trailing edge (macOS primary-action position).
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    deploy.deploy(siteID: site.id, siteDirectory: site.path)
+                } label: {
+                    Label("Deploy", systemImage: "paperplane.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(deploy.isRunning || backup.isRunning || audit.isRunning || !site.isValid)
+                .help(site.isValid
+                      ? "Build, scan, and run wrangler deploy on this site"
+                      : "Site is missing required files")
+            }
+            .visibilityPriority(.high)
+        }
         .sheet(isPresented: $deploy.blockedPresented) {
             if case .blocked(let failures, let warnings) = deploy.phase {
                 BlockedDeploySheetView(failures: failures, warnings: warnings) {
@@ -152,87 +244,7 @@ struct SiteWindow: View {
 
     @ViewBuilder
     private func mainPane(for site: SiteStore.Site) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(site.name).font(.headline)
-                if let url = preview.readyURL {
-                    Text(url.absoluteString)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Open in browser") { NSWorkspace.shared.open(url) }
-                        .controlSize(.small)
-                } else {
-                    Spacer()
-                }
-                HealthBadgeView(
-                    model: health,
-                    onRecheck: { health.recheck(siteID: site.id, siteDirectory: site.path) },
-                    onAskClaude: {
-                        #if !ANGLESITE_MAS
-                        chatPresented = true
-                        chat?.send("/anglesite:check")
-                        #endif
-                    }
-                )
-
-                Button {
-                    chatPresented.toggle()
-                } label: {
-                    Label("Chat",
-                          systemImage: chatPresented
-                            ? "bubble.left.and.bubble.right.fill"
-                            : "bubble.left.and.bubble.right")
-                }
-                .controlSize(.small)
-                .help(chatPresented ? "Hide chat panel" : "Show chat panel")
-                .keyboardShortcut("k", modifiers: [.command])
-
-                Button {
-                    backup.backup(siteID: site.id, siteDirectory: site.path)
-                } label: {
-                    Label("Backup", systemImage: "externaldrive.fill.badge.icloud")
-                }
-                .controlSize(.small)
-                .buttonStyle(.bordered)
-                .disabled(backup.isRunning || audit.isRunning || deploy.isRunning || !site.isValid)
-                .help(site.isValid
-                      ? "Commit and push working-tree changes to your current branch"
-                      : "Site is missing required files")
-
-                Button {
-                    audit.audit(siteID: site.id, siteDirectory: site.path)
-                } label: {
-                    if audit.isRunning {
-                        Label("Auditing…", systemImage: "magnifyingglass")
-                    } else {
-                        Label("Audit", systemImage: "checkmark.shield.fill")
-                    }
-                }
-                .controlSize(.small)
-                .buttonStyle(.bordered)
-                .disabled(audit.isRunning || backup.isRunning || deploy.isRunning || !site.isValid)
-                .help(site.isValid
-                      ? "Run the structured accessibility audit against this site"
-                      : "Site is missing required files")
-
-                Button {
-                    deploy.deploy(siteID: site.id, siteDirectory: site.path)
-                } label: {
-                    Label("Deploy", systemImage: "paperplane.fill")
-                }
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
-                .disabled(deploy.isRunning || backup.isRunning || audit.isRunning || !site.isValid)
-                .help(site.isValid
-                      ? "Build, scan, and run wrangler deploy on this site"
-                      : "Site is missing required files")
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            Divider()
-
-            switch preview.state {
+        switch preview.state {
             case .ready(_, let url):
                 PreviewView(url: url, router: preview.editRouter, annotationProvider: annotationProvider)
             case .starting:
@@ -254,7 +266,6 @@ struct SiteWindow: View {
             case .idle:
                 centeredStatus { ProgressView() }
             }
-        }
     }
 
     private func centeredStatus<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
