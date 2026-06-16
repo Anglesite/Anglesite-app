@@ -52,16 +52,18 @@ starting / failed / idle) with no header `HStack` and no leading `Divider`.
 
 | Item | Treatment | Rationale |
 |---|---|---|
-| **Deploy** | `topBarPinnedTrailing` + highest `visibilityPriority` | Load-bearing; never collapses |
-| **Health badge** | high `visibilityPriority` | Deploy-readiness must stay visible |
-| **Open in browser** | medium `visibilityPriority`, only when `readyURL != nil` | Useful, not critical |
-| **Chat** (⌘K) | lower priority | Toggled often → kept above Audit/Backup |
-| **Audit** | lower priority | Collapses before Chat |
-| **Backup** | lowest priority | First to collapse |
+| **Deploy** | `.primaryAction` + `.visibilityPriority(.high)` | Load-bearing; collapses last |
+| **Health badge** | `.visibilityPriority(.high)` | Deploy-readiness must stay visible |
+| **Open in browser** | `.automatic` (default), only when `readyURL != nil` | Useful, not critical |
+| **Chat** (⌘K) | `.automatic` (default) | Toggled often → kept above Audit/Backup |
+| **Audit** | `.low` | Collapses before Chat |
+| **Backup** | `ToolbarItemVisibilityPriority(lowerThan: .low)` | First to collapse |
 
 Collapse order as the window narrows (least critical first):
-**Backup → Audit → Chat → Open in browser**, all routed into the system overflow
-menu via `toolbarOverflowMenu`. Deploy and the health badge remain visible.
+**Backup → Audit → Chat → Open in browser**, all dropped into the **native macOS
+toolbar overflow chevron** automatically (there is no `toolbarOverflowMenu` on
+macOS — see API-surface reality below). Deploy and the health badge remain
+visible.
 
 ### Carried-over behavior (unchanged)
 
@@ -77,19 +79,33 @@ menu via `toolbarOverflowMenu`. Deploy and the health badge remain visible.
 - Deploy/Backup drawers, the deploy blocked/token sheets, and the audit sheet —
   all attached to the site UI, unaffected.
 
-## API-surface risk & fallback
+## API-surface reality (verified against the macOS 27.0 SDK)
 
-The macOS 27 toolbar APIs post-date this design's knowledge baseline, so exact
-signatures are **not** hardcoded blind. The implementation plan's first step
-confirms the precise spellings against the Xcode 27 SDK — e.g. whether it is
-`ToolbarItem(...).visibilityPriority(_:)`, and the exact placement/form of
-`toolbarOverflowMenu` and `topBarPinnedTrailing`.
+A compile-checked spike against the Xcode 27.0 / macOS 27.0 SDK established that
+**two of the three issue-named APIs are iOS/visionOS-only** and do not exist on
+macOS:
 
-If a named API does not exist as the issue describes, the documented fallback is:
-native `.toolbar` + `visibilityPriority` (and/or `ToolbarSpacer`) with SwiftUI's
-default overflow behavior, and the gap is flagged in the PR rather than worked
-around silently. No `if #available` guards are needed — the deployment target is
-macOS 27.0 across both targets (`Package.swift`, `project.yml`).
+| Issue named API | macOS reality |
+|---|---|
+| `visibilityPriority` | ✅ Exists. `.visibilityPriority(_ priority: ToolbarItemVisibilityPriority)` on `ToolbarContent` (the `ToolbarItem`, not the inner `Button`). Constants `.high` / `.automatic` (default) / `.low`, plus relative `init(lowerThan:)` / `init(higherThan:)`. Higher priority = collapses **last**. |
+| `toolbarOverflowMenu` | ❌ `@available(macOS, unavailable)`. macOS toolbars overflow **automatically** via the native NSToolbar chevron — there is no SwiftUI knob and none is needed. `visibilityPriority` is the lever that orders which items the native overflow drops first. |
+| `topBarPinnedTrailing` | ❌ `@available(macOS, unavailable)`. macOS equivalent for the primary pinned action is `.primaryAction` placement + `.visibilityPriority(.high)`. (A true un-removable pin would additionally need `.defaultCustomization(.visible, .alwaysAvailable)` inside a customizable `.toolbar(id:)` — explicitly out of scope, see Decision below.) |
+
+So the issue's *goal* is fully achievable on macOS — Deploy stays put, secondary
+actions collapse into the system overflow — but it is expressed through
+`visibilityPriority` + `.primaryAction` + the platform's automatic overflow, not
+the two iOS-only symbols. The PR must state this so the issue's acceptance
+criteria are read against the macOS-native mechanism. No `if #available` guards
+are needed — the deployment target is macOS 27.0 on both targets
+(`Package.swift`, `project.yml`).
+
+### Decision: non-customizable `.toolbar { }`
+
+Use a plain `.toolbar { }`, not a customizable `.toolbar(id:)`. Deploy is pinned
+via `.primaryAction` + `.visibilityPriority(.high)`; the native chevron handles
+overflow. This meets the issue's goal with the least surface area and adds no
+user-facing "Customize Toolbar" affordance (which `.toolbar(id:)` +
+`defaultCustomization` would introduce — beyond this issue's scope).
 
 ## MAS parity
 
