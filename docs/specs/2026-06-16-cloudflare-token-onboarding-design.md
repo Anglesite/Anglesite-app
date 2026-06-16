@@ -116,10 +116,12 @@ The encoded URL is built once as a Swift constant (single source of truth, easy 
 permission JSON and `name` live as readable literals that are URL-encoded at build time, not
 hand-encoded.
 
-> **Implementation gate:** because the format is undocumented, the plan MUST include a manual
-> verification step — open the candidate URL against a real Cloudflare login and confirm the five
-> permission rows pre-check and the name pre-fills — before this ships. It cannot be verified
-> headlessly (the form renders behind dashboard auth).
+> **Implementation gate — SATISFIED (2026-06-16):** because the format is undocumented, it was
+> verified manually against a real Cloudflare login. The Create Token form pre-fills all five
+> permission rows (Workers Routes/Scripts/KV/Tail/R2), the name "Anglesite Deploy", and
+> Include-all-accounts / Include-all-zones. (It can't be verified headlessly — the form renders
+> behind dashboard auth.) Note: the query string must be passed intact; line breaks introduced by
+> copy/paste corrupt `permissionGroupKeys` and silently drop the whole permission list.
 
 ### 3. Live verification via `wrangler whoami`
 

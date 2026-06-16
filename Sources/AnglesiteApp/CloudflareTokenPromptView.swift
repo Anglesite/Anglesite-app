@@ -25,8 +25,9 @@ struct CloudflareTokenPromptView: View {
 
     /// Cloudflare's dashboard accepts undocumented query params that pre-fill the token-creation
     /// form. These five permission groups reproduce the built-in "Edit Cloudflare Workers" template
-    /// — everything a Workers + Static Assets `wrangler deploy` needs. If Cloudflare ever changes
-    /// the param schema, the link still lands on the token page and the on-screen steps name the
+    /// — everything a Workers + Static Assets `wrangler deploy` needs. Verified against the live
+    /// dashboard on 2026-06-16: all five rows + the name pre-fill. If Cloudflare ever changes the
+    /// param schema, the link still lands on the token page and the on-screen steps name the
     /// template to pick by hand, so the flow degrades rather than breaks.
     private static let createTokenURL: URL = {
         let permissions = """
