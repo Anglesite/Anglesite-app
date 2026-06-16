@@ -22,6 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await AnglesiteIntents.bootstrap(contentGraph: contentGraph)
         }
 
+        // Begin mirroring the site registry so the File ▸ Open Recent submenu is populated
+        // and stays current. Idempotent; safe on the main actor.
+        Task { @MainActor in RecentSitesModel.shared.start() }
+
         // Extract the bundled npm cache into Application Support so the first site `npm install`
         // is offline-fast. No-op when nothing's bundled or it's already current; logged either way.
         Task {
@@ -47,6 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct AnglesiteApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
+    /// Live mirror of the site registry for the File ▸ Open Recent submenu. Held as `@State`
+    /// so SwiftUI re-evaluates `.commands` when its `sites` change. Started in AppDelegate.
+    @State private var recent = RecentSitesModel.shared
     #if !ANGLESITE_MAS
     /// Sparkle updater, held for the app's lifetime so its automatic-check timer keeps firing.
     /// MAS builds update through the App Store and have no Sparkle dependency (Phase 10.1).
@@ -71,6 +78,21 @@ struct AnglesiteApp: App {
         )
     }
 
+    /// File ▸ Open Site… — window-independent, so it runs from any focused window.
+    @MainActor
+    private func openSiteFromMenu() async {
+        do {
+            guard let site = try await SiteActions.pickAndRegisterSite() else { return }
+            openWindow(value: site.id)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't open that folder"
+            alert.informativeText = "\(error)"
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+    }
+
     var body: some Scene {
         // The launcher is the first scene so it's the default window at launch (used when
         // SwiftUI has nothing to restore). It autoopens the most-recently-used site from its
@@ -80,6 +102,29 @@ struct AnglesiteApp: App {
         }
         .windowResizability(.contentSize)
         .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Site") {
+                    // Ensure the launcher exists to host the wizard sheet, then ask it to open.
+                    openWindow(id: "sites")
+                    WindowRouter.shared.requestNewSite()
+                }
+                .keyboardShortcut("n")
+
+                Button("Open Site…") {
+                    Task { await openSiteFromMenu() }
+                }
+                .keyboardShortcut("o")
+
+                Menu("Open Recent") {
+                    ForEach(recent.sites) { site in
+                        Button(site.name) { openWindow(value: site.id) }
+                            .disabled(!site.isValid)
+                    }
+                    if recent.sites.isEmpty {
+                        Button("No Recent Sites") {}.disabled(true)
+                    }
+                }
+            }
             // "Check for Updates…" lives in the standard slot Mac users expect — directly
             // under "About Anglesite" in the application menu. `CommandGroup(after: .appInfo)`
             // puts it there.
