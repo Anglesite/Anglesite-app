@@ -13,4 +13,11 @@ public final class WindowRouter {
     public var requested: String?
 
     public func requestOpen(siteID: String) { requested = siteID }
+
+    /// Set true by File ▸ New Site (which can't host the wizard sheet itself). The "Sites"
+    /// launcher observes this, runs `presentNewSite()`, then clears the flag. Mirrors
+    /// `requested`/`requestOpen` for the open-existing path.
+    public var newSiteRequested = false
+
+    public func requestNewSite() { newSiteRequested = true }
 }
