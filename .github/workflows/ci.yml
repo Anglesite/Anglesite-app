@@ -90,6 +90,68 @@ jobs:
       - name: Build (release)
         run: swift build -c release
 
+  app-tests:
+    name: App-target hosted tests (AnglesiteAppTests)
+    runs-on: macos-15
+    timeout-minutes: 25
+    # The AnglesiteApp target's MainActor models (e.g. DeployModel) aren't reachable from
+    # `swift test` — only the SPM libraries are. These run as hosted unit tests in Anglesite.app
+    # via `xcodebuild test`, which means doing the full Xcode app build (vendor Node, copy plugin,
+    # build overlay, Help index). Skip the ~264MB primed npm cache (#6) — the tests stub the deploy
+    # command and never run real npm.
+    env:
+      ANGLESITE_BUILD_NPM_CACHE: '0'
+    steps:
+      - uses: actions/checkout@v4
+
+      # copy-plugin.sh bundles the sibling plugin into Resources/plugin (a build resource), so the
+      # app build needs it present. Point ANGLESITE_PLUGIN_SRC at the checkout below.
+      - name: Checkout sibling Anglesite plugin
+        uses: actions/checkout@v4
+        with:
+          repository: Anglesite/anglesite
+          path: anglesite-plugin
+
+      - name: Set up Node (for copy-plugin's npm install and the overlay build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Select latest available Xcode
+        # Same toolchain rationale as build-test: CLAUDE.md mandates Xcode 27+.
+        run: |
+          set -euo pipefail
+          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          echo "Selecting: $LATEST"
+          sudo xcode-select -s "$LATEST"
+
+      - name: Install XcodeGen
+        # Anglesite.xcodeproj is generated (gitignored); the git hooks that regenerate it locally
+        # don't run on a CI checkout, so generate it explicitly.
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Show toolchain versions
+        run: |
+          xcodebuild -version
+          node --version
+          xcodegen --version
+
+      - name: Run hosted app tests
+        # The hosted tests launch Anglesite.app as the test host; GitHub macOS runners provide the
+        # GUI session this needs. ANGLESITE_PLUGIN_SRC feeds copy-plugin.sh the sibling checkout.
+        env:
+          ANGLESITE_PLUGIN_SRC: ${{ github.workspace }}/anglesite-plugin
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project Anglesite.xcodeproj \
+            -scheme Anglesite \
+            -configuration Debug \
+            -destination 'platform=macOS'
+
   relay-tsan:
     name: Relay concurrency suites (ThreadSanitizer)
     runs-on: macos-15
