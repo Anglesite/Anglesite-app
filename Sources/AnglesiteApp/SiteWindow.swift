@@ -177,8 +177,8 @@ struct SiteWindow: View {
             // .visibilityPriority(.automatic) is the default — left implicit.
 
             // Open in browser — default priority, only when the dev server is ready.
-            ToolbarItem(placement: .primaryAction) {
-                if let url = preview.readyURL {
+            if let url = preview.readyURL {
+                ToolbarItem(placement: .primaryAction) {
                     Button {
                         NSWorkspace.shared.open(url)
                     } label: {
