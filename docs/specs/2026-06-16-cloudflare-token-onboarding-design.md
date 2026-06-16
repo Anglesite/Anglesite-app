@@ -194,15 +194,23 @@ Deploy click
 
 ## Testing
 
-- **Parser unit tests** (`AnglesiteCoreTests`): account-name extraction from captured
-  `wrangler whoami` stdout fixtures, including the no-name-but-exit-0 fallback.
-- **Error-mapping unit tests:** each `VerifyError` → expected copy.
-- **`DeployModel` tests** with a stubbed `TokenVerifying`:
-  - failure keeps `tokenPromptPresented == true` and writes nothing to the Keychain;
-  - success writes the token and dispatches the parked deploy (assert the retry path runs).
-- **Build verification:** `swift test` plus an `xcodebuild` of the `Anglesite` scheme (per repo
-  practice that `swift test` alone doesn't prove the `.app` links). The MAS target builds clean as
-  well since no new entitlement is introduced.
+The verification logic lives in `AnglesiteCore` (a real test target) precisely so it can be
+unit-tested; `DeployModel` and the view live in the `AnglesiteApp` Xcode target, which is **not** a
+SwiftPM test target, so their thin glue is covered by the build rather than `swift test`.
+
+- **Parser unit tests** (`AnglesiteCoreTests/CloudflareTokenVerifierTests`): account-name and email
+  extraction from captured `wrangler whoami` stdout fixtures (with and without an email line),
+  including the no-table → `nil` case so a zero-exit run still verifies.
+- **Failure-classification tests:** auth output → `.invalidToken`, DNS/connection output →
+  `.network`.
+- **Error-copy tests:** `.invalidToken` names the "Edit Cloudflare Workers" template; `.network`
+  mentions the connection.
+- **Verify-orchestration tests** with an injected runner (no Node spawned): zero-exit → parsed
+  account; zero-exit-but-unparsable → success with `nil` name; non-zero auth → `.invalidToken`;
+  thrown runner → `.unavailable`.
+- **Build verification:** `swift test` (Core) plus `xcodebuild` of both the `Anglesite` and
+  `AnglesiteMAS` schemes — the MAS target builds clean since no new entitlement is introduced
+  (verification reuses the existing supervised wrangler spawn).
 
 ## Risks & mitigations
 
@@ -219,7 +227,7 @@ Deploy click
 - `Sources/AnglesiteApp/DeployModel.swift` — async verify-then-persist; verification state; verifier
   injection.
 - `Sources/AnglesiteCore/CloudflareTokenVerifier.swift` *(new)* — `TokenVerifying` protocol,
-  wrangler-backed impl, pure stdout parser, `CloudflareAccount`, `VerifyError`.
+  `WranglerTokenVerifier` impl, pure stdout parser, `CloudflareAccount`, `TokenVerifyError`.
 - `Sources/AnglesiteApp/SiteWindow.swift` — only if the sheet wiring needs the new state (likely
   unchanged; binding stays `$deploy.tokenPromptPresented`).
 - Tests under `AnglesiteCoreTests` (parser, error mapping) and the `DeployModel` suite.
