@@ -295,6 +295,77 @@ final class SiteStoreTests {
         #expect(count == 1, "the post-clear remove must not emit")
     }
 
+    // MARK: - Change stream broadcast (#188)
+
+    @Test("Change stream yields the current snapshot on subscribe")
+    func changeStreamYieldsCurrentSnapshotOnSubscribe() async throws {
+        _ = try makeValidSite(named: "alpha")
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        try await store.refresh()
+
+        var iterator = store.changeStream().makeAsyncIterator()
+        let first = await iterator.next()
+        #expect(first?.map(\.name) == ["alpha"])
+    }
+
+    @Test("Change stream delivers a post-remove snapshot without the removed id")
+    func changeStreamDeliversRemoval() async throws {
+        _ = try makeValidSite(named: "alpha")
+        _ = try makeValidSite(named: "bravo")
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        try await store.refresh()
+        let alphaID = try #require(await store.sites.first { $0.name == "alpha" }).id
+
+        var iterator = store.changeStream().makeAsyncIterator()
+        _ = await iterator.next() // drain the subscribe-time snapshot ([alpha, bravo])
+
+        try await store.remove(id: alphaID)
+
+        let afterRemove = await iterator.next()
+        #expect(afterRemove?.contains { $0.id == alphaID } == false)
+        #expect(afterRemove?.map(\.name) == ["bravo"])
+    }
+
+    @Test("Change stream fans out to multiple subscribers")
+    func changeStreamFansOutToMultipleSubscribers() async throws {
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        var iterA = store.changeStream().makeAsyncIterator()
+        var iterB = store.changeStream().makeAsyncIterator()
+        _ = await iterA.next() // subscribe-time snapshot ([] on a fresh store)
+        _ = await iterB.next()
+
+        let dir = try makeValidSite(named: "alpha")
+        _ = try await store.add(dir)
+
+        let a = await iterA.next()
+        let b = await iterB.next()
+        #expect(a?.map(\.name) == ["alpha"])
+        #expect(b?.map(\.name) == ["alpha"])
+    }
+
+    @Test("A cancelled subscriber does not break a surviving one")
+    func changeStreamSurvivesSubscriberCancellation() async throws {
+        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+
+        // Subscriber 1 iterates in a task we'll cancel — its stream then terminates and its
+        // continuation is pruned via onTermination.
+        let task1 = Task {
+            for await _ in store.changeStream() { /* drain until cancelled */ }
+        }
+        // Subscriber 2 persists for the whole test.
+        var iter2 = store.changeStream().makeAsyncIterator()
+        _ = await iter2.next() // subscribe-time snapshot ([])
+
+        task1.cancel()
+        _ = await task1.value // let cancellation + onTermination settle
+
+        let dir = try makeValidSite(named: "alpha")
+        _ = try await store.add(dir)
+
+        let survivor = await iter2.next()
+        #expect(survivor?.map(\.name) == ["alpha"], "emitChange must still deliver after another subscriber is gone")
+    }
+
     // MARK: - Sandbox bookmark retention (#184)
 
     /// Simulates the macOS App Sandbox before a per-site security scope is active: any

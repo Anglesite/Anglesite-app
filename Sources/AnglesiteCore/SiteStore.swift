@@ -64,6 +64,12 @@ public actor SiteStore {
     private(set) public var sites: [Site] = []
     private var changeHandler: ChangeHandler?
 
+    /// Continuations for the UI-observer broadcast, keyed by a per-subscription `UUID`. Distinct
+    /// from `changeHandler`: that single closure is the indexer's awaited post-mutation hook, while
+    /// these are fire-and-forget snapshot feeds that SwiftUI windows consume to notice their site
+    /// being removed (#188). Pruned in `removeContinuation(_:)` via the stream's `onTermination`.
+    private var changeStreamContinuations: [UUID: AsyncStream<[Site]>.Continuation] = [:]
+
     /// - Parameters:
     ///   - settings: settings store consulted for `sitesRoot`.
     ///   - persistenceURL: where to read/write `sites.json`. Defaults to
@@ -219,9 +225,47 @@ public actor SiteStore {
 
     // MARK: - Change notification
 
+    /// Vends a per-subscriber broadcast of the site list. Every call registers a fresh
+    /// continuation; the stream yields the current `sites` snapshot once on subscribe (so a
+    /// subscriber isn't blind until the next mutation, and a removal that races subscription is
+    /// caught immediately), then a new snapshot after every `emitChange()`. The continuation is
+    /// pruned when the stream terminates (consumer task cancelled, iterator dropped, or store gone).
+    ///
+    /// `nonisolated` so a caller can subscribe synchronously (e.g. `for await … in store.changeStream()`
+    /// or chaining `.makeAsyncIterator()`); the actor-state touch is deferred onto the actor via the
+    /// `register` hop. A subscriber only observes the snapshot through `next()`, which suspends until
+    /// `register` has yielded — so registration happens-before any mutation the subscriber can see.
+    public nonisolated func changeStream() -> AsyncStream<[Site]> {
+        let id = UUID()
+        return AsyncStream { continuation in
+            // Builder runs off-actor; hop onto the actor to register + emit the subscribe-time snapshot.
+            Task { await self.register(continuation, id: id) }
+            continuation.onTermination = { [weak self] _ in
+                // onTermination runs off-actor at an arbitrary time; hop back to prune.
+                Task { await self?.removeContinuation(id) }
+            }
+        }
+    }
+
+    private func register(_ continuation: AsyncStream<[Site]>.Continuation, id: UUID) {
+        changeStreamContinuations[id] = continuation
+        continuation.yield(sites)
+    }
+
+    private func removeContinuation(_ id: UUID) {
+        changeStreamContinuations[id] = nil
+    }
+
     private func emitChange() async {
-        guard let handler = changeHandler else { return }
-        await handler(sites)
+        // The indexer's awaited hook keeps its original semantics: when set, it completes as part
+        // of the mutation. The broadcast is additive — UI observers get a fire-and-forget snapshot
+        // even when no `changeHandler` is installed.
+        if let handler = changeHandler {
+            await handler(sites)
+        }
+        for continuation in changeStreamContinuations.values {
+            continuation.yield(sites)
+        }
     }
 
     // MARK: - Persistence
