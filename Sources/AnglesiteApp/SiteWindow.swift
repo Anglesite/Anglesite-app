@@ -65,6 +65,7 @@ struct SiteWindow: View {
             }
         }
         .task(id: siteID) { await loadAndStart() }
+        .task(id: site?.id) { await observeRemoval() }
         .onDisappear {
             preview.close()
             // Unregister the annotation provider from the shared registry so
@@ -269,6 +270,23 @@ struct SiteWindow: View {
     /// always visible — mirroring `AnglesiteIntents.bootstrap`.
     private func makeEditBridge() -> IntentEditBridge {
         IntentEditBridge(routerProvider: { id in await EditRouterRegistry.shared.router(for: id) })
+    }
+
+    /// Auto-close this window when its site leaves the registry (#188). Subscribes to the store's
+    /// broadcast only after `site` is resolved; on the first snapshot that no longer contains this
+    /// site's id — an explicit `remove(id:)` from the launcher, or a `refresh()` that prunes a stale
+    /// entry — dismisses the window. `dismissWindow()` triggers `onDisappear`, which stops the
+    /// dev-server/MCP subprocess and releases the MAS security-scoped grant, so no teardown is
+    /// duplicated here. The `for await` loop is cancelled when the window tears down or `site`
+    /// changes, which terminates the stream and prunes the store-side continuation.
+    private func observeRemoval() async {
+        guard let resolvedID = site?.id else { return }
+        for await snapshot in SiteStore.shared.changeStream() {
+            if !snapshot.contains(where: { $0.id == resolvedID }) {
+                dismissWindow()
+                return
+            }
+        }
     }
 
     private func loadAndStart() async {
