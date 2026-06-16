@@ -34,6 +34,17 @@ final class DeployModel {
     /// Keychain; cleared when the user saves a token (which then retries the deploy) or cancels.
     var tokenPromptPresented: Bool = false
 
+    /// Progress of verifying a pasted token, consumed by `CloudflareTokenPromptView`'s status line
+    /// and button-enabled logic. A token is only written to the Keychain once verification reaches
+    /// `.connected`; a `.failed` state keeps the sheet open and leaves the Keychain untouched.
+    enum TokenVerification: Equatable {
+        case idle
+        case checking
+        case connected(accountName: String?)
+        case failed(message: String)
+    }
+    private(set) var tokenVerification: TokenVerification = .idle
+
     /// Fires every time the deploy pipeline's preflight step resolves, with the
     /// `PreDeployCheck.Outcome` that was used to decide whether to continue.
     /// `SiteWindow` wires this to `HealthModel.ingestDeployOutcome` so the health
@@ -44,6 +55,7 @@ final class DeployModel {
     private let command: DeployCommand
     private let logCenter: LogCenter
     private let keychain: KeychainStore
+    private let onboarding: TokenOnboarding
     private var inFlight: Task<Void, Never>?
     /// Site to retry once the user pastes a token. `nil` outside the prompt flow.
     private var pendingDeploy: (siteID: String, siteDirectory: URL)?
@@ -51,11 +63,13 @@ final class DeployModel {
     init(
         command: DeployCommand = DeployCommand(),
         logCenter: LogCenter = .shared,
-        keychain: KeychainStore = KeychainStore()
+        keychain: KeychainStore = KeychainStore(),
+        verifier: TokenVerifying = WranglerTokenVerifier()
     ) {
         self.command = command
         self.logCenter = logCenter
         self.keychain = keychain
+        self.onboarding = TokenOnboarding(verifier: verifier)
     }
 
     var isRunning: Bool {
@@ -71,13 +85,14 @@ final class DeployModel {
     /// Kicks off a deploy. No-op if one is already running.
     ///
     /// First checks whether a Cloudflare token is available (env > Keychain). If neither has one,
-    /// the token-prompt sheet is presented and the deploy is parked until the user saves a token
-    /// via `saveTokenAndRetry(_:)` — at which point the parked site is dispatched without the
-    /// user having to click Deploy again.
+    /// the token-prompt sheet is presented and the deploy is parked until the user pastes and
+    /// verifies a token via `verifyAndSaveToken(_:)` — at which point the parked site is dispatched
+    /// without the user having to click Deploy again.
     func deploy(siteID: String, siteDirectory: URL) {
         guard !isRunning else { return }
         if !hasUsableToken() {
             pendingDeploy = (siteID, siteDirectory)
+            tokenVerification = .idle
             tokenPromptPresented = true
             return
         }
@@ -86,29 +101,50 @@ final class DeployModel {
         }
     }
 
-    /// Called by the token-prompt sheet's "Save" button. Persists the token to the Keychain and
-    /// — if a deploy was parked on the prompt — kicks it off. Returns `nil` on success or an
-    /// error message on failure (the sheet stays presented so the user can correct it).
-    @discardableResult
-    func saveTokenAndRetry(_ token: String) -> String? {
-        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "Token is empty." }
-        do {
-            try keychain.writeCloudflareToken(trimmed)
-        } catch {
-            return "Couldn't save to Keychain: \(error)"
+    /// Called by the token-prompt sheet's "Connect & deploy" button. Verifies the token against
+    /// Cloudflare (via `wrangler whoami`) *before* persisting it — so a bad token is caught here
+    /// rather than failing later inside the deploy, and never reaches the Keychain. On success the
+    /// token is stored, the connected account is surfaced briefly, and the parked deploy is
+    /// dispatched. On failure the sheet stays open with a specific message.
+    func verifyAndSaveToken(_ token: String) async {
+        guard let pending = pendingDeploy else {
+            // The prompt is only shown with a parked deploy; guard defensively.
+            tokenVerification = .failed(message: "No deploy is waiting — close this and click Deploy again.")
+            return
         }
-        tokenPromptPresented = false
-        if let pending = pendingDeploy {
+
+        tokenVerification = .checking
+        // `TokenOnboarding` owns the verify → persist → flash → re-check-cancel ordering; this method
+        // just maps its outcome onto observable state and the parked deploy. `isCancelled` covers
+        // both the user hitting Cancel (which clears `tokenPromptPresented` via `cancelTokenPrompt`)
+        // and the view tearing down (which cancels this Task).
+        let outcome = await onboarding.run(
+            token: token,
+            siteDirectory: pending.siteDirectory,
+            persist: { try keychain.writeCloudflareToken($0) },
+            onConnected: { tokenVerification = .connected(accountName: $0.name) },
+            delay: { try? await Task.sleep(for: .milliseconds(700)) },
+            isCancelled: { Task.isCancelled || !tokenPromptPresented }
+        )
+
+        switch outcome {
+        case .proceed:
             pendingDeploy = nil
+            tokenPromptPresented = false
+            tokenVerification = .idle
             deploy(siteID: pending.siteID, siteDirectory: pending.siteDirectory)
+        case .stay(let message):
+            tokenVerification = .failed(message: message)
+        case .abort:
+            // The user cancelled mid-flow; `cancelTokenPrompt` already cleared the parked deploy.
+            tokenVerification = .idle
         }
-        return nil
     }
 
     func cancelTokenPrompt() {
         pendingDeploy = nil
         tokenPromptPresented = false
+        tokenVerification = .idle
     }
 
     func dismissDrawer() {
