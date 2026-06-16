@@ -372,15 +372,21 @@ struct SiteWindow: View {
         // `contentGraph` so it attaches `ApplyEditTool` + `SearchContentTool` and advertises
         // `supportsTools` (#193). The Claude path carries its own tool surface and ignores these.
         let settings = AppSettings.shared
-        // `makeEditBridge()` is only called in the on-device arm — the ternary doesn't evaluate the
-        // untaken branch, so the Claude path does no bridge work.
-        let assistant: any ConversationalAssistant = settings.preferFoundationModels
-            ? FoundationModelAssistant(
-                tier: settings.foundationModelTier,
+        // The settings → backend decision is a pure function in `AnglesiteCore`
+        // (`resolveAssistantChoice`) so it's unit-tested without the App target (#161 item 7);
+        // construction stays here because it needs App-owned deps (the edit bridge, content graph).
+        // `makeEditBridge()` is only called in the on-device arm — the Claude path does no bridge work.
+        let assistant: any ConversationalAssistant
+        switch resolveAssistantChoice(preferFoundationModels: settings.preferFoundationModels, tier: settings.foundationModelTier) {
+        case .foundationModel(let tier):
+            assistant = FoundationModelAssistant(
+                tier: tier,
                 editBridge: makeEditBridge(),
                 contentGraph: contentGraph
             )
-            : ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.path)
+        case .claude:
+            assistant = ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.path)
+        }
         chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
         #endif
         // Auto alt-text (C.7 / #157): after a successful image drop, generate alt text on-device and
