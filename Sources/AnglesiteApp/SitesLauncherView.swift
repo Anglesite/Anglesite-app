@@ -28,20 +28,14 @@ struct SitesLauncherView: View {
     /// stays stable through the dismiss animation — reading `siteToRemove?.name` directly would
     /// collapse to "" the instant the dialog clears the optional.
     @State private var siteToRemoveName = ""
-    /// The active New Site wizard session, or nil when the wizard isn't showing. A single
-    /// `Identifiable` payload — rather than a bool plus two optionals — so `.sheet(item:)` only
-    /// presents once both the model and the scaffolder exist. This closes the empty-sheet bug
-    /// (#209) where `.sheet(isPresented:)` flipped true before the content optionals were observed,
-    /// resolving the content builder to `EmptyView` and rendering a blank, default-sized sheet.
-    @State private var newSiteSession: NewSiteSession?
-    @State private var sitesRootScopedURL: URL?
-
-    /// Bundles the wizard model and its scaffolder so the New Site sheet presents atomically.
     private struct NewSiteSession: Identifiable {
         let id = UUID()
         let model: NewSiteWizardModel
         let scaffolder: SiteScaffolder
     }
+    /// Non-nil while the New Site wizard is showing; nil dismisses it.
+    @State private var newSiteSession: NewSiteSession?
+    @State private var sitesRootScopedURL: URL?
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -315,8 +309,6 @@ struct SitesLauncherView: View {
                 return site
             }
         )
-        // Assign the model and scaffolder together as one payload so the sheet can't present
-        // before both exist (see NewSiteSession / #209).
         newSiteSession = NewSiteSession(model: model, scaffolder: scaffolder)
     }
 
