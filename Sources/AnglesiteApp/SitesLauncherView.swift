@@ -227,10 +227,9 @@ struct SitesLauncherView: View {
     /// of `~/Sites` would immediately rediscover a still-present in-root folder, undoing the
     /// removal visually. Persistence is handled by `remove(id:)`.
     ///
-    /// Note: an already-open `SiteWindow` for this site is *not* signalled — `SiteStore`'s change
-    /// handler is single-subscriber (the Spotlight indexer), so the window keeps running its
-    /// dev-server/MCP subprocess against a now-orphaned entry until the user closes it. Closing or
-    /// warning the open window is left as a follow-up.
+    /// An already-open `SiteWindow` for this site auto-closes: it observes `SiteStore.changeStream()`
+    /// and dismisses itself when its id leaves the registry, which tears down its dev-server/MCP
+    /// subprocess via `onDisappear` (#188).
     private func removeSite(_ site: SiteStore.Site) {
         Task {
             do {
