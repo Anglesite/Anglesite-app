@@ -235,9 +235,11 @@ public actor SiteStore {
     /// or chaining `.makeAsyncIterator()`); the actor-state touch is deferred onto the actor via the
     /// `register` hop. A subscriber only observes the snapshot through `next()`, which suspends until
     /// `register` has yielded — so registration happens-before any mutation the subscriber can see.
+    /// A subscription that races an in-flight mutation observes the newer (post-mutation) snapshot,
+    /// never a stale one — it can only ever miss *toward* the latest state.
     public nonisolated func changeStream() -> AsyncStream<[Site]> {
         let id = UUID()
-        return AsyncStream { continuation in
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             // Builder runs off-actor; hop onto the actor to register + emit the subscribe-time snapshot.
             Task { await self.register(continuation, id: id) }
             continuation.onTermination = { [weak self] _ in
