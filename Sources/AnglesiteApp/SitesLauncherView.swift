@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AnglesiteCore
+import AnglesiteIntents
 
 /// The "Sites" launcher window: a list of known sites plus actions to open an
 /// existing one or add a folder to the registry. This is the single entry point
@@ -36,6 +37,7 @@ struct SitesLauncherView: View {
     /// Non-nil while the New Site wizard is showing; nil dismisses it.
     @State private var newSiteSession: NewSiteSession?
     @State private var sitesRootScopedURL: URL?
+    @State private var router = WindowRouter.shared
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -51,6 +53,11 @@ struct SitesLauncherView: View {
             }
         }
         .task { await onFirstAppear() }
+        .onChange(of: router.newSiteRequested) { _, requested in
+            guard requested else { return }
+            router.newSiteRequested = false
+            Task { await presentNewSite() }
+        }
         .navigationTitle("Sites")
     }
 
@@ -244,32 +251,20 @@ struct SitesLauncherView: View {
     }
 
     private func openFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Open"
-        panel.message = "Choose an Anglesite project directory."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
         Task {
             do {
-                let site = try await SiteStore.shared.add(url)
-                #if ANGLESITE_MAS
-                // The panel grant is the only chance to mint a scoped bookmark — persist it now
-                // so the grant survives relaunch. SiteWindow resolves it and holds access.
-                let bookmark = try SecurityScopedBookmark.create(for: url)
-                try await SiteStore.shared.setBookmark(bookmark, for: site.id)
-                #endif
+                guard let site = try await SiteActions.pickAndRegisterSite() else { return }
                 await refreshSites()
                 open(site: site)
             } catch {
-                loadError = "Couldn't add \(url.lastPathComponent): \(error)"
+                loadError = "Couldn't add the chosen folder: \(error)"
             }
         }
     }
 
     @MainActor
     private func presentNewSite() async {
+        guard !showingNewSite else { return }
         let resolution = PluginRuntime.resolve()
         guard let pluginURL = resolution.url else {
             loadError = "Plugin not found — can't create a site. Reinstall the app."
@@ -343,6 +338,15 @@ struct SitesLauncherView: View {
 
     private func onFirstAppear() async {
         await refreshSites()
+
+        // A File ▸ New Site that opened this launcher set the flag before our `.task` ran;
+        // `.onChange` won't fire for that initial value, so consume it here.
+        if router.newSiteRequested {
+            router.newSiteRequested = false
+            deciding = false
+            await presentNewSite()
+            return
+        }
 
         if !Self.didAutoOpenAttempt {
             Self.didAutoOpenAttempt = true
