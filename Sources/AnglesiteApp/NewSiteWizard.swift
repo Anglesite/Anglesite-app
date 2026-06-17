@@ -118,6 +118,11 @@ struct NewSiteWizard: View {
                     .accessibilityLabel("Build failed")
                     .accessibilityValue(msg)
             }
+            if model.completedSiteID != nil && model.hasWarnings {
+                Text("Your site was created, but something above needs attention before it can preview. You can open it anyway and fix it from the site window.")
+                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    .accessibilityLabel("Your site was created with warnings. You can open it anyway and fix it from the site window.")
+            }
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
@@ -165,11 +170,20 @@ struct NewSiteWizard: View {
             }
             if model.step == .content {
                 Button("Create Site") {
-                    Task { if let id = await model.build(using: scaffolder) { onComplete(id) } }
+                    // Auto-open only on a clean build. If the build warned (e.g. dependencies
+                    // failed to install), stay put so the owner reads the warning and opens
+                    // explicitly via "Open Site Anyway" below — rather than landing on a
+                    // dead-end "Can't preview" screen (#229).
+                    Task {
+                        _ = await model.build(using: scaffolder)
+                        if model.didCompleteCleanly, let id = model.completedSiteID { onComplete(id) }
+                    }
                 }.keyboardShortcut(.defaultAction).disabled(!model.canContinue)
             } else if model.step != .building {
                 Button("Continue") { model.advance() }
                     .keyboardShortcut(.defaultAction).disabled(!model.canContinue)
+            } else if let id = model.completedSiteID, model.hasWarnings {
+                Button("Open Site Anyway") { onComplete(id) }.keyboardShortcut(.defaultAction)
             } else if model.completedSiteID == nil && model.fatal != nil {
                 Button("Close") { onCancel() }
             }

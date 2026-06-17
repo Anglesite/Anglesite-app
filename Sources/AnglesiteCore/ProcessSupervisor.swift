@@ -26,6 +26,14 @@ public actor ProcessSupervisor {
 
     private let backend: SupervisorBackend
 
+    /// Environment applied to spawns that don't pass one explicitly. Defaults to
+    /// `NodeRuntime.environmentWithNodeOnPath` so every Node spawn (npm install, the MCP server, the
+    /// Astro dev server) gets the bundled runtime's `bin` directory on `PATH` — without it,
+    /// dependency lifecycle scripts that invoke `node` by name fail with exit 127 (#229). Returns
+    /// `nil` when Node isn't bundled (e.g. `swift test`), so spawns then inherit the parent
+    /// environment unchanged. Injectable for tests.
+    private let defaultEnvironment: @Sendable () -> [String: String]?
+
     /// Source-compat re-exports. These used to be nested types; they now live at the protocol layer
     /// (so the backend can speak them too), re-exposed here so existing call sites such as
     /// `ProcessSupervisor.RestartPolicy.onCrash(...)` and `ProcessSupervisor.ExitReason` compile
@@ -46,11 +54,15 @@ public actor ProcessSupervisor {
     /// separate process can't inherit the app's scoped grant).
     public init() {
         self.backend = InProcessBackend()
+        self.defaultEnvironment = { NodeRuntime.environmentWithNodeOnPath }
     }
 
-    /// Inject a backend explicitly (tests, future MAS wiring).
-    public init(backend: SupervisorBackend) {
+    /// Inject a backend explicitly (tests, future MAS wiring). `defaultEnvironment` is applied to
+    /// spawns that don't pass one — see the property doc.
+    public init(backend: SupervisorBackend,
+                defaultEnvironment: @escaping @Sendable () -> [String: String]? = { NodeRuntime.environmentWithNodeOnPath }) {
         self.backend = backend
+        self.defaultEnvironment = defaultEnvironment
     }
 
     // MARK: One-shot run
@@ -85,7 +97,7 @@ public actor ProcessSupervisor {
         let spec = SpawnSpec(
             executable: executable,
             arguments: arguments,
-            environment: environment,
+            environment: environment ?? defaultEnvironment(),
             workingDirectory: currentDirectoryURL,
             logSource: "run"
         )
@@ -135,7 +147,7 @@ public actor ProcessSupervisor {
         let spec = SpawnSpec(
             executable: executable,
             arguments: arguments,
-            environment: environment,
+            environment: environment ?? defaultEnvironment(),
             workingDirectory: currentDirectoryURL,
             stdinPipe: attachStdin,
             logSource: source
