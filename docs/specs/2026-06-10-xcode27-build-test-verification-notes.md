@@ -66,6 +66,8 @@ After the plist fix:
 
 No deprecation notices were emitted. `ViewBuilder` → `ContentBuilder` (called out in issue #108 as a possible diagnostic surface) didn't surface anything in this codebase.
 
+> **Superseded 2026-06-16.** This "no deprecation notices" result was accurate on 2026-06-10, *before* the on-device FoundationModels work (PRs #192–#205) landed. The current tree emits 18 deprecation warnings from Apple's `@Generable` macro expansion — see [Re-verification 2026-06-16](#re-verification-2026-06-16-post-foundationmodels) at the end of this file. `ViewBuilder` → `ContentBuilder` is still clean.
+
 ## Test results
 
 `swift test --package-path .` — Xcode 27 / Swift 6.4 / sequential (no `--parallel`), `ANGLESITE_PLUGIN_PATH` not set (test falls back to `../anglesite` sibling).
@@ -140,3 +142,50 @@ Bumping CI to Xcode 27 is a follow-up — it likely needs `macos-15` → `macos-
 - Bump CI runner / `xcode-select` to Xcode 27 once a runner image ships it (separate PR).
 - Investigate the MCP e2e flakes on local — `.sessionLost` after 20s suggests either the plugin's HTTP server start-up has regressed, or the test's poll budget is environment-sensitive. Likely a paired-PR concern with the plugin repo.
 - Run the test suite with `--parallel` to mirror CI; the local sequential run is slower but more deterministic, and useful as a baseline.
+
+## Re-verification 2026-06-16 (post-FoundationModels)
+
+The original audit above ran on 2026-06-10. Between then and 2026-06-16 the on-device FoundationModels work landed (PRs #192, #194, #197–#200, #202, #205), adding seven `@Generable` result types. That changed the deprecation surface, so #108 was re-verified against current `main`.
+
+Toolchain/host unchanged: Xcode 27.0 (27A5194q), Swift 6.4, macOS 27.0, Apple silicon. Worktree build, so `ANGLESITE_PLUGIN_SRC` / `ANGLESITE_PLUGIN_PATH` are pinned to the absolute sibling checkout (the `../anglesite` fallback resolves wrong from inside `.claude/worktrees/`).
+
+### Build — both schemes still clean
+
+| Scheme | Configuration | Result | Clean-build wall time |
+|---|---|---|---|
+| `Anglesite` | Debug, `clean build` | ✅ BUILD SUCCEEDED | ~50 s |
+| `AnglesiteMAS` | Debug, `clean build` | ✅ BUILD SUCCEEDED | ~13 s |
+
+(The MAS figure is lower because it ran second and reused the bundled-Node vendor/copy/re-sign and shared module artifacts from the DevID build in the same DerivedData — not a true from-scratch number.)
+
+### New warnings — `@Generable` macro expansion (upstream, unfixable here)
+
+18 deprecation warnings per scheme, all from **Apple's own `@Generable` macro expansion**, not our source:
+
+| Deprecated symbol | Count | Replacement Apple suggests |
+|---|---|---|
+| `GenerationError` (deprecated in macOS 27.0) | 12 | (none given in the diagnostic) |
+| `decodingFailure` (deprecated in macOS 27.0) | 6 | `GeneratedContent/ParsingError` |
+
+The diagnostics point at `macro expansion @Generable:NN:NN`, i.e. the code Apple's macro generates references symbols Apple deprecated in the same SDK. `grep` for these symbols in `Sources/` returns nothing — we never write them. The seven affected types are all `@Generable`:
+
+- `Sources/AnglesiteCore/GenerableTypes.swift`: `ContentClassification`, `EditOperation`, `ContentSummary`, `GeneratedEditCommand`, `GeneratedPageMeta`, `GeneratedAltText`
+- `Sources/AnglesiteCore/SearchContentTool.swift`: the tool's `Arguments`
+
+**Verdict: known upstream, no action.** There is no granular way to suppress a deprecation inside a macro expansion we don't own; both schemes still build, and the warnings should clear when a future Xcode 27.x ships an updated `@Generable` macro. Tracked here so the count isn't mistaken for a regression in our code.
+
+### `@State` macro audit — verdict unchanged
+
+The companion [`@State`-macro notes](2026-06-10-xcode27-state-macro-audit-notes.md) still hold. `PreviewModel`'s init signature has since gained a `contentGraph` parameter (`init(contentGraph:runtime:)`), but it remains the only `@State`-stored class with a side-effecting init (it still spawns the `runtime.observe()` `Task`), and `SiteWindow` still assigns it via an explicit `State(initialValue: PreviewModel(contentGraph:))` in the view's `init` — whose evaluation timing is *not* governed by the macro's default-expression lazy rule. The other `@State` class models (`DeployModel`, `BackupModel`, `AuditModel`, `HealthModel`) still have pure inits; `ChatModel?` is still nil-initialized and constructed in `loadAndStart`. No behavior change attributable to lazy `@State` init.
+
+### Tests — `swift test --package-path .` with `ANGLESITE_PLUGIN_PATH` set
+
+Same two pre-existing MCP-server-spawn e2e failures as 2026-06-10, and nothing else:
+
+| Bundle | Outcome |
+|---|---|
+| `AnglesiteCoreTests` (XCTest) | ✅ all pass |
+| `AnglesiteCoreTests` (Swift Testing) | ⚠️ 386/387 pass — `MCPClientHTTPEndToEndTests` `.sessionLost` after 20 s |
+| `AnglesiteBridgeTests` (Swift Testing) | ⚠️ 12/13 pass — `AppliesEditEndToEndTests` `.reconnecting` |
+
+Setting `ANGLESITE_PLUGIN_PATH` to the absolute sibling checkout (with its `node_modules` present) moved the HTTP test's failure from "plugin checkout not found" (path resolution) to `.sessionLost` (server didn't stabilize in the 20 s poll) — confirming the path wiring is correct and the residual failures are the documented MCP-lifecycle flakes, not Xcode 27 regressions. They remain the open follow-up above; they do not gate the toolchain.
