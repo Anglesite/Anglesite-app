@@ -189,3 +189,16 @@ Same two pre-existing MCP-server-spawn e2e failures as 2026-06-10, and nothing e
 | `AnglesiteBridgeTests` (Swift Testing) | ⚠️ 12/13 pass — `AppliesEditEndToEndTests` `.reconnecting` |
 
 Setting `ANGLESITE_PLUGIN_PATH` to the absolute sibling checkout (with its `node_modules` present) moved the HTTP test's failure from "plugin checkout not found" (path resolution) to `.sessionLost` (server didn't stabilize in the 20 s poll) — confirming the path wiring is correct and the residual failures are the documented MCP-lifecycle flakes, not Xcode 27 regressions. They remain the open follow-up above; they do not gate the toolchain.
+
+### Re-run later 2026-06-16 — full suite green, e2e flake confirmed timing-sensitive
+
+A back-to-back re-run on the same toolchain/host (worktree, `ANGLESITE_PLUGIN_PATH`/`ANGLESITE_PLUGIN_SRC` pinned to the absolute sibling checkout) produced **a fully green suite** — the MCP e2e tests that flaked above passed on retry:
+
+| Bundle | Swift Testing | XCTest |
+|---|---|---|
+| `AnglesiteCoreTests` | ✅ 400/400 (incl. `MCPClientHTTPEndToEndTests`) | ✅ 104/104 |
+| `AnglesiteIntentsTests` | ✅ 145/145 | — |
+| `AnglesiteBridgeTests` | ✅ 13/13 (incl. `AppliesEditEndToEndTests`) | — |
+| **Total** | **558 Swift Testing + 104 XCTest = 662, all pass** | |
+
+The first run that day hit the `.sessionLost` flake on `MCPClientHTTPEndToEndTests`; this run the spawned HTTP MCP server stabilized in time and the `AnglesiteCoreTests` Swift Testing executable took ~227 s (almost entirely that one test's server-startup poll). Passing on retry with no source change **confirms the failure is timing/lifecycle, not an Xcode 27 regression**. The flake-hardening of the e2e poll budget remains the open follow-up; it does not gate the toolchain. The 662 figure is the count reflected in `README.md`, `docs/build-plan.md`, and `CLAUDE.md` (the earlier "270" in the first two was stale, predating the FoundationModels and App Intents test bundles).
