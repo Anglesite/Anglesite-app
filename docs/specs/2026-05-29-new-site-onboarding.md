@@ -6,7 +6,7 @@
 
 **Architecture:** A thin SwiftUI wizard collects a `NewSiteDraft`. A `SiteScaffolder` actor runs the pipeline (mkdir → `scaffold.sh` → write `.site-config` → apply theme → write homepage → `npm install` → register) and emits an `AsyncStream<ScaffoldStep>` the wizard renders. Theme data is parsed at runtime from the bundled plugin's `template/scripts/themes.ts` (`ThemeCatalog`); applying a theme (`ThemeApplier`) and pre-filling content (`HomepageWriter`) are pure string transforms over known template files. The launcher presents the wizard and opens the site on completion.
 
-**Tech Stack:** Swift 6 / SwiftUI, `AnglesiteCore` (actors + pure helpers), `ProcessSupervisor` for subprocesses, XCTest. Spec: `docs/superpowers/specs/2026-05-29-new-site-onboarding-design.md`.
+**Tech Stack:** Swift 6 / SwiftUI, `AnglesiteCore` (actors + pure helpers), `ProcessSupervisor` for subprocesses, XCTest. Spec: `docs/specs/2026-05-29-new-site-onboarding-design.md`.
 
 ---
 

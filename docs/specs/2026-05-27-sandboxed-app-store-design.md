@@ -1,7 +1,7 @@
 # Sandboxed Mac App Store build — embedded Node under App Sandbox
 
 **Status:** approved — **ARCHITECTURE PIVOTED 2026-05-28** (XPC helper removed; see banner below)
-**Tracks:** Phase 10 step 1 of [build-plan.md](../build-plan.md#phase-10--v2-polish) — "Mac App Store build (sandboxed)" from design doc §12 ([../../anglesite/docs/dev/mac-app-design.md](../../anglesite/docs/dev/mac-app-design.md))
+**Tracks:** Phase 10 step 1 of [build-plan.md](../build-plan.md#phase-10--v2-polish) — "Mac App Store build (sandboxed)" from design doc §12 ([../../../anglesite/docs/dev/mac-app-design.md](../../../anglesite/docs/dev/mac-app-design.md))
 **Cross-repo:** none — this is app-only; the plugin's files copy in unchanged
 **Date:** 2026-05-27 (pivoted 2026-05-28)
 

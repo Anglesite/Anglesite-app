@@ -2,7 +2,7 @@
 
 **Issue:** [#162](https://github.com/Anglesite/Anglesite-app/issues/162) (parent [#135](https://github.com/Anglesite/Anglesite-app/issues/135), Phase D — System-wide MCP exposure)
 **Date:** 2026-06-17
-**Spec:** [`docs/superpowers/specs/2026-06-11-siri-ai-integration-design.md`](../superpowers/specs/2026-06-11-siri-ai-integration-design.md) — Phase D
+**Spec:** [`docs/specs/2026-06-11-siri-ai-integration-design.md`](2026-06-11-siri-ai-integration-design.md) — Phase D
 
 ## Why this audit exists
 

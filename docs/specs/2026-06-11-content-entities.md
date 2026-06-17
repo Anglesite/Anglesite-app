@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift 6.4 (strict concurrency), AppIntents framework, Foundation, Swift Testing. Targets `AnglesiteIntents` library + `AnglesiteIntentsTests` test target as defined in `Package.swift`.
 
-**Spec:** [`docs/superpowers/specs/2026-06-11-content-entities-design.md`](../specs/2026-06-11-content-entities-design.md)
+**Spec:** [`docs/specs/2026-06-11-content-entities-design.md`](2026-06-11-content-entities-design.md)
 
 **Branch:** `feat/content-entities` (already checked out; design doc committed as `edfb7a2`).
 
@@ -1230,7 +1230,7 @@ gh pr create \
 - `AnglesiteIntents.bootstrap` gains a `contentGraph:` parameter; `AppDelegate` constructs the single graph instance and passes it in.
 - 35 Swift Testing cases (11 Page + 13 Post + 11 Image) covering display representation, id lookup with silent skip on unknown, case-insensitive fuzzy match across the spec'd fields, `lastModified`-DESC ordering, and empty-graph / empty-array edge cases.
 
-Design: [`docs/superpowers/specs/2026-06-11-content-entities-design.md`](docs/superpowers/specs/2026-06-11-content-entities-design.md) · Plan: [`docs/superpowers/plans/2026-06-11-content-entities.md`](docs/superpowers/plans/2026-06-11-content-entities.md)
+Design: [`docs/specs/2026-06-11-content-entities-design.md`](docs/specs/2026-06-11-content-entities-design.md) · Plan: [`docs/specs/2026-06-11-content-entities.md`](docs/specs/2026-06-11-content-entities.md)
 
 ## Test plan
 
@@ -1295,7 +1295,7 @@ Plan complete.
 
 ## Execution Handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-06-11-content-entities.md`. Two execution options:
+Plan complete and saved to `docs/specs/2026-06-11-content-entities.md`. Two execution options:
 
 1. **Subagent-Driven (recommended)** — fresh subagent per task with two-stage review between tasks. Best when you want quality gating between commits.
 2. **Inline Execution** — execute tasks in this session with batch checkpoints. Faster end-to-end but less review surface.

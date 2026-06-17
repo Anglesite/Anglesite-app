@@ -123,7 +123,7 @@ Expected: all three bundles green; no new failures in `AnglesiteCoreTests` beyon
 - [x] **Step 2: Post the audit conclusion on #161**
 
 ```bash
-gh issue comment 161 --body "Phase C coverage audit complete (spec: docs/superpowers/specs/2026-06-17-c11-phase-c-test-suite-design.md).
+gh issue comment 161 --body "Phase C coverage audit complete (spec: docs/specs/2026-06-17-c11-phase-c-test-suite-design.md).
 
 All 7 checklist items are covered by existing tests (coverage map in the spec):
 - FoundationModelAssistant, @Generable round-trips, ApplyEditTool/SearchContentTool, alt-text, ContentAssistant/ClaudeAssistant, settings tier, transcript accumulation, chat history.

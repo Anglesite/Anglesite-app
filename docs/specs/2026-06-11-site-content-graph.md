@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift 6.4 (strict concurrency), Foundation, Swift Testing for tests. Targets `AnglesiteCore` library + `AnglesiteCoreTests` test target as defined in `Package.swift`.
 
-**Spec:** [`docs/superpowers/specs/2026-06-11-site-content-graph-design.md`](../specs/2026-06-11-site-content-graph-design.md)
+**Spec:** [`docs/specs/2026-06-11-site-content-graph-design.md`](2026-06-11-site-content-graph-design.md)
 
 **Branch:** `feat/site-content-graph` (already checked out; design doc already committed as `b1fd7f8`).
 
@@ -1354,7 +1354,7 @@ gh pr create \
 - No-op suppression on `upsert*` via `Equatable` so file-watch fires with identical content do not wake the indexer.
 - 16 Swift Testing cases covering bulk-load replacement, siteID isolation, upsert/remove emit semantics, no-op suppression, unload (always-emit), case-insensitive search across the spec'd fields, `knownSiteIDs` enumeration, handler detach, and actor-isolation serialization under 100-way TaskGroup parallelism.
 
-Design: [`docs/superpowers/specs/2026-06-11-site-content-graph-design.md`](docs/superpowers/specs/2026-06-11-site-content-graph-design.md) (committed earlier on this branch).
+Design: [`docs/specs/2026-06-11-site-content-graph-design.md`](docs/specs/2026-06-11-site-content-graph-design.md) (committed earlier on this branch).
 
 ## Test plan
 
@@ -1437,7 +1437,7 @@ Plan complete.
 
 ## Execution Handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-06-11-site-content-graph.md`. Two execution options:
+Plan complete and saved to `docs/specs/2026-06-11-site-content-graph.md`. Two execution options:
 
 1. **Subagent-Driven (recommended)** — fresh subagent per task with two-stage review between tasks. Best when you want quality gating between commits.
 2. **Inline Execution** — execute tasks in this session with batch checkpoints. Faster end-to-end but less review surface.

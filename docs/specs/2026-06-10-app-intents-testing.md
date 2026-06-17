@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Land the design from `docs/superpowers/specs/2026-06-10-app-intents-testing-design.md` (#104) — extract `Sources/AnglesiteApp/Intents/*` into a new SwiftPM library `AnglesiteIntents`, switch the four App Intents to `@Dependency`-injected `SiteOperationsService`, and add ~19 tests in a new `AnglesiteIntentsTests` target running under `swift test --parallel`.
+**Goal:** Land the design from `docs/specs/2026-06-10-app-intents-testing-design.md` (#104) — extract `Sources/AnglesiteApp/Intents/*` into a new SwiftPM library `AnglesiteIntents`, switch the four App Intents to `@Dependency`-injected `SiteOperationsService`, and add ~19 tests in a new `AnglesiteIntentsTests` target running under `swift test --parallel`.
 
 **Architecture:** New SPM library `AnglesiteIntents` (depends on `AnglesiteCore`, system `AppIntents`, `Observation`) holds the four intents + `SiteEntity` + `SiteEntityQuery` + `AnglesiteShortcuts` + the `WindowRouter` class. The app target keeps `SitesWindowRoot` (SwiftUI scene infra) and gains a one-line `AnglesiteIntents.bootstrap()` call at launch that registers a live `SiteOperations` with `AppDependencyManager.shared`. Tests register fakes via the same manager; all suites nest under a single `@Suite("AppIntents", .serialized)` root to serialize mutations of the shared dependency registry.
 
@@ -1416,8 +1416,8 @@ Closes #104. Extracts the four App Intents from #122 into a new `AnglesiteIntent
 - App target keeps `SitesWindowRoot` (the SwiftUI view) and calls `AnglesiteIntents.bootstrap()` from `AppDelegate.applicationDidFinishLaunching`.
 - `SiteEntityQuery` now accepts an injectable `SiteStore` (defaults to `.shared`) so tests can populate a throwaway store.
 
-Design: `docs/superpowers/specs/2026-06-10-app-intents-testing-design.md`.
-Plan: `docs/superpowers/plans/2026-06-10-app-intents-testing.md`.
+Design: `docs/specs/2026-06-10-app-intents-testing-design.md`.
+Plan: `docs/specs/2026-06-10-app-intents-testing.md`.
 
 ## Test Plan
 
