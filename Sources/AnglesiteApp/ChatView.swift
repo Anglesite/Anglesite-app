@@ -118,6 +118,23 @@ struct ChatView: View {
                 // Stream characters extend the last message; re-anchor on each chunk.
                 proxy.scrollTo("__bottom__", anchor: .bottom)
             }
+            // VoiceOver live region: announce the *transitions* into and out of streaming, so a
+            // non-sighted user knows a response started, and hears the answer when it finishes —
+            // without watching tokens arrive. Keyed off `isStreaming` (not message content) so it
+            // fires twice per turn, never per-chunk; the stop announcement speaks the actual reply
+            // (or the failure/cancel reason). See `LiveRegionAnnouncer` for the rationale.
+            .onChange(of: model.isStreaming) { wasStreaming, isStreaming in
+                guard AppSettings.shared.announcesLiveUpdates else { return }
+                if let start = LiveRegionAnnouncer.chatStartAnnouncement(
+                    wasStreaming: wasStreaming, isStreaming: isStreaming) {
+                    AccessibilityNotification.Announcement(start).post()
+                }
+                if let stop = LiveRegionAnnouncer.chatStopAnnouncement(
+                    wasStreaming: wasStreaming, isStreaming: isStreaming,
+                    outcome: model.liveAnnouncementOutcome) {
+                    AccessibilityNotification.Announcement(stop).post()
+                }
+            }
         }
     }
 

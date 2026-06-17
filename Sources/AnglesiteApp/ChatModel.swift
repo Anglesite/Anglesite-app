@@ -47,6 +47,19 @@ final class ChatModel {
     var messages: [Message] { transcript.messages }
     private(set) var isStreaming: Bool = false
     private(set) var lastError: String?
+    /// True when the user cancelled the in-flight turn — so the VoiceOver stop announcement says
+    /// "stopped" rather than "complete". Set by ``cancel()``, cleared when a new turn begins.
+    private(set) var wasCancelledMidTurn = false
+
+    /// The terminal outcome of the just-ended turn, for VoiceOver's stop announcement. Derived from
+    /// the same observable state `ChatView` already binds: an in-band error wins, then an explicit
+    /// cancel, else the assistant's final reply text (spoken so a non-sighted user hears the answer).
+    var liveAnnouncementOutcome: LiveRegionAnnouncer.ChatTurnOutcome {
+        if let lastError { return .failed(reason: lastError) }
+        if wasCancelledMidTurn { return .cancelled }
+        let reply = messages.last(where: { $0.role == .assistant })?.content ?? ""
+        return .completed(reply: reply)
+    }
     /// Mirrors the last `turnComplete.usage` claude reported. `ChatView` shows this in the
     /// footer so the user can see token + cost telemetry without diving into the Debug pane.
     private(set) var lastUsage: TurnTelemetry?
@@ -208,6 +221,7 @@ final class ChatModel {
         guard !trimmed.isEmpty, !isStreaming else { return }
 
         lastError = nil
+        wasCancelledMidTurn = false
         // `beginTurn` appends the user prompt and an empty assistant row (which streamed events
         // extend), marks the latter in-flight, and returns the user row so we persist exactly it.
         let userMessage = transcript.beginTurn(userPrompt: trimmed)
@@ -289,6 +303,7 @@ final class ChatModel {
 
     /// Stops the in-flight turn. The current assistant message is marked finished as-is.
     func cancel() {
+        wasCancelledMidTurn = true
         streamTask?.cancel()
         Task { await assistant.cancel() }
     }
