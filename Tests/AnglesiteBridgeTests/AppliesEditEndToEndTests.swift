@@ -2,6 +2,7 @@ import Testing
 import Foundation
 @testable import AnglesiteBridge
 import AnglesiteCore
+import AnglesiteTestSupport
 
 /// End-to-end: spawn the *real* bundled plugin's MCP server, drive an `apply_edit` through a
 /// real `MCPClient` via `MCPApplyEditRouter`, and assert the file's bytes change on disk.
@@ -44,13 +45,13 @@ final class AppliesEditEndToEndTests {
     @Test(
         "Apply edit end to end mutates the file on disk",
         .enabled(
-            if: AppliesEditEndToEndTests.prerequisitesMet,
+            if: E2EPrerequisites.prerequisitesMet,
             "requires the sibling Anglesite plugin checkout (ANGLESITE_PLUGIN_PATH, or ../anglesite with node_modules) and a Node ≥22 binary"
         )
     )
     func applyEditEndToEndMutatesTheFileOnDisk() async throws {
-        let pluginRoot = try #require(Self.locateSiblingPlugin())
-        let node = try #require(Self.locateNode())
+        let pluginRoot = try #require(E2EPrerequisites.locateSiblingPlugin())
+        let node = try #require(E2EPrerequisites.locateNode())
         let serverPath = pluginRoot.appendingPathComponent("server/index.mjs")
 
         // Real MCPClient against the real bundled plugin server, scoped to our tmp site.
@@ -102,56 +103,5 @@ final class AppliesEditEndToEndTests {
         #expect(after.contains("Welcome to the new headline"), "new heading should be present")
 
         await mcp.stop()
-    }
-
-    // MARK: prerequisite probing
-
-    /// True when both the sibling plugin checkout (with its `node_modules`) and a Node binary are
-    /// present. Drives the `.enabled(if:)` trait so the test is reported as *skipped* rather than
-    /// *failed* when the e2e prerequisites are absent.
-    static var prerequisitesMet: Bool {
-        locateSiblingPlugin() != nil && locateNode() != nil
-    }
-
-    /// The sibling Anglesite plugin checkout (MCP server + `node_modules`), or `nil` if absent.
-    /// Priority: explicit `ANGLESITE_PLUGIN_PATH` (CI), then `../anglesite` relative to the test's
-    /// CWD (the package root under `swift test`).
-    static func locateSiblingPlugin() -> URL? {
-        let env = ProcessInfo.processInfo.environment["ANGLESITE_PLUGIN_PATH"]
-        let candidate: URL = {
-            if let env, !env.isEmpty { return URL(fileURLWithPath: env, isDirectory: true) }
-            let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-            return cwd.deletingLastPathComponent().appendingPathComponent("anglesite", isDirectory: true)
-        }()
-        guard FileManager.default.isReadableFile(
-                atPath: candidate.appendingPathComponent("server/index.mjs").path),
-              FileManager.default.fileExists(
-                atPath: candidate.appendingPathComponent("node_modules/@modelcontextprotocol/sdk").path)
-        else { return nil }
-        return candidate
-    }
-
-    /// A Node binary: `NODE_BINARY` override, then common install paths, then nvm-managed versions.
-    static func locateNode() -> URL? {
-        if let override = ProcessInfo.processInfo.environment["NODE_BINARY"], !override.isEmpty,
-           FileManager.default.isExecutableFile(atPath: override) {
-            return URL(fileURLWithPath: override)
-        }
-        var candidates = [
-            "/opt/homebrew/bin/node",
-            "/usr/local/bin/node",
-            "/usr/bin/node",
-        ]
-        // nvm-managed installs live under ~/.nvm/versions/node/<version>/bin/node and aren't on
-        // any of the common paths; add whatever versions are present.
-        let nvmDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".nvm/versions/node")
-        if let versions = try? FileManager.default.contentsOfDirectory(at: nvmDir, includingPropertiesForKeys: nil) {
-            candidates.append(contentsOf: versions
-                .map { $0.appendingPathComponent("bin/node").path }
-                .filter { FileManager.default.isExecutableFile(atPath: $0) }
-                .sorted())
-        }
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
-            .map { URL(fileURLWithPath: $0) }
     }
 }

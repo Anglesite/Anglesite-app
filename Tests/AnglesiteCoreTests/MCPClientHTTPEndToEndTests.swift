@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import Darwin
 @testable import AnglesiteCore
+import AnglesiteTestSupport
 
 /// End-to-end: spawn the real plugin MCP server in HTTP mode on a free port, then drive the real
 /// `MCPClient.connect(httpEndpoint:)` against it. Asserts `tools/list` includes `list_annotations`
@@ -15,13 +16,13 @@ struct MCPClientHTTPEndToEndTests {
     @Test(
         "HTTP end-to-end: connect, list tools, call list_annotations",
         .enabled(
-            if: MCPClientHTTPEndToEndTests.prerequisitesMet,
+            if: E2EPrerequisites.prerequisitesMet,
             "requires the sibling Anglesite plugin checkout (ANGLESITE_PLUGIN_PATH, or ../anglesite with node_modules) and a Node ≥22 binary"
         )
     )
     func httpEndToEnd() async throws {
-        let pluginRoot = try #require(Self.locateSiblingPlugin())
-        let node = try #require(Self.locateNode())
+        let pluginRoot = try #require(E2EPrerequisites.locateSiblingPlugin())
+        let node = try #require(E2EPrerequisites.locateNode())
         let serverPath = pluginRoot.appendingPathComponent("server/index.mjs")
         let port = try Self.freePort()
 
@@ -72,47 +73,8 @@ struct MCPClientHTTPEndToEndTests {
         #expect(result.content.first?.text == "[]")
     }
 
-    // MARK: prerequisite probing (mirrors AppliesEditEndToEndTests)
-
-    /// True when both the sibling plugin checkout (with its `node_modules`) and a Node binary are
-    /// present. Drives the `.enabled(if:)` trait so the test is reported as *skipped* rather than
-    /// *failed* when the e2e prerequisites are absent.
-    static var prerequisitesMet: Bool {
-        locateSiblingPlugin() != nil && locateNode() != nil
-    }
-
-    static func locateSiblingPlugin() -> URL? {
-        let env = ProcessInfo.processInfo.environment["ANGLESITE_PLUGIN_PATH"]
-        let candidate: URL = {
-            if let env, !env.isEmpty { return URL(fileURLWithPath: env, isDirectory: true) }
-            let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-            return cwd.deletingLastPathComponent().appendingPathComponent("anglesite", isDirectory: true)
-        }()
-        guard FileManager.default.isReadableFile(
-                atPath: candidate.appendingPathComponent("server/index.mjs").path),
-              FileManager.default.fileExists(
-                atPath: candidate.appendingPathComponent("node_modules/@modelcontextprotocol/sdk").path)
-        else { return nil }
-        return candidate
-    }
-
-    static func locateNode() -> URL? {
-        if let override = ProcessInfo.processInfo.environment["NODE_BINARY"], !override.isEmpty,
-           FileManager.default.isExecutableFile(atPath: override) {
-            return URL(fileURLWithPath: override)
-        }
-        var candidates = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"]
-        let nvmDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".nvm/versions/node")
-        if let versions = try? FileManager.default.contentsOfDirectory(at: nvmDir, includingPropertiesForKeys: nil) {
-            let nvmNodes = versions
-                .map { $0.appendingPathComponent("bin/node").path }
-                .filter { FileManager.default.isExecutableFile(atPath: $0) }
-                .sorted()
-            candidates.append(contentsOf: nvmNodes)
-        }
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
-            .map { URL(fileURLWithPath: $0) }
-    }
+    // MARK: free-port probing
+    // (plugin / Node prerequisites live in `E2EPrerequisites`, shared with AppliesEditEndToEndTests)
 
     // NB: do not interpolate `errno` into these messages. Reading `errno` links
     // `libswift_DarwinFoundation1.dylib` (the macOS-27 SDK vends it through that overlay), which
