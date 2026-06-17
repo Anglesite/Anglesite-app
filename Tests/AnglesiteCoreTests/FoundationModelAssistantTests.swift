@@ -32,8 +32,16 @@ struct FoundationModelAssistantTests {
         #expect(caps.maxContextTokens == 4_096)
         #expect(caps.supportsStreaming)
         #expect(caps.supportsStructuredOutput)
-        #expect(!caps.supportsTools)
+        #expect(caps.supportsTools)  // Spotlight tool is always attached (C.8, #158)
         #expect(caps.supportsVision)  // macOS 27 on-device model accepts image attachments (C.7)
+    }
+
+    @Test("Spotlight tool is attached unconditionally, so supportsTools is true with no deps")
+    func spotlightMakesToolsUnconditional() {
+        // No editBridge / contentGraph supplied. SpotlightSearchTool needs neither — it queries
+        // the system Core Spotlight index directly — so the session still carries a tool (C.8, #158).
+        let caps = FoundationModelAssistant(tier: .onDevice, editBridge: nil, contentGraph: nil).capabilities
+        #expect(caps.supportsTools)
     }
 
     @Test("PCC tier advertises a larger context window and PCC provider name")
@@ -230,6 +238,30 @@ struct FoundationModelAssistantTests {
         // Terminal event is .turnComplete (no in-band failure).
         guard case .turnComplete = events.last else {
             Issue.record("Expected last event to be .turnComplete, got \(String(describing: events.last))")
+            return
+        }
+    }
+
+    @Test("converse with the Spotlight tool attached fits the on-device budget and completes")
+    func converseWithSpotlightFitsBudget() async throws {
+        guard modelAvailable() else { return }
+        // Regression guard for the 13k-token overflow: the default SpotlightSearchTool() guidance
+        // exceeds the 4,096-token window. A no-deps assistant's converse path carries only the
+        // configured Spotlight tool, so reaching .turnComplete proves the .focused/.compact guide
+        // fits (C.8, #158).
+        let assistant = FoundationModelAssistant()
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(
+            prompt: "Say hello in one short sentence.",
+            context: makeContext()
+        ) {
+            events.append(event)
+        }
+        // `guard case` rather than `#expect`: matching a non-equatable associated-value enum case
+        // on an `Optional` is awkward with `#expect`; this mirrors the other converse lifecycle
+        // tests in this suite (e.g. `converseEmitsLifecycleEvents`).
+        guard case .turnComplete = events.last else {
+            Issue.record("Expected .turnComplete (budget fit), got \(String(describing: events.last))")
             return
         }
     }

@@ -42,6 +42,7 @@ public enum FoundationModelTier: String, Sendable, Equatable, CaseIterable {
 // See ContentAssistant.swift / ClaudeAssistant.swift for the same pattern.
 #if compiler(>=6.4)
 import FoundationModels
+import CoreSpotlight
 
 /// A ``ContentAssistant`` backed by Apple's on-device `FoundationModels`. Streams free-form text
 /// and produces ``Generable`` structured output via guided generation.
@@ -67,9 +68,12 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// ``resetSession()``. The one-shot ``generate(prompt:context:)`` path deliberately bypasses it.
     private var session: LanguageModelSession?
 
-    /// `editBridge` + `contentGraph` are optional. When **both** are supplied, the assistant
-    /// attaches ``ApplyEditTool`` + ``SearchContentTool`` to each session (a local agentic loop)
-    /// and advertises `supportsTools`. When either is `nil`, behavior is the tool-less default.
+    /// The multi-turn ``converse(prompt:context:)`` session attaches Apple's `SpotlightSearchTool`
+    /// (budget-fit `.focused(.items)`/`.compact` config) for local RAG over indexed site content,
+    /// so ``capabilities`` always advertises `supportsTools` (C.8, #158). When **both** `editBridge`
+    /// and `contentGraph` are supplied, ``ApplyEditTool`` + ``SearchContentTool`` are added too. The
+    /// one-shot ``generate``/``generateStructured`` paths carry no Spotlight tool, preserving their
+    /// full context budget for generation.
     public init(
         tier: FoundationModelTier = .onDevice,
         editBridge: IntentEditBridge? = nil,
@@ -90,7 +94,12 @@ public actor FoundationModelAssistant: ConversationalAssistant {
             supportsStreaming: true,
             supportsStructuredOutput: true,
             supportsVision: true,  // macOS 27 on-device model accepts image attachments (C.7, #157)
-            supportsTools: editBridge != nil && contentGraph != nil,
+            // The converse session always carries SpotlightSearchTool (C.8, #158). This advertises
+            // that the tool is *attached*, not that every query succeeds: on MAS, converse runs the
+            // on-device backend under App Sandbox (#159), and whether the Spotlight CSSearchableIndex
+            // query needs an extra entitlement there is unverified until the MAS smoke (#81, Task 11).
+            // Attachment and construction are sandbox-independent, so `true` is accurate regardless.
+            supportsTools: true,
             maxContextTokens: tier == .privateCloudCompute ? 32_768 : 4_096,
             providerName: tier == .privateCloudCompute ? "Private Cloud Compute" : "On-Device"
         )
@@ -254,18 +263,27 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         session = nil
     }
 
-    /// The names of the tools attached to each conversational session, for the `.started` event so
-    /// `ChatModel`/the chat UI can reflect what's actually wired. Empty unless both `editBridge` and
-    /// `contentGraph` were supplied (the same condition ``makeSession(context:)`` gates tools on).
+    /// Display label for `SpotlightSearchTool` in the `.started` event. `SpotlightSearchTool`
+    /// exposes no public `toolName` (unlike `ApplyEditTool`/`SearchContentTool`), so this is a
+    /// fixed local label — update it here if a future SDK adds a public name to bind to.
+    private static let spotlightToolDisplayName = "spotlightSearch"
+
+    /// Tool names for the `.started` event (emitted only on the `converse` path) so the chat UI can
+    /// reflect what's wired. Never empty — the conversational session always carries
+    /// `SpotlightSearchTool`; the edit/search pair is added only when both deps are present.
     private var attachedToolNames: [String] {
-        capabilities.supportsTools ? [ApplyEditTool.toolName, SearchContentTool.toolName] : []
+        var names = [Self.spotlightToolDisplayName]
+        if editBridge != nil && contentGraph != nil {
+            names += [ApplyEditTool.toolName, SearchContentTool.toolName]
+        }
+        return names
     }
 
     /// Returns the cached conversational session, lazily creating it from `context` on first use.
     /// The session persists across turns to retain history; ``resetSession()`` clears it.
     private func conversationSession(for context: AssistantContext) throws -> LanguageModelSession {
         if let session { return session }
-        let created = try makeSession(context: context)
+        let created = try makeSession(context: context, includeSpotlight: true)
         session = created
         return created
     }
@@ -277,7 +295,8 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// ``generateStructured`` build one per call (one-shot, no history bleed); ``converse`` builds one
     /// and caches it (multi-turn history). The instructions fold in the context's route/content at
     /// construction time, so a cached session keeps the first turn's system prompt.
-    private func makeSession(context: AssistantContext) throws -> LanguageModelSession {
+    private func makeSession(context: AssistantContext,
+                             includeSpotlight: Bool = false) throws -> LanguageModelSession {
         switch SystemLanguageModel.default.availability {
         case .available:
             break
@@ -289,18 +308,29 @@ public actor FoundationModelAssistant: ConversationalAssistant {
             throw AssistantError.unavailable("The on-device model is unavailable on this device.")
         }
         let instructions = Self.instructions(for: context)
-        if let editBridge, let contentGraph {
-            let tools: [any Tool] = [
-                ApplyEditTool(
-                    bridge: editBridge,
-                    siteID: context.siteID,
-                    contextSelector: context.selectedElementSelector
-                ),
-                SearchContentTool(contentGraph: contentGraph, siteID: context.siteID),
-            ]
-            return LanguageModelSession(tools: tools, instructions: instructions)
+        var tools: [any Tool] = []
+        if includeSpotlight {
+            // Default GuidanceLevel.complete injects a ~13k-token query manual that exceeds the
+            // on-device 4,096-token window. .focused(.items) scopes guidance to our page/post
+            // text domain and .compact trims output — measured to fit (C.8, #158).
+            tools.append(SpotlightSearchTool(configuration: .init(
+                sources: [.coreSpotlight],
+                guide: .init(level: .focused(.items), format: .compact))))
         }
-        return LanguageModelSession(instructions: instructions)
+        if let editBridge, let contentGraph {
+            tools.append(ApplyEditTool(
+                bridge: editBridge,
+                siteID: context.siteID,
+                contextSelector: context.selectedElementSelector
+            ))
+            tools.append(SearchContentTool(contentGraph: contentGraph, siteID: context.siteID))
+        }
+        // `tools` is empty only on the one-shot paths (`includeSpotlight: false`) with no
+        // editBridge/contentGraph; the converse path always appends Spotlight, so its session is
+        // never tool-less. The empty branch preserves the prior tool-less one-shot behavior.
+        return tools.isEmpty
+            ? LanguageModelSession(instructions: instructions)
+            : LanguageModelSession(tools: tools, instructions: instructions)
     }
 
     /// Folds the situational ``AssistantContext`` into session instructions.

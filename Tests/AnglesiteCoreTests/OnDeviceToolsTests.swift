@@ -241,8 +241,8 @@ struct SearchContentToolTests {
 @Suite("FoundationModelAssistant tool wiring")
 struct FoundationModelAssistantToolWiringTests {
 
-    @Test("supportsTools is true only when both dependencies are injected")
-    func capabilitiesReflectDeps() async {
+    @Test("supportsTools is always true (SpotlightSearchTool is unconditional)")
+    func capabilitiesAlwaysSupportTools() async {
         let router = FakeEditRouter(reply: EditReply(id: "x", status: .applied, message: nil))
         let bridge = makeBridge(router)
         let graph = SiteContentGraph()
@@ -251,13 +251,13 @@ struct FoundationModelAssistantToolWiringTests {
         #expect(withTools.capabilities.supportsTools == true)
 
         let withoutTools = FoundationModelAssistant(tier: .onDevice)
-        #expect(withoutTools.capabilities.supportsTools == false)
+        #expect(withoutTools.capabilities.supportsTools == true)  // SpotlightSearchTool is unconditional (C.8, #158)
 
         let partial = FoundationModelAssistant(tier: .onDevice, editBridge: bridge, contentGraph: nil)
-        #expect(partial.capabilities.supportsTools == false)
+        #expect(partial.capabilities.supportsTools == true)  // SpotlightSearchTool is unconditional (C.8, #158)
 
         let partialGraph = FoundationModelAssistant(tier: .onDevice, editBridge: nil, contentGraph: graph)
-        #expect(partialGraph.capabilities.supportsTools == false)
+        #expect(partialGraph.capabilities.supportsTools == true)  // SpotlightSearchTool is unconditional (C.8, #158)
     }
 
     private func modelAvailable() -> Bool {
@@ -265,7 +265,7 @@ struct FoundationModelAssistantToolWiringTests {
         return false
     }
 
-    @Test("converse .started reports the attached tool names when tools are wired")
+    @Test("converse .started reports Spotlight tool unconditionally, and edit/search tools when wired")
     func startedReportsToolNames() async throws {
         guard modelAvailable() else { return }
         let router = FakeEditRouter(reply: EditReply(id: "x", status: .applied, message: nil))
@@ -283,7 +283,8 @@ struct FoundationModelAssistantToolWiringTests {
                 break  // the names are fixed at turn open; no need to drain the model's response
             }
         }
-        #expect(startedToolNames == [ApplyEditTool.toolName, SearchContentTool.toolName])
+        // SpotlightSearchTool is unconditional; edit/search pair is conditional on both deps (C.8, #158)
+        #expect(startedToolNames == ["spotlightSearch", ApplyEditTool.toolName, SearchContentTool.toolName])
     }
 }
 #endif
