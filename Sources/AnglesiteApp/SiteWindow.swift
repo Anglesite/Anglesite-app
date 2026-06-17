@@ -49,6 +49,8 @@ struct SiteWindow: View {
     @State private var chat: ChatModel?
     @State private var chatPresented = false
     @State private var health = HealthModel(runner: DefaultHealthCheckRunner())
+    /// Observed so an already-open window reacts to a `PreviewSiteIntent` navigation request.
+    @State private var router = WindowRouter.shared
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -66,6 +68,12 @@ struct SiteWindow: View {
         }
         .task(id: siteID) { await loadAndStart() }
         .task(id: site?.id) { await observeRemoval() }
+        // Warm path: an already-open window reacts to a new `PreviewSiteIntent` request (the
+        // cold path is `applyPendingNavigation` in `loadAndStart`). Mirrors how `SitesLauncherView`
+        // pairs `.onChange` with an initial consume for `newSiteRequested`.
+        .onChange(of: router.pendingNavigation) { _, _ in
+            if let id = site?.id { applyPendingNavigation(for: id) }
+        }
         .onDisappear {
             preview.close()
             // Unregister the annotation provider from the shared registry so
@@ -246,7 +254,7 @@ struct SiteWindow: View {
     private func mainPane(for site: SiteStore.Site) -> some View {
         switch preview.state {
         case .ready(_, let url):
-            PreviewView(url: url, router: preview.editRouter, annotationProvider: annotationProvider)
+            PreviewView(url: preview.displayURL ?? url, router: preview.editRouter, annotationProvider: annotationProvider)
         case .starting:
             centeredStatus { ProgressView("Starting dev server for \(site.name)…") }
         case .failed(_, let message):
@@ -300,6 +308,21 @@ struct SiteWindow: View {
         }
     }
 
+    /// Apply (and clear) any pending `PreviewSiteIntent` navigation for `siteID`: navigate to a
+    /// page route, or reset the preview to the site root. Called from `loadAndStart` (cold-open,
+    /// where `.onChange` won't fire for the value set before the window observed it) and from
+    /// `.onChange(of: router.pendingNavigation)` (an already-open window) — the dual cold/warm
+    /// handling `SitesLauncherView` uses for `newSiteRequested`. `consumeNavigation` is keyed by
+    /// siteID, so other sites' windows observing the same dict no-op here.
+    @MainActor
+    private func applyPendingNavigation(for siteID: String) {
+        switch router.consumeNavigation(for: siteID) {
+        case .some(.some(let route)): preview.navigate(toRoute: route)
+        case .some(.none): preview.clearRoute()
+        case .none: break
+        }
+    }
+
     private func loadAndStart() async {
         // SwiftUI's NSPersistentUIManager will happily restore a WindowGroup with a
         // nil payload, or one whose value no longer matches a known site (sites.json
@@ -346,6 +369,9 @@ struct SiteWindow: View {
         }
 
         preview.open(siteID: resolved.id, siteDirectory: resolved.path)
+        // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
+        // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
+        applyPendingNavigation(for: resolved.id)
         // The annotation feed, undo command, and edit observer feed the chat panel. They're all
         // MCP-based (the edit overlay applies edits via MCP on both targets), so they're wired the
         // same way regardless of which assistant backs the chat.

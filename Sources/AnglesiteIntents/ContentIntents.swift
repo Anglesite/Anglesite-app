@@ -83,11 +83,9 @@ public struct SiteStatusIntent: AppIntent {
 // MARK: - Preview
 
 /// Opens the site window. `openAppWhenRun` brings Anglesite forward; the actual window open
-/// happens via `WindowRouter`, which the "Sites" scene observes.
-///
-/// The `page` parameter is accepted (per the A.5 spec) but does not yet drive in-preview
-/// navigation to that page — delivering the route to the right `SiteWindow`'s WKWebView is a
-/// follow-up. Today the intent opens the site; the dialog deliberately doesn't claim more.
+/// happens via `WindowRouter`, which the "Sites" scene observes. When a `page` is supplied, its
+/// route rides along on the open request; `SiteWindow` consumes it and navigates the preview's
+/// WKWebView to that page once the dev server is ready (cold-open included).
 public struct PreviewSiteIntent: AppIntent {
     public static let title: LocalizedStringResource = "Preview Site"
     public static let description = IntentDescription("Open a site's live preview in Anglesite.")
@@ -102,8 +100,8 @@ public struct PreviewSiteIntent: AppIntent {
 
     @MainActor
     public func perform() async throws -> some IntentResult & ProvidesDialog {
-        WindowRouter.shared.requestOpen(siteID: site.id)
-        return .result(dialog: IntentDialog(stringLiteral: ContentDialogs.preview(siteName: site.displayName)))
+        WindowRouter.shared.requestOpen(siteID: site.id, route: page?.route)
+        return .result(dialog: IntentDialog(stringLiteral: ContentDialogs.preview(siteName: site.displayName, pageName: page?.displayName)))
     }
 }
 
@@ -211,8 +209,9 @@ public enum ContentDialogs {
         return "\(siteName) has \(count(pages, "page")), \(count(posts, "post"))\(draftNote), and \(count(images, "image"))."
     }
 
-    public static func preview(siteName: String) -> String {
-        "Opening \(siteName)."
+    public static func preview(siteName: String, pageName: String? = nil) -> String {
+        if let pageName { return "Opening the \(pageName) page of \(siteName)." }
+        return "Opening \(siteName)."
     }
 
     public static func created(_ result: ContentCreateResult, kind: CreateKind, siteName: String) -> String {

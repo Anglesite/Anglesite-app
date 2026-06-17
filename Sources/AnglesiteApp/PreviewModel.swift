@@ -15,6 +15,11 @@ final class PreviewModel {
     /// the runtime is still `.starting`.
     private(set) var openSiteID: String?
 
+    /// The page route the preview should show, set by `navigate(toRoute:)` (e.g. from
+    /// `PreviewSiteIntent`). `nil` means the site root. Persisted, not consumed, so a dev-server
+    /// restart that rebinds the port re-derives the target against the new base URL.
+    private(set) var activeRoute: String?
+
     private let runtime: any SiteRuntime
 
     /// The `EditRouter` that the WKWebView's `AnglesiteScriptHandler` forwards overlay edits to.
@@ -98,6 +103,22 @@ final class PreviewModel {
     var readyURL: URL? {
         if case .ready(_, let url) = state { return url }
         return nil
+    }
+
+    /// Show `route` in the preview. Safe to call before the runtime is `.ready` — `displayURL`
+    /// derives the target lazily once a base URL exists (the cold-open Siri case).
+    func navigate(toRoute route: String) { activeRoute = route }
+
+    /// Reset the preview to the site root — a plain "preview my site" issued after a prior page
+    /// navigation. Without this, `activeRoute` would persist and keep showing the old page.
+    func clearRoute() { activeRoute = nil }
+
+    /// The URL the preview WKWebView should load: the active page route against the ready base
+    /// URL, or the base URL itself when no route is active. `nil` until the runtime is `.ready`.
+    var displayURL: URL? {
+        guard let base = readyURL else { return nil }
+        guard let route = activeRoute else { return base }
+        return PreviewNavigation.targetURL(base: base, route: route)
     }
 
     /// Exposes the runtime's `MCPClient` via the same weak-getter pattern `editRouter` uses,
