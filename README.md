@@ -16,7 +16,7 @@ Also landed since v1:
 - **`SiteRuntime` protocol** (#65) — abstracts the execution substrate so `PreviewModel` is decoupled from how a site runs (in-process subprocess vs. local container vs. Cloudflare).
 - **HTTP/Streamable MCP transport** (#64) — `MCPClient` can connect over HTTP in addition to stdio, enabling container-backed runtimes.
 - **Containerization spikes** — Apple Containerization (#60, DevID-only; MAS-incompatible) and Cloudflare Sandbox (#61, shared OCI image) are complete. Production container runtimes (#66, #69) and the iOS thin client (#71) are open.
-- **Xcode 27 migration** (#108) — macOS 27+ deployment target, `@State` macro audit, Swift 6.4 toolchain. Both schemes build clean; 270 tests pass.
+- **Xcode 27 migration** (#108) — macOS 27+ deployment target, `@State` macro audit, Swift 6.4 toolchain. Both schemes build clean; 662 tests pass.
 - **macOS 27 platform features** (open) — system-wide MCP (#101), Spotlight/App Intents (#102), native chat on Foundation Models (#105), and more.
 
 See [`docs/build-plan.md`](docs/build-plan.md) for the full phased status.
