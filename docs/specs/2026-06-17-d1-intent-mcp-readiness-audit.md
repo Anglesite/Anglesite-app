@@ -151,3 +151,19 @@ These map directly onto the D.2 candidate tools (`anglesite_apply_edit`,
 `anglesite_list_content`): if Apple's bridge auto-derives well-shaped tools from the
 improved intents above, the custom descriptors in D.2 may be unnecessary — which is what
 this audit set out to determine.
+
+## D.2 Closeout (2026-06-17) — descriptor decision
+
+With F-1/F-2/F-3 landed, the two D.2 candidate descriptors are resolved:
+
+- **`anglesite_list_content` — not needed.** The enriched `SearchContentIntent` (now returns a
+  typed `[ContentSearchResultEntity]`) plus `SiteStatusIntent` cover structured content
+  enumeration via auto-derived tools. No hand-registered descriptor.
+- **`anglesite_apply_edit` — deliberately not exposed** as a system-wide intent. It is a low-level
+  `selector / op / value` primitive, not a natural-language action; exposing a structured DOM-edit
+  primitive to arbitrary external agents without the edit overlay's live selection context is a
+  safety regression. It stays on the app-internal MCP path (`MCPClient` + `AnglesiteBridge`);
+  `EditContentIntent`'s natural-language `instruction` form remains the agent-facing edit surface.
+
+No `AnglesiteMCPRegistration` / hand-written descriptors are required: the auto-derived tools from
+the enriched intents *are* D.2's "custom MCP tool descriptors". Closes #163.
