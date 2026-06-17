@@ -182,5 +182,28 @@ extension AppIntentsTests {
             }
             #expect(fake.pageCalls.count == 1)
         }
+
+        @Test("createdPage builds a PageEntity from a successful result, nil on failure")
+        func createdPageFactory() {
+            let ok = ContentCreateResult.created(filePath: "src/pages/about.astro", identifier: "/about")
+            let e = AddPageIntent.createdPage(ok, siteID: AppIntentsTests.aSite, name: "About")
+            #expect(e?.id == "\(AppIntentsTests.aSite):page:/about")
+            #expect(e?.route == "/about")
+            #expect(e?.displayName == "About")
+            #expect(AddPageIntent.createdPage(.siteNotFound, siteID: AppIntentsTests.aSite, name: "About") == nil)
+            #expect(AddPageIntent.createdPage(.failed(reason: "x"), siteID: AppIntentsTests.aSite, name: "About") == nil)
+        }
+
+        @Test("createdPost builds a PostEntity; collection from input, else parsed from filePath")
+        func createdPostFactory() {
+            let ok = ContentCreateResult.created(filePath: "src/content/notes/hello.md", identifier: "hello")
+            let withInput = AddPostIntent.createdPost(ok, siteID: AppIntentsTests.aSite, title: "Hello", collection: "blog")
+            #expect(withInput?.id == "\(AppIntentsTests.aSite):post:hello")
+            #expect(withInput?.slug == "hello")
+            #expect(withInput?.collection == "blog")          // input wins
+            let parsed = AddPostIntent.createdPost(ok, siteID: AppIntentsTests.aSite, title: "Hello", collection: nil)
+            #expect(parsed?.collection == "notes")            // parsed from filePath
+            #expect(AddPostIntent.createdPost(.failed(reason: "x"), siteID: AppIntentsTests.aSite, title: "Hello", collection: nil) == nil)
+        }
     }
 }

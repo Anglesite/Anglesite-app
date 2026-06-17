@@ -1,5 +1,6 @@
 import AppIntents
 import AnglesiteCore
+import Foundation
 
 /// Phase A content intents (A.5, #139). Thin adapters, like `SiteIntents`:
 ///
@@ -147,7 +148,7 @@ public struct AddPageIntent: AppIntent {
         Summary("Add page \(\.$name) to \(\.$site)")
     }
 
-    public func perform() async throws -> some IntentResult & ProvidesDialog {
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<PageEntity?> {
         let scoped = ContentOperationsOverride.scoped
         let svc = scoped ?? content
         // Spawning the plugin's Node MCP server on first use can exceed the default budget, so the
@@ -165,7 +166,18 @@ public struct AddPageIntent: AppIntent {
             result = await svc.createPage(siteID: site.id, name: name, route: route)
             #endif
         }
-        return .result(dialog: IntentDialog(stringLiteral: ContentDialogs.created(result, kind: .page, siteName: site.displayName)))
+        return .result(
+            value: Self.createdPage(result, siteID: site.id, name: name),
+            dialog: IntentDialog(stringLiteral: ContentDialogs.created(result, kind: .page, siteName: site.displayName))
+        )
+    }
+}
+
+extension AddPageIntent {
+    /// Reconstruct the created page from inputs + result; nil when the create failed.
+    static func createdPage(_ result: ContentCreateResult, siteID: String, name: String) -> PageEntity? {
+        guard case let .created(_, identifier) = result else { return nil }
+        return PageEntity(id: "\(siteID):page:\(identifier)", displayName: name, route: identifier, siteID: siteID)
     }
 }
 
@@ -197,7 +209,7 @@ public struct AddPostIntent: AppIntent {
         Summary("Add post \(\.$title2) to \(\.$site)")
     }
 
-    public func perform() async throws -> some IntentResult & ProvidesDialog {
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<PostEntity?> {
         let scoped = ContentOperationsOverride.scoped
         let svc = scoped ?? content
         let result: ContentCreateResult
@@ -212,7 +224,22 @@ public struct AddPostIntent: AppIntent {
             result = await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug)
             #endif
         }
-        return .result(dialog: IntentDialog(stringLiteral: ContentDialogs.created(result, kind: .post, siteName: site.displayName)))
+        return .result(
+            value: Self.createdPost(result, siteID: site.id, title: title2, collection: collection),
+            dialog: IntentDialog(stringLiteral: ContentDialogs.created(result, kind: .post, siteName: site.displayName))
+        )
+    }
+}
+
+extension AddPostIntent {
+    /// Reconstruct the created post; collection from the input when supplied, else parsed
+    /// from the created file's parent directory.
+    static func createdPost(_ result: ContentCreateResult, siteID: String, title: String, collection: String?) -> PostEntity? {
+        guard case let .created(filePath, identifier) = result else { return nil }
+        let coll = (collection?.isEmpty == false)
+            ? collection!
+            : ((filePath as NSString).deletingLastPathComponent as NSString).lastPathComponent
+        return PostEntity(id: "\(siteID):post:\(identifier)", displayName: title, slug: identifier, collection: coll, siteID: siteID)
     }
 }
 

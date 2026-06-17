@@ -26,6 +26,13 @@ public struct PageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
         self.route = page.route
         self.siteID = page.siteID
     }
+
+    public init(id: String, displayName: String, route: String, siteID: String) {
+        self.id = id
+        self.displayName = displayName
+        self.route = route
+        self.siteID = siteID
+    }
 }
 
 /// Resolves `PageEntity` references from `SiteContentGraph`. Used by Siri/Shortcuts for both
@@ -114,6 +121,17 @@ public struct PostEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
         self.slug = post.slug
         self.collection = post.collection
         self.siteID = post.siteID
+    }
+
+    public init(id: String, displayName: String, slug: String, collection: String,
+                siteID: String, isDraft: Bool = true, tags: [String] = []) {
+        self.id = id
+        self.displayName = displayName
+        self.isDraft = isDraft
+        self.tags = tags
+        self.slug = slug
+        self.collection = collection
+        self.siteID = siteID
     }
 }
 
