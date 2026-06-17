@@ -27,4 +27,16 @@ public final class WindowRouter {
     public func consumeRoute(for siteID: String) -> String? {
         pendingRoute.removeValue(forKey: siteID)
     }
+
+    /// Set by File ▸ New Site (which can't host the wizard sheet itself). The "Sites"
+    /// launcher observes this, runs `presentNewSite()`, then clears it via
+    /// `clearNewSiteRequest()`. `private(set)` so only the two methods below mutate it —
+    /// external callers can't subvert the set-then-consume contract the launcher relies on.
+    /// Mirrors `requested`/`requestOpen` for the open-existing path.
+    public private(set) var newSiteRequested = false
+
+    public func requestNewSite() { newSiteRequested = true }
+
+    /// Called by the launcher once it has consumed the request.
+    public func clearNewSiteRequest() { newSiteRequested = false }
 }
