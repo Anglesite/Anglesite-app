@@ -40,4 +40,12 @@ struct PreviewNavigationTests {
         #expect(PreviewNavigation.targetURL(base: base, route: "/about")
                 == URL(string: "http://localhost:4321/about")!)
     }
+
+    @Test("a query string and fragment in the route are carried over, not encoded into the path")
+    func routeWithQueryAndFragment() {
+        #expect(PreviewNavigation.targetURL(base: Self.base, route: "/about?preview=1")
+                == URL(string: "http://localhost:4321/about?preview=1")!)
+        #expect(PreviewNavigation.targetURL(base: Self.base, route: "/about#top")
+                == URL(string: "http://localhost:4321/about#top")!)
+    }
 }

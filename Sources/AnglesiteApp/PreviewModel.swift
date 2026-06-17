@@ -109,6 +109,10 @@ final class PreviewModel {
     /// derives the target lazily once a base URL exists (the cold-open Siri case).
     func navigate(toRoute route: String) { activeRoute = route }
 
+    /// Reset the preview to the site root — a plain "preview my site" issued after a prior page
+    /// navigation. Without this, `activeRoute` would persist and keep showing the old page.
+    func clearRoute() { activeRoute = nil }
+
     /// The URL the preview WKWebView should load: the active page route against the ready base
     /// URL, or the base URL itself when no route is active. `nil` until the runtime is `.ready`.
     var displayURL: URL? {

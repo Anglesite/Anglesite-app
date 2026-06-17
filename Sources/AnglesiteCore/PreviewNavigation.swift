@@ -6,13 +6,18 @@ import Foundation
 public enum PreviewNavigation {
     /// The absolute preview URL for `route` against the dev-server `base`.
     /// `route` is treated as a site-absolute path; `base`'s scheme/host/port are preserved.
-    /// An empty route or `"/"` returns `base` (the site root).
+    /// An empty route or `"/"` returns `base` (the site root). A query string or fragment in
+    /// `route` (e.g. `/about?preview=1#top`) is carried over to the result rather than being
+    /// percent-encoded into the path.
     public static func targetURL(base: URL, route: String) -> URL {
         let trimmed = route.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != "/" else { return base }
-        let path = trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
-        guard var comps = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return base }
-        comps.path = path
+        let normalized = trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
+        guard var comps = URLComponents(url: base, resolvingAgainstBaseURL: false),
+              let routeComps = URLComponents(string: normalized) else { return base }
+        comps.path = routeComps.path
+        comps.query = routeComps.query
+        comps.fragment = routeComps.fragment
         return comps.url ?? base
     }
 }
