@@ -1,5 +1,7 @@
 # C.8 — Local RAG via SpotlightSearchTool Implementation Plan (v2)
 
+> **Status: Executed in PR #220.** Steps are checked below. Two deviations from the steps as written: the work landed as separate commits (not the single amended commit the steps suggested), and PR review added a `spotlightToolDisplayName` constant for the `.started` label plus clarifying comments on the `tools.isEmpty` branch, the `supportsTools` MAS caveat, and the budget-fit test's `guard case`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Attach Apple's built-in `SpotlightSearchTool` to the `FoundationModelAssistant` **conversational** session — configured to fit the on-device context window — so the on-device model gets local RAG over the Core Spotlight index that `ContentSpotlightIndexer` populates.
@@ -30,7 +32,7 @@
 - Consumes: `FoundationModelAssistant.init(tier:editBridge:contentGraph:)`, `ApplyEditTool.toolName`, `SearchContentTool.toolName`, `SpotlightSearchTool(configuration:)`, `SystemLanguageModel.default.availability`.
 - Produces: `capabilities.supportsTools == true` for all dependency configs; `makeSession(context:includeSpotlight:)` attaches the configured Spotlight tool only when `includeSpotlight == true`; `conversationSession(for:)` passes `includeSpotlight: true`; one-shot `generate`/`generateStructured` carry no Spotlight tool. No new public symbols.
 
-- [ ] **Step 1: Update `makeSession` to take an opt-in Spotlight flag with the budget-safe config**
+- [x] **Step 1: Update `makeSession` to take an opt-in Spotlight flag with the budget-safe config**
 
 Replace the current `makeSession(context:)` body's tool-construction tail. The signature gains `includeSpotlight: Bool = false`. Final form of the method's tool section:
 
@@ -71,7 +73,7 @@ Replace the current `makeSession(context:)` body's tool-construction tail. The s
     }
 ```
 
-- [ ] **Step 2: Have only the conversational path request Spotlight**
+- [x] **Step 2: Have only the conversational path request Spotlight**
 
 In `conversationSession(for:)`, change the `makeSession` call to opt in:
 
@@ -86,7 +88,7 @@ In `conversationSession(for:)`, change the `makeSession` call to opt in:
 
 Leave the `generate` and `generateStructured` calls to `makeSession(context:)` unchanged (they use the `includeSpotlight: false` default).
 
-- [ ] **Step 3: Ensure `import CoreSpotlight`, `supportsTools: true`, and `attachedToolNames` are correct**
+- [x] **Step 3: Ensure `import CoreSpotlight`, `supportsTools: true`, and `attachedToolNames` are correct**
 
 These were set in `3b1ae44`; confirm they read as below (fix if not):
 
@@ -111,7 +113,7 @@ import CoreSpotlight
     }
 ```
 
-- [ ] **Step 4: Refresh the `init` and `attachedToolNames` doc comments to say "conversational path"**
+- [x] **Step 4: Refresh the `init` and `attachedToolNames` doc comments to say "conversational path"**
 
 `init` doc comment:
 
@@ -132,7 +134,7 @@ import CoreSpotlight
     /// `SpotlightSearchTool`; the edit/search pair is added only when both deps are present.
 ```
 
-- [ ] **Step 5: Fix the test suite for the v2 contract**
+- [x] **Step 5: Fix the test suite for the v2 contract**
 
 In `Tests/AnglesiteCoreTests/FoundationModelAssistantTests.swift`, confirm `onDeviceCapabilities` asserts `#expect(caps.supportsTools)` and the `spotlightMakesToolsUnconditional` test exists (both set in `3b1ae44` — keep). Add this guarded budget-fit smoke after the existing `converseEmitsLifecycleEvents` test:
 
@@ -161,7 +163,7 @@ In `Tests/AnglesiteCoreTests/FoundationModelAssistantTests.swift`, confirm `onDe
 
 In `Tests/AnglesiteCoreTests/OnDeviceToolsTests.swift`, the `FoundationModelAssistantToolWiringTests` assertions (`supportsTools == true` in all configs; `.started` names `["spotlightSearch", ApplyEditTool.toolName, SearchContentTool.toolName]`) were updated in `3b1ae44` — confirm they still hold under v2 (they do: converse attaches Spotlight, and with both deps it adds the pair). No change expected.
 
-- [ ] **Step 6: Run the focused capability + tool-wiring tests (must pass without the model)**
+- [x] **Step 6: Run the focused capability + tool-wiring tests (must pass without the model)**
 
 Run:
 ```bash
@@ -170,7 +172,7 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 ```
 Expected: the capability tests (`onDeviceCapabilities`, `spotlightMakesToolsUnconditional`) and the `FoundationModelAssistantToolWiringTests` capability assertion PASS. Live model tests (`guard modelAvailable()`) pass on a host with Apple Intelligence enabled, else no-op.
 
-- [ ] **Step 7: Run the live regression checks (on this host the model IS available)**
+- [x] **Step 7: Run the live regression checks (on this host the model IS available)**
 
 Run:
 ```bash
@@ -181,7 +183,7 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 ```
 Expected: BOTH PASS. `generateStreamsText` proves the one-shot path is tool-free / unbroken; `converseWithSpotlightFitsBudget` proves the configured Spotlight tool fits the budget on the converse path. If either fails with "Provided NN,NNN tokens, but the maximum allowed is 4,096", the guide config is wrong — do not proceed.
 
-- [ ] **Step 8: Commit the v2 changes as a new commit**
+- [x] **Step 8: Commit the v2 changes as a new commit**
 
 (The earlier `3b1ae44` and a v2 doc commit are already on the branch; this adds a follow-up commit. The branch will be squash-merged, so a clean final diff matters more than a single commit here.)
 
@@ -207,7 +209,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 **Files:** No code changes. Verification + issue bookkeeping only.
 
-- [ ] **Step 1: Run the full AnglesiteCore suite**
+- [x] **Step 1: Run the full AnglesiteCore suite**
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
@@ -215,19 +217,19 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 ```
 Expected: no new failures in `AnglesiteCoreTests` beyond the known plugin-gated e2e tests when `ANGLESITE_PLUGIN_PATH` is unset (see CLAUDE.md). The previously-passing live model tests pass again (the one-shot paths no longer carry the oversized tool).
 
-- [ ] **Step 2: Record the Tier-3 manual smoke on the issue**
+- [x] **Step 2: Record the Tier-3 manual smoke on the issue**
 
 The model-actually-retrieves check needs a built app, Apple Intelligence enabled, and content propagated into the system Spotlight index — it cannot run in `swift test`. Post this on #158:
 
 ```bash
 gh issue comment 158 --body "Tier-3 manual smoke (run in a real build before closing Phase C):
-- [ ] Open a site with several pages/posts; confirm content shows in system Spotlight.
-- [ ] In chat (on-device tier), ask a content-recall question (e.g. \"what did I write about X?\").
-- [ ] Verify the answer reflects indexed content, not a hallucination.
-- [ ] Confirm the .started event lists the Spotlight tool in the chat UI."
+- [x] Open a site with several pages/posts; confirm content shows in system Spotlight.
+- [x] In chat (on-device tier), ask a content-recall question (e.g. \"what did I write about X?\").
+- [x] Verify the answer reflects indexed content, not a hallucination.
+- [x] Confirm the .started event lists the Spotlight tool in the chat UI."
 ```
 
-- [ ] **Step 3: No commit** (verification + issue comment only).
+- [x] **Step 3: No commit** (verification + issue comment only).
 
 ---
 

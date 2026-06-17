@@ -94,7 +94,12 @@ public actor FoundationModelAssistant: ConversationalAssistant {
             supportsStreaming: true,
             supportsStructuredOutput: true,
             supportsVision: true,  // macOS 27 on-device model accepts image attachments (C.7, #157)
-            supportsTools: true,  // converse session always carries SpotlightSearchTool (C.8, #158)
+            // The converse session always carries SpotlightSearchTool (C.8, #158). This advertises
+            // that the tool is *attached*, not that every query succeeds: on MAS, converse runs the
+            // on-device backend under App Sandbox (#159), and whether the Spotlight CSSearchableIndex
+            // query needs an extra entitlement there is unverified until the MAS smoke (#81, Task 11).
+            // Attachment and construction are sandbox-independent, so `true` is accurate regardless.
+            supportsTools: true,
             maxContextTokens: tier == .privateCloudCompute ? 32_768 : 4_096,
             providerName: tier == .privateCloudCompute ? "Private Cloud Compute" : "On-Device"
         )
@@ -258,13 +263,16 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         session = nil
     }
 
+    /// Display label for `SpotlightSearchTool` in the `.started` event. `SpotlightSearchTool`
+    /// exposes no public `toolName` (unlike `ApplyEditTool`/`SearchContentTool`), so this is a
+    /// fixed local label — update it here if a future SDK adds a public name to bind to.
+    private static let spotlightToolDisplayName = "spotlightSearch"
+
     /// Tool names for the `.started` event (emitted only on the `converse` path) so the chat UI can
     /// reflect what's wired. Never empty — the conversational session always carries
     /// `SpotlightSearchTool`; the edit/search pair is added only when both deps are present.
     private var attachedToolNames: [String] {
-        // SpotlightSearchTool is always on the converse session; the edit/search pair only when
-        // their deps exist. "spotlightSearch" is a display label — the system tool exposes no name.
-        var names = ["spotlightSearch"]
+        var names = [Self.spotlightToolDisplayName]
         if editBridge != nil && contentGraph != nil {
             names += [ApplyEditTool.toolName, SearchContentTool.toolName]
         }
@@ -317,6 +325,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
             ))
             tools.append(SearchContentTool(contentGraph: contentGraph, siteID: context.siteID))
         }
+        // `tools` is empty only on the one-shot paths (`includeSpotlight: false`) with no
+        // editBridge/contentGraph; the converse path always appends Spotlight, so its session is
+        // never tool-less. The empty branch preserves the prior tool-less one-shot behavior.
         return tools.isEmpty
             ? LanguageModelSession(instructions: instructions)
             : LanguageModelSession(tools: tools, instructions: instructions)

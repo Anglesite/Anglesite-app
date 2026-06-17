@@ -257,6 +257,9 @@ struct FoundationModelAssistantTests {
         ) {
             events.append(event)
         }
+        // `guard case` rather than `#expect`: matching a non-equatable associated-value enum case
+        // on an `Optional` is awkward with `#expect`; this mirrors the other converse lifecycle
+        // tests in this suite (e.g. `converseEmitsLifecycleEvents`).
         guard case .turnComplete = events.last else {
             Issue.record("Expected .turnComplete (budget fit), got \(String(describing: events.last))")
             return
