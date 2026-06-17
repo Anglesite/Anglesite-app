@@ -58,26 +58,33 @@ public enum LiveRegionAnnouncer {
 
     /// The announceable substrate of a deploy, mapped from the app-target `DeployModel.Phase` (which
     /// `AnglesiteCore` sits below and cannot reference). Only the distinctions that affect an
-    /// announcement are modelled; `idle` and `blocked` both collapse to `inactive`.
+    /// announcement are modelled; `idle` collapses to `inactive`.
     public enum DeployActivity: Equatable {
         case inactive
         case running(site: String)
         case succeeded(url: String)
         case failed(reason: String)
+        /// The pre-deploy check refused the deploy. Terminal and action-required (the app cannot
+        /// override the security hook), so it gets its own announcement rather than silence —
+        /// otherwise a VoiceOver user hears "Deploying <site>" and then nothing.
+        case blocked(failedChecks: Int)
     }
 
     /// The announcement for a deploy phase transition, or `nil`.
     ///
     /// Speaks the *start* (so a deploy kicked off from a keyboard menu is confirmed even if focus
-    /// doesn't move to the drawer) and the *terminal* transitions (succeeded/failed). Everything in
-    /// between — the streaming log — stays silent here; see `deployStderrAnnouncement` for the one
-    /// mid-flight exception.
+    /// doesn't move to the drawer) and the *terminal* transitions (succeeded/failed/blocked).
+    /// Everything in between — the streaming log — stays silent here; see `deployStderrAnnouncement`
+    /// for the one mid-flight exception.
     public static func deployAnnouncement(from old: DeployActivity, to new: DeployActivity) -> String? {
         guard old != new else { return nil }
         switch new {
         case .running(let site): return "Deploying \(site)"
         case .succeeded(let url): return "Deploy succeeded. \(url)"
         case .failed(let reason): return "Deploy failed. \(reason)"
+        case .blocked(let failedChecks):
+            let checks = failedChecks == 1 ? "check" : "checks"
+            return "Deploy blocked. \(failedChecks) \(checks) failed."
         case .inactive: return nil
         }
     }

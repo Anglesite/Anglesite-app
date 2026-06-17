@@ -159,14 +159,16 @@ struct DeployDrawerView: View {
     }
 
     /// Collapses the app-target `DeployModel.Phase` onto the announceable substrate the decider
-    /// understands. `idle` and `blocked` are both pre-output states → `.inactive`.
+    /// understands. `idle` is the only pre-output state → `.inactive`; `blocked` is terminal and
+    /// action-required, so it announces (a VoiceOver user otherwise hears the start cue and silence).
     private func activity(for phase: DeployModel.Phase) -> LiveRegionAnnouncer.DeployActivity {
         switch phase {
         case .running: return .running(site: siteName)
         case .succeeded(let url, _): return .succeeded(url: url.absoluteString)
         case .failed(let reason, let exit):
             return .failed(reason: exit.map { "\(reason) (exit \($0))" } ?? reason)
-        case .idle, .blocked: return .inactive
+        case .blocked(let failures, _): return .blocked(failedChecks: failures.count)
+        case .idle: return .inactive
         }
     }
 

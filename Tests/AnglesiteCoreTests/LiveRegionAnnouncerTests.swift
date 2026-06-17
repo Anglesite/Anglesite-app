@@ -98,6 +98,26 @@ struct LiveRegionAnnouncerTests {
                                                        to: .inactive) == nil)
     }
 
+    @Test("Running → blocked announces the refusal, not silence")
+    func deployBlockedAnnouncesRefusal() {
+        #expect(LiveRegionAnnouncer.deployAnnouncement(from: .running(site: "acme"),
+                                                       to: .blocked(failedChecks: 3))
+                == "Deploy blocked. 3 checks failed.")
+    }
+
+    @Test("A single failed check is announced in the singular")
+    func deployBlockedSingularCheck() {
+        #expect(LiveRegionAnnouncer.deployAnnouncement(from: .running(site: "acme"),
+                                                       to: .blocked(failedChecks: 1))
+                == "Deploy blocked. 1 check failed.")
+    }
+
+    @Test("A re-emitted blocked state announces nothing")
+    func deployBlockedUnchangedIsSilent() {
+        #expect(LiveRegionAnnouncer.deployAnnouncement(from: .blocked(failedChecks: 2),
+                                                       to: .blocked(failedChecks: 2)) == nil)
+    }
+
     // MARK: Deploy — first-stderr early warning
 
     @Test("The first stderr line warns once, before any terminal state")
