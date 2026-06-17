@@ -97,7 +97,7 @@ struct ApplyEditToolTests {
         #expect(msg?.selector == .object([
             "tag": .string("h1"), "classes": .array([]), "nthChild": .int(1),
         ]))
-        #expect(msg?.op == "replace-attr")
+        // Op-string mapping is asserted exhaustively in `mapsEveryOperationToItsOpString`.
     }
 
     @Test("no context selector + complex selector fails gracefully without calling the bridge")
