@@ -16,11 +16,20 @@
 # Membership is checked per target (via the target's PBXSourcesBuildPhase), not by mere
 # presence of a file reference — because both the Anglesite and AnglesiteMAS targets share
 # Sources/AnglesiteApp, a file dropped from one but kept by the other would otherwise slip by.
+# Files are compared by their path *relative to* Sources/AnglesiteApp (reconstructed from the
+# PBX group hierarchy), not by bare basename, so two same-named files in different subdirs
+# (e.g. Views/Settings.swift vs Overlays/Settings.swift) are distinguished.
 #
 # It deliberately does NOT run a full `xcodebuild` of the app: the app target needs the
 # macOS 27 SDK (Xcode 27), which CI runners don't yet ship (see #128). XcodeGen only needs
 # the spec + sources, so this guard runs anywhere xcodegen + python3 are installed.
+#
+# XcodeGen version: CI pins 2.45.4 (see .github/workflows/ci.yml). This script requires at
+# least the MIN_XCODEGEN below; the project graph keys it reads (PBXSourcesBuildPhase,
+# productType, --quiet) are stable across the 2.x line.
 set -euo pipefail
+
+MIN_XCODEGEN="2.38.0"
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
@@ -28,6 +37,16 @@ cd "$repo_root"
 if ! command -v xcodegen >/dev/null 2>&1; then
   echo "error: xcodegen not found on PATH." >&2
   echo "       Install with: brew install xcodegen" >&2
+  exit 1
+fi
+
+# Fail loudly on an xcodegen too old to be trusted, rather than silently accepting whatever
+# the local/Homebrew formula happens to provide.
+xcodegen_version="$(xcodegen --version 2>/dev/null | sed -n 's/^Version: //p')"
+if [[ -n "$xcodegen_version" ]] \
+   && [[ "$(printf '%s\n%s\n' "$MIN_XCODEGEN" "$xcodegen_version" | sort -V | head -1)" != "$MIN_XCODEGEN" ]]; then
+  echo "error: xcodegen $xcodegen_version is older than the required $MIN_XCODEGEN." >&2
+  echo "       Upgrade with: brew upgrade xcodegen" >&2
   exit 1
 fi
 
@@ -49,22 +68,46 @@ fi
 
 # Resolve, per application target, the set of Swift files it compiles, and compare against the
 # Swift files on disk under $sources_root. plutil reads the old-style pbxproj plist; python3
-# walks the object graph (target → PBXSourcesBuildPhase → PBXBuildFile → PBXFileReference).
-plutil -convert json -o /tmp/anglesite-pbxproj.json "$pbxproj"
+# walks the object graph (target → PBXSourcesBuildPhase → PBXBuildFile → PBXFileReference),
+# rebuilding each file's path from its enclosing PBXGroup chain.
+pbx_json="$(mktemp "${TMPDIR:-/tmp}/anglesite-pbxproj.XXXXXX.json")"
+trap 'rm -f "$pbx_json"' EXIT
+plutil -convert json -o "$pbx_json" "$pbxproj"
 
-python3 - "$sources_root" /tmp/anglesite-pbxproj.json <<'PY'
+python3 - "$sources_root" "$pbx_json" <<'PY'
 import json, os, sys
 
 sources_root, pbx_json = sys.argv[1], sys.argv[2]
 
+# On-disk Swift files, as paths relative to sources_root (e.g. "Foo.swift", "Views/Bar.swift").
 on_disk = {
-    f for _root, _dirs, files in os.walk(sources_root)
+    os.path.relpath(os.path.join(root, f), sources_root)
+    for root, _dirs, files in os.walk(sources_root)
     for f in files if f.endswith(".swift")
 }
 if not on_disk:
     sys.exit(f"error: no .swift files found under {sources_root} — is the working tree intact?")
 
-objects = json.load(open(pbx_json))["objects"]
+with open(pbx_json) as fh:
+    objects = json.load(fh)["objects"]
+
+# child id → enclosing PBXGroup id, so a file reference's full path can be rebuilt from the
+# chain of group `path` components (XcodeGen emits one group per source directory).
+parent = {
+    child: gid
+    for gid, obj in objects.items() if obj.get("isa") == "PBXGroup"
+    for child in obj.get("children", [])
+}
+
+def full_path(obj_id):
+    parts, node = [], obj_id
+    while node is not None:
+        path = objects.get(node, {}).get("path")
+        if path:
+            parts.append(path)
+        node = parent.get(node)
+    return os.path.normpath(os.path.join(*reversed(parts))) if parts else ""
+
 app_targets = [
     v for v in objects.values()
     if v.get("isa") == "PBXNativeTarget"
@@ -81,10 +124,10 @@ for target in sorted(app_targets, key=lambda t: t["name"]):
         if phase.get("isa") != "PBXSourcesBuildPhase":
             continue
         for build_file_id in phase.get("files", []):
-            ref = objects.get(objects.get(build_file_id, {}).get("fileRef", ""), {})
-            path = ref.get("path", "")
-            if path.endswith(".swift"):
-                compiled.add(os.path.basename(path))
+            ref_id = objects.get(build_file_id, {}).get("fileRef")
+            ref = objects.get(ref_id, {})
+            if str(ref.get("path", "")).endswith(".swift"):
+                compiled.add(os.path.relpath(full_path(ref_id), sources_root))
 
     missing = sorted(on_disk - compiled)
     if missing:
@@ -95,8 +138,8 @@ for target in sorted(app_targets, key=lambda t: t["name"]):
         print(
             "       project.yml's sources have drifted from disk; an xcodebuild of this target "
             "would fail with 'cannot find … in scope':", file=sys.stderr)
-        for f in missing:
-            print(f"         - {sources_root}/{f}", file=sys.stderr)
+        for rel in missing:
+            print(f"         - {sources_root}/{rel}", file=sys.stderr)
 
 if failed:
     sys.exit(1)
