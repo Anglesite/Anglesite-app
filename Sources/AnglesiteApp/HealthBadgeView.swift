@@ -21,6 +21,12 @@ struct HealthBadgeView: View {
     /// state-specific glyph instead of a plain dot (HIG: differentiate without color).
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
 
+    /// Badge geometry scales with Dynamic Type so the differentiate-without-color glyph stays
+    /// legible at larger text sizes — the very users who turn that setting on. Anchored to
+    /// `.body` so it tracks the system text size rather than a fixed point size.
+    @ScaledMetric(relativeTo: .body) private var badgeDimension = 18
+    @ScaledMetric(relativeTo: .body) private var glyphSize = 11
+
     var body: some View {
         Button {
             popoverPresented.toggle()
@@ -45,7 +51,7 @@ struct HealthBadgeView: View {
         ZStack {
             if differentiateWithoutColor {
                 Image(systemName: stateSymbol)
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: glyphSize, weight: .bold))
                     .foregroundStyle(color)
             } else {
                 Circle()
@@ -58,7 +64,7 @@ struct HealthBadgeView: View {
                     .frame(width: 14, height: 14)
             }
         }
-        .frame(width: 18, height: 18, alignment: .center)
+        .frame(width: badgeDimension, height: badgeDimension, alignment: .center)
         .contentShape(Rectangle())
     }
 

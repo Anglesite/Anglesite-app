@@ -46,10 +46,12 @@ struct DeployDrawerView: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(url.absoluteString, forType: .string)
                 }
+                .accessibilityHint("Copies \(url.absoluteString) to the clipboard")
                 Button("Open in browser") {
                     NSWorkspace.shared.open(url)
                 }
                 .buttonStyle(.borderedProminent)
+                .accessibilityHint("Opens \(url.absoluteString)")
             }
         }
         .padding(.horizontal, 16)
@@ -61,14 +63,18 @@ struct DeployDrawerView: View {
         switch model.phase {
         case .running:
             ProgressView().controlSize(.small)
+                .accessibilityLabel("Deploying")
         case .succeeded:
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(.green).font(.title3)
+                .accessibilityHidden(true)
         case .failed:
             Image(systemName: "exclamationmark.octagon.fill")
                 .foregroundStyle(.red).font(.title3)
+                .accessibilityHidden(true)
         case .idle, .blocked:
             Image(systemName: "shippingbox").font(.title3)
+                .accessibilityHidden(true)
         }
     }
 
@@ -104,6 +110,8 @@ struct DeployDrawerView: View {
                             .foregroundStyle(line.stream == .stderr ? Color.red : Color.primary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .id(line.id)
+                            // stderr is conveyed in red; name it so VoiceOver doesn't lose that.
+                            .accessibilityLabel(line.stream == .stderr ? "Error: \(line.text)" : line.text)
                     }
                     if model.logLines.isEmpty {
                         Text("Waiting for output…")
