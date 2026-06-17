@@ -55,6 +55,13 @@ extension AppIntentsTests {
             #expect(ContentDialogs.created(.failed(reason: "boom"), kind: .page, siteName: "Alpha") == "Couldn’t add the page: boom")
         }
 
+        @Test("preview dialog names the page when one is supplied")
+        func previewDialogWithPage() {
+            #expect(ContentDialogs.preview(siteName: "Alpha") == "Opening Alpha.")
+            #expect(ContentDialogs.preview(siteName: "Alpha", pageName: "About")
+                    == "Opening the About page of Alpha.")
+        }
+
         // MARK: - Read intents (graph-gathering helpers)
 
         @Test("SearchContentIntent gathers matches for the right site and query")
