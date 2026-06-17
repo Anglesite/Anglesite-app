@@ -19,8 +19,8 @@ jobs:
       run:
         working-directory: JS/edit-overlay
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
@@ -39,19 +39,19 @@ jobs:
     env:
       ANGLESITE_BUILD_NPM_CACHE: '0'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       # The end-to-end test in AnglesiteBridgeTests spawns the real plugin's MCP server, so
       # CI needs the sibling repo present and `npm ci`-installed. Without these the test cleanly
       # `XCTSkip`s; with them, the full overlay → patcher → file-on-disk round-trip is exercised.
       - name: Checkout sibling Anglesite plugin
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Anglesite/anglesite
           path: anglesite-plugin
 
       - name: Set up Node (for the bundled plugin's MCP server)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
 
@@ -98,7 +98,7 @@ jobs:
     # skips the sibling-plugin checkout. TSan deterministically flags data races the probabilistic
     # `concurrentDeliver*` tests would otherwise only catch by timing luck (#203).
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Select latest available Xcode
         # Same toolchain rationale as build-test: CLAUDE.md mandates Xcode 27+.
@@ -129,14 +129,20 @@ jobs:
       # Pinned so a future XcodeGen release can't silently change what this guard accepts.
       # Bump deliberately; keep in sync with MIN_XCODEGEN in scripts/check-xcodeproj-sync.sh.
       XCODEGEN_VERSION: 2.45.4
+      # SHA-256 of the pinned release's xcodegen.zip — verified after download so a compromised
+      # release (or MITM) can't substitute a different binary. Re-fetch and update on every bump.
+      XCODEGEN_SHA256: 090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install XcodeGen (pinned)
         run: |
           set -euo pipefail
           curl -fsSL "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip" -o /tmp/xcodegen.zip
+          echo "${XCODEGEN_SHA256}  /tmp/xcodegen.zip" | shasum -a 256 --check
           unzip -q /tmp/xcodegen.zip -d /tmp/xcodegen-dist
+          test -x /tmp/xcodegen-dist/xcodegen/bin/xcodegen \
+            || { echo "error: xcodegen binary not found at expected path after unzip — check zip layout" >&2; exit 1; }
           echo "/tmp/xcodegen-dist/xcodegen/bin" >> "$GITHUB_PATH"
 
       - name: Check project sync

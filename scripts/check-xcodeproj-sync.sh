@@ -22,7 +22,9 @@
 #
 # It deliberately does NOT run a full `xcodebuild` of the app: the app target needs the
 # macOS 27 SDK (Xcode 27), which CI runners don't yet ship (see #128). XcodeGen only needs
-# the spec + sources, so this guard runs anywhere xcodegen + python3 are installed.
+# the spec + sources, so this guard runs anywhere xcodegen + python3 + plutil are installed.
+# `plutil` (used below to convert the pbxproj plist to JSON) is macOS-only, so in practice
+# this script requires macOS.
 #
 # XcodeGen version: CI pins 2.45.4 (see .github/workflows/ci.yml). This script requires at
 # least the MIN_XCODEGEN below; the project graph keys it reads (PBXSourcesBuildPhase,
@@ -43,8 +45,11 @@ fi
 # Fail loudly on an xcodegen too old to be trusted, rather than silently accepting whatever
 # the local/Homebrew formula happens to provide.
 xcodegen_version="$(xcodegen --version 2>/dev/null | sed -n 's/^Version: //p')"
-if [[ -n "$xcodegen_version" ]] \
-   && [[ "$(printf '%s\n%s\n' "$MIN_XCODEGEN" "$xcodegen_version" | sort -V | head -1)" != "$MIN_XCODEGEN" ]]; then
+if [[ -z "$xcodegen_version" ]]; then
+  # An unparseable --version means an unexpected build; warn rather than silently skipping, so a
+  # stale xcodegen can't masquerade as "checked" and produce a confusing result downstream.
+  echo "warning: could not parse 'xcodegen --version'; skipping minimum-version ($MIN_XCODEGEN) check." >&2
+elif [[ "$(printf '%s\n%s\n' "$MIN_XCODEGEN" "$xcodegen_version" | sort -V | head -1)" != "$MIN_XCODEGEN" ]]; then
   echo "error: xcodegen $xcodegen_version is older than the required $MIN_XCODEGEN." >&2
   echo "       Upgrade with: brew upgrade xcodegen" >&2
   exit 1
@@ -100,8 +105,11 @@ parent = {
 }
 
 def full_path(obj_id):
-    parts, node = [], obj_id
-    while node is not None:
+    # `seen` guards against a malformed pbxproj with a circular group hierarchy (A → B → A).
+    # XcodeGen's generated output won't cycle, but the set keeps the failure mode obvious.
+    parts, node, seen = [], obj_id, set()
+    while node is not None and node not in seen:
+        seen.add(node)
         path = objects.get(node, {}).get("path")
         if path:
             parts.append(path)
