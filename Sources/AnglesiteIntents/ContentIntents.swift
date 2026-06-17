@@ -24,7 +24,10 @@ public struct SearchContentIntent: AppIntent {
     public static let description = IntentDescription("Search a site's pages, posts, and images.")
 
     @Parameter(title: "Site") public var site: SiteEntity
-    @Parameter(title: "Search") public var query: String
+    @Parameter(
+        title: "Search",
+        description: "Words to match against page titles, post titles, slugs, tags, and image filenames."
+    ) public var query: String
     @Dependency private var graph: SiteContentGraph
 
     public init() {}
@@ -112,8 +115,14 @@ public struct AddPageIntent: AppIntent {
     public static let description = IntentDescription("Scaffold a new page on a site with Anglesite.")
 
     @Parameter(title: "Site") public var site: SiteEntity
-    @Parameter(title: "Name") public var name: String
-    @Parameter(title: "Route") public var route: String?
+    @Parameter(
+        title: "Name",
+        description: "The page title, e.g. “About” or “Contact”."
+    ) public var name: String
+    @Parameter(
+        title: "Route",
+        description: "Optional URL path relative to the site root, e.g. “/about”. Derived from the name when omitted."
+    ) public var route: String?
     @Dependency private var content: any ContentOperationsService
 
     public init() {}
@@ -151,9 +160,18 @@ public struct AddPostIntent: AppIntent {
     public static let description = IntentDescription("Scaffold a new draft post on a site with Anglesite.")
 
     @Parameter(title: "Site") public var site: SiteEntity
-    @Parameter(title: "Title") public var title2: String
-    @Parameter(title: "Collection") public var collection: String?
-    @Parameter(title: "Slug") public var slug: String?
+    @Parameter(
+        title: "Title",
+        description: "The post title."
+    ) public var title2: String
+    @Parameter(
+        title: "Collection",
+        description: "Optional content collection to add the post to, e.g. “blog”. Uses the site default when omitted."
+    ) public var collection: String?
+    @Parameter(
+        title: "Slug",
+        description: "Optional URL slug for the post, e.g. “my-first-post”. Derived from the title when omitted."
+    ) public var slug: String?
     @Dependency private var content: any ContentOperationsService
 
     public init() {}

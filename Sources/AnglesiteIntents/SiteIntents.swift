@@ -25,7 +25,9 @@ public struct DeploySiteIntent: AppIntent {
 
     public static var parameterSummary: some ParameterSummary { Summary("Deploy \(\.$site)") }
 
-    public func perform() async throws -> some IntentResult & ProvidesDialog {
+    // Returns the site as a value (like AuditSiteIntent) so an agent/Shortcut can chain
+    // deploy→backup or audit→deploy→backup. The MCP bridge surfaces this as a typed output.
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<SiteEntity> {
         let scoped = SiteOperationsOverride.scoped
         let ops: any SiteOperationsService
         if let scoped {
@@ -41,7 +43,7 @@ public struct DeploySiteIntent: AppIntent {
             ops = self.ops
         }
         guard let resolved = await ops.site(id: site.id) else {
-            return .result(dialog: "Couldn't find \(site.displayName).")
+            return .result(value: site, dialog: "Couldn't find \(site.displayName).")
         }
         // Deploys (build + wrangler) routinely exceed the default budget. On Xcode 27 we run via
         // `performBackgroundTask(onCancel:)` so the system can offer Cancel and we get extended
@@ -59,7 +61,7 @@ public struct DeploySiteIntent: AppIntent {
             result = await ops.deploy(site: resolved)
             #endif
         }
-        return .result(dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forDeploy: result)))
+        return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forDeploy: result)))
     }
 }
 
@@ -74,11 +76,13 @@ public struct BackupSiteIntent: AppIntent {
 
     public static var parameterSummary: some ParameterSummary { Summary("Back up \(\.$site)") }
 
-    public func perform() async throws -> some IntentResult & ProvidesDialog {
+    // Returns the site as a value (like Audit/Deploy) so an agent/Shortcut can chain backup
+    // into a follow-up site operation. The MCP bridge surfaces this as a typed output.
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<SiteEntity> {
         let scoped = SiteOperationsOverride.scoped
         let ops = scoped ?? self.ops
         guard let resolved = await ops.site(id: site.id) else {
-            return .result(dialog: "Couldn't find \(site.displayName).")
+            return .result(value: site, dialog: "Couldn't find \(site.displayName).")
         }
         // git push on a slow connection or large repo can exceed the default budget. Same
         // long-running + cancellable adoption as deploy/audit on Xcode 27; fallback on 26.3.
@@ -94,7 +98,7 @@ public struct BackupSiteIntent: AppIntent {
             result = await ops.backup(site: resolved)
             #endif
         }
-        return .result(dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forBackup: result)))
+        return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forBackup: result)))
     }
 }
 
