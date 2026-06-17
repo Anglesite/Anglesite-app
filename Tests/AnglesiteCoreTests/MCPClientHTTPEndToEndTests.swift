@@ -58,16 +58,18 @@ struct MCPClientHTTPEndToEndTests {
         // dies — `awaitReady` then throws with the server's stderr instead of letting this spin the
         // whole budget and report an opaque `.sessionLost`. A healthy cold start connects in well
         // under a second; the generous budget only covers a genuinely slow start.
+        let readyBudget: TimeInterval = 60
         try await E2EServer.awaitReady(
             handle: handle,
             supervisor: supervisor,
             logCenter: logCenter,
-            timeout: 60
+            timeout: readyBudget
         ) {
             // Retry the handshake until it succeeds. The inner deadline (< the outer budget) surfaces
             // the real connect error if the server is up but never completes the handshake; a crashed
-            // server is caught by `awaitReady`'s death detection, not this loop.
-            let deadline = Date().addingTimeInterval(55)
+            // server is caught by `awaitReady`'s death detection, not this loop. Derived from the
+            // outer budget so the two stay in sync if it's ever bumped.
+            let deadline = Date().addingTimeInterval(readyBudget - 5)
             while true {
                 do { try await client.connect(httpEndpoint: endpoint); return }
                 catch {

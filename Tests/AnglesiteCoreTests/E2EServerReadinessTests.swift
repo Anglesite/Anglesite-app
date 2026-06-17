@@ -68,4 +68,39 @@ struct E2EServerReadinessTests {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
     }
+
+    @Test("awaitReady reports a budget overrun as ServerTimedOut, not a phantom crash")
+    func timeoutIsDistinctFromCrash() async throws {
+        let supervisor = ProcessSupervisor()
+        let logCenter = LogCenter()
+        // A healthy-but-slow server: the process stays alive (so the death branch never fires), but
+        // readiness never completes, so only the timeout can settle the outcome.
+        let handle = try await supervisor.launch(
+            source: "e2e-readiness-timeout",
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "sleep 30"],
+            restartPolicy: .never,
+            logCenter: logCenter
+        )
+        defer { Task { await supervisor.terminate(handle, timeout: 2) } }
+
+        let start = Date()
+        do {
+            try await E2EServer.awaitReady(
+                handle: handle,
+                supervisor: supervisor,
+                logCenter: logCenter,
+                timeout: 0.3
+            ) {
+                while true { try await Task.sleep(nanoseconds: 50_000_000) }
+            }
+            Issue.record("expected awaitReady to throw ServerTimedOut, but it returned")
+        } catch let error as E2EServer.ServerTimedOut {
+            #expect(error.timeout == 0.3)
+        } catch let error as E2EServer.ServerExited {
+            Issue.record("a live-but-slow server must time out, not be reported as exited: \(error)")
+        }
+        // The budget, not the 30s process lifetime, bounds the wait.
+        #expect(Date().timeIntervalSince(start) < 5)
+    }
 }

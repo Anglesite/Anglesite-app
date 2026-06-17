@@ -32,6 +32,36 @@ public enum E2EServer {
         }
     }
 
+    /// The readiness budget elapsed while the server was still running (it just never became ready).
+    /// Distinct from `ServerExited`: the process is alive here, so there is no exit reason and no
+    /// crash stderr to report — conflating the two (e.g. `ServerExited(reason: .terminated, …)`)
+    /// would send a reader chasing a phantom signal kill.
+    public struct ServerTimedOut: Error, CustomStringConvertible {
+        public let timeout: TimeInterval
+
+        public init(timeout: TimeInterval) {
+            self.timeout = timeout
+        }
+
+        public var description: String {
+            "MCP server did not become ready within \(timeout)s (process still running)."
+        }
+    }
+
+    /// Records which of the racing tasks (readiness / death / timeout) settled first. Exactly one
+    /// `claim()` returns `true`; the losers see `false` and bow out without throwing. This replaces a
+    /// `Task.isCancelled` check, which is timing-dependent: when the process exits at the same instant
+    /// readiness succeeds, `group.cancelAll()` hasn't propagated yet, so the death task would observe
+    /// `isCancelled == false` and throw a spurious `ServerExited` even though readiness won.
+    private actor Outcome {
+        private var settled = false
+        func claim() -> Bool {
+            if settled { return false }
+            settled = true
+            return true
+        }
+    }
+
     /// Run `readiness` (typically a connect/handshake poll), but abort the moment the supervised
     /// `handle` process exits — throwing `ServerExited` with the captured stderr instead of letting
     /// the poll spin until `timeout`. The budget can therefore be generous (real cold starts vary)
@@ -47,14 +77,20 @@ public enum E2EServer {
         timeout: TimeInterval = 60,
         readiness: @Sendable @escaping () async throws -> Void
     ) async throws {
+        let outcome = Outcome()
         try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { try await readiness() }
+            group.addTask {
+                try await readiness()
+                // Mark readiness as the winner if it got here first; if the death/timeout task
+                // already claimed the outcome, this is a no-op and we just return success.
+                _ = await outcome.claim()
+            }
 
             group.addTask {
                 let reason = await supervisor.waitForExit(handle)
-                // `waitForExit` returns `.terminated` immediately when *this* task is cancelled
-                // (readiness already won) — don't misreport that as a crash.
-                if Task.isCancelled { return }
+                // Throw only if we won the race. If readiness already claimed the outcome, the
+                // process exit is just the cleanup that follows a successful start — not a crash.
+                guard await outcome.claim() else { return }
                 let stderr = await logCenter.snapshot()
                     .filter { $0.source == handle.source && $0.stream == .stderr }
                     .map(\.text)
@@ -64,15 +100,13 @@ public enum E2EServer {
 
             group.addTask {
                 try await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
-                throw ServerExited(
-                    reason: .terminated,
-                    stderr: "timed out after \(timeout)s waiting for the server to become ready"
-                )
+                guard await outcome.claim() else { return }
+                throw ServerTimedOut(timeout: timeout)
             }
 
             defer { group.cancelAll() }
             // First task to finish decides the outcome: readiness success returns, a crash or
-            // timeout throws.
+            // timeout throws. The `Outcome` gate guarantees the loser tasks can't also throw.
             try await group.next()
         }
     }
