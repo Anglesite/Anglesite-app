@@ -12,5 +12,18 @@ public final class WindowRouter {
     /// The site id the intent asked to open; the scene clears it after handling.
     public var requested: String?
 
-    public func requestOpen(siteID: String) { requested = siteID }
+    /// Pending page route per site, set alongside an open request and consumed once by the
+    /// site's window. Keyed by siteID so one site's window can't pick up another's route.
+    private var pendingRoute: [String: String] = [:]
+
+    public func requestOpen(siteID: String, route: String? = nil) {
+        requested = siteID
+        if let route { pendingRoute[siteID] = route }
+    }
+
+    /// Take (and clear) the route requested for `siteID`, if any. Returns `nil` after the first
+    /// read or when no route was requested.
+    public func consumeRoute(for siteID: String) -> String? {
+        pendingRoute.removeValue(forKey: siteID)
+    }
 }
