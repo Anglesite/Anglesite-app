@@ -26,12 +26,7 @@ public actor ProcessSupervisor {
 
     private let backend: SupervisorBackend
 
-    /// Environment applied to spawns that don't pass one explicitly. Defaults to
-    /// `NodeRuntime.environmentWithNodeOnPath` so every Node spawn (npm install, the MCP server, the
-    /// Astro dev server) gets the bundled runtime's `bin` directory on `PATH` — without it,
-    /// dependency lifecycle scripts that invoke `node` by name fail with exit 127 (#229). Returns
-    /// `nil` when Node isn't bundled (e.g. `swift test`), so spawns then inherit the parent
-    /// environment unchanged. Injectable for tests.
+    /// Environment for spawns that don't pass one — puts the bundled Node on `PATH` so node-by-name lifecycle scripts don't exit 127 (#229); `nil` when Node isn't bundled. Injectable for tests.
     private let defaultEnvironment: @Sendable () -> [String: String]?
 
     /// Source-compat re-exports. These used to be nested types; they now live at the protocol layer
@@ -57,8 +52,7 @@ public actor ProcessSupervisor {
         self.defaultEnvironment = { NodeRuntime.environmentWithNodeOnPath }
     }
 
-    /// Inject a backend explicitly (tests, future MAS wiring). `defaultEnvironment` is applied to
-    /// spawns that don't pass one — see the property doc.
+    /// Inject a backend explicitly (tests, future MAS wiring); `defaultEnvironment` applies to spawns that don't pass one.
     public init(backend: SupervisorBackend,
                 defaultEnvironment: @escaping @Sendable () -> [String: String]? = { NodeRuntime.environmentWithNodeOnPath }) {
         self.backend = backend

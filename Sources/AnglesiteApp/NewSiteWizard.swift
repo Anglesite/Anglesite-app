@@ -170,10 +170,7 @@ struct NewSiteWizard: View {
             }
             if model.step == .content {
                 Button("Create Site") {
-                    // Auto-open only on a clean build. If the build warned (e.g. dependencies
-                    // failed to install), stay put so the owner reads the warning and opens
-                    // explicitly via "Open Site Anyway" below — rather than landing on a
-                    // dead-end "Can't preview" screen (#229).
+                    // Auto-open only on a clean build; with warnings, stay put so the owner sees them (#229).
                     Task {
                         _ = await model.build(using: scaffolder)
                         if model.didCompleteCleanly, let id = model.completedSiteID { onComplete(id) }

@@ -76,7 +76,10 @@ final class NewSiteWizardModelTests: XCTestCase {
 
         XCTAssertNotNil(id)                       // the site was still registered
         XCTAssertTrue(m.hasWarnings)              // …but with a non-fatal warning
-        XCTAssertTrue(m.warnings.contains { $0.lowercased().contains("install") })
+        // Assert on the stable step identifier, not the (rephrasable) message text.
+        XCTAssertTrue(m.progress.contains {
+            if case .warning(let step, _) = $0 { return step == "installing" } else { return false }
+        })
         XCTAssertFalse(m.didCompleteCleanly)      // so the wizard must NOT auto-open
     }
 }

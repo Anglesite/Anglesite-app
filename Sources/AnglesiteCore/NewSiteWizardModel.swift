@@ -24,18 +24,14 @@ public final class NewSiteWizardModel {
 
     public var slugPreview: String { SiteSlug.derive(from: draft.name) }
 
-    /// Non-fatal warnings collected during the build (e.g. dependencies failed to install). The
-    /// wizard surfaces these instead of silently opening the site on success — otherwise the owner
-    /// only discovers a failed `npm install` via a dead-end "Can't preview" screen (#229).
+    /// Non-fatal build warnings (e.g. a failed install), surfaced so a failure isn't hidden behind a dead-end preview (#229).
     public var warnings: [String] {
         progress.compactMap { if case .warning(_, let message) = $0 { return message } else { return nil } }
     }
 
     public var hasWarnings: Bool { !warnings.isEmpty }
 
-    /// True once the build registered the site *and* produced no warnings — only then may the wizard
-    /// open the site immediately. With warnings, the wizard stays on the building step so the owner
-    /// can read them and open explicitly (#229).
+    /// Site registered with no warnings — only then may the wizard open it immediately (else it stays put so warnings are read) (#229).
     public var didCompleteCleanly: Bool { completedSiteID != nil && !hasWarnings }
 
     public var detailsError: String? {

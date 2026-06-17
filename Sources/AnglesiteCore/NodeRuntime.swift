@@ -21,13 +21,7 @@ public enum NodeRuntime {
         return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil
     }
 
-    /// Returns a copy of `base` with `directory` ensured at the front of `PATH` (existing
-    /// occurrences removed so it appears exactly once).
-    ///
-    /// We spawn the bundled `node` by absolute path, but dependency lifecycle scripts spawn
-    /// `node`/`npm`/`node-gyp` *by name* — `sharp`'s postinstall runs `sh -c node install/check`.
-    /// Without the bundled runtime's `bin` directory on `PATH` those die with
-    /// `node: command not found` (exit 127), which aborts `npm install` for new sites (#229).
+    /// `base` with `directory` prepended to `PATH` (deduped) so lifecycle scripts that invoke `node` by name resolve the bundled runtime instead of exiting 127 (#229).
     public static func environment(_ base: [String: String], prependingPATH directory: String) -> [String: String] {
         var env = base
         let existing = (env["PATH"] ?? "")
@@ -38,9 +32,7 @@ public enum NodeRuntime {
         return env
     }
 
-    /// The current process environment with the bundled Node's `bin` directory prepended to `PATH`,
-    /// or `nil` when the runtime isn't bundled (e.g. `swift test`) — callers then fall back to
-    /// inheriting the parent environment unchanged.
+    /// Process environment with the bundled Node's bin dir on `PATH`; `nil` when Node isn't bundled (e.g. `swift test`), so callers inherit the parent env unchanged.
     public static var environmentWithNodeOnPath: [String: String]? {
         guard let node = bundledExecutableURL else { return nil }
         return environment(ProcessInfo.processInfo.environment,
