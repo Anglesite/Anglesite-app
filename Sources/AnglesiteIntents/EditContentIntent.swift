@@ -41,7 +41,10 @@ public struct EditContentIntent: AppIntent {
     )
 
     @Parameter(title: "Element") public var element: ElementEntity
-    @Parameter(title: "Change") public var instruction: String
+    @Parameter(
+        title: "Change",
+        description: "A natural-language description of the change to apply, e.g. “make it bigger” or “change the color to teal”."
+    ) public var instruction: String
     @Dependency private var bridge: IntentEditBridge
 
     public init() {}

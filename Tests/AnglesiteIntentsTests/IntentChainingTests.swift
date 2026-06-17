@@ -36,5 +36,30 @@ extension AppIntentsTests {
             #expect(fake.deployCalls.count == 1)
             #expect(fake.auditCalls.first?.id == fake.deployCalls.first?.id)
         }
+
+        // D.1 (#162): DeploySiteIntent and BackupSiteIntent now return the SiteEntity they
+        // processed (ReturnsValue<SiteEntity>), mirroring AuditSiteIntent, so an agent/Shortcut
+        // can pipe deploy→backup. Reproduce that wiring by feeding the same SiteEntity into both.
+        @Test("deploy output flows into backup as input")
+        func deployOutputFlowsIntoBackup() async throws {
+            let fake = FakeOperations()
+            let site = TestStore.site(id: "s1", name: "Portfolio")
+            fake.sites = [site.id: site]
+            fake.deployResult = .succeeded(url: URL(string: "https://example.com")!, duration: 1)
+            fake.backupResult = .succeeded(commitSHA: "abc1234", branch: "main", remote: "origin")
+
+            try await SiteOperationsOverride.$scoped.withValue(fake) {
+                var deploy = DeploySiteIntent()
+                deploy.site = SiteEntity(site)
+                _ = try await deploy.perform()
+
+                var backup = BackupSiteIntent()
+                backup.site = SiteEntity(site)
+                _ = try await backup.perform()
+            }
+            #expect(fake.deployCalls.count == 1)
+            #expect(fake.backupCalls.count == 1)
+            #expect(fake.deployCalls.first?.id == fake.backupCalls.first?.id)
+        }
     }
 }
