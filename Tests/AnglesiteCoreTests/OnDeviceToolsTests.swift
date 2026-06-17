@@ -25,7 +25,7 @@ private func makeBridge(_ router: FakeEditRouter) -> IntentEditBridge {
 @Suite("On-device tools: ApplyEditTool")
 struct ApplyEditToolTests {
 
-    @Test("context selector is used verbatim; operation maps to the op string; value is wrapped")
+    @Test("context selector is used verbatim; value is wrapped; path is forwarded")
     func usesContextSelectorAndMapsOp() async throws {
         let router = FakeEditRouter(reply: EditReply(id: "test-id", status: .applied, message: "ok"))
         let element: JSONValue = .object([
@@ -42,12 +42,41 @@ struct ApplyEditToolTests {
 
         let out = try await tool.call(arguments: cmd)
 
+        // Op-string mapping is exhaustively asserted in `mapsEveryOperationToItsOpString`.
         let msg = await router.received
-        #expect(msg?.op == "replace-text")
         #expect(msg?.selector == element)
         #expect(msg?.value == .string("New Title"))
         #expect(msg?.path == "src/pages/about.md")
         #expect(out.contains("Applied"))
+    }
+
+    /// The op-vocabulary bridge between #154 (`EditOperation`) and #156 (`ApplyEditTool`):
+    /// every `EditOperation` case must map onto its `EditMessage.Op` string. Single source of
+    /// truth for that mapping (see the C.11 audit, #161).
+    @Test("every EditOperation maps to its EditMessage.Op string", arguments: [
+        (EditOperation.replaceText, EditMessage.Op.replaceText),
+        (EditOperation.replaceAttr, EditMessage.Op.replaceAttr),
+        (EditOperation.replaceImageSrc, EditMessage.Op.replaceImageSrc),
+        (EditOperation.applyInstruction, EditMessage.Op.applyInstruction),
+    ])
+    func mapsEveryOperationToItsOpString(operation: EditOperation, expectedOp: String) async throws {
+        let router = FakeEditRouter(reply: EditReply(id: "test-id", status: .applied, message: "ok"))
+        let element: JSONValue = .object([
+            "tag": .string("h1"), "classes": .array([]), "nthChild": .int(1),
+        ])
+        let tool = ApplyEditTool(bridge: makeBridge(router), siteID: "site1", contextSelector: element)
+        let cmd = GeneratedEditCommand(
+            filePath: "src/pages/about.md",
+            selector: "ignored-by-tool",
+            operation: operation,
+            value: "value",
+            explanation: "x"
+        )
+
+        _ = try await tool.call(arguments: cmd)
+
+        let msg = await router.received
+        #expect(msg?.op == expectedOp)
     }
 
     @Test("no context selector + bare-tag selector builds a minimal ElementInfo")
