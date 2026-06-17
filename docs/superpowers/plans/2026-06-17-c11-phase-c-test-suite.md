@@ -1,5 +1,7 @@
 # C.11 — Phase C Test Suite (Audit + Gap-Fill) Implementation Plan
 
+> **Status: Executed in PR #223.** The test landed as `mapsEveryOperationToItsOpString(operation:expectedOp:)` — the names in the steps below were the proposal (`opMappingCoversAllCases(operation:expected:)`) and have since been reconciled to what shipped. The redundant op assertion was removed from both `usesContextSelectorAndMapsOp` and `bareTagBuildsMinimalElementInfo`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close the one confirmed Phase C coverage gap — `ApplyEditTool`'s `EditOperation → EditMessage.Op` mapping is asserted for only one of four cases — and verify the audited Phase C coverage stays green.
@@ -29,7 +31,7 @@
 
 > **Note on TDD:** the production mapping (`ApplyEditTool.opString`) is already correct for all four cases, so this coverage test passes the moment it is written — there is no genuine RED phase. Step 2 is a *deliberate, reverted* mutation check that proves the test is not vacuous, standing in for the RED step.
 
-- [ ] **Step 1: Add the parameterized test**
+- [x] **Step 1: Add the parameterized test**
 
 In `Tests/AnglesiteCoreTests/OnDeviceToolsTests.swift`, inside the `struct ApplyEditToolTests` suite (e.g. immediately after `usesContextSelectorAndMapsOp`), add:
 
@@ -41,7 +43,7 @@ In `Tests/AnglesiteCoreTests/OnDeviceToolsTests.swift`, inside the `struct Apply
               (EditOperation.replaceImageSrc, EditMessage.Op.replaceImageSrc),
               (EditOperation.applyInstruction, EditMessage.Op.applyInstruction),
           ])
-    func opMappingCoversAllCases(operation: EditOperation, expected: String) async throws {
+    func mapsEveryOperationToItsOpString(operation: EditOperation, expectedOp: String) async throws {
         // Guards the #154 EditOperation → #156 EditMessage.Op vocabulary bridge across all
         // four cases (previously only .replaceText was asserted). Pure routing logic, no model.
         let router = FakeEditRouter(reply: EditReply(id: "test-id", status: .applied, message: "ok"))
@@ -59,20 +61,20 @@ In `Tests/AnglesiteCoreTests/OnDeviceToolsTests.swift`, inside the `struct Apply
 
         _ = try await tool.call(arguments: cmd)
 
-        #expect(await router.received?.op == expected)
+        #expect(await router.received?.op == expectedOp)
     }
 ```
 
-- [ ] **Step 2: Prove the test is not vacuous (mutation check)**
+- [x] **Step 2: Prove the test is not vacuous (mutation check)**
 
 Temporarily edit `Sources/AnglesiteCore/ApplyEditTool.swift` `opString(for:)` so one case returns the wrong string, e.g. change `case .replaceAttr: return EditMessage.Op.replaceAttr` to `return EditMessage.Op.replaceText`. Run:
 ```bash
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
-  swift test --package-path . --filter "opMappingCoversAllCases"
+  swift test --package-path . --filter "mapsEveryOperationToItsOpString"
 ```
 Expected: FAIL on the `.replaceAttr` argument case (`"replace-text"` ≠ `"replace-attr"`). **Then revert the `ApplyEditTool.swift` edit** (`git checkout -- Sources/AnglesiteCore/ApplyEditTool.swift`) — production code must be unchanged.
 
-- [ ] **Step 3: Remove the now-redundant single-op assertion**
+- [x] **Step 3: Remove the now-redundant single-op assertion**
 
 In `usesContextSelectorAndMapsOp` (`OnDeviceToolsTests.swift:46`), delete this line so op-string mapping is asserted in exactly one place:
 
@@ -82,16 +84,16 @@ In `usesContextSelectorAndMapsOp` (`OnDeviceToolsTests.swift:46`), delete this l
 
 Keep that test's other assertions (`msg?.selector`, `msg?.value`, `msg?.path`, `out.contains("Applied")`) — the new test does not cover those.
 
-- [ ] **Step 4: Run the ApplyEditTool tests to verify green**
+- [x] **Step 4: Run the ApplyEditTool tests to verify green**
 
 Run:
 ```bash
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
   swift test --package-path . --filter "ApplyEditTool"
 ```
-Expected: PASS. `opMappingCoversAllCases` runs four argument cases, all pass; `usesContextSelectorAndMapsOp` still passes with its remaining assertions. Confirm `ApplyEditTool.swift` shows no diff (`git diff --stat Sources/` is empty).
+Expected: PASS. `mapsEveryOperationToItsOpString` runs four argument cases, all pass; `usesContextSelectorAndMapsOp` still passes with its remaining assertions. Confirm `ApplyEditTool.swift` shows no diff (`git diff --stat Sources/` is empty).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Tests/AnglesiteCoreTests/OnDeviceToolsTests.swift
@@ -110,15 +112,15 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 **Files:** No code changes. Verification + issue bookkeeping only.
 
-- [ ] **Step 1: Run the full suite**
+- [x] **Step 1: Run the full suite**
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
   swift test --package-path . 2>&1 | tail -20
 ```
-Expected: all three bundles green; no new failures in `AnglesiteCoreTests` beyond the known plugin-gated e2e tests when `ANGLESITE_PLUGIN_PATH` is unset (see CLAUDE.md). The new `opMappingCoversAllCases` is included.
+Expected: all three bundles green; no new failures in `AnglesiteCoreTests` beyond the known plugin-gated e2e tests when `ANGLESITE_PLUGIN_PATH` is unset (see CLAUDE.md). The new `mapsEveryOperationToItsOpString` is included.
 
-- [ ] **Step 2: Post the audit conclusion on #161**
+- [x] **Step 2: Post the audit conclusion on #161**
 
 ```bash
 gh issue comment 161 --body "Phase C coverage audit complete (spec: docs/superpowers/specs/2026-06-17-c11-phase-c-test-suite-design.md).
@@ -131,7 +133,7 @@ All 7 checklist items are covered by existing tests (coverage map in the spec):
 One real gap was found and filled: ApplyEditTool asserted only .replaceText of four EditOperation→EditMessage.Op mappings — now parameterized across all four. No other gaps; no padding tests added."
 ```
 
-- [ ] **Step 3: No commit** (verification + issue comment only).
+- [x] **Step 3: No commit** (verification + issue comment only).
 
 ---
 
