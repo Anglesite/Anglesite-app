@@ -115,6 +115,19 @@ final class AppSettingsTests {
         #expect(settings.autoGenerateAltText)
     }
 
+    @Test("announcesLiveUpdates defaults to true (on)") func announcesLiveUpdatesDefaultsToTrue() {
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.announcesLiveUpdates)
+    }
+
+    @Test("announcesLiveUpdates round trip") func announcesLiveUpdatesRoundTrip() {
+        let settings = AppSettings(defaults: defaults)
+        settings.announcesLiveUpdates = false
+        #expect(!settings.announcesLiveUpdates)
+        settings.announcesLiveUpdates = true
+        #expect(settings.announcesLiveUpdates)
+    }
+
     // MARK: DebugPaneVisibility
 
     @Test("Debug menu always visible in debug builds") func debugMenuAlwaysVisibleInDebugBuilds() {

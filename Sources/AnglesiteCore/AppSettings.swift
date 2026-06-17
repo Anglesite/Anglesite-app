@@ -20,6 +20,7 @@ public final class AppSettings: @unchecked Sendable {
         public static let preferFoundationModels = "anglesite.preferFoundationModels"
         public static let foundationModelTier    = "anglesite.foundationModelTier"
         public static let autoGenerateAltText = "anglesite.autoGenerateAltText"
+        public static let announcesLiveUpdates = "anglesite.announcesLiveUpdates"
     }
 
     private let defaults: UserDefaults
@@ -112,6 +113,18 @@ public final class AppSettings: @unchecked Sendable {
             return defaults.bool(forKey: Key.autoGenerateAltText)
         }
         set { defaults.set(newValue, forKey: Key.autoGenerateAltText) }
+    }
+
+    /// Whether the app posts VoiceOver live-region announcements for streaming chat and deploy
+    /// state (`LiveRegionAnnouncer`). On by default; an assistive-technology user who finds the
+    /// spoken cues noisy can switch them off. Stored inverted-from-absent so an untouched install
+    /// defaults to `true`.
+    public var announcesLiveUpdates: Bool {
+        get {
+            guard defaults.object(forKey: Key.announcesLiveUpdates) != nil else { return true }
+            return defaults.bool(forKey: Key.announcesLiveUpdates)
+        }
+        set { defaults.set(newValue, forKey: Key.announcesLiveUpdates) }
     }
 
     /// The site that was most-recently focused. Used by the Sites launcher to auto-open

@@ -130,23 +130,39 @@ struct DeployDrawerView: View {
                     }
                 }
             }
-            // VoiceOver live region: announce only the terminal transition (running → succeeded /
-            // failed), not every appended log line. A non-sighted user who has navigated away from
-            // the drawer hears the outcome; the streaming lines stay silent to keep speech usable.
+            // VoiceOver live region: announce the deploy start ("Deploying <site>") and the terminal
+            // transition (running → succeeded / failed), not every appended log line. A non-sighted
+            // user who has navigated away from the drawer hears start and outcome; the streaming
+            // lines stay silent to keep speech usable.
             .onChange(of: model.phase) { oldPhase, newPhase in
+                guard AppSettings.shared.announcesLiveUpdates else { return }
                 if let announcement = LiveRegionAnnouncer.deployAnnouncement(
-                    from: Self.activity(for: oldPhase), to: Self.activity(for: newPhase)) {
+                    from: activity(for: oldPhase), to: activity(for: newPhase)) {
+                    AccessibilityNotification.Announcement(announcement).post()
+                }
+            }
+            // The one mid-flight exception: warn *once* when the deploy first writes to stderr, so a
+            // failing deploy is flagged before its terminal state — without announcing every line.
+            .onChange(of: stderrLineCount) { previous, current in
+                guard AppSettings.shared.announcesLiveUpdates else { return }
+                if let announcement = LiveRegionAnnouncer.deployStderrAnnouncement(
+                    previousStderrCount: previous, currentStderrCount: current) {
                     AccessibilityNotification.Announcement(announcement).post()
                 }
             }
         }
     }
 
+    /// Number of stderr lines captured so far — drives the one-shot first-error warning.
+    private var stderrLineCount: Int {
+        model.logLines.lazy.filter { $0.stream == .stderr }.count
+    }
+
     /// Collapses the app-target `DeployModel.Phase` onto the announceable substrate the decider
     /// understands. `idle` and `blocked` are both pre-output states → `.inactive`.
-    private static func activity(for phase: DeployModel.Phase) -> LiveRegionAnnouncer.DeployActivity {
+    private func activity(for phase: DeployModel.Phase) -> LiveRegionAnnouncer.DeployActivity {
         switch phase {
-        case .running: return .running
+        case .running: return .running(site: siteName)
         case .succeeded(let url, _): return .succeeded(url: url.absoluteString)
         case .failed(let reason, let exit):
             return .failed(reason: exit.map { "\(reason) (exit \($0))" } ?? reason)

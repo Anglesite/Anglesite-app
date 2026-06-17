@@ -17,6 +17,7 @@ private struct AdvancedSettingsView: View {
     @AppStorage(AppSettings.Key.sitesRootOverride) private var sitesRootOverride: String = ""
     @AppStorage(AppSettings.Key.debugPaneEnabled) private var debugPaneEnabled: Bool = false
     @AppStorage(AppSettings.Key.autoGenerateAltText) private var autoGenerateAltText: Bool = true
+    @AppStorage(AppSettings.Key.announcesLiveUpdates) private var announcesLiveUpdates: Bool = true
 
     var body: some View {
         Form {
@@ -30,6 +31,13 @@ private struct AdvancedSettingsView: View {
             Section("Editing") {
                 Toggle("Auto-generate alt text for dropped images", isOn: $autoGenerateAltText)
                 Text("When you drop an image onto the preview, Anglesite uses Apple's on-device vision model to write descriptive alt text and applies it automatically. Runs locally; requires Apple Intelligence to be enabled. Purely decorative images get empty alt text and role=\"presentation\".")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Accessibility") {
+                Toggle("Announce live updates to VoiceOver", isOn: $announcesLiveUpdates)
+                Text("Speaks streaming chat responses (start, and the reply when it finishes) and deploy progress (start, errors, and the final result) as VoiceOver announcements. Turn off if you prefer to read these surfaces by navigating to them yourself.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
