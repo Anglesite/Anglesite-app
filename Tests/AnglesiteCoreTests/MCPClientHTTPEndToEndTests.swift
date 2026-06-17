@@ -114,9 +114,13 @@ struct MCPClientHTTPEndToEndTests {
             .map { URL(fileURLWithPath: $0) }
     }
 
+    // NB: do not interpolate `errno` into these messages. Reading `errno` links
+    // `libswift_DarwinFoundation1.dylib` (the macOS-27 SDK vends it through that overlay), which
+    // is absent on the macOS-15 CI runner — the whole test bundle then fails to `dlopen`. The bare
+    // syscall name is enough; socket()/bind() failing here is vanishingly rare.
     private static func freePort() throws -> Int {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw FreePortError("socket() failed: errno \(errno)") }
+        guard fd >= 0 else { throw FreePortError("socket() failed") }
         defer { close(fd) }
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
@@ -127,7 +131,7 @@ struct MCPClientHTTPEndToEndTests {
                 Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        guard bindOK == 0 else { throw FreePortError("bind() failed: errno \(errno)") }
+        guard bindOK == 0 else { throw FreePortError("bind() failed") }
         var len = socklen_t(MemoryLayout<sockaddr_in>.size)
         _ = withUnsafeMutablePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) }
