@@ -66,6 +66,8 @@ struct ChatView: View {
                 Text(usageSummary(usage))
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel("Token usage and cost")
+                    .accessibilityValue(usageSummary(usage))
             }
             Menu {
                 Button("Reset conversation", role: .destructive) {
@@ -211,6 +213,7 @@ private struct MessageRow: View {
             Rectangle()
                 .fill(Color.secondary.opacity(0.4))
                 .frame(width: 3)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(message.content)
                     .font(.callout)
@@ -232,6 +235,10 @@ private struct MessageRow: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(metadata.commit != model.currentHeadSHA)
+                    .accessibilityLabel("Undo this edit")
+                    .accessibilityHint(metadata.commit != model.currentHeadSHA
+                                       ? "Unavailable — newer edits have been made since"
+                                       : "")
                 }
             }
         }
@@ -257,6 +264,21 @@ private struct MessageRow: View {
                 .background(bubbleBackground)
                 .foregroundStyle(bubbleForeground)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                // Prefix the spoken text with the speaker so VoiceOver users can follow the
+                // back-and-forth; the visual layout (left/right alignment) conveys this sightedly.
+                .accessibilityLabel(accessibilitySpokenContent)
+        }
+    }
+
+    /// Role-prefixed plain text for VoiceOver. Uses the raw message string (not the attributed
+    /// markdown) so symbols and code fences don't garble the reading.
+    private var accessibilitySpokenContent: String {
+        switch message.role {
+        case .user:      return "You said: \(message.content)"
+        case .assistant: return "Assistant said: \(message.content)"
+        case .error:     return "Error: \(message.content)"
+        case .system:    return "System: \(message.content)"
+        case .edit, .annotation: return message.content  // rendered by their own rows
         }
     }
 
@@ -298,6 +320,7 @@ private struct AnnotationRowView: View {
             Rectangle()
                 .fill(Color.orange.opacity(0.5))
                 .frame(width: 3)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(message.content)
                     .font(.callout)
@@ -317,6 +340,7 @@ private struct AnnotationRowView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(isResolving)
+            .accessibilityLabel("Resolve this annotation")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -364,6 +388,7 @@ private struct ToolCallCard: View {
                 } else {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.small)
+                            .accessibilityHidden(true)
                         Text("running…").font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -373,10 +398,17 @@ private struct ToolCallCard: View {
             HStack(spacing: 6) {
                 Image(systemName: call.isError ? "exclamationmark.triangle.fill" : (call.result == nil ? "wrench.and.screwdriver" : "wrench.and.screwdriver.fill"))
                     .foregroundStyle(call.isError ? .red : .secondary)
+                    .accessibilityHidden(true)
                 Text(call.name)
                     .font(.callout.weight(.medium))
+                    // Roll the tool state into the disclosure label so a collapsed card still
+                    // announces error/running/done without the icon (now hidden) carrying it.
+                    .accessibilityLabel("\(call.name) tool")
+                    .accessibilityValue(call.isError ? "Error"
+                                        : (call.result == nil ? "Running" : "Finished"))
                 if call.result == nil {
                     ProgressView().controlSize(.mini)
+                        .accessibilityHidden(true)
                 }
                 Spacer()
             }

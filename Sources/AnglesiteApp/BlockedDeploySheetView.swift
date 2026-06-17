@@ -49,6 +49,7 @@ struct BlockedDeploySheetView: View {
             Image(systemName: "shield.lefthalf.filled")
                 .font(.title)
                 .foregroundStyle(.orange)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Deploy blocked").font(.title3).fontWeight(.semibold)
                 Text("The pre-deploy scan found issues that need fixing before this site can ship.")
@@ -68,6 +69,7 @@ private struct FailureCard: View {
             HStack(spacing: 8) {
                 Image(systemName: categoryIcon(failure.category))
                     .foregroundStyle(.red)
+                    .accessibilityHidden(true)
                 Text(categoryLabel(failure.category))
                     .font(.subheadline).fontWeight(.semibold)
                 if let file = failure.file {
@@ -75,6 +77,9 @@ private struct FailureCard: View {
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
+                        // Path is middle-truncated for layout; read the whole thing aloud.
+                        .accessibilityLabel("File")
+                        .accessibilityValue(file)
                 }
             }
             Text(failure.detail).font(.callout)
@@ -116,6 +121,7 @@ private struct WarningCard: View {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
+                    .accessibilityHidden(true)
                 Text(categoryLabel(warning.category))
                     .font(.subheadline).fontWeight(.semibold)
             }

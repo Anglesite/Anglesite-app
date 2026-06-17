@@ -167,6 +167,8 @@ private struct CloudflareTokenRow: View {
                     SecureField("paste token", text: $token, prompt: Text(promptText))
                         .textFieldStyle(.roundedBorder)
                         .frame(minWidth: 240)
+                        .accessibilityLabel("Cloudflare API token")
+                        .accessibilityValue(statusDescription)
                     Button("Save") { save() }
                         .disabled(token.isEmpty)
                     Button("Clear") { clear() }
@@ -192,6 +194,16 @@ private struct CloudflareTokenRow: View {
         case .absent:  return "paste token"
         case .unknown: return ""
         case .error:   return "paste token"
+        }
+    }
+
+    /// Spoken status for VoiceOver — the redacted `SecureField` prompt isn't announced clearly.
+    private var statusDescription: String {
+        switch status {
+        case .present:           return "Token stored"
+        case .absent:            return "No token stored"
+        case .unknown:           return "Checking…"
+        case .error(let message): return "Error: \(message)"
         }
     }
 
@@ -263,6 +275,7 @@ private struct GitHubAuthRow: View {
                         sheetPresented = true
                     }
                     .disabled(isUnavailable)
+                    .accessibilityHint(isUnavailable ? "GitHub tools are unavailable on this Mac" : "")
                 }
                 if let resultMessage {
                     Text(resultMessage.text)
@@ -373,9 +386,14 @@ private struct FolderPickerRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // The path is middle-truncated for layout; expose the full value to VoiceOver.
+                    .accessibilityLabel(label)
+                    .accessibilityValue(path.isEmpty ? "Default — \(placeholder)" : path)
                 Button("Choose…") { chooseFolder() }
+                    .accessibilityLabel("Choose \(label)")
                 Button("Clear") { path = "" }
                     .disabled(path.isEmpty)
+                    .accessibilityLabel("Clear \(label)")
             }
         }
     }

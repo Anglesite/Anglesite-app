@@ -35,11 +35,17 @@ struct NewSiteWizard: View {
                 Button { model.choose(type: type) } label: {
                     HStack {
                         Image(systemName: type.symbol).frame(width: 24)
+                            .accessibilityHidden(true)
                         Text(type.label)
                         Spacer()
-                        if model.draft.siteType == type { Image(systemName: "checkmark") }
+                        if model.draft.siteType == type {
+                            Image(systemName: "checkmark").accessibilityHidden(true)
+                        }
                     }.contentShape(Rectangle())
-                }.buttonStyle(.plain).padding(.vertical, 4)
+                }
+                .buttonStyle(.plain).padding(.vertical, 4)
+                .accessibilityLabel(type.label)
+                .accessibilityValue(model.draft.siteType == type ? "Selected" : "")
             }
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -49,7 +55,11 @@ struct NewSiteWizard: View {
             Text("Name your site").font(.title2.bold())
             TextField("Site name", text: $model.draft.name)
             Text("Folder: ~/Sites/\(model.slugPreview)").font(.caption).foregroundStyle(.secondary)
-            if let err = model.detailsError { Text(err).font(.caption).foregroundStyle(.red) }
+            if let err = model.detailsError {
+                Text(err).font(.caption).foregroundStyle(.red)
+                    .accessibilityLabel("Error")
+                    .accessibilityValue(err)
+            }
             Text("Tagline (optional)").font(.headline).padding(.top, 8)
             TextField("A short line about your site", text: $model.draft.tagline)
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -68,13 +78,17 @@ struct NewSiteWizard: View {
                                         Color(hex: hex).frame(height: 28)
                                     }
                                 }.clipShape(RoundedRectangle(cornerRadius: 6))
+                                .accessibilityHidden(true)
                                 Text(theme.name).font(.subheadline.bold())
                                 Text(theme.blurb).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                             }
                             .padding(8)
                             .overlay(RoundedRectangle(cornerRadius: 8)
                                 .stroke(model.draft.themeID == theme.id ? Color.accentColor : Color.clear, lineWidth: 2))
-                        }.buttonStyle(.plain)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityValue(model.draft.themeID == theme.id ? "Selected" : "")
                     }
                 }
             }
@@ -96,9 +110,13 @@ struct NewSiteWizard: View {
             Text("Building your site\u{2026}").font(.title2.bold())
             ForEach(Array(model.progress.enumerated()), id: \.offset) { _, s in
                 Text(label(for: s)).font(.callout)
+                    // The visible label leads with an emoji status glyph; give VoiceOver clean text.
+                    .accessibilityLabel(accessibilityLabel(for: s))
             }
             if case .failed(_, let msg) = model.fatal {
                 Text(msg).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                    .accessibilityLabel("Build failed")
+                    .accessibilityValue(msg)
             }
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -114,6 +132,22 @@ struct NewSiteWizard: View {
         case .warning(_, let m): return "\u{26A0}\u{FE0F} \(m)"
         case .failed(_, let m): return "\u{274C} \(m)"
         case .done: return "\u{2705} Done"
+        }
+    }
+
+    /// Emoji-free version of `label(for:)` for VoiceOver, which would otherwise read the status
+    /// glyph as "check mark", "hourglass", etc. before the actual message.
+    private func accessibilityLabel(for step: SiteScaffolder.ScaffoldStep) -> String {
+        switch step {
+        case .creatingFolder:    return "Created the site folder"
+        case .copyingTemplate:   return "Copied the template"
+        case .applyingTheme:     return "Applied your theme"
+        case .writingContent:    return "Wrote your words"
+        case .installing:        return "Installing…"
+        case .registering:       return "Registering"
+        case .warning(_, let m): return "Warning: \(m)"
+        case .failed(_, let m):  return "Failed: \(m)"
+        case .done:              return "Done"
         }
     }
 
