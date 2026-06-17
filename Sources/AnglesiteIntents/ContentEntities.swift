@@ -140,6 +140,45 @@ public struct PostEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
         self.collection = post.collection
         self.siteID = post.siteID
     }
+
+    public init(id: String, displayName: String, slug: String, collection: String,
+                siteID: String, isDraft: Bool, tags: [String]) {
+        self.id = id
+        self.displayName = displayName
+        self.isDraft = isDraft
+        self.tags = tags
+        self.slug = slug
+        self.collection = collection
+        self.siteID = siteID
+    }
+
+    /// `"src/content/{collection}/{slug}.md"` → `"{collection}"`. The collection is the path
+    /// component immediately before the file. Returns nil when the path has no such parent.
+    public static func collection(fromPath path: String) -> String? {
+        let parts = path.split(separator: "/").map(String.init)
+        guard parts.count >= 2 else { return nil }
+        return parts[parts.count - 2]
+    }
+
+    /// Build the entity an `AddPostIntent` returns. Add Post scaffolds a *draft*, so `isDraft`
+    /// is true and `tags` empty. The dialog is the source of truth for success vs. failure.
+    public static func make(
+        siteID: String, title: String, requestedCollection: String?, requestedSlug: String?,
+        result: ContentCreateResult
+    ) -> PostEntity {
+        let slug: String
+        let collection: String
+        switch result {
+        case .created(let filePath, let identifier):
+            slug = identifier
+            collection = Self.collection(fromPath: filePath) ?? requestedCollection ?? ""
+        case .siteNotFound, .failed:
+            slug = requestedSlug ?? ""
+            collection = requestedCollection ?? ""
+        }
+        return PostEntity(id: "\(siteID):post:\(slug)", displayName: title, slug: slug,
+                          collection: collection, siteID: siteID, isDraft: true, tags: [])
+    }
 }
 
 /// Resolves `PostEntity` references from `SiteContentGraph`. Search covers title, slug, tags,

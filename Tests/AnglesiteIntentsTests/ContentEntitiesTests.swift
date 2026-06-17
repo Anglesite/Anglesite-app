@@ -626,6 +626,50 @@ extension AppIntentsTests {
         }
     }
 
+    @Suite("CreateFactory.Post (F-3)")
+    struct CreatePostFactoryTests {
+        @Test("collection(fromPath:) extracts the content collection segment")
+        func collectionFromPath() {
+            #expect(PostEntity.collection(fromPath: "src/content/blog/hello.md") == "blog")
+            #expect(PostEntity.collection(fromPath: "src/content/notes/x.md") == "notes")
+            #expect(PostEntity.collection(fromPath: "weird.md") == nil)
+        }
+
+        @Test("success: slug from identifier; collection derived from filePath; draft scaffold")
+        func success() {
+            let e = PostEntity.make(
+                siteID: AppIntentsTests.aSite, title: "Hello World",
+                requestedCollection: nil, requestedSlug: nil,
+                result: .created(filePath: "src/content/blog/hello-world.md", identifier: "hello-world"))
+            #expect(e.slug == "hello-world")
+            #expect(e.collection == "blog")
+            #expect(e.isDraft == true)
+            #expect(e.tags.isEmpty)
+            #expect(e.id == "\(AppIntentsTests.aSite):post:hello-world")
+            #expect(e.displayName == "Hello World")
+        }
+
+        @Test("success: user-supplied collection wins when filePath can't be parsed")
+        func userCollectionFallback() {
+            let e = PostEntity.make(
+                siteID: AppIntentsTests.aSite, title: "X",
+                requestedCollection: "notes", requestedSlug: nil,
+                result: .created(filePath: "unparseable.md", identifier: "x"))
+            #expect(e.collection == "notes")
+        }
+
+        @Test("failure: best-effort entity from requested slug/collection")
+        func failure() {
+            let e = PostEntity.make(
+                siteID: AppIntentsTests.aSite, title: "X",
+                requestedCollection: "notes", requestedSlug: "x",
+                result: .failed(reason: "boom"))
+            #expect(e.slug == "x")
+            #expect(e.collection == "notes")
+            #expect(e.id == "\(AppIntentsTests.aSite):post:x")
+        }
+    }
+
     @Suite("Bootstrap")
     struct BootstrapSmokeTests {
 

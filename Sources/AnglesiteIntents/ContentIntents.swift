@@ -183,7 +183,7 @@ public struct AddPostIntent: AppIntent {
         Summary("Add post \(\.$title2) to \(\.$site)")
     }
 
-    public func perform() async throws -> some IntentResult & ProvidesDialog {
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<PostEntity> {
         let scoped = ContentOperationsOverride.scoped
         let svc = scoped ?? content
         let result: ContentCreateResult
@@ -198,7 +198,10 @@ public struct AddPostIntent: AppIntent {
             result = await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug)
             #endif
         }
-        return .result(dialog: IntentDialog(stringLiteral: ContentDialogs.created(result, kind: .post, siteName: site.displayName)))
+        let entity = PostEntity.make(siteID: site.id, title: title2, requestedCollection: collection,
+                                     requestedSlug: slug, result: result)
+        return .result(value: entity,
+                       dialog: IntentDialog(stringLiteral: ContentDialogs.created(result, kind: .post, siteName: site.displayName)))
     }
 }
 

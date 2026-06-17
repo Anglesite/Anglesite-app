@@ -55,6 +55,17 @@ extension AppIntentsTests {
             #expect(WindowRouter.shared.requested == AppIntentsTests.aSite)
         }
 
+        // F-3 (#163): AddPostIntent returns the created PostEntity carrying slug+collection for chaining.
+        @Test("add-post output carries slug and collection for chaining")
+        func addPostOutputCarriesIdentity() {
+            let e = PostEntity.make(
+                siteID: AppIntentsTests.aSite, title: "Hello", requestedCollection: nil, requestedSlug: nil,
+                result: .created(filePath: "src/content/blog/hello.md", identifier: "hello"))
+            #expect(e.slug == "hello")
+            #expect(e.collection == "blog")
+            #expect(e.id == "\(AppIntentsTests.aSite):post:hello")
+        }
+
         // D.1 (#162): DeploySiteIntent and BackupSiteIntent now return the SiteEntity they
         // processed (ReturnsValue<SiteEntity>), mirroring AuditSiteIntent, so an agent/Shortcut
         // can pipe deploy→backup. Reproduce that wiring by feeding the same SiteEntity into both.
