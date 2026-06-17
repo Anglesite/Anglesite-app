@@ -316,3 +316,79 @@ public struct ImageEntityQuery: EntityStringQuery {
 
     public func defaultResult() async -> ImageEntity? { nil }
 }
+
+// MARK: - ContentSearchResultEntity (F-2)
+
+/// Discriminator for the flattened search result. `SearchContentIntent` spans three entity
+/// types; `ReturnsValue<T>` needs one concrete type, so results carry their kind.
+public enum ContentKind: String, AppEnum, Sendable {
+    case page, post, image
+    public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Content Kind" }
+    public static var caseDisplayRepresentations: [ContentKind: DisplayRepresentation] {
+        [.page: "Page", .post: "Post", .image: "Image"]
+    }
+}
+
+/// A single search hit, flattened across pages/posts/images. `id` is the *underlying* entity id
+/// (e.g. "s1:page:/about"), so an agent can re-resolve the typed entity (PageEntity, …) to chain.
+public struct ContentSearchResultEntity: AppEntity, Identifiable, Sendable {
+    public let id: String
+    @Property(title: "Kind")    public var kind: ContentKind
+    @Property(title: "Title")   public var title: String
+    @Property(title: "Locator") public var locator: String
+    @Property(title: "Site ID") public var siteID: String
+
+    public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Search Result" }
+    public var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(title)", subtitle: "\(locator)")
+    }
+    public static let defaultQuery = ContentSearchResultEntityQuery()
+
+    public init(id: String, kind: ContentKind, title: String, locator: String, siteID: String) {
+        self.id = id; self.kind = kind; self.title = title; self.locator = locator; self.siteID = siteID
+    }
+    public init(page e: PageEntity) {
+        self.init(id: e.id, kind: .page, title: e.displayName, locator: e.route, siteID: e.siteID)
+    }
+    public init(post e: PostEntity) {
+        self.init(id: e.id, kind: .post, title: e.displayName, locator: "\(e.collection)/\(e.slug)", siteID: e.siteID)
+    }
+    public init(image e: ImageEntity) {
+        self.init(id: e.id, kind: .image, title: e.displayName, locator: e.relativePath, siteID: e.siteID)
+    }
+}
+
+/// Re-resolves flattened results by parsing the kind token out of each id and delegating to the
+/// graph's typed id lookups. Plain `EntityQuery` (not `EntityStringQuery`): string search lives on
+/// the typed entity queries and on `SearchContentIntent` itself; this only needs id round-trip.
+public struct ContentSearchResultEntityQuery: EntityQuery {
+    @Dependency private var graph: SiteContentGraph
+    public init() {}
+    private var resolved: SiteContentGraph { ContentGraphOverride.scoped ?? graph }
+
+    public func entities(for identifiers: [String]) async throws -> [ContentSearchResultEntity] {
+        let g = resolved
+        var pageIDs: [String] = [], postIDs: [String] = [], imageIDs: [String] = []
+        for id in identifiers {
+            // id == "{siteID}:{kind}:{rest}". The siteID is a filesystem path (no ":"), so splitting
+            // on ":" with maxSplits 2 yields exactly [siteID, kind, rest]; parts[1] is the kind.
+            let parts = id.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+            guard parts.count == 3 else { continue }
+            switch parts[1] {
+            case "page": pageIDs.append(id)
+            case "post": postIDs.append(id)
+            case "image": imageIDs.append(id)
+            default: continue
+            }
+        }
+        async let pages = g.pages(ids: pageIDs)
+        async let posts = g.posts(ids: postIDs)
+        async let images = g.images(ids: imageIDs)
+        let mapped = await (pages.map { ContentSearchResultEntity(page: PageEntity($0)) }
+            + posts.map { ContentSearchResultEntity(post: PostEntity($0)) }
+            + images.map { ContentSearchResultEntity(image: ImageEntity($0)) })
+        // Preserve caller's id order.
+        let order = Dictionary(uniqueKeysWithValues: identifiers.enumerated().map { ($1, $0) })
+        return mapped.sorted { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
+    }
+}

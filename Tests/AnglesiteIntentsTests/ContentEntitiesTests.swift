@@ -670,6 +670,45 @@ extension AppIntentsTests {
         }
     }
 
+    @Suite("ContentSearchResultEntity (F-2)")
+    struct SearchResultEntityTests {
+        @Test("maps each typed entity into a flattened result with kind + locator")
+        func mapping() {
+            let p = ContentSearchResultEntity(page: PageEntity(AppIntentsTests.gPage(route: "/about", title: "About")))
+            #expect(p.kind == .page)
+            #expect(p.title == "About")
+            #expect(p.locator == "/about")
+            #expect(p.id == "\(AppIntentsTests.aSite):page:/about")
+
+            let o = ContentSearchResultEntity(post: PostEntity(AppIntentsTests.gPost(slug: "hi", title: "Hi", collection: "blog")))
+            #expect(o.kind == .post)
+            #expect(o.locator == "blog/hi")
+            #expect(o.id == "\(AppIntentsTests.aSite):post:hi")
+
+            let i = ContentSearchResultEntity(image: ImageEntity(AppIntentsTests.gImage(relativePath: "public/images/hero.jpg", fileName: "hero.jpg")))
+            #expect(i.kind == .image)
+            #expect(i.title == "hero.jpg")
+            #expect(i.locator == "public/images/hero.jpg")
+        }
+
+        @Test("query resolves ids back through the graph by kind")
+        func queryRoundTrip() async throws {
+            let graph = SiteContentGraph()
+            await graph.load(
+                siteID: AppIntentsTests.aSite,
+                pages: [AppIntentsTests.gPage(route: "/about", title: "About")],
+                posts: [AppIntentsTests.gPost(slug: "hi", title: "Hi", collection: "blog")],
+                images: [])
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let results = try await ContentSearchResultEntityQuery().entities(
+                    for: ["\(AppIntentsTests.aSite):page:/about", "\(AppIntentsTests.aSite):post:hi"])
+                #expect(results.count == 2)
+                #expect(results.contains { $0.kind == .page && $0.locator == "/about" })
+                #expect(results.contains { $0.kind == .post && $0.locator == "blog/hi" })
+            }
+        }
+    }
+
     @Suite("Bootstrap")
     struct BootstrapSmokeTests {
 
