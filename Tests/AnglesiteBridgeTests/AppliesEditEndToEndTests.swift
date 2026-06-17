@@ -2,13 +2,14 @@ import Testing
 import Foundation
 @testable import AnglesiteBridge
 import AnglesiteCore
+import AnglesiteTestSupport
 
 /// End-to-end: spawn the *real* bundled plugin's MCP server, drive an `apply_edit` through a
 /// real `MCPClient` via `MCPApplyEditRouter`, and assert the file's bytes change on disk.
 ///
-/// Cancels cleanly when the sibling plugin checkout or its `node_modules` aren't present —
-/// CI provides them via the `ANGLESITE_PLUGIN_PATH` env var; local dev relies on the
-/// `../anglesite` sibling layout documented in CLAUDE.md.
+/// Skipped (via the `.enabled(if:)` trait) when the sibling plugin checkout, its `node_modules`,
+/// or a Node binary aren't present — CI provides them via the `ANGLESITE_PLUGIN_PATH` env var;
+/// local dev relies on the `../anglesite` sibling layout documented in CLAUDE.md.
 ///
 /// A `final class` (not a `struct`) so `deinit` can tear down the temp site, mirroring the
 /// former `tearDownWithError`.
@@ -23,9 +24,8 @@ final class AppliesEditEndToEndTests {
     // MARK: setup / teardown
 
     init() throws {
-        try Self.requireSiblingPlugin()
-        _ = try Self.requireNode()
-
+        // Prerequisites are gated by the test's `.enabled(if:)` trait, so this initializer only
+        // runs when the plugin checkout and Node are present — no need to re-probe here.
         tmpSite = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("anglesite-e2e-\(UUID().uuidString)", isDirectory: true)
         let pagesDir = tmpSite.appendingPathComponent("src/pages", isDirectory: true)
@@ -42,9 +42,16 @@ final class AppliesEditEndToEndTests {
 
     // MARK: the test
 
-    @Test("Apply edit end to end mutates the file on disk") func applyEditEndToEndMutatesTheFileOnDisk() async throws {
-        let pluginRoot = try Self.requireSiblingPlugin()
-        let node = try Self.requireNode()
+    @Test(
+        "Apply edit end to end mutates the file on disk",
+        .enabled(
+            if: E2EPrerequisites.prerequisitesMet,
+            "requires the sibling Anglesite plugin checkout (ANGLESITE_PLUGIN_PATH, or ../anglesite with node_modules) and a Node ≥22 binary"
+        )
+    )
+    func applyEditEndToEndMutatesTheFileOnDisk() async throws {
+        let pluginRoot = try #require(E2EPrerequisites.locateSiblingPlugin())
+        let node = try #require(E2EPrerequisites.locateNode())
         let serverPath = pluginRoot.appendingPathComponent("server/index.mjs")
 
         // Real MCPClient against the real bundled plugin server, scoped to our tmp site.
@@ -97,68 +104,4 @@ final class AppliesEditEndToEndTests {
 
         await mcp.stop()
     }
-
-    // MARK: prerequisite probing
-
-    /// Returns the path to the sibling Anglesite plugin checkout, or cancels the test if absent.
-    @discardableResult
-    private static func requireSiblingPlugin() throws -> URL {
-        // Priority: explicit env var (CI), then `../anglesite` relative to the test's CWD
-        // (which is the package root under `swift test`).
-        let env = ProcessInfo.processInfo.environment["ANGLESITE_PLUGIN_PATH"]
-        let candidate: URL = {
-            if let env, !env.isEmpty { return URL(fileURLWithPath: env, isDirectory: true) }
-            let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-            return cwd.deletingLastPathComponent().appendingPathComponent("anglesite", isDirectory: true)
-        }()
-        let serverPath = candidate.appendingPathComponent("server/index.mjs")
-        guard FileManager.default.isReadableFile(atPath: serverPath.path) else {
-            throw SkipReason(
-                "Anglesite plugin checkout not found at \(candidate.path)/server/index.mjs. Set ANGLESITE_PLUGIN_PATH or clone Anglesite/anglesite as a sibling."
-            )
-        }
-        let sdkPath = candidate.appendingPathComponent("node_modules/@modelcontextprotocol/sdk")
-        guard FileManager.default.fileExists(atPath: sdkPath.path) else {
-            throw SkipReason(
-                "Plugin's node_modules are missing — run `npm ci` in \(candidate.path)"
-            )
-        }
-        return candidate
-    }
-
-    @discardableResult
-    private static func requireNode() throws -> URL {
-        // Explicit override (CI / nvm shells) wins.
-        if let override = ProcessInfo.processInfo.environment["NODE_BINARY"], !override.isEmpty,
-           FileManager.default.isExecutableFile(atPath: override) {
-            return URL(fileURLWithPath: override)
-        }
-        var candidates = [
-            "/opt/homebrew/bin/node",
-            "/usr/local/bin/node",
-            "/usr/bin/node",
-        ]
-        // nvm-managed installs live under ~/.nvm/versions/node/<version>/bin/node and aren't on
-        // any of the common paths; add whatever versions are present.
-        let nvmDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".nvm/versions/node")
-        if let versions = try? FileManager.default.contentsOfDirectory(at: nvmDir, includingPropertiesForKeys: nil) {
-            candidates.append(contentsOf: versions
-                .map { $0.appendingPathComponent("bin/node").path }
-                .filter { FileManager.default.isExecutableFile(atPath: $0) }
-                .sorted())
-        }
-        for p in candidates where FileManager.default.isExecutableFile(atPath: p) {
-            return URL(fileURLWithPath: p)
-        }
-        throw SkipReason("node not found; set NODE_BINARY, install Node ≥22 in a common path, or via nvm")
-    }
-}
-
-/// Carries a precondition-skip message in the test's `throws` channel. Swift 6.0's Swift Testing
-/// has no runtime `Test.cancel` API; throwing surfaces the reason in the failure output so a
-/// local dev sees why the test didn't run, while CI (which provides ANGLESITE_PLUGIN_PATH and a
-/// Node install) never hits these paths.
-private struct SkipReason: Error, CustomStringConvertible {
-    let description: String
-    init(_ description: String) { self.description = description }
 }

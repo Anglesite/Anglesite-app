@@ -2,19 +2,27 @@ import Testing
 import Foundation
 import Darwin
 @testable import AnglesiteCore
+import AnglesiteTestSupport
 
 /// End-to-end: spawn the real plugin MCP server in HTTP mode on a free port, then drive the real
 /// `MCPClient.connect(httpEndpoint:)` against it. Asserts `tools/list` includes `list_annotations`
 /// and that calling it on an empty project returns `[]`.
 ///
-/// Skips (throws `SkipReason`) when the sibling plugin checkout / its node_modules / Node aren't
-/// present. Resolve the plugin via `ANGLESITE_PLUGIN_PATH` (default `../anglesite`); resolve Node via
-/// `NODE_BINARY`, common paths, or `~/.nvm/versions/node/*/bin/node`.
+/// Skipped (via the `.enabled(if:)` trait) when the sibling plugin checkout / its node_modules /
+/// Node aren't present. Resolve the plugin via `ANGLESITE_PLUGIN_PATH` (default `../anglesite`);
+/// resolve Node via `NODE_BINARY`, common paths, or `~/.nvm/versions/node/*/bin/node`.
 @Suite(.serialized)  // serial subprocess spawns — see MCPClientTests rationale (CI-flakiness fix)
 struct MCPClientHTTPEndToEndTests {
-    @Test("HTTP end-to-end: connect, list tools, call list_annotations") func httpEndToEnd() async throws {
-        let pluginRoot = try Self.requireSiblingPlugin()
-        let node = try Self.requireNode()
+    @Test(
+        "HTTP end-to-end: connect, list tools, call list_annotations",
+        .enabled(
+            if: E2EPrerequisites.prerequisitesMet,
+            "requires the sibling Anglesite plugin checkout (ANGLESITE_PLUGIN_PATH, or ../anglesite with node_modules) and a Node ≥22 binary"
+        )
+    )
+    func httpEndToEnd() async throws {
+        let pluginRoot = try #require(E2EPrerequisites.locateSiblingPlugin())
+        let node = try #require(E2EPrerequisites.locateNode())
         let serverPath = pluginRoot.appendingPathComponent("server/index.mjs")
         let port = try Self.freePort()
 
@@ -65,51 +73,16 @@ struct MCPClientHTTPEndToEndTests {
         #expect(result.content.first?.text == "[]")
     }
 
-    // MARK: prerequisite probing (mirrors AppliesEditEndToEndTests)
+    // MARK: free-port probing
+    // (plugin / Node prerequisites live in `E2EPrerequisites`, shared with AppliesEditEndToEndTests)
 
-    @discardableResult
-    private static func requireSiblingPlugin() throws -> URL {
-        let env = ProcessInfo.processInfo.environment["ANGLESITE_PLUGIN_PATH"]
-        let candidate: URL = {
-            if let env, !env.isEmpty { return URL(fileURLWithPath: env, isDirectory: true) }
-            let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-            return cwd.deletingLastPathComponent().appendingPathComponent("anglesite", isDirectory: true)
-        }()
-        let serverPath = candidate.appendingPathComponent("server/index.mjs")
-        guard FileManager.default.isReadableFile(atPath: serverPath.path) else {
-            throw SkipReason("Anglesite plugin checkout not found at \(candidate.path)/server/index.mjs. Set ANGLESITE_PLUGIN_PATH or clone Anglesite/anglesite as a sibling.")
-        }
-        let sdkPath = candidate.appendingPathComponent("node_modules/@modelcontextprotocol/sdk")
-        guard FileManager.default.fileExists(atPath: sdkPath.path) else {
-            throw SkipReason("Plugin's node_modules are missing — run `npm ci` in \(candidate.path)")
-        }
-        return candidate
-    }
-
-    @discardableResult
-    private static func requireNode() throws -> URL {
-        if let override = ProcessInfo.processInfo.environment["NODE_BINARY"], !override.isEmpty,
-           FileManager.default.isExecutableFile(atPath: override) {
-            return URL(fileURLWithPath: override)
-        }
-        var candidates = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"]
-        let nvmDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".nvm/versions/node")
-        if let versions = try? FileManager.default.contentsOfDirectory(at: nvmDir, includingPropertiesForKeys: nil) {
-            let nvmNodes = versions
-                .map { $0.appendingPathComponent("bin/node").path }
-                .filter { FileManager.default.isExecutableFile(atPath: $0) }
-                .sorted()
-            candidates.append(contentsOf: nvmNodes)
-        }
-        for p in candidates where FileManager.default.isExecutableFile(atPath: p) {
-            return URL(fileURLWithPath: p)
-        }
-        throw SkipReason("node not found; set NODE_BINARY or install Node ≥22")
-    }
-
+    // NB: do not interpolate `errno` into these messages. Reading `errno` links
+    // `libswift_DarwinFoundation1.dylib` (the macOS-27 SDK vends it through that overlay), which
+    // is absent on the macOS-15 CI runner — the whole test bundle then fails to `dlopen`. The bare
+    // syscall name is enough; socket()/bind() failing here is vanishingly rare.
     private static func freePort() throws -> Int {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw SkipReason("socket() failed") }
+        guard fd >= 0 else { throw FreePortError("socket() failed") }
         defer { close(fd) }
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
@@ -120,7 +93,7 @@ struct MCPClientHTTPEndToEndTests {
                 Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        guard bindOK == 0 else { throw SkipReason("bind() failed") }
+        guard bindOK == 0 else { throw FreePortError("bind() failed") }
         var len = socklen_t(MemoryLayout<sockaddr_in>.size)
         _ = withUnsafeMutablePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) }
@@ -129,7 +102,9 @@ struct MCPClientHTTPEndToEndTests {
     }
 }
 
-private struct SkipReason: Error, CustomStringConvertible {
+/// A genuine failure while reserving a loopback port — distinct from a missing-prerequisite skip.
+/// Surfaced through the test's `throws` channel so Swift Testing records it as an issue.
+private struct FreePortError: Error, CustomStringConvertible {
     let description: String
     init(_ description: String) { self.description = description }
 }

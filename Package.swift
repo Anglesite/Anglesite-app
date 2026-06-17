@@ -36,15 +36,23 @@ var packageTargets: [Target] = [
         path: "Sources/AnglesiteIntents",
         swiftSettings: strictConcurrency
     ),
+    // Test-only support shared across the test targets (e.g. the e2e prerequisite probes used by
+    // both AnglesiteCoreTests and AnglesiteBridgeTests). Not exposed as a `.library` product, so
+    // the app/xcodeproj never links it — only `swift test` builds it.
+    .target(
+        name: "AnglesiteTestSupport",
+        path: "Tests/AnglesiteTestSupport",
+        swiftSettings: strictConcurrency
+    ),
     .testTarget(
         name: "AnglesiteCoreTests",
-        dependencies: ["AnglesiteCore"],
+        dependencies: ["AnglesiteCore", "AnglesiteTestSupport"],
         path: "Tests/AnglesiteCoreTests",
         swiftSettings: strictConcurrency
     ),
     .testTarget(
         name: "AnglesiteBridgeTests",
-        dependencies: ["AnglesiteBridge"],
+        dependencies: ["AnglesiteBridge", "AnglesiteTestSupport"],
         path: "Tests/AnglesiteBridgeTests",
         swiftSettings: strictConcurrency
     )
