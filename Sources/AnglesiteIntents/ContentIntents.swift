@@ -36,18 +36,34 @@ public struct SearchContentIntent: AppIntent {
         Summary("Search \(\.$site) for \(\.$query)")
     }
 
-    public func perform() async throws -> some IntentResult & ProvidesDialog {
-        let dialog = await Self.dialog(graph: ContentGraphOverride.scoped ?? graph, siteID: site.id, query: query)
-        return .result(dialog: IntentDialog(stringLiteral: dialog))
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<[ContentMatchEntity]> {
+        let g = ContentGraphOverride.scoped ?? graph
+        let matches = await Self.matches(graph: g, siteID: site.id, query: query)
+        return .result(value: matches, dialog: IntentDialog(stringLiteral: Self.dialog(for: matches, query: query)))
     }
 
-    /// Gather matches from the graph and format the spoken result. Static + graph-injected so the
-    /// read+format wiring is unit-testable without the AppIntents runtime.
+    /// Gather matches from the graph as a uniform list. Static + graph-injected so it's
+    /// unit-testable without the AppIntents runtime (mirrors the prior `dialog` helper).
+    static func matches(graph: SiteContentGraph, siteID: String, query: String) async -> [ContentMatchEntity] {
+        let pages = await graph.searchPages(siteID: siteID, matching: query).map { ContentMatchEntity(PageEntity($0)) }
+        let posts = await graph.searchPosts(siteID: siteID, matching: query).map { ContentMatchEntity(PostEntity($0)) }
+        let images = await graph.searchImages(siteID: siteID, matching: query).map { ContentMatchEntity(ImageEntity($0)) }
+        return pages + posts + images
+    }
+
+    /// Spoken count dialog, derived from the already-gathered matches (single search path).
+    static func dialog(for matches: [ContentMatchEntity], query: String) -> String {
+        ContentDialogs.search(
+            query: query,
+            pageCount: matches.filter { $0.kind == .page }.count,
+            postCount: matches.filter { $0.kind == .post }.count,
+            imageCount: matches.filter { $0.kind == .image }.count
+        )
+    }
+
+    /// Back-compat overload used by the existing `searchHelper` test: gather + format in one call.
     static func dialog(graph: SiteContentGraph, siteID: String, query: String) async -> String {
-        let pages = await graph.searchPages(siteID: siteID, matching: query)
-        let posts = await graph.searchPosts(siteID: siteID, matching: query)
-        let images = await graph.searchImages(siteID: siteID, matching: query)
-        return ContentDialogs.search(query: query, pageCount: pages.count, postCount: posts.count, imageCount: images.count)
+        dialog(for: await matches(graph: graph, siteID: siteID, query: query), query: query)
     }
 }
 

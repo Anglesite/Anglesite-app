@@ -142,6 +142,34 @@ extension AppIntentsTests {
             #expect(fake.postCalls.first?.slug == "hello")
         }
 
+        @Test("SearchContentIntent.matches returns a uniform list across kinds")
+        func searchMatchesHelper() async {
+            let graph = SiteContentGraph()
+            await graph.load(
+                siteID: AppIntentsTests.aSite,
+                pages: [AppIntentsTests.gPage(route: "/about", title: "About")],
+                posts: [AppIntentsTests.gPost(slug: "about-us", title: "About Us")],
+                images: []
+            )
+            let matches = await SearchContentIntent.matches(graph: graph, siteID: AppIntentsTests.aSite, query: "about")
+            #expect(matches.map(\.kind) == [.page, .post])
+            #expect(matches.first { $0.kind == .page }?.path == "/about")
+        }
+
+        @Test("search match path is the route and resolves back to a page (chaining)")
+        func searchMatchChainsToPage() async throws {
+            let graph = SiteContentGraph()
+            let p = AppIntentsTests.gPage(route: "/about", title: "About")
+            await graph.load(siteID: AppIntentsTests.aSite, pages: [p], posts: [], images: [])
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let matches = await SearchContentIntent.matches(graph: graph, siteID: AppIntentsTests.aSite, query: "about")
+                let pageMatch = try #require(matches.first { $0.kind == .page })
+                #expect(pageMatch.path == "/about")
+                let resolved = try await ContentMatchEntityQuery().entities(for: [pageMatch.id])
+                #expect(resolved.map(\.id) == [p.id])
+            }
+        }
+
         @Test("create intents tolerate a failed service result")
         func createFailureIsHandled() async throws {
             let fake = FakeContentOps()
