@@ -42,6 +42,7 @@ public enum FoundationModelTier: String, Sendable, Equatable, CaseIterable {
 // See ContentAssistant.swift / ClaudeAssistant.swift for the same pattern.
 #if compiler(>=6.4)
 import FoundationModels
+import CoreSpotlight
 
 /// A ``ContentAssistant`` backed by Apple's on-device `FoundationModels`. Streams free-form text
 /// and produces ``Generable`` structured output via guided generation.
@@ -67,9 +68,10 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// ``resetSession()``. The one-shot ``generate(prompt:context:)`` path deliberately bypasses it.
     private var session: LanguageModelSession?
 
-    /// `editBridge` + `contentGraph` are optional. When **both** are supplied, the assistant
-    /// attaches ``ApplyEditTool`` + ``SearchContentTool`` to each session (a local agentic loop)
-    /// and advertises `supportsTools`. When either is `nil`, behavior is the tool-less default.
+    /// Every session attaches Apple's `SpotlightSearchTool` for local RAG over the indexed site
+    /// content, so ``capabilities`` always advertises `supportsTools` (C.8, #158). When **both**
+    /// `editBridge` and `contentGraph` are supplied, ``ApplyEditTool`` + ``SearchContentTool`` are
+    /// added too, forming the full local agentic loop.
     public init(
         tier: FoundationModelTier = .onDevice,
         editBridge: IntentEditBridge? = nil,
@@ -90,7 +92,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
             supportsStreaming: true,
             supportsStructuredOutput: true,
             supportsVision: true,  // macOS 27 on-device model accepts image attachments (C.7, #157)
-            supportsTools: editBridge != nil && contentGraph != nil,
+            supportsTools: true,  // every session carries SpotlightSearchTool (C.8, #158)
             maxContextTokens: tier == .privateCloudCompute ? 32_768 : 4_096,
             providerName: tier == .privateCloudCompute ? "Private Cloud Compute" : "On-Device"
         )
@@ -255,10 +257,17 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     }
 
     /// The names of the tools attached to each conversational session, for the `.started` event so
-    /// `ChatModel`/the chat UI can reflect what's actually wired. Empty unless both `editBridge` and
-    /// `contentGraph` were supplied (the same condition ``makeSession(context:)`` gates tools on).
+    /// `ChatModel`/the chat UI can reflect what's actually wired. Never empty — every session carries
+    /// `SpotlightSearchTool`; the edit/search pair is added only when both deps are present.
     private var attachedToolNames: [String] {
-        capabilities.supportsTools ? [ApplyEditTool.toolName, SearchContentTool.toolName] : []
+        // SpotlightSearchTool is always attached; the edit/search pair only when their deps exist.
+        // "spotlightSearch" is a display label for the .started event — the system tool exposes
+        // no name to the app.
+        var names = ["spotlightSearch"]
+        if editBridge != nil && contentGraph != nil {
+            names += [ApplyEditTool.toolName, SearchContentTool.toolName]
+        }
+        return names
     }
 
     /// Returns the cached conversational session, lazily creating it from `context` on first use.
@@ -289,18 +298,19 @@ public actor FoundationModelAssistant: ConversationalAssistant {
             throw AssistantError.unavailable("The on-device model is unavailable on this device.")
         }
         let instructions = Self.instructions(for: context)
+        // SpotlightSearchTool needs no app-supplied dependency — it queries the system Core
+        // Spotlight index that ContentSpotlightIndexer populates — so it attaches to every
+        // session for local RAG (C.8, #158). The edit/search pair stays dependency-gated.
+        var tools: [any Tool] = [SpotlightSearchTool()]
         if let editBridge, let contentGraph {
-            let tools: [any Tool] = [
-                ApplyEditTool(
-                    bridge: editBridge,
-                    siteID: context.siteID,
-                    contextSelector: context.selectedElementSelector
-                ),
-                SearchContentTool(contentGraph: contentGraph, siteID: context.siteID),
-            ]
-            return LanguageModelSession(tools: tools, instructions: instructions)
+            tools.append(ApplyEditTool(
+                bridge: editBridge,
+                siteID: context.siteID,
+                contextSelector: context.selectedElementSelector
+            ))
+            tools.append(SearchContentTool(contentGraph: contentGraph, siteID: context.siteID))
         }
-        return LanguageModelSession(instructions: instructions)
+        return LanguageModelSession(tools: tools, instructions: instructions)
     }
 
     /// Folds the situational ``AssistantContext`` into session instructions.

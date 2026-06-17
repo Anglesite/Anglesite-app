@@ -32,8 +32,16 @@ struct FoundationModelAssistantTests {
         #expect(caps.maxContextTokens == 4_096)
         #expect(caps.supportsStreaming)
         #expect(caps.supportsStructuredOutput)
-        #expect(!caps.supportsTools)
+        #expect(caps.supportsTools)  // Spotlight tool is always attached (C.8, #158)
         #expect(caps.supportsVision)  // macOS 27 on-device model accepts image attachments (C.7)
+    }
+
+    @Test("Spotlight tool is attached unconditionally, so supportsTools is true with no deps")
+    func spotlightMakesToolsUnconditional() {
+        // No editBridge / contentGraph supplied. SpotlightSearchTool needs neither — it queries
+        // the system Core Spotlight index directly — so the session still carries a tool (C.8, #158).
+        let caps = FoundationModelAssistant(tier: .onDevice, editBridge: nil, contentGraph: nil).capabilities
+        #expect(caps.supportsTools)
     }
 
     @Test("PCC tier advertises a larger context window and PCC provider name")
