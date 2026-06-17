@@ -51,6 +51,10 @@ xcodegen generate
 # and Sources/ without manual `xcodegen generate` calls.
 git config core.hooksPath scripts/git-hooks
 
+# Verify project.yml hasn't drifted from the source tree (regenerates the .xcodeproj
+# and checks every app target compiles all of Sources/AnglesiteApp). CI runs this too.
+scripts/check-xcodeproj-sync.sh
+
 # Build via CLI (ad-hoc signed; no Apple account required)
 xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build
 

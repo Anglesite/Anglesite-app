@@ -113,3 +113,21 @@ jobs:
 
       - name: Run relay suites under ThreadSanitizer
         run: scripts/test-relay-tsan.sh
+
+  xcodeproj-sync:
+    name: Anglesite.xcodeproj ↔ project.yml in sync
+    runs-on: macos-15
+    timeout-minutes: 10
+    # Anglesite.xcodeproj is gitignored and regenerated from project.yml via XcodeGen, so a
+    # stale/drifted spec never trips `swift build` above — it only bites a contributor running
+    # `xcodebuild` with "cannot find … in scope" (#123). This lane regenerates the project and
+    # asserts every app target still compiles the full Sources/AnglesiteApp tree. It needs only
+    # xcodegen + python3 (no Xcode 27 SDK, Node, or sibling plugin), so it's fast and parallel.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
+
+      - name: Check project sync
+        run: scripts/check-xcodeproj-sync.sh
