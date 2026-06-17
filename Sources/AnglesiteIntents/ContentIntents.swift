@@ -45,8 +45,11 @@ public struct SearchContentIntent: AppIntent {
     /// typed results. Static + graph-injected so it's unit-testable without the AppIntents runtime.
     static func results(graph: SiteContentGraph, siteID: String, query: String) async -> (dialog: String, items: [ContentSearchResultEntity]) {
         let pages = await graph.searchPages(siteID: siteID, matching: query)
+            .sorted { $0.lastModified != $1.lastModified ? $0.lastModified > $1.lastModified : $0.id < $1.id }
         let posts = await graph.searchPosts(siteID: siteID, matching: query)
+            .sorted { $0.lastModified != $1.lastModified ? $0.lastModified > $1.lastModified : $0.id < $1.id }
         let images = await graph.searchImages(siteID: siteID, matching: query)
+            .sorted { $0.lastModified != $1.lastModified ? $0.lastModified > $1.lastModified : $0.id < $1.id }
         let dialog = ContentDialogs.search(query: query, pageCount: pages.count, postCount: posts.count, imageCount: images.count)
         let items = pages.map { ContentSearchResultEntity(page: PageEntity($0)) }
             + posts.map { ContentSearchResultEntity(post: PostEntity($0)) }

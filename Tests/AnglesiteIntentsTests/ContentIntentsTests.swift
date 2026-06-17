@@ -166,6 +166,16 @@ extension AppIntentsTests {
             #expect(e.id == "\(AppIntentsTests.aSite):page:/about")
         }
 
+        @Test("SearchContentIntent.results returns matches in deterministic lastModified-desc order")
+        func searchResultsOrdering() async {
+            let graph = SiteContentGraph()
+            let older = AppIntentsTests.gPage(route: "/about-old", title: "About old", modified: AppIntentsTests.t0)
+            let newer = AppIntentsTests.gPage(route: "/about-new", title: "About new", modified: AppIntentsTests.t0.addingTimeInterval(100))
+            await graph.load(siteID: AppIntentsTests.aSite, pages: [older, newer], posts: [], images: [])
+            let (_, items) = await SearchContentIntent.results(graph: graph, siteID: AppIntentsTests.aSite, query: "about")
+            #expect(items.map(\.id) == [newer.id, older.id])  // newer first
+        }
+
         @Test("create intents tolerate a failed service result")
         func createFailureIsHandled() async throws {
             let fake = FakeContentOps()
