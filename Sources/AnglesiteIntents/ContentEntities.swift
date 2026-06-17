@@ -26,6 +26,31 @@ public struct PageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
         self.route = page.route
         self.siteID = page.siteID
     }
+
+    /// Direct field initializer — used to build a return value from data already in hand
+    /// (e.g. a just-created page) without round-tripping through `SiteContentGraph`,
+    /// which the file-watcher may not have indexed yet.
+    public init(id: String, displayName: String, route: String, siteID: String) {
+        self.id = id
+        self.displayName = displayName
+        self.route = route
+        self.siteID = siteID
+    }
+
+    /// Build the entity an `AddPageIntent` returns. On success the route is the created
+    /// identifier; on failure we return a best-effort entity from the requested input so the
+    /// intent keeps a single `ReturnsValue<PageEntity>` type. The dialog — not this value — is
+    /// the source of truth for whether creation actually succeeded.
+    public static func make(
+        siteID: String, name: String, requestedRoute: String?, result: ContentCreateResult
+    ) -> PageEntity {
+        let route: String
+        switch result {
+        case .created(_, let identifier): route = identifier
+        case .siteNotFound, .failed:       route = requestedRoute ?? ""
+        }
+        return PageEntity(id: "\(siteID):page:\(route)", displayName: name, route: route, siteID: siteID)
+    }
 }
 
 /// Resolves `PageEntity` references from `SiteContentGraph`. Used by Siri/Shortcuts for both

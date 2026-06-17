@@ -37,6 +37,24 @@ extension AppIntentsTests {
             #expect(fake.auditCalls.first?.id == fake.deployCalls.first?.id)
         }
 
+        // F-3 (#163): AddPageIntent returns the created PageEntity so an agent can chain
+        // create→preview. Reproduce by feeding the factory-built entity into PreviewSiteIntent.
+        @Test("add-page output flows into preview as input")
+        @MainActor
+        func addPageOutputFlowsIntoPreview() async throws {
+            WindowRouter.shared.requested = nil
+            let created = PageEntity.make(
+                siteID: AppIntentsTests.aSite, name: "About", requestedRoute: "/about",
+                result: .created(filePath: "src/pages/about.astro", identifier: "/about"))
+
+            var preview = PreviewSiteIntent()
+            preview.site = SiteEntity(TestStore.site(id: AppIntentsTests.aSite, name: "Alpha"))
+            preview.page = created
+            _ = try await preview.perform()
+
+            #expect(WindowRouter.shared.requested == AppIntentsTests.aSite)
+        }
+
         // D.1 (#162): DeploySiteIntent and BackupSiteIntent now return the SiteEntity they
         // processed (ReturnsValue<SiteEntity>), mirroring AuditSiteIntent, so an agent/Shortcut
         // can pipe deploy→backup. Reproduce that wiring by feeding the same SiteEntity into both.

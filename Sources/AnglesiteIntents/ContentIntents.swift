@@ -131,7 +131,7 @@ public struct AddPageIntent: AppIntent {
         Summary("Add page \(\.$name) to \(\.$site)")
     }
 
-    public func perform() async throws -> some IntentResult & ProvidesDialog {
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<PageEntity> {
         let scoped = ContentOperationsOverride.scoped
         let svc = scoped ?? content
         // Spawning the plugin's Node MCP server on first use can exceed the default budget, so the
@@ -149,7 +149,9 @@ public struct AddPageIntent: AppIntent {
             result = await svc.createPage(siteID: site.id, name: name, route: route)
             #endif
         }
-        return .result(dialog: IntentDialog(stringLiteral: ContentDialogs.created(result, kind: .page, siteName: site.displayName)))
+        let entity = PageEntity.make(siteID: site.id, name: name, requestedRoute: route, result: result)
+        return .result(value: entity,
+                       dialog: IntentDialog(stringLiteral: ContentDialogs.created(result, kind: .page, siteName: site.displayName)))
     }
 }
 

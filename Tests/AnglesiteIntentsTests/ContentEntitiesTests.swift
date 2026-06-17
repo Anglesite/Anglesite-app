@@ -95,6 +95,30 @@ extension AppIntentsTests {
         }
     }
 
+    @Suite("CreateFactory.Page (F-3)")
+    struct CreatePageFactoryTests {
+        @Test("success: route comes from the created identifier; id matches graph formula")
+        func success() {
+            let e = PageEntity.make(
+                siteID: AppIntentsTests.aSite, name: "About Us", requestedRoute: nil,
+                result: .created(filePath: "src/pages/about.astro", identifier: "/about"))
+            #expect(e.route == "/about")
+            #expect(e.siteID == AppIntentsTests.aSite)
+            #expect(e.displayName == "About Us")
+            #expect(e.id == "\(AppIntentsTests.aSite):page:/about")
+        }
+
+        @Test("failure: best-effort entity from the requested route")
+        func failure() {
+            let e = PageEntity.make(
+                siteID: AppIntentsTests.aSite, name: "About", requestedRoute: "/about",
+                result: .failed(reason: "boom"))
+            #expect(e.route == "/about")
+            #expect(e.id == "\(AppIntentsTests.aSite):page:/about")
+            #expect(e.displayName == "About")
+        }
+    }
+
     @Suite("PageEntityQuery")
     struct PageEntityQueryTests {
 

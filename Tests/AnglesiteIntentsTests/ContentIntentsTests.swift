@@ -142,6 +142,15 @@ extension AppIntentsTests {
             #expect(fake.postCalls.first?.slug == "hello")
         }
 
+        @Test("AddPage returns an entity carrying the created route")
+        func addPageReturnsEntity() {
+            let e = PageEntity.make(
+                siteID: AppIntentsTests.aSite, name: "About", requestedRoute: "/about",
+                result: .created(filePath: "src/pages/about.astro", identifier: "/about"))
+            #expect(e.route == "/about")
+            #expect(e.id == "\(AppIntentsTests.aSite):page:/about")
+        }
+
         @Test("create intents tolerate a failed service result")
         func createFailureIsHandled() async throws {
             let fake = FakeContentOps()
