@@ -69,6 +69,32 @@ extension AppIntentsTests {
         )
     }
 
+    @Suite("PropertyPromotion (F-1)")
+    struct PropertyPromotionTests {
+        @Test("promoted PageEntity fields round-trip through construction")
+        func pageFields() {
+            let e = PageEntity(AppIntentsTests.gPage(route: "/about", title: "About"))
+            #expect(e.route == "/about")
+            #expect(e.siteID == AppIntentsTests.aSite)
+            #expect(e.id == "\(AppIntentsTests.aSite):page:/about")  // id unchanged
+        }
+
+        @Test("promoted PostEntity fields round-trip through construction")
+        func postFields() {
+            let e = PostEntity(AppIntentsTests.gPost(slug: "hello-world", collection: "blog"))
+            #expect(e.slug == "hello-world")
+            #expect(e.collection == "blog")
+            #expect(e.siteID == AppIntentsTests.aSite)
+        }
+
+        @Test("promoted ImageEntity fields round-trip through construction")
+        func imageFields() {
+            let e = ImageEntity(AppIntentsTests.gImage(relativePath: "public/images/hero.jpg"))
+            #expect(e.relativePath == "public/images/hero.jpg")
+            #expect(e.siteID == AppIntentsTests.aSite)
+        }
+    }
+
     @Suite("PageEntityQuery")
     struct PageEntityQueryTests {
 

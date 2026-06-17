@@ -9,8 +9,8 @@ import Foundation
 public struct PageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public let id: String            // "{siteID}:page:{route}" — same as SiteContentGraph.Page.id
     public let displayName: String   // title ?? route
-    public let route: String
-    public let siteID: String
+    @Property(title: "Route") public var route: String
+    @Property(title: "Site ID") public var siteID: String
 
     public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Page" }
 
@@ -89,9 +89,9 @@ public struct PageEntityQuery: EntityStringQuery {
 public struct PostEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public let id: String            // "{siteID}:post:{slug}"
     public let displayName: String   // title
-    public let slug: String
-    public let collection: String
-    public let siteID: String
+    @Property(title: "Slug") public var slug: String
+    @Property(title: "Collection") public var collection: String
+    @Property(title: "Site ID") public var siteID: String
     public let isDraft: Bool
     public let tags: [String]
 
@@ -109,11 +109,11 @@ public struct PostEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public init(_ post: SiteContentGraph.Post) {
         self.id = post.id
         self.displayName = post.title
+        self.isDraft = post.draft
+        self.tags = post.tags
         self.slug = post.slug
         self.collection = post.collection
         self.siteID = post.siteID
-        self.isDraft = post.draft
-        self.tags = post.tags
     }
 }
 
@@ -176,8 +176,8 @@ public struct PostEntityQuery: EntityStringQuery {
 public struct ImageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public let id: String            // "{siteID}:image:{relativePath}"
     public let displayName: String   // fileName
-    public let relativePath: String
-    public let siteID: String
+    @Property(title: "Relative Path") public var relativePath: String
+    @Property(title: "Site ID") public var siteID: String
     /// Page routes that reference this image. Carried in the struct (not surfaced in
     /// `displayRepresentation` today) so adding it later isn't a source-breaking AppEntity
     /// schema change for Shortcuts persistence / donated interactions.
@@ -194,9 +194,9 @@ public struct ImageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public init(_ image: SiteContentGraph.Image) {
         self.id = image.id
         self.displayName = image.fileName
+        self.usedOnPages = image.usedOnPages
         self.relativePath = image.relativePath
         self.siteID = image.siteID
-        self.usedOnPages = image.usedOnPages
     }
 }
 
