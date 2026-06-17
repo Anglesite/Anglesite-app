@@ -28,10 +28,22 @@ alongside `import FoundationModels`:
 let session = LanguageModelSession(tools: [SpotlightSearchTool()], instructions: instructions)
 ```
 
-A default-initialized `SpotlightSearchTool()` searches the app's Core Spotlight index — the
-same `CSSearchableIndex.default()` that `ContentSpotlightIndexer` writes to — so no
-configuration is needed. (The tool also accepts a `FileSource` config for sandbox file-path
-search; we do not use it, since our content is indexed as entities, not files.)
+A **default**-initialized `SpotlightSearchTool()` is unusable on the on-device model: its
+default `GuidanceLevel.complete` injects a ~13,000-token query-construction manual into the
+prompt, which is over 3× the on-device model's entire 4,096-token context window. Measured
+empirically — a trivial "say hello" prompt fails with *"Provided 13,053 tokens, but the
+maximum allowed is 4,096."* The tool must be configured with a leaner guidance level:
+
+```swift
+SpotlightSearchTool(configuration: .init(
+    sources: [.coreSpotlight],
+    guide: .init(level: .focused(.items), format: .compact)))
+```
+
+`.focused(.items)` scopes the guidance to the *items* content domain (title/text/created/
+modified) — exactly our pages/posts — and `.compact` trims the response format. Measured:
+this configuration fits and the model responds normally. (`.dynamic(GuidanceProfile(...))`
+also fits and offers finer control; `.focused(.items)` is the simplest fit for text content.)
 
 ## Design
 
@@ -40,39 +52,57 @@ All changes are in `Sources/AnglesiteCore/FoundationModelAssistant.swift`.
 ### 1. Import
 
 Add `import CoreSpotlight` next to `import FoundationModels` (both inside the existing
-`#if compiler(>=6.4)` gate).
+`#if compiler(>=6.4)` gate). The `_CoreSpotlight_FoundationModels` cross-import overlay that
+vends `SpotlightSearchTool` activates automatically when both are imported.
 
-### 2. Attach unconditionally in `makeSession(context:)`
+### 2. Attach on the **conversational path only**
 
-`SpotlightSearchTool` needs no app-supplied dependency, so it attaches to **every** session.
-The existing edit/search pair stays gated on `editBridge`/`contentGraph`:
+Even the slimmed `.focused`/`.compact` guide still consumes part of the 4,096-token budget on
+every session it is attached to. The one-shot paths (`generate`, and `generateStructured` for
+alt-text/summaries) never use retrieval — paying that tax there only steals context from the
+generation itself. So Spotlight attaches **only** to the multi-turn `converse` session, where
+RAG is the point. `makeSession` gains an opt-in flag; only `conversationSession(for:)` sets it:
 
 ```swift
-var tools: [any Tool] = [SpotlightSearchTool()]
-if let editBridge, let contentGraph {
-    tools.append(ApplyEditTool(bridge: editBridge, siteID: context.siteID,
-                               contextSelector: context.selectedElementSelector))
-    tools.append(SearchContentTool(contentGraph: contentGraph, siteID: context.siteID))
+private func makeSession(context: AssistantContext,
+                         includeSpotlight: Bool = false) throws -> LanguageModelSession {
+    // ... existing availability check ...
+    let instructions = Self.instructions(for: context)
+    var tools: [any Tool] = []
+    if includeSpotlight {
+        tools.append(SpotlightSearchTool(configuration: .init(
+            sources: [.coreSpotlight],
+            guide: .init(level: .focused(.items), format: .compact))))
+    }
+    if let editBridge, let contentGraph {
+        tools.append(ApplyEditTool(bridge: editBridge, siteID: context.siteID,
+                                   contextSelector: context.selectedElementSelector))
+        tools.append(SearchContentTool(contentGraph: contentGraph, siteID: context.siteID))
+    }
+    return tools.isEmpty
+        ? LanguageModelSession(instructions: instructions)
+        : LanguageModelSession(tools: tools, instructions: instructions)
 }
-return LanguageModelSession(tools: tools, instructions: instructions)
 ```
 
-The previous tool-less `LanguageModelSession(instructions:)` branch is removed — every
-session now carries at least the Spotlight tool.
+`conversationSession(for:)` calls `makeSession(context: context, includeSpotlight: true)`. The
+one-shot `generate`/`generateStructured` paths call `makeSession(context:)` unchanged — they
+keep their existing behavior (edit/search pair when deps present, no Spotlight). The
+edit/search pair's attachment is *not* touched by this task; only Spotlight is added.
 
-Note: `makeSession` already throws `AssistantError.unavailable` *before* this point when the
-on-device model is absent, so `SpotlightSearchTool()` is only ever constructed on a device
-where the model runs. This sidesteps any concern about touching the tool type on CI.
+Note: `makeSession` throws `AssistantError.unavailable` *before* constructing any tool, so
+`SpotlightSearchTool` is only ever built on a device where the model runs.
 
 ### 3. `capabilities.supportsTools` → unconditionally `true`
 
-Every session carries Spotlight, so the advertised capability drops its
-`editBridge != nil && contentGraph != nil` expression and becomes `true`.
+The `converse` session now always carries at least Spotlight, so the conversational assistant
+always supports tools. `supportsTools` drops its `editBridge != nil && contentGraph != nil`
+expression and becomes `true`. (`supportsTools` is informational — no app code branches on it.)
 
 ### 4. `attachedToolNames`
 
-Reported in the `.started` event for the chat UI. Always include a Spotlight label; add the
-edit/search names only when those dependencies are present:
+Reported in the `.started` event (emitted only on the `converse` path). Always include a
+Spotlight label; add the edit/search names only when those dependencies are present:
 
 ```swift
 private var attachedToolNames: [String] {
@@ -87,13 +117,14 @@ private var attachedToolNames: [String] {
 `"spotlightSearch"` is a display label, not Apple's internal tool name (which carries no
 telemetry to the app anyway — see Testing).
 
-## Why "always attach" is safe
+## Why conversational-path-only
 
-The one-shot paths (`generate`, and `generateStructured` for alt-text/summaries) now carry
-the tool too. Guided generation (`respond(generating:)`) constrains output to the
-`@Generable` result type and will not spuriously call a search tool; free-text `generate`
-*could* search, which is harmless and arguably useful. This is an accepted, deliberate
-trade-off over gating the tool behind a dependency it does not have.
+The `converse` session is the only place retrieval helps, and it is the only place that pays
+the guide's token cost. One-shot `generate`/`generateStructured` (alt-text, summaries,
+structured metadata) are constrained, single-purpose calls that never search — keeping them
+tool-free preserves their full 4,096-token budget for the actual generation. This revises an
+earlier "attach to every session" draft, which was abandoned once the guide's real token cost
+on the tiny on-device window was measured.
 
 ## Testing
 
@@ -110,31 +141,38 @@ Testing therefore splits into three tiers:
 
 ### Tier 1 — CI-safe (the automated deliverable)
 
-In `Tests/AnglesiteCoreTests/FoundationModelAssistantTests.swift`:
+In `Tests/AnglesiteCoreTests/FoundationModelAssistantTests.swift` (and the matching
+`FoundationModelAssistantToolWiringTests` in `OnDeviceToolsTests.swift`):
 
 - Update `onDeviceCapabilities`: `#expect(!caps.supportsTools)` → `#expect(caps.supportsTools)`.
 - Add a test: an assistant built with **no** `editBridge`/`contentGraph` still reports
-  `supportsTools == true` — proving Spotlight is unconditional.
+  `supportsTools == true` (the `converse` path always carries Spotlight).
+- Update the existing tool-wiring assertions to the new contract: `supportsTools == true` in
+  all dependency configurations, and `attachedToolNames`/`.started` lists begin with
+  `"spotlightSearch"`.
 
 These read `capabilities`, which is `nonisolated` and never touches `SystemLanguageModel`, so
 they run on any toolchain ≥6.4 without the model.
 
-### Tier 2 — Device-only smoke (guarded by `modelAvailable()`, skips on CI)
+### Tier 2 — Device-only budget-fit smoke (guarded by `modelAvailable()`, skips on CI)
 
-The closest automatable form of the issue's "integration test": index a known entity through
-`ContentSpotlightIndexer`'s live backend, ask the assistant a question only answerable from
-that entity, and assert the reply contains the planted fact. Written, but flagged in-code as
-**model-dependent and index-propagation-racy** (the system indexes asynchronously) — a smoke,
-not a deterministic gate, consistent with the existing live `converse*` tests.
+The regression this task exists to prevent is the 13k-token overflow. A guarded live test
+drives `converse` (the Spotlight-carrying path) on a no-deps assistant with a trivial prompt
+and asserts the turn reaches `.turnComplete` — i.e. the `.focused`/`.compact` guide fits the
+4,096-token budget. This is **not** redundant with the existing live `converse` lifecycle
+test: it specifically guards the configuration-fits-budget property that the default config
+violated. (The one-shot live `generate`/`generateStructured` tests also keep passing, since
+those paths now carry no Spotlight tool.)
 
 ### Tier 3 — Manual
 
-True end-to-end RAG ("what did I write about SwiftUI last month?") belongs in the Phase C
-manual smoke, alongside B.6/D.5. The comprehensive automated suite is #161's scope.
+True end-to-end RAG ("what did I write about SwiftUI last month?") — verifying the model
+actually *retrieves* indexed content — belongs in the Phase C manual smoke, alongside B.6/D.5.
+The comprehensive automated suite is #161's scope.
 
-**Net:** #158 lands the wiring + the Tier-1 capability tests + a guarded Tier-2 smoke, and
-explicitly does not claim to verify tool invocation on CI — avoiding a silently-skipping test
-that would read as green coverage when it is not.
+**Net:** #158 lands the wiring + Tier-1 capability tests + a guarded Tier-2 budget-fit smoke,
+and explicitly does not claim to verify tool *invocation* on CI — avoiding a silently-skipping
+test that would read as green coverage when it is not.
 
 ## Out of scope
 
