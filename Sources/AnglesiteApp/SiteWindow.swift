@@ -234,7 +234,7 @@ struct SiteWindow: View {
 
             switch preview.state {
             case .ready(_, let url):
-                PreviewView(url: url, router: preview.editRouter, annotationProvider: annotationProvider)
+                PreviewView(url: preview.displayURL ?? url, router: preview.editRouter, annotationProvider: annotationProvider)
             case .starting:
                 centeredStatus { ProgressView("Starting dev server for \(site.name)…") }
             case .failed(_, let message):
@@ -335,6 +335,10 @@ struct SiteWindow: View {
         }
 
         preview.open(siteID: resolved.id, siteDirectory: resolved.path)
+        // A page route from `PreviewSiteIntent` (#139): navigate once the dev server is ready.
+        if let route = WindowRouter.shared.consumeRoute(for: resolved.id) {
+            preview.navigate(toRoute: route)
+        }
         // The annotation feed, undo command, and edit observer feed the chat panel. They're all
         // MCP-based (the edit overlay applies edits via MCP on both targets), so they're wired the
         // same way regardless of which assistant backs the chat.
