@@ -242,6 +242,27 @@ struct FoundationModelAssistantTests {
         }
     }
 
+    @Test("converse with the Spotlight tool attached fits the on-device budget and completes")
+    func converseWithSpotlightFitsBudget() async throws {
+        guard modelAvailable() else { return }
+        // Regression guard for the 13k-token overflow: the default SpotlightSearchTool() guidance
+        // exceeds the 4,096-token window. A no-deps assistant's converse path carries only the
+        // configured Spotlight tool, so reaching .turnComplete proves the .focused/.compact guide
+        // fits (C.8, #158).
+        let assistant = FoundationModelAssistant()
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(
+            prompt: "Say hello in one short sentence.",
+            context: makeContext()
+        ) {
+            events.append(event)
+        }
+        guard case .turnComplete = events.last else {
+            Issue.record("Expected .turnComplete (budget fit), got \(String(describing: events.last))")
+            return
+        }
+    }
+
     @Test("converse retains conversation history across turns")
     func converseRemembersAcrossTurns() async throws {
         guard modelAvailable() else { return }
