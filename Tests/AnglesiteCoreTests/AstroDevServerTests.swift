@@ -189,10 +189,18 @@ struct AstroDevServerTests {
         )
         #expect(first == URL(string: "http://localhost:9001/"))
 
-        // Give the supervisor time to notice the crash, restart, and the watcher to pick up :9002/.
-        try? await Task.sleep(nanoseconds: 700_000_000)
-        let updated = await server.readyURL
-        #expect(updated == URL(string: "http://localhost:9002/"))
+        // Poll (instead of a single fixed sleep) for the supervisor to notice the crash, restart,
+        // and the watcher to pick up :9002/. A fixed 700 ms delay flakes on a loaded CI runner where
+        // this chain runs slower than locally (~0.7 s end to end).
+        let expected = URL(string: "http://localhost:9002/")
+        var updated = await server.readyURL
+        var waited = 0
+        while updated != expected && waited < 100 {   // up to ~5 s
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            updated = await server.readyURL
+            waited += 1
+        }
+        #expect(updated == expected)
 
         await server.stop(timeout: 2)
     }
@@ -224,10 +232,17 @@ struct AstroDevServerTests {
         )
         #expect(first == URL(string: "http://localhost:9101/"))
 
-        // Wait for the crash → restart → watcher → callback chain.
-        try? await Task.sleep(nanoseconds: 700_000_000)
-        let urls = await observed.urls
-        #expect(urls == [URL(string: "http://localhost:9102/")!])
+        // Poll for the crash → restart → watcher → callback chain rather than a fixed sleep, which
+        // flakes on a loaded CI runner where the chain runs slower than locally.
+        let expected = [URL(string: "http://localhost:9102/")!]
+        var urls = await observed.urls
+        var waited = 0
+        while urls != expected && waited < 100 {   // up to ~5 s
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            urls = await observed.urls
+            waited += 1
+        }
+        #expect(urls == expected)
 
         await server.stop(timeout: 2)
     }
