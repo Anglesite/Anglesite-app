@@ -41,6 +41,7 @@ var packageTargets: [Target] = [
     // the app/xcodeproj never links it — only `swift test` builds it.
     .target(
         name: "AnglesiteTestSupport",
+        dependencies: ["AnglesiteCore"],
         path: "Tests/AnglesiteTestSupport",
         swiftSettings: strictConcurrency
     ),

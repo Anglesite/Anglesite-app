@@ -24,10 +24,19 @@ public enum E2EPrerequisites {
             let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
             return cwd.deletingLastPathComponent().appendingPathComponent("anglesite", isDirectory: true)
         }()
+        // The check must reflect "can the server actually boot", not just "is there a checkout".
+        // `server/apply-edit-dispatcher.mjs` eagerly imports `optimize-images.mjs`, which eagerly
+        // imports `sharp` — so a checkout whose `node_modules` is missing `sharp` (a partial/stale
+        // install) crashes the server on load before it ever listens. Gating on both the MCP SDK and
+        // `sharp` means an incomplete install yields a *skip* with a clear reason instead of an
+        // opaque connect timeout. (CI installs deps fresh, so this only bites stale local checkouts.)
+        let bootCriticalDeps = ["@modelcontextprotocol/sdk", "sharp"]
         guard FileManager.default.isReadableFile(
                 atPath: candidate.appendingPathComponent("server/index.mjs").path),
-              FileManager.default.fileExists(
-                atPath: candidate.appendingPathComponent("node_modules/@modelcontextprotocol/sdk").path)
+              bootCriticalDeps.allSatisfy({ dep in
+                  FileManager.default.fileExists(
+                    atPath: candidate.appendingPathComponent("node_modules/\(dep)").path)
+              })
         else { return nil }
         return candidate
     }

@@ -46,7 +46,7 @@ final class AppliesEditEndToEndTests {
         "Apply edit end to end mutates the file on disk",
         .enabled(
             if: E2EPrerequisites.prerequisitesMet,
-            "requires the sibling Anglesite plugin checkout (ANGLESITE_PLUGIN_PATH, or ../anglesite with node_modules) and a Node ≥22 binary"
+            "requires the sibling Anglesite plugin checkout with a complete install (ANGLESITE_PLUGIN_PATH, or ../anglesite — run `npm install` in the plugin so sharp is present) and a Node ≥22 binary"
         )
     )
     func applyEditEndToEndMutatesTheFileOnDisk() async throws {

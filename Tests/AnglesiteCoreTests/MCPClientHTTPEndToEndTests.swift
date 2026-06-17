@@ -17,7 +17,7 @@ struct MCPClientHTTPEndToEndTests {
         "HTTP end-to-end: connect, list tools, call list_annotations",
         .enabled(
             if: E2EPrerequisites.prerequisitesMet,
-            "requires the sibling Anglesite plugin checkout (ANGLESITE_PLUGIN_PATH, or ../anglesite with node_modules) and a Node ≥22 binary"
+            "requires the sibling Anglesite plugin checkout with a complete install (ANGLESITE_PLUGIN_PATH, or ../anglesite — run `npm install` in the plugin so sharp is present) and a Node ≥22 binary"
         )
     )
     func httpEndToEnd() async throws {
@@ -54,13 +54,26 @@ struct MCPClientHTTPEndToEndTests {
         let endpoint = URL(string: "http://127.0.0.1:\(port)/mcp")!
         let client = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
 
-        // Poll connect until the server is listening (cold node start can take a moment).
-        let deadline = Date().addingTimeInterval(20)
-        while true {
-            do { try await client.connect(httpEndpoint: endpoint); break }
-            catch {
-                guard Date() < deadline else { throw error }
-                try await Task.sleep(nanoseconds: 200_000_000)
+        // Wait for the server to accept the MCP handshake, but abort the instant the spawned process
+        // dies — `awaitReady` then throws with the server's stderr instead of letting this spin the
+        // whole budget and report an opaque `.sessionLost`. A healthy cold start connects in well
+        // under a second; the generous budget only covers a genuinely slow start.
+        try await E2EServer.awaitReady(
+            handle: handle,
+            supervisor: supervisor,
+            logCenter: logCenter,
+            timeout: 60
+        ) {
+            // Retry the handshake until it succeeds. The inner deadline (< the outer budget) surfaces
+            // the real connect error if the server is up but never completes the handshake; a crashed
+            // server is caught by `awaitReady`'s death detection, not this loop.
+            let deadline = Date().addingTimeInterval(55)
+            while true {
+                do { try await client.connect(httpEndpoint: endpoint); return }
+                catch {
+                    guard Date() < deadline else { throw error }
+                    try await Task.sleep(nanoseconds: 200_000_000)
+                }
             }
         }
         defer { Task { await client.stop() } }
