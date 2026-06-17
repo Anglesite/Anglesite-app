@@ -75,7 +75,7 @@ extension AppIntentsTests {
                 let posts = try await PostEntityQuery().entities(matching: "hello")
                 #expect(posts.map(\.slug) == ["hello"])
                 let images = try await ImageEntityQuery().entities(matching: "hero")
-                #expect(images.count == 1)
+                #expect(images.map(\.relativePath) == ["public/images/hero.jpg"])
             }
 
             // 4. Index into Spotlight (recording backend). 2 pages + 2 posts + 1 image = 5.
@@ -85,6 +85,7 @@ extension AppIntentsTests {
             #expect(first == .init(indexed: 5, removed: 0))
             #expect(await Set(backend.indexedPages.first?.map(\.route) ?? []) == ["/about", "/contact"])
             #expect(await Set(backend.indexedPosts.first?.map(\.slug) ?? []) == ["hello", "draft-news"])
+            #expect(await backend.indexedImages.first?.map(\.id) == ["\(site):image:public/images/hero.jpg"])
             #expect(await backend.deletedPosts.isEmpty)
 
             // 5. Mutate: remove the draft post, edit the about page. Re-index → correct diff.

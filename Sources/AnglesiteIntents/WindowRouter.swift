@@ -14,6 +14,7 @@ public final class WindowRouter {
 
     /// Pending page route per site, set alongside an open request and consumed once by the
     /// site's window. Keyed by siteID so one site's window can't pick up another's route.
+    /// Re-requesting a site overwrites any still-pending route (last request wins).
     private var pendingRoute: [String: String] = [:]
 
     public func requestOpen(siteID: String, route: String? = nil) {
