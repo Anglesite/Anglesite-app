@@ -64,6 +64,21 @@ extension AppIntentsTests {
 
         // MARK: - Read intents (graph-gathering helpers)
 
+        @Test("SearchContentIntent.results returns dialog parity + flattened typed results")
+        func searchResults() async {
+            let graph = SiteContentGraph()
+            await graph.load(
+                siteID: AppIntentsTests.aSite,
+                pages: [AppIntentsTests.gPage(route: "/about", title: "About")],
+                posts: [AppIntentsTests.gPost(slug: "about-us", title: "About Us")],
+                images: [])
+            let (dialog, items) = await SearchContentIntent.results(graph: graph, siteID: AppIntentsTests.aSite, query: "about")
+            #expect(dialog == "Found 1 page and 1 post matching \u{201C}about\u{201D}.")   // byte-identical to before
+            #expect(items.count == 2)
+            #expect(items.contains { $0.kind == .page && $0.locator == "/about" })
+            #expect(items.contains { $0.kind == .post && $0.locator == "blog/about-us" })
+        }
+
         @Test("SearchContentIntent gathers matches for the right site and query")
         func searchHelper() async {
             let graph = SiteContentGraph()
@@ -76,7 +91,7 @@ extension AppIntentsTests {
             // A different site's content must not leak into the result.
             await graph.load(siteID: AppIntentsTests.bSite, pages: [AppIntentsTests.gPage(site: AppIntentsTests.bSite, route: "/about")], posts: [], images: [])
 
-            let dialog = await SearchContentIntent.dialog(graph: graph, siteID: AppIntentsTests.aSite, query: "about")
+            let dialog = await SearchContentIntent.results(graph: graph, siteID: AppIntentsTests.aSite, query: "about").dialog
             #expect(dialog == "Found 1 page and 1 post matching “about”.")
         }
 

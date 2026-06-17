@@ -36,18 +36,22 @@ public struct SearchContentIntent: AppIntent {
         Summary("Search \(\.$site) for \(\.$query)")
     }
 
-    public func perform() async throws -> some IntentResult & ProvidesDialog {
-        let dialog = await Self.dialog(graph: ContentGraphOverride.scoped ?? graph, siteID: site.id, query: query)
-        return .result(dialog: IntentDialog(stringLiteral: dialog))
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<[ContentSearchResultEntity]> {
+        let (dialog, items) = await Self.results(graph: ContentGraphOverride.scoped ?? graph, siteID: site.id, query: query)
+        return .result(value: items, dialog: IntentDialog(stringLiteral: dialog))
     }
 
-    /// Gather matches from the graph and format the spoken result. Static + graph-injected so the
-    /// read+format wiring is unit-testable without the AppIntents runtime.
-    static func dialog(graph: SiteContentGraph, siteID: String, query: String) async -> String {
+    /// Gather matches once and build both the spoken dialog (unchanged wording) and the flattened
+    /// typed results. Static + graph-injected so it's unit-testable without the AppIntents runtime.
+    static func results(graph: SiteContentGraph, siteID: String, query: String) async -> (dialog: String, items: [ContentSearchResultEntity]) {
         let pages = await graph.searchPages(siteID: siteID, matching: query)
         let posts = await graph.searchPosts(siteID: siteID, matching: query)
         let images = await graph.searchImages(siteID: siteID, matching: query)
-        return ContentDialogs.search(query: query, pageCount: pages.count, postCount: posts.count, imageCount: images.count)
+        let dialog = ContentDialogs.search(query: query, pageCount: pages.count, postCount: posts.count, imageCount: images.count)
+        let items = pages.map { ContentSearchResultEntity(page: PageEntity($0)) }
+            + posts.map { ContentSearchResultEntity(post: PostEntity($0)) }
+            + images.map { ContentSearchResultEntity(image: ImageEntity($0)) }
+        return (dialog, items)
     }
 }
 
