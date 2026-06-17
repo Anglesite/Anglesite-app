@@ -130,6 +130,27 @@ struct DeployDrawerView: View {
                     }
                 }
             }
+            // VoiceOver live region: announce only the terminal transition (running → succeeded /
+            // failed), not every appended log line. A non-sighted user who has navigated away from
+            // the drawer hears the outcome; the streaming lines stay silent to keep speech usable.
+            .onChange(of: model.phase) { oldPhase, newPhase in
+                if let announcement = LiveRegionAnnouncer.deployAnnouncement(
+                    from: Self.activity(for: oldPhase), to: Self.activity(for: newPhase)) {
+                    AccessibilityNotification.Announcement(announcement).post()
+                }
+            }
+        }
+    }
+
+    /// Collapses the app-target `DeployModel.Phase` onto the announceable substrate the decider
+    /// understands. `idle` and `blocked` are both pre-output states → `.inactive`.
+    private static func activity(for phase: DeployModel.Phase) -> LiveRegionAnnouncer.DeployActivity {
+        switch phase {
+        case .running: return .running
+        case .succeeded(let url, _): return .succeeded(url: url.absoluteString)
+        case .failed(let reason, let exit):
+            return .failed(reason: exit.map { "\(reason) (exit \($0))" } ?? reason)
+        case .idle, .blocked: return .inactive
         }
     }
 

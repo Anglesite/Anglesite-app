@@ -118,6 +118,16 @@ struct ChatView: View {
                 // Stream characters extend the last message; re-anchor on each chunk.
                 proxy.scrollTo("__bottom__", anchor: .bottom)
             }
+            // VoiceOver live region: announce the *transitions* into and out of streaming, so a
+            // non-sighted user knows a response started/finished without watching tokens arrive.
+            // Keyed off `isStreaming` (not message content) so it fires twice per turn, never
+            // per-chunk — see `LiveRegionAnnouncer` for the anti-flooding rationale.
+            .onChange(of: model.isStreaming) { wasStreaming, isStreaming in
+                if let announcement = LiveRegionAnnouncer.chatStreamingAnnouncement(
+                    wasStreaming: wasStreaming, isStreaming: isStreaming) {
+                    AccessibilityNotification.Announcement(announcement).post()
+                }
+            }
         }
     }
 
