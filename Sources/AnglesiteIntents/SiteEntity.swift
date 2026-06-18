@@ -10,7 +10,7 @@ import Foundation
 /// the explicit override is omitted here (the metadata processor requires its removal).
 @AppEntity(schema: .wordProcessor.document)
 public struct SiteEntity: Sendable {
-    public var id: String
+    public let id: String
     @Property(title: "Name")
     public var name: String
     @Property(title: "Creation Date")
@@ -20,27 +20,34 @@ public struct SiteEntity: Sendable {
 
     /// The original display name used by `displayRepresentation` and `SiteEntityQuery`.
     public var displayName: String { name }
-    /// The directory on disk backing this site. Not exposed as a schema property —
-    /// it is app-internal state used by `displayRepresentation`. The default only
-    /// satisfies the macro-synthesised memberwise init; `init(_ site:)` (the sole
-    /// real construction path) always overwrites it, so the placeholder is unreachable.
-    public var directory: URL = URL(fileURLWithPath: "/")
+    // App-internal, not a schema property; nil only if AppIntents ever builds via the macro init.
+    public var directory: URL?
 
     public var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(name)", subtitle: "\(directory.path)")
+        DisplayRepresentation(title: "\(name)", subtitle: "\(directory?.path(percentEncoded: false) ?? "")")
     }
 
     public static let defaultQuery = SiteEntityQuery()
 
-    public init(_ site: SiteStore.Site) {
-        self.id = site.id
-        self.name = site.name
-        self.directory = site.path
+    public init(id: String, name: String, creationDate: Date?, modificationDate: Date?, directory: URL? = nil) {
+        self.id = id
+        self.name = name
+        self.creationDate = creationDate
+        self.modificationDate = modificationDate
+        self.directory = directory
+    }
 
+    public init(_ site: SiteStore.Site) {
+        // Directory mtime misses in-file edits; revisit with git timestamps after #68.
         let keys: Set<URLResourceKey> = [.creationDateKey, .contentModificationDateKey]
         let values = try? site.path.resourceValues(forKeys: keys)
-        self.creationDate = values?.creationDate
-        self.modificationDate = values?.contentModificationDate
+        self.init(
+            id: site.id,
+            name: site.name,
+            creationDate: values?.creationDate,
+            modificationDate: values?.contentModificationDate,
+            directory: site.path
+        )
     }
 }
 

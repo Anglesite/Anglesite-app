@@ -19,6 +19,20 @@ extension AppIntentsTests {
             #expect(results.map(\.id) == ["s1"])
         }
 
+        @Test("reconstruction init does not default missing directory to filesystem root")
+        func reconstructionInitKeepsMissingDirectoryNil() {
+            let entity = SiteEntity(
+                id: "s1",
+                name: "Portfolio",
+                creationDate: nil,
+                modificationDate: nil,
+                directory: nil
+            )
+
+            #expect(entity.directory == nil)
+            #expect(String(localized: entity.displayRepresentation.subtitle ?? "") == "")
+        }
+
         @Test("entities(for:) returns empty when id is unknown")
         func unknownIdReturnsEmpty() async throws {
             let store = try await TestStore.with([
