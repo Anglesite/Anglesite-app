@@ -1,5 +1,5 @@
 import Foundation
-#if canImport(FoundationModels)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 #endif
 
@@ -79,7 +79,7 @@ public struct FoundationModelsProbe: ReadinessProbe {
 /// Case names below must match the `FoundationModels` SDK; `@unknown default` absorbs drift.
 public enum LiveFoundationModelsAvailability {
     public static func current() -> FoundationModelsAvailability {
-        #if canImport(FoundationModels)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         switch SystemLanguageModel.default.availability {
         case .available:
             return .available
