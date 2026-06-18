@@ -46,8 +46,9 @@ DEFAULT_SRC=$(cd "$REPO_ROOT/.." && pwd)/anglesite
 SRC="${ANGLESITE_PLUGIN_SRC:-$DEFAULT_SRC}"
 [[ -d "$SRC" ]] || { echo "plugin source not found at $SRC (set ANGLESITE_PLUGIN_SRC)" >&2; exit 1; }
 [[ -f "$SRC/.claude-plugin/plugin.json" ]] || { echo "$SRC is not the Anglesite plugin (no .claude-plugin/plugin.json)" >&2; exit 1; }
-[[ -f "$SRC/template/package.json" && -f "$SRC/template/package-lock.json" ]] \
-    || { echo "template manifests missing under $SRC/template" >&2; exit 1; }
+TEMPLATE_DIR="$REPO_ROOT/Resources/Template"
+[[ -f "$TEMPLATE_DIR/package.json" ]] \
+    || { echo "template manifests missing under $TEMPLATE_DIR" >&2; exit 1; }
 
 command -v docker >/dev/null 2>&1 || { echo "docker not found on PATH" >&2; exit 1; }
 
@@ -68,11 +69,13 @@ rsync -a \
     --exclude='.claude/' --exclude='dist/' --exclude='build/' \
     --exclude='tests/' --exclude='test/' --exclude='docs/' \
     --exclude='*.log' --exclude='.DS_Store' \
+    --exclude='template/' \
     "$SRC/" "$CTX/plugin/"
 
 # Template: manifests only. We bake the template's dependency closure, not its source.
 mkdir -p "$CTX/template"
-cp "$SRC/template/package.json" "$SRC/template/package-lock.json" "$CTX/template/"
+cp "$TEMPLATE_DIR/package.json" "$CTX/template/"
+[[ -f "$TEMPLATE_DIR/package-lock.json" ]] && cp "$TEMPLATE_DIR/package-lock.json" "$CTX/template/"
 
 # ---- Build --------------------------------------------------------------------
 IMAGE_REF="${IMAGE_REPO}:${IMAGE_TAG}"

@@ -94,7 +94,9 @@ mkdir -p "$CACHE"
 # Install each project into a throwaway copy, sharing one --cache so it accumulates
 # every package tarball. --prefer-online to get fresh tarballs; --ignore-scripts so
 # no postinstall hooks run during the build.
-find "$PLUGIN_DIR" -name package.json -not -path '*/node_modules/*' -print0 | while IFS= read -r -d '' pkgjson; do
+{ find "$PLUGIN_DIR" -name package.json -not -path '*/node_modules/*' -print0 2>/dev/null; \
+  find "$REPO_ROOT/Resources/Template" -name package.json -not -path '*/node_modules/*' -print0 2>/dev/null; \
+} | while IFS= read -r -d '' pkgjson; do
     dir=$(dirname "$pkgjson")
     work="$TMP/work-$RANDOM"
     mkdir -p "$work"

@@ -50,6 +50,7 @@ rsync -a --delete \
     --exclude='tests/' \
     --exclude='test/' \
     --exclude='*.log' \
+    --exclude='template/' \
     "$SRC/" "$DEST/"
 
 # Install the plugin's runtime dependencies into the bundle. The rsync above

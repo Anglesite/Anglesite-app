@@ -41,13 +41,11 @@ final class HomepageWriterTests: XCTestCase {
     }
 
     // DRIFT GUARD: the real scaffolded index.astro must still contain the exact strings
-    // HomepageWriter replaces. If the plugin template changes them, fill() would silently
-    // no-op and ship template copy instead of the owner's content. Skips when the sibling
-    // plugin checkout isn't present.
+    // HomepageWriter replaces. If the template changes them, fill() would silently no-op
+    // and ship template copy instead of the owner's content.
     func testRealIndexAstroContainsAllSentinels() throws {
-        guard let url = Self.realIndexAstroURL(), let src = try? String(contentsOf: url, encoding: .utf8) else {
-            throw XCTSkip("plugin index.astro not found; set ANGLESITE_PLUGIN_PATH or check out ../anglesite")
-        }
+        let url = Self.realIndexAstroURL()
+        let src = try String(contentsOf: url, encoding: .utf8)
         XCTAssertTrue(src.contains(HomepageWriter.titleLine), "titleLine sentinel drifted from template")
         XCTAssertTrue(src.contains(HomepageWriter.h1Line),    "h1Line sentinel drifted from template")
         XCTAssertTrue(src.contains(HomepageWriter.descLine),  "descLine sentinel drifted from template")
@@ -62,17 +60,10 @@ final class HomepageWriterTests: XCTestCase {
         XCTAssertFalse(out.contains("<script>"))
     }
 
-    /// Resolve the real index.astro via env override or the sibling repo relative to this source file.
-    static func realIndexAstroURL() -> URL? {
-        let fm = FileManager.default
-        if let env = ProcessInfo.processInfo.environment["ANGLESITE_PLUGIN_PATH"] {
-            let u = URL(fileURLWithPath: env).appendingPathComponent("template/src/pages/index.astro")
-            if fm.fileExists(atPath: u.path) { return u }
-        }
+    /// Resolve the real index.astro from the in-repo template (Resources/Template/).
+    static func realIndexAstroURL() -> URL {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let sibling = repoRoot.deletingLastPathComponent()
-            .appendingPathComponent("anglesite/template/src/pages/index.astro")
-        return fm.fileExists(atPath: sibling.path) ? sibling : nil
+        return repoRoot.appendingPathComponent("Resources/Template/src/pages/index.astro")
     }
 }

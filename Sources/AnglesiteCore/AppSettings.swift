@@ -12,8 +12,9 @@ public final class AppSettings: @unchecked Sendable {
 
     /// UserDefaults keys. Public so the SwiftUI side can use them with `@AppStorage`.
     public enum Key {
-        public static let pluginPathOverride = "anglesite.pluginPathOverride"
-        public static let sitesRootOverride  = "anglesite.sitesRootOverride"
+        public static let pluginPathOverride   = "anglesite.pluginPathOverride"
+        public static let templatePathOverride = "anglesite.templatePathOverride"
+        public static let sitesRootOverride    = "anglesite.sitesRootOverride"
         public static let debugPaneEnabled   = "anglesite.debugPaneEnabled"
         public static let lastOpenedSiteID   = "anglesite.lastOpenedSiteID"
         public static let sitesRootBookmark  = "anglesite.sitesRootBookmark"
@@ -41,6 +42,22 @@ public final class AppSettings: @unchecked Sendable {
                 defaults.set(url.path, forKey: Key.pluginPathOverride)
             } else {
                 defaults.removeObject(forKey: Key.pluginPathOverride)
+            }
+        }
+    }
+
+    /// Optional override for the bundled website template path. Lets template authors iterate
+    /// on `Resources/Template/` content without rebuilding the app.
+    public var templatePathOverride: URL? {
+        get {
+            guard let path = defaults.string(forKey: Key.templatePathOverride), !path.isEmpty else { return nil }
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        set {
+            if let url = newValue {
+                defaults.set(url.path, forKey: Key.templatePathOverride)
+            } else {
+                defaults.removeObject(forKey: Key.templatePathOverride)
             }
         }
     }
