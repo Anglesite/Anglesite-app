@@ -24,6 +24,16 @@ public final class NewSiteWizardModel {
 
     public var slugPreview: String { SiteSlug.derive(from: draft.name) }
 
+    /// Non-fatal build warnings (e.g. a failed install), surfaced so a failure isn't hidden behind a dead-end preview (#229).
+    public var warnings: [String] {
+        progress.compactMap { if case .warning(_, let message) = $0 { return message } else { return nil } }
+    }
+
+    public var hasWarnings: Bool { !warnings.isEmpty }
+
+    /// Site registered with no warnings — only then may the wizard open it immediately (else it stays put so warnings are read) (#229).
+    public var didCompleteCleanly: Bool { completedSiteID != nil && !hasWarnings }
+
     public var detailsError: String? {
         let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         if name.isEmpty { return nil }              // empty is "incomplete", not an error to show

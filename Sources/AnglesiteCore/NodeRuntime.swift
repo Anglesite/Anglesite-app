@@ -20,4 +20,22 @@ public enum NodeRuntime {
             .appendingPathComponent("node")
         return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil
     }
+
+    /// `base` with `directory` prepended to `PATH` (deduped) so lifecycle scripts that invoke `node` by name resolve the bundled runtime instead of exiting 127 (#229).
+    public static func environment(_ base: [String: String], prependingPATH directory: String) -> [String: String] {
+        var env = base
+        let existing = (env["PATH"] ?? "")
+            .split(separator: ":", omittingEmptySubsequences: true)
+            .map(String.init)
+            .filter { $0 != directory }
+        env["PATH"] = ([directory] + existing).joined(separator: ":")
+        return env
+    }
+
+    /// Process environment with the bundled Node's bin dir on `PATH`; `nil` when Node isn't bundled (e.g. `swift test`), so callers inherit the parent env unchanged.
+    public static var environmentWithNodeOnPath: [String: String]? {
+        guard let node = bundledExecutableURL else { return nil }
+        return environment(ProcessInfo.processInfo.environment,
+                           prependingPATH: node.deletingLastPathComponent().path)
+    }
 }

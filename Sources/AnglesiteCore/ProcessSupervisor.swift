@@ -26,6 +26,9 @@ public actor ProcessSupervisor {
 
     private let backend: SupervisorBackend
 
+    /// Environment for spawns that don't pass one — puts the bundled Node on `PATH` so node-by-name lifecycle scripts don't exit 127 (#229); `nil` when Node isn't bundled. Injectable for tests.
+    private let defaultEnvironment: @Sendable () -> [String: String]?
+
     /// Source-compat re-exports. These used to be nested types; they now live at the protocol layer
     /// (so the backend can speak them too), re-exposed here so existing call sites such as
     /// `ProcessSupervisor.RestartPolicy.onCrash(...)` and `ProcessSupervisor.ExitReason` compile
@@ -46,11 +49,14 @@ public actor ProcessSupervisor {
     /// separate process can't inherit the app's scoped grant).
     public init() {
         self.backend = InProcessBackend()
+        self.defaultEnvironment = { NodeRuntime.environmentWithNodeOnPath }
     }
 
-    /// Inject a backend explicitly (tests, future MAS wiring).
-    public init(backend: SupervisorBackend) {
+    /// Inject a backend explicitly (tests, future MAS wiring); `defaultEnvironment` applies to spawns that don't pass one.
+    public init(backend: SupervisorBackend,
+                defaultEnvironment: @escaping @Sendable () -> [String: String]? = { NodeRuntime.environmentWithNodeOnPath }) {
         self.backend = backend
+        self.defaultEnvironment = defaultEnvironment
     }
 
     // MARK: One-shot run
@@ -85,7 +91,7 @@ public actor ProcessSupervisor {
         let spec = SpawnSpec(
             executable: executable,
             arguments: arguments,
-            environment: environment,
+            environment: environment ?? defaultEnvironment(),
             workingDirectory: currentDirectoryURL,
             logSource: "run"
         )
@@ -135,7 +141,7 @@ public actor ProcessSupervisor {
         let spec = SpawnSpec(
             executable: executable,
             arguments: arguments,
-            environment: environment,
+            environment: environment ?? defaultEnvironment(),
             workingDirectory: currentDirectoryURL,
             stdinPipe: attachStdin,
             logSource: source

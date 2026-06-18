@@ -53,4 +53,31 @@ struct ProcessSupervisorTests {
         )
         #expect(result.stdout == "phase-1")
     }
+
+    @Test("Run injects the default environment when none is passed")
+    func runInjectsDefaultEnvironment() async throws {
+        let supervisor = ProcessSupervisor(
+            backend: InProcessBackend(),
+            defaultEnvironment: { ["ANGLESITE_DEFAULT": "from-default", "PATH": "/usr/bin:/bin"] }
+        )
+        let result = try await supervisor.run(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf %s \"$ANGLESITE_DEFAULT\""]
+        )
+        #expect(result.stdout == "from-default")
+    }
+
+    @Test("Explicit environment overrides the default")
+    func explicitEnvironmentOverridesDefault() async throws {
+        let supervisor = ProcessSupervisor(
+            backend: InProcessBackend(),
+            defaultEnvironment: { ["ANGLESITE_DEFAULT": "from-default"] }
+        )
+        let result = try await supervisor.run(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf %s \"${ANGLESITE_DEFAULT:-none}\""],
+            environment: ["FOO": "bar"]
+        )
+        #expect(result.stdout == "none")
+    }
 }
