@@ -4,23 +4,50 @@ import Foundation
 
 /// An Anglesite site, addressable by Siri/Shortcuts. Backed live by `SiteStore` — no
 /// cache, so the entity never goes stale relative to the registry.
-public struct SiteEntity: AppEntity, Identifiable, Sendable {
+///
+/// Conforms to the `.wordProcessor.document` AppSchema so Siri/Spotlight treat each site
+/// as a document container. The schema macro synthesises `typeDisplayRepresentation`, so
+/// the explicit override is omitted here (the metadata processor requires its removal).
+@AppEntity(schema: .wordProcessor.document)
+public struct SiteEntity: Sendable {
     public let id: String
-    public let displayName: String
-    public let directory: URL
+    @Property(title: "Name")
+    public var name: String
+    @Property(title: "Creation Date")
+    public var creationDate: Date?
+    @Property(title: "Modification Date")
+    public var modificationDate: Date?
 
-    public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Site" }
+    /// The original display name used by `displayRepresentation` and `SiteEntityQuery`.
+    public var displayName: String { name }
+    // App-internal, not a schema property; nil only if AppIntents ever builds via the macro init.
+    public var directory: URL?
 
     public var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(displayName)", subtitle: "\(directory.path)")
+        DisplayRepresentation(title: "\(name)", subtitle: "\(directory?.path(percentEncoded: false) ?? "")")
     }
 
     public static let defaultQuery = SiteEntityQuery()
 
+    public init(id: String, name: String, creationDate: Date?, modificationDate: Date?, directory: URL? = nil) {
+        self.id = id
+        self.name = name
+        self.creationDate = creationDate
+        self.modificationDate = modificationDate
+        self.directory = directory
+    }
+
     public init(_ site: SiteStore.Site) {
-        self.id = site.id
-        self.displayName = site.name
-        self.directory = site.path
+        // Directory mtime misses in-file edits; revisit with git timestamps after #68.
+        let keys: Set<URLResourceKey> = [.creationDateKey, .contentModificationDateKey]
+        let values = try? site.path.resourceValues(forKeys: keys)
+        self.init(
+            id: site.id,
+            name: site.name,
+            creationDate: values?.creationDate,
+            modificationDate: values?.contentModificationDate,
+            directory: site.path
+        )
     }
 }
 

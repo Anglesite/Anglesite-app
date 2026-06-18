@@ -147,3 +147,74 @@ jobs:
 
       - name: Check project sync
         run: scripts/check-xcodeproj-sync.sh
+
+  appintents-schema:
+    name: AppIntents schema conformance (metadata processor)
+    # macOS 27 / Xcode 27 runner: the AppSchema.WordProcessor surface and its
+    # validator are macOS-27 symbols. macos-15 (Xcode 16/26) cannot run this.
+    runs-on: macos-26
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    # The AppIntents metadata processor (`appintentsmetadataprocessor --validate-assistant-intents`)
+    # only runs during an xcodebuild *build* phase — never `swift build` / `swift test`. So an
+    # AppSchema conformance regression (e.g. SiteEntity dropping a required `.wordProcessor.document`
+    # property) passes every SwiftPM lane above and would surface only on a contributor's local
+    # `xcodebuild`. This lane builds just the `AnglesiteIntents` target — which runs the processor
+    # with `--validate-assistant-intents` — to gate that. Validation is build-time, so it needs NO
+    # app launch (sidestepping the LaunchServices block on running a macOS-27 .app on an older host),
+    # no vendored Node, no sibling plugin, and no signing — the library target pulls none of those.
+    env:
+      # Keep in sync with the xcodeproj-sync lane above (and MIN_XCODEGEN in check-xcodeproj-sync.sh).
+      XCODEGEN_VERSION: 2.45.4
+      XCODEGEN_SHA256: 090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Select latest available Xcode
+        run: |
+          set -euo pipefail
+          ls -d /Applications/Xcode*.app 2>/dev/null | sort -V
+          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          echo "Selecting: $LATEST"
+          sudo xcode-select -s "$LATEST"
+
+      - name: Detect Xcode 27 (the schema validator is a macOS-27 facility)
+        id: xcode
+        # The validation needs the macOS 27 SDK. GitHub-hosted images don't ship Xcode 27 yet
+        # (macos-26 tops out at 26.5 as of 2026-06), so this lane is ARMED but skips gracefully
+        # — green, with a ::warning:: — until a runner provides Xcode 27 (a future hosted image,
+        # or a self-hosted macOS-27 runner). It then auto-activates and enforces, no edit needed.
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          MAJOR=$(xcodebuild -version | sed -n 's/^Xcode \([0-9]*\).*/\1/p')
+          if [ "${MAJOR:-0}" -ge 27 ]; then
+            echo "has27=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has27=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=AppIntents schema validation skipped::Needs Xcode 27+, runner has ${MAJOR:-unknown}. Lane auto-activates once a runner provides Xcode 27."
+            echo "SKIPPED: AppIntents schema validation requires Xcode 27 (runner has Xcode ${MAJOR:-unknown}); skipping the build steps below."
+          fi
+
+      - name: Install XcodeGen (pinned)
+        if: steps.xcode.outputs.has27 == 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip" -o /tmp/xcodegen.zip
+          echo "${XCODEGEN_SHA256}  /tmp/xcodegen.zip" | shasum -a 256 --check
+          unzip -q /tmp/xcodegen.zip -d /tmp/xcodegen-dist
+          test -x /tmp/xcodegen-dist/xcodegen/bin/xcodegen \
+            || { echo "error: xcodegen binary not found at expected path after unzip — check zip layout" >&2; exit 1; }
+          echo "/tmp/xcodegen-dist/xcodegen/bin" >> "$GITHUB_PATH"
+
+      - name: Generate Xcode project
+        if: steps.xcode.outputs.has27 == 'true'
+        run: xcodegen generate
+
+      - name: Validate AppIntents schema conformance
+        if: steps.xcode.outputs.has27 == 'true'
+        # Builds only the library target; ExtractAppIntentsMetadata runs the validator. A missing
+        # required schema member (verified locally) fails the build with a "Missing required
+        # property … from AppSchemaEntity …" halting error.
+        run: xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteIntents -configuration Debug build
