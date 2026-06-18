@@ -9,10 +9,22 @@ private actor HangingTransport: MCPTransport {
     private(set) var sentMethods: [String] = []
     private var continuation: AsyncStream<JSONValue>.Continuation?
     private let stream: AsyncStream<JSONValue>
+
+    /// Fires the first time a `tools/call` message passes through `send(_:)`.
+    /// Awaiting one element from this stream guarantees the `callTool` continuation is already
+    /// registered in `MCPClient.pending` (because `pending[id] = cont` is set synchronously
+    /// before the detached send task runs).
+    let sentSignal: AsyncStream<Void>
+    private let sentSignalContinuation: AsyncStream<Void>.Continuation
+
     init() {
-        var cont: AsyncStream<JSONValue>.Continuation!
-        stream = AsyncStream { cont = $0 }
-        continuation = cont
+        var inboundCont: AsyncStream<JSONValue>.Continuation!
+        stream = AsyncStream { inboundCont = $0 }
+        continuation = inboundCont
+
+        var signalCont: AsyncStream<Void>.Continuation!
+        sentSignal = AsyncStream { signalCont = $0 }
+        sentSignalContinuation = signalCont
     }
     func sentMethodsSnapshot() -> [String] { sentMethods }
     func open() async throws {}
@@ -29,6 +41,9 @@ private actor HangingTransport: MCPTransport {
                 "id": .int(id),
                 "result": .object(["protocolVersion": .string("2024-11-05"), "capabilities": .object([:])]),
             ]))
+        } else if method == "tools/call" {
+            // Signal that the send has fired — the pending continuation is already registered.
+            sentSignalContinuation.yield(())
         }
         // tools/call: deliberately no response.
     }
@@ -45,10 +60,13 @@ struct MCPClientCancellationTests {
 
     @Test("a call whose task is cancelled mid-flight throws CancellationError, not timeout")
     func inFlightCancel() async throws {
-        let (client, _) = try await makeInitializedClient()
+        let (client, transport) = try await makeInitializedClient()
         let task = Task { try await client.callTool(name: "echo", arguments: .object([:])) }
-        // Give the call time to register its pending continuation, then cancel.
-        try await Task.sleep(nanoseconds: 100_000_000)
+        // Wait until `tools/call` has been sent — at that point the pending continuation is
+        // provably registered in MCPClient (pending[id] = cont runs before the detached send).
+        // This is deterministic: no fixed sleep that can race on a loaded CI runner.
+        var sentIter = transport.sentSignal.makeAsyncIterator()
+        _ = await sentIter.next()
         task.cancel()
         await #expect(throws: CancellationError.self) { _ = try await task.value }
     }
