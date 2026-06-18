@@ -48,10 +48,9 @@ public struct SiteOperations: Sendable {
     }
 
     public func audit(site: SiteStore.Site, onProgress: ProgressHandler? = nil) async -> AuditCommand.Result {
-        _ = onProgress   // wired to AuditCommand in Task 8
         do {
             return try await SiteAccess.withScopedAccess(to: site, in: store) { url in
-                await factory.audit().audit(siteID: site.id, siteDirectory: url)
+                await factory.audit().audit(siteID: site.id, siteDirectory: url, onProgress: onProgress)
             }
         } catch let SiteAccess.AccessError.noGrant(message) {
             return .failed(reason: message, exitCode: nil, logTail: [])
