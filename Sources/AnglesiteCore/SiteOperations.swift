@@ -35,10 +35,9 @@ public struct SiteOperations: Sendable {
     }
 
     public func backup(site: SiteStore.Site, onProgress: ProgressHandler? = nil) async -> BackupCommand.Result {
-        _ = onProgress   // wired to BackupCommand in Task 7
         do {
             return try await SiteAccess.withScopedAccess(to: site, in: store) { url in
-                await factory.backup().backup(siteID: site.id, siteDirectory: url)
+                await factory.backup().backup(siteID: site.id, siteDirectory: url, onProgress: onProgress)
             }
         } catch let SiteAccess.AccessError.noGrant(message) {
             return .failed(reason: message, exitCode: nil)

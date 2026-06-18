@@ -56,7 +56,7 @@ public actor BackupCommand {
         self.clock = clock
     }
 
-    public func backup(siteID: String, siteDirectory: URL) async -> Result {
+    public func backup(siteID: String, siteDirectory: URL, onProgress: ProgressHandler? = nil) async -> Result {
         let source = "backup:\(siteID)"
 
         // 0. Repository — refuse outside a git work tree with a clear, actionable message.
@@ -138,10 +138,12 @@ public actor BackupCommand {
         // A CancellableIntent (Siri/Shortcuts) may cancel between steps; bail before issuing the
         // next git mutation. The streamed step itself SIGTERMs on cancel (see defaultStreamer).
         if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
+        onProgress?(.backupStaging)
         if let failure = await streamGit(["add", "-A"], in: siteDirectory, source: source, label: "git add") {
             return failure
         }
         if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
+        onProgress?(.backupCommitting)
         let commitMessage = "Backup \(Self.iso8601Formatter.string(from: clock()))"
         if let failure = await streamGit(["commit", "-m", commitMessage], in: siteDirectory, source: source, label: "git commit") {
             return failure
@@ -157,6 +159,7 @@ public actor BackupCommand {
             return .failed(reason: "couldn't read commit SHA: \(error)", exitCode: nil)
         }
         if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
+        onProgress?(.backupPushing)
         if let failure = await streamGit(["push", "origin", branch], in: siteDirectory, source: source, label: "git push") {
             return failure
         }
