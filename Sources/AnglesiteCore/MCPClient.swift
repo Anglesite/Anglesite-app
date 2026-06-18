@@ -250,6 +250,7 @@ public actor MCPClient {
 
     public func callTool(name: String, arguments: JSONValue = .object([:])) async throws -> ToolCallResult {
         guard initialized else { throw MCPError.notInitialized }
+        try Task.checkCancellation()   // pre-call guard: never send for an already-cancelled task
         let params: JSONValue = .object([
             "name": .string(name),
             "arguments": arguments,
@@ -305,22 +306,29 @@ public actor MCPClient {
         }
         defer { timeoutTask.cancel() }
 
-        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<JSONValue, Error>) in
-            // This closure runs synchronously on the actor, so the continuation is registered
-            // *before* the send — a response (which the HTTP transport produces during `send`)
-            // can never be missed, and there is no registration race.
-            pending[id] = cont
-            // Send on a detached task so a synchronous transport failure (e.g. connection refused)
-            // resolves THIS continuation via `failPending` instead of leaking it. Every exit path —
-            // response (`resolvePending` from the reader), timeout, or send error — resumes the
-            // continuation exactly once (`pending` removal guarantees single-resume).
-            Task { [weak self] in
-                do {
-                    try await self?.send(message)
-                } catch {
-                    await self?.failPending(id: id, error: error)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<JSONValue, Error>) in
+                // This closure runs synchronously on the actor, so the continuation is registered
+                // *before* the send — a response (which the HTTP transport produces during `send`)
+                // can never be missed, and there is no registration race.
+                pending[id] = cont
+                // Send on a detached task so a synchronous transport failure (e.g. connection refused)
+                // resolves THIS continuation via `failPending` instead of leaking it. Every exit path —
+                // response (`resolvePending` from the reader), timeout, cancellation, or send error —
+                // resumes the continuation exactly once (`pending` removal guarantees single-resume).
+                Task { [weak self] in
+                    do {
+                        try await self?.send(message)
+                    } catch {
+                        await self?.failPending(id: id, error: error)
+                    }
                 }
             }
+        } onCancel: {
+            // The awaiting task was cancelled. Resolve the pending continuation with Swift's
+            // CancellationError (decision (b) — no MCPError.cancelled). If the response already
+            // arrived, `failPending` finds no entry and no-ops, preserving single-resume.
+            Task { [weak self] in await self?.failPending(id: id, error: CancellationError()) }
         }
     }
 
