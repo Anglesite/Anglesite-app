@@ -135,11 +135,13 @@ public actor BackupCommand {
         }
 
         // 4. add → 5. commit → 6. read HEAD SHA → 7. push.
-        // Each streamed action goes through the streamer so the drawer can render
-        // live output (auth prompts on push are the obvious case).
+        // A CancellableIntent (Siri/Shortcuts) may cancel between steps; bail before issuing the
+        // next git mutation. The streamed step itself SIGTERMs on cancel (see defaultStreamer).
+        if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
         if let failure = await streamGit(["add", "-A"], in: siteDirectory, source: source, label: "git add") {
             return failure
         }
+        if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
         let commitMessage = "Backup \(Self.iso8601Formatter.string(from: clock()))"
         if let failure = await streamGit(["commit", "-m", commitMessage], in: siteDirectory, source: source, label: "git commit") {
             return failure
@@ -154,6 +156,7 @@ public actor BackupCommand {
         } catch {
             return .failed(reason: "couldn't read commit SHA: \(error)", exitCode: nil)
         }
+        if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
         if let failure = await streamGit(["push", "origin", branch], in: siteDirectory, source: source, label: "git push") {
             return failure
         }
@@ -282,7 +285,11 @@ public actor BackupCommand {
             arguments: ["git"] + arguments,
             currentDirectoryURL: siteDirectory
         )
-        let reason = await ProcessSupervisor.shared.waitForExit(handle)
+        let reason = await withTaskCancellationHandler {
+            await ProcessSupervisor.shared.waitForExit(handle)
+        } onCancel: {
+            Task { await ProcessSupervisor.shared.terminate(handle) }
+        }
 
         // `waitForExit` only resumes once the supervisor's pipe-drain Tasks have finished, so
         // every stderr line is already in LogCenter; cancelling ends the stream and the await
