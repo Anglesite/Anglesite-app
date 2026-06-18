@@ -164,6 +164,12 @@ public actor ProcessSupervisor {
     /// (either the process exited and isn't being restarted, or `terminate(_:)` ran). If the
     /// awaiting task is cancelled, returns `.terminated` immediately — letting task groups
     /// unwind without waiting for the real process exit.
+    ///
+    /// Contract: this **returns** on cancellation (it is non-`throws`), it does not raise
+    /// `CancellationError`. Callers that race it inside a task group — e.g. `E2EServer.awaitReady`,
+    /// which parks a death-waiter against a readiness poll — rely on a cancelled wait unwinding as a
+    /// plain return so it can't surface as a spurious error. Preserve that if this ever gains
+    /// cooperative cancellation.
     public func waitForExit(_ handle: Handle) async -> ExitReason {
         await backend.waitForExit(backendHandle(for: handle))
     }
