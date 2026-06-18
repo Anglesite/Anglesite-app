@@ -21,7 +21,9 @@ public struct SiteEntity: Sendable {
     /// The original display name used by `displayRepresentation` and `SiteEntityQuery`.
     public var displayName: String { name }
     /// The directory on disk backing this site. Not exposed as a schema property —
-    /// it is app-internal state used by `displayRepresentation`.
+    /// it is app-internal state used by `displayRepresentation`. The default only
+    /// satisfies the macro-synthesised memberwise init; `init(_ site:)` (the sole
+    /// real construction path) always overwrites it, so the placeholder is unreachable.
     public var directory: URL = URL(fileURLWithPath: "/")
 
     public var displayRepresentation: DisplayRepresentation {

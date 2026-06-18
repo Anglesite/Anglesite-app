@@ -257,3 +257,27 @@ optional").
   is worth adding, or omit if the schema accepts a missing optional template.
 - Prior Note A in the table above was incorrect: it inferred `target` = page entity. The
   correct mapping is `target` = document entity.
+
+## Final outcome (what shipped)
+
+After the discovery probes, the wide slice collapsed to a single honest adoption, applying
+the design's own **no-force-fit** rule against the verified contract:
+
+| Target | Decision | Reason |
+|---|---|---|
+| `SiteEntity` -> `.wordProcessor.document` | **ADOPTED** | Clean fit -- a site genuinely has `name`/`creationDate`/`modificationDate`. Validated by `appintentsmetadataprocessor --validate-assistant-intents` on both schemes. |
+| `AddPageIntent` -> `.wordProcessor.createPage` | **deferred** | Schema requires a `template` param (a `.wordProcessor.template` entity). Anglesite has **no page-template concept** -- `ContentOperations.createPage(siteID:name:route:)` takes no template, and site-level themes (`ThemeCatalog`) are not per-page templates. Adopting would mean a cosmetic entity + an ignored param. |
+| `TemplateEntity` -> `.wordProcessor.template` | **deferred** | Only consumer would be `createPage`'s param; no independent "list/choose template" workflow exists. Building it alone is YAGNI. |
+| `PageEntity` -> `.wordProcessor.page` | **deferred** | Requires `pageIndex: Int` -- Anglesite pages are route-addressed, have no natural integer index. A synthetic value would be dishonest. |
+| `PreviewSiteIntent` -> `.wordProcessor.openPage` | **deferred** | Requires `OpenIntent` conformance that defaults to opening the app; Anglesite preview is an in-pane WKWebView, a different model. |
+| `EditContentIntent` -> `.addImageToPage`, `AddPostIntent` -> `.createPage` | **deferred** | `addImageToPage` needs an asset+target shape an instruction-based edit doesn't fit; `AddPostIntent` shares `createPage`'s template problem. |
+| `DeploySiteIntent` / `BackupSiteIntent` / `AuditSiteIntent` | **stay plain** | No domain analog (expected). Still reachable via Siri / Shortcuts / Spotlight. |
+
+**Conclusion for #235:** the `AppSchema.WordProcessor` domain is modelled on Pages-style
+layout documents (indexed pages inside a document, per-page templates), which only
+partially fits a static-site generator. The genuinely honest mapping is **the site as a
+`document`** -- adopted. The page/template/openPage members would require synthesizing data
+Anglesite's domain doesn't have, so they are deliberately left plain per the no-force-fit
+rule. This is the SDK-grounded answer to #235, superseding its original
+imperative-MCP-registration premise (shown impossible in the
+[spike](2026-06-18-assistant-schema-exposure-spike.md)).
