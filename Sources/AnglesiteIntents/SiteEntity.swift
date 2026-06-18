@@ -4,23 +4,41 @@ import Foundation
 
 /// An Anglesite site, addressable by Siri/Shortcuts. Backed live by `SiteStore` — no
 /// cache, so the entity never goes stale relative to the registry.
-public struct SiteEntity: AppEntity, Identifiable, Sendable {
-    public let id: String
-    public let displayName: String
-    public let directory: URL
+///
+/// Conforms to the `.wordProcessor.document` AppSchema so Siri/Spotlight treat each site
+/// as a document container. The schema macro synthesises `typeDisplayRepresentation`, so
+/// the explicit override is omitted here (the metadata processor requires its removal).
+@AppEntity(schema: .wordProcessor.document)
+public struct SiteEntity: Sendable {
+    public var id: String
+    @Property(title: "Name")
+    public var name: String
+    @Property(title: "Creation Date")
+    public var creationDate: Date?
+    @Property(title: "Modification Date")
+    public var modificationDate: Date?
 
-    public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Site" }
+    /// The original display name used by `displayRepresentation` and `SiteEntityQuery`.
+    public var displayName: String { name }
+    /// The directory on disk backing this site. Not exposed as a schema property —
+    /// it is app-internal state used by `displayRepresentation`.
+    public var directory: URL = URL(fileURLWithPath: "/")
 
     public var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(displayName)", subtitle: "\(directory.path)")
+        DisplayRepresentation(title: "\(name)", subtitle: "\(directory.path)")
     }
 
     public static let defaultQuery = SiteEntityQuery()
 
     public init(_ site: SiteStore.Site) {
         self.id = site.id
-        self.displayName = site.name
+        self.name = site.name
         self.directory = site.path
+
+        let keys: Set<URLResourceKey> = [.creationDateKey, .contentModificationDateKey]
+        let values = try? site.path.resourceValues(forKeys: keys)
+        self.creationDate = values?.creationDate
+        self.modificationDate = values?.contentModificationDate
     }
 }
 
