@@ -178,6 +178,9 @@ public struct AddPageIntent: AppIntent {
             result = await svc.createPage(siteID: site.id, name: name, route: route)
             #endif
         }
+        if Task.isCancelled {
+            return .result(value: nil, dialog: IntentDialog(stringLiteral: ContentDialogs.canceled(kind: .page, siteName: site.displayName)))
+        }
         return .result(
             value: Self.createdPage(result, siteID: site.id, name: name),
             dialog: IntentDialog(stringLiteral: ContentDialogs.created(result, kind: .page, siteName: site.displayName))
@@ -236,6 +239,9 @@ public struct AddPostIntent: AppIntent {
             result = await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug)
             #endif
         }
+        if Task.isCancelled {
+            return .result(value: nil, dialog: IntentDialog(stringLiteral: ContentDialogs.canceled(kind: .post, siteName: site.displayName)))
+        }
         return .result(
             value: Self.createdPost(result, siteID: site.id, title: title2, collection: collection),
             dialog: IntentDialog(stringLiteral: ContentDialogs.created(result, kind: .post, siteName: site.displayName))
@@ -289,6 +295,11 @@ public enum ContentDialogs {
     public static func preview(siteName: String, pageName: String? = nil) -> String {
         if let pageName { return "Opening the \(pageName) page of \(siteName)." }
         return "Opening \(siteName)."
+    }
+
+    /// Friendly dialog for a Siri/Shortcuts cancellation of a create operation.
+    public static func canceled(kind: CreateKind, siteName: String) -> String {
+        "Canceled adding the \(kind == .page ? "page" : "post") to \(siteName)."
     }
 
     public static func created(_ result: ContentCreateResult, kind: CreateKind, siteName: String) -> String {

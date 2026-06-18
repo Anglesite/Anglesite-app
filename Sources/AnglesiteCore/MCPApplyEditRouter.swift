@@ -83,6 +83,8 @@ public struct MCPApplyEditRouter: EditRouter {
                 Task { await postProcess(reply, message) }
             }
             return reply
+        } catch is CancellationError {
+            return EditReply(id: message.id, status: .failed, message: "canceled")
         } catch {
             return EditReply(id: message.id, status: .failed, message: "\(error)")
         }
