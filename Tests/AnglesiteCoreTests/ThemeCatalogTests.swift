@@ -62,12 +62,10 @@ final class ThemeCatalogTests: XCTestCase {
         XCTAssertEqual(catalog.defaultThemeID(for: .organization), "community")
     }
 
-    // DRIFT GUARD: parse the REAL bundled plugin themes.ts. Skips when the sibling
-    // plugin checkout isn't present (e.g. CI without it / pure `swift test`).
+    // DRIFT GUARD: parse the REAL bundled themes.ts from the in-repo template.
     func testRealThemesFileParsesToEightCompleteThemes() throws {
-        guard let url = Self.realThemesURL(), let ts = try? String(contentsOf: url, encoding: .utf8) else {
-            throw XCTSkip("plugin themes.ts not found; set ANGLESITE_PLUGIN_PATH or check out ../anglesite")
-        }
+        let url = Self.realThemesURL()
+        let ts = try String(contentsOf: url, encoding: .utf8)
         let themes = try ThemeCatalog.parse(themesTS: ts)
         XCTAssertEqual(themes.count, 8, "expected 8 built-in themes")
         for t in themes {
@@ -81,19 +79,10 @@ final class ThemeCatalogTests: XCTestCase {
         }
     }
 
-    /// Resolve the real themes.ts via env override or the sibling repo relative to this source file.
-    static func realThemesURL() -> URL? {
-        let fm = FileManager.default
-        if let env = ProcessInfo.processInfo.environment["ANGLESITE_PLUGIN_PATH"] {
-            let u = URL(fileURLWithPath: env)
-                .appendingPathComponent("template/scripts/themes.ts")
-            if fm.fileExists(atPath: u.path) { return u }
-        }
-        // <repo>/Tests/AnglesiteCoreTests/ThemeCatalogTests.swift -> repo root is 3 up.
+    /// Resolve the real themes.ts from the in-repo template (Resources/Template/).
+    static func realThemesURL() -> URL {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let sibling = repoRoot.deletingLastPathComponent()
-            .appendingPathComponent("anglesite/template/scripts/themes.ts")
-        return fm.fileExists(atPath: sibling.path) ? sibling : nil
+        return repoRoot.appendingPathComponent("Resources/Template/scripts/themes.ts")
     }
 }

@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 #
 # Creates a smoke-test Anglesite site at ~/Sites/anglesite-smoke/, populated
-# from the bundled plugin template with `node_modules` installed.
+# from the in-repo template (Resources/Template/) with `node_modules` installed.
 #
 # Use this fixture to manually verify the dev-server lifecycle end-to-end:
 # PreviewModel → AstroDevServer → ProcessSupervisor → window-close teardown.
 # The template alone (without node_modules) leaves the preview in `.failed`
 # and never exercises the subprocess code path.
 #
-# Idempotent: re-running mirrors any template changes (the source of truth
-# lives in the sibling plugin repo) and runs `npm install` incrementally.
-# Respects $ANGLESITE_PLUGIN_SRC the same way scripts/copy-plugin.sh does.
+# Idempotent: re-running mirrors any template changes and runs `npm install`
+# incrementally.
 
 set -euo pipefail
 
@@ -28,14 +27,12 @@ done
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
-PLUGIN_SRC="${ANGLESITE_PLUGIN_SRC:-$REPO_ROOT/../anglesite}"
-TEMPLATE_SRC="$PLUGIN_SRC/template"
+TEMPLATE_SRC="$REPO_ROOT/Resources/Template"
 FIXTURE_DIR="$HOME/Sites/anglesite-smoke"
 
 if [[ ! -d "$TEMPLATE_SRC" ]]; then
     echo "error: template not found at $TEMPLATE_SRC" >&2
-    echo "       set ANGLESITE_PLUGIN_SRC to the plugin checkout root, or" >&2
-    echo "       clone Anglesite/anglesite alongside this repo." >&2
+    echo "       Resources/Template/ should be committed to the app repo." >&2
     exit 1
 fi
 

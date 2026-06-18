@@ -44,7 +44,7 @@ final class SiteScaffolderTests: XCTestCase {
         let calls = CallRecorder()
         let scaffolder = SiteScaffolder(
             sitesRoot: root,
-            pluginURL: URL(fileURLWithPath: "/plugin"),
+            templateURL: URL(fileURLWithPath: "/template"),
             catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(calls: calls),
             register: { url in SiteStore.Site(id: url.path, name: url.lastPathComponent, path: url, isValid: true, missingSentinels: []) }
@@ -67,7 +67,7 @@ final class SiteScaffolderTests: XCTestCase {
     func testScaffoldFailureIsFatal() async throws {
         let root = tmpDir()
         let scaffolder = SiteScaffolder(
-            sitesRoot: root, pluginURL: URL(fileURLWithPath: "/plugin"), catalog: ThemeCatalog(themes: [theme]),
+            sitesRoot: root, templateURL: URL(fileURLWithPath: "/template"), catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(scaffoldExit: 1, calls: CallRecorder()),
             register: { _ in XCTFail("must not register on scaffold failure"); fatalError() }
         )
@@ -81,7 +81,7 @@ final class SiteScaffolderTests: XCTestCase {
         let root = tmpDir()
         let registered = OSAllocatedUnfairLock<Bool>(initialState: false)
         let scaffolder = SiteScaffolder(
-            sitesRoot: root, pluginURL: URL(fileURLWithPath: "/plugin"), catalog: ThemeCatalog(themes: [theme]),
+            sitesRoot: root, templateURL: URL(fileURLWithPath: "/template"), catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(npmExit: 1, calls: CallRecorder()),
             register: { url in
                 registered.withLock { $0 = true }

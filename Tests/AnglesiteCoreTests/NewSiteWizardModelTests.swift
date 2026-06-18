@@ -42,7 +42,7 @@ final class NewSiteWizardModelTests: XCTestCase {
     private func warningScaffolder(root: URL) -> SiteScaffolder {
         SiteScaffolder(
             sitesRoot: root,
-            pluginURL: URL(fileURLWithPath: "/plugin"),
+            templateURL: URL(fileURLWithPath: "/template"),
             catalog: catalog(),
             run: { _, args, cwd in
                 if args.contains(where: { $0.hasSuffix("scaffold.sh") }), let cwd {

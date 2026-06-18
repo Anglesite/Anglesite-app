@@ -272,13 +272,13 @@ struct SitesLauncherView: View {
         guard newSiteSession == nil, !preparingNewSite else { return }
         preparingNewSite = true
         defer { preparingNewSite = false }
-        let resolution = PluginRuntime.resolve()
-        guard let pluginURL = resolution.url else {
-            loadError = "Plugin not found — can't create a site. Reinstall the app."
+        let resolution = TemplateRuntime.resolve()
+        guard let templateURL = resolution.url else {
+            loadError = "Template not found — can't create a site. Reinstall the app."
             return
         }
         let catalog: ThemeCatalog
-        do { catalog = try ThemeCatalog.load(pluginURL: pluginURL) }
+        do { catalog = try ThemeCatalog.load(templateURL: templateURL) }
         catch { loadError = "Couldn't load themes: \(error.localizedDescription)"; return }
 
         // Effective sites root (override or ~/Sites) — the same accessor SiteStore uses.
@@ -297,7 +297,7 @@ struct SitesLauncherView: View {
 
         let scaffolder = SiteScaffolder(
             sitesRoot: sitesRoot,
-            pluginURL: pluginURL,
+            templateURL: templateURL,
             catalog: catalog,
             run: { exe, args, cwd in
                 try await ProcessSupervisor.shared.run(executable: exe, arguments: args, currentDirectoryURL: cwd)

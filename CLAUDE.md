@@ -6,15 +6,19 @@ This is the **native macOS app** that hosts the Anglesite Claude plugin. The plu
 
 | Repo | Role |
 |---|---|
-| `Anglesite/anglesite` | Claude plugin: skills, hooks, MCP server, template, docs |
-| `Anglesite/Anglesite-app` *(this repo)* | macOS app: SwiftUI shell, embedded Node, WKWebView preview, edit overlay |
+| `Anglesite/anglesite` | Claude plugin: skills, hooks, MCP server, docs |
+| `Anglesite/Anglesite-app` *(this repo)* | macOS app: SwiftUI shell, website template, embedded Node, WKWebView preview, edit overlay |
+
+The **website template** (Astro project skeleton, themes, scaffold script, pre-deploy check) lives in this repo at `Resources/Template/`. It is a committed, first-class app resource — not copied from the plugin at build time. `TemplateRuntime` resolves it from the app bundle (with a Settings override for development).
 
 Cross-cutting work (e.g. extending the MCP server with `apply-edit` messages) lands as paired PRs:
 
 1. Plugin PR adds the server-side support and ships in a tagged plugin release.
 2. App PR consumes it and bumps the bundled-plugin pointer.
 
-When in doubt, the plugin is the source of truth for skills, hooks, and the MCP message schema. The app is a *host* — it does not own those.
+Paired PRs are only needed for MCP schema changes and skill additions — template changes are app-only.
+
+When in doubt, the plugin is the source of truth for skills, hooks, and the MCP message schema. The app is a *host* — it does not own those. The app *does* own the template.
 
 ## Stack
 
@@ -43,9 +47,10 @@ Sources/
 JS/
 └── edit-overlay/      TypeScript edit overlay compiled and bundled into app resources
 Resources/
+├── Template/          Website template (themes, scaffold script, Astro source, pre-deploy check) — committed
 ├── node-runtime/      (gitignored) Vendored Node binary, populated by scripts/vendor-node.sh
-├── plugin/            (gitignored) Copy of ../anglesite, populated by scripts/copy-plugin.sh
-│                      (runs as a pre-build phase; respects $ANGLESITE_PLUGIN_SRC override)
+├── plugin/            (gitignored) Plugin MCP server + skills, populated by scripts/copy-plugin.sh
+│                      (template excluded — lives in Resources/Template/ instead)
 ├── Anglesite.help/    Apple Help Book (HTML pages; hiutil index built by scripts/build-help-index.sh)
 └── *.entitlements     Per-target sandbox/signing entitlements (incl. node-runtime.entitlements for the MAS Node re-sign)
 ```

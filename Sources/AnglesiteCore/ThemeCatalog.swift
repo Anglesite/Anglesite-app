@@ -1,6 +1,6 @@
 import Foundation
 
-/// One built-in visual theme, parsed from the plugin's `template/scripts/themes.ts`.
+/// One built-in visual theme, parsed from `Resources/Template/scripts/themes.ts`.
 public struct Theme: Sendable, Identifiable, Equatable {
     public let id: String                    // THEMES record key, e.g. "warm"
     public let name: String                  // displayName
@@ -34,10 +34,10 @@ public struct ThemeCatalog: Sendable {
         return themes.first?.id ?? want
     }
 
-    /// Load + parse the bundled plugin's themes.ts. `pluginURL` is the plugin root
-    /// (`PluginRuntime.resolve().url`); themes.ts lives at template/scripts/themes.ts.
-    public static func load(pluginURL: URL) throws -> ThemeCatalog {
-        let url = pluginURL.appendingPathComponent("template/scripts/themes.ts")
+    /// Load + parse the bundled template's themes.ts. `templateURL` is the template root
+    /// (`TemplateRuntime.resolve().url`); themes.ts lives at scripts/themes.ts.
+    public static func load(templateURL: URL) throws -> ThemeCatalog {
+        let url = templateURL.appendingPathComponent("scripts/themes.ts")
         let ts = try String(contentsOf: url, encoding: .utf8)
         return ThemeCatalog(themes: try parse(themesTS: ts))
     }

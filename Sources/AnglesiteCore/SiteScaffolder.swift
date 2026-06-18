@@ -17,7 +17,7 @@ public actor SiteScaffolder {
     public typealias Register = @Sendable (_ siteDirectory: URL) async throws -> SiteStore.Site
 
     private let sitesRoot: URL
-    private let pluginURL: URL
+    private let templateURL: URL
     private let catalog: ThemeCatalog
     private let run: CommandRunner
     private let register: Register
@@ -25,11 +25,11 @@ public actor SiteScaffolder {
 
     /// `catalog` (not a fixed theme) so the owner's Look-step choice resolves at pipeline time
     /// from `draft.themeID`.
-    public init(sitesRoot: URL, pluginURL: URL, catalog: ThemeCatalog,
+    public init(sitesRoot: URL, templateURL: URL, catalog: ThemeCatalog,
                 run: @escaping CommandRunner, register: @escaping Register,
                 fileManager: FileManager = .default) {
         self.sitesRoot = sitesRoot
-        self.pluginURL = pluginURL
+        self.templateURL = templateURL
         self.catalog = catalog
         self.run = run
         self.register = register
@@ -56,7 +56,7 @@ public actor SiteScaffolder {
 
         // 2. scaffold.sh
         emit(.copyingTemplate)
-        let scaffoldScript = pluginURL.appendingPathComponent("scripts/scaffold.sh")
+        let scaffoldScript = templateURL.appendingPathComponent("scripts/scaffold.sh")
         do {
             let r = try await run(URL(fileURLWithPath: "/bin/zsh"),
                                   [scaffoldScript.path, "--yes", siteDir.path], siteDir)
