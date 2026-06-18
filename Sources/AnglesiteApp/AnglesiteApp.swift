@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `AnglesiteIntents.bootstrap` so it can be registered with `AppDependencyManager`;
     /// will also be threaded into `LocalSiteRuntime` in A.8 (#142).
     let contentGraph = SiteContentGraph()
+    var contentIndexer: ContentSpotlightIndexer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Register App Intents dependencies before the app surface comes up so backgrounded
@@ -19,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // we kick it off here without waiting — the launcher view's `task` modifier doesn't
         // block on it, and bootstrap's own defensive `load()` closes any race.
         Task { [contentGraph] in
-            await AnglesiteIntents.bootstrap(contentGraph: contentGraph)
+            self.contentIndexer = await AnglesiteIntents.bootstrap(contentGraph: contentGraph)
         }
 
         // Begin mirroring the site registry so the File ▸ Open Recent submenu is populated
@@ -159,7 +160,7 @@ struct AnglesiteApp: App {
             // route to the launcher when restoration hands us a nil or unresolvable
             // id. If we short-circuit with `if let siteID` here the SiteWindow never
             // instantiates and an empty restored window strands the user.
-            SiteWindow(siteID: siteID, contentGraph: appDelegate.contentGraph)
+            SiteWindow(siteID: siteID, contentGraph: appDelegate.contentGraph, contentIndexer: appDelegate.contentIndexer)
                 .frame(minWidth: 960, minHeight: 600)
         }
         .windowStyle(.titleBar)

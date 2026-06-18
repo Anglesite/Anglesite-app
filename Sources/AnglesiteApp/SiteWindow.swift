@@ -18,10 +18,12 @@ struct SiteWindow: View {
     /// The app-lifetime content graph (held by `AppDelegate`), seeded into this window's
     /// `PreviewModel` so opening the site populates the shared graph (A.8, #142).
     private let contentGraph: SiteContentGraph
+    private let contentIndexer: ContentSpotlightIndexer?
 
-    init(siteID: String?, contentGraph: SiteContentGraph) {
+    init(siteID: String?, contentGraph: SiteContentGraph, contentIndexer: ContentSpotlightIndexer?) {
         self.siteID = siteID
         self.contentGraph = contentGraph
+        self.contentIndexer = contentIndexer
         _preview = State(initialValue: PreviewModel(contentGraph: contentGraph))
     }
 
@@ -51,6 +53,8 @@ struct SiteWindow: View {
     @State private var health = HealthModel(runner: DefaultHealthCheckRunner())
     /// Observed so an already-open window reacts to a `PreviewSiteIntent` navigation request.
     @State private var router = WindowRouter.shared
+    @State private var siriReadinessPresented = false
+    @State private var siriReadinessModel: SiriReadinessModel?
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -227,6 +231,22 @@ struct SiteWindow: View {
                       : "Site is missing required files")
             }
             .visibilityPriority(.high)
+
+            // Siri AI Readiness — secondary action, visible when a site is loaded.
+            ToolbarItem {
+                Button {
+                    if siriReadinessModel == nil, let contentIndexer {
+                        siriReadinessModel = SiriReadinessModel(
+                            probes: SiriReadinessProbes.site(siteID: site.id, graph: contentGraph, indexer: contentIndexer)
+                        )
+                    }
+                    siriReadinessPresented = true
+                } label: {
+                    Label("Siri AI Readiness", systemImage: "sparkles")
+                }
+                .help("Check whether Siri workflows are ready for this site")
+                .disabled(contentIndexer == nil)
+            }
         }
         .sheet(isPresented: $deploy.blockedPresented) {
             if case .blocked(let failures, let warnings) = deploy.phase {
@@ -246,6 +266,27 @@ struct SiteWindow: View {
                 siteName: site.name,
                 onRunAgain: { audit.audit(siteID: site.id, siteDirectory: site.path) }
             )
+        }
+        .sheet(isPresented: $siriReadinessPresented) {
+            if let model = siriReadinessModel {
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Siri AI readiness for \u{201C}\(site.id)\u{201D}.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            SiriReadinessList(model: model)
+                        }
+                        .padding()
+                    }
+                    .frame(minWidth: 420, minHeight: 260)
+                    .navigationTitle("Siri AI Readiness")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { siriReadinessPresented = false }
+                        }
+                    }
+                }
+            }
         }
         .annotatedAsSite(site)
     }
