@@ -43,4 +43,16 @@ import Foundation
         let finding = await probe.check()
         #expect(finding.level == .unsupported)
     }
+
+    @Test func foundationModels_modelNotReady_isWarning() async {
+        let probe = FoundationModelsProbe(availability: { .modelNotReady })
+        let finding = await probe.check()
+        #expect(finding.level == .warning)
+    }
+
+    @Test func foundationModels_unknown_isWarning() async {
+        let probe = FoundationModelsProbe(availability: { .unknown("test") })
+        let finding = await probe.check()
+        #expect(finding.level == .warning)
+    }
 }

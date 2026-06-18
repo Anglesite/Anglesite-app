@@ -44,6 +44,7 @@ private actor NoopSpotlightBackend: ContentSpotlightBackend {
         let indexer = ContentSpotlightIndexer(graph: graph, backend: NoopSpotlightBackend())
         let finding = await SpotlightIndexProbe(siteID: "blog", indexer: indexer, indexingAvailable: true).check()
         #expect(finding.level == .warning)
+        #expect(finding.remediation != nil)
     }
 
     @Test func spotlight_unavailable_isWarning_withRemediation() async {

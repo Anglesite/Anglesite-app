@@ -1,6 +1,6 @@
 // Sources/AnglesiteIntents/SiriReadinessIntentProbes.swift
 import AnglesiteCore
-import AppIntents
+import AppIntents  // load-bearing: AnglesiteShortcuts.appShortcuts default-arg resolves [AppShortcut]
 
 /// Confirms Anglesite's App Shortcuts are registered (the surface Siri/Spotlight enumerate).
 /// Count is injectable; the default reads the live provider.

@@ -272,7 +272,7 @@ struct SiteWindow: View {
                 NavigationStack {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Siri AI readiness for \u{201C}\(site.id)\u{201D}.")
+                            Text("Siri AI readiness for \u{201C}\(site.name)\u{201D}.")
                                 .font(.caption).foregroundStyle(.secondary)
                             SiriReadinessList(model: model)
                         }
