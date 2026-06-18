@@ -36,12 +36,13 @@ public struct ContentOperations: ContentOperationsService {
         identifierKey: String,
         onProgress: ProgressHandler? = nil
     ) async -> ContentCreateResult {
-        _ = onProgress   // wired to ContentCommand in Task 9
+        onProgress?(.createResolvingRuntime)
         guard let directory = await siteDirectory(siteID) else { return .siteNotFound }
         guard let runtime = await pool.runtime(siteID: siteID, siteDirectory: directory) else {
             return .failed(reason: "Couldn't start the Anglesite plugin for this site.")
         }
         let client = runtime.mcpClient
+        onProgress?(.createCallingPlugin)
         do {
             let result = try await client.callTool(name: tool, arguments: .object(arguments))
             let text = result.content.compactMap(\.text).joined(separator: "\n")
@@ -51,7 +52,10 @@ public struct ContentOperations: ContentOperationsService {
             guard let parsed = Self.parseCreated(text, identifierKey: identifierKey) else {
                 return .failed(reason: "The plugin's reply couldn't be read.")
             }
+            onProgress?(.createFinalizing)
             return .created(filePath: parsed.filePath, identifier: parsed.identifier)
+        } catch is CancellationError {
+            return .failed(reason: "canceled")
         } catch {
             return .failed(reason: "\(error)")
         }
