@@ -22,7 +22,8 @@ public struct SiteOperations: Sendable {
 
     // MARK: Operations
 
-    public func deploy(site: SiteStore.Site) async -> DeployCommand.Result {
+    public func deploy(site: SiteStore.Site, onProgress: ProgressHandler? = nil) async -> DeployCommand.Result {
+        _ = onProgress   // wired to DeployCommand in Task 6
         do {
             return try await SiteAccess.withScopedAccess(to: site, in: store) { url in
                 await factory.deploy().deploy(siteID: site.id, siteDirectory: url)
@@ -34,7 +35,8 @@ public struct SiteOperations: Sendable {
         }
     }
 
-    public func backup(site: SiteStore.Site) async -> BackupCommand.Result {
+    public func backup(site: SiteStore.Site, onProgress: ProgressHandler? = nil) async -> BackupCommand.Result {
+        _ = onProgress   // wired to BackupCommand in Task 7
         do {
             return try await SiteAccess.withScopedAccess(to: site, in: store) { url in
                 await factory.backup().backup(siteID: site.id, siteDirectory: url)
@@ -46,7 +48,8 @@ public struct SiteOperations: Sendable {
         }
     }
 
-    public func audit(site: SiteStore.Site) async -> AuditCommand.Result {
+    public func audit(site: SiteStore.Site, onProgress: ProgressHandler? = nil) async -> AuditCommand.Result {
+        _ = onProgress   // wired to AuditCommand in Task 8
         do {
             return try await SiteAccess.withScopedAccess(to: site, in: store) { url in
                 await factory.audit().audit(siteID: site.id, siteDirectory: url)
