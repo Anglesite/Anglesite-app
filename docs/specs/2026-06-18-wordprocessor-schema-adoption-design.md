@@ -128,6 +128,82 @@ is **probe → map → adopt**, per schema member:
 - `Browser` schema for preview — weak fit; `openPage` covers page preview.
 - Deploy/backup/audit schema typing — no domain analog.
 
+## Discovery (Task 1 output)
+
+Probe performed 2026-06-18 in worktree `fix-234-search-empty-query`. Method: add the
+schema macro to an existing type, run `xcodebuild -scheme Anglesite -configuration Debug
+build`, capture metadata-processor diagnostics, revert, repeat for each member. Baseline
+build was clean (`** BUILD SUCCEEDED **`) before any probe. All source changes were reverted
+(`git diff Sources/` clean) after each probe.
+
+### `__appSchemaIntent` introspectability confirmed
+
+`AddPageIntent.__appSchemaIntent == "wordProcessor.createPage"` passes under
+`@testable import AnglesiteIntents` via `swift test`. Tasks 2–8 can assert schema ids using
+this form. The same pattern applies to `__appSchemaEntity` for entities.
+
+### Required-member contract per schema member
+
+| Schema member | Kind | Applied to | Required members (verbatim from metadata processor) | Return shape / notes |
+|---|---|---|---|---|
+| `wordProcessor.createPage` | `@AppIntent` | `AddPageIntent` | `@Parameter target` (page entity — type inferred from `WordProcessorPageEntity` schema label; see note A), `@Parameter template` (optional in practice; probe emitted "missing required" but the schema may accept nil — verify in Task 5) | App-defined params not in schema must be `Optional`; `name: String` and `route: String?` flagged. Metadata-processor errors: `Missing required parameter 'target'`, `Missing required parameter 'template'`, `Intent parameters must be optional when not defined by the AppSchemaIntent` (×2). |
+| `wordProcessor.openPage` | `@AppIntent` | `PreviewSiteIntent` | `OpenIntent` conformance required (Swift compiler–level, not metadata processor). `OpenIntent` protocol: `associatedtype Value: AppValue; var target: Self.Value { get set }`. So `PreviewSiteIntent` must conform to `OpenIntent` with `Value = PageEntity` and provide a `var target: PageEntity { get set }` stored property. | Compiler error before metadata processor: `type 'PreviewSiteIntent' does not conform to protocol 'OpenIntent'`. `OpenIntent.perform()` has a default impl; `openAppWhenRun` auto-set to `true`. All existing app-defined params must be `Optional`. |
+| `wordProcessor.addImageToPage` | `@AppIntent` | `EditContentIntent` | `@Parameter image` (image asset — type not given by processor; schema label is `AddImageToWordProcessorPageIntent` — see note A), `@Parameter target` (page entity). App-defined `element: ElementEntity` and `instruction: String` flagged as must-be-optional. | Metadata-processor errors: `Missing required parameter 'image'`, `Missing required parameter 'target'`, `Intent parameters must be optional when not defined by the AppSchemaIntent` (×2). **Decision gate (Task 8):** `EditContentIntent` is NL-instruction–based; the schema wants an image asset + page target — a poor fit. Likely deferred. |
+| `wordProcessor.page` | `@AppEntity` | `PageEntity` | `@Property pageIndex` (type not given; likely `Int` — integer page index in document), `@Property document` (type: a `WordProcessorDocumentEntity`-schema–conforming entity — i.e. whatever type conforms to `.wordProcessor.document` in the app, which will be `SiteEntity` after Task 3). Fixit verbatim: `var document: <#WordProcessorDocumentEntity#>`. | Metadata-processor errors: `Missing required property 'pageIndex'`, `Missing required property 'document'`. Warning: `The property 'typeDisplayRepresentation' should not be overridden in an AppEntity that conforms to a schema` (warning — do not override `typeDisplayRepresentation` on schema entities). |
+| `wordProcessor.document` | `@AppEntity` | `SiteEntity` | `@Property modificationDate` (likely `Date`), `@Property name` (likely `String`), `@Property creationDate` (likely `Date`). | Metadata-processor errors: `Missing required property 'modificationDate'`, `Missing required property 'name'`, `Missing required property 'creationDate'`. Warning: do not override `typeDisplayRepresentation`. |
+| `wordProcessor.template` | `@AppEntity` | `_TemplateEntityProbe` (scratch) | `@Property name` (likely `String`). | Metadata-processor error: `Missing required property 'name'`. Warning: do not override `typeDisplayRepresentation`. Only one required property — simpler than document. |
+
+**Note A — parameter types:** The metadata processor names the required parameter/property
+by key (e.g. `target`, `image`, `pageIndex`) but does not emit the Swift type in the error
+message. The SDK schema labels (`WordProcessorPageEntity`, `WordProcessorDocumentEntity`) in
+the fixit for `document` confirm the entity cross-reference shape. For intent parameters,
+the types must be inferred from schema-label intent names and `OpenIntent` protocol
+inspection:
+- `target` on `createPage`: the page being created — type `PageEntity` (the app's
+  `.wordProcessor.page`-conforming entity).
+- `template` on `createPage`: the template to use — type should be the app's
+  `.wordProcessor.template`-conforming entity (or `TemplateEntity` once Task 4 decides).
+  Likely `Optional` since "create without template" is valid.
+- `image` on `addImageToPage`: image asset — likely `IntentFile` (the AppIntents type for
+  file payloads) or `URL`. Requires a Task 8 probe with a typed `@Parameter` to confirm.
+- `target` on `addImageToPage`: the destination page — type `PageEntity`.
+- `target` on `openPage`: per `OpenIntent` protocol, `var target: Self.Value { get set }`;
+  `Value` must be the page entity, i.e. `PageEntity`.
+
+### `typeDisplayRepresentation` constraint (all schema entities)
+
+All three entity probes (`page`, `document`, `template`) produced this warning:
+`The property 'typeDisplayRepresentation' should not be overridden in an AppEntity that
+conforms to a schema`. This is a metadata-processor warning, not an error — but Tasks 2–4
+should follow it: do not declare `static var typeDisplayRepresentation` on any
+schema-conforming entity. The schema provides this automatically.
+
+### Key decision implications for later tasks
+
+- **Task 2 (`page`):** Add `@Property var pageIndex: Int` and `@Property var document:
+  SiteEntity` (after Task 3 makes `SiteEntity` the `document` schema entity). Remove or
+  stop overriding `typeDisplayRepresentation`. The `pageIndex` will be synthetic (derive
+  from sort order or set to 0 — pages don't have a canonical integer index in Anglesite).
+- **Task 3 (`document`):** Add `@Property var name: String`, `@Property var creationDate:
+  Date`, `@Property var modificationDate: Date`. `SiteEntity` has `displayName` but not a
+  `name` property — add one (alias of `displayName`). Dates require `SiteStore.Site` to
+  expose them (or derive from filesystem metadata).
+- **Task 4 (`template`):** Only `@Property var name: String` required. Minimal surface —
+  worthwhile to surface if a `TemplateEntity` is created.
+- **Task 5 (`createPage`):** Add `@Parameter var target: PageEntity?` and `@Parameter var
+  template: TemplateEntity?` (both Optional since the schema may accept nil); make
+  `name: String` and `route: String?` `Optional`. **Risk:** making `name` optional changes
+  the required-parameter dialog.
+- **Task 6 (`openPage`):** `PreviewSiteIntent` must conform to `OpenIntent` and rename
+  `page` to `target` (or add `target` as an alias). The `OpenIntent` default `perform()` is
+  a no-op that opens the app; override it with the existing routing logic. **Risk:** the
+  `OpenIntent` protocol may impose additional constraints — probe carefully.
+- **Task 7 (`AddPostIntent` / `createPage`):** Two intents on one schema id — unknown
+  whether the metadata processor or assistant tolerates this. Probe in Task 7 before
+  committing.
+- **Task 8 (`addImageToPage`):** Decision gate verdict: likely **deferred** —
+  `EditContentIntent` is NL-instruction–based, not image-asset–targeted.
+
 ## Packaging
 
 One worktree, one PR re-scoping/closing #235, with the spike doc already landed separately.
