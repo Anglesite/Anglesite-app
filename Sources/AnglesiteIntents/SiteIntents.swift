@@ -54,8 +54,9 @@ public struct DeploySiteIntent: AppIntent {
             result = await ops.deploy(site: resolved)
         } else {
             #if compiler(>=6.4)
+            let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
-                await ops.deploy(site: resolved)
+                await ops.deploy(site: resolved, onProgress: onProgress)
             } onCancel: { _ in }
             #else
             result = await ops.deploy(site: resolved)
@@ -94,8 +95,9 @@ public struct BackupSiteIntent: AppIntent {
             result = await ops.backup(site: resolved)
         } else {
             #if compiler(>=6.4)
+            let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
-                await ops.backup(site: resolved)
+                await ops.backup(site: resolved, onProgress: onProgress)
             } onCancel: { _ in }
             #else
             result = await ops.backup(site: resolved)
@@ -133,8 +135,9 @@ public struct AuditSiteIntent: AppIntent {
             result = await ops.audit(site: resolved)
         } else {
             #if compiler(>=6.4)
+            let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
-                await ops.audit(site: resolved)
+                await ops.audit(site: resolved, onProgress: onProgress)
             } onCancel: { _ in }
             #else
             result = await ops.audit(site: resolved)

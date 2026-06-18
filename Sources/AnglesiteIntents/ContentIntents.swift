@@ -171,8 +171,9 @@ public struct AddPageIntent: AppIntent {
             result = await svc.createPage(siteID: site.id, name: name, route: route)
         } else {
             #if compiler(>=6.4)
+            let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
-                await svc.createPage(siteID: site.id, name: name, route: route)
+                await svc.createPage(siteID: site.id, name: name, route: route, onProgress: onProgress)
             } onCancel: { _ in }
             #else
             result = await svc.createPage(siteID: site.id, name: name, route: route)
@@ -232,8 +233,9 @@ public struct AddPostIntent: AppIntent {
             result = await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug)
         } else {
             #if compiler(>=6.4)
+            let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
-                await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug)
+                await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug, onProgress: onProgress)
             } onCancel: { _ in }
             #else
             result = await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug)
