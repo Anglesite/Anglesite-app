@@ -176,9 +176,6 @@ extension AppIntentsTests {
 
         @Test("SearchContentIntent.matches guards a blank query instead of dumping the whole graph")
         func searchMatchesBlankQueryReturnsEmpty() async {
-            // #234: D.2 made this a typed ReturnsValue, so an empty query handed to an MCP agent or
-            // Shortcut would dump every page/post/image. The intent surface must require a term even
-            // though the graph helpers keep "empty = all" for internal callers.
             let graph = SiteContentGraph()
             await graph.load(
                 siteID: AppIntentsTests.aSite,
@@ -188,8 +185,10 @@ extension AppIntentsTests {
             )
             #expect(await SearchContentIntent.matches(graph: graph, siteID: AppIntentsTests.aSite, query: "").isEmpty)
             #expect(await SearchContentIntent.matches(graph: graph, siteID: AppIntentsTests.aSite, query: "   ").isEmpty)
-            // The graph helper itself still returns everything for an empty query (internal contract).
+            // The graph helpers keep "empty = all" for internal callers — verify across all three kinds.
             #expect(await graph.searchPages(siteID: AppIntentsTests.aSite, matching: "").count == 1)
+            #expect(await graph.searchPosts(siteID: AppIntentsTests.aSite, matching: "").count == 1)
+            #expect(await graph.searchImages(siteID: AppIntentsTests.aSite, matching: "").count == 1)
         }
 
         @Test("search match path is the route and resolves back to a page (chaining)")
