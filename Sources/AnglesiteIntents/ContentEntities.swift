@@ -9,8 +9,8 @@ import Foundation
 public struct PageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public let id: String            // "{siteID}:page:{route}" — same as SiteContentGraph.Page.id
     public let displayName: String   // title ?? route
-    public let route: String
-    public let siteID: String
+    @Property(title: "Route") public var route: String
+    @Property(title: "Site") public var siteID: String
 
     public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Page" }
 
@@ -25,6 +25,13 @@ public struct PageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
         self.displayName = page.title ?? page.route
         self.route = page.route
         self.siteID = page.siteID
+    }
+
+    public init(id: String, displayName: String, route: String, siteID: String) {
+        self.id = id
+        self.displayName = displayName
+        self.route = route
+        self.siteID = siteID
     }
 }
 
@@ -89,11 +96,11 @@ public struct PageEntityQuery: EntityStringQuery {
 public struct PostEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public let id: String            // "{siteID}:post:{slug}"
     public let displayName: String   // title
-    public let slug: String
-    public let collection: String
-    public let siteID: String
+    @Property(title: "Slug") public var slug: String
+    @Property(title: "Collection") public var collection: String
     public let isDraft: Bool
     public let tags: [String]
+    @Property(title: "Site") public var siteID: String
 
     public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Post" }
 
@@ -109,11 +116,22 @@ public struct PostEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public init(_ post: SiteContentGraph.Post) {
         self.id = post.id
         self.displayName = post.title
+        self.isDraft = post.draft
+        self.tags = post.tags
         self.slug = post.slug
         self.collection = post.collection
         self.siteID = post.siteID
-        self.isDraft = post.draft
-        self.tags = post.tags
+    }
+
+    public init(id: String, displayName: String, slug: String, collection: String,
+                siteID: String, isDraft: Bool = true, tags: [String] = []) {
+        self.id = id
+        self.displayName = displayName
+        self.isDraft = isDraft
+        self.tags = tags
+        self.slug = slug
+        self.collection = collection
+        self.siteID = siteID
     }
 }
 
@@ -176,12 +194,12 @@ public struct PostEntityQuery: EntityStringQuery {
 public struct ImageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public let id: String            // "{siteID}:image:{relativePath}"
     public let displayName: String   // fileName
-    public let relativePath: String
-    public let siteID: String
+    @Property(title: "Path") public var relativePath: String
     /// Page routes that reference this image. Carried in the struct (not surfaced in
     /// `displayRepresentation` today) so adding it later isn't a source-breaking AppEntity
     /// schema change for Shortcuts persistence / donated interactions.
     public let usedOnPages: [String]
+    @Property(title: "Site") public var siteID: String
 
     public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Image" }
 
@@ -194,9 +212,9 @@ public struct ImageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public init(_ image: SiteContentGraph.Image) {
         self.id = image.id
         self.displayName = image.fileName
+        self.usedOnPages = image.usedOnPages
         self.relativePath = image.relativePath
         self.siteID = image.siteID
-        self.usedOnPages = image.usedOnPages
     }
 }
 

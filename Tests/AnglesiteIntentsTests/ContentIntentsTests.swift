@@ -142,6 +142,45 @@ extension AppIntentsTests {
             #expect(fake.postCalls.first?.slug == "hello")
         }
 
+        @Test("SearchContentIntent.matches returns a uniform list across kinds")
+        func searchMatchesHelper() async {
+            let graph = SiteContentGraph()
+            await graph.load(
+                siteID: AppIntentsTests.aSite,
+                pages: [AppIntentsTests.gPage(route: "/about", title: "About")],
+                posts: [AppIntentsTests.gPost(slug: "about-us", title: "About Us")],
+                images: []
+            )
+            let matches = await SearchContentIntent.matches(graph: graph, siteID: AppIntentsTests.aSite, query: "about")
+            #expect(matches.map(\.kind) == [.page, .post])
+            #expect(matches.first { $0.kind == .page }?.path == "/about")
+        }
+
+        @Test("SearchContentIntent.matches orders hits deterministically (lastModified desc, id asc)")
+        func searchMatchesOrdering() async {
+            let graph = SiteContentGraph()
+            let older = AppIntentsTests.gPage(route: "/about-old", title: "About old", modified: AppIntentsTests.t0)
+            let newer = AppIntentsTests.gPage(route: "/about-new", title: "About new", modified: AppIntentsTests.t0.addingTimeInterval(100))
+            // Load newer first so insertion order can't accidentally satisfy the assertion.
+            await graph.load(siteID: AppIntentsTests.aSite, pages: [newer, older], posts: [], images: [])
+            let matches = await SearchContentIntent.matches(graph: graph, siteID: AppIntentsTests.aSite, query: "about")
+            #expect(matches.map(\.id) == [newer.id, older.id])  // newer (later lastModified) first
+        }
+
+        @Test("search match path is the route and resolves back to a page (chaining)")
+        func searchMatchChainsToPage() async throws {
+            let graph = SiteContentGraph()
+            let p = AppIntentsTests.gPage(route: "/about", title: "About")
+            await graph.load(siteID: AppIntentsTests.aSite, pages: [p], posts: [], images: [])
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let matches = await SearchContentIntent.matches(graph: graph, siteID: AppIntentsTests.aSite, query: "about")
+                let pageMatch = try #require(matches.first { $0.kind == .page })
+                #expect(pageMatch.path == "/about")
+                let resolved = try await ContentMatchEntityQuery().entities(for: [pageMatch.id])
+                #expect(resolved.map(\.id) == [p.id])
+            }
+        }
+
         @Test("create intents tolerate a failed service result")
         func createFailureIsHandled() async throws {
             let fake = FakeContentOps()
@@ -153,6 +192,29 @@ extension AppIntentsTests {
                 _ = try await intent.perform()   // must not throw
             }
             #expect(fake.pageCalls.count == 1)
+        }
+
+        @Test("createdPage builds a PageEntity from a successful result, nil on failure")
+        func createdPageFactory() {
+            let ok = ContentCreateResult.created(filePath: "src/pages/about.astro", identifier: "/about")
+            let e = AddPageIntent.createdPage(ok, siteID: AppIntentsTests.aSite, name: "About")
+            #expect(e?.id == "\(AppIntentsTests.aSite):page:/about")
+            #expect(e?.route == "/about")
+            #expect(e?.displayName == "About")
+            #expect(AddPageIntent.createdPage(.siteNotFound, siteID: AppIntentsTests.aSite, name: "About") == nil)
+            #expect(AddPageIntent.createdPage(.failed(reason: "x"), siteID: AppIntentsTests.aSite, name: "About") == nil)
+        }
+
+        @Test("createdPost builds a PostEntity; collection from input, else parsed from filePath")
+        func createdPostFactory() {
+            let ok = ContentCreateResult.created(filePath: "src/content/notes/hello.md", identifier: "hello")
+            let withInput = AddPostIntent.createdPost(ok, siteID: AppIntentsTests.aSite, title: "Hello", collection: "blog")
+            #expect(withInput?.id == "\(AppIntentsTests.aSite):post:hello")
+            #expect(withInput?.slug == "hello")
+            #expect(withInput?.collection == "blog")          // input wins
+            let parsed = AddPostIntent.createdPost(ok, siteID: AppIntentsTests.aSite, title: "Hello", collection: nil)
+            #expect(parsed?.collection == "notes")            // parsed from filePath
+            #expect(AddPostIntent.createdPost(.failed(reason: "x"), siteID: AppIntentsTests.aSite, title: "Hello", collection: nil) == nil)
         }
     }
 }

@@ -422,6 +422,19 @@ extension AppIntentsTests {
                 #expect(reversed.map(\.slug) == ["three", "one", "two"])
             }
         }
+
+        @Test("PostEntity round-trip exposes slug, collection, siteID")
+        func postRoundTripFields() async throws {
+            let graph = SiteContentGraph()
+            let p = AppIntentsTests.gPost(slug: "hello-world", collection: "blog")
+            await graph.upsertPost(p)
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let r = try await PostEntityQuery().entities(for: [p.id])
+                #expect(r.first?.slug == "hello-world")
+                #expect(r.first?.collection == "blog")
+                #expect(r.first?.siteID == AppIntentsTests.aSite)
+            }
+        }
     }
 
     @Suite("ImageEntityQuery")
@@ -572,6 +585,18 @@ extension AppIntentsTests {
                 let q = ImageEntityQuery()
                 let reversed = try await q.entities(for: [i3.id, i1.id, i2.id])
                 #expect(reversed.map(\.displayName) == ["three.jpg", "one.jpg", "two.jpg"])
+            }
+        }
+
+        @Test("ImageEntity round-trip exposes relativePath, siteID")
+        func imageRoundTripFields() async throws {
+            let graph = SiteContentGraph()
+            let i = AppIntentsTests.gImage(relativePath: "public/images/hero.jpg")
+            await graph.upsertImage(i)
+            try await ContentGraphOverride.$scoped.withValue(graph) {
+                let r = try await ImageEntityQuery().entities(for: [i.id])
+                #expect(r.first?.relativePath == "public/images/hero.jpg")
+                #expect(r.first?.siteID == AppIntentsTests.aSite)
             }
         }
     }
