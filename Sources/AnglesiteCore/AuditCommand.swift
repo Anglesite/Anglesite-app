@@ -86,6 +86,7 @@ public actor AuditCommand {
         var skipped: [AuditReport.SkippedRunner] = []
 
         for runner in runners {
+            if Task.isCancelled { break }   // CancellableIntent cancel — stop before the next runner
             let source = "audit:\(siteID):\(runner.category.rawValue)"
             do {
                 let runnerFindings = try await runner.run(
