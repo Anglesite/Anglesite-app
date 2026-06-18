@@ -80,7 +80,8 @@ public actor DeployCommand {
     public func deploy(
         siteID: String,
         siteDirectory: URL,
-        onPreflight: PreflightObserver? = nil
+        onPreflight: PreflightObserver? = nil,
+        onProgress: ProgressHandler? = nil
     ) async -> Result {
         // Pre-spawn checks. The token comes first so we never spend time on a build or scan
         // for a deploy that won't reach wrangler.
@@ -95,6 +96,7 @@ public actor DeployCommand {
         }
 
         // Build dist/ before the scan needs it. Streams to LogCenter via launch().
+        onProgress?(.deployBuilding)
         switch await runBuild(siteID: siteID, siteDirectory: siteDirectory) {
         case .success:
             break
@@ -107,6 +109,7 @@ public actor DeployCommand {
         // third-party scripts, or Keystatic admin routes in dist/, the deploy is blocked —
         // per the durable rule in CLAUDE.md, the app cannot bypass plugin security hooks;
         // the UI sheet for `.blocked` has no override.
+        onProgress?(.deployPreflight)
         let preflightOutcome = await preflight(siteDirectory)
         onPreflight?(preflightOutcome)
         switch preflightOutcome {
@@ -134,6 +137,7 @@ public actor DeployCommand {
         environment["CLOUDFLARE_API_TOKEN"] = token
 
         let started = Date()
+        onProgress?(.deployDeploying)
         let handle: ProcessSupervisor.Handle
         do {
             handle = try await supervisor.launch(
@@ -162,6 +166,7 @@ public actor DeployCommand {
         // `waitForExit` only resumes after the supervisor's per-pipe drain Tasks have
         // finished — every byte wrangler wrote to stdout/stderr is in `LogCenter` by
         // the time we get here, so the snapshot can't miss the `Published` line.
+        onProgress?(.deployFinalizing)
         let snapshot = await logCenter.snapshot()
         let stdout = snapshot
             .filter { $0.source == source && $0.stream == .stdout }

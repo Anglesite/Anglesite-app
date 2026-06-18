@@ -23,10 +23,9 @@ public struct SiteOperations: Sendable {
     // MARK: Operations
 
     public func deploy(site: SiteStore.Site, onProgress: ProgressHandler? = nil) async -> DeployCommand.Result {
-        _ = onProgress   // wired to DeployCommand in Task 6
         do {
             return try await SiteAccess.withScopedAccess(to: site, in: store) { url in
-                await factory.deploy().deploy(siteID: site.id, siteDirectory: url)
+                await factory.deploy().deploy(siteID: site.id, siteDirectory: url, onProgress: onProgress)
             }
         } catch let SiteAccess.AccessError.noGrant(message) {
             return .failed(reason: message, exitCode: nil)
