@@ -210,3 +210,50 @@ One worktree, one PR re-scoping/closing #235, with the spike doc already landed 
 Commits sequenced: (1) discovery-probe findings appended to this spec, (2) entity
 conformances, (3) intent conformances, (4) tests. Reframe #164 D.3 to the conformance test
 (comment on the issue); add the Siri end-to-end check to #166.
+
+## createPage.target dependency probe
+
+Probe performed 2026-06-18 in worktree `fix-234-search-empty-query`. Method: add
+`@available(macOS 26.0, *)` + `@AppIntent(schema: .wordProcessor.createPage)` to
+`AddPageIntent`, add `@Parameter(title: "Target") public var target: PageEntity?` (plain
+existing `PageEntity` — no schema conformance added), make `name: String` optional to
+suppress the unrelated non-schema-param error. Built with
+`xcodebuild -scheme Anglesite -configuration Debug build` and captured metadata-processor
+diagnostics. All source changes were reverted after (`git diff Sources/` = 0 lines).
+
+### Verbatim diagnostics
+
+```
+error: Required AppSchemaIntent parameter 'target' must not be optional
+error: Parameter 'target' does not match required AppSchemaIntent type 'WordProcessorDocumentEntity'
+error: Missing required parameter 'template' from AppSchemaIntent 'wordProcessor.createPage'
+error: Intent parameters must be optional when not defined by the AppSchemaIntent
+```
+
+### Verdict: **TARGET REQUIRES .document CONFORMANCE (not .page)**
+
+The metadata processor rejects `PageEntity` for `target` with:
+`Parameter 'target' does not match required AppSchemaIntent type 'WordProcessorDocumentEntity'`.
+
+This means **`createPage.target` is the destination *document* (the container), not the
+created page** — semantically "create a page in this document". The required type is
+`WordProcessorDocumentEntity`, i.e. the app's `.wordProcessor.document`-conforming entity.
+In Anglesite's model that will be `SiteEntity` (once Task 3 adds `@AppEntity(schema:
+.wordProcessor.document)` conformance). A plain `PageEntity` (not schema-conforming) is
+explicitly rejected, and even a `.wordProcessor.page`-conforming entity would not satisfy
+this parameter.
+
+Additional constraint: `target` must be **non-optional** (the processor errors "must not be
+optional").
+
+### Impact on Task 5 (`AddPageIntent` schema adoption)
+
+- `target` must be `var target: SiteEntity` (non-optional), not `PageEntity`. This means
+  **Task 3 (`SiteEntity → .wordProcessor.document`) must land before Task 5**.
+- The existing `site: SiteEntity` parameter becomes `target: SiteEntity` (rename + schema
+  adoption, same type).
+- `template` is still missing (the processor flagged it); its type is the app's
+  `.wordProcessor.template`-conforming entity — defer until Task 4 confirms `TemplateEntity`
+  is worth adding, or omit if the schema accepts a missing optional template.
+- Prior Note A in the table above was incorrect: it inferred `target` = page entity. The
+  correct mapping is `target` = document entity.
