@@ -46,6 +46,12 @@ public struct SearchContentIntent: AppIntent {
     /// Gather matches from the graph as a uniform list. Static + graph-injected so it's
     /// unit-testable without the AppIntents runtime (mirrors the prior `dialog` helper).
     static func matches(graph: SiteContentGraph, siteID: String, query: String) async -> [ContentMatchEntity] {
+        // Guard the intent surface against a blank query (#234). The graph helpers treat "empty =
+        // all" — fine for internal status/listing callers — but D.2 (#163) made this intent return a
+        // typed `ReturnsValue<[ContentMatchEntity]>`, so an empty query handed to an MCP agent or
+        // Shortcut would dump every page, post, and image for the site. Require a search term here
+        // while leaving the graph helpers' contract untouched.
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         // Sort each kind's graph hits deterministically (lastModified desc, id asc — the same
         // comparator the entity queries use) BEFORE projecting, so the agent-facing result order
         // is stable across launches. `ContentMatchEntity` doesn't carry `lastModified`, so the
@@ -266,6 +272,11 @@ public enum ContentDialogs {
     public enum CreateKind: String, Sendable { case page, post }
 
     public static func search(query: String, pageCount: Int, postCount: Int, imageCount: Int) -> String {
+        // A blank/whitespace query is a missing search term, not a zero-result search (#234). Prompt
+        // for input rather than echoing `Nothing matched “”.`, which reads as a real empty result.
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "Please tell me what to search for."
+        }
         let total = pageCount + postCount + imageCount
         guard total > 0 else { return "Nothing matched “\(query)”." }
         var parts: [String] = []

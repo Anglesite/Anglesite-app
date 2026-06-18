@@ -40,6 +40,13 @@ extension AppIntentsTests {
             #expect(ContentDialogs.search(query: "x", pageCount: 0, postCount: 2, imageCount: 0) == "Found 2 posts matching “x”.")
         }
 
+        @Test("search dialog: blank or whitespace query asks for a term instead of 'nothing matched'")
+        func searchDialogBlankQuery() {
+            // #234: an empty/whitespace query must prompt for input, not echo `Nothing matched “”.`
+            #expect(ContentDialogs.search(query: "", pageCount: 0, postCount: 0, imageCount: 0) == "Please tell me what to search for.")
+            #expect(ContentDialogs.search(query: "   ", pageCount: 0, postCount: 0, imageCount: 0) == "Please tell me what to search for.")
+        }
+
         @Test("status dialog: drafts noted only when present; singular nouns")
         func statusDialog() {
             #expect(ContentDialogs.status(siteName: "Alpha", pages: 1, posts: 1, drafts: 0, images: 1) == "Alpha has 1 page, 1 post, and 1 image.")
@@ -165,6 +172,24 @@ extension AppIntentsTests {
             await graph.load(siteID: AppIntentsTests.aSite, pages: [newer, older], posts: [], images: [])
             let matches = await SearchContentIntent.matches(graph: graph, siteID: AppIntentsTests.aSite, query: "about")
             #expect(matches.map(\.id) == [newer.id, older.id])  // newer (later lastModified) first
+        }
+
+        @Test("SearchContentIntent.matches guards a blank query instead of dumping the whole graph")
+        func searchMatchesBlankQueryReturnsEmpty() async {
+            // #234: D.2 made this a typed ReturnsValue, so an empty query handed to an MCP agent or
+            // Shortcut would dump every page/post/image. The intent surface must require a term even
+            // though the graph helpers keep "empty = all" for internal callers.
+            let graph = SiteContentGraph()
+            await graph.load(
+                siteID: AppIntentsTests.aSite,
+                pages: [AppIntentsTests.gPage(route: "/about", title: "About")],
+                posts: [AppIntentsTests.gPost(slug: "notes", title: "Notes")],
+                images: [AppIntentsTests.gImage()]
+            )
+            #expect(await SearchContentIntent.matches(graph: graph, siteID: AppIntentsTests.aSite, query: "").isEmpty)
+            #expect(await SearchContentIntent.matches(graph: graph, siteID: AppIntentsTests.aSite, query: "   ").isEmpty)
+            // The graph helper itself still returns everything for an empty query (internal contract).
+            #expect(await graph.searchPages(siteID: AppIntentsTests.aSite, matching: "").count == 1)
         }
 
         @Test("search match path is the route and resolves back to a page (chaining)")
