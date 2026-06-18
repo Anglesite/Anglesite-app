@@ -552,7 +552,7 @@ so D.2 enriches that schema instead of hand-writing descriptors (deferred to D.5
 - **F-2** — `ContentMatchEntity` uniform projection; `SearchContentIntent` returns `ReturnsValue<[ContentMatchEntity]>`; dialog preserved.
 - **F-3** — `AddPage`/`AddPostIntent` return `ReturnsValue<PageEntity?>`/`<PostEntity?>`; nil + dialog on failure.
 
-Design: `docs/superpowers/specs/2026-06-17-d2-mcp-tool-descriptors-design.md`.
+Design: `docs/specs/2026-06-17-d2-mcp-tool-descriptors-design.md`.
 
 ### Testing
 - `AnglesiteIntents` suite green (incl. new F-1 round-trip, F-2 projection/query/chaining, F-3 factory tests).

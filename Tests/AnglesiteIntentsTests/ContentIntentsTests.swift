@@ -156,6 +156,17 @@ extension AppIntentsTests {
             #expect(matches.first { $0.kind == .page }?.path == "/about")
         }
 
+        @Test("SearchContentIntent.matches orders hits deterministically (lastModified desc, id asc)")
+        func searchMatchesOrdering() async {
+            let graph = SiteContentGraph()
+            let older = AppIntentsTests.gPage(route: "/about-old", title: "About old", modified: AppIntentsTests.t0)
+            let newer = AppIntentsTests.gPage(route: "/about-new", title: "About new", modified: AppIntentsTests.t0.addingTimeInterval(100))
+            // Load newer first so insertion order can't accidentally satisfy the assertion.
+            await graph.load(siteID: AppIntentsTests.aSite, pages: [newer, older], posts: [], images: [])
+            let matches = await SearchContentIntent.matches(graph: graph, siteID: AppIntentsTests.aSite, query: "about")
+            #expect(matches.map(\.id) == [newer.id, older.id])  // newer (later lastModified) first
+        }
+
         @Test("search match path is the route and resolves back to a page (chaining)")
         func searchMatchChainsToPage() async throws {
             let graph = SiteContentGraph()

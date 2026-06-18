@@ -46,9 +46,19 @@ public struct SearchContentIntent: AppIntent {
     /// Gather matches from the graph as a uniform list. Static + graph-injected so it's
     /// unit-testable without the AppIntents runtime (mirrors the prior `dialog` helper).
     static func matches(graph: SiteContentGraph, siteID: String, query: String) async -> [ContentMatchEntity] {
-        let pages = await graph.searchPages(siteID: siteID, matching: query).map { ContentMatchEntity(PageEntity($0)) }
-        let posts = await graph.searchPosts(siteID: siteID, matching: query).map { ContentMatchEntity(PostEntity($0)) }
-        let images = await graph.searchImages(siteID: siteID, matching: query).map { ContentMatchEntity(ImageEntity($0)) }
+        // Sort each kind's graph hits deterministically (lastModified desc, id asc — the same
+        // comparator the entity queries use) BEFORE projecting, so the agent-facing result order
+        // is stable across launches. `ContentMatchEntity` doesn't carry `lastModified`, so the
+        // sort must happen on the graph structs, not the projections.
+        let pages = await graph.searchPages(siteID: siteID, matching: query)
+            .sorted { $0.lastModified != $1.lastModified ? $0.lastModified > $1.lastModified : $0.id < $1.id }
+            .map { ContentMatchEntity(PageEntity($0)) }
+        let posts = await graph.searchPosts(siteID: siteID, matching: query)
+            .sorted { $0.lastModified != $1.lastModified ? $0.lastModified > $1.lastModified : $0.id < $1.id }
+            .map { ContentMatchEntity(PostEntity($0)) }
+        let images = await graph.searchImages(siteID: siteID, matching: query)
+            .sorted { $0.lastModified != $1.lastModified ? $0.lastModified > $1.lastModified : $0.id < $1.id }
+            .map { ContentMatchEntity(ImageEntity($0)) }
         return pages + posts + images
     }
 
