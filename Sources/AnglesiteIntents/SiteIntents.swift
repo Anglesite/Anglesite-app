@@ -61,6 +61,9 @@ public struct DeploySiteIntent: AppIntent {
             result = await ops.deploy(site: resolved)
             #endif
         }
+        if Task.isCancelled {
+            return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.canceledDialog(operation: "deploy", siteName: site.displayName)))
+        }
         return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forDeploy: result)))
     }
 }
@@ -98,6 +101,9 @@ public struct BackupSiteIntent: AppIntent {
             result = await ops.backup(site: resolved)
             #endif
         }
+        if Task.isCancelled {
+            return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.canceledDialog(operation: "backup", siteName: site.displayName)))
+        }
         return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forBackup: result)))
     }
 }
@@ -133,6 +139,9 @@ public struct AuditSiteIntent: AppIntent {
             #else
             result = await ops.audit(site: resolved)
             #endif
+        }
+        if Task.isCancelled {
+            return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.canceledDialog(operation: "check", siteName: site.displayName)))
         }
         return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forAudit: result)))
     }

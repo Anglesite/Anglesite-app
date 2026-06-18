@@ -95,4 +95,10 @@ public struct SiteOperations: Sendable {
             return "Audit failed: \(reason)"
         }
     }
+
+    /// Friendly dialog for a Siri/Shortcuts cancellation, mapped from `Task.isCancelled` at the
+    /// intent boundary (the command actor SIGTERMs the underlying subprocess on cancel).
+    public static func canceledDialog(operation: String, siteName: String) -> String {
+        "Canceled the \(operation) of \(siteName)."
+    }
 }
