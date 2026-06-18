@@ -54,7 +54,7 @@ struct ReadinessRow: View {
 /// Renders a readiness model: the findings list, a re-check button, and a last-checked stamp.
 /// Drives an initial check on appear. Reused by Settings (system) and the per-window sheet.
 struct SiriReadinessList: View {
-    @State var model: SiriReadinessModel
+    let model: SiriReadinessModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
