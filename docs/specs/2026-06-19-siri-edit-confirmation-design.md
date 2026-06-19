@@ -150,3 +150,13 @@ guard/summary logic is pure and directly callable.
 - **Summary, not diff, in v1**: an honest reflection of what the app can compute without a
   plugin dry-run. The follow-up paired PR upgrades the same `editConfirmation` seam to a real
   diff without touching the gate's structure.
+- **Cross-PR coordination with #249 (operation descriptors)**: PR #249 adds an
+  `OperationDescriptor` registry where `edit-content` is declared `requiresConfirmation: false`,
+  with `OperationDescriptorTests.declaredFields` asserting that value. This PR is the
+  "deliberate manual checkpoint" the #249 spec names — once it ships, `edit-content` *does*
+  require confirmation. The two files live only in #249, so the flip cannot happen here until
+  #249 lands. **Plan: merge #249 first, then on this branch flip both**
+  `Sources/AnglesiteIntents/OperationDescriptor.swift` (the `edit-content` entry's
+  `requiresConfirmation` to `true`) **and** the matching `expected` value in
+  `Tests/AnglesiteIntentsTests/OperationDescriptorTests.swift`, so the registry and its test
+  stay truthful once both PRs are on main.
