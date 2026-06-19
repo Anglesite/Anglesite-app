@@ -24,6 +24,10 @@ final class DeployModel {
     private(set) var logLines: [LogCenter.LogLine] = []
     /// The latest milestone label from the running deploy (drives a status line above the log).
     private(set) var currentMilestone: String?
+    /// On-device summary of the most recent *failed* deploy, or nil if none/unavailable.
+    private(set) var failureSummary: DeployFailureSummary?
+    /// True while the failure summary is being generated (drives a spinner in the drawer).
+    private(set) var summarizing: Bool = false
 
     /// Bound to a custom slide-up drawer in `SiteWindow`. The view sets this back to false
     /// when the user clicks "Dismiss" (we never auto-close — users want to read the URL).
@@ -58,6 +62,7 @@ final class DeployModel {
     private let logCenter: LogCenter
     private let keychain: KeychainStore
     private let onboarding: TokenOnboarding
+    private let summarizer: any DeployFailureSummarizing
     private var inFlight: Task<Void, Never>?
     /// Site to retry once the user pastes a token. `nil` outside the prompt flow.
     private var pendingDeploy: (siteID: String, siteDirectory: URL)?
@@ -66,12 +71,14 @@ final class DeployModel {
         command: DeployCommand = DeployCommand(),
         logCenter: LogCenter = .shared,
         keychain: KeychainStore = KeychainStore(),
-        verifier: TokenVerifying = WranglerTokenVerifier()
+        verifier: TokenVerifying = WranglerTokenVerifier(),
+        summarizer: any DeployFailureSummarizing = DeploySummarizerFactory.makeDefault()
     ) {
         self.command = command
         self.logCenter = logCenter
         self.keychain = keychain
         self.onboarding = TokenOnboarding(verifier: verifier)
+        self.summarizer = summarizer
     }
 
     var isRunning: Bool {
@@ -173,6 +180,8 @@ final class DeployModel {
         phase = .running(siteID: siteID, since: Date())
         logLines = []
         currentMilestone = nil
+        failureSummary = nil
+        summarizing = false
         drawerPresented = true
         blockedPresented = false
 
@@ -212,6 +221,14 @@ final class DeployModel {
             phase = .succeeded(url: url, duration: duration)
         case .failed(let reason, let exit):
             phase = .failed(reason: reason, exitCode: exit)
+            summarizing = true
+            failureSummary = await DeployFailureSummaryRequest.run(
+                logText: logText,
+                siteID: siteID,
+                siteDirectory: siteDirectory,
+                using: summarizer
+            )
+            summarizing = false
         case .blocked(let failures, let warnings):
             phase = .blocked(failures: failures, warnings: warnings)
             // For the blocked outcome the modal sheet carries the actionable info; the
