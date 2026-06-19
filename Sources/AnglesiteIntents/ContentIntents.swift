@@ -171,12 +171,16 @@ public struct AddPageIntent: AppIntent {
             result = await svc.createPage(siteID: site.id, name: name, route: route)
         } else {
             #if compiler(>=6.4)
+            let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
-                await svc.createPage(siteID: site.id, name: name, route: route)
-            } onCancel: { _ in }
+                await svc.createPage(siteID: site.id, name: name, route: route, onProgress: onProgress)
+            } onCancel: { _ in }  // task cancellation propagates automatically through structured concurrency; no extra cleanup needed
             #else
             result = await svc.createPage(siteID: site.id, name: name, route: route)
             #endif
+        }
+        if Task.isCancelled {
+            return .result(value: nil, dialog: IntentDialog(stringLiteral: ContentDialogs.canceled(kind: .page, siteName: site.displayName)))
         }
         return .result(
             value: Self.createdPage(result, siteID: site.id, name: name),
@@ -229,12 +233,16 @@ public struct AddPostIntent: AppIntent {
             result = await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug)
         } else {
             #if compiler(>=6.4)
+            let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
-                await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug)
-            } onCancel: { _ in }
+                await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug, onProgress: onProgress)
+            } onCancel: { _ in }  // task cancellation propagates automatically through structured concurrency; no extra cleanup needed
             #else
             result = await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug)
             #endif
+        }
+        if Task.isCancelled {
+            return .result(value: nil, dialog: IntentDialog(stringLiteral: ContentDialogs.canceled(kind: .post, siteName: site.displayName)))
         }
         return .result(
             value: Self.createdPost(result, siteID: site.id, title: title2, collection: collection),
@@ -289,6 +297,14 @@ public enum ContentDialogs {
     public static func preview(siteName: String, pageName: String? = nil) -> String {
         if let pageName { return "Opening the \(pageName) page of \(siteName)." }
         return "Opening \(siteName)."
+    }
+
+    /// Friendly dialog for a Siri/Shortcuts cancellation of a create operation.
+    public static func canceled(kind: CreateKind, siteName: String) -> String {
+        switch kind {
+        case .page: return "Canceled adding the page to \(siteName)."
+        case .post: return "Canceled adding the post to \(siteName)."
+        }
     }
 
     public static func created(_ result: ContentCreateResult, kind: CreateKind, siteName: String) -> String {

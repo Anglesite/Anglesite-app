@@ -23,24 +23,30 @@ final class FakeOperations: SiteOperationsService, @unchecked Sendable {
     private(set) var deployCalls: [SiteStore.Site] = []
     private(set) var backupCalls: [SiteStore.Site] = []
     private(set) var auditCalls: [SiteStore.Site] = []
+    private(set) var lastDeployProgress: ProgressHandler?
+    private(set) var lastBackupProgress: ProgressHandler?
+    private(set) var lastAuditProgress: ProgressHandler?
 
     func site(id: String) async -> SiteStore.Site? {
         siteCalls.append(id)
         return sites[id]
     }
 
-    func deploy(site: SiteStore.Site) async -> DeployCommand.Result {
+    func deploy(site: SiteStore.Site, onProgress: ProgressHandler?) async -> DeployCommand.Result {
         deployCalls.append(site)
+        lastDeployProgress = onProgress
         return deployResult
     }
 
-    func backup(site: SiteStore.Site) async -> BackupCommand.Result {
+    func backup(site: SiteStore.Site, onProgress: ProgressHandler?) async -> BackupCommand.Result {
         backupCalls.append(site)
+        lastBackupProgress = onProgress
         return backupResult
     }
 
-    func audit(site: SiteStore.Site) async -> AuditCommand.Result {
+    func audit(site: SiteStore.Site, onProgress: ProgressHandler?) async -> AuditCommand.Result {
         auditCalls.append(site)
+        lastAuditProgress = onProgress
         return auditResult
     }
 }

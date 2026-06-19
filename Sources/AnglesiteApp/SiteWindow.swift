@@ -53,6 +53,8 @@ struct SiteWindow: View {
     @State private var chat: ChatModel?
     @State private var chatPresented = false
     @State private var health = HealthModel(runner: DefaultHealthCheckRunner())
+    /// Drives the determinate startup progress bar shown in `mainPane` while the dev server boots.
+    @State private var startup = StartupProgressModel()
     /// Observed so an already-open window reacts to a `PreviewSiteIntent` navigation request.
     @State private var router = WindowRouter.shared
     @State private var siriReadinessPresented = false
@@ -86,8 +88,12 @@ struct SiteWindow: View {
         .onChange(of: site?.id) { _, _ in
             siriReadinessModel = nil
         }
+        .onChange(of: preview.state) { _, newState in
+            startup.ingest(state: newState)
+        }
         .onDisappear {
             preview.close()
+            startup.stop()
             // Unregister the annotation provider from the shared registry so
             // `ElementEntityQuery` stops resolving stale entity ids for a window that's no
             // longer on screen.
@@ -305,7 +311,9 @@ struct SiteWindow: View {
         case .ready(_, let url):
             PreviewView(url: preview.displayURL ?? url, router: preview.editRouter, annotationProvider: annotationProvider)
         case .starting:
-            centeredStatus { ProgressView("Starting dev server for \(site.name)…") }
+            centeredStatus {
+                StartupProgressView(title: "Starting dev server for \(site.name)…", model: startup)
+            }
         case .failed(_, let message):
             centeredStatus {
                 VStack(spacing: 12) {

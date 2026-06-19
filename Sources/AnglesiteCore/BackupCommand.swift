@@ -14,8 +14,9 @@ import Foundation
 ///      pipeline. We surface a `.failed` with no override and let the user switch
 ///      branches (or use the chat-routed path, which can auto-switch to `draft`).
 ///   2. Remote: refuse if `origin` isn't configured. There's nowhere to push to.
-///   3. Status: bail with `.noChanges` if the working tree is clean — no point
-///      generating a no-op commit.
+///   3. Status: on a clean working tree, generate no commit — but if HEAD is ahead of
+///      `origin/<branch>` (an unpushed commit from a prior cancelled backup, #246), push it
+///      and report `.succeeded`; only a clean tree that's also in sync yields `.noChanges`.
 ///
 /// Then the action steps stream their output to `LogCenter` under
 /// `backup:<siteID>`, so the drawer UI can show progress in real time.
@@ -55,7 +56,7 @@ public actor BackupCommand {
         self.clock = clock
     }
 
-    public func backup(siteID: String, siteDirectory: URL) async -> Result {
+    public func backup(siteID: String, siteDirectory: URL, onProgress: ProgressHandler? = nil) async -> Result {
         let source = "backup:\(siteID)"
 
         // 0. Repository — refuse outside a git work tree with a clear, actionable message.
@@ -96,8 +97,10 @@ public actor BackupCommand {
         }
 
         // 2. Remote — refuse when `origin` isn't configured. `git remote get-url`
-        // exits non-zero with an empty stdout when the remote doesn't exist.
-        let remote: String
+        // exits non-zero with an empty stdout when the remote doesn't exist. This is the
+        // remote *URL*; the git operations below address the remote by name (`origin`), so the
+        // URL is only carried through to the `.succeeded` result for the caller's reference.
+        let remoteURL: String
         do {
             let result = try await runner(siteDirectory, ["remote", "get-url", "origin"])
             guard result.exitCode == 0 else {
@@ -106,33 +109,42 @@ public actor BackupCommand {
                     exitCode: nil
                 )
             }
-            remote = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !remote.isEmpty else {
+            remoteURL = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !remoteURL.isEmpty else {
                 return .failed(reason: "the `origin` remote is configured but empty.", exitCode: nil)
             }
         } catch {
             return .failed(reason: "couldn't read `origin` remote: \(error)", exitCode: nil)
         }
 
-        // 3. Status — bail early on a clean working tree.
+        // 3. Status — on a clean working tree there's nothing new to commit, but HEAD may
+        // still be *ahead* of the remote: a prior backup that committed and was cancelled (or
+        // failed) before its push leaves an unpushed commit (#246). A naive `.noChanges` here
+        // would silently strand that work. So on a clean tree we check the ahead-count and,
+        // when there are pending commits, push them and report `.succeeded` instead.
         do {
             let result = try await runner(siteDirectory, ["status", "--porcelain"])
             guard result.exitCode == 0 else {
                 return .failed(reason: "`git status` exited \(result.exitCode)", exitCode: result.exitCode)
             }
             if result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return .noChanges
+                return await pushPendingCommitsIfAhead(branch: branch, remoteURL: remoteURL, in: siteDirectory, source: source, onProgress: onProgress)
             }
         } catch {
             return .failed(reason: "couldn't run `git status`: \(error)", exitCode: nil)
         }
 
         // 4. add → 5. commit → 6. read HEAD SHA → 7. push.
-        // Each streamed action goes through the streamer so the drawer can render
-        // live output (auth prompts on push are the obvious case).
+        // A CancellableIntent (Siri/Shortcuts) may cancel between steps; bail before issuing the
+        // next git mutation. The streamed step itself SIGTERMs on cancel (see defaultStreamer).
+        if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
+        onProgress?(.backupStaging)
         if let failure = await streamGit(["add", "-A"], in: siteDirectory, source: source, label: "git add") {
             return failure
         }
+        // Note: cancelling after commit but before push leaves a local commit; the next backup detects it (ahead of origin with a clean tree) and pushes it — see `pushPendingCommitsIfAhead` (#246).
+        if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
+        onProgress?(.backupCommitting)
         let commitMessage = "Backup \(Self.iso8601Formatter.string(from: clock()))"
         if let failure = await streamGit(["commit", "-m", commitMessage], in: siteDirectory, source: source, label: "git commit") {
             return failure
@@ -147,11 +159,13 @@ public actor BackupCommand {
         } catch {
             return .failed(reason: "couldn't read commit SHA: \(error)", exitCode: nil)
         }
+        if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
+        onProgress?(.backupPushing)
         if let failure = await streamGit(["push", "origin", branch], in: siteDirectory, source: source, label: "git push") {
             return failure
         }
 
-        return .succeeded(commitSHA: sha, branch: branch, remote: remote)
+        return .succeeded(commitSHA: sha, branch: branch, remote: remoteURL)
     }
 
     // MARK: - Helpers
@@ -175,6 +189,56 @@ public actor BackupCommand {
         } catch {
             return .failed(reason: "couldn't spawn `\(label)`: \(error)", exitCode: nil)
         }
+    }
+
+    /// Handles the clean-tree case: pushes any commit(s) that are ahead of `origin/<branch>`
+    /// and reports `.succeeded`, otherwise returns `.noChanges`. Covers the cancelled-after-
+    /// commit backup (#246), where a commit was made locally but never pushed.
+    ///
+    /// Ahead-ness is measured against the remote-tracking ref (`origin/<branch>`), which
+    /// `git push origin <branch>` keeps current — rather than `@{u}`, since a plain push
+    /// (no `-u`) never configures upstream tracking. If that ref doesn't exist (the branch
+    /// was never pushed), `git rev-list` exits non-zero; we treat that as "can't determine"
+    /// and preserve the historical `.noChanges` rather than erroring or pushing blindly.
+    private func pushPendingCommitsIfAhead(
+        branch: String,
+        remoteURL: String,
+        in siteDirectory: URL,
+        source: String,
+        onProgress: ProgressHandler?
+    ) async -> Result {
+        let aheadCount: Int
+        do {
+            let result = try await runner(siteDirectory, ["rev-list", "--count", "origin/\(branch)..HEAD"])
+            guard result.exitCode == 0 else { return .noChanges }
+            aheadCount = Int(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        } catch {
+            return .noChanges
+        }
+        guard aheadCount > 0 else { return .noChanges }
+
+        // Read the SHA we'll report before pushing it.
+        let sha: String
+        do {
+            let result = try await runner(siteDirectory, ["rev-parse", "HEAD"])
+            guard result.exitCode == 0 else {
+                return .failed(reason: "couldn't read commit SHA (`git rev-parse HEAD` exit \(result.exitCode))", exitCode: result.exitCode)
+            }
+            sha = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return .failed(reason: "couldn't read commit SHA: \(error)", exitCode: nil)
+        }
+
+        // Bail before the push if the task was cancelled during the rev-list/rev-parse hops.
+        // `Task.isCancelled` (not `try? Task.checkCancellation()` — which would swallow the
+        // error and push anyway) actually short-circuits, matching the step-level guards the
+        // normal add→commit→push path gets from the cancellation work (#238).
+        if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
+        onProgress?(.backupPushing)
+        if let failure = await streamGit(["push", "origin", branch], in: siteDirectory, source: source, label: "git push") {
+            return failure
+        }
+        return .succeeded(commitSHA: sha, branch: branch, remote: remoteURL)
     }
 
     /// ISO-8601 timestamps in commit messages so they sort correctly under `git log` and
@@ -227,7 +291,11 @@ public actor BackupCommand {
             arguments: ["git"] + arguments,
             currentDirectoryURL: siteDirectory
         )
-        let reason = await ProcessSupervisor.shared.waitForExit(handle)
+        let reason = await withTaskCancellationHandler {
+            await ProcessSupervisor.shared.waitForExit(handle)
+        } onCancel: {
+            Task { await ProcessSupervisor.shared.terminate(handle) }
+        }
 
         // `waitForExit` only resumes once the supervisor's pipe-drain Tasks have finished, so
         // every stderr line is already in LogCenter; cancelling ends the stream and the await

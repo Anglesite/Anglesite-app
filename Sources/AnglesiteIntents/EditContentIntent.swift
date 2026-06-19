@@ -23,17 +23,6 @@ import Foundation
 /// in-progress smoke testing will hit `.failed` until the paired plugin change ships. The
 /// failure path is well-tested and the dialog explains the situation — shipping the app side
 /// now unblocks the plugin work to land independently.
-///
-/// **Known cancellation limitation.** The type conforms to `CancellableIntent`
-/// (gated below) but doesn't implement `onCancel()`. The bridge's `applyEdit` is awaited
-/// inside `perform()`; Swift cooperative cancellation reaches `perform`'s task, but the
-/// downstream MCP `apply_edit` call doesn't currently propagate cancellation through
-/// `MCPClient.callTool`. Net effect: a Siri-cancelled intent surfaces a `.failed` dialog to
-/// the user, but the patch can still land on disk if the plugin has already committed it
-/// when the cancellation arrives. Threading `Task.isCancelled` checks through the MCP
-/// callsite is tracked as follow-up; the user-facing impact is bounded because the next
-/// edit naturally supersedes a stale one, and the chat panel's edit log surfaces the
-/// landed-but-cancelled patch for inspection.
 public struct EditContentIntent: AppIntent {
     public static let title: LocalizedStringResource = "Edit Content"
     public static let description = IntentDescription(
@@ -67,6 +56,13 @@ public struct EditContentIntent: AppIntent {
             op: EditMessage.Op.applyInstruction,
             value: .string(instruction)
         )
+        // Cancellation is self-describing: `MCPApplyEditRouter` maps an interrupted edit to a
+        // `.failed` reply whose message is exactly "canceled". Key off that, not `Task.isCancelled`
+        // — otherwise a *genuine* plugin failure that merely coincides with cancellation would be
+        // mislabelled "Canceled" and the real error swallowed.
+        if reply.status == .failed, reply.message == "canceled" {
+            return .result(dialog: IntentDialog(stringLiteral: "Canceled the edit to \(element.displayName)."))
+        }
         let dialog = ContentDialogs.editReply(reply, displayName: element.displayName)
         return .result(dialog: IntentDialog(stringLiteral: dialog))
     }

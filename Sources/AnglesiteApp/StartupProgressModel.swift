@@ -1,0 +1,110 @@
+import SwiftUI
+import AnglesiteCore
+
+/// Drives the determinate startup progress bar for one site window. Owns a pure
+/// `StartupProgressEstimator` and feeds it three things: runtime-state changes (pushed in by
+/// `SiteWindow` via `ingest(state:)`), the site's `astro:<id>` stdout lines (subscribed from
+/// `LogCenter`), and ~20 fps `tick`s that ease the fill forward. On success it persists the
+/// measured timing so the next startup paces itself. The estimator stays host-independent and
+/// CI-tested; this class is the SwiftUI/actor wiring around it.
+@MainActor
+@Observable
+final class StartupProgressModel {
+    private(set) var phase: StartupPhase = .idle
+    private(set) var fraction: Double = 0
+    private(set) var message: String = ""
+
+    private let timingStore: StartupTimingStore
+    private let logCenter: LogCenter
+    private let clock: @Sendable () -> TimeInterval
+
+    private var estimator = StartupProgressEstimator()
+    private var siteID: String?
+    private var logTask: Task<Void, Never>?
+    private var tickTask: Task<Void, Never>?
+
+    init(
+        timingStore: StartupTimingStore = .shared,
+        logCenter: LogCenter = .shared,
+        clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    ) {
+        self.timingStore = timingStore
+        self.logCenter = logCenter
+        self.clock = clock
+    }
+
+    /// Push a runtime-state change. `.starting` (re)arms tracking for the site; `.ready` records
+    /// timing and completes the bar; `.failed`/`.idle` tear the tracker down.
+    func ingest(state: SiteRuntimeState) {
+        switch state {
+        case .starting(let id):
+            begin(siteID: id)
+        case .ready(let id, _):
+            estimator.ingest(runtimeState: state, at: clock())
+            if let profile = estimator.completedProfile {
+                timingStore.record(profile, for: id)
+            }
+            publish()
+            stop()
+        case .failed, .idle:
+            estimator.ingest(runtimeState: state, at: clock())
+            publish()
+            stop()
+        }
+    }
+
+    /// Cancel the log subscription and ticker. Safe to call repeatedly.
+    func stop() {
+        logTask?.cancel(); logTask = nil
+        tickTask?.cancel(); tickTask = nil
+    }
+
+    // MARK: - Internals
+
+    private func begin(siteID: String) {
+        // Re-arm only on a genuinely new startup; ignore a duplicate `.starting` for the same site.
+        if self.siteID == siteID && estimator.isActive { return }
+        self.siteID = siteID
+        estimator = StartupProgressEstimator(profile: timingStore.profile(for: siteID))
+        estimator.ingest(runtimeState: .starting(siteID: siteID), at: clock())
+        publish()
+        subscribeToLogs(siteID: siteID)
+        startTicker()
+    }
+
+    private func subscribeToLogs(siteID: String) {
+        logTask?.cancel()
+        let source = "astro:\(siteID)"
+        logTask = Task { @MainActor [weak self] in
+            guard let center = self?.logCenter else { return }
+            let subscription = await center.subscribe()
+            for await line in subscription.stream {
+                guard let self else { break }
+                if Task.isCancelled { break }
+                guard line.source == source, line.stream == .stdout else { continue }
+                guard self.estimator.isActive else { break }
+                self.estimator.ingest(logText: line.text, at: self.clock())
+                self.publish()
+            }
+            subscription.cancel()
+        }
+    }
+
+    private func startTicker() {
+        tickTask?.cancel()
+        tickTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.estimator.isActive else { return }
+                self.estimator.tick(now: self.clock())
+                self.publish()
+                try? await Task.sleep(nanoseconds: 50_000_000) // ~20 fps
+            }
+        }
+    }
+
+    private func publish() {
+        phase = estimator.phase
+        fraction = estimator.fraction
+        message = estimator.message
+    }
+}
