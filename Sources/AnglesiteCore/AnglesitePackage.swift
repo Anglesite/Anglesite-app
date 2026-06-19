@@ -24,7 +24,7 @@ public struct AnglesitePackage: Sendable, Equatable {
 
     // MARK: - Layout
 
-    public var infoPlistURL: URL { url.appendingPathComponent("Info.plist") }
+    public var infoPlistURL: URL { url.appendingPathComponent("Info.plist", isDirectory: false) }
     public var sourceURL: URL { url.appendingPathComponent("Source", isDirectory: true) }
     public var configURL: URL { url.appendingPathComponent("Config", isDirectory: true) }
 
