@@ -79,4 +79,53 @@ struct SiteStoreRecentsTests {
         let mostRecent = RecentSites.select(from: await store.sites, limit: 1).first
         #expect(mostRecent?.id == siteA.id)
     }
+
+    @Test("moved package maintains identity by marker UUID; record upserts path in place")
+    func movedPackageIdentity() async throws {
+        let root = try tempDir(); defer { try? FileManager.default.removeItem(at: root) }
+        let originalPath = root.appendingPathComponent("Acme.anglesite", isDirectory: true)
+        let pkg = try makeValidPackage(in: root, name: "Acme")
+        let store = SiteStore(persistenceURL: root.appendingPathComponent("recents.json"))
+
+        // Record original location
+        let originalSite = try await store.record(pkg)
+        let originalID = originalSite.id
+        try await store.setBookmark(Data("bm".utf8), for: originalID)
+
+        // Move the package directory
+        let newPath = root.appendingPathComponent("Projects").appendingPathComponent("Acme.anglesite", isDirectory: true)
+        try FileManager.default.createDirectory(at: newPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: originalPath, to: newPath)
+
+        // Record the moved package
+        let movedPkg = AnglesitePackage(url: newPath)
+        let movedSite = try await store.record(movedPkg)
+
+        // Verify identity is preserved, path updated, bookmark carried forward
+        #expect(movedSite.id == originalID)
+        #expect(await store.find(id: originalID)?.packageURL == newPath)
+        #expect(await store.bookmarkData(for: originalID) == Data("bm".utf8))
+        #expect(await store.sites.filter { $0.id == originalID }.count == 1)
+    }
+
+    @Test("packageURL is canonicalized to standardized form")
+    func canonicalizePackageURL() async throws {
+        let root = try tempDir(); defer { try? FileManager.default.removeItem(at: root) }
+        let pkg = try makeValidPackage(in: root, name: "Acme")
+        let store = SiteStore(persistenceURL: root.appendingPathComponent("recents.json"))
+
+        // Record the package normally
+        let site = try await store.record(pkg)
+        let canonicalURL = site.packageURL
+
+        // Construct a non-standardized URL to the same package (with redundant path segments)
+        let nonStandardPath = canonicalURL.appendingPathComponent("..").appendingPathComponent("Acme.anglesite")
+        let nonStandardPkg = AnglesitePackage(url: nonStandardPath)
+
+        // Record via the non-standard path
+        let rerecorded = try await store.record(nonStandardPkg)
+
+        // Verify the stored packageURL is in canonical form
+        #expect(await store.find(id: rerecorded.id)?.packageURL == canonicalURL)
+    }
 }

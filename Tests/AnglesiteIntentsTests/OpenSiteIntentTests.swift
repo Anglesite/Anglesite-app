@@ -18,5 +18,14 @@ extension AppIntentsTests {
             _ = try await intent.perform()
             #expect(WindowRouter.shared.requested == "s1")
         }
+
+        @Test("SiteEntity maps id and directory from SiteStore.Site")
+        func siteEntityMapping() async throws {
+            let testPath = "/tmp/MyProject.anglesite"
+            let site = TestStore.site(id: "site-uuid-123", name: "My Project", path: "/tmp/MyProject")
+            let entity = SiteEntity(site)
+            #expect(entity.id == "site-uuid-123")
+            #expect(entity.directory == URL(fileURLWithPath: testPath, isDirectory: true))
+        }
     }
 }
