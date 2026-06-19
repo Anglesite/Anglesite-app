@@ -30,7 +30,9 @@ The navigator needs live page/post updates, but `SiteContentGraph`'s single `cha
 
 **Interfaces:**
 - Consumes: existing `SiteContentGraph` actor, `emitChange(_:)`.
-- Produces: `nonisolated func changeStream() -> AsyncStream<String>` — yields the affected `siteID` on every real mutation; no subscribe-time yield (a change is an event, not a snapshot).
+- Produces: `func changeStream() -> AsyncStream<String>` (actor-isolated — callers `await`) — yields the affected `siteID` on every real mutation; no subscribe-time yield (a change is an event, not a snapshot).
+
+> **Why actor-isolated (not `nonisolated` like `SiteStore.changeStream()`):** `SiteStore` yields a subscribe-time snapshot, so a caller that subscribes then mutates always gets *something* and never hangs. This stream deliberately has **no** subscribe-time yield, so registering the continuation in a detached `Task {}` (as a `nonisolated` factory must) races the caller's next mutation — if the emit lands before registration, `next()` suspends forever. Making `changeStream()` actor-isolated and registering the continuation **synchronously** (via `AsyncStream.makeStream`) before returning closes the race. Consumers (Task 6) therefore `await graph.changeStream()`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -51,7 +53,7 @@ struct SiteContentGraphStreamTests {
     @Test("changeStream yields the siteID on a real mutation")
     func yieldsOnMutation() async throws {
         let graph = SiteContentGraph()
-        var iterator = graph.changeStream().makeAsyncIterator()
+        var iterator = (await graph.changeStream()).makeAsyncIterator()
         await graph.upsertPage(makePage("siteA", route: "/about/"))
         let received = await iterator.next()
         #expect(received == "siteA")
@@ -60,8 +62,8 @@ struct SiteContentGraphStreamTests {
     @Test("two independent subscribers both receive the change")
     func broadcastsToAll() async throws {
         let graph = SiteContentGraph()
-        var it1 = graph.changeStream().makeAsyncIterator()
-        var it2 = graph.changeStream().makeAsyncIterator()
+        var it1 = (await graph.changeStream()).makeAsyncIterator()
+        var it2 = (await graph.changeStream()).makeAsyncIterator()
         await graph.upsertPage(makePage("siteB", route: "/x/"))
         let a = await it1.next()
         let b = await it2.next()
@@ -74,7 +76,7 @@ struct SiteContentGraphStreamTests {
         let graph = SiteContentGraph()
         let page = makePage("siteC", route: "/y/")
         await graph.upsertPage(page)              // first insert emits
-        var it = graph.changeStream().makeAsyncIterator()
+        var it = (await graph.changeStream()).makeAsyncIterator()
         await graph.upsertPage(page)              // equal → no emit
         await graph.upsertPage(makePage("siteC", route: "/z/")) // emits
         let received = await it.next()
@@ -112,24 +114,24 @@ Extend `emitChange` to fan out to both (replace the existing `emitChange`):
     }
 ```
 
-Add the stream factory + register/prune helpers (mirrors `SiteStore.changeStream()`):
+Add the stream factory + prune helper. Unlike `SiteStore.changeStream()` this is **actor-isolated**, so the continuation is registered synchronously before the call returns — no detached registration `Task`, no race (see the Interfaces note above):
 
 ```swift
-    /// A multi-subscriber stream of affected siteIDs, one per real mutation. Unlike
-    /// `SiteStore.changeStream()` there is no subscribe-time snapshot — a content change is an
-    /// event, so the navigator reads the graph back itself on first load.
-    public nonisolated func changeStream() -> AsyncStream<String> {
+    /// A multi-subscriber stream of affected siteIDs, one per real mutation. Actor-isolated so the
+    /// continuation registers synchronously before this returns: there is no subscribe-time snapshot
+    /// to mask a registration race, so a caller that subscribes then mutates must not miss the emit.
+    /// (A content change is an event — the navigator reads the graph back itself on first load.)
+    /// Callers `await` it.
+    public func changeStream() -> AsyncStream<String> {
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: String.self, bufferingPolicy: .bufferingNewest(8))
         let id = UUID()
-        return AsyncStream(bufferingPolicy: .bufferingNewest(8)) { continuation in
-            Task { await self.registerContinuation(continuation, id: id) }
-            continuation.onTermination = { [weak self] _ in
-                Task { await self?.removeContinuation(id) }
-            }
-        }
-    }
-
-    private func registerContinuation(_ continuation: AsyncStream<String>.Continuation, id: UUID) {
         changeStreamContinuations[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            // onTermination runs off-actor at an arbitrary time; hop back to prune.
+            Task { await self?.removeContinuation(id) }
+        }
+        return stream
     }
 
     private func removeContinuation(_ id: UUID) {
@@ -812,7 +814,8 @@ final class SiteNavigatorModel {
         Task { await refresh() }
         observeTask?.cancel()
         observeTask = Task { [graph, siteID] in
-            for await changedSiteID in graph.changeStream() {
+            // `changeStream()` is actor-isolated (Task 1) — await it to subscribe before iterating.
+            for await changedSiteID in await graph.changeStream() {
                 if Task.isCancelled { break }
                 if changedSiteID == siteID { await refresh() }
             }
