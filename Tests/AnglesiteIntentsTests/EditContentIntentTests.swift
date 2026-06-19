@@ -178,6 +178,22 @@ extension AppIntentsTests {
                     == "Lost track of h1 \u{2014} Hi — try selecting it again.")
         }
 
+        @Test("editConfirmation: names element, page, and change") func editConfirmation_full() {
+            #expect(ContentDialogs.editConfirmation(
+                displayName: "h1 \u{2014} Welcome",
+                pagePath: "/about/",
+                instruction: "make it shorter")
+                    == "Update h1 \u{2014} Welcome on /about/? Change: make it shorter.")
+        }
+
+        @Test("editConfirmation: trims surrounding whitespace in the instruction") func editConfirmation_trimsInstruction() {
+            #expect(ContentDialogs.editConfirmation(
+                displayName: "p \u{2014} Intro",
+                pagePath: "/",
+                instruction: "  fix the typo  ")
+                    == "Update p \u{2014} Intro on /? Change: fix the typo.")
+        }
+
         @Test("editReply dispatches on status") func editReply_dispatchesOnStatus() {
             let applied = EditReply(id: "x", status: .applied, message: nil, file: "f.astro")
             #expect(ContentDialogs.editReply(applied, displayName: "h1")

@@ -121,6 +121,15 @@ extension ContentDialogs {
         "Lost track of \(displayName) — try selecting it again."
     }
 
+    /// Confirmation summary shown before a Siri-driven edit mutates source files (#239).
+    /// Names the element, the page it lives on, and the requested change so the user can
+    /// review before confirming. App-only summary — a structured diff is a deferred follow-up
+    /// gated on a plugin `apply_edit` dry-run.
+    public static func editConfirmation(displayName: String, pagePath: String, instruction: String) -> String {
+        let change = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "Update \(displayName) on \(pagePath)? Change: \(change)."
+    }
+
     /// Dispatch on the reply status. Single entry point the intent's `perform()` uses.
     public static func editReply(_ reply: EditReply, displayName: String) -> String {
         switch reply.status {
