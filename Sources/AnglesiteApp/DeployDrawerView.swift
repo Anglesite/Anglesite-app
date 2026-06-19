@@ -20,6 +20,7 @@ struct DeployDrawerView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            failureSummarySection
             logScroller
             Divider()
             footer
@@ -95,6 +96,31 @@ struct DeployDrawerView: View {
             return exit.map { "\(reason) (exit \($0))" } ?? reason
         default:
             return nil
+        }
+    }
+
+    @ViewBuilder
+    private var failureSummarySection: some View {
+        if case .failed = model.phase {
+            if model.summarizing {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Summarizing…").font(.callout).foregroundStyle(.secondary)
+                }
+            } else if let s = model.failureSummary {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(s.summary).font(.callout)
+                    if !s.likelyCause.isEmpty {
+                        Text("Likely cause: \(s.likelyCause)").font(.callout).foregroundStyle(.secondary)
+                    }
+                    if !s.suggestedFix.isEmpty {
+                        Text("Suggested fix: \(s.suggestedFix)").font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+                .textSelection(.enabled)
+                .accessibilityElement(children: .combine)
+            }
+            // failureSummary == nil && !summarizing → render nothing; the raw reason/log already shows.
         }
     }
 
