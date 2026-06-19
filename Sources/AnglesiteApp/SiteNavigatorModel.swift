@@ -24,9 +24,13 @@ final class SiteNavigatorModel {
     func start(siteID: String, siteRoot: URL) {
         self.siteID = siteID
         self.siteRoot = siteRoot
-        Task { await refresh() }
+        // Cancel any prior observer (window reuse: SwiftUI can replay a different site into the
+        // same window) BEFORE starting the new one, so a stale refresh can't overwrite the new
+        // site's sections. The initial load runs as the new task's first step, so it is tracked
+        // and cancellable too.
         observeTask?.cancel()
         observeTask = Task { [graph, siteID] in
+            await refresh()
             // `changeStream()` is actor-isolated (Task 1) — await it to subscribe before iterating.
             for await changedSiteID in await graph.changeStream() {
                 if Task.isCancelled { break }
@@ -53,6 +57,9 @@ final class SiteNavigatorModel {
         let posts = await graph.posts(for: siteID)
         // Filesystem scan is synchronous + cheap; run off the main actor to avoid stutter.
         let fileGroups = await Task.detached { SiteFileTree.scan(siteRoot: siteRoot) }.value
+        // The task may have been cancelled (stop()/re-start) while we awaited — don't write stale
+        // content into the @Observable sections after teardown.
+        if Task.isCancelled { return }
         sections = buildNavigatorTree(pages: pages, posts: posts, fileGroups: fileGroups)
     }
 }
