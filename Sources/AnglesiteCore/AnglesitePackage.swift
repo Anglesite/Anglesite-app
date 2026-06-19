@@ -58,10 +58,35 @@ public struct AnglesitePackage: Sendable, Equatable {
         }
     }
 
+    public enum PackageError: Error, Equatable, Sendable {
+        case markerMissing(URL)
+        case markerUnreadable(URL)
+    }
+
+    /// Forward-compatibility verdict for an opened package's marker.
+    public enum Compatibility: Sendable, Equatable {
+        /// Same format the app writes — fully editable.
+        case current
+        /// Written by a newer build than this one. Open read-only and prompt to upgrade rather
+        /// than silently rewriting a format we don't understand (spec §9).
+        case readOnlyTooNew
+    }
+
+    public static func compatibility(for marker: Marker) -> Compatibility {
+        marker.formatVersion > currentFormatVersion ? .readOnlyTooNew : .current
+    }
+
     /// Reads and decodes the `Info.plist` marker. (Error cases handled in Task 2.)
     public func readMarker(fileManager: FileManager = .default) throws -> Marker {
-        let data = try Data(contentsOf: infoPlistURL)
-        return try PropertyListDecoder().decode(Marker.self, from: data)
+        guard fileManager.fileExists(atPath: infoPlistURL.path) else {
+            throw PackageError.markerMissing(infoPlistURL)
+        }
+        do {
+            let data = try Data(contentsOf: infoPlistURL)
+            return try PropertyListDecoder().decode(Marker.self, from: data)
+        } catch {
+            throw PackageError.markerUnreadable(infoPlistURL)
+        }
     }
 
     /// Writes the marker to `Info.plist` (XML plist, atomic), creating the package dir if needed.

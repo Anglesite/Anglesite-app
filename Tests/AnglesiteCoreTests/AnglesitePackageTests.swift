@@ -55,4 +55,36 @@ struct AnglesitePackageTests {
         #expect(plist["AnglesiteDisplayName"] as? String == "Acme")
         #expect(plist["AnglesiteCreatedDate"] != nil)
     }
+
+    @Test("readMarker throws markerMissing when Info.plist is absent")
+    func readMarkerMissing() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let pkg = AnglesitePackage(url: dir.appendingPathComponent("Empty.anglesite", isDirectory: true))
+        #expect(throws: AnglesitePackage.PackageError.markerMissing(pkg.infoPlistURL)) {
+            try pkg.readMarker()
+        }
+    }
+
+    @Test("readMarker throws markerUnreadable when Info.plist is corrupt")
+    func readMarkerCorrupt() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let pkg = AnglesitePackage(url: dir.appendingPathComponent("Bad.anglesite", isDirectory: true))
+        try FileManager.default.createDirectory(at: pkg.url, withIntermediateDirectories: true)
+        try Data("not a plist".utf8).write(to: pkg.infoPlistURL)
+        #expect(throws: AnglesitePackage.PackageError.markerUnreadable(pkg.infoPlistURL)) {
+            try pkg.readMarker()
+        }
+    }
+
+    @Test("compatibility flags a newer format version as read-only")
+    func compatibilityGate() {
+        let current = AnglesitePackage.Marker(
+            formatVersion: AnglesitePackage.currentFormatVersion, displayName: "A")
+        let future = AnglesitePackage.Marker(
+            formatVersion: AnglesitePackage.currentFormatVersion + 1, displayName: "B")
+        #expect(AnglesitePackage.compatibility(for: current) == .current)
+        #expect(AnglesitePackage.compatibility(for: future) == .readOnlyTooNew)
+    }
 }
