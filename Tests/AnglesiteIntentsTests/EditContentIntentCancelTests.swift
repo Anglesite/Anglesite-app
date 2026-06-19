@@ -10,15 +10,27 @@ import AppIntents
 /// Uses `CheckedContinuation<Void, Never>` — does NOT check for cancellation —
 /// so the parked task stays parked until `release()` is called explicitly.
 /// This lets us cancel the surrounding task while `applyEdit` is mid-flight.
+///
+/// `parkedSignal` yields exactly once when a waiter registers its continuation, so the test can
+/// `await` the parked state instead of spin-polling a flag with `Task.yield()` — the same
+/// AsyncStream signalling pattern `MCPClientCancellationTests` uses to avoid a hang risk if the
+/// awaited point is never reached.
 private actor EditCancelGate {
     private var cont: CheckedContinuation<Void, Never>?
     private var released = false
-    /// True once a waiter has registered its continuation (i.e. the bridge is parked).
-    private(set) var parked = false
+
+    nonisolated let parkedSignal: AsyncStream<Void>
+    private let parkedContinuation: AsyncStream<Void>.Continuation
+
+    init() {
+        var c: AsyncStream<Void>.Continuation!
+        parkedSignal = AsyncStream { c = $0 }
+        parkedContinuation = c
+    }
 
     func wait() async {
         if released { return }
-        parked = true
+        parkedContinuation.yield(())   // announce the parked state, then suspend
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
             cont = c
         }
@@ -31,7 +43,7 @@ private actor EditCancelGate {
     }
 }
 
-// MARK: - GatedRouter
+// MARK: - Routers
 
 /// Routes through a gate before returning its configured reply — lets us cancel the
 /// outer task while `applyEdit` is parked, then release so it returns with a known status.
@@ -46,6 +58,13 @@ private actor GatedRouter: EditRouter {
         await gate.wait()
         return reply
     }
+}
+
+/// Returns its reply without gating — for cases that don't need to cancel mid-flight.
+private actor ImmediateRouter: EditRouter {
+    private let reply: EditReply
+    init(reply: EditReply) { self.reply = reply }
+    func apply(_ message: EditMessage) async -> EditReply { reply }
 }
 
 // MARK: - Test suite
@@ -74,79 +93,73 @@ extension AppIntentsTests {
             IntentEditBridge(routerProvider: { _ in router }, makeID: { "cancel-test" })
         }
 
-        /// When the task is cancelled but the bridge reply is `.applied`, `perform()` must
-        /// fall through to the normal `ContentDialogs.editReply` path ("Edited …"), not the
-        /// cancellation dialog. This verifies Fix 4: `if Task.isCancelled, reply.status != .applied`.
-        @Test("cancelled + applied reply: perform() returns editReply dialog, not Canceled")
-        func cancelledApplied_showsEditedDialog() async throws {
+        /// Runs `perform()` in a child task, cancels it once the router has parked, then releases
+        /// the gate so the router returns `reply`. Returns the dialog's string description.
+        private static func performCancellingMidFlight(reply: EditReply) async throws -> String {
             let gate = EditCancelGate()
-            let appliedReply = EditReply(
-                id: "cancel-test",
-                status: .applied,
-                message: nil,
-                file: "src/pages/about.astro"
-            )
-            let router = GatedRouter(gate: gate, reply: appliedReply)
+            let router = GatedRouter(gate: gate, reply: reply)
             let bridge = Self.bridge(router: router)
 
             let intent = EditContentIntent()
             intent.element = Self.fixture()
             intent.instruction = "make it bigger"
 
-            // Run perform() in a child task so we can cancel it while the bridge is parked.
             let performTask: Task<String, Error> = Task {
                 let result = try await IntentEditBridgeOverride.$scoped.withValue(bridge) {
                     try await intent.perform()
                 }
-                // Extract the dialog text via string interpolation (opaque ProvidesDialog).
-                return "\(result)"
+                return "\(result)"  // opaque ProvidesDialog — interpolate to read the dialog text
             }
 
-            // Yield until the gate is parked, then cancel, then release.
-            while !(await gate.parked) { await Task.yield() }
+            // Await the parked signal (no spin-poll), then cancel mid-flight and release.
+            var parked = gate.parkedSignal.makeAsyncIterator()
+            _ = await parked.next()
             performTask.cancel()
             await gate.release()
 
-            let dialogDescription = try await performTask.value
-            // The normal edit dialog path produces "Edited h1 — Welcome in src/pages/about.astro."
-            // The ContentDialogs.editApplied helper is the expected path; verify it's NOT "Canceled".
-            #expect(!dialogDescription.lowercased().contains("cancel"),
-                    "should not say 'Canceled' when edit was applied, got: \(dialogDescription)")
+            return try await performTask.value
         }
 
-        /// When the task is cancelled and the bridge reply is NOT `.applied` (e.g. `.failed`),
-        /// `perform()` must return the cancellation dialog ("Canceled the edit to …").
-        @Test("cancelled + failed reply: perform() returns Canceled dialog")
-        func cancelledFailed_showsCanceledDialog() async throws {
-            let gate = EditCancelGate()
-            let failedReply = EditReply(
-                id: "cancel-test",
-                status: .failed,
-                message: "timed out",
-                file: nil
-            )
-            let router = GatedRouter(gate: gate, reply: failedReply)
-            let bridge = Self.bridge(router: router)
+        /// A genuine plugin failure that *coincides* with cancellation must surface the real error,
+        /// not be mislabelled "Canceled". The reply carries the actual failure message ("timed out"),
+        /// which is not the router's "canceled" sentinel — so `perform()` keys off the reply, not
+        /// `Task.isCancelled`, and reports the error.
+        @Test("genuine failure during cancellation: surfaces the error, not 'Canceled'")
+        func genuineFailureDuringCancellation_surfacesError() async throws {
+            let failedReply = EditReply(id: "cancel-test", status: .failed, message: "timed out", file: nil)
+            let dialog = try await Self.performCancellingMidFlight(reply: failedReply)
+            #expect(dialog.contains("timed out"), "should surface the real failure message, got: \(dialog)")
+            #expect(!dialog.lowercased().contains("cancel"),
+                    "must not mislabel a genuine failure as 'Canceled', got: \(dialog)")
+        }
+
+        /// An actual cancellation is self-describing: `MCPApplyEditRouter` maps it to a `.failed`
+        /// reply whose message is exactly "canceled". `perform()` recognises that and shows the
+        /// cancellation dialog.
+        @Test("canceled reply: perform() returns the Canceled dialog")
+        func canceledReply_showsCanceledDialog() async {
+            let canceledReply = EditReply(id: "cancel-test", status: .failed, message: "canceled", file: nil)
+            let bridge = Self.bridge(router: ImmediateRouter(reply: canceledReply))
 
             let intent = EditContentIntent()
             intent.element = Self.fixture()
             intent.instruction = "change the color"
 
-            let performTask: Task<String, Error> = Task {
-                let result = try await IntentEditBridgeOverride.$scoped.withValue(bridge) {
-                    try await intent.perform()
-                }
-                return "\(result)"
+            let dialog = await IntentEditBridgeOverride.$scoped.withValue(bridge) {
+                "\((try? await intent.perform()) as Any)"
             }
+            #expect(dialog.lowercased().contains("cancel"),
+                    "a 'canceled' reply should produce the Canceled dialog, got: \(dialog)")
+        }
 
-            while !(await gate.parked) { await Task.yield() }
-            performTask.cancel()
-            await gate.release()
-
-            let dialogDescription = try await performTask.value
-            // The cancellation path returns "Canceled the edit to h1 — Welcome."
-            #expect(dialogDescription.lowercased().contains("cancel"),
-                    "expected 'Canceled …' dialog for failed+cancelled, got: \(dialogDescription)")
+        /// An `.applied` reply wins even if the task was cancelled mid-flight: the edit landed, so
+        /// the user sees "Edited …", never "Canceled".
+        @Test("cancelled + applied reply: returns the Edited dialog, not Canceled")
+        func cancelledApplied_showsEditedDialog() async throws {
+            let appliedReply = EditReply(id: "cancel-test", status: .applied, message: nil, file: "src/pages/about.astro")
+            let dialog = try await Self.performCancellingMidFlight(reply: appliedReply)
+            #expect(!dialog.lowercased().contains("cancel"),
+                    "an applied edit should never read as 'Canceled', got: \(dialog)")
         }
     }
 }

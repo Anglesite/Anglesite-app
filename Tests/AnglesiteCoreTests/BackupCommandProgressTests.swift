@@ -21,6 +21,6 @@ struct BackupCommandProgressTests {
         let cmd = BackupCommand(runner: runner, streamer: streamer)
         _ = await cmd.backup(siteID: "s", siteDirectory: URL(fileURLWithPath: "/tmp/s"),
                             onProgress: { recorder.record($0) })
-        #expect(await recorder.phases() == ["staging", "committing", "pushing"])
+        #expect(recorder.phases() == ["staging", "committing", "pushing"])
     }
 }

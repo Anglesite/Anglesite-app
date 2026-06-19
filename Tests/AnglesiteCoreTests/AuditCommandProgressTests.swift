@@ -16,7 +16,7 @@ struct AuditCommandProgressTests {
         )
         _ = await cmd.audit(siteID: "s", siteDirectory: URL(fileURLWithPath: NSTemporaryDirectory()),
                             onProgress: { recorder.record($0) })
-        let phases = await recorder.phases()
+        let phases = recorder.phases()
         #expect(phases == ["building", "running", "running", "finalizing"])
     }
 }

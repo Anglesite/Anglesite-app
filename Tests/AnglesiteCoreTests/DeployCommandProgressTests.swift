@@ -18,14 +18,20 @@ struct DeployCommandProgressTests {
         )
         _ = await cmd.deploy(siteID: "s", siteDirectory: URL(fileURLWithPath: NSTemporaryDirectory()),
                              onProgress: { recorder.record($0) })
-        let phases = await recorder.phases()
+        let phases = recorder.phases()
         #expect(phases.prefix(2) == ["building", "preflightScan"])
     }
 }
 
+/// Collects `OperationProgress` from the synchronous `ProgressHandler` sink. The handler is
+/// `@Sendable (OperationProgress) -> Void` and runs inline inside the emitting actor's isolation,
+/// so it can't `await` — which rules out making this an actor (that would force `Task { await
+/// record(...) }`, and `Task` ordering is non-deterministic, breaking the phase-order assertions).
+/// A plain lock is the right tool for a synchronous concurrent sink; `record`/`phases` have no
+/// suspension points, so neither is `async`.
 final class ProgressRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var items: [OperationProgress] = []
     func record(_ p: OperationProgress) { lock.lock(); items.append(p); lock.unlock() }
-    func phases() async -> [String] { lock.lock(); defer { lock.unlock() }; return items.map(\.phase) }
+    func phases() -> [String] { lock.lock(); defer { lock.unlock() }; return items.map(\.phase) }
 }

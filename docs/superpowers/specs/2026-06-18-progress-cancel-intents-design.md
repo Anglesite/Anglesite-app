@@ -55,10 +55,18 @@ App Intents progress API.
 
 A new `Sendable` value type emitted at phase boundaries:
 
+> **Shipped scope:** edit progress was deferred. `Kind` ships as
+> `deploy, backup, audit, createContent` (no `edit`), and the `resolvingRouter`/`applying`
+> milestones below are **not** implemented — `MCPApplyEditRouter`/`EditContentIntent` have no
+> `onProgress` seam. `EditContentIntent` still gets cancellation (the documented limitation is
+> closed); only its progress *reporting* is out of scope here. Wiring edit progress end-to-end
+> (onProgress through the bridge + router) is a scoped follow-up. The original design below is
+> kept for that follow-up's reference.
+
 ```swift
 public struct OperationProgress: Sendable, Equatable {
     public enum Kind: Sendable, Equatable {
-        case deploy, backup, audit, createContent, edit
+        case deploy, backup, audit, createContent  // (`edit` deferred — see note above)
     }
     public let kind: Kind
     public let phase: String        // stable milestone id, e.g. "building"
@@ -75,7 +83,7 @@ Phases are anchored to the real code paths, not invented:
 | backup    | `staging` → `committing` → `pushing` |
 | audit     | `building` → `running` (per runner) → `finalizing` |
 | createContent | `resolvingRuntime` → `callingPlugin` → `finalizing` |
-| edit      | `resolvingRouter` → `applying` |
+| edit *(deferred)* | `resolvingRouter` → `applying` |
 
 `fraction` is populated only where a real denominator exists (e.g. audit
 runner *i of n*); otherwise `nil` (indeterminate). No fabricated percentages.

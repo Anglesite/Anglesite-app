@@ -56,7 +56,11 @@ public struct EditContentIntent: AppIntent {
             op: EditMessage.Op.applyInstruction,
             value: .string(instruction)
         )
-        if Task.isCancelled, reply.status != .applied {
+        // Cancellation is self-describing: `MCPApplyEditRouter` maps an interrupted edit to a
+        // `.failed` reply whose message is exactly "canceled". Key off that, not `Task.isCancelled`
+        // — otherwise a *genuine* plugin failure that merely coincides with cancellation would be
+        // mislabelled "Canceled" and the real error swallowed.
+        if reply.status == .failed, reply.message == "canceled" {
             return .result(dialog: IntentDialog(stringLiteral: "Canceled the edit to \(element.displayName)."))
         }
         let dialog = ContentDialogs.editReply(reply, displayName: element.displayName)

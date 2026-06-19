@@ -122,7 +122,10 @@ public extension OperationProgress {
 
     static let auditBuilding = OperationProgress(kind: .audit, phase: "building", label: "Building site…")
     static func auditRunning(category: String, index: Int, of total: Int) -> OperationProgress {
-        let fraction = total > 0 ? Double(index + 1) / Double(total) : nil
+        // Denominator is `total + 1` so the running phase never reaches 1.0 while runners are
+        // still executing — the reserved slice lets the terminal `auditFinalizing` step own
+        // completion.
+        let fraction = total > 0 ? Double(index + 1) / Double(total + 1) : nil
         return OperationProgress(kind: .audit, phase: "running", label: "Checking \(category)…", fraction: fraction)
     }
     static let auditFinalizing = OperationProgress(kind: .audit, phase: "finalizing", label: "Summarizing findings…")

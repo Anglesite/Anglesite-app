@@ -52,6 +52,11 @@ public struct MCPApplyEditRouter: EditRouter {
     }
 
     public func apply(_ message: EditMessage) async -> EditReply {
+        // Pre-call cancellation checkpoint. In production this is belt-and-suspenders — the real
+        // `toolCaller` routes through `MCPClient.callTool`, which checks cancellation itself and
+        // throws `CancellationError` (handled by the catch below). It's load-bearing only for the
+        // test seam, where a fake `toolCaller` with no cancellation awareness is injected; this
+        // guard is then the single checkpoint that turns a pre-call cancel into a "canceled" reply.
         if Task.isCancelled {
             return EditReply(id: message.id, status: .failed, message: "canceled")
         }

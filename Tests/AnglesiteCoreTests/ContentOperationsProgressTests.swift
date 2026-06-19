@@ -12,6 +12,6 @@ struct ContentOperationsProgressTests {
         let result = await ops.createPage(siteID: "ghost", name: "About", route: nil,
                                           onProgress: { recorder.record($0) })
         #expect(result == .siteNotFound)
-        #expect(await recorder.phases().first == "resolvingRuntime")
+        #expect(recorder.phases().first == "resolvingRuntime")
     }
 }
