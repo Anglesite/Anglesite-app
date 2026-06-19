@@ -113,6 +113,23 @@ extension AppIntentsTests {
             #expect(await router.received.isEmpty, "bridge must not be called when selector won't decode")
         }
 
+        @Test("perform still routes under test scope after the confirmation gate is added")
+        func perform_gateSkippedUnderTestScope() async throws {
+            let router = RecordingRouter(reply: EditReply(
+                id: "fixed", status: .applied, message: nil, file: "src/pages/about.astro"
+            ))
+            let intent = EditContentIntent()
+            intent.element = Self.fixture()
+            intent.instruction = "make it shorter"
+
+            // IntentEditBridgeOverride.scoped is set, so the confirmation prompt is skipped
+            // (it has no UI surface in tests) and the edit routes as before.
+            try await IntentEditBridgeOverride.$scoped.withValue(Self.bridge(router: router)) {
+                _ = try await intent.perform()
+            }
+            #expect(await router.received.count == 1, "test-scoped edit must route past the confirmation gate")
+        }
+
         @Test("perform routes per the element's siteID, not a global default")
         func perform_routesPerElementSiteID() async throws {
             actor SpyProvider {

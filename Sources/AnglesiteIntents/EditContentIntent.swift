@@ -43,10 +43,23 @@ public struct EditContentIntent: AppIntent {
     }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
-        let resolved = IntentEditBridgeOverride.scoped ?? bridge
+        let scoped = IntentEditBridgeOverride.scoped
+        let resolved = scoped ?? bridge
         guard let selector = element.selectorJSON() else {
             return .result(dialog: IntentDialog(stringLiteral: ContentDialogs.editInvalidSelector(
                 displayName: element.displayName
+            )))
+        }
+        // #239: Siri must review the edit before it mutates source files. Confirm after the
+        // target is resolved (so the summary names the element/page) and before routing (so a
+        // decline leaves the working tree untouched — `perform` exits here, never calling the
+        // bridge). Skipped under test scope, which has no UI surface — same pattern as the
+        // Site intents' `SiteOperationsOverride.scoped` guard around `requestConfirmation`.
+        if scoped == nil {
+            try await requestConfirmation(dialog: IntentDialog(stringLiteral: ContentDialogs.editConfirmation(
+                displayName: element.displayName,
+                pagePath: element.pagePath,
+                instruction: instruction
             )))
         }
         let reply = await resolved.applyEdit(
