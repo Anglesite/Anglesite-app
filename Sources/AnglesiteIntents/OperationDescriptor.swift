@@ -41,12 +41,18 @@ public struct OperationDescriptor: Sendable, Equatable {
     }
 }
 
-/// Mutation risk to a site's content *source* — what drives confirmation decisions. Operations that
-/// spawn subprocesses but don't touch site source (audit, preview, status, search) are `.readOnly`.
+/// An operation's write reach — what drives confirmation and risk decisions. Operations that read
+/// or spawn subprocesses but persist nothing to the site or its repository (audit, preview, status,
+/// search) are `.readOnly`.
 public enum OperationSideEffect: Sendable, Equatable {
+    /// No persisted writes to the site or its repository.
     case readOnly
+    /// Adds a new artifact without altering existing site source — a new page/post, or a backup
+    /// commit/snapshot pushed to a draft branch. Additive and reversible.
     case createsContent
+    /// Alters existing site source in place (edit).
     case modifiesContent
+    /// Pushes the site outward to production (deploy).
     case publishes
 }
 
@@ -67,8 +73,10 @@ public enum AnglesiteOperations {
             resultShape: .entity("SiteEntity")
         ),
         OperationDescriptor(
+            // `.createsContent`: backup is `git add -A` → commit → push to a draft branch — it
+            // snapshots the working tree outward, it does not alter existing site source in place.
             operationID: "backup-site", displayName: "Back Up Site",
-            intentTypeName: "BackupSiteIntent", sideEffect: .modifiesContent,
+            intentTypeName: "BackupSiteIntent", sideEffect: .createsContent,
             requiresConfirmation: false, isCancellable: true,
             resultShape: .entity("SiteEntity")
         ),
@@ -115,6 +123,9 @@ public enum AnglesiteOperations {
             resultShape: .entity("PostEntity")
         ),
         OperationDescriptor(
+            // TODO(#239/#250): flip `requiresConfirmation` to true when the EditContentIntent
+            // confirmation gate lands. Whichever of this PR and #250 merges second must update
+            // this line and the `declaredFields` value table — the test passes on stale data.
             operationID: "edit-content", displayName: "Edit Content",
             intentTypeName: "EditContentIntent", sideEffect: .modifiesContent,
             requiresConfirmation: false, isCancellable: true,

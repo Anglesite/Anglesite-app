@@ -59,10 +59,10 @@ public struct OperationDescriptor: Sendable, Equatable {
 }
 
 public enum OperationSideEffect: Sendable {
-    case readOnly        // does not mutate site source
-    case createsContent  // adds new files (pages, posts)
-    case modifiesContent // changes existing files / local state (backup, edit)
-    case publishes       // pushes to production (deploy)
+    case readOnly        // no persisted writes to the site or its repository
+    case createsContent  // adds a new artifact without altering existing source (page/post; backup snapshot)
+    case modifiesContent // alters existing site source in place (edit)
+    case publishes       // pushes the site outward to production (deploy)
 }
 
 public enum OperationResult: Sendable, Equatable {
@@ -89,7 +89,7 @@ canonical source of truth. Classification of the 10 current operations:
 | operationID | intent | sideEffect | confirm | cancellable | result |
 |---|---|---|---|---|---|
 | `deploy-site` | `DeploySiteIntent` | `publishes` | **true** | true | `.entity("SiteEntity")` |
-| `backup-site` | `BackupSiteIntent` | `modifiesContent` | false | true | `.entity("SiteEntity")` |
+| `backup-site` | `BackupSiteIntent` | `createsContent` | false | true | `.entity("SiteEntity")` |
 | `audit-site` | `AuditSiteIntent` | `readOnly` | false | true | `.entity("SiteEntity")` |
 | `open-site` | `OpenSiteIntent` | `readOnly` | false | false | `.none` |
 | `search-content` | `SearchContentIntent` | `readOnly` | false | false | `.entities("ContentMatchEntity")` |

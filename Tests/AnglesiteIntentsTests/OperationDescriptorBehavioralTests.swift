@@ -12,19 +12,8 @@ import AppIntents
 extension AppIntentsTests {
     @Suite("OperationDescriptors.Behavioral", .serialized)
     struct OperationDescriptorBehavioralTests {
-        /// Records create calls so a content intent's routing/mutation can be asserted.
-        final class RoutingContentOps: ContentOperationsService, @unchecked Sendable {
-            private(set) var pageCalls = 0
-            private(set) var postCalls = 0
-            func createPage(siteID: String, name: String, route: String?) async -> ContentCreateResult {
-                pageCalls += 1
-                return .created(filePath: "src/pages/x.astro", identifier: "/x")
-            }
-            func createPost(siteID: String, title: String, collection: String?, slug: String?) async -> ContentCreateResult {
-                postCalls += 1
-                return .created(filePath: "src/content/posts/x.md", identifier: "x")
-            }
-        }
+        // Content-create routing is asserted with the shared `FakeContentOps`
+        // (`Support/FakeContentOps.swift`) via `.pageCalls.count` / `.postCalls.count`.
 
         /// Records edit-bridge calls.
         actor RoutingRouter: EditRouter {
@@ -91,28 +80,28 @@ extension AppIntentsTests {
 
         @Test("add-page routes to createPage (createsContent)")
         func addPageMutates() async throws {
-            let fake = RoutingContentOps()
+            let fake = FakeContentOps()
             try await ContentOperationsOverride.$scoped.withValue(fake) {
                 var intent = AddPageIntent()
                 intent.site = Self.site()
                 intent.name = "X"
                 _ = try await intent.perform()
             }
-            #expect(fake.pageCalls == 1)
-            #expect(fake.postCalls == 0)
+            #expect(fake.pageCalls.count == 1)
+            #expect(fake.postCalls.isEmpty)
         }
 
         @Test("add-post routes to createPost (createsContent)")
         func addPostMutates() async throws {
-            let fake = RoutingContentOps()
+            let fake = FakeContentOps()
             try await ContentOperationsOverride.$scoped.withValue(fake) {
                 var intent = AddPostIntent()
                 intent.site = Self.site()
                 intent.title2 = "Hello"
                 _ = try await intent.perform()
             }
-            #expect(fake.postCalls == 1)
-            #expect(fake.pageCalls == 0)
+            #expect(fake.postCalls.count == 1)
+            #expect(fake.pageCalls.isEmpty)
         }
 
         @Test("edit-content routes to the edit bridge (modifiesContent)")
@@ -140,9 +129,10 @@ extension AppIntentsTests {
             #expect(await router.received == 1)
         }
 
-        @Test("read intents (search, status) perform no content mutation")
+        @Test("read intents (search, status) perform no content or site mutation")
         func readsDoNotMutate() async throws {
-            let createFake = RoutingContentOps()
+            let createFake = FakeContentOps()
+            let siteFake = FakeOperations()
             let graph = SiteContentGraph()
             await graph.load(
                 siteID: AppIntentsTests.aSite,
@@ -150,20 +140,27 @@ extension AppIntentsTests {
                 posts: [],
                 images: []
             )
-            try await ContentOperationsOverride.$scoped.withValue(createFake) {
-                try await ContentGraphOverride.$scoped.withValue(graph) {
-                    var search = SearchContentIntent()
-                    search.site = Self.site()
-                    search.query = "about"
-                    _ = try await search.perform()
+            try await SiteOperationsOverride.$scoped.withValue(siteFake) {
+                try await ContentOperationsOverride.$scoped.withValue(createFake) {
+                    try await ContentGraphOverride.$scoped.withValue(graph) {
+                        var search = SearchContentIntent()
+                        search.site = Self.site()
+                        search.query = "about"
+                        _ = try await search.perform()
 
-                    var status = SiteStatusIntent()
-                    status.site = Self.site()
-                    _ = try await status.perform()
+                        var status = SiteStatusIntent()
+                        status.site = Self.site()
+                        _ = try await status.perform()
+                    }
                 }
             }
-            #expect(createFake.pageCalls == 0)
-            #expect(createFake.postCalls == 0)
+            // No content created...
+            #expect(createFake.pageCalls.isEmpty)
+            #expect(createFake.postCalls.isEmpty)
+            // ...and no site op (deploy/backup/audit) accidentally invoked either.
+            #expect(siteFake.deployCalls.isEmpty)
+            #expect(siteFake.backupCalls.isEmpty)
+            #expect(siteFake.auditCalls.isEmpty)
         }
     }
 }
