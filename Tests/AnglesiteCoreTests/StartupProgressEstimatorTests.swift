@@ -152,4 +152,14 @@ struct StartupProgressEstimatorTests {
         est.ingest(logText: "building", at: 0.2)
         #expect(est.completedProfile == nil)
     }
+
+    @Test(".failed after ready does not clobber the completed bar")
+    func failedAfterReadyIgnored() {
+        var est = make()
+        est.ingest(runtimeState: .starting(siteID: "s"), at: 0)
+        est.ingest(runtimeState: .ready(siteID: "s", url: URL(string: "http://x/")!), at: 1.0)
+        est.ingest(runtimeState: .failed(siteID: "s", message: "died"), at: 1.5)
+        #expect(est.phase == .ready)
+        #expect(est.fraction == 1.0)
+    }
 }

@@ -11,6 +11,9 @@ public enum StartupPhase: String, Sendable, Equatable, CaseIterable {
     case failed
 
     /// Forward-only ordering. The estimator only ever advances to a higher-ranked active phase.
+    /// Note: `.failed` and `.idle` are reset directly in `ingest(runtimeState:)` and never reached
+    /// through the forward-only `enter(_:at:)`, so their rank ordering relative to `.ready` is not
+    /// load-bearing.
     var rank: Int {
         switch self {
         case .idle:       return 0
@@ -64,6 +67,7 @@ public struct StartupProgressEstimator: Sendable, Equatable {
     /// How sharply the fill approaches the cap. At `elapsed == expectedSegment` the bar is ~92% of
     /// the way across the band; it asymptotes to (but never reaches) the cap thereafter.
     private static let easeK = 2.5
+    private static let fractionEpsilon = 0.0001
 
     public init(profile: StartupProfile = .default) {
         self.profile = profile
@@ -99,9 +103,13 @@ public struct StartupProgressEstimator: Sendable, Equatable {
         case .ready:
             enter(.ready, at: now)
         case .failed:
+            // A crash *after* a successful start is a runtime concern, not a startup one — the
+            // error pane handles it; don't clobber the completed bar.
+            guard phase != .ready else { return }
             phase = .failed
             fraction = 0
         case .idle:
+            guard phase != .ready else { return }
             phase = .idle
             fraction = 0
             anchorTimes = [:]
@@ -129,7 +137,7 @@ public struct StartupProgressEstimator: Sendable, Equatable {
         let eased = 1 - exp(-Self.easeK * r)               // 0 at r=0, →1, never 1
         let target = start + (cap - start) * eased
         // Monotonic, and strictly below the cap so only a real anchor can cross into the next band.
-        fraction = min(max(fraction, target), cap - 0.0001)
+        fraction = min(max(fraction, target), cap - Self.fractionEpsilon)
     }
 
     // MARK: - Internals
