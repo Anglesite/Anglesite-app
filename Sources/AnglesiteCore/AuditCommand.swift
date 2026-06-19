@@ -111,6 +111,9 @@ public actor AuditCommand {
             }
         }
 
+        if Task.isCancelled {
+            return .failed(reason: "audit canceled", exitCode: nil, logTail: [])
+        }
         onProgress?(.auditFinalizing)
         let report = AuditReport(findings: findings, runnersExecuted: executed, runnersSkipped: skipped)
         return .succeeded(report: report, duration: Date().timeIntervalSince(started))

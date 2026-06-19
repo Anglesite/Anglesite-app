@@ -57,7 +57,7 @@ public struct DeploySiteIntent: AppIntent {
             let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
                 await ops.deploy(site: resolved, onProgress: onProgress)
-            } onCancel: { _ in }
+            } onCancel: { _ in }  // task cancellation propagates automatically through structured concurrency; no extra cleanup needed
             #else
             result = await ops.deploy(site: resolved)
             #endif
@@ -98,7 +98,7 @@ public struct BackupSiteIntent: AppIntent {
             let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
                 await ops.backup(site: resolved, onProgress: onProgress)
-            } onCancel: { _ in }
+            } onCancel: { _ in }  // task cancellation propagates automatically through structured concurrency; no extra cleanup needed
             #else
             result = await ops.backup(site: resolved)
             #endif
@@ -138,7 +138,7 @@ public struct AuditSiteIntent: AppIntent {
             let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
                 await ops.audit(site: resolved, onProgress: onProgress)
-            } onCancel: { _ in }
+            } onCancel: { _ in }  // task cancellation propagates automatically through structured concurrency; no extra cleanup needed
             #else
             result = await ops.audit(site: resolved)
             #endif

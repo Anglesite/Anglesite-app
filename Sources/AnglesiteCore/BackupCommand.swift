@@ -128,7 +128,7 @@ public actor BackupCommand {
                 return .failed(reason: "`git status` exited \(result.exitCode)", exitCode: result.exitCode)
             }
             if result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return await pushPendingCommitsIfAhead(branch: branch, remoteURL: remoteURL, in: siteDirectory, source: source)
+                return await pushPendingCommitsIfAhead(branch: branch, remoteURL: remoteURL, in: siteDirectory, source: source, onProgress: onProgress)
             }
         } catch {
             return .failed(reason: "couldn't run `git status`: \(error)", exitCode: nil)
@@ -142,10 +142,7 @@ public actor BackupCommand {
         if let failure = await streamGit(["add", "-A"], in: siteDirectory, source: source, label: "git add") {
             return failure
         }
-        // Note: cancelling AFTER a successful commit but before push leaves a local
-        // commit; a later backup sees a clean tree (.noChanges) and won't push it.
-        // Acceptable — the commit is safe in the local repo (Git is the source of truth);
-        // detecting "ahead of origin with nothing to commit" and pushing is a follow-up.
+        // Note: cancelling after commit but before push leaves a local commit; the next backup detects it (ahead of origin with a clean tree) and pushes it — see `pushPendingCommitsIfAhead` (#246).
         if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
         onProgress?(.backupCommitting)
         let commitMessage = "Backup \(Self.iso8601Formatter.string(from: clock()))"
@@ -207,7 +204,8 @@ public actor BackupCommand {
         branch: String,
         remoteURL: String,
         in siteDirectory: URL,
-        source: String
+        source: String,
+        onProgress: ProgressHandler?
     ) async -> Result {
         let aheadCount: Int
         do {
@@ -236,6 +234,7 @@ public actor BackupCommand {
         // error and push anyway) actually short-circuits, matching the step-level guards the
         // normal add→commit→push path gets from the cancellation work (#238).
         if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
+        onProgress?(.backupPushing)
         if let failure = await streamGit(["push", "origin", branch], in: siteDirectory, source: source, label: "git push") {
             return failure
         }

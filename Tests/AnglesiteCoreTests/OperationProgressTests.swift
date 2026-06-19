@@ -11,7 +11,6 @@ struct OperationProgressTests {
         #expect(OperationProgress.backupPushing.kind == .backup)
         #expect(OperationProgress.auditFinalizing.phase == "finalizing")
         #expect(OperationProgress.createCallingPlugin.kind == .createContent)
-        #expect(OperationProgress.editApplying.kind == .edit)
     }
 
     @Test("auditRunning computes a determinate fraction")
@@ -19,7 +18,8 @@ struct OperationProgressTests {
         let p = OperationProgress.auditRunning(category: "accessibility", index: 0, of: 2)
         #expect(p.kind == .audit)
         #expect(p.phase == "running")
-        #expect(p.fraction == 0.5)
+        // index 0 of 2: (0+1)/(2+1) = 1/3; never reaches 1.0 during a running milestone
+        #expect(p.fraction == 1.0 / 3.0)
         #expect(p.label.contains("accessibility"))
     }
 

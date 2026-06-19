@@ -56,7 +56,7 @@ public struct EditContentIntent: AppIntent {
             op: EditMessage.Op.applyInstruction,
             value: .string(instruction)
         )
-        if Task.isCancelled {
+        if Task.isCancelled, reply.status != .applied {
             return .result(dialog: IntentDialog(stringLiteral: "Canceled the edit to \(element.displayName)."))
         }
         let dialog = ContentDialogs.editReply(reply, displayName: element.displayName)

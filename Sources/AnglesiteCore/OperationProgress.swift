@@ -9,7 +9,7 @@ import Foundation
 /// `nil` (indeterminate) — never a fabricated percentage.
 public struct OperationProgress: Sendable, Equatable {
     public enum Kind: String, Sendable, Equatable {
-        case deploy, backup, audit, createContent, edit
+        case deploy, backup, audit, createContent
     }
 
     public let kind: Kind
@@ -46,7 +46,7 @@ public extension OperationProgress {
 
     static let auditBuilding = OperationProgress(kind: .audit, phase: "building", label: "Building site…")
     static func auditRunning(category: String, index: Int, of total: Int) -> OperationProgress {
-        let fraction = total > 0 ? Double(index + 1) / Double(total) : nil
+        let fraction = total > 0 ? Double(index + 1) / Double(total + 1) : nil
         return OperationProgress(kind: .audit, phase: "running", label: "Checking \(category)…", fraction: fraction)
     }
     static let auditFinalizing = OperationProgress(kind: .audit, phase: "finalizing", label: "Summarizing findings…")
@@ -55,6 +55,4 @@ public extension OperationProgress {
     static let createCallingPlugin = OperationProgress(kind: .createContent, phase: "callingPlugin", label: "Creating content…")
     static let createFinalizing = OperationProgress(kind: .createContent, phase: "finalizing", label: "Finishing up…")
 
-    static let editResolvingRouter = OperationProgress(kind: .edit, phase: "resolvingRouter", label: "Locating the page…")
-    static let editApplying = OperationProgress(kind: .edit, phase: "applying", label: "Applying the edit…")
 }

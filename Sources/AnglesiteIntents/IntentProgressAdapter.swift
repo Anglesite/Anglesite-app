@@ -32,11 +32,12 @@ enum IntentProgressAdapter {
                 progress.localizedDescription = label
                 if let fraction {
                     progress.totalUnitCount = 100
-                    progress.completedUnitCount = Int64((fraction * 100).rounded())
+                    progress.completedUnitCount = Int64((min(1.0, max(0.0, fraction)) * 100).rounded())
                 } else {
-                    // Indeterminate: a 0 total count keeps the system bar in its
-                    // spinner/indeterminate state rather than showing a stale fraction.
-                    progress.totalUnitCount = 0
+                    // Foundation.Progress treats a NEGATIVE totalUnitCount as indeterminate; reset the
+                    // completed count too so a prior determinate step doesn't leave the bar reading "complete".
+                    progress.completedUnitCount = 0
+                    progress.totalUnitCount = -1
                 }
             }
         }

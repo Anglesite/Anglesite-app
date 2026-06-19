@@ -198,6 +198,7 @@ final class DeployModel {
                 }
             },
             onProgress: { [weak self] progress in
+                // last-write-wins: each milestone fully replaces the label, so out-of-order delivery across these hops is benign
                 Task { @MainActor in self?.currentMilestone = progress.label }
             }
         )

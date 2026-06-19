@@ -328,7 +328,7 @@ public actor MCPClient {
             // The awaiting task was cancelled. Resolve the pending continuation with Swift's
             // CancellationError (decision (b) — no MCPError.cancelled). If the response already
             // arrived, `failPending` finds no entry and no-ops, preserving single-resume.
-            Task { [weak self] in await self?.failPending(id: id, error: CancellationError()) }
+            Task { [self] in await self.failPending(id: id, error: CancellationError()) }
         }
     }
 

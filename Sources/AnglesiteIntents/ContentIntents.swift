@@ -174,7 +174,7 @@ public struct AddPageIntent: AppIntent {
             let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
                 await svc.createPage(siteID: site.id, name: name, route: route, onProgress: onProgress)
-            } onCancel: { _ in }
+            } onCancel: { _ in }  // task cancellation propagates automatically through structured concurrency; no extra cleanup needed
             #else
             result = await svc.createPage(siteID: site.id, name: name, route: route)
             #endif
@@ -236,7 +236,7 @@ public struct AddPostIntent: AppIntent {
             let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
                 await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug, onProgress: onProgress)
-            } onCancel: { _ in }
+            } onCancel: { _ in }  // task cancellation propagates automatically through structured concurrency; no extra cleanup needed
             #else
             result = await svc.createPost(siteID: site.id, title: title2, collection: collection, slug: slug)
             #endif
@@ -301,7 +301,10 @@ public enum ContentDialogs {
 
     /// Friendly dialog for a Siri/Shortcuts cancellation of a create operation.
     public static func canceled(kind: CreateKind, siteName: String) -> String {
-        "Canceled adding the \(kind == .page ? "page" : "post") to \(siteName)."
+        switch kind {
+        case .page: return "Canceled adding the page to \(siteName)."
+        case .post: return "Canceled adding the post to \(siteName)."
+        }
     }
 
     public static func created(_ result: ContentCreateResult, kind: CreateKind, siteName: String) -> String {

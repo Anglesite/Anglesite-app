@@ -166,7 +166,7 @@ public actor DeployCommand {
         // `waitForExit` only resumes after the supervisor's per-pipe drain Tasks have
         // finished — every byte wrangler wrote to stdout/stderr is in `LogCenter` by
         // the time we get here, so the snapshot can't miss the `Published` line.
-        onProgress?(.deployFinalizing)
+        if !Task.isCancelled { onProgress?(.deployFinalizing) }
         let snapshot = await logCenter.snapshot()
         let stdout = snapshot
             .filter { $0.source == source && $0.stream == .stdout }

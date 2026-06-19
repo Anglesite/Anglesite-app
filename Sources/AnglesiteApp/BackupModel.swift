@@ -79,6 +79,7 @@ final class BackupModel {
             onProgress: { [weak self] progress in
                 // The callback fires inside BackupCommand's actor isolation; hop to
                 // MainActor before touching our @Observable state.
+                // last-write-wins: each milestone fully replaces the label, so out-of-order delivery across these hops is benign
                 Task { @MainActor in self?.currentMilestone = progress.label }
             }
         )

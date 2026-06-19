@@ -19,8 +19,10 @@ struct AuditCommandCancellationTests {
         )
         let task = Task { await cmd.audit(siteID: "s", siteDirectory: URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)) }
         await holder.hold(task)
-        _ = await task.value
+        let result = await task.value
         #expect(await counter.value == 1)   // only the first runner ran
+        // A cancelled audit must return .failed, not .succeeded with a partial report
+        #expect(result == .failed(reason: "audit canceled", exitCode: nil, logTail: []))
     }
 }
 
