@@ -97,8 +97,10 @@ public actor BackupCommand {
         }
 
         // 2. Remote — refuse when `origin` isn't configured. `git remote get-url`
-        // exits non-zero with an empty stdout when the remote doesn't exist.
-        let remote: String
+        // exits non-zero with an empty stdout when the remote doesn't exist. This is the
+        // remote *URL*; the git operations below address the remote by name (`origin`), so the
+        // URL is only carried through to the `.succeeded` result for the caller's reference.
+        let remoteURL: String
         do {
             let result = try await runner(siteDirectory, ["remote", "get-url", "origin"])
             guard result.exitCode == 0 else {
@@ -107,8 +109,8 @@ public actor BackupCommand {
                     exitCode: nil
                 )
             }
-            remote = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !remote.isEmpty else {
+            remoteURL = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !remoteURL.isEmpty else {
                 return .failed(reason: "the `origin` remote is configured but empty.", exitCode: nil)
             }
         } catch {
@@ -126,7 +128,7 @@ public actor BackupCommand {
                 return .failed(reason: "`git status` exited \(result.exitCode)", exitCode: result.exitCode)
             }
             if result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return await pushPendingCommitsIfAhead(branch: branch, remote: remote, in: siteDirectory, source: source)
+                return await pushPendingCommitsIfAhead(branch: branch, remoteURL: remoteURL, in: siteDirectory, source: source)
             }
         } catch {
             return .failed(reason: "couldn't run `git status`: \(error)", exitCode: nil)
@@ -156,7 +158,7 @@ public actor BackupCommand {
             return failure
         }
 
-        return .succeeded(commitSHA: sha, branch: branch, remote: remote)
+        return .succeeded(commitSHA: sha, branch: branch, remote: remoteURL)
     }
 
     // MARK: - Helpers
@@ -193,7 +195,7 @@ public actor BackupCommand {
     /// and preserve the historical `.noChanges` rather than erroring or pushing blindly.
     private func pushPendingCommitsIfAhead(
         branch: String,
-        remote: String,
+        remoteURL: String,
         in siteDirectory: URL,
         source: String
     ) async -> Result {
@@ -219,10 +221,15 @@ public actor BackupCommand {
             return .failed(reason: "couldn't read commit SHA: \(error)", exitCode: nil)
         }
 
+        // Bail before the push if the task was cancelled during the rev-list/rev-parse hops.
+        // `Task.isCancelled` (not `try? Task.checkCancellation()` — which would swallow the
+        // error and push anyway) actually short-circuits, matching the step-level guards the
+        // normal add→commit→push path gets from the cancellation work (#238).
+        if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
         if let failure = await streamGit(["push", "origin", branch], in: siteDirectory, source: source, label: "git push") {
             return failure
         }
-        return .succeeded(commitSHA: sha, branch: branch, remote: remote)
+        return .succeeded(commitSHA: sha, branch: branch, remote: remoteURL)
     }
 
     /// ISO-8601 timestamps in commit messages so they sort correctly under `git log` and

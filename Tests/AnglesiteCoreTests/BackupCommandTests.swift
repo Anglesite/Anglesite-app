@@ -137,6 +137,47 @@ struct BackupCommandTests {
         #expect(pushed.snapshot() == ["push"], "expected a single push of the pending commit, got \(pushed.snapshot())")
     }
 
+    @Test("Cancelling during the clean-but-ahead path prevents the pending push")
+    func cancelPreventsPendingPush() async {
+        // Park at the first git call until the test has captured the task handle, so the cancel
+        // lands deterministically before the push guard — no reliance on scheduling races.
+        let pushed = LockedSourceList()
+        let holder = CancelHolder()
+        let runner: BackupCommand.GitRunner = { _, args in
+            switch args.first {
+            case "status":   return .init(stdout: "", stderr: "", exitCode: 0)  // clean tree
+            case "remote":   return .init(stdout: "git@github.com:owner/site.git\n", stderr: "", exitCode: 0)
+            case "rev-list":
+                await holder.cancelSelf()  // task is held by now → cancels before the push guard
+                return .init(stdout: "1\n", stderr: "", exitCode: 0)
+            case "rev-parse":
+                if args.contains("--is-inside-work-tree") {
+                    await holder.awaitHeld()  // step 0 — park until the handle is stored
+                    return .init(stdout: "true\n", stderr: "", exitCode: 0)
+                }
+                if args.contains("--abbrev-ref") {
+                    return .init(stdout: "draft\n", stderr: "", exitCode: 0)
+                }
+                return .init(stdout: "abc1234\n", stderr: "", exitCode: 0)
+            default:
+                return .init(stdout: "", stderr: "unmocked", exitCode: 1)
+            }
+        }
+        let cmd = makeCommand(runner: runner, streamer: { _, args, _ in pushed.add(args.first ?? ""); return (0, "") })
+
+        let task = Task { await cmd.backup(siteID: "site", siteDirectory: tmpDir) }
+        await holder.hold(task)
+        let result = await task.value
+
+        guard case .failed(let reason, let exit) = result else {
+            Issue.record("expected .failed on cancellation, got \(result)")
+            return
+        }
+        #expect(reason.contains("canceled"), "reason should name the cancellation: \(reason)")
+        #expect(exit == nil, "cancellation is pre-spawn for the push — no exit code")
+        #expect(pushed.snapshot().isEmpty, "must not push the pending commit once cancelled, got \(pushed.snapshot())")
+    }
+
     // MARK: Main-branch refusal
 
     @Test("Refuses when current branch is main")
@@ -330,4 +371,27 @@ private final class LockedSourceList: @unchecked Sendable {
     private var values: [String] = []
     func add(_ v: String) { lock.lock(); values.append(v); lock.unlock() }
     func snapshot() -> [String] { lock.lock(); defer { lock.unlock() }; return values }
+}
+
+/// Lets a test cancel the very `backup()` task it's awaiting, deterministically: the runner
+/// parks at the first git call via `awaitHeld()` until the test stores the handle with `hold(_:)`,
+/// then a later runner step calls `cancelSelf()` to cancel before the push guard is reached.
+private actor CancelHolder {
+    private var task: Task<BackupCommand.Result, Never>?
+    private var held = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func hold(_ t: Task<BackupCommand.Result, Never>) {
+        task = t
+        held = true
+        waiter?.resume()
+        waiter = nil
+    }
+
+    func awaitHeld() async {
+        if held { return }
+        await withCheckedContinuation { waiter = $0 }
+    }
+
+    func cancelSelf() { task?.cancel() }
 }
