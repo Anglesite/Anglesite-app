@@ -32,6 +32,9 @@ private actor SpySummarizer: DeployFailureSummarizing {
             logText: "✘ [ERROR] Could not resolve \"./x\"", siteID: "s", siteDirectory: dir, using: spy
         )
         #expect(result == expected)
-        #expect(await spy.receivedLog?.contains("Could not resolve") == true)
+        // Assert the summarizer received the *digest*, not the raw log — so a future
+        // DeployLogDigest change that dropped the error line would fail here.
+        let rawLog = "✘ [ERROR] Could not resolve \"./x\""
+        #expect(await spy.receivedLog == DeployLogDigest.extract(from: rawLog))
     }
 }
