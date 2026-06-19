@@ -10,7 +10,8 @@ import Foundation
 /// 2. Siri fills `EditContentIntent`'s parameters with the entity + the user's spoken phrase
 ///    ("make it bigger", "change the color to teal", …).
 /// 3. `perform()` decodes the entity's stored selector back into a structured `JSONValue`,
-///    builds an `EditMessage`, and routes it via `IntentEditBridge` →
+///    confirms the change with the user (#239 — review before mutating source files; skipped
+///    under test scope), then builds an `EditMessage` and routes it via `IntentEditBridge` →
 ///    `EditRouterRegistry.shared` → the open window's `MCPApplyEditRouter` → plugin
 ///    `apply_edit` MCP tool.
 /// 4. Plugin interprets the instruction (the natural-language op is the plugin's responsibility,
