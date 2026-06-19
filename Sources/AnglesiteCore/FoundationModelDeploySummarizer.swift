@@ -1,0 +1,55 @@
+import Foundation
+
+/// Chooses the deploy-failure summarizer for the current toolchain. Non-gated so `DeployModel`
+/// can default its dependency without importing FoundationModels.
+public enum DeploySummarizerFactory {
+    public static func makeDefault() -> any DeployFailureSummarizing {
+        #if compiler(>=6.4)
+        return FoundationModelDeploySummarizer()
+        #else
+        return NoopDeploySummarizer()
+        #endif
+    }
+}
+
+#if compiler(>=6.4)
+import FoundationModels
+
+/// On-device summarizer: runs the digested failure log through the macOS 27 model via guided
+/// generation, then maps the result to the non-gated `DeployFailureSummary`. Any failure —
+/// including `AssistantError.unavailable` when Apple Intelligence is off — collapses to `nil`
+/// so the caller falls back to showing the raw log.
+public struct FoundationModelDeploySummarizer: DeployFailureSummarizing {
+    public init() {}
+
+    public func summarize(failureLog: String, siteID: String, siteDirectory: URL) async -> DeployFailureSummary? {
+        guard !failureLog.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let context = AssistantContext(siteID: siteID, siteDirectory: siteDirectory)
+        do {
+            let generated = try await FoundationModelAssistant(tier: .onDevice).generateStructured(
+                prompt: Self.prompt(for: failureLog),
+                context: context,
+                resultType: GeneratedDeployFailureSummary.self
+            )
+            return DeployFailureSummary(
+                summary: generated.summary,
+                likelyCause: generated.likelyCause,
+                suggestedFix: generated.suggestedFix
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    static func prompt(for log: String) -> String {
+        """
+        A website deploy to Cloudflare failed. Read the deploy log below and explain the failure \
+        for a non-expert site owner. Be concise and specific to this log — do not invent details \
+        that are not present in the log.
+
+        Deploy log:
+        \(log)
+        """
+    }
+}
+#endif
