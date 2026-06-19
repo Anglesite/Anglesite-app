@@ -10,21 +10,8 @@ extension AppIntentsTests {
     @Suite("ContentIntents")
     @MainActor
     struct ContentIntentsTests {
-        // MARK: Fake create service
-
-        final class FakeContentOps: ContentOperationsService, @unchecked Sendable {
-            var pageResult: ContentCreateResult = .created(filePath: "src/pages/x.astro", identifier: "/x")
-            var postResult: ContentCreateResult = .created(filePath: "src/content/posts/x.md", identifier: "x")
-            private(set) var pageCalls: [(siteID: String, name: String, route: String?)] = []
-            private(set) var postCalls: [(siteID: String, title: String, collection: String?, slug: String?)] = []
-
-            func createPage(siteID: String, name: String, route: String?, onProgress: ProgressHandler?) async -> ContentCreateResult {
-                pageCalls.append((siteID, name, route)); return pageResult
-            }
-            func createPost(siteID: String, title: String, collection: String?, slug: String?, onProgress: ProgressHandler?) async -> ContentCreateResult {
-                postCalls.append((siteID, title, collection, slug)); return postResult
-            }
-        }
+        // `FakeContentOps` (the `create_page`/`create_post` recorder) lives in
+        // `Support/FakeContentOps.swift`, shared with `OperationDescriptorBehavioralTests`.
 
         private func entity(_ siteID: String = AppIntentsTests.aSite, name: String = "Alpha") -> SiteEntity {
             SiteEntity(TestStore.site(id: siteID, name: name))
