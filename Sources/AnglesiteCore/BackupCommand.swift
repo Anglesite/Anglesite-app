@@ -142,6 +142,10 @@ public actor BackupCommand {
         if let failure = await streamGit(["add", "-A"], in: siteDirectory, source: source, label: "git add") {
             return failure
         }
+        // Note: cancelling AFTER a successful commit but before push leaves a local
+        // commit; a later backup sees a clean tree (.noChanges) and won't push it.
+        // Acceptable — the commit is safe in the local repo (Git is the source of truth);
+        // detecting "ahead of origin with nothing to commit" and pushing is a follow-up.
         if Task.isCancelled { return .failed(reason: "backup canceled", exitCode: nil) }
         onProgress?(.backupCommitting)
         let commitMessage = "Backup \(Self.iso8601Formatter.string(from: clock()))"

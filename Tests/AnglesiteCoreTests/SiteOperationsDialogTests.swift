@@ -7,5 +7,6 @@ struct SiteOperationsDialogTests {
     func canceled() {
         #expect(SiteOperations.canceledDialog(operation: "deploy", siteName: "My Site") == "Canceled the deploy of My Site.")
         #expect(SiteOperations.canceledDialog(operation: "backup", siteName: "Blog") == "Canceled the backup of Blog.")
+        #expect(SiteOperations.canceledDialog(operation: "check", siteName: "Blog") == "Canceled the check of Blog.")
     }
 }

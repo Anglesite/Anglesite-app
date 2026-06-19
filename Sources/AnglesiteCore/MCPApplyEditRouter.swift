@@ -52,6 +52,9 @@ public struct MCPApplyEditRouter: EditRouter {
     }
 
     public func apply(_ message: EditMessage) async -> EditReply {
+        if Task.isCancelled {
+            return EditReply(id: message.id, status: .failed, message: "canceled")
+        }
         let args = message.jsonValue
         do {
             let result = try await toolCaller("apply_edit", args)
