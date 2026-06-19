@@ -7,13 +7,18 @@ import AppIntents  // load-bearing: AnglesiteShortcuts.appShortcuts default-arg 
 public struct AppIntentsRegistrationProbe: ReadinessProbe {
     public let id = "intents.registration"
     public let title = "App Intents & Shortcuts"
-    private let shortcutCount: Int
+    /// `nil` means "read the live count at `check()` time". Resolving it lazily (rather than as a
+    /// default argument) avoids reading the provider at struct-construction time, which can run
+    /// before `AppDependencyManager` finishes wiring App Intents. `AnglesiteShortcuts.appShortcuts`
+    /// is a static `@AppShortcutsBuilder` literal, so the live count is environment-independent.
+    private let shortcutCount: Int?
 
-    public init(shortcutCount: Int = AnglesiteShortcuts.appShortcuts.count) {
+    public init(shortcutCount: Int? = nil) {
         self.shortcutCount = shortcutCount
     }
 
     public func check() async -> ReadinessFinding {
+        let shortcutCount = self.shortcutCount ?? AnglesiteShortcuts.appShortcuts.count
         if shortcutCount > 0 {
             return ReadinessFinding(id: id, title: title, level: .ok,
                 detail: "\(shortcutCount) Anglesite shortcuts are registered for Siri and Spotlight.")
@@ -61,6 +66,8 @@ public struct SystemMCPBridgeProbe: ReadinessProbe {
     public let title = "System-wide MCP bridge"
     private let registered: Bool
 
+    // TODO(#135): replace the `false` default with a live system-MCP-bridge registration check
+    // once Phase D lands (#164/#101). Until then this probe truthfully reports `.unsupported`.
     public init(registered: Bool = false) {
         self.registered = registered
     }

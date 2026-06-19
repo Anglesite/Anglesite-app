@@ -13,7 +13,25 @@ private actor NoopSpotlightBackend: ContentSpotlightBackend {
     func deleteImages(identifiers: [String]) async throws {}
 }
 
+/// Flat stub for the counting seam — returns canned counts without standing up a full indexer.
+private struct StubIndexCounter: SpotlightIndexCounting {
+    let counts: ContentSpotlightIndexer.IndexedCounts
+    func indexedCounts(for siteID: String) async -> ContentSpotlightIndexer.IndexedCounts { counts }
+}
+
 @Suite struct SiriReadinessSpotlightProbeTests {
+    @Test func spotlight_flatStubWithCounts_isOk() async {
+        let counter = StubIndexCounter(counts: .init(pages: 3, posts: 1, images: 0))
+        let finding = await SpotlightIndexProbe(siteID: "blog", counter: counter, indexingAvailable: true).check()
+        #expect(finding.level == .ok)
+    }
+
+    @Test func spotlight_flatStubEmpty_isWarning() async {
+        let counter = StubIndexCounter(counts: .init(pages: 0, posts: 0, images: 0))
+        let finding = await SpotlightIndexProbe(siteID: "blog", counter: counter, indexingAvailable: true).check()
+        #expect(finding.level == .warning)
+    }
+
     private func page(_ site: String, _ route: String) -> SiteContentGraph.Page {
         SiteContentGraph.Page(id: "\(site):page:\(route)", siteID: site, route: route,
                               filePath: "/\(route).md", title: route, lastModified: Date(timeIntervalSince1970: 0))
@@ -34,7 +52,7 @@ private actor NoopSpotlightBackend: ContentSpotlightBackend {
         let indexer = ContentSpotlightIndexer(graph: graph, backend: NoopSpotlightBackend())
         await graph.load(siteID: "blog", pages: [page("blog", "about")], posts: [], images: [])
         _ = try await indexer.reindex(siteID: "blog")
-        let finding = await SpotlightIndexProbe(siteID: "blog", indexer: indexer, indexingAvailable: true).check()
+        let finding = await SpotlightIndexProbe(siteID: "blog", counter: indexer, indexingAvailable: true).check()
         #expect(finding.id == "site.spotlight")
         #expect(finding.level == .ok)
     }
@@ -42,7 +60,7 @@ private actor NoopSpotlightBackend: ContentSpotlightBackend {
     @Test func spotlight_nothingIndexed_isWarning() async {
         let graph = SiteContentGraph()
         let indexer = ContentSpotlightIndexer(graph: graph, backend: NoopSpotlightBackend())
-        let finding = await SpotlightIndexProbe(siteID: "blog", indexer: indexer, indexingAvailable: true).check()
+        let finding = await SpotlightIndexProbe(siteID: "blog", counter: indexer, indexingAvailable: true).check()
         #expect(finding.level == .warning)
         #expect(finding.remediation != nil)
     }
@@ -50,7 +68,7 @@ private actor NoopSpotlightBackend: ContentSpotlightBackend {
     @Test func spotlight_unavailable_isWarning_withRemediation() async {
         let graph = SiteContentGraph()
         let indexer = ContentSpotlightIndexer(graph: graph, backend: NoopSpotlightBackend())
-        let finding = await SpotlightIndexProbe(siteID: "blog", indexer: indexer, indexingAvailable: false).check()
+        let finding = await SpotlightIndexProbe(siteID: "blog", counter: indexer, indexingAvailable: false).check()
         #expect(finding.level == .warning)
         #expect(finding.remediation != nil)
     }

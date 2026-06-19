@@ -5,11 +5,9 @@ import Foundation
 
 private struct StubProbe: ReadinessProbe {
     let id: String
-    let title: String
     let finding: ReadinessFinding
     init(_ finding: ReadinessFinding) {
         self.id = finding.id
-        self.title = finding.title
         self.finding = finding
     }
     func check() async -> ReadinessFinding { finding }
@@ -63,5 +61,27 @@ private func makeFinding(_ id: String, _ level: ReadinessLevel) -> ReadinessFind
         ])
         await model.recheck().value
         #expect(model.overallLevel == .ok)
+    }
+
+    @Test func recheck_cancelled_resetsIsChecking() async {
+        // A cancelled run must clear the spinner — otherwise `isChecking` is stuck `true`
+        // forever and the Re-check button stays permanently disabled.
+        let model = SiriReadinessModel(probes: [StubProbe(makeFinding("a", .ok))])
+        let task = model.recheck()
+        task.cancel()
+        await task.value
+        #expect(model.isChecking == false)
+    }
+
+    @Test func recheck_rapidDouble_firstCancelled_endsNotChecking() async {
+        // The second recheck cancels the first via `inFlight?.cancel()`. The superseded run must
+        // not clobber the live one, and the final state must reflect the second run's commit.
+        let model = SiriReadinessModel(probes: [StubProbe(makeFinding("a", .ok))])
+        let first = model.recheck()
+        let second = model.recheck()
+        await first.value
+        await second.value
+        #expect(model.isChecking == false)
+        #expect(model.findings.map(\.id) == ["a"])
     }
 }

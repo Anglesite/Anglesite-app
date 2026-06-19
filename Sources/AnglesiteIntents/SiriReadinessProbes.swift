@@ -23,7 +23,7 @@ public enum SiriReadinessProbes {
     ) -> [any ReadinessProbe] {
         [
             ContentGraphProbe(siteID: siteID, graph: graph),
-            SpotlightIndexProbe(siteID: siteID, indexer: indexer),
+            SpotlightIndexProbe(siteID: siteID, counter: indexer),
         ]
     }
 }

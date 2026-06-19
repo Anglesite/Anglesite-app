@@ -1,5 +1,5 @@
 import Foundation
-#if compiler(>=6.4) && canImport(FoundationModels)
+#if compiler(>=6.4)
 import FoundationModels
 #endif
 
@@ -20,7 +20,8 @@ public struct OSRuntimeProbe: ReadinessProbe {
     }
 
     public func check() async -> ReadinessFinding {
-        let running = "\(version.majorVersion).\(version.minorVersion)"
+        // Include the patch so a user on e.g. 26.9.5 doesn't see a misleading "26.9 is below…".
+        let running = "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
         if version.majorVersion >= minimumMajor {
             return ReadinessFinding(id: id, title: title, level: .ok,
                 detail: "macOS \(running) meets the macOS \(minimumMajor) requirement for Siri workflows.")
@@ -79,7 +80,7 @@ public struct FoundationModelsProbe: ReadinessProbe {
 /// Case names below must match the `FoundationModels` SDK; `@unknown default` absorbs drift.
 public enum LiveFoundationModelsAvailability {
     public static func current() -> FoundationModelsAvailability {
-        #if compiler(>=6.4) && canImport(FoundationModels)
+        #if compiler(>=6.4)
         switch SystemLanguageModel.default.availability {
         case .available:
             return .available

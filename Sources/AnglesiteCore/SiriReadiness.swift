@@ -30,9 +30,11 @@ public struct ReadinessFinding: Identifiable, Sendable, Equatable {
 
 /// A single capability check. Never throws — a failure is a `ReadinessFinding` with a
 /// failing `level`. Injectable so tests can supply canned probes.
+///
+/// The user-facing title is carried by the `ReadinessFinding` each probe returns, so it is not
+/// part of the protocol surface — consumers read `finding.title`, never `probe.title`.
 public protocol ReadinessProbe: Sendable {
     var id: String { get }
-    var title: String { get }
     func check() async -> ReadinessFinding
 }
 
@@ -49,6 +51,9 @@ public final class SiriReadinessModel {
     @ObservationIgnored private let probes: [any ReadinessProbe]
     @ObservationIgnored private let now: @Sendable () -> Date
     @ObservationIgnored private var inFlight: Task<Void, Never>?
+    /// Bumped on every `recheck()`. A cancelled run uses it to tell "I was cancelled and nobody
+    /// replaced me" (clear the spinner) from "a newer run superseded me" (leave its spinner alone).
+    @ObservationIgnored private var generation = 0
 
     public init(probes: [any ReadinessProbe], now: @escaping @Sendable () -> Date = { Date() }) {
         self.probes = probes
@@ -67,15 +72,17 @@ public final class SiriReadinessModel {
     @discardableResult
     public func recheck() -> Task<Void, Never> {
         inFlight?.cancel()
+        generation += 1
+        let runGeneration = generation
         isChecking = true
         let probes = self.probes
         let task = Task { @MainActor [weak self] in
             var collected: [ReadinessFinding] = []
             for probe in probes {
-                if Task.isCancelled { return }
+                if Task.isCancelled { self?.cancelled(runGeneration); return }
                 collected.append(await probe.check())
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { self?.cancelled(runGeneration); return }
             self?.commit(collected)
         }
         inFlight = task
@@ -86,5 +93,13 @@ public final class SiriReadinessModel {
         self.findings = findings
         self.lastChecked = now()
         self.isChecking = false
+    }
+
+    /// Clear the spinner for a cancelled run — but only if no later `recheck()` has superseded it.
+    /// A newer run owns `isChecking` (it set its own `true` and will `commit`), so a stale
+    /// cancellation must not flip it back to `false` underneath the live run.
+    private func cancelled(_ runGeneration: Int) {
+        guard runGeneration == generation else { return }
+        isChecking = false
     }
 }

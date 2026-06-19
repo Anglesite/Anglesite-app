@@ -1,22 +1,31 @@
 import AnglesiteCore
 import CoreSpotlight
 
+/// Thin counting seam over the indexer, so the probe can take a flat fake in tests instead of
+/// standing up a full `ContentSpotlightIndexer` + backend just to vary a count. The production
+/// indexer conforms below.
+public protocol SpotlightIndexCounting: Sendable {
+    func indexedCounts(for siteID: String) async -> ContentSpotlightIndexer.IndexedCounts
+}
+
+extension ContentSpotlightIndexer: SpotlightIndexCounting {}
+
 /// Reports how many of a site's items are published to the Spotlight semantic index Siri reads.
 /// `indexingAvailable` is injected; the default reads `CSSearchableIndex.isIndexingAvailable()`.
 public struct SpotlightIndexProbe: ReadinessProbe {
     public let id = "site.spotlight"
     public let title = "Spotlight index"
     private let siteID: String
-    private let indexer: ContentSpotlightIndexer
+    private let counter: any SpotlightIndexCounting
     private let indexingAvailable: Bool
 
     public init(
         siteID: String,
-        indexer: ContentSpotlightIndexer,
+        counter: any SpotlightIndexCounting,
         indexingAvailable: Bool = CSSearchableIndex.isIndexingAvailable()
     ) {
         self.siteID = siteID
-        self.indexer = indexer
+        self.counter = counter
         self.indexingAvailable = indexingAvailable
     }
 
@@ -26,7 +35,7 @@ public struct SpotlightIndexProbe: ReadinessProbe {
                 detail: "Spotlight indexing is unavailable on this Mac.",
                 remediation: "Make sure Spotlight is enabled in System Settings ▸ Siri & Spotlight.")
         }
-        let counts = await indexer.indexedCounts(for: siteID)
+        let counts = await counter.indexedCounts(for: siteID)
         if counts.total > 0 {
             return ReadinessFinding(id: id, title: title, level: .ok,
                 detail: "\(counts.total) items are indexed in Spotlight for this site.")

@@ -18,12 +18,14 @@ struct SiteWindow: View {
     /// The app-lifetime content graph (held by `AppDelegate`), seeded into this window's
     /// `PreviewModel` so opening the site populates the shared graph (A.8, #142).
     private let contentGraph: SiteContentGraph
-    private let contentIndexer: ContentSpotlightIndexer?
+    /// Observed (not a bare optional) so the Siri AI Readiness button enables itself if `bootstrap`
+    /// populates the indexer after this window was constructed — see `ContentIndexerStore`.
+    private let contentIndexerStore: ContentIndexerStore
 
-    init(siteID: String?, contentGraph: SiteContentGraph, contentIndexer: ContentSpotlightIndexer?) {
+    init(siteID: String?, contentGraph: SiteContentGraph, contentIndexerStore: ContentIndexerStore) {
         self.siteID = siteID
         self.contentGraph = contentGraph
-        self.contentIndexer = contentIndexer
+        self.contentIndexerStore = contentIndexerStore
         _preview = State(initialValue: PreviewModel(contentGraph: contentGraph))
     }
 
@@ -77,6 +79,12 @@ struct SiteWindow: View {
         // pairs `.onChange` with an initial consume for `newSiteRequested`.
         .onChange(of: router.pendingNavigation) { _, _ in
             if let id = site?.id { applyPendingNavigation(for: id) }
+        }
+        // SwiftUI can replay a different site into the same window instance (state restoration,
+        // window reuse). Drop the cached readiness model so the next tap rebuilds its probes for
+        // the current site — otherwise it holds stale probes scoped to the original site.id.
+        .onChange(of: site?.id) { _, _ in
+            siriReadinessModel = nil
         }
         .onDisappear {
             preview.close()
@@ -233,11 +241,11 @@ struct SiteWindow: View {
             .visibilityPriority(.high)
 
             // Siri AI Readiness — secondary action, visible when a site is loaded.
-            ToolbarItem {
+            ToolbarItem(placement: .primaryAction) {
                 Button {
-                    if siriReadinessModel == nil, let contentIndexer {
+                    if siriReadinessModel == nil, let indexer = contentIndexerStore.indexer {
                         siriReadinessModel = SiriReadinessModel(
-                            probes: SiriReadinessProbes.site(siteID: site.id, graph: contentGraph, indexer: contentIndexer)
+                            probes: SiriReadinessProbes.site(siteID: site.id, graph: contentGraph, indexer: indexer)
                         )
                     }
                     siriReadinessPresented = true
@@ -245,7 +253,7 @@ struct SiteWindow: View {
                     Label("Siri AI Readiness", systemImage: "sparkles")
                 }
                 .help("Check whether Siri workflows are ready for this site")
-                .disabled(contentIndexer == nil)
+                .disabled(contentIndexerStore.indexer == nil)
             }
         }
         .sheet(isPresented: $deploy.blockedPresented) {
