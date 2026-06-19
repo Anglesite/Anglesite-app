@@ -94,10 +94,10 @@ canonical source of truth. Classification of the 10 current operations:
 | `open-site` | `OpenSiteIntent` | `readOnly` | false | false | `.none` |
 | `search-content` | `SearchContentIntent` | `readOnly` | false | false | `.entities("ContentMatchEntity")` |
 | `site-status` | `SiteStatusIntent` | `readOnly` | false | false | `.none` |
-| `preview-site` | `PreviewSiteIntent` | `readOnly` | false | true | `.none` |
-| `add-page` | `AddPageIntent` | `createsContent` | false | false | `.entity("PageEntity")` |
-| `add-post` | `AddPostIntent` | `createsContent` | false | false | `.entity("PostEntity")` |
-| `edit-content` | `EditContentIntent` | `modifiesContent` | false | false | `.none` |
+| `preview-site` | `PreviewSiteIntent` | `readOnly` | false | false | `.none` |
+| `add-page` | `AddPageIntent` | `createsContent` | false | true | `.entity("PageEntity")` |
+| `add-post` | `AddPostIntent` | `createsContent` | false | true | `.entity("PostEntity")` |
+| `edit-content` | `EditContentIntent` | `modifiesContent` | false | true | `.none` |
 
 `OpenSiteIntent` is included (it is MCP-exposable via `mcpbridge`) even though it
 has no curated Siri phrase, so it is **not** coverage-enforced by the anchor below.
@@ -136,26 +136,57 @@ New file: `Tests/AnglesiteIntentsTests/OperationDescriptorTests.swift`, Swift
 Testing (`@Test`/`#expect`), reusing the existing fake-service seams
 (`SiteOperationsOverride.scoped`, `ContentGraphOverride.scoped`, etc.).
 
-1. **Coverage** — `AnglesiteShortcuts.phraseExposedIntentNames` is a subset of
-   `Set(AnglesiteOperations.all.map(\.intentTypeName))`. Adding a Siri phrase
-   without a descriptor fails here.
-2. **Anchor sync guard** — `AnglesiteShortcuts.appShortcuts.count ==
-   phraseExposedIntentNames.count`, so the hand-list can't drift from the provider.
-3. **Uniqueness** — `operationID` and `intentTypeName` are each unique across the
-   registry.
-4. **Confirmation agreement** — drive each `publishes`/`modifiesContent`/
-   `createsContent` intent through its fake service and assert `requestConfirmation`
-   was invoked **iff** `descriptor.requiresConfirmation`. (Generalizes the existing
-   `DeploySiteIntentTests` confirmation assertion across the whole table.)
-5. **Side-effect agreement** — assert a mutating service method was called **iff**
-   `descriptor.sideEffect != .readOnly`; for `.readOnly` ops assert no mutating
-   method fired.
-6. **Result-shape agreement** — assert `.entity`/`.entities`/`.none` matches each
-   intent's actual `ReturnsValue<…>` / dialog-only return (statically known).
+The verification is a **honest hybrid**: behavioral where the existing fake-service
+seams allow it, and declared-field value assertions (not behavioral) where the seams
+genuinely cannot observe the behavior. The boundaries below are deliberate, not
+oversights — they reflect two hard limits of unit-testing App Intents under
+`swift test`:
 
-`isCancellable` gets **no** behavioral test — real cancellation is #238's scope, so
-it is a declared field only. This gap is intentional, documented here so it reads as
-a deliberate boundary rather than an oversight.
+- **Confirmation is unobservable.** Every intent's `perform()` *bypasses*
+  `requestConfirmation` when its test seam is active (`SiteOperationsOverride.scoped
+  != nil` → skip), because calling `requestConfirmation` outside the live AppIntents
+  runtime crashes. macOS 27's App Intents Testing could observe it but needs a hosted
+  app target, which CI's macos-15 runner can't launch. So no `swift test` can witness
+  whether confirmation fires.
+- **Read-vs-write is unobservable for the three site ops.** `deploy`, `backup`, and
+  `audit` all invoke a `SiteOperationsService` command method, so "a command fired"
+  can't distinguish `audit` (readOnly) from `deploy` (write). The clean read/write
+  split only exists for **content** intents (`createPage`/`createPost` vs graph-only
+  reads) and **edit** (edit-bridge call).
+
+The test groups:
+
+1. **Coverage** *(data)* — `AnglesiteShortcuts.phraseExposedIntentNames` is a subset
+   of `Set(AnglesiteOperations.all.map(\.intentTypeName))`. Adding a Siri phrase
+   without a descriptor fails here.
+2. **Anchor sync guard** *(data)* — `AnglesiteShortcuts.appShortcuts.count ==
+   phraseExposedIntentNames.count`, so the hand-list can't drift from the provider.
+3. **Uniqueness** *(data)* — `operationID` and `intentTypeName` are each unique
+   across the registry.
+4. **Routing agreement** *(behavioral)* — drive each intent's `perform()` in scoped
+   mode and assert it invokes the service call matching its operation: `deploy` →
+   `deployCalls == 1`, `backup` → `backupCalls == 1`, `audit` → `auditCalls == 1`,
+   `add-page` → `createPage`, `add-post` → `createPost`, `edit-content` → the
+   edit-bridge call. Proves each descriptor maps to a real invoked operation, not a
+   phantom. (`open`/`site-status`/`preview`/`search` route to the window router or
+   graph reads, asserted as *no* content-mutating call — see group 5.)
+5. **Content-mutation agreement** *(behavioral)* — for content and edit intents,
+   assert a content-mutating service call (`createPage`/`createPost`/edit-bridge)
+   happened **iff** `descriptor.sideEffect != .readOnly`. So `search`/`site-status`
+   marked anything but `.readOnly`, or `add-page` marked `.readOnly`, fails CI.
+6. **Declared-field value assertions** *(data, not behavioral)* — per operation,
+   assert the expected `requiresConfirmation`, `isCancellable`, `resultShape`, and
+   (for the three site ops) `sideEffect` values. This is a value table, not a
+   behavioral cross-check — it guards against typos and missed updates, but cannot by
+   itself prove the intent's runtime behavior matches. The two limits above are why.
+
+When #239 adds confirmation to `EditContentIntent`, group 6's value table must be
+updated to `requiresConfirmation: true` for `edit-content` — a deliberate manual
+checkpoint, since confirmation isn't behaviorally enforced. `isCancellable` is
+likewise a declared field only (real cancellation is #238's scope); its values mirror
+the `CancellableIntent` conformances in source — deploy, backup, audit, add-page,
+add-post, edit (the six `LongRunning`/`Cancellable` intents) are `true`; open,
+search, status, preview are `false`.
 
 ## Files
 
@@ -171,8 +202,8 @@ a deliberate boundary rather than an oversight.
 
 | Issue acceptance criterion | Satisfied by |
 |---|---|
-| Deploy/edit operations marked as requiring confirmation | Deploy `requiresConfirmation: true`; edit reflects current `false` with the behavioral cross-check forcing it to track #239 |
-| Read-only operations marked as non-destructive | `sideEffect: .readOnly` for audit/open/search/status/preview, verified by the side-effect agreement test |
+| Deploy/edit operations marked as requiring confirmation | Deploy `requiresConfirmation: true` (declared, value-asserted in group 6); edit reflects current `false`, flips to `true` with #239 at the documented manual checkpoint |
+| Read-only operations marked as non-destructive | `sideEffect: .readOnly` for audit/open/search/status/preview; content reads (search/status/preview) behaviorally enforced by content-mutation agreement (group 5), site `audit` value-asserted (group 6) |
 | Descriptors cover the current Siri-facing operations | Coverage test (anchor subset) |
 | Tests catch missing descriptors for new Siri-facing intents/tools | Coverage + anchor-sync guard tests |
 
