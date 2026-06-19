@@ -44,8 +44,7 @@ public protocol ReadinessProbe: Sendable {
 @MainActor
 @Observable
 public final class SiriReadinessModel: Identifiable {
-    /// Identity for SwiftUI's `.sheet(item:)`, which drives the readiness sheet off this model's
-    /// existence — presenting it is impossible without a model, so the sheet can never render empty.
+    // Identity lets the readiness sheet bind via `.sheet(item:)`.
     public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
 
     public private(set) var findings: [ReadinessFinding] = []

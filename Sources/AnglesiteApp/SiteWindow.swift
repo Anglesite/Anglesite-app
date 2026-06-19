@@ -57,9 +57,8 @@ struct SiteWindow: View {
     @State private var startup = StartupProgressModel()
     /// Observed so an already-open window reacts to a `PreviewSiteIntent` navigation request.
     @State private var router = WindowRouter.shared
-    /// Drives the Siri AI Readiness sheet via `.sheet(item:)`: non-nil ⟺ presented. Coupling the
-    /// sheet to the model (rather than a separate Bool) makes an empty, undismissable sheet
-    /// impossible — the content always receives a non-nil model and "Done" nils it out.
+    /// Non-nil ⟺ the Siri AI Readiness sheet is presented (`.sheet(item:)`); coupling presentation
+    /// to the model rather than a separate Bool makes an empty, undismissable sheet impossible.
     @State private var siriReadinessModel: SiriReadinessModel?
 
     @Environment(\.openWindow) private var openWindow
@@ -251,13 +250,13 @@ struct SiteWindow: View {
             // Siri AI Readiness — secondary action, visible when a site is loaded.
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    // Only present when the model can actually be built — never flip on a
-                    // presentation flag independently of its content (that was the empty-sheet bug).
-                    if let indexer = contentIndexerStore.indexer {
-                        siriReadinessModel = SiriReadinessModel(
-                            probes: SiriReadinessProbes.site(siteID: site.id, graph: contentGraph, indexer: indexer)
-                        )
-                    }
+                    // Build the model only when absent and buildable: presenting without a model
+                    // is the empty-sheet bug; rebuilding while open flashes the sheet (new identity
+                    // → dismiss + re-present).
+                    guard siriReadinessModel == nil, let indexer = contentIndexerStore.indexer else { return }
+                    siriReadinessModel = SiriReadinessModel(
+                        probes: SiriReadinessProbes.site(siteID: site.id, graph: contentGraph, indexer: indexer)
+                    )
                 } label: {
                     Label("Siri AI Readiness", systemImage: "sparkles")
                 }
