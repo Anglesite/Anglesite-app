@@ -47,7 +47,11 @@ public struct AnglesitePackage: Sendable, Equatable {
             self.formatVersion = formatVersion
             self.siteID = siteID
             self.displayName = displayName
-            self.createdDate = createdDate
+            // XML property-list <date> values have whole-second granularity, so we truncate to
+            // a second boundary here. This keeps an in-memory Marker equal to the one decoded
+            // back from Info.plist (the writeMarker→readMarker round-trip contract).
+            self.createdDate = Date(timeIntervalSinceReferenceDate:
+                floor(createdDate.timeIntervalSinceReferenceDate))
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -112,10 +116,7 @@ public struct AnglesitePackage: Sendable, Equatable {
         let pkg = AnglesitePackage(url: url)
         try fileManager.createDirectory(at: pkg.sourceURL, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: pkg.configURL, withIntermediateDirectories: true)
-        // Round date to nearest second to match plist XML precision (seconds only, no fractional part)
-        let now = Date()
-        let roundedDate = Date(timeIntervalSinceReferenceDate: floor(now.timeIntervalSinceReferenceDate))
-        let marker = Marker(displayName: displayName, createdDate: roundedDate)
+        let marker = Marker(displayName: displayName)
         try pkg.writeMarker(marker, fileManager: fileManager)
         return (pkg, marker)
     }
