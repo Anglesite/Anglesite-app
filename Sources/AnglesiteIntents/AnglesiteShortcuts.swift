@@ -88,3 +88,22 @@ public struct AnglesiteShortcuts: AppShortcutsProvider {
         )
     }
 }
+
+extension AnglesiteShortcuts {
+    /// Intent type names that have a curated Siri phrase in `appShortcuts` above. Kept beside the
+    /// phrase definitions so adding/removing a phrase naturally updates this — it is the anchor for
+    /// operation-descriptor coverage (`OperationDescriptorTests`). Apple's `appShortcuts` is a
+    /// type-erased `[AppShortcut]` with no public way to read back the intent type, so this hand
+    /// list is required; a sync-guard test asserts its size matches `appShortcuts.count`.
+    static let phraseExposedIntentNames: Set<String> = [
+        "DeploySiteIntent",
+        "BackupSiteIntent",
+        "AuditSiteIntent",
+        "SearchContentIntent",
+        "SiteStatusIntent",
+        "AddPageIntent",
+        "AddPostIntent",
+        "PreviewSiteIntent",
+        "EditContentIntent",
+    ]
+}
