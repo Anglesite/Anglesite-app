@@ -47,7 +47,7 @@ final class SiteScaffolderTests: XCTestCase {
             templateURL: URL(fileURLWithPath: "/template"),
             catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(calls: calls),
-            register: { url in SiteStore.Site(id: url.path, name: url.lastPathComponent, path: url, isValid: true, missingSentinels: []) }
+            register: { url in SiteStore.Site(id: url.path, name: url.lastPathComponent, packageURL: url, isValid: true, missingSentinels: []) }
         )
         var steps: [SiteScaffolder.ScaffoldStep] = []
         for await s in scaffolder.scaffold(makeDraft()) { steps.append(s) }
@@ -85,7 +85,7 @@ final class SiteScaffolderTests: XCTestCase {
             run: fakeRunner(npmExit: 1, calls: CallRecorder()),
             register: { url in
                 registered.withLock { $0 = true }
-                return SiteStore.Site(id: url.path, name: "x", path: url, isValid: true, missingSentinels: [])
+                return SiteStore.Site(id: url.path, name: "x", packageURL: url, isValid: true, missingSentinels: [])
             }
         )
         var steps: [SiteScaffolder.ScaffoldStep] = []

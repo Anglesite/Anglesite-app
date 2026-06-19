@@ -1,37 +1,43 @@
 import Foundation
 
-/// Manages the list of Anglesite sites known to the app.
+/// Recents registry for `.anglesite` packages opened in this app.
 ///
-/// Sites live in `~/Sites/<name>/` (or wherever `AppSettings.sitesRoot` points). The store
-/// discovers them by scanning that root for directories that pass `ProjectValidator`, then
-/// persists the resulting list as JSON in `~/Library/Application Support/Anglesite/sites.json`.
+/// Each entry is keyed by the package's stable marker UUID (independent of filesystem path).
+/// When a package is opened or created, the caller calls `record(_:)`, which reads the
+/// `Info.plist` marker, upserts by UUID, and persists a most-recently-used–sorted list to
+/// `recents.json`. `touch(id:)` bumps `lastSeen` without re-reading the marker (fast path
+/// after a create/open that already called `record`).
 ///
-/// The persisted list is the canonical source between launches: we cache validity and last-seen
-/// timestamps so the UI can render immediately without re-scanning the filesystem. `refresh()`
-/// reconciles the cache with what's actually on disk.
+/// The persisted list is the canonical source between launches: validity and last-seen
+/// timestamps are cached so the UI renders immediately. `load()` restores the list on startup.
 public actor SiteStore {
-    /// Process-wide shared instance. Multi-window code reads/writes through this so the
-    /// in-memory list and on-disk sites.json stay coherent across windows.
+    /// Process-wide shared instance.
     public static let shared = SiteStore()
 
     public struct Site: Sendable, Codable, Equatable, Identifiable {
-        public let id: String          // path-derived, stable across launches
-        public let name: String        // last path component
-        public let path: URL
+        /// The package's stable marker UUID (string). Path-independent — survives moves (#242).
+        public let id: String
+        /// Display name (from the package marker).
+        public let name: String
+        /// The `.anglesite` package directory.
+        public let packageURL: URL
         public var isValid: Bool
         public var missingSentinels: [String]
         public var lastSeen: Date
-        /// Security-scoped bookmark for `path`. Populated via the MAS "Open Folder…" flow
-        /// (NSOpenPanel grants access; we stamp a bookmark so the grant survives relaunch).
-        /// `nil` for the DevID build (no sandbox) and for sites found by directory scan, which
-        /// can't mint a bookmark without an explicit user grant. Optional so existing
-        /// sites.json files decode unchanged.
+        /// Security-scoped bookmark for `packageURL` (MAS). `nil` on DevID. One grant covers
+        /// the whole package, so Source/ and Config/ are both reachable under it.
         public var bookmarkData: Data?
+
+        /// The Astro project tree — every subprocess (scaffold, dev server, build, deploy,
+        /// pre-deploy check) runs with this as its working directory.
+        public var sourceDirectory: URL { AnglesitePackage(url: packageURL).sourceURL }
+        /// App-owned per-site config dir (settings, chat history, cache).
+        public var configDirectory: URL { AnglesitePackage(url: packageURL).configURL }
 
         public init(
             id: String,
             name: String,
-            path: URL,
+            packageURL: URL,
             isValid: Bool,
             missingSentinels: [String],
             lastSeen: Date = Date(),
@@ -39,11 +45,25 @@ public actor SiteStore {
         ) {
             self.id = id
             self.name = name
-            self.path = path
+            self.packageURL = packageURL
             self.isValid = isValid
             self.missingSentinels = missingSentinels
             self.lastSeen = lastSeen
             self.bookmarkData = bookmarkData
+        }
+
+        /// Build a `Site` from a package on disk: id = marker UUID, name = marker displayName,
+        /// validity = whether `Source/` passes the project sentinels.
+        public static func make(package: AnglesitePackage, fileManager: FileManager = .default) throws -> Site {
+            let marker = try package.readMarker(fileManager: fileManager)
+            let validation = package.sourceValidation(fileManager: fileManager)
+            return Site(
+                id: marker.siteID.uuidString,
+                name: marker.displayName,
+                packageURL: canonicalizePackageURL(package.url),
+                isValid: validation.isValid,
+                missingSentinels: validation.missing
+            )
         }
     }
 
@@ -53,48 +73,39 @@ public actor SiteStore {
     }
 
     /// Async callback invoked with the new site list after every mutation that changes the
-    /// visible registry (load/refresh/add/remove). Bookmark-only updates are not emitted —
+    /// visible registry (load/record/remove/touch). Bookmark-only updates are not emitted —
     /// they don't affect what consumers like `SpotlightIndexer` care about. Single-subscriber
     /// by design; the indexer is the only known consumer today.
     public typealias ChangeHandler = @Sendable ([Site]) async -> Void
 
     private let fileManager: FileManager
-    private let settings: AppSettings
     private let persistenceURL: URL
     private(set) public var sites: [Site] = []
     private var changeHandler: ChangeHandler?
 
-    /// Continuations for the UI-observer broadcast, keyed by a per-subscription `UUID`. Distinct
-    /// from `changeHandler`: that single closure is the indexer's awaited post-mutation hook, while
-    /// these are fire-and-forget snapshot feeds that SwiftUI windows consume to notice their site
-    /// being removed (#188). Pruned in `removeContinuation(_:)` via the stream's `onTermination`.
+    /// Continuations for the UI-observer broadcast, keyed by a per-subscription `UUID`.
     private var changeStreamContinuations: [UUID: AsyncStream<[Site]>.Continuation] = [:]
 
     /// - Parameters:
-    ///   - settings: settings store consulted for `sitesRoot`.
-    ///   - persistenceURL: where to read/write `sites.json`. Defaults to
-    ///     `~/Library/Application Support/Anglesite/sites.json`. Tests should pass a temp URL.
+    ///   - persistenceURL: where to read/write `recents.json`. Defaults to
+    ///     `~/Library/Application Support/Anglesite/recents.json`. Tests should pass a temp URL.
     ///   - fileManager: injection seam for tests.
     public init(
-        settings: AppSettings = .shared,
         persistenceURL: URL? = nil,
         fileManager: FileManager = .default
     ) {
-        self.settings = settings
         self.fileManager = fileManager
         self.persistenceURL = persistenceURL ?? Self.defaultPersistenceURL(fileManager: fileManager)
     }
 
-    /// Install (or replace, or clear with `nil`) the post-mutation change handler. Invoked on
-    /// the actor's executor after `sites` is updated and persisted, with the new list.
+    /// Install (or replace, or clear with `nil`) the post-mutation change handler.
     public func setChangeHandler(_ handler: ChangeHandler?) {
         changeHandler = handler
     }
 
-    /// Loads the persisted site list from disk into memory. Safe to call before `refresh()`
-    /// when the UI wants to render quickly without waiting for filesystem validation.
-    /// Skips the change emit on a fresh-install no-file path — there's nothing to propagate,
-    /// and we'd otherwise wake the SpotlightIndexer for a no-op on every cold launch.
+    /// Loads the persisted site list from disk into memory. Safe to call before `record()`
+    /// when the UI wants to render quickly. Skips the change emit on a fresh-install no-file
+    /// path — there's nothing to propagate.
     public func load() async throws {
         guard fileManager.fileExists(atPath: persistenceURL.path) else {
             sites = []
@@ -105,96 +116,32 @@ public actor SiteStore {
         await emitChange()
     }
 
-    /// Scans `settings.sitesRoot` for project directories, validates each, merges with the
-    /// existing in-memory list, and persists. Returns the new list.
+    /// Add or update a recents entry for `package`. Reads its marker for identity + name and
+    /// validates `Source/`. Upsert is by `id` (the marker UUID): re-opening a moved package
+    /// updates its `packageURL` in place and carries any existing bookmark forward. Persists
+    /// and emits a change.
     @discardableResult
-    public func refresh() async throws -> [Site] {
-        let root = settings.sitesRoot
-        let discovered: [Site]
-        if fileManager.fileExists(atPath: root.path) {
-            let entries = try fileManager.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]
-            )
-            discovered = entries
-                .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
-                .map { url in
-                    let result = ProjectValidator.validate(url, fileManager: fileManager)
-                    let canonical = Self.canonicalize(url)
-                    return Site(
-                        id: Self.identifier(for: canonical),
-                        name: canonical.lastPathComponent,
-                        path: canonical,
-                        isValid: result.isValid,
-                        missingSentinels: result.missing,
-                        lastSeen: Date()
-                    )
-                }
-                .filter { $0.isValid || !$0.missingSentinels.elementsEqual(ProjectValidator.sentinels) }
-                // Drop dirs with zero sentinels — they're not Anglesite sites at all.
-        } else {
-            discovered = []
+    public func record(_ package: AnglesitePackage) async throws -> Site {
+        var site = try Site.make(package: package, fileManager: fileManager)
+        if let existing = sites.first(where: { $0.id == site.id }) {
+            site.bookmarkData = existing.bookmarkData ?? site.bookmarkData
         }
-
-        // Merge: keep manually-added sites that aren't under `root` (and are still valid),
-        // refresh anything we just rediscovered, drop stale entries that no longer exist.
-        var byID: [String: Site] = [:]
-        for site in sites {
-            // Keep an entry that's still on disk. Also keep any entry carrying a security-scoped
-            // bookmark even when `fileExists` fails: under the App Sandbox, before the per-site
-            // grant is activated, a query for the site path is denied (returns false) and is not
-            // proof the folder is gone. Dropping it here would strip the bookmark on the first
-            // sandboxed relaunch `refresh()` — which runs before `acquireGrant` — leaving the
-            // preview and the content graph with no folder access (#184). Consequence: a bookmarked
-            // entry is never pruned by `refresh()`, even if its folder is genuinely deleted — the
-            // grant scopes only the site folder, not its parent, so a later scan can't re-evaluate
-            // it. Removing such an entry requires an explicit `remove(id:)`.
-            if site.bookmarkData != nil || fileManager.fileExists(atPath: site.path.path) {
-                byID[site.id] = site
-            }
-        }
-        for var site in discovered {
-            // Re-discovery rebuilds a Site from the filesystem with no bookmark; carry forward
-            // any persisted security-scoped bookmark so a refresh doesn't strip the grant.
-            site.bookmarkData = byID[site.id]?.bookmarkData ?? site.bookmarkData
-            byID[site.id] = site
-        }
-        sites = byID.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        try persist()
-        await emitChange()
-        return sites
-    }
-
-    /// Adds a site by absolute path. Validates first; throws if the directory isn't an Anglesite project.
-    @discardableResult
-    public func add(_ url: URL) async throws -> Site {
-        var isDir: ObjCBool = false
-        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
-            throw StoreError.notADirectory(url)
-        }
-        let result = ProjectValidator.validate(url, fileManager: fileManager)
-        guard result.isValid else {
-            throw StoreError.invalidProject(url, missing: result.missing)
-        }
-        // Canonicalize once so id, path, and name all derive from the same
-        // symlink-resolved form — NSOpenPanel hands us paths that may differ
-        // from the resolved form by a /private prefix or a symlinked root (#56).
-        let canonical = Self.canonicalize(url)
-        let site = Site(
-            id: Self.identifier(for: canonical),
-            name: canonical.lastPathComponent,
-            path: canonical,
-            isValid: true,
-            missingSentinels: [],
-            lastSeen: Date()
-        )
+        site.lastSeen = Date()
         sites.removeAll { $0.id == site.id }
         sites.append(site)
-        sites.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        sites.sort { $0.lastSeen > $1.lastSeen }
         try persist()
         await emitChange()
         return site
+    }
+
+    /// Bump `lastSeen` for the entry with `id` (most-recently-used ordering). No-op if unknown.
+    public func touch(id: String) async throws {
+        guard let index = sites.firstIndex(where: { $0.id == id }) else { return }
+        sites[index].lastSeen = Date()
+        sites.sort { $0.lastSeen > $1.lastSeen }
+        try persist()
+        await emitChange()
     }
 
     /// Removes a site from the list. Does not delete files on disk.
@@ -204,14 +151,12 @@ public actor SiteStore {
         await emitChange()
     }
 
-    /// Look up a site by id. Convenience used by window scenes that receive the id as a
-    /// `WindowGroup(for:)` value and need to resolve it to a path/name.
+    /// Look up a site by id.
     public func find(id: String) -> Site? {
         sites.first { $0.id == id }
     }
 
-    /// The persisted security-scoped bookmark for a site, if any. `nil` in DevID and for
-    /// scan-discovered sites that were never granted via NSOpenPanel.
+    /// The persisted security-scoped bookmark for a site, if any.
     public func bookmarkData(for id: String) -> Data? {
         sites.first { $0.id == id }?.bookmarkData
     }
@@ -225,25 +170,11 @@ public actor SiteStore {
 
     // MARK: - Change notification
 
-    /// Vends a per-subscriber broadcast of the site list. Every call registers a fresh
-    /// continuation; the stream yields the current `sites` snapshot once on subscribe (so a
-    /// subscriber isn't blind until the next mutation, and a removal that races subscription is
-    /// caught immediately), then a new snapshot after every `emitChange()`. The continuation is
-    /// pruned when the stream terminates (consumer task cancelled, iterator dropped, or store gone).
-    ///
-    /// `nonisolated` so a caller can subscribe synchronously (e.g. `for await … in store.changeStream()`
-    /// or chaining `.makeAsyncIterator()`); the actor-state touch is deferred onto the actor via the
-    /// `register` hop. A subscriber only observes the snapshot through `next()`, which suspends until
-    /// `register` has yielded — so registration happens-before any mutation the subscriber can see.
-    /// A subscription that races an in-flight mutation observes the newer (post-mutation) snapshot,
-    /// never a stale one — it can only ever miss *toward* the latest state.
     public nonisolated func changeStream() -> AsyncStream<[Site]> {
         let id = UUID()
         return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-            // Builder runs off-actor; hop onto the actor to register + emit the subscribe-time snapshot.
             Task { await self.register(continuation, id: id) }
             continuation.onTermination = { [weak self] _ in
-                // onTermination runs off-actor at an arbitrary time; hop back to prune.
                 Task { await self?.removeContinuation(id) }
             }
         }
@@ -259,9 +190,6 @@ public actor SiteStore {
     }
 
     private func emitChange() async {
-        // The indexer's awaited hook keeps its original semantics: when set, it completes as part
-        // of the mutation. The broadcast is additive — UI observers get a fire-and-forget snapshot
-        // even when no `changeHandler` is installed.
         if let handler = changeHandler {
             await handler(sites)
         }
@@ -292,18 +220,6 @@ public actor SiteStore {
         return d
     }
 
-    /// The canonical file URL for `url`: standardized and symlink-resolved. The single
-    /// resolved form that `id`, `path`, and `name` are all derived from, so a site reached
-    /// via a symlinked root (e.g. `/tmp` → `/private/tmp`) collapses to one stable entry (#56).
-    static func canonicalize(_ url: URL) -> URL {
-        url.standardizedFileURL.resolvingSymlinksInPath()
-    }
-
-    private static func identifier(for url: URL) -> String {
-        // Standardize so "/Users/x/Sites/foo" and "/Users/x/Sites/foo/" resolve to the same id.
-        canonicalize(url).path
-    }
-
     private static func defaultPersistenceURL(fileManager: FileManager) -> URL {
         let support = (try? fileManager.url(
             for: .applicationSupportDirectory,
@@ -314,6 +230,12 @@ public actor SiteStore {
             .appendingPathComponent("Library/Application Support", isDirectory: true)
         return support
             .appendingPathComponent("Anglesite", isDirectory: true)
-            .appendingPathComponent("sites.json")
+            .appendingPathComponent("recents.json")
     }
+}
+
+/// Canonical (standardized, symlink-resolved) form of a package URL, so the same package
+/// reached via a symlinked path collapses to one recents entry.
+func canonicalizePackageURL(_ url: URL) -> URL {
+    url.standardizedFileURL.resolvingSymlinksInPath()
 }

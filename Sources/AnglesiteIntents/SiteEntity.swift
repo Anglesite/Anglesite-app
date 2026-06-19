@@ -40,13 +40,13 @@ public struct SiteEntity: Sendable {
     public init(_ site: SiteStore.Site) {
         // Directory mtime misses in-file edits; revisit with git timestamps after #68.
         let keys: Set<URLResourceKey> = [.creationDateKey, .contentModificationDateKey]
-        let values = try? site.path.resourceValues(forKeys: keys)
+        let values = try? site.sourceDirectory.resourceValues(forKeys: keys)
         self.init(
             id: site.id,
             name: site.name,
             creationDate: values?.creationDate,
             modificationDate: values?.contentModificationDate,
-            directory: site.path
+            directory: site.packageURL
         )
     }
 }

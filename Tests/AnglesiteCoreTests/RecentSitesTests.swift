@@ -14,7 +14,7 @@ struct RecentSitesTests {
         SiteStore.Site(
             id: "/Sites/\(name)",
             name: name,
-            path: URL(fileURLWithPath: "/Sites/\(name)"),
+            packageURL: URL(fileURLWithPath: "/Sites/\(name).anglesite"),
             isValid: isValid,
             missingSentinels: [],
             lastSeen: lastSeen

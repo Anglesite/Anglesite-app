@@ -2,199 +2,96 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
-/// A `final class` (not a `struct`) so `deinit` can remove the temp directories and throwaway
-/// `UserDefaults` suite, mirroring the former `tearDownWithError`.
+/// Tests for `SiteStore` recents behavior: record, remove, load, bookmarks, change streams.
 final class SiteStoreTests {
     private let tempDir: URL
-    private let sitesRoot: URL
     private let persistenceURL: URL
-    private let settings: AppSettings
-    private let defaults: UserDefaults
-    private let suiteName: String
     private let fileManager = FileManager.default
 
     init() throws {
         tempDir = fileManager.temporaryDirectory.appendingPathComponent("anglesite-store-\(UUID().uuidString)", isDirectory: true)
-        sitesRoot = tempDir.appendingPathComponent("Sites", isDirectory: true)
-        persistenceURL = tempDir.appendingPathComponent("sites.json")
-        try fileManager.createDirectory(at: sitesRoot, withIntermediateDirectories: true)
-
-        let suite = "test-anglesite-\(UUID().uuidString)"
-        suiteName = suite
-        defaults = UserDefaults(suiteName: suite)!
-        settings = AppSettings(defaults: defaults)
-        settings.sitesRootOverride = sitesRoot
+        persistenceURL = tempDir.appendingPathComponent("recents.json")
+        try fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
     }
 
     deinit {
         try? fileManager.removeItem(at: tempDir)
-        defaults.removePersistentDomain(forName: suiteName)
     }
 
-    private func makeValidSite(named name: String) throws -> URL {
-        let dir = sitesRoot.appendingPathComponent(name, isDirectory: true)
-        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-        for sentinel in ProjectValidator.sentinels {
-            try Data().write(to: dir.appendingPathComponent(sentinel))
+    /// Create a valid `.anglesite` package skeleton with all required sentinels in `Source/`.
+    private func makeValidPackage(named name: String) throws -> AnglesitePackage {
+        let (pkg, _) = try AnglesitePackage.createSkeleton(
+            at: tempDir.appendingPathComponent("\(name).anglesite", isDirectory: true),
+            displayName: name
+        )
+        for sentinel in ProjectValidator.requiredSentinels {
+            try Data().write(to: pkg.sourceURL.appendingPathComponent(sentinel))
         }
-        return dir
+        return pkg
     }
 
-    @Test("Refresh discovers valid sites") func refreshDiscoversValidSites() async throws {
-        _ = try makeValidSite(named: "alpha")
-        _ = try makeValidSite(named: "bravo")
-
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        let result = try await store.refresh()
-
-        #expect(result.map(\.name) == ["alpha", "bravo"])
-        #expect(result.allSatisfy { $0.isValid })
+    @Test("record discovers valid package") func recordDiscoversValidPackage() async throws {
+        let pkg = try makeValidPackage(named: "alpha")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        let site = try await store.record(pkg)
+        #expect(site.name == "alpha")
+        #expect(site.isValid)
+        let all = await store.sites
+        #expect(all.map(\.name) == ["alpha"])
     }
 
-    @Test("Refresh skips non-project directories") func refreshSkipsNonProjectDirectories() async throws {
-        _ = try makeValidSite(named: "alpha")
-        try fileManager.createDirectory(at: sitesRoot.appendingPathComponent("not-a-site"), withIntermediateDirectories: true)
-
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        let result = try await store.refresh()
-        #expect(result.map(\.name) == ["alpha"])
-    }
-
-    @Test("Refresh keeps partial scaffolds with diagnostics") func refreshKeepsPartialScaffoldsWithDiagnostics() async throws {
-        let dir = sitesRoot.appendingPathComponent("partial", isDirectory: true)
-        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-        try Data().write(to: dir.appendingPathComponent("anglesite.config.json"))
-
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        let result = try await store.refresh()
-        #expect(result.count == 1)
-        #expect(result[0].name == "partial")
-        #expect(!result[0].isValid)
-        #expect(Set(result[0].missingSentinels) == Set(["astro.config.ts", "keystatic.config.ts"]))
+    @Test("record two packages preserves both") func recordTwoPackages() async throws {
+        let a = try makeValidPackage(named: "alpha")
+        let b = try makeValidPackage(named: "bravo")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        _ = try await store.record(a)
+        _ = try await store.record(b)
+        let names = await store.sites.map(\.name)
+        #expect(Set(names) == Set(["alpha", "bravo"]))
     }
 
     @Test("Persistence round trip") func persistenceRoundTrip() async throws {
-        _ = try makeValidSite(named: "alpha")
-        let writer = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        try await writer.refresh()
+        let pkg = try makeValidPackage(named: "alpha")
+        let writer = SiteStore(persistenceURL: persistenceURL)
+        _ = try await writer.record(pkg)
 
-        let reader = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let reader = SiteStore(persistenceURL: persistenceURL)
         try await reader.load()
         let loaded = await reader.sites
         #expect(loaded.map(\.name) == ["alpha"])
     }
 
-    @Test("Add rejects invalid project") func addRejectsInvalidProject() async throws {
-        let dir = tempDir.appendingPathComponent("not-a-site", isDirectory: true)
-        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        do {
-            _ = try await store.add(dir)
-            Issue.record("expected invalidProject")
-        } catch SiteStore.StoreError.invalidProject(_, let missing) {
-            #expect(Set(missing) == Set(ProjectValidator.sentinels))
-        }
-    }
-
-    @Test("Add persists site outside Sites root") func addPersistsSiteOutsideSitesRoot() async throws {
-        let dir = tempDir.appendingPathComponent("external", isDirectory: true)
-        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-        for sentinel in ProjectValidator.sentinels {
-            try Data().write(to: dir.appendingPathComponent(sentinel))
-        }
-
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        let site = try await store.add(dir)
-        #expect(site.name == "external")
-
-        let reader = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        try await reader.load()
-        let loaded = await reader.sites
-        #expect(loaded.map(\.name) == ["external"])
-    }
-
-    @Test("Add normalizes symlinked path") func addNormalizesSymlinkedPath() async throws {
-        // A real project dir, reached through a symlink that points at it.
-        let realDir = tempDir.appendingPathComponent("real-site", isDirectory: true)
-        try fileManager.createDirectory(at: realDir, withIntermediateDirectories: true)
-        for sentinel in ProjectValidator.sentinels {
-            try Data().write(to: realDir.appendingPathComponent(sentinel))
-        }
-        let linkDir = tempDir.appendingPathComponent("link-site", isDirectory: true)
-        try fileManager.createSymbolicLink(at: linkDir, withDestinationURL: realDir)
-
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        let site = try await store.add(linkDir)
-
-        // id and path must derive from the same symlink-resolved form: the
-        // stored path is already canonical, so its .path equals the id, and the
-        // name reflects the real directory rather than the symlink.
-        #expect(site.path.path == site.id)
-        #expect(site.name == "real-site")
-    }
-
-    @Test("Add collapses symlinked and real path to one entry") func addCollapsesSymlinkedAndRealPathToOneEntry() async throws {
-        let realDir = tempDir.appendingPathComponent("real-site", isDirectory: true)
-        try fileManager.createDirectory(at: realDir, withIntermediateDirectories: true)
-        for sentinel in ProjectValidator.sentinels {
-            try Data().write(to: realDir.appendingPathComponent(sentinel))
-        }
-        let linkDir = tempDir.appendingPathComponent("link-site", isDirectory: true)
-        try fileManager.createSymbolicLink(at: linkDir, withDestinationURL: realDir)
-
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        let viaLink = try await store.add(linkDir)
-        let viaReal = try await store.add(realDir)
-
-        #expect(viaLink.id == viaReal.id)
-        let count = await store.sites.count
-        #expect(count == 1, "the same directory via symlink and real path must be one entry")
-    }
-
     @Test("Remove does not delete files") func removeDoesNotDeleteFiles() async throws {
-        let dir = try makeValidSite(named: "alpha")
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        try await store.refresh()
-        let id = await store.sites.first!.id
+        let pkg = try makeValidPackage(named: "alpha")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        let site = try await store.record(pkg)
 
-        try await store.remove(id: id)
+        try await store.remove(id: site.id)
         let remaining = await store.sites
         #expect(remaining.isEmpty)
-        #expect(fileManager.fileExists(atPath: dir.path), "files on disk must be untouched")
+        #expect(fileManager.fileExists(atPath: pkg.url.path), "package on disk must be untouched")
     }
 
-    /// The #186 case: a bookmarked entry must stay gone after removal, even across a reload +
-    /// refresh that can't rediscover it. This is the only way to drop a bookmarked site, since
-    /// `refresh()` deliberately never prunes one (#184/#185). The site lives *outside* the scanned
-    /// root so the post-remove refresh has no chance to re-add it, and removing the inline-stored
-    /// `bookmarkData` is what drops the MAS security-scoped grant.
+    /// The #186 case: a bookmarked entry must stay gone after removal, even across a reload.
     @Test("Remove drops a bookmarked entry permanently across reload")
     func removeBookmarkedSitePermanent() async throws {
-        let outside = tempDir.appendingPathComponent("external-site", isDirectory: true)
-        try fileManager.createDirectory(at: outside, withIntermediateDirectories: true)
-        for sentinel in ProjectValidator.sentinels {
-            try Data().write(to: outside.appendingPathComponent(sentinel))
-        }
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        let site = try await store.add(outside)
+        let pkg = try makeValidPackage(named: "external-site")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        let site = try await store.record(pkg)
         try await store.setBookmark(Data([0xAB, 0xCD]), for: site.id)
         #expect(await store.bookmarkData(for: site.id) != nil)
 
         try await store.remove(id: site.id)
 
-        // A fresh store proves the entry (and its bookmark) is gone from sites.json and stays gone
-        // even after a refresh that scans the root it never lived under.
-        let reloaded = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let reloaded = SiteStore(persistenceURL: persistenceURL)
         try await reloaded.load()
-        let afterRefresh = try await reloaded.refresh()
-        #expect(afterRefresh.isEmpty)
+        let afterLoad = await reloaded.sites
+        #expect(afterLoad.isEmpty)
         #expect(await reloaded.bookmarkData(for: site.id) == nil)
     }
 
-    // MARK: - Change handler (#102)
+    // MARK: - Change handler
 
-    /// Captures change-handler emissions so each test can assert on the post-mutation snapshot.
     actor ChangeRecorder {
         private(set) var snapshots: [[SiteStore.Site]] = []
         func record(_ sites: [SiteStore.Site]) { snapshots.append(sites) }
@@ -202,29 +99,14 @@ final class SiteStoreTests {
         var last: [SiteStore.Site]? { snapshots.last }
     }
 
-    @Test("Change handler fires on refresh")
-    func changeHandlerFiresOnRefresh() async throws {
-        _ = try makeValidSite(named: "alpha")
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+    @Test("Change handler fires on record")
+    func changeHandlerFiresOnRecord() async throws {
+        let pkg = try makeValidPackage(named: "alpha")
+        let store = SiteStore(persistenceURL: persistenceURL)
         let recorder = ChangeRecorder()
         await store.setChangeHandler { sites in await recorder.record(sites) }
 
-        try await store.refresh()
-
-        let count = await recorder.count
-        let last = await recorder.last
-        #expect(count == 1)
-        #expect(last?.map(\.name) == ["alpha"])
-    }
-
-    @Test("Change handler fires on add")
-    func changeHandlerFiresOnAdd() async throws {
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        let recorder = ChangeRecorder()
-        await store.setChangeHandler { sites in await recorder.record(sites) }
-
-        let dir = try makeValidSite(named: "alpha")
-        _ = try await store.add(dir)
+        _ = try await store.record(pkg)
 
         let last = await recorder.last
         #expect(last?.map(\.name) == ["alpha"])
@@ -232,15 +114,14 @@ final class SiteStoreTests {
 
     @Test("Change handler fires on remove")
     func changeHandlerFiresOnRemove() async throws {
-        _ = try makeValidSite(named: "alpha")
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        try await store.refresh()
-        let id = try #require(await store.sites.first).id
+        let pkg = try makeValidPackage(named: "alpha")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        let site = try await store.record(pkg)
 
         let recorder = ChangeRecorder()
         await store.setChangeHandler { sites in await recorder.record(sites) }
 
-        try await store.remove(id: id)
+        try await store.remove(id: site.id)
 
         let last = await recorder.last
         #expect(last?.isEmpty == true)
@@ -248,12 +129,11 @@ final class SiteStoreTests {
 
     @Test("Change handler fires on load")
     func changeHandlerFiresOnLoad() async throws {
-        _ = try makeValidSite(named: "alpha")
-        // Seed sites.json by refreshing through a separate store.
-        let writer = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        try await writer.refresh()
+        let pkg = try makeValidPackage(named: "alpha")
+        let writer = SiteStore(persistenceURL: persistenceURL)
+        _ = try await writer.record(pkg)
 
-        let reader = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let reader = SiteStore(persistenceURL: persistenceURL)
         let recorder = ChangeRecorder()
         await reader.setChangeHandler { sites in await recorder.record(sites) }
 
@@ -265,14 +145,12 @@ final class SiteStoreTests {
 
     @Test("Change handler does not fire on setBookmark")
     func changeHandlerDoesNotFireOnSetBookmark() async throws {
-        let dir = try makeValidSite(named: "alpha")
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        let site = try await store.add(dir)
+        let pkg = try makeValidPackage(named: "alpha")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        let site = try await store.record(pkg)
 
         let recorder = ChangeRecorder()
         await store.setChangeHandler { sites in await recorder.record(sites) }
-        // Bookmark-only updates don't change the visible entity surface, so they don't emit —
-        // avoids re-indexing Spotlight on every panel grant.
         try await store.setBookmark(Data([0x01, 0x02]), for: site.id)
 
         let count = await recorder.count
@@ -281,12 +159,12 @@ final class SiteStoreTests {
 
     @Test("Change handler can be cleared")
     func changeHandlerCanBeCleared() async throws {
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let pkg = try makeValidPackage(named: "alpha")
+        let store = SiteStore(persistenceURL: persistenceURL)
         let recorder = ChangeRecorder()
         await store.setChangeHandler { sites in await recorder.record(sites) }
 
-        let dir = try makeValidSite(named: "alpha")
-        _ = try await store.add(dir)
+        _ = try await store.record(pkg)
         await store.setChangeHandler(nil)
         let id = try #require(await store.sites.first).id
         try await store.remove(id: id)
@@ -295,13 +173,13 @@ final class SiteStoreTests {
         #expect(count == 1, "the post-clear remove must not emit")
     }
 
-    // MARK: - Change stream broadcast (#188)
+    // MARK: - Change stream
 
     @Test("Change stream yields the current snapshot on subscribe")
     func changeStreamYieldsCurrentSnapshotOnSubscribe() async throws {
-        _ = try makeValidSite(named: "alpha")
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        try await store.refresh()
+        let pkg = try makeValidPackage(named: "alpha")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        _ = try await store.record(pkg)
 
         var iterator = store.changeStream().makeAsyncIterator()
         let first = await iterator.next()
@@ -310,32 +188,32 @@ final class SiteStoreTests {
 
     @Test("Change stream delivers a post-remove snapshot without the removed id")
     func changeStreamDeliversRemoval() async throws {
-        _ = try makeValidSite(named: "alpha")
-        _ = try makeValidSite(named: "bravo")
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        try await store.refresh()
-        let alphaID = try #require(await store.sites.first { $0.name == "alpha" }).id
+        let a = try makeValidPackage(named: "alpha")
+        let b = try makeValidPackage(named: "bravo")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        let siteA = try await store.record(a)
+        _ = try await store.record(b)
+        let alphaID = siteA.id
 
         var iterator = store.changeStream().makeAsyncIterator()
-        _ = await iterator.next() // drain the subscribe-time snapshot ([alpha, bravo])
+        _ = await iterator.next() // drain subscribe-time snapshot
 
         try await store.remove(id: alphaID)
 
         let afterRemove = await iterator.next()
         #expect(afterRemove?.contains { $0.id == alphaID } == false)
-        #expect(afterRemove?.map(\.name) == ["bravo"])
     }
 
     @Test("Change stream fans out to multiple subscribers")
     func changeStreamFansOutToMultipleSubscribers() async throws {
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let store = SiteStore(persistenceURL: persistenceURL)
         var iterA = store.changeStream().makeAsyncIterator()
         var iterB = store.changeStream().makeAsyncIterator()
-        _ = await iterA.next() // subscribe-time snapshot ([] on a fresh store)
+        _ = await iterA.next()
         _ = await iterB.next()
 
-        let dir = try makeValidSite(named: "alpha")
-        _ = try await store.add(dir)
+        let pkg = try makeValidPackage(named: "alpha")
+        _ = try await store.record(pkg)
 
         let a = await iterA.next()
         let b = await iterB.next()
@@ -345,103 +223,27 @@ final class SiteStoreTests {
 
     @Test("A cancelled subscriber does not break a surviving one")
     func changeStreamSurvivesSubscriberCancellation() async throws {
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let store = SiteStore(persistenceURL: persistenceURL)
 
-        // Subscriber 1 iterates in a task we'll cancel — its stream then terminates and its
-        // continuation is pruned via onTermination.
         let task1 = Task {
-            for await _ in store.changeStream() { /* drain until cancelled */ }
+            for await _ in store.changeStream() { }
         }
-        // Subscriber 2 persists for the whole test.
         var iter2 = store.changeStream().makeAsyncIterator()
-        _ = await iter2.next() // subscribe-time snapshot ([])
+        _ = await iter2.next()
 
         task1.cancel()
-        _ = await task1.value // let cancellation + onTermination settle
+        _ = await task1.value
 
-        let dir = try makeValidSite(named: "alpha")
-        _ = try await store.add(dir)
+        let pkg = try makeValidPackage(named: "alpha")
+        _ = try await store.record(pkg)
 
         let survivor = await iter2.next()
-        #expect(survivor?.map(\.name) == ["alpha"], "emitChange must still deliver after another subscriber is gone")
-    }
-
-    // MARK: - Sandbox bookmark retention (#184)
-
-    /// Simulates the macOS App Sandbox before a per-site security scope is active: any
-    /// filesystem query for a path under `deniedRoot` fails as if the path doesn't exist,
-    /// while the app's own container (where `sites.json` lives) stays readable. This mirrors a
-    /// sandboxed relaunch — `~/Sites/<name>` is unreadable until `acquireGrant` resolves the
-    /// site's bookmark, which happens *after* `SiteWindow` already ran `load()` + `refresh()`.
-    private final class SandboxDenyingFileManager: FileManager, @unchecked Sendable {
-        let deniedRoot: String
-        init(deniedRoot: URL) { self.deniedRoot = deniedRoot.path; super.init() }
-
-        private func isDenied(_ path: String) -> Bool {
-            path == deniedRoot || path.hasPrefix(deniedRoot + "/")
-        }
-
-        override func fileExists(atPath path: String) -> Bool {
-            isDenied(path) ? false : super.fileExists(atPath: path)
-        }
-
-        override func fileExists(atPath path: String, isDirectory: UnsafeMutablePointer<ObjCBool>?) -> Bool {
-            isDenied(path) ? false : super.fileExists(atPath: path, isDirectory: isDirectory)
-        }
-
-        override func contentsOfDirectory(
-            at url: URL,
-            includingPropertiesForKeys keys: [URLResourceKey]?,
-            options mask: FileManager.DirectoryEnumerationOptions
-        ) throws -> [URL] {
-            if isDenied(url.path) { throw CocoaError(.fileReadNoPermission) }
-            return try super.contentsOfDirectory(at: url, includingPropertiesForKeys: keys, options: mask)
-        }
-    }
-
-    @Test("Refresh keeps a bookmarked site when the sandbox denies fileExists")
-    func refreshKeepsBookmarkedSiteUnderSandboxDenial() async throws {
-        // In-session: a real FileManager mints + persists the bookmark to sites.json.
-        let realDir = try makeValidSite(named: "smoke")
-        let writer = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        let site = try await writer.add(realDir)
-        try await writer.setBookmark(Data([0xBE, 0xEF]), for: site.id)
-
-        // Relaunch: no grant held yet, so every query under sitesRoot is denied — exactly the
-        // state `refresh()` runs in (it precedes `acquireGrant`). sites.json itself stays
-        // readable because it lives outside sitesRoot.
-        let denying = SandboxDenyingFileManager(deniedRoot: sitesRoot)
-        let relaunch = SiteStore(settings: settings, persistenceURL: persistenceURL, fileManager: denying)
-        try await relaunch.load()
-        try await relaunch.refresh()
-
-        let bookmark = await relaunch.bookmarkData(for: site.id)
-        #expect(bookmark == Data([0xBE, 0xEF]), "the persisted bookmark must survive a no-grant refresh byte-for-byte")
-        let names = await relaunch.sites.map(\.name)
-        #expect(names == ["smoke"], "the bookmarked site must survive a no-grant refresh")
-    }
-
-    @Test("Refresh carries bookmark forward when a site is re-discovered normally")
-    func refreshCarriesBookmarkForwardOnRediscovery() async throws {
-        // The non-sandboxed (DevID) path: the site is still on disk, so `refresh()` re-discovers
-        // it from the filesystem (rebuilt with no bookmark) and the merge step must carry the
-        // persisted bookmark forward rather than silently dropping it.
-        let dir = try makeValidSite(named: "live")
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
-        let site = try await store.add(dir)
-        try await store.setBookmark(Data([0xCA, 0xFE]), for: site.id)
-
-        try await store.refresh()
-
-        let bookmark = await store.bookmarkData(for: site.id)
-        #expect(bookmark == Data([0xCA, 0xFE]), "a normal refresh must preserve the bookmark through re-discovery")
+        #expect(survivor?.map(\.name) == ["alpha"])
     }
 
     @Test("Change handler does not fire on no-file load")
     func changeHandlerDoesNotFireOnNoFileLoad() async throws {
-        // Fresh install: no sites.json. The handler should not be woken for a snapshot
-        // that didn't change — the indexer would just no-op against its own prior state.
-        let store = SiteStore(settings: settings, persistenceURL: persistenceURL)
+        let store = SiteStore(persistenceURL: persistenceURL)
         let recorder = ChangeRecorder()
         await store.setChangeHandler { sites in await recorder.record(sites) }
 
@@ -449,5 +251,20 @@ final class SiteStoreTests {
 
         let count = await recorder.count
         #expect(count == 0)
+    }
+
+    // MARK: - Bookmark retention
+
+    @Test("record carries bookmark forward on re-record of same package")
+    func recordCarriesBookmarkForward() async throws {
+        let pkg = try makeValidPackage(named: "live")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        let site = try await store.record(pkg)
+        try await store.setBookmark(Data([0xCA, 0xFE]), for: site.id)
+
+        _ = try await store.record(pkg)
+
+        let bookmark = await store.bookmarkData(for: site.id)
+        #expect(bookmark == Data([0xCA, 0xFE]))
     }
 }
