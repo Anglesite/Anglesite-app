@@ -22,6 +22,8 @@ final class DeployModel {
     private(set) var phase: Phase = .idle
     /// Captured deploy + build log lines for the current/most-recent run.
     private(set) var logLines: [LogCenter.LogLine] = []
+    /// The latest milestone label from the running deploy (drives a status line above the log).
+    private(set) var currentMilestone: String?
 
     /// Bound to a custom slide-up drawer in `SiteWindow`. The view sets this back to false
     /// when the user clicks "Dismiss" (we never auto-close — users want to read the URL).
@@ -170,6 +172,7 @@ final class DeployModel {
     private func runDeploy(siteID: String, siteDirectory: URL) async {
         phase = .running(siteID: siteID, since: Date())
         logLines = []
+        currentMilestone = nil
         drawerPresented = true
         blockedPresented = false
 
@@ -193,12 +196,17 @@ final class DeployModel {
                 Task { @MainActor in
                     self?.onScanComplete?(outcome)
                 }
+            },
+            onProgress: { [weak self] progress in
+                // last-write-wins: each milestone fully replaces the label, so out-of-order delivery across these hops is benign
+                Task { @MainActor in self?.currentMilestone = progress.label }
             }
         )
 
         subscription.cancel()
         _ = await logTask.value
 
+        currentMilestone = nil
         switch result {
         case .succeeded(let url, let duration):
             phase = .succeeded(url: url, duration: duration)

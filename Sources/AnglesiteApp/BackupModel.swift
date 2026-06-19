@@ -17,6 +17,8 @@ final class BackupModel {
     private(set) var phase: Phase = .idle
     /// Captured backup log lines for the current/most-recent run.
     private(set) var logLines: [LogCenter.LogLine] = []
+    /// The latest milestone label from the running backup (drives a status line above the log).
+    private(set) var currentMilestone: String?
 
     /// Bound to a slide-up drawer in `SiteWindow`. The view sets this back to false when the
     /// user clicks "Dismiss" — we never auto-close on success because the commit SHA is
@@ -60,6 +62,7 @@ final class BackupModel {
         let started = Date()
         phase = .running(siteID: siteID, since: started)
         logLines = []
+        currentMilestone = nil
         drawerPresented = true
 
         let source = "backup:\(siteID)"
@@ -70,11 +73,21 @@ final class BackupModel {
             }
         }
 
-        let result = await command.backup(siteID: siteID, siteDirectory: siteDirectory)
+        let result = await command.backup(
+            siteID: siteID,
+            siteDirectory: siteDirectory,
+            onProgress: { [weak self] progress in
+                // The callback fires inside BackupCommand's actor isolation; hop to
+                // MainActor before touching our @Observable state.
+                // last-write-wins: each milestone fully replaces the label, so out-of-order delivery across these hops is benign
+                Task { @MainActor in self?.currentMilestone = progress.label }
+            }
+        )
 
         subscription.cancel()
         _ = await logTask.value
 
+        currentMilestone = nil
         let duration = Date().timeIntervalSince(started)
         switch result {
         case .succeeded(let sha, let branch, let remote):

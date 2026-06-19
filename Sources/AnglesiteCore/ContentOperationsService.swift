@@ -5,8 +5,17 @@ import Foundation
 /// server — `create_page` / `create_post` — so they're injectable behind a test seam the way
 /// `SiteOperationsService` is for deploy/backup/audit.
 public protocol ContentOperationsService: Sendable {
-    func createPage(siteID: String, name: String, route: String?) async -> ContentCreateResult
-    func createPost(siteID: String, title: String, collection: String?, slug: String?) async -> ContentCreateResult
+    func createPage(siteID: String, name: String, route: String?, onProgress: ProgressHandler?) async -> ContentCreateResult
+    func createPost(siteID: String, title: String, collection: String?, slug: String?, onProgress: ProgressHandler?) async -> ContentCreateResult
+}
+
+public extension ContentOperationsService {
+    func createPage(siteID: String, name: String, route: String?) async -> ContentCreateResult {
+        await createPage(siteID: siteID, name: name, route: route, onProgress: nil)
+    }
+    func createPost(siteID: String, title: String, collection: String?, slug: String?) async -> ContentCreateResult {
+        await createPost(siteID: siteID, title: title, collection: collection, slug: slug, onProgress: nil)
+    }
 }
 
 /// Outcome of a `create_page` / `create_post` call.

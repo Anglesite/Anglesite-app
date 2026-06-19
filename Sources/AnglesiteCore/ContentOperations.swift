@@ -16,30 +16,33 @@ public struct ContentOperations: ContentOperationsService {
         self.siteDirectory = siteDirectory
     }
 
-    public func createPage(siteID: String, name: String, route: String?) async -> ContentCreateResult {
+    public func createPage(siteID: String, name: String, route: String?, onProgress: ProgressHandler? = nil) async -> ContentCreateResult {
         var args: [String: JSONValue] = ["name": .string(name)]
         if let route, !route.isEmpty { args["route"] = .string(route) }
-        return await create(siteID: siteID, tool: "create_page", arguments: args, identifierKey: "route")
+        return await create(siteID: siteID, tool: "create_page", arguments: args, identifierKey: "route", onProgress: onProgress)
     }
 
-    public func createPost(siteID: String, title: String, collection: String?, slug: String?) async -> ContentCreateResult {
+    public func createPost(siteID: String, title: String, collection: String?, slug: String?, onProgress: ProgressHandler? = nil) async -> ContentCreateResult {
         var args: [String: JSONValue] = ["title": .string(title)]
         if let collection, !collection.isEmpty { args["collection"] = .string(collection) }
         if let slug, !slug.isEmpty { args["slug"] = .string(slug) }
-        return await create(siteID: siteID, tool: "create_post", arguments: args, identifierKey: "slug")
+        return await create(siteID: siteID, tool: "create_post", arguments: args, identifierKey: "slug", onProgress: onProgress)
     }
 
     private func create(
         siteID: String,
         tool: String,
         arguments: [String: JSONValue],
-        identifierKey: String
+        identifierKey: String,
+        onProgress: ProgressHandler? = nil
     ) async -> ContentCreateResult {
+        onProgress?(.createResolvingRuntime)
         guard let directory = await siteDirectory(siteID) else { return .siteNotFound }
         guard let runtime = await pool.runtime(siteID: siteID, siteDirectory: directory) else {
             return .failed(reason: "Couldn't start the Anglesite plugin for this site.")
         }
         let client = runtime.mcpClient
+        onProgress?(.createCallingPlugin)
         do {
             let result = try await client.callTool(name: tool, arguments: .object(arguments))
             let text = result.content.compactMap(\.text).joined(separator: "\n")
@@ -49,7 +52,10 @@ public struct ContentOperations: ContentOperationsService {
             guard let parsed = Self.parseCreated(text, identifierKey: identifierKey) else {
                 return .failed(reason: "The plugin's reply couldn't be read.")
             }
+            onProgress?(.createFinalizing)
             return .created(filePath: parsed.filePath, identifier: parsed.identifier)
+        } catch is CancellationError {
+            return .failed(reason: "canceled")
         } catch {
             return .failed(reason: "\(error)")
         }
