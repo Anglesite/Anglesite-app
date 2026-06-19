@@ -62,6 +62,26 @@ public actor ContentSpotlightIndexer {
         public let removed: Int
     }
 
+    /// Snapshot of how many entities are currently published to Spotlight for a site. Reads the
+    /// `lastIndexed` set this indexer maintains — the truthful "what we've put in the index" count
+    /// without querying the system daemon. Returns zeros for an unknown / never-indexed site.
+    public struct IndexedCounts: Sendable, Equatable {
+        public let pages: Int
+        public let posts: Int
+        public let images: Int
+        public var total: Int { pages + posts + images }
+        public init(pages: Int, posts: Int, images: Int) {
+            self.pages = pages
+            self.posts = posts
+            self.images = images
+        }
+    }
+
+    public func indexedCounts(for siteID: String) -> IndexedCounts {
+        guard let state = lastIndexed[siteID] else { return IndexedCounts(pages: 0, posts: 0, images: 0) }
+        return IndexedCounts(pages: state.pageIDs.count, posts: state.postIDs.count, images: state.imageIDs.count)
+    }
+
     /// Fetch the current page/post/image snapshot for `siteID` from the graph, diff each type
     /// against the previously-indexed set for that site, delete anything dropped, then upsert the
     /// current set.

@@ -7,8 +7,10 @@ struct SettingsView: View {
         TabView {
             AdvancedSettingsView()
                 .tabItem { Label("Advanced", systemImage: "gearshape.2") }
+            SiriReadinessSettingsView()
+                .tabItem { Label("Siri AI", systemImage: "sparkles") }
         }
-        .frame(width: 540, height: 320)
+        .frame(width: 540, height: 360)
     }
 }
 

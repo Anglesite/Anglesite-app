@@ -25,7 +25,8 @@ private let contentLog = Logger(subsystem: "dev.anglesite.app", category: "conte
 /// before the load here, so the load *will* emit even if the launcher already raced ahead and
 /// missed it — emission is idempotent (the indexer dedups by id set).
 public enum AnglesiteIntents {
-    public static func bootstrap(contentGraph: SiteContentGraph) async {
+    @discardableResult
+    public static func bootstrap(contentGraph: SiteContentGraph) async -> ContentSpotlightIndexer {
         // Singleton-factory: the closure always returns the same pre-constructed `contentGraph`
         // instance. `AppDependencyManager.add` accepts a factory because dependencies may be
         // per-resolution, but our graph is process-wide, so we capture and re-yield.
@@ -76,5 +77,6 @@ public enum AnglesiteIntents {
         } catch {
             log.error("initial load failed: \(error.localizedDescription, privacy: .public)")
         }
+        return contentIndexer
     }
 }

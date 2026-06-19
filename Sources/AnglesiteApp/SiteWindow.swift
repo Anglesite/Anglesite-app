@@ -18,10 +18,14 @@ struct SiteWindow: View {
     /// The app-lifetime content graph (held by `AppDelegate`), seeded into this window's
     /// `PreviewModel` so opening the site populates the shared graph (A.8, #142).
     private let contentGraph: SiteContentGraph
+    /// Observed (not a bare optional) so the Siri AI Readiness button enables itself if `bootstrap`
+    /// populates the indexer after this window was constructed — see `ContentIndexerStore`.
+    private let contentIndexerStore: ContentIndexerStore
 
-    init(siteID: String?, contentGraph: SiteContentGraph) {
+    init(siteID: String?, contentGraph: SiteContentGraph, contentIndexerStore: ContentIndexerStore) {
         self.siteID = siteID
         self.contentGraph = contentGraph
+        self.contentIndexerStore = contentIndexerStore
         _preview = State(initialValue: PreviewModel(contentGraph: contentGraph))
     }
 
@@ -53,6 +57,8 @@ struct SiteWindow: View {
     @State private var startup = StartupProgressModel()
     /// Observed so an already-open window reacts to a `PreviewSiteIntent` navigation request.
     @State private var router = WindowRouter.shared
+    @State private var siriReadinessPresented = false
+    @State private var siriReadinessModel: SiriReadinessModel?
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -75,6 +81,12 @@ struct SiteWindow: View {
         // pairs `.onChange` with an initial consume for `newSiteRequested`.
         .onChange(of: router.pendingNavigation) { _, _ in
             if let id = site?.id { applyPendingNavigation(for: id) }
+        }
+        // SwiftUI can replay a different site into the same window instance (state restoration,
+        // window reuse). Drop the cached readiness model so the next tap rebuilds its probes for
+        // the current site — otherwise it holds stale probes scoped to the original site.id.
+        .onChange(of: site?.id) { _, _ in
+            siriReadinessModel = nil
         }
         .onChange(of: preview.state) { _, newState in
             startup.ingest(state: newState)
@@ -233,6 +245,22 @@ struct SiteWindow: View {
                       : "Site is missing required files")
             }
             .visibilityPriority(.high)
+
+            // Siri AI Readiness — secondary action, visible when a site is loaded.
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    if siriReadinessModel == nil, let indexer = contentIndexerStore.indexer {
+                        siriReadinessModel = SiriReadinessModel(
+                            probes: SiriReadinessProbes.site(siteID: site.id, graph: contentGraph, indexer: indexer)
+                        )
+                    }
+                    siriReadinessPresented = true
+                } label: {
+                    Label("Siri AI Readiness", systemImage: "sparkles")
+                }
+                .help("Check whether Siri workflows are ready for this site")
+                .disabled(contentIndexerStore.indexer == nil)
+            }
         }
         .sheet(isPresented: $deploy.blockedPresented) {
             if case .blocked(let failures, let warnings) = deploy.phase {
@@ -252,6 +280,27 @@ struct SiteWindow: View {
                 siteName: site.name,
                 onRunAgain: { audit.audit(siteID: site.id, siteDirectory: site.path) }
             )
+        }
+        .sheet(isPresented: $siriReadinessPresented) {
+            if let model = siriReadinessModel {
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Siri AI readiness for \u{201C}\(site.name)\u{201D}.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            SiriReadinessList(model: model)
+                        }
+                        .padding()
+                    }
+                    .frame(minWidth: 420, minHeight: 260)
+                    .navigationTitle("Siri AI Readiness")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { siriReadinessPresented = false }
+                        }
+                    }
+                }
+            }
         }
         .annotatedAsSite(site)
     }
