@@ -67,15 +67,115 @@ struct BackupCommandTests {
 
     // MARK: noChanges
 
-    @Test("Returns .noChanges when git status is empty")
-    func returnsNoChangesWhenStatusEmpty() async {
+    @Test("Returns .noChanges when the tree is clean and in sync with origin")
+    func returnsNoChangesWhenCleanAndInSync() async {
+        // Clean tree (empty status) and HEAD not ahead of origin/<branch> (rev-list count 0)
+        // → genuinely nothing to back up.
         let cmd = makeCommand(runner: runner([
             "status": ("", 0),
             "rev-parse": ("draft\n", 0),
-            "remote": ("git@github.com:owner/site.git\n", 0)
+            "remote": ("git@github.com:owner/site.git\n", 0),
+            "rev-list": ("0\n", 0)
         ]))
         let result = await cmd.backup(siteID: "site", siteDirectory: tmpDir)
         #expect(result == .noChanges)
+    }
+
+    @Test("Returns .noChanges when ahead-count can't be determined (no remote-tracking ref)")
+    func returnsNoChangesWhenAheadCountUnknown() async {
+        // A branch that was never pushed has no `origin/<branch>` ref, so
+        // `git rev-list --count origin/<branch>..HEAD` exits non-zero. With a clean tree we
+        // preserve the historical .noChanges rather than erroring or pushing blindly.
+        let pushed = LockedSourceList()
+        let cmd = makeCommand(
+            runner: runner([
+                "status": ("", 0),
+                "rev-parse": ("draft\n", 0),
+                "remote": ("git@github.com:owner/site.git\n", 0),
+                "rev-list": ("", 128)  // fatal: ambiguous argument 'origin/draft..HEAD'
+            ]),
+            streamer: { _, args, _ in pushed.add(args.first ?? ""); return (0, "") }
+        )
+        let result = await cmd.backup(siteID: "site", siteDirectory: tmpDir)
+        #expect(result == .noChanges)
+        #expect(pushed.snapshot().isEmpty, "must not push when ahead-count is unknown")
+    }
+
+    // MARK: Clean-but-ahead push (#246)
+
+    @Test("Pushes the pending commit when the tree is clean but ahead of origin")
+    func pushesPendingCommitWhenCleanButAhead() async {
+        // The cancelled-after-commit case: a prior backup committed but never pushed, so the
+        // tree is clean yet HEAD is ahead of origin/<branch>. Backup must push the pending
+        // commit and report .succeeded — not mask it behind .noChanges.
+        let pushed = LockedSourceList()
+        let runner: BackupCommand.GitRunner = { _, args in
+            switch args.first {
+            case "status":   return .init(stdout: "", stderr: "", exitCode: 0)  // clean tree
+            case "remote":   return .init(stdout: "git@github.com:owner/site.git\n", stderr: "", exitCode: 0)
+            case "rev-list": return .init(stdout: "1\n", stderr: "", exitCode: 0) // 1 commit ahead
+            case "rev-parse":
+                if args.contains("--abbrev-ref") {
+                    return .init(stdout: "draft\n", stderr: "", exitCode: 0)
+                }
+                return .init(stdout: "abc1234deadbeef0000000000000000000000000\n", stderr: "", exitCode: 0)
+            default:
+                return .init(stdout: "", stderr: "unmocked", exitCode: 1)
+            }
+        }
+        let cmd = makeCommand(runner: runner, streamer: { _, args, _ in pushed.add(args.first ?? ""); return (0, "") })
+
+        let result = await cmd.backup(siteID: "site", siteDirectory: tmpDir)
+        guard case .succeeded(let sha, let branch, let remote) = result else {
+            Issue.record("expected .succeeded for the unpushed commit, got \(result)")
+            return
+        }
+        #expect(sha == "abc1234deadbeef0000000000000000000000000")
+        #expect(branch == "draft")
+        #expect(remote == "git@github.com:owner/site.git")
+        // Only a push runs — no add/commit, since there's nothing new to commit.
+        #expect(pushed.snapshot() == ["push"], "expected a single push of the pending commit, got \(pushed.snapshot())")
+    }
+
+    @Test("Cancelling during the clean-but-ahead path prevents the pending push")
+    func cancelPreventsPendingPush() async {
+        // Park at the first git call until the test has captured the task handle, so the cancel
+        // lands deterministically before the push guard — no reliance on scheduling races.
+        let pushed = LockedSourceList()
+        let holder = CancelHolder()
+        let runner: BackupCommand.GitRunner = { _, args in
+            switch args.first {
+            case "status":   return .init(stdout: "", stderr: "", exitCode: 0)  // clean tree
+            case "remote":   return .init(stdout: "git@github.com:owner/site.git\n", stderr: "", exitCode: 0)
+            case "rev-list":
+                await holder.cancelSelf()  // task is held by now → cancels before the push guard
+                return .init(stdout: "1\n", stderr: "", exitCode: 0)
+            case "rev-parse":
+                if args.contains("--is-inside-work-tree") {
+                    await holder.awaitHeld()  // step 0 — park until the handle is stored
+                    return .init(stdout: "true\n", stderr: "", exitCode: 0)
+                }
+                if args.contains("--abbrev-ref") {
+                    return .init(stdout: "draft\n", stderr: "", exitCode: 0)
+                }
+                return .init(stdout: "abc1234\n", stderr: "", exitCode: 0)
+            default:
+                return .init(stdout: "", stderr: "unmocked", exitCode: 1)
+            }
+        }
+        let cmd = makeCommand(runner: runner, streamer: { _, args, _ in pushed.add(args.first ?? ""); return (0, "") })
+
+        let task = Task { await cmd.backup(siteID: "site", siteDirectory: tmpDir) }
+        await holder.hold(task)
+        let result = await task.value
+
+        guard case .failed(let reason, let exit) = result else {
+            Issue.record("expected .failed on cancellation, got \(result)")
+            return
+        }
+        #expect(reason.contains("canceled"), "reason should name the cancellation: \(reason)")
+        #expect(exit == nil, "cancellation is pre-spawn for the push — no exit code")
+        #expect(pushed.snapshot().isEmpty, "must not push the pending commit once cancelled, got \(pushed.snapshot())")
     }
 
     // MARK: Main-branch refusal
@@ -271,4 +371,27 @@ private final class LockedSourceList: @unchecked Sendable {
     private var values: [String] = []
     func add(_ v: String) { lock.lock(); values.append(v); lock.unlock() }
     func snapshot() -> [String] { lock.lock(); defer { lock.unlock() }; return values }
+}
+
+/// Lets a test cancel the very `backup()` task it's awaiting, deterministically: the runner
+/// parks at the first git call via `awaitHeld()` until the test stores the handle with `hold(_:)`,
+/// then a later runner step calls `cancelSelf()` to cancel before the push guard is reached.
+private actor CancelHolder {
+    private var task: Task<BackupCommand.Result, Never>?
+    private var held = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func hold(_ t: Task<BackupCommand.Result, Never>) {
+        task = t
+        held = true
+        waiter?.resume()
+        waiter = nil
+    }
+
+    func awaitHeld() async {
+        if held { return }
+        await withCheckedContinuation { waiter = $0 }
+    }
+
+    func cancelSelf() { task?.cancel() }
 }
