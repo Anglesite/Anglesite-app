@@ -170,10 +170,17 @@ The test groups:
    edit-bridge call. Proves each descriptor maps to a real invoked operation, not a
    phantom. (`open`/`site-status`/`preview`/`search` route to the window router or
    graph reads, asserted as *no* content-mutating call — see group 5.)
-5. **Content-mutation agreement** *(behavioral)* — for content and edit intents,
-   assert a content-mutating service call (`createPage`/`createPost`/edit-bridge)
-   happened **iff** `descriptor.sideEffect != .readOnly`. So `search`/`site-status`
-   marked anything but `.readOnly`, or `add-page` marked `.readOnly`, fails CI.
+5. **Content-mutation agreement** *(behavioral)* — splits across two assertions
+   rather than one registry-driven `iff`. The non-readOnly direction is covered by
+   group 4's routing tests (`add-page`→`createPage`, `add-post`→`createPost`,
+   `edit-content`→edit-bridge each fire). The readOnly direction is covered by a
+   `readsDoNotMutate` test that drives `SearchContentIntent` and `SiteStatusIntent`
+   with the create-side seam in scope and asserts no `createPage`/`createPost` fired.
+   So `add-page` mis-marked `.readOnly` (routing test fires a create) or `search`/
+   `site-status` mis-driving a create both fail CI. **Boundary:** `preview-site` and
+   `open-site` are *not* behaviorally exercised here (they need WindowRouter/preview
+   fixtures); their `.readOnly` `sideEffect` is value-asserted in group 6, not
+   behaviorally enforced.
 6. **Declared-field value assertions** *(data, not behavioral)* — per operation,
    assert the expected `requiresConfirmation`, `isCancellable`, `resultShape`, and
    (for the three site ops) `sideEffect` values. This is a value table, not a
