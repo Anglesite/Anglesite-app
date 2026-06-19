@@ -160,7 +160,7 @@ struct SiteWindow: View {
             // Backup — lowest priority, first to collapse into the native overflow chevron.
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    backup.backup(siteID: site.id, siteDirectory: site.path)
+                    backup.backup(siteID: site.id, siteDirectory: site.sourceDirectory)
                 } label: {
                     Label("Backup", systemImage: "externaldrive.fill.badge.icloud")
                 }
@@ -174,7 +174,7 @@ struct SiteWindow: View {
             // Audit — low priority, collapses before Chat.
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    audit.audit(siteID: site.id, siteDirectory: site.path)
+                    audit.audit(siteID: site.id, siteDirectory: site.sourceDirectory)
                 } label: {
                     if audit.isRunning {
                         Label("Auditing…", systemImage: "magnifyingglass")
@@ -220,7 +220,7 @@ struct SiteWindow: View {
             ToolbarItem(placement: .primaryAction) {
                 HealthBadgeView(
                     model: health,
-                    onRecheck: { health.recheck(siteID: site.id, siteDirectory: site.path) },
+                    onRecheck: { health.recheck(siteID: site.id, siteDirectory: site.sourceDirectory) },
                     onAskClaude: {
                         #if !ANGLESITE_MAS
                         chatPresented = true
@@ -235,7 +235,7 @@ struct SiteWindow: View {
             // Declared LAST so it renders at the trailing edge (macOS primary-action position).
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    deploy.deploy(siteID: site.id, siteDirectory: site.path)
+                    deploy.deploy(siteID: site.id, siteDirectory: site.sourceDirectory)
                 } label: {
                     Label("Deploy", systemImage: "paperplane.fill")
                 }
@@ -280,7 +280,7 @@ struct SiteWindow: View {
             AuditSheetView(
                 model: audit,
                 siteName: site.name,
-                onRunAgain: { audit.audit(siteID: site.id, siteDirectory: site.path) }
+                onRunAgain: { audit.audit(siteID: site.id, siteDirectory: site.sourceDirectory) }
             )
         }
         .sheet(item: $siriReadinessModel) { model in
@@ -324,7 +324,7 @@ struct SiteWindow: View {
                         .font(.callout).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).frame(maxWidth: 420)
                     Button("Retry") {
-                        preview.open(siteID: site.id, siteDirectory: site.path)
+                        preview.open(siteID: site.id, siteDirectory: site.sourceDirectory)
                     }
                 }
             }
@@ -394,7 +394,6 @@ struct SiteWindow: View {
         let store = SiteStore.shared
         do {
             try await store.load()
-            _ = try await store.refresh()
         } catch {
             // Non-fatal: we'll fall back to whatever's already in the persisted list.
         }
@@ -405,6 +404,7 @@ struct SiteWindow: View {
         }
         site = resolved
         AppSettings.shared.lastOpenedSiteID = resolved.id
+        try? await store.touch(id: resolved.id)
 
         #if ANGLESITE_MAS
         await acquireGrant(for: resolved, in: store)
@@ -425,7 +425,7 @@ struct SiteWindow: View {
             PreviewAnnotationProviderRegistry.shared.register(provider, for: resolved.id)
         }
 
-        preview.open(siteID: resolved.id, siteDirectory: resolved.path)
+        preview.open(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
         applyPendingNavigation(for: resolved.id)
@@ -460,7 +460,7 @@ struct SiteWindow: View {
         // agentic loop with no network (#193).
         chat = ChatModel(
             siteID: resolved.id,
-            siteDirectory: resolved.path,
+            siteDirectory: resolved.sourceDirectory,
             assistant: FoundationModelAssistant(
                 tier: .onDevice,
                 editBridge: makeEditBridge(),
@@ -497,9 +497,9 @@ struct SiteWindow: View {
                 contentGraph: contentGraph
             )
         case .claude:
-            assistant = ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.path)
+            assistant = ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
         }
-        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
+        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.sourceDirectory, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
         #endif
         // Auto alt-text (C.7 / #157): after a successful image drop, generate alt text on-device and
         // apply it to the `<img>`. Target-agnostic — the on-device vision model runs on both builds.
@@ -507,7 +507,7 @@ struct SiteWindow: View {
         // recurse. Best-effort and opt-out via Settings.
         let altTextGenerator = AltTextGenerator(
             siteID: resolved.id,
-            siteDirectory: resolved.path,
+            siteDirectory: resolved.sourceDirectory,
             isEnabled: { AppSettings.shared.autoGenerateAltText },
             produce: { imageURL, context in
                 try await FoundationModelAssistant(tier: .onDevice).generateStructured(
@@ -553,7 +553,7 @@ struct SiteWindow: View {
         guard let bookmark = await store.bookmarkData(for: site.id) else {
             await LogCenter.shared.append(
                 source: "grant:\(site.id)", stream: .stderr,
-                text: "No security-scoped bookmark for \(site.name); preview will fail until the folder is re-added via Open Folder…"
+                text: "No security-scoped bookmark for \(site.name); preview will fail until the package is re-added via Open Site…"
             )
             return
         }

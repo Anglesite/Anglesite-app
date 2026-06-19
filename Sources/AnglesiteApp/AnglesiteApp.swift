@@ -101,8 +101,8 @@ struct AnglesiteApp: App {
             openWindow(value: site.id)
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Couldn't open that folder"
-            // `SiteActions.ImportError.localizedDescription` names the folder and the reason;
+            alert.messageText = "Couldn't open that site"
+            // `SiteActions.ImportError.localizedDescription` names the package and the reason;
             // other errors fall back to their OS-provided message rather than a raw enum dump.
             alert.informativeText = error.localizedDescription
             alert.alertStyle = .warning
@@ -116,6 +116,22 @@ struct AnglesiteApp: App {
         // own .task — see SitesLauncherView.onFirstAppear().
         Window("Sites", id: "sites") {
             SitesWindowRoot(openWindow: openWindow)
+                .onOpenURL { url in
+                    guard AnglesitePackage.isPackage(at: url) else { return }
+                    Task { @MainActor in
+                        do {
+                            let site = try await SiteStore.shared.record(AnglesitePackage(url: url))
+                            #if ANGLESITE_MAS
+                            if let bm = try? SecurityScopedBookmark.create(for: url) {
+                                try? await SiteStore.shared.setBookmark(bm, for: site.id)
+                            }
+                            #endif
+                            openWindow(value: site.id)
+                        } catch {
+                            await LogCenter.shared.append(source: "open-url", stream: .stderr, text: "open \(url.lastPathComponent) failed: \(error)")
+                        }
+                    }
+                }
         }
         .windowResizability(.contentSize)
         .commands {
