@@ -56,7 +56,8 @@ final class NewSiteWizardModelTests: XCTestCase {
                 }
                 return ProcessSupervisor.RunResult(stdout: "", stderr: "", exitCode: 0)
             },
-            register: { url in SiteStore.Site(id: url.path, name: url.lastPathComponent, packageURL: url, isValid: true, missingSentinels: []) }
+            gitInit: { _ in },
+            register: { pkg in SiteStore.Site(id: pkg.url.path, name: pkg.url.lastPathComponent, packageURL: pkg.url, isValid: true, missingSentinels: []) }
         )
     }
 
