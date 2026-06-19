@@ -43,7 +43,10 @@ public protocol ReadinessProbe: Sendable {
 /// for deterministic ordering.
 @MainActor
 @Observable
-public final class SiriReadinessModel {
+public final class SiriReadinessModel: Identifiable {
+    // Identity lets the readiness sheet bind via `.sheet(item:)`.
+    public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
+
     public private(set) var findings: [ReadinessFinding] = []
     public private(set) var isChecking: Bool = false
     public private(set) var lastChecked: Date?
