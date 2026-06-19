@@ -113,8 +113,8 @@ extension AppIntentsTests {
             #expect(await router.received.isEmpty, "bridge must not be called when selector won't decode")
         }
 
-        @Test("perform still routes under test scope after the confirmation gate is added")
-        func perform_gateSkippedUnderTestScope() async throws {
+        @Test("perform skips the confirmation gate and routes under test scope")
+        func perform_confirmationGateSkippedUnderTestScope() async throws {
             let router = RecordingRouter(reply: EditReply(
                 id: "fixed", status: .applied, message: nil, file: "src/pages/about.astro"
             ))
