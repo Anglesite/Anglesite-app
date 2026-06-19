@@ -131,16 +131,17 @@ const baseEdit = {
 };
 
 describe("apply_edit dry_run", () => {
-  it("returns edit-preview without mutating the file", () => {
-    const before = readFileSync(join(root, "src/pages/about.astro"), "utf-8");
-    const res = applyEditSync({ ...baseEdit, dry_run: true });
+  it("returns edit-preview without mutating the file", async () => {
+    const file = join(root, "src/pages/about.astro");
+    const before = readFileSync(file, "utf-8");
+    const res = await applyEdit(root, { ...baseEdit, dry_run: true });
     expect(res.isError).toBeFalsy();
     const body = JSON.parse(res.content[0].text);
     expect(body.type).toBe("anglesite:edit-preview");
     expect(body.before).toContain("Welcome");
     expect(body.after).toContain("Hello");
     // critical: file is byte-identical
-    expect(readFileSync(join(root, "src/pages/about.astro"), "utf-8")).toBe(before);
+    expect(readFileSync(file, "utf-8")).toBe(before);
   });
 
   it("still refuses (no-match) under dry_run", async () => {
@@ -151,22 +152,8 @@ describe("apply_edit dry_run", () => {
     expect(res.isError).toBe(true);
     expect(JSON.parse(res.content[0].text).reason).toBe("no-match");
   });
-
-  // helper to await applyEdit synchronously in the first test
-  function applyEditSync(edit) {
-    let out;
-    // applyEdit is async; resolve before assertions
-    return (out = applyEditPromise(edit));
-  }
-  function applyEditPromise(edit) {
-    // vitest supports returning a promise; but we need sync read after.
-    // Use the async form instead:
-    throw new Error("use async");
-  }
 });
 ```
-
-Replace the awkward helper: write the first test as `async` and `await applyEdit(root, {...baseEdit, dry_run: true})` directly (the helper stubs above exist only to make the intent explicit — delete them and use `await`).
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -670,7 +657,7 @@ Tagging the release (`git tag vX.Y.Z && git push origin vX.Y.Z`) happens **after
 - MCP wiring → Task 5 ✓
 - paired release → Task 6 ✓
 
-**Placeholder scan:** Task 1 test helper `applyEditSync`/`applyEditPromise` are deliberately-flagged stubs with an explicit "delete them and use await" instruction — not a silent placeholder. All other steps carry full code.
+**Placeholder scan:** Task 5 Step 1 describes the MCP-server test in prose (reusing the existing `tests/mcp-server.test.ts` JSON-RPC helper) rather than pasting the full spawn plumbing — intentional, since the helper already exists and re-pasting it would duplicate ~20 lines verbatim. All other steps carry full code.
 
 **Type consistency:** `createEditPreviewContent(id, file, range, op, before, after)` is defined in Task 1 and called with the same arg order in Task 2 (`preview(...)` wrapper). `rewriteAstroStyle(source, selector, property, value)` defined in Task 3 Step 3, called the same way in `resolveStyle`. `edit-style` op string consistent across schema, patcher, tests.
 
