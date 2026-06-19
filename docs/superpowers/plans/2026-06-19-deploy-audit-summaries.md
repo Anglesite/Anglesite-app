@@ -538,9 +538,14 @@ import Testing
 #endif
 
 @Suite struct DeploySummarizerFactoryTests {
-    @Test func makeDefaultReturnsAConformer() {
-        let summarizer = DeploySummarizerFactory.makeDefault()
-        _ = summarizer  // smoke: constructs without trapping on either toolchain
+    // The factory's product differs per toolchain (real conformer under Xcode 27, Noop on CI),
+    // but BOTH short-circuit a whitespace-only log to nil before touching any model — a real
+    // behavioral assertion that holds everywhere and never invokes Apple Intelligence.
+    @Test func makeDefaultProductShortCircuitsEmptyLog() async {
+        let result = await DeploySummarizerFactory.makeDefault().summarize(
+            failureLog: "   ", siteID: "s", siteDirectory: URL(fileURLWithPath: "/tmp/s")
+        )
+        #expect(result == nil)
     }
 }
 ```
