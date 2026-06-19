@@ -14,8 +14,9 @@ import Foundation
 ///      pipeline. We surface a `.failed` with no override and let the user switch
 ///      branches (or use the chat-routed path, which can auto-switch to `draft`).
 ///   2. Remote: refuse if `origin` isn't configured. There's nowhere to push to.
-///   3. Status: bail with `.noChanges` if the working tree is clean — no point
-///      generating a no-op commit.
+///   3. Status: on a clean working tree, generate no commit — but if HEAD is ahead of
+///      `origin/<branch>` (an unpushed commit from a prior cancelled backup, #246), push it
+///      and report `.succeeded`; only a clean tree that's also in sync yields `.noChanges`.
 ///
 /// Then the action steps stream their output to `LogCenter` under
 /// `backup:<siteID>`, so the drawer UI can show progress in real time.
@@ -114,14 +115,18 @@ public actor BackupCommand {
             return .failed(reason: "couldn't read `origin` remote: \(error)", exitCode: nil)
         }
 
-        // 3. Status — bail early on a clean working tree.
+        // 3. Status — on a clean working tree there's nothing new to commit, but HEAD may
+        // still be *ahead* of the remote: a prior backup that committed and was cancelled (or
+        // failed) before its push leaves an unpushed commit (#246). A naive `.noChanges` here
+        // would silently strand that work. So on a clean tree we check the ahead-count and,
+        // when there are pending commits, push them and report `.succeeded` instead.
         do {
             let result = try await runner(siteDirectory, ["status", "--porcelain"])
             guard result.exitCode == 0 else {
                 return .failed(reason: "`git status` exited \(result.exitCode)", exitCode: result.exitCode)
             }
             if result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return .noChanges
+                return await pushPendingCommitsIfAhead(branch: branch, remote: remote, in: siteDirectory, source: source)
             }
         } catch {
             return .failed(reason: "couldn't run `git status`: \(error)", exitCode: nil)
@@ -175,6 +180,49 @@ public actor BackupCommand {
         } catch {
             return .failed(reason: "couldn't spawn `\(label)`: \(error)", exitCode: nil)
         }
+    }
+
+    /// Handles the clean-tree case: pushes any commit(s) that are ahead of `origin/<branch>`
+    /// and reports `.succeeded`, otherwise returns `.noChanges`. Covers the cancelled-after-
+    /// commit backup (#246), where a commit was made locally but never pushed.
+    ///
+    /// Ahead-ness is measured against the remote-tracking ref (`origin/<branch>`), which
+    /// `git push origin <branch>` keeps current — rather than `@{u}`, since a plain push
+    /// (no `-u`) never configures upstream tracking. If that ref doesn't exist (the branch
+    /// was never pushed), `git rev-list` exits non-zero; we treat that as "can't determine"
+    /// and preserve the historical `.noChanges` rather than erroring or pushing blindly.
+    private func pushPendingCommitsIfAhead(
+        branch: String,
+        remote: String,
+        in siteDirectory: URL,
+        source: String
+    ) async -> Result {
+        let aheadCount: Int
+        do {
+            let result = try await runner(siteDirectory, ["rev-list", "--count", "origin/\(branch)..HEAD"])
+            guard result.exitCode == 0 else { return .noChanges }
+            aheadCount = Int(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        } catch {
+            return .noChanges
+        }
+        guard aheadCount > 0 else { return .noChanges }
+
+        // Read the SHA we'll report before pushing it.
+        let sha: String
+        do {
+            let result = try await runner(siteDirectory, ["rev-parse", "HEAD"])
+            guard result.exitCode == 0 else {
+                return .failed(reason: "couldn't read commit SHA (`git rev-parse HEAD` exit \(result.exitCode))", exitCode: result.exitCode)
+            }
+            sha = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return .failed(reason: "couldn't read commit SHA: \(error)", exitCode: nil)
+        }
+
+        if let failure = await streamGit(["push", "origin", branch], in: siteDirectory, source: source, label: "git push") {
+            return failure
+        }
+        return .succeeded(commitSHA: sha, branch: branch, remote: remote)
     }
 
     /// ISO-8601 timestamps in commit messages so they sort correctly under `git log` and
