@@ -6,11 +6,23 @@ import AnglesiteIntents
 
 /// Owns process-level lifecycle that SwiftUI's `App` value type can't: prime the npm cache on
 /// launch, and drain every supervised child on quit so nothing outlives the app.
+/// Holds the app-lifetime `ContentSpotlightIndexer` once `bootstrap` finishes populating it.
+/// `@Observable` so a `SiteWindow` constructed *before* bootstrap completes still reacts when the
+/// indexer arrives (enabling its Siri AI Readiness button) — passing the bare optional through the
+/// `WindowGroup` constructor would freeze whatever value existed at body-eval time.
+@MainActor
+@Observable
+final class ContentIndexerStore {
+    var indexer: ContentSpotlightIndexer?
+}
+
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Single shared `SiteContentGraph` for the app's lifetime. Passed into
     /// `AnglesiteIntents.bootstrap` so it can be registered with `AppDependencyManager`;
     /// will also be threaded into `LocalSiteRuntime` in A.8 (#142).
     let contentGraph = SiteContentGraph()
+    let contentIndexerStore = ContentIndexerStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Register App Intents dependencies before the app surface comes up so backgrounded
@@ -18,8 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `bootstrap()` is async (it awaits the Spotlight handler installation on `SiteStore`);
         // we kick it off here without waiting — the launcher view's `task` modifier doesn't
         // block on it, and bootstrap's own defensive `load()` closes any race.
-        Task { [contentGraph] in
-            await AnglesiteIntents.bootstrap(contentGraph: contentGraph)
+        Task { [contentGraph, contentIndexerStore] in
+            // This Task inherits the @MainActor context, so the store write needs no extra hop.
+            contentIndexerStore.indexer = await AnglesiteIntents.bootstrap(contentGraph: contentGraph)
         }
 
         // Begin mirroring the site registry so the File ▸ Open Recent submenu is populated
@@ -159,7 +172,7 @@ struct AnglesiteApp: App {
             // route to the launcher when restoration hands us a nil or unresolvable
             // id. If we short-circuit with `if let siteID` here the SiteWindow never
             // instantiates and an empty restored window strands the user.
-            SiteWindow(siteID: siteID, contentGraph: appDelegate.contentGraph)
+            SiteWindow(siteID: siteID, contentGraph: appDelegate.contentGraph, contentIndexerStore: appDelegate.contentIndexerStore)
                 .frame(minWidth: 960, minHeight: 600)
         }
         .windowStyle(.titleBar)

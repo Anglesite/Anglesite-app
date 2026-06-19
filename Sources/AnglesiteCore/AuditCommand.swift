@@ -71,8 +71,9 @@ public actor AuditCommand {
 
     /// Run the audit pipeline against `siteDirectory`. Reaches `.succeeded` even when
     /// individual runners throw — those are surfaced via `report.runnersSkipped`.
-    public func audit(siteID: String, siteDirectory: URL) async -> Result {
+    public func audit(siteID: String, siteDirectory: URL, onProgress: ProgressHandler? = nil) async -> Result {
         let started = Date()
+        onProgress?(.auditBuilding)
 
         // Build dist/ first. Streamed so the UI can show progress.
         switch await runBuild(siteID: siteID, siteDirectory: siteDirectory) {
@@ -85,7 +86,9 @@ public actor AuditCommand {
         var executed: [AuditReport.Finding.Category] = []
         var skipped: [AuditReport.SkippedRunner] = []
 
-        for runner in runners {
+        for (index, runner) in runners.enumerated() {
+            if Task.isCancelled { break }   // CancellableIntent cancel — stop before the next runner
+            onProgress?(.auditRunning(category: runner.category.rawValue, index: index, of: runners.count))
             let source = "audit:\(siteID):\(runner.category.rawValue)"
             do {
                 let runnerFindings = try await runner.run(
@@ -108,6 +111,10 @@ public actor AuditCommand {
             }
         }
 
+        if Task.isCancelled {
+            return .failed(reason: "audit canceled", exitCode: nil, logTail: [])
+        }
+        onProgress?(.auditFinalizing)
         let report = AuditReport(findings: findings, runnersExecuted: executed, runnersSkipped: skipped)
         return .succeeded(report: report, duration: Date().timeIntervalSince(started))
     }

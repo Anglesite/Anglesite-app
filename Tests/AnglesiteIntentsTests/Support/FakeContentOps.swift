@@ -20,12 +20,12 @@ final class FakeContentOps: ContentOperationsService, @unchecked Sendable {
     private(set) var pageCalls: [(siteID: String, name: String, route: String?)] = []
     private(set) var postCalls: [(siteID: String, title: String, collection: String?, slug: String?)] = []
 
-    func createPage(siteID: String, name: String, route: String?) async -> ContentCreateResult {
+    func createPage(siteID: String, name: String, route: String?, onProgress: ProgressHandler?) async -> ContentCreateResult {
         pageCalls.append((siteID, name, route))
         return pageResult
     }
 
-    func createPost(siteID: String, title: String, collection: String?, slug: String?) async -> ContentCreateResult {
+    func createPost(siteID: String, title: String, collection: String?, slug: String?, onProgress: ProgressHandler?) async -> ContentCreateResult {
         postCalls.append((siteID, title, collection, slug))
         return postResult
     }

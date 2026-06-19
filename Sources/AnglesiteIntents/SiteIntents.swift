@@ -54,12 +54,16 @@ public struct DeploySiteIntent: AppIntent {
             result = await ops.deploy(site: resolved)
         } else {
             #if compiler(>=6.4)
+            let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
-                await ops.deploy(site: resolved)
-            } onCancel: { _ in }
+                await ops.deploy(site: resolved, onProgress: onProgress)
+            } onCancel: { _ in }  // task cancellation propagates automatically through structured concurrency; no extra cleanup needed
             #else
             result = await ops.deploy(site: resolved)
             #endif
+        }
+        if Task.isCancelled {
+            return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.canceledDialog(operation: "deploy", siteName: site.displayName)))
         }
         return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forDeploy: result)))
     }
@@ -91,12 +95,16 @@ public struct BackupSiteIntent: AppIntent {
             result = await ops.backup(site: resolved)
         } else {
             #if compiler(>=6.4)
+            let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
-                await ops.backup(site: resolved)
-            } onCancel: { _ in }
+                await ops.backup(site: resolved, onProgress: onProgress)
+            } onCancel: { _ in }  // task cancellation propagates automatically through structured concurrency; no extra cleanup needed
             #else
             result = await ops.backup(site: resolved)
             #endif
+        }
+        if Task.isCancelled {
+            return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.canceledDialog(operation: "backup", siteName: site.displayName)))
         }
         return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forBackup: result)))
     }
@@ -127,12 +135,16 @@ public struct AuditSiteIntent: AppIntent {
             result = await ops.audit(site: resolved)
         } else {
             #if compiler(>=6.4)
+            let onProgress = IntentProgressAdapter.handler(for: self.progress)
             result = try await performBackgroundTask {
-                await ops.audit(site: resolved)
-            } onCancel: { _ in }
+                await ops.audit(site: resolved, onProgress: onProgress)
+            } onCancel: { _ in }  // task cancellation propagates automatically through structured concurrency; no extra cleanup needed
             #else
             result = await ops.audit(site: resolved)
             #endif
+        }
+        if Task.isCancelled {
+            return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.canceledDialog(operation: "check", siteName: site.displayName)))
         }
         return .result(value: site, dialog: IntentDialog(stringLiteral: SiteOperations.dialog(forAudit: result)))
     }
