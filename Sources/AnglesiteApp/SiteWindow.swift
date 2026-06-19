@@ -57,7 +57,9 @@ struct SiteWindow: View {
     @State private var startup = StartupProgressModel()
     /// Observed so an already-open window reacts to a `PreviewSiteIntent` navigation request.
     @State private var router = WindowRouter.shared
-    @State private var siriReadinessPresented = false
+    /// Drives the Siri AI Readiness sheet via `.sheet(item:)`: non-nil ⟺ presented. Coupling the
+    /// sheet to the model (rather than a separate Bool) makes an empty, undismissable sheet
+    /// impossible — the content always receives a non-nil model and "Done" nils it out.
     @State private var siriReadinessModel: SiriReadinessModel?
 
     @Environment(\.openWindow) private var openWindow
@@ -249,12 +251,13 @@ struct SiteWindow: View {
             // Siri AI Readiness — secondary action, visible when a site is loaded.
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    if siriReadinessModel == nil, let indexer = contentIndexerStore.indexer {
+                    // Only present when the model can actually be built — never flip on a
+                    // presentation flag independently of its content (that was the empty-sheet bug).
+                    if let indexer = contentIndexerStore.indexer {
                         siriReadinessModel = SiriReadinessModel(
                             probes: SiriReadinessProbes.site(siteID: site.id, graph: contentGraph, indexer: indexer)
                         )
                     }
-                    siriReadinessPresented = true
                 } label: {
                     Label("Siri AI Readiness", systemImage: "sparkles")
                 }
@@ -281,23 +284,21 @@ struct SiteWindow: View {
                 onRunAgain: { audit.audit(siteID: site.id, siteDirectory: site.path) }
             )
         }
-        .sheet(isPresented: $siriReadinessPresented) {
-            if let model = siriReadinessModel {
-                NavigationStack {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Siri AI readiness for \u{201C}\(site.name)\u{201D}.")
-                                .font(.caption).foregroundStyle(.secondary)
-                            SiriReadinessList(model: model)
-                        }
-                        .padding()
+        .sheet(item: $siriReadinessModel) { model in
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Siri AI readiness for \u{201C}\(site.name)\u{201D}.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        SiriReadinessList(model: model)
                     }
-                    .frame(minWidth: 420, minHeight: 260)
-                    .navigationTitle("Siri AI Readiness")
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { siriReadinessPresented = false }
-                        }
+                    .padding()
+                }
+                .frame(minWidth: 420, minHeight: 260)
+                .navigationTitle("Siri AI Readiness")
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { siriReadinessModel = nil }
                     }
                 }
             }

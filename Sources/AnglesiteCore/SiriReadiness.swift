@@ -43,7 +43,11 @@ public protocol ReadinessProbe: Sendable {
 /// for deterministic ordering.
 @MainActor
 @Observable
-public final class SiriReadinessModel {
+public final class SiriReadinessModel: Identifiable {
+    /// Identity for SwiftUI's `.sheet(item:)`, which drives the readiness sheet off this model's
+    /// existence — presenting it is impossible without a model, so the sheet can never render empty.
+    public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
+
     public private(set) var findings: [ReadinessFinding] = []
     public private(set) var isChecking: Bool = false
     public private(set) var lastChecked: Date?
