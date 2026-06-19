@@ -87,4 +87,52 @@ struct AnglesitePackageTests {
         #expect(AnglesitePackage.compatibility(for: current) == .current)
         #expect(AnglesitePackage.compatibility(for: future) == .readOnlyTooNew)
     }
+
+    @Test("createSkeleton lays down Source/, Config/, and a stamped marker")
+    func createSkeletonLaysDownLayout() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let pkgURL = dir.appendingPathComponent("Acme.anglesite", isDirectory: true)
+
+        let (pkg, marker) = try AnglesitePackage.createSkeleton(at: pkgURL, displayName: "Acme")
+
+        var isDir: ObjCBool = false
+        #expect(FileManager.default.fileExists(atPath: pkg.sourceURL.path, isDirectory: &isDir) && isDir.boolValue)
+        #expect(FileManager.default.fileExists(atPath: pkg.configURL.path, isDirectory: &isDir) && isDir.boolValue)
+        #expect(marker.displayName == "Acme")
+        #expect(try pkg.readMarker() == marker)
+    }
+
+    @Test("isPackage is true only for an .anglesite dir with a readable marker")
+    func isPackageDetection() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let good = dir.appendingPathComponent("Good.anglesite", isDirectory: true)
+        _ = try AnglesitePackage.createSkeleton(at: good, displayName: "Good")
+        let wrongExt = dir.appendingPathComponent("Plain", isDirectory: true)
+        try FileManager.default.createDirectory(at: wrongExt, withIntermediateDirectories: true)
+        let noMarker = dir.appendingPathComponent("Hollow.anglesite", isDirectory: true)
+        try FileManager.default.createDirectory(at: noMarker, withIntermediateDirectories: true)
+
+        #expect(AnglesitePackage.isPackage(at: good))
+        #expect(!AnglesitePackage.isPackage(at: wrongExt))
+        #expect(!AnglesitePackage.isPackage(at: noMarker))
+    }
+
+    @Test("sourceValidation reports missing sentinels in Source/")
+    func sourceValidationReportsMissing() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let pkgURL = dir.appendingPathComponent("Acme.anglesite", isDirectory: true)
+        let (pkg, _) = try AnglesitePackage.createSkeleton(at: pkgURL, displayName: "Acme")
+
+        // Empty Source/: invalid (all required sentinels missing).
+        #expect(!pkg.sourceValidation().isValid)
+
+        // Drop the required sentinels into Source/: now valid.
+        for name in ProjectValidator.requiredSentinels {
+            try Data("{}".utf8).write(to: pkg.sourceURL.appendingPathComponent(name))
+        }
+        #expect(pkg.sourceValidation().isValid)
+    }
 }

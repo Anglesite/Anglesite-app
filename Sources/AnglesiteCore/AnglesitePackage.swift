@@ -97,4 +97,39 @@ public struct AnglesitePackage: Sendable, Equatable {
         let data = try encoder.encode(marker)
         try data.write(to: infoPlistURL, options: [.atomic])
     }
+
+    // MARK: - Creation
+
+    /// Creates an empty package skeleton: the package dir, `Source/`, `Config/`, and a freshly
+    /// stamped `Info.plist`. Does **not** scaffold the Astro project — that runs later with cwd =
+    /// `sourceURL` (P2). Returns the package and its new marker.
+    @discardableResult
+    public static func createSkeleton(
+        at url: URL,
+        displayName: String,
+        fileManager: FileManager = .default
+    ) throws -> (AnglesitePackage, Marker) {
+        let pkg = AnglesitePackage(url: url)
+        try fileManager.createDirectory(at: pkg.sourceURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: pkg.configURL, withIntermediateDirectories: true)
+        // Round date to nearest second to match plist XML precision (seconds only, no fractional part)
+        let now = Date()
+        let roundedDate = Date(timeIntervalSinceReferenceDate: floor(now.timeIntervalSinceReferenceDate))
+        let marker = Marker(displayName: displayName, createdDate: roundedDate)
+        try pkg.writeMarker(marker, fileManager: fileManager)
+        return (pkg, marker)
+    }
+
+    // MARK: - Detection & validation
+
+    /// `true` when `url` is a `.anglesite` directory carrying a readable marker.
+    public static func isPackage(at url: URL, fileManager: FileManager = .default) -> Bool {
+        guard url.pathExtension == packageExtension else { return false }
+        return (try? AnglesitePackage(url: url).readMarker(fileManager: fileManager)) != nil
+    }
+
+    /// Validates the `Source/` tree against the Anglesite project sentinels.
+    public func sourceValidation(fileManager: FileManager = .default) -> ProjectValidator.Result {
+        ProjectValidator.validate(sourceURL, fileManager: fileManager)
+    }
 }
