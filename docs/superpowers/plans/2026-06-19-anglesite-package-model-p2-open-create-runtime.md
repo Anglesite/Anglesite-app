@@ -591,7 +591,7 @@ Replace the panel config + registration (lines 27–42) so it accepts `.anglesit
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [UTType("dev.anglesite.site")].compactMap { $0 }
+        panel.allowedContentTypes = [.anglesiteSite]   // UTType.anglesiteSite (AnglesiteCore) — non-failable, CI-safe
         panel.treatsFilePackagesAsDirectories = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Open"
@@ -761,7 +761,7 @@ EOF
 **Risk flags for the implementer:**
 - Tasks 2+3 are one compilable unit — apply both before the build claim.
 - Removing `refresh()`/`add` will break any caller not updated here — grep `\.refresh()` and `SiteStore.shared.add(` across `Sources/` and fix each (RecentSitesModel.start() calls `refresh()` at `RecentSitesModel.swift:30` — change it to `load()` only, since recents no longer scans).
-- Confirm `UTType("dev.anglesite.site")` resolves at runtime (it's declared in P1's Info.plist).
+- Use `UTType.anglesiteSite` (declared in `AnglesiteCore/UTType+Anglesite.swift`, P1) for panel content types — it's non-failable, so it stays valid in CI/test processes where the bundle UTI isn't registered. Do not use the failable `UTType("dev.anglesite.site")`.
 
 ## Handoff to P3
 

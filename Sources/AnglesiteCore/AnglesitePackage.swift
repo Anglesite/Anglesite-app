@@ -33,10 +33,13 @@ public struct AnglesitePackage: Sendable, Equatable {
     /// The `Info.plist` marker: stable identity + format version + provenance. Encoded with
     /// `PropertyListEncoder`, so `createdDate` is a native plist date and `siteID` a plist string.
     public struct Marker: Sendable, Codable, Equatable {
-        public var formatVersion: Int
-        public var siteID: UUID
+        // Identity + provenance are immutable: the point of the UUID redesign is that a package's
+        // identity never changes after creation. Only `displayName` has a legitimate reason to
+        // change (a rename), so it stays `var`.
+        public let formatVersion: Int
+        public let siteID: UUID
         public var displayName: String
-        public var createdDate: Date
+        public let createdDate: Date
 
         public init(
             formatVersion: Int = AnglesitePackage.currentFormatVersion,
@@ -62,9 +65,17 @@ public struct AnglesitePackage: Sendable, Equatable {
         }
     }
 
-    public enum PackageError: Error, Equatable, Sendable {
+    public enum PackageError: Error, Sendable {
+        /// `Info.plist` is absent (or was deleted out from under us).
         case markerMissing(URL)
-        case markerUnreadable(URL)
+        /// `Info.plist` exists but couldn't be read or decoded. Carries the underlying cause so a
+        /// permission error, a corrupt plist, and a decode mismatch are distinguishable downstream.
+        case markerUnreadable(URL, underlying: Error)
+        /// Refused to overwrite a marker written by a newer build (`.readOnlyTooNew`), per spec §9.
+        case markerTooNew(URL)
+        /// `createSkeleton` target already exists — overwriting would mint a new UUID and destroy
+        /// the existing site's stable identity.
+        case alreadyExists(URL)
     }
 
     /// Forward-compatibility verdict for an opened package's marker.
@@ -80,21 +91,32 @@ public struct AnglesitePackage: Sendable, Equatable {
         marker.formatVersion > currentFormatVersion ? .readOnlyTooNew : .current
     }
 
-    /// Reads and decodes the `Info.plist` marker. (Error cases handled in Task 2.)
+    /// Reads and decodes the `Info.plist` marker.
+    ///
+    /// No separate existence check: that would be a TOCTOU race (the file could vanish between the
+    /// check and the read). Instead we let `Data(contentsOf:)` throw and classify — a no-such-file
+    /// `CocoaError` becomes `.markerMissing`, anything else `.markerUnreadable` carrying the cause.
     public func readMarker(fileManager: FileManager = .default) throws -> Marker {
-        guard fileManager.fileExists(atPath: infoPlistURL.path) else {
-            throw PackageError.markerMissing(infoPlistURL)
-        }
         do {
             let data = try Data(contentsOf: infoPlistURL)
             return try PropertyListDecoder().decode(Marker.self, from: data)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
+            throw PackageError.markerMissing(infoPlistURL)
         } catch {
-            throw PackageError.markerUnreadable(infoPlistURL)
+            throw PackageError.markerUnreadable(infoPlistURL, underlying: error)
         }
     }
 
     /// Writes the marker to `Info.plist` (XML plist, atomic), creating the package dir if needed.
+    ///
+    /// Refuses to overwrite a marker written by a newer build (`.readOnlyTooNew`) so we never
+    /// silently downgrade a format we don't understand (spec §9). A fresh package has no marker
+    /// yet — `readMarker` throws, the `try?` yields `nil`, and creation proceeds.
     public func writeMarker(_ marker: Marker, fileManager: FileManager = .default) throws {
+        if let existing = try? readMarker(fileManager: fileManager),
+           AnglesitePackage.compatibility(for: existing) == .readOnlyTooNew {
+            throw PackageError.markerTooNew(infoPlistURL)
+        }
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .xml
@@ -113,24 +135,58 @@ public struct AnglesitePackage: Sendable, Equatable {
         displayName: String,
         fileManager: FileManager = .default
     ) throws -> (AnglesitePackage, Marker) {
+        // Refuse to scaffold over an existing path: overwriting would mint a new UUID and silently
+        // destroy the existing site's stable identity (spec §9).
+        guard !fileManager.fileExists(atPath: url.path) else {
+            throw PackageError.alreadyExists(url)
+        }
         let pkg = AnglesitePackage(url: url)
+        // Roll back a half-written package if any step fails (disk full, permissions), so a failed
+        // create never leaves an orphaned partial package behind (spec §9).
+        var succeeded = false
+        defer { if !succeeded { try? fileManager.removeItem(at: url) } }
         try fileManager.createDirectory(at: pkg.sourceURL, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: pkg.configURL, withIntermediateDirectories: true)
         let marker = Marker(displayName: displayName)
         try pkg.writeMarker(marker, fileManager: fileManager)
+        succeeded = true
         return (pkg, marker)
     }
 
     // MARK: - Detection & validation
 
-    /// `true` when `url` is a `.anglesite` directory carrying a readable marker.
+    /// `true` when `url` is a `.anglesite` **directory** carrying a readable marker. A regular file
+    /// with the `.anglesite` extension is not a package.
     public static func isPackage(at url: URL, fileManager: FileManager = .default) -> Bool {
         guard url.pathExtension == packageExtension else { return false }
+        var isDir: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else { return false }
         return (try? AnglesitePackage(url: url).readMarker(fileManager: fileManager)) != nil
     }
 
     /// Validates the `Source/` tree against the Anglesite project sentinels.
     public func sourceValidation(fileManager: FileManager = .default) -> ProjectValidator.Result {
         ProjectValidator.validate(sourceURL, fileManager: fileManager)
+    }
+
+    /// Two packages are equal when they point at the same standardized location, so a path with a
+    /// trailing slash or `..` segment compares equal to its canonical form. (Symlink-level identity
+    /// is handled by `SiteStore`'s canonicalization at the recents layer.)
+    public static func == (lhs: AnglesitePackage, rhs: AnglesitePackage) -> Bool {
+        lhs.url.standardizedFileURL == rhs.url.standardizedFileURL
+    }
+}
+
+extension AnglesitePackage.PackageError: Equatable {
+    /// Equality by case + URL; the `markerUnreadable` underlying error is excluded (`Error` isn't
+    /// `Equatable`), so callers and tests can match on the case without constructing a cause.
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case let (.markerMissing(a), .markerMissing(b)): return a == b
+        case let (.markerUnreadable(a, _), .markerUnreadable(b, _)): return a == b
+        case let (.markerTooNew(a), .markerTooNew(b)): return a == b
+        case let (.alreadyExists(a), .alreadyExists(b)): return a == b
+        default: return false
+        }
     }
 }
