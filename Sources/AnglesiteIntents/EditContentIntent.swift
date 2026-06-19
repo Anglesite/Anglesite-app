@@ -10,7 +10,8 @@ import Foundation
 /// 2. Siri fills `EditContentIntent`'s parameters with the entity + the user's spoken phrase
 ///    ("make it bigger", "change the color to teal", …).
 /// 3. `perform()` decodes the entity's stored selector back into a structured `JSONValue`,
-///    builds an `EditMessage`, and routes it via `IntentEditBridge` →
+///    confirms the change with the user (#239 — review before mutating source files; skipped
+///    under test scope), then builds an `EditMessage` and routes it via `IntentEditBridge` →
 ///    `EditRouterRegistry.shared` → the open window's `MCPApplyEditRouter` → plugin
 ///    `apply_edit` MCP tool.
 /// 4. Plugin interprets the instruction (the natural-language op is the plugin's responsibility,
@@ -43,10 +44,23 @@ public struct EditContentIntent: AppIntent {
     }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
-        let resolved = IntentEditBridgeOverride.scoped ?? bridge
+        let scoped = IntentEditBridgeOverride.scoped
+        let resolved = scoped ?? bridge
         guard let selector = element.selectorJSON() else {
             return .result(dialog: IntentDialog(stringLiteral: ContentDialogs.editInvalidSelector(
                 displayName: element.displayName
+            )))
+        }
+        // #239: Siri must review the edit before it mutates source files. Confirm after the
+        // target is resolved (so the summary names the element/page) and before routing (so a
+        // decline leaves the working tree untouched — `perform` exits here, never calling the
+        // bridge). Skipped under test scope, which has no UI surface — same pattern as the
+        // Site intents' `SiteOperationsOverride.scoped` guard around `requestConfirmation`.
+        if scoped == nil {
+            try await requestConfirmation(dialog: IntentDialog(stringLiteral: ContentDialogs.editConfirmation(
+                displayName: element.displayName,
+                pagePath: element.pagePath,
+                instruction: instruction
             )))
         }
         let reply = await resolved.applyEdit(
@@ -119,6 +133,15 @@ extension ContentDialogs {
     /// tested), but the failure mode is well-defined enough to deserve a dialog.
     public static func editInvalidSelector(displayName: String) -> String {
         "Lost track of \(displayName) — try selecting it again."
+    }
+
+    /// Confirmation summary shown before a Siri-driven edit mutates source files (#239).
+    /// Names the element, the page it lives on, and the requested change so the user can
+    /// review before confirming. App-only summary — a structured diff is a deferred follow-up
+    /// gated on a plugin `apply_edit` dry-run.
+    public static func editConfirmation(displayName: String, pagePath: String, instruction: String) -> String {
+        let change = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "Update \(displayName) on \(pagePath)? Change: \(change)."
     }
 
     /// Dispatch on the reply status. Single entry point the intent's `perform()` uses.
