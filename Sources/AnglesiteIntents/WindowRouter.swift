@@ -47,9 +47,4 @@ public final class WindowRouter {
 
     /// Called by the launcher once it has consumed the request.
     public func clearNewSiteRequest() { newSiteRequested = false }
-
-    /// The id of the site whose window is currently key. Set by `SiteWindow.loadAndStart` when the
-    /// site resolves; cleared in `onDisappear` only if it still matches this window's id (so a newly
-    /// focused window isn't cleared by the one that just closed). Drives File ▸ Export Site Source….
-    public var focusedSiteID: String?
 }
