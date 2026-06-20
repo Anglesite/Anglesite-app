@@ -38,6 +38,10 @@ public enum FileDocumentIO {
     ) throws -> ExternalChange {
         let current = try modificationDate(of: url, fileManager: fileManager)
         // Treat a strictly-newer disk mtime as an external write. Equal/nil → no change.
+        // Known limitation: HFS+ has 1-second mtime granularity, so two writes within the same
+        // second can carry identical mtimes and a second external change made that quickly is not
+        // detected. APFS (the macOS 27 default) has nanosecond granularity, so this only affects
+        // legacy HFS+ volumes.
         guard let current, let last = lastKnownModificationDate, current > last else {
             return .none
         }
@@ -46,6 +50,6 @@ public enum FileDocumentIO {
     }
 
     private static func modificationDate(of url: URL, fileManager: FileManager) throws -> Date? {
-        try fileManager.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+        try fileManager.attributesOfItem(atPath: url.path(percentEncoded: false))[.modificationDate] as? Date
     }
 }

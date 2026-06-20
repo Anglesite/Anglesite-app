@@ -69,6 +69,9 @@ struct SiteWindow: View {
     @State private var siriReadinessModel: SiriReadinessModel?
     @State private var navigator: SiteNavigatorModel?
     @State private var mainPaneMode: MainPaneMode = .preview
+    /// Sidebar visibility persisted per scene (window), per the design spec. Column WIDTH is restored
+    /// automatically by `NavigationSplitView`'s own scene state, so only explicit visibility is wired.
+    @SceneStorage("siteNavigator.sidebarVisible") private var sidebarVisible = true
     /// The open file's editor state. Owned here (not in `MainPaneEditorView`) so navigating away can
     /// auto-save it and the Preview/Editor toggle keeps the buffer alive. Replaced when a different
     /// file opens; cleared on window close / site replay.
@@ -101,6 +104,8 @@ struct SiteWindow: View {
         // the current site — otherwise it holds stale probes scoped to the original site.id.
         .onChange(of: site?.id) { _, _ in
             siriReadinessModel = nil
+            // Persist any unsaved edits before dropping the old site's editor on replay (#188 reuse).
+            persistEditorBufferBestEffort()
             editorModel = nil
             mainPaneMode = .preview
         }
@@ -120,7 +125,10 @@ struct SiteWindow: View {
             chat = nil
             navigator?.stop()
             navigator = nil
-            _ = editorModel?.flushBeforeLeaving()
+            // Window closing: persist unsaved edits unconditionally (consistent with
+            // auto-save-on-leave). No conflict dialog is possible during teardown, so we don't gate
+            // on a flush return value — just write the buffer best-effort, off the main actor.
+            persistEditorBufferBestEffort()
             editorModel = nil
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()
@@ -131,7 +139,10 @@ struct SiteWindow: View {
 
     @ViewBuilder
     private func siteUI(for site: SiteStore.Site) -> some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: Binding(
+            get: { sidebarVisible ? .all : .detailOnly },
+            set: { sidebarVisible = ($0 != .detailOnly) }
+        )) {
             if let navigator {
                 SiteNavigatorView(model: navigator)
                     .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
@@ -365,8 +376,8 @@ struct SiteWindow: View {
     private func setPaneSelection(_ value: Int) {
         if value == 0 {
             // Switching to Preview auto-saves the open editor (abort on an unresolved conflict).
-            guard leaveCurrentEditor() else { return }
-            mainPaneMode = .preview
+            // The flush is async (off-main IO), so do it in a Task and only switch on success.
+            Task { if await leaveCurrentEditor() { mainPaneMode = .preview } }
         } else if value == 1, let model = editorModel {
             mainPaneMode = .editor(model.file)
         }
@@ -374,11 +385,21 @@ struct SiteWindow: View {
 
     /// Flush the open editor before leaving it: auto-saves a dirty buffer, but returns false (and the
     /// model raises its conflict alert) when the file changed externally — so the caller aborts the
-    /// switch instead of clobbering the other tool's edit. Safe to call when not editing.
-    @discardableResult
-    private func leaveCurrentEditor() -> Bool {
+    /// switch instead of clobbering the other tool's edit. Safe to call when not editing. Async
+    /// because the save/check IO runs off the main actor.
+    private func leaveCurrentEditor() async -> Bool {
         guard case .editor = mainPaneMode, let model = editorModel else { return true }
-        return model.flushBeforeLeaving()
+        return await model.flushBeforeLeaving()
+    }
+
+    /// Best-effort off-main save of the open editor's buffer when the editor is torn down (window
+    /// close or site replay), where no conflict dialog can be shown. Consistent with the
+    /// auto-save-on-leave model; last-writer-wins on the rare teardown-time external conflict.
+    private func persistEditorBufferBestEffort() {
+        guard let model = editorModel, model.isDirty else { return }
+        let url = model.file.url
+        let contents = model.text
+        Task.detached(priority: .userInitiated) { try? FileDocumentIO.save(contents, to: url) }
     }
 
     @ViewBuilder
@@ -471,26 +492,32 @@ struct SiteWindow: View {
     }
 
     /// Route a navigator selection: pages/posts switch to preview and navigate; files open the editor.
+    /// Async — leaving the current editor flushes it to disk off the main actor first, and aborts the
+    /// switch if an external conflict needs resolving.
     @MainActor
     private func applyNavigatorSelection(_ id: String?) {
         guard let id, let target = navigator?.target(for: id) else { return }
         switch target {
         case .route(let route):
-            guard leaveCurrentEditor() else { return }   // abort if a conflict needs resolving
-            mainPaneMode = .preview
-            if route.isEmpty || route == "/" {
-                preview.clearRoute()
-            } else {
-                preview.navigate(toRoute: route)
+            Task {
+                guard await leaveCurrentEditor() else { return }   // abort if a conflict needs resolving
+                mainPaneMode = .preview
+                if route.isEmpty || route == "/" {
+                    preview.clearRoute()
+                } else {
+                    preview.navigate(toRoute: route)
+                }
             }
         case .file(let file):
             if editorModel?.file.id == file.id {
                 mainPaneMode = .editor(file)   // re-show the already-open file (buffer intact)
                 return
             }
-            guard leaveCurrentEditor() else { return }   // flush the previous file first
-            editorModel = FileEditorModel(file: file)
-            mainPaneMode = .editor(file)
+            Task {
+                guard await leaveCurrentEditor() else { return }   // flush the previous file first
+                editorModel = FileEditorModel(file: file)
+                mainPaneMode = .editor(file)
+            }
         }
     }
 
@@ -543,6 +570,11 @@ struct SiteWindow: View {
         // Scan from the package ROOT (not Source/): SiteFileTree's adaptive layout detects the
         // `.anglesite` package here and resolves Source/ for Components/Styles plus the sibling
         // Config/ + Info.plist for the Metadata group. Handing it Source/ would hide Metadata.
+        // Stop any prior navigator (window replay into the same instance) right before replacing it,
+        // so its observe task doesn't leak and keep streaming for the stale site. Done here at the
+        // deterministic replacement point rather than in `onChange(of: site?.id)`, which could race
+        // this creation and stop the freshly-made navigator instead.
+        navigator?.stop()
         let navModel = SiteNavigatorModel(graph: contentGraph)
         navModel.start(siteID: resolved.id, siteRoot: resolved.packageURL)
         navigator = navModel

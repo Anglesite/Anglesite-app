@@ -7,7 +7,7 @@ struct EditorKindTests {
     func everythingIsText() {
         for group in FileGroup.allCases {
             let ref = FileRef(url: URL(fileURLWithPath: "/tmp/x"), group: group, name: "x")
-            #expect(editorKind(for: ref) == .text)
+            #expect(EditorKind.resolve(for: ref) == .text)
         }
     }
 }

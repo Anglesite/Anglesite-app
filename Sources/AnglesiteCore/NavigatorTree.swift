@@ -26,7 +26,11 @@ public struct NavigatorSection: Sendable, Equatable, Identifiable {
 
 /// Derived preview route for a post. See the plan's documented assumption.
 public func postRoute(for post: SiteContentGraph.Post) -> String {
-    "/\(post.collection)/\(post.slug)/"
+    // Percent-encode each component: a collection/slug with spaces, Unicode, or reserved chars
+    // would otherwise produce an invalid URL path and 404 silently in the preview.
+    let collection = post.collection.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? post.collection
+    let slug = post.slug.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? post.slug
+    return "/\(collection)/\(slug)/"
 }
 
 /// Display titles for the five groups, in canonical sidebar order.

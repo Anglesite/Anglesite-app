@@ -29,20 +29,21 @@ struct NavigatorTreeTests {
     }
 
     @Test("page item uses title when present and route as fallback; target is the route")
-    func pageItems() {
+    func pageItems() throws {
         let sections = buildNavigatorTree(
             pages: [page("/about/", title: "About"), page("/contact/", title: nil)],
             posts: [], fileGroups: [:])
-        let pages = sections.first { $0.id == .pages }!
+        let pages = try #require(sections.first { $0.id == .pages })
         #expect(pages.items.map(\.title) == ["About", "/contact/"])
         #expect(pages.items.first?.target == .route("/about/"))
     }
 
     @Test("file item target carries the FileRef")
-    func fileItems() {
+    func fileItems() throws {
         let ref = FileRef(url: URL(fileURLWithPath: "/tmp/Base.astro"), group: .components, name: "Base.astro")
         let sections = buildNavigatorTree(pages: [], posts: [], fileGroups: [.components: [ref]])
-        let item = sections.first { $0.id == .components }!.items.first!
+        let components = try #require(sections.first { $0.id == .components })
+        let item = try #require(components.items.first)
         #expect(item.title == "Base.astro")
         #expect(item.target == .file(ref))
     }

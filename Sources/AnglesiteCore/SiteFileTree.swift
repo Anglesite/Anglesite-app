@@ -11,7 +11,7 @@ public enum FileGroup: String, Sendable, CaseIterable {
 }
 
 public struct FileRef: Sendable, Equatable, Identifiable {
-    public var id: String { url.path }
+    public var id: String { url.path(percentEncoded: false) }
     public let url: URL
     public let group: FileGroup
     public let name: String
@@ -61,7 +61,7 @@ public enum SiteFileTree {
         if let configDir = layout.configDir {
             metadata += files(in: configDir, group: .metadata, fileManager: fileManager)
         }
-        if let infoPlist = layout.infoPlist, fileManager.fileExists(atPath: infoPlist.path) {
+        if let infoPlist = layout.infoPlist, fileManager.fileExists(atPath: infoPlist.path(percentEncoded: false)) {
             metadata.append(FileRef(url: infoPlist, group: .metadata, name: infoPlist.lastPathComponent))
         }
         if !metadata.isEmpty { result[.metadata] = metadata.sorted { $0.name < $1.name } }
@@ -73,15 +73,19 @@ public enum SiteFileTree {
     private static func files(in dir: URL, group: FileGroup, fileManager: FileManager) -> [FileRef] {
         guard let enumerator = fileManager.enumerator(
             at: dir,
-            includingPropertiesForKeys: [.isDirectoryKey],
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         ) else { return [] }
 
         var refs: [FileRef] = []
         for case let url as URL in enumerator {
             let name = url.lastPathComponent
-            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-            if isDir {
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            // Skip symlinks entirely: the exclusion set only matches real directory names, so a
+            // symlinked tree (e.g. pnpm's symlinked node_modules) would slip past it, and a symlink
+            // cycle would loop forever. `skipDescendants()` only works on real directories.
+            if values?.isSymbolicLink == true { continue }
+            if values?.isDirectory == true {
                 if excludedDirNames.contains(name) { enumerator.skipDescendants() }
                 continue
             }
