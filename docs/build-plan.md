@@ -35,7 +35,7 @@ This is the riskiest piece, so do it first.
 ## Phase 2 — Plugin + site project plumbing
 
 1. ✅ Bundle a known-good copy of the Anglesite plugin in `Resources/plugin/` (copied from `../anglesite` at build time via the `Bundle Anglesite plugin` pre-build script in `project.yml`). Stamp the copy with the source commit for diagnostics.
-2. ✅ `SiteStore` (Swift actor): manages `~/Sites/<name>/` directories. Discovers existing projects (look for `anglesite.config.json`), persists the list in `~/Library/Application Support/Anglesite/sites.json`.
+2. ✅ `SiteStore` (Swift actor): manages `~/Sites/<name>/` directories. Discovers existing projects (look for `anglesite.config.json`), persists the list in `~/Library/Application Support/Anglesite/sites.json`. *(Superseded by #242: `SiteStore` is now a recents registry of `.anglesite` packages — `record`/`touch`, `recents.json` — not a `~/Sites` scan. See CLAUDE.md "Site identity — the `.anglesite` package".)*
 3. ✅ `ProjectValidator`: confirms a directory is an Anglesite project (`anglesite.config.json`, `astro.config.ts`, `keystatic.config.ts`). Returns which sentinels are missing so the UI can show partial-scaffold remediation.
 4. ✅ **Settings → Advanced → Plugin path** override (per §7) wired up early — lets the plugin author point the app at `../anglesite` while iterating. `Sites root` override added alongside for development/testing.
 
