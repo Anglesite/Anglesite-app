@@ -49,6 +49,9 @@ public struct ApplyEditTool: Tool, Sendable {
                 + "Select a specific element in the preview and try again."
         case .failed:
             return "Edit failed: \(reply.message ?? "unknown error")."
+        case .preview:
+            // ApplyEditTool never sets dryRun — a .preview reply is unexpected here.
+            return "Edit not applied (unexpected preview response)."
         }
     }
 

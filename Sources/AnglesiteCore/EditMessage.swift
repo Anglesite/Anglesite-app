@@ -46,14 +46,19 @@ public struct EditMessage: Sendable, Equatable {
     public let op: String
     /// Operation payload — varies by `op`. Optional because some ops (e.g. `"delete"`) won't carry one.
     public let value: JSONValue?
+    /// When `true`, the plugin performs a dry run and returns an `anglesite:edit-preview` body
+    /// instead of applying the change. Used by `EditContentIntent` to show a before/after diff
+    /// before committing. Defaults `false` so all existing call sites are unaffected.
+    public let dryRun: Bool
 
-    public init(id: String, type: MessageType, path: String, selector: JSONValue, op: String, value: JSONValue?) {
+    public init(id: String, type: MessageType, path: String, selector: JSONValue, op: String, value: JSONValue?, dryRun: Bool = false) {
         self.id = id
         self.type = type
         self.path = path
         self.selector = selector
         self.op = op
         self.value = value
+        self.dryRun = dryRun
     }
 
     /// Round-trippable `JSONValue` representation — used as the `arguments` payload when the
@@ -69,6 +74,7 @@ public struct EditMessage: Sendable, Equatable {
             "op": .string(op),
         ]
         if let value { obj["value"] = value }
+        if dryRun { obj["dry_run"] = .bool(true) }
         return .object(obj)
     }
 

@@ -150,6 +150,10 @@ extension ContentDialogs {
         case .applied: return editApplied(displayName: displayName, file: reply.file)
         case .failed: return editFailed(displayName: displayName, reason: reply.message)
         case .ambiguous: return editAmbiguous(displayName: displayName, detail: reply.message)
+        case .preview:
+            // editReply is called on the final apply — .preview here means dry-run leaked through;
+            // treat conservatively as not applied.
+            return editFailed(displayName: displayName, reason: "unexpected preview reply")
         }
     }
 }
