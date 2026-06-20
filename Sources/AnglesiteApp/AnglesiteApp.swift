@@ -110,6 +110,22 @@ struct AnglesiteApp: App {
         }
     }
 
+    /// File ▸ Import — copy a plain Anglesite directory into a new package and open it. Shares the
+    /// same error presentation as Open (`SiteActions.ImportError` names the folder and reason).
+    @MainActor
+    private func importSiteFromMenu() async {
+        do {
+            guard let site = try await SiteActions.importPackage() else { return }
+            openWindow(value: site.id)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't import that folder"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+    }
+
     var body: some Scene {
         // The launcher is the first scene so it's the default window at launch (used when
         // SwiftUI has nothing to restore). It autoopens the most-recently-used site from its
@@ -151,6 +167,10 @@ struct AnglesiteApp: App {
                 }
                 .keyboardShortcut("o")
 
+                Button("Import Site…") {
+                    Task { await importSiteFromMenu() }
+                }
+
                 Menu("Open Recent") {
                     ForEach(recent.sites) { site in
                         Button(site.name) { openWindow(value: site.id) }
@@ -180,6 +200,8 @@ struct AnglesiteApp: App {
                     .keyboardShortcut("d", modifiers: [.command, .option])
                 }
             }
+            // Export operates on the focused site window via @FocusedValue; see ExportSiteCommands.
+            ExportSiteCommands()
         }
 
         // Per-site windows, keyed by SiteStore.Site.id (a stable path-derived String).

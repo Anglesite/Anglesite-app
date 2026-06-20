@@ -70,6 +70,8 @@ struct SiteWindow: View {
         Group {
             if let site {
                 siteUI(for: site)
+                    // Publish to the active scene so File ▸ Export Site Source… targets this window.
+                    .focusedSceneValue(\.focusedSite, site)
             } else {
                 ProgressView("Loading site…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

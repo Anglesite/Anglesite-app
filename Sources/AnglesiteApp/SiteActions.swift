@@ -50,4 +50,60 @@ enum SiteActions {
             throw ImportError(folderName: url.lastPathComponent, underlying: error)
         }
     }
+
+    /// File ▸ Import — pick a plain Anglesite directory, choose where to save the new package, copy
+    /// the tree into the package's `Source/`, and register it. The original directory is untouched
+    /// (`PackageTransfer.importDirectory`). Returns the new site, or `nil` if either panel was
+    /// cancelled. On MAS the save-panel destination carries the user grant, so the bookmark is
+    /// minted on the recorded package URL — exactly as `pickAndRegisterSite` does for Open.
+    static func importPackage() async throws -> SiteStore.Site? {
+        let picker = NSOpenPanel()
+        picker.canChooseDirectories = true
+        picker.canChooseFiles = false
+        picker.allowsMultipleSelection = false
+        picker.prompt = "Choose"
+        picker.message = "Choose an existing Anglesite site folder to import."
+        guard picker.runModal() == .OK, let sourceDir = picker.url else { return nil }
+
+        let name = sourceDir.deletingPathExtension().lastPathComponent
+        let save = NSSavePanel()
+        save.message = "Save the imported site package."
+        save.nameFieldStringValue = "\(name).anglesite"
+        save.directoryURL = AppSettings.shared.sitesRoot
+        guard save.runModal() == .OK, let dest = save.url else { return nil }
+
+        do {
+            let pkg = try PackageTransfer.importDirectory(sourceDir, toPackageAt: dest, displayName: name)
+            let site = try await SiteStore.shared.record(pkg)
+            #if ANGLESITE_MAS
+            let bookmark = try SecurityScopedBookmark.create(for: site.packageURL)
+            try await SiteStore.shared.setBookmark(bookmark, for: site.id)
+            #endif
+            return site
+        } catch {
+            throw ImportError(folderName: sourceDir.lastPathComponent, underlying: error)
+        }
+    }
+
+    /// File ▸ Export Site Source… — copy the focused site's `Source/` working tree to a chosen
+    /// folder. `node_modules/` is always excluded; a save-panel accessory checkbox lets the owner
+    /// include the Git history (spec §5 makes `.git` an opt-in). Failures surface in an alert.
+    static func exportSource(of site: SiteStore.Site) {
+        let save = NSSavePanel()
+        save.message = "Export this site's source files to a folder."
+        save.nameFieldStringValue = site.name
+        let gitToggle = NSButton(checkboxWithTitle: "Include Git history (.git)", target: nil, action: nil)
+        gitToggle.state = .off
+        save.accessoryView = gitToggle
+        guard save.runModal() == .OK, let dest = save.url else { return }
+        do {
+            try PackageTransfer.exportSource(
+                of: AnglesitePackage(url: site.packageURL),
+                to: dest,
+                includeGit: gitToggle.state == .on
+            )
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
 }
