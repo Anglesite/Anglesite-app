@@ -104,4 +104,70 @@ final class AppliesEditEndToEndTests {
 
         await mcp.stop()
     }
+
+    @Test(
+        "Dry-run edit-style returns preview with color change, file unchanged on disk",
+        .enabled(
+            if: E2EPrerequisites.prerequisitesMet,
+            "requires the sibling Anglesite plugin checkout with a complete install (ANGLESITE_PLUGIN_PATH, or ../anglesite — run `npm install` in the plugin so sharp is present) and a Node ≥22 binary"
+        )
+    )
+    func dryRunEditStyleReturnsPreviewFileUnchanged() async throws {
+        let pluginRoot = try #require(E2EPrerequisites.locateSiblingPlugin())
+        let node = try #require(E2EPrerequisites.locateNode())
+        let serverPath = pluginRoot.appendingPathComponent("server/index.mjs")
+
+        // Temp site with a heading that has a stable id for the selector.
+        let pagePath = tmpSite.appendingPathComponent("src/pages/index.astro")
+        let originalContents = try String(contentsOf: pagePath, encoding: .utf8)
+
+        let supervisor = ProcessSupervisor()
+        let center = LogCenter()
+        let mcp = MCPClient(supervisor: supervisor, logCenter: center)
+        try await mcp.start(
+            executable: node,
+            arguments: [serverPath.path],
+            environment: ["ANGLESITE_PROJECT_ROOT": tmpSite.path],
+            source: "mcp:e2e-dryrun",
+            initializeTimeout: 15
+        )
+        defer { Task { await mcp.stop() } }
+
+        let router = MCPApplyEditRouter(mcpClient: { mcp })
+
+        // Dry-run edit-style: add `color: teal` to the <h1>.
+        let message = EditMessage(
+            id: "e2e-dryrun-1",
+            type: .applyEdit,
+            path: "/",
+            selector: .object([
+                "tag": .string("H1"),
+                "classes": .array([]),
+                "nthChild": .int(1),
+                "textContent": .string(Self.editableHeading),
+            ]),
+            op: "edit-style",
+            value: .object(["property": .string("color"), "value": .string("teal")]),
+            dryRun: true
+        )
+
+        let reply = await router.apply(message)
+        #expect(reply.id == "e2e-dryrun-1")
+        #expect(
+            reply.status == .preview,
+            "expected a preview reply for dry_run; got status=\(reply.status), message=\(reply.message ?? "nil")"
+        )
+        // The after fragment must contain the applied color.
+        let after = try #require(reply.after, "expected a non-nil after fragment in the preview reply")
+        #expect(after.contains("teal"), "after fragment should contain 'teal': \(after)")
+
+        // The on-disk file must be byte-for-byte identical to what it was before the call.
+        let contentsAfterCall = try String(contentsOf: pagePath, encoding: .utf8)
+        #expect(
+            contentsAfterCall == originalContents,
+            "dry_run must not write to disk — file changed unexpectedly"
+        )
+
+        await mcp.stop()
+    }
 }
