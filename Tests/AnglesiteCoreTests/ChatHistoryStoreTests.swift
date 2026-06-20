@@ -15,19 +15,19 @@ final class ChatHistoryStoreTests: XCTestCase {
     }
 
     func testLoadReturnsEmptyWhenFileMissing() async throws {
-        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let store = ChatHistoryStore(configDirectory: tmpDir)
         let entries = try await store.load()
         XCTAssertEqual(entries, [])
     }
 
     func testAppendCreatesDirectoryAndFile() async throws {
-        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let store = ChatHistoryStore(configDirectory: tmpDir)
         try await store.append(.init(role: .user, content: "Hello"))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: tmpDir.appendingPathComponent(".anglesite/chat-history.jsonl").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tmpDir.appendingPathComponent("chat-history.jsonl").path))
     }
 
     func testAppendThenLoadRoundTrips() async throws {
-        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let store = ChatHistoryStore(configDirectory: tmpDir)
         let entries: [ChatHistoryStore.Entry] = [
             .init(role: .user, content: "Hi"),
             .init(role: .assistant, content: "Hello there."),
@@ -42,7 +42,7 @@ final class ChatHistoryStoreTests: XCTestCase {
     }
 
     func testCorruptLineDoesNotDestroyHistory() async throws {
-        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let store = ChatHistoryStore(configDirectory: tmpDir)
         try await store.append(.init(role: .user, content: "good"))
         // Inject a junk line between two good ones.
         let url = await store.fileURL
@@ -57,7 +57,7 @@ final class ChatHistoryStoreTests: XCTestCase {
     }
 
     func testClearEmptiesTheFile() async throws {
-        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let store = ChatHistoryStore(configDirectory: tmpDir)
         try await store.append(.init(role: .user, content: "transient"))
         try await store.clear()
         let loaded = try await store.load()
@@ -65,7 +65,7 @@ final class ChatHistoryStoreTests: XCTestCase {
     }
 
     func testClearIsNoOpWhenFileMissing() async throws {
-        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let store = ChatHistoryStore(configDirectory: tmpDir)
         try await store.clear()  // should not throw
         let loaded = try await store.load()
         XCTAssertEqual(loaded, [])
@@ -74,7 +74,7 @@ final class ChatHistoryStoreTests: XCTestCase {
     // MARK: edit rows + undone records
 
     func testEditEntryRoundTripsWithMetadata() async throws {
-        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let store = ChatHistoryStore(configDirectory: tmpDir)
         let edit = ChatHistoryStore.Entry(
             role: .edit,
             content: "Edited src/pages/about.astro",
@@ -89,7 +89,7 @@ final class ChatHistoryStoreTests: XCTestCase {
     }
 
     func testUndoneRecordFlipsTheReferencedEditsUndoneFlag() async throws {
-        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let store = ChatHistoryStore(configDirectory: tmpDir)
         let editID = UUID()
         let edit = ChatHistoryStore.Entry(
             role: .edit,
@@ -106,14 +106,14 @@ final class ChatHistoryStoreTests: XCTestCase {
     }
 
     func testUndoneRecordWithoutMatchingEditIsIgnored() async throws {
-        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let store = ChatHistoryStore(configDirectory: tmpDir)
         try await store.appendUndone(messageID: UUID(), newCommit: "orphan")
         let loaded = try await store.load()
         XCTAssertEqual(loaded, [])
     }
 
     func testMixedHistoryPreservesOrderAndAppliesUndone() async throws {
-        let store = ChatHistoryStore(siteDirectory: tmpDir)
+        let store = ChatHistoryStore(configDirectory: tmpDir)
         let editID = UUID()
         try await store.append(.init(role: .user, content: "Hi"))
         try await store.append(.init(
