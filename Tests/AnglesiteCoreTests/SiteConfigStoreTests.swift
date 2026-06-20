@@ -42,4 +42,17 @@ struct SiteConfigStoreTests {
         try await store.save(SiteSettings(displayName: "X"))
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("settings.plist").path))
     }
+
+    @Test("a second save overwrites the first (atomic replace, not merge)")
+    func saveOverwritesPrevious() async throws {
+        let dir = try tempConfigDir()
+        defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+        let store = SiteConfigStore(configDirectory: dir)
+        try await store.save(SiteSettings(displayName: "First"))
+        try await store.save(SiteSettings(displayName: "Second"))
+        #expect(try await store.load() == SiteSettings(displayName: "Second"))
+        // Clearing a field round-trips too (overwrite, not stale-merge).
+        try await store.save(SiteSettings(displayName: nil))
+        #expect(try await store.load() == SiteSettings())
+    }
 }

@@ -10,7 +10,7 @@ import AnglesiteCore
 
 /// SwiftUI-facing wrapper around ``ConversationalAssistant`` for one site. Owns the
 /// assistant, accumulates streamed events into typed `Message` values, persists every
-/// user/assistant/tool entry to `<site>/.anglesite/chat-history.jsonl`, and exposes the
+/// user/assistant/tool entry to the package's `Config/chat-history.jsonl`, and exposes the
 /// streaming + cancel surface that `ChatView` binds to.
 ///
 /// Threading: this model is `@MainActor` so all SwiftUI bindings stay on the main actor.
