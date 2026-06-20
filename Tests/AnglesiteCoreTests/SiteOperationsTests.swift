@@ -42,7 +42,7 @@ struct SiteOperationsTests {
         SiteStore.Site(
             id: "s1",
             name: "Portfolio",
-            path: URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true),
+            packageURL: URL(fileURLWithPath: NSTemporaryDirectory() + "portfolio.anglesite", isDirectory: true),
             isValid: true,
             missingSentinels: []
         )

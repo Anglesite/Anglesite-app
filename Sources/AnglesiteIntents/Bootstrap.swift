@@ -38,7 +38,7 @@ public enum AnglesiteIntents {
         // via a shared pool; pooled Node processes are drained on quit by ProcessSupervisor.
         let headlessPool = HeadlessRuntimePool()
         AppDependencyManager.shared.add { () -> any ContentOperationsService in
-            ContentOperations(pool: headlessPool, siteDirectory: { id in await SiteStore.shared.find(id: id)?.path })
+            ContentOperations(pool: headlessPool, siteDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory })
         }
         // `EditContentIntent` (B.5 / #149) routes natural-language edits through
         // `IntentEditBridge`, which asks `EditRouterRegistry.shared` for the live edit router of

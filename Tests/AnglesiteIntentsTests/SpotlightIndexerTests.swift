@@ -25,7 +25,7 @@ extension AppIntentsTests {
             SiteStore.Site(
                 id: id,
                 name: name,
-                path: URL(fileURLWithPath: "/tmp/\(name)", isDirectory: true),
+                packageURL: URL(fileURLWithPath: "/tmp/\(name).anglesite", isDirectory: true),
                 isValid: true,
                 missingSentinels: []
             )

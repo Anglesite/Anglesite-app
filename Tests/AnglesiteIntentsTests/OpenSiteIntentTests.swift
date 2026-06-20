@@ -18,5 +18,15 @@ extension AppIntentsTests {
             _ = try await intent.perform()
             #expect(WindowRouter.shared.requested == "s1")
         }
+
+        @Test("SiteEntity maps id and directory from SiteStore.Site")
+        func siteEntityMapping() async throws {
+            let site = TestStore.site(id: "site-uuid-123", name: "My Project", path: "/tmp/MyProject")
+            let entity = SiteEntity(site)
+            #expect(entity.id == site.id)
+            // Compare against the production-derived value, not a reconstructed string, so this
+            // stays correct if TestStore's package-URL derivation changes (#259).
+            #expect(entity.directory == site.packageURL)
+        }
     }
 }

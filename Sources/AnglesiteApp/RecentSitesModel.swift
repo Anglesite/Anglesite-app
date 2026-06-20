@@ -24,16 +24,16 @@ final class RecentSitesModel {
         guard !started else { return }
         started = true
         Task {
-            // Populate from disk + scan first so the menu is correct before any mutation.
+            // Load from disk so the menu is correct before any mutation.
+            // The registry no longer scans ~/Sites — it is the authoritative list.
+            // `changeStream()` re-emits the current snapshot on subscribe, so we don't
+            // need a separate sites read after `load()`.
             do {
                 try await SiteStore.shared.load()
-                let scanned = try await SiteStore.shared.refresh()
-                sites = RecentSites.select(from: scanned)
             } catch {
                 await LogCenter.shared.append(source: "recent-sites", stream: .stderr, text: "initial load failed: \(error)")
             }
-            // Then track every mutation. `changeStream()` also re-emits the current snapshot
-            // on subscribe, which simply reaffirms what we just set.
+            // Track every mutation (and the initial snapshot emitted on subscribe).
             for await snapshot in SiteStore.shared.changeStream() {
                 sites = RecentSites.select(from: snapshot)
             }

@@ -101,8 +101,8 @@ struct AnglesiteApp: App {
             openWindow(value: site.id)
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Couldn't open that folder"
-            // `SiteActions.ImportError.localizedDescription` names the folder and the reason;
+            alert.messageText = "Couldn't open that site"
+            // `SiteActions.ImportError.localizedDescription` names the package and the reason;
             // other errors fall back to their OS-provided message rather than a raw enum dump.
             alert.informativeText = error.localizedDescription
             alert.alertStyle = .warning
@@ -116,6 +116,25 @@ struct AnglesiteApp: App {
         // own .task — see SitesLauncherView.onFirstAppear().
         Window("Sites", id: "sites") {
             SitesWindowRoot(openWindow: openWindow)
+                .onOpenURL { url in
+                    // Guard on the extension only (zero I/O on the main thread); `record` reads and
+                    // validates the marker and throws a legible error if it isn't a real package.
+                    guard url.pathExtension == AnglesitePackage.packageExtension else { return }
+                    Task { @MainActor in
+                        do {
+                            let site = try await SiteStore.shared.record(AnglesitePackage(url: url))
+                            #if ANGLESITE_MAS
+                            // Mint from the canonicalized recorded path; let a failure surface to the
+                            // catch (logged) rather than silently leaving the site grantless.
+                            let bm = try SecurityScopedBookmark.create(for: site.packageURL)
+                            try await SiteStore.shared.setBookmark(bm, for: site.id)
+                            #endif
+                            openWindow(value: site.id)
+                        } catch {
+                            await LogCenter.shared.append(source: "open-url", stream: .stderr, text: "open \(url.lastPathComponent) failed: \(error.localizedDescription)")
+                        }
+                    }
+                }
         }
         .windowResizability(.contentSize)
         .commands {

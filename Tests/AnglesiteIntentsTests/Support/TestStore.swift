@@ -19,7 +19,7 @@ enum TestStore {
         SiteStore.Site(
             id: id,
             name: name,
-            path: URL(fileURLWithPath: path ?? "/tmp/\(name)", isDirectory: true),
+            packageURL: URL(fileURLWithPath: (path ?? "/tmp/\(name)") + ".anglesite", isDirectory: true),
             isValid: true,
             missingSentinels: []
         )

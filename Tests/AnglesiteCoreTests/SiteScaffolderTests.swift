@@ -47,20 +47,25 @@ final class SiteScaffolderTests: XCTestCase {
             templateURL: URL(fileURLWithPath: "/template"),
             catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(calls: calls),
-            register: { url in SiteStore.Site(id: url.path, name: url.lastPathComponent, path: url, isValid: true, missingSentinels: []) }
+            gitInit: { _ in },
+            // Production registers via SiteStore.record → Site.make, whose id is the marker UUID.
+            // Use the real factory so the assertion reflects production output, not a path stand-in.
+            register: { pkg in try SiteStore.Site.make(package: pkg) }
         )
         var steps: [SiteScaffolder.ScaffoldStep] = []
         for await s in scaffolder.scaffold(makeDraft()) { steps.append(s) }
 
         XCTAssertEqual(steps.first, .creatingFolder)
-        if case .done(let id) = steps.last { XCTAssertEqual(id, root.appendingPathComponent("acme-co").path) }
+        let pkgURL = root.appendingPathComponent("acme-co.anglesite")
+        let expectedID = try AnglesitePackage(url: pkgURL).readMarker().siteID.uuidString
+        if case .done(let id) = steps.last { XCTAssertEqual(id, expectedID) }
         else { XCTFail("expected .done last, got \(String(describing: steps.last))") }
-        // .site-config gained SITE_NAME without clobbering the stamped version.
-        let cfg = try String(contentsOf: root.appendingPathComponent("acme-co/.site-config"), encoding: .utf8)
+        // .site-config gained SITE_NAME without clobbering the stamped version — lives in Source/.
+        let cfg = try String(contentsOf: pkgURL.appendingPathComponent("Source/.site-config"), encoding: .utf8)
         XCTAssertTrue(cfg.contains("ANGLESITE_VERSION=1.0.0"))
         XCTAssertTrue(cfg.contains("SITE_NAME=Acme Co"))
-        // Theme + homepage applied:
-        let css = try String(contentsOf: root.appendingPathComponent("acme-co/src/styles/global.css"), encoding: .utf8)
+        // Theme + homepage applied in Source/:
+        let css = try String(contentsOf: pkgURL.appendingPathComponent("Source/src/styles/global.css"), encoding: .utf8)
         XCTAssertTrue(css.contains("--color-primary: #1e3a5f;"))
     }
 
@@ -69,6 +74,7 @@ final class SiteScaffolderTests: XCTestCase {
         let scaffolder = SiteScaffolder(
             sitesRoot: root, templateURL: URL(fileURLWithPath: "/template"), catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(scaffoldExit: 1, calls: CallRecorder()),
+            gitInit: { _ in },
             register: { _ in XCTFail("must not register on scaffold failure"); fatalError() }
         )
         var steps: [SiteScaffolder.ScaffoldStep] = []
@@ -83,9 +89,10 @@ final class SiteScaffolderTests: XCTestCase {
         let scaffolder = SiteScaffolder(
             sitesRoot: root, templateURL: URL(fileURLWithPath: "/template"), catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(npmExit: 1, calls: CallRecorder()),
-            register: { url in
+            gitInit: { _ in },
+            register: { pkg in
                 registered.withLock { $0 = true }
-                return SiteStore.Site(id: url.path, name: "x", path: url, isValid: true, missingSentinels: [])
+                return try SiteStore.Site.make(package: pkg)
             }
         )
         var steps: [SiteScaffolder.ScaffoldStep] = []

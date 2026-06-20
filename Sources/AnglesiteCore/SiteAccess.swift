@@ -2,20 +2,24 @@ import Foundation
 
 /// Grants folder access around a single unit of work for a site, then releases it.
 ///
-/// - DevID (non-sandboxed): passes `site.path` straight through.
+/// - DevID (non-sandboxed): passes `site.sourceDirectory` straight through so callers
+///   operate in the Astro project tree (the working directory for deploy/backup/audit).
 /// - MAS (`ANGLESITE_MAS`): resolves the site's persisted security-scoped bookmark
-///   (`SiteStore.bookmarkData`), holds the grant for the duration of `body`, then stops.
-///   Mirrors `SiteWindow.acquireGrant` but short-lived, so background App Intents work with
-///   no window open. Throws `AccessError.noGrant` if the site has no usable bookmark.
+///   (recorded against `packageURL`; one grant covers both `Source/` and `Config/`),
+///   holds the grant for the duration of `body`, then stops. Mirrors `SiteWindow.acquireGrant`
+///   but short-lived, so background App Intents work with no window open. Throws
+///   `AccessError.noGrant` if the site has no usable bookmark.
 public enum SiteAccess {
     public enum AccessError: Error, Sendable, Equatable {
         /// No security-scoped bookmark for this site (MAS only). Carries a user-facing message.
         case noGrant(String)
     }
 
-    /// Run `body` with read/write access to the site's directory. The returned URL is the
-    /// directory `body` should operate in (`site.path` on DevID, the bookmark-resolved URL
-    /// on MAS — they're the same path, but the MAS URL carries the active security scope).
+    /// Run `body` with read/write access to the site's source directory. The `URL` passed to
+    /// `body` is `site.sourceDirectory` — the Astro project tree that every subprocess
+    /// (deploy, backup, audit) uses as its working directory. On MAS the bookmark resolves
+    /// to `packageURL`; the scope covers the whole package, so `Source/` (= `sourceDirectory`)
+    /// is accessible under it.
     public static func withScopedAccess<T: Sendable>(
         to site: SiteStore.Site,
         in store: SiteStore = .shared,
@@ -24,13 +28,13 @@ public enum SiteAccess {
         #if ANGLESITE_MAS
         guard let data = await store.bookmarkData(for: site.id) else {
             throw AccessError.noGrant(
-                "\(site.name) has no folder grant. Open it once via Open Folder… in Anglesite, then try again."
+                "\(site.name) has no folder grant. Open it once via Open Site… in Anglesite, then try again."
             )
         }
         let resolved = try SecurityScopedBookmark.resolve(data)
         guard resolved.url.startAccessingSecurityScopedResource() else {
             throw AccessError.noGrant(
-                "Couldn't access \(site.name)'s folder. Re-add it via Open Folder… in Anglesite."
+                "Couldn't access \(site.name)'s folder. Re-add it via Open Site… in Anglesite."
             )
         }
         defer { resolved.url.stopAccessingSecurityScopedResource() }
@@ -38,9 +42,9 @@ public enum SiteAccess {
         if resolved.isStale, let fresh = try? SecurityScopedBookmark.create(for: resolved.url) {
             try? await store.setBookmark(fresh, for: site.id)
         }
-        return await body(resolved.url)
+        return await body(site.sourceDirectory)
         #else
-        return await body(site.path)
+        return await body(site.sourceDirectory)
         #endif
     }
 }

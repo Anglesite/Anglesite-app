@@ -63,7 +63,7 @@ private struct AdvancedSettingsView: View {
                     path: $sitesRootOverride,
                     promptTitle: "Choose sites root directory"
                 )
-                Text("By default, Anglesite scans `~/Sites/` for projects. Override this for development or testing.")
+                Text("By default, Anglesite saves new and imported site packages under `~/Sites/`. Override this for development or testing.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
