@@ -28,6 +28,19 @@ When in doubt, the plugin is the source of truth for skills, hooks, and the MCP 
 - **Embedded Node** — vendored at build time. Both targets re-sign it via a `scripts/resign-node.sh` post-build phase with the app's identity + hardened runtime: the MAS target uses `node-runtime.entitlements` (sandbox/inherit + JIT), the DevID target uses `node-runtime-devid.entitlements` (same minus the sandbox keys). The DevID re-sign + bundle-seal verification is done (#4 — `codesign --verify --deep --strict` passes); only the real Developer-ID-cert notarize run remains deferred (#1, gated on the signing cert + `TEAM_ID`).
 - **MCP** — talks to the plugin's server over stdio (local subprocess) or HTTP/Streamable transport (for container-backed runtimes). `MCPClient` abstracts the transport behind an `MCPTransport` seam; `SiteRuntime` (protocol) abstracts the execution substrate so `PreviewModel` doesn't know whether a site runs in-process or in a container.
 
+## Site identity — the `.anglesite` package
+
+A site is a self-contained `.anglesite` **package** (#242) — a directory with the
+`dev.anglesite.site` package UTI (`LSTypeIsPackage`). Layout:
+
+- `Info.plist` — marker: format version + **stable site UUID** + display name + created date. Identity is the UUID (path-independent), so moving/renaming a package keeps its identity.
+- `Source/` — the Astro project, a git repo. The externally-editable, clonable unit; `cd`/git/VS Code/CLI descend into it.
+- `Config/` — app-owned per-site state (`settings.plist` via `SiteConfigStore`, `chat-history.jsonl`, caches). **Never** in git. `.site-config` stays in `Source/` (template/plugin-owned).
+
+`AnglesitePackage` (AnglesiteCore) is the single source of truth for this layout. The app opens packages explicitly — Finder double-click / `onOpenURL`, **File ▸ Open Site…** (an `NSOpenPanel` filtering on the `dev.anglesite.site` UTI via `UTType.anglesiteSite`), **Open Recent** — and discovers them via a **recents registry** (`SiteStore`, `recents.json`), not by scanning a folder. `SiteStore.Site` carries `packageURL` + computed `sourceDirectory`/`configDirectory` (there is no `path`).
+
+Operationally: **File ▸ Import** copies a plain Anglesite directory into a new package (migrating any legacy `.anglesite/` into `Config/`); **File ▸ Export** copies `Source/` back out. New sites scaffold into `Source/` (with `git init`); the dev server, deploy, and `pre-deploy-check` all run with cwd = `Source/`. On MAS, one security-scoped bookmark per package covers both `Source/` and `Config/`. `~/Sites/` is now just the default save location for new/imported packages — not a discovery root (there is no legacy `sites.json` migration, so Import is the upgrade path for pre-package sites).
+
 ## Two build targets
 
 | Scheme | Bundle id | Distribution | Sandbox |
@@ -61,7 +74,7 @@ Resources/
 - **Process spawning is centralized** in `AnglesiteCore/ProcessSupervisor` — never call `Process()` from a view.
 - **Logs are sacred** — every spawned subprocess streams stdout+stderr into the debug pane. Do not silently `>/dev/null`.
 - **The app cannot bypass plugin security hooks** — `pre-deploy-check.sh` runs before every deploy, and the app surfaces failures rather than allowing override.
-- **The filesystem is the source of truth** — the app must never become the only way to edit a site. Owners can open `~/Sites/<name>/` in Finder, VS Code, or Claude Code CLI and continue working. (Per #72 this reframes to **Git** as the source of truth — the repo, clonable anywhere, is the externally-editable copy — but only once the container runtimes (#66/#69) land and every site is a repo (#68). Don't change the wording before that ships, or the doc describes an unshipped state.)
+- **The filesystem is the source of truth** — the app must never become the only way to edit a site. A site is now an `.anglesite` **package** (#242): Finder treats it as opaque (double-click opens it in Anglesite), but its `Source/` subdirectory is an ordinary git repo, so `cd`, `git`, VS Code, and the Claude Code CLI all descend into `Foo.anglesite/Source/` and keep working. App-owned per-site state lives beside it in `Foo.anglesite/Config/`, outside that repo. (Per #72 this still reframes to **Git** as the source of truth — the `Source/` repo, clonable anywhere, is the externally-editable copy — but only once the container runtimes (#66/#69) land and every site is a repo (#68). The package model is compatible with both states; don't finalize the filesystem→Git wording before that ships, or the doc describes an unshipped state.)
 
 ## Worktrees (default for feature/agent work)
 
@@ -98,3 +111,5 @@ Note: `swift test` runs on CI's older runners even though `Package.swift` declar
 **Containerization epic (#59):** The `SiteRuntime` protocol (#65) and HTTP/Streamable MCP transport (#64) are landed and shipping. The Apple Containerization spike (#60 — MAS-incompatible, DevID-only) is done; the Cloudflare Sandbox throwaway spike (#61 — shared OCI image built) is still open. **Intended behavior:** Apple Containerization is the primary runtime (local, near-native perf, no network dependency); Cloudflare Sandbox is the automatic fallback on unsupported platforms or bundles (MAS, iOS, non-Apple-Silicon). Production runtimes (`LocalContainerSiteRuntime` #69, `RemoteSandboxSiteRuntime` #66) and the iOS thin client (#71) are open.
 
 **macOS 27 / Siri AI:** the first platform wave has shipped (system-wide MCP, Spotlight App-Intents indexing, View Annotations, App Intents Testing, Foundation Models chat, SwiftUI 27 toolbars, the Xcode 27 migration audit). Ongoing work is tracked under the Siri AI phases (A–D, ~#132–135) and their sub-issues — check `gh issue list` for the live set.
+
+**`.anglesite` package model (#242):** shipped — a site is a `.anglesite` package (see "Site identity" above). Design + phase plans: [`docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md`](docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md) and `docs/superpowers/plans/2026-06-19-anglesite-package-model-p{1..5}-*.md`. It dovetails with the still-open epics: the git-bootstrap (#68) and container runtimes (#66/#69) operate on the package's `Source/` repo, and `Config/` never enters a container. The first open follow-up is the `SiteConfigStore.displayName` override consumer (#266).
