@@ -88,4 +88,31 @@ struct PackageTransferTests {
         #expect(fm.fileExists(atPath: dest.appendingPathComponent(".git/config").path))
         #expect(!fm.fileExists(atPath: dest.appendingPathComponent("node_modules").path))
     }
+
+    @Test("export throws .destinationExists when the destination already exists")
+    func exportRejectsExistingDestination() throws {
+        let fm = FileManager.default
+        let root = try tempDir(); defer { try? fm.removeItem(at: root) }
+        let pkg = try makePackageWithSource(in: root)
+        let dest = root.appendingPathComponent("already-there", isDirectory: true)
+        try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+
+        #expect(throws: PackageTransfer.TransferError.destinationExists(dest)) {
+            try PackageTransfer.exportSource(of: pkg, to: dest, includeGit: false, fileManager: fm)
+        }
+    }
+
+    @Test("import throws .destinationExists when the package URL already exists")
+    func importRejectsExistingPackage() throws {
+        let fm = FileManager.default
+        let root = try tempDir(); defer { try? fm.removeItem(at: root) }
+        let src = root.appendingPathComponent("src", isDirectory: true)
+        try fm.createDirectory(at: src, withIntermediateDirectories: true)
+        let pkgURL = root.appendingPathComponent("Exists.anglesite", isDirectory: true)
+        try fm.createDirectory(at: pkgURL, withIntermediateDirectories: true)
+
+        #expect(throws: PackageTransfer.TransferError.destinationExists(pkgURL)) {
+            _ = try PackageTransfer.importDirectory(src, toPackageAt: pkgURL, displayName: "Exists", fileManager: fm)
+        }
+    }
 }
