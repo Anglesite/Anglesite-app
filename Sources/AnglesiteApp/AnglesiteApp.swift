@@ -117,18 +117,21 @@ struct AnglesiteApp: App {
         Window("Sites", id: "sites") {
             SitesWindowRoot(openWindow: openWindow)
                 .onOpenURL { url in
-                    guard AnglesitePackage.isPackage(at: url) else { return }
+                    // Guard on the extension only (zero I/O on the main thread); `record` reads and
+                    // validates the marker and throws a legible error if it isn't a real package.
+                    guard url.pathExtension == AnglesitePackage.packageExtension else { return }
                     Task { @MainActor in
                         do {
                             let site = try await SiteStore.shared.record(AnglesitePackage(url: url))
                             #if ANGLESITE_MAS
-                            if let bm = try? SecurityScopedBookmark.create(for: url) {
-                                try? await SiteStore.shared.setBookmark(bm, for: site.id)
-                            }
+                            // Mint from the canonicalized recorded path; let a failure surface to the
+                            // catch (logged) rather than silently leaving the site grantless.
+                            let bm = try SecurityScopedBookmark.create(for: site.packageURL)
+                            try await SiteStore.shared.setBookmark(bm, for: site.id)
                             #endif
                             openWindow(value: site.id)
                         } catch {
-                            await LogCenter.shared.append(source: "open-url", stream: .stderr, text: "open \(url.lastPathComponent) failed: \(error)")
+                            await LogCenter.shared.append(source: "open-url", stream: .stderr, text: "open \(url.lastPathComponent) failed: \(error.localizedDescription)")
                         }
                     }
                 }

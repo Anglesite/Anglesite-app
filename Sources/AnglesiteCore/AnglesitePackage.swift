@@ -177,6 +177,23 @@ public struct AnglesitePackage: Sendable, Equatable {
     }
 }
 
+extension AnglesitePackage.PackageError: LocalizedError {
+    /// User-legible messages so open/import call sites surface a real explanation rather than a
+    /// raw system error (#259 review).
+    public var errorDescription: String? {
+        switch self {
+        case .markerMissing:
+            return "This doesn't look like an Anglesite site package (no Info.plist marker)."
+        case .markerUnreadable(_, let underlying):
+            return "The site package's Info.plist couldn't be read: \(underlying.localizedDescription)"
+        case .markerTooNew:
+            return "This site package was created by a newer version of Anglesite. Update the app to open it."
+        case .alreadyExists:
+            return "A site package already exists at that location."
+        }
+    }
+}
+
 extension AnglesitePackage.PackageError: Equatable {
     /// Equality by case + URL; the `markerUnreadable` underlying error is excluded (`Error` isn't
     /// `Equatable`), so callers and tests can match on the case without constructing a cause.

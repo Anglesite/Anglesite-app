@@ -48,14 +48,17 @@ final class SiteScaffolderTests: XCTestCase {
             catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(calls: calls),
             gitInit: { _ in },
-            register: { pkg in SiteStore.Site(id: pkg.url.path, name: pkg.url.lastPathComponent, packageURL: pkg.url, isValid: true, missingSentinels: []) }
+            // Production registers via SiteStore.record → Site.make, whose id is the marker UUID.
+            // Use the real factory so the assertion reflects production output, not a path stand-in.
+            register: { pkg in try SiteStore.Site.make(package: pkg) }
         )
         var steps: [SiteScaffolder.ScaffoldStep] = []
         for await s in scaffolder.scaffold(makeDraft()) { steps.append(s) }
 
         XCTAssertEqual(steps.first, .creatingFolder)
         let pkgURL = root.appendingPathComponent("acme-co.anglesite")
-        if case .done(let id) = steps.last { XCTAssertEqual(id, pkgURL.path) }
+        let expectedID = try AnglesitePackage(url: pkgURL).readMarker().siteID.uuidString
+        if case .done(let id) = steps.last { XCTAssertEqual(id, expectedID) }
         else { XCTFail("expected .done last, got \(String(describing: steps.last))") }
         // .site-config gained SITE_NAME without clobbering the stamped version — lives in Source/.
         let cfg = try String(contentsOf: pkgURL.appendingPathComponent("Source/.site-config"), encoding: .utf8)
@@ -89,7 +92,7 @@ final class SiteScaffolderTests: XCTestCase {
             gitInit: { _ in },
             register: { pkg in
                 registered.withLock { $0 = true }
-                return SiteStore.Site(id: pkg.url.path, name: "x", packageURL: pkg.url, isValid: true, missingSentinels: [])
+                return try SiteStore.Site.make(package: pkg)
             }
         )
         var steps: [SiteScaffolder.ScaffoldStep] = []

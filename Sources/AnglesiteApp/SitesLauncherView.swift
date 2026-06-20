@@ -310,9 +310,10 @@ struct SitesLauncherView: View {
             register: { package in
                 let site = try await SiteStore.shared.record(package)
                 #if ANGLESITE_MAS
-                if let bm = try? SecurityScopedBookmark.create(for: package.url) {
-                    try? await SiteStore.shared.setBookmark(bm, for: site.id)
-                }
+                // Mint from the canonicalized recorded path, and propagate a failure (don't swallow
+                // it with `try?`) — a grantless new site would silently fail to preview at open.
+                let bm = try SecurityScopedBookmark.create(for: site.packageURL)
+                try await SiteStore.shared.setBookmark(bm, for: site.id)
                 #endif
                 return site
             }

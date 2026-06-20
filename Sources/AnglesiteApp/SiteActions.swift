@@ -40,8 +40,9 @@ enum SiteActions {
             let site = try await SiteStore.shared.record(package)
             #if ANGLESITE_MAS
             // The panel grant is the only chance to mint a scoped bookmark — persist it now so
-            // the grant survives relaunch. SiteWindow resolves it and holds access.
-            let bookmark = try SecurityScopedBookmark.create(for: url)
+            // the grant survives relaunch. Mint from `site.packageURL` (the canonicalized path the
+            // store recorded), so the bookmark's path matches what subprocesses are spawned against.
+            let bookmark = try SecurityScopedBookmark.create(for: site.packageURL)
             try await SiteStore.shared.setBookmark(bookmark, for: site.id)
             #endif
             return site

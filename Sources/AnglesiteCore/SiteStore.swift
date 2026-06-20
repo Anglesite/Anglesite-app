@@ -56,6 +56,12 @@ public actor SiteStore {
         /// validity = whether `Source/` passes the project sentinels.
         public static func make(package: AnglesitePackage, fileManager: FileManager = .default) throws -> Site {
             let marker = try package.readMarker(fileManager: fileManager)
+            // Refuse a package written by a newer build rather than opening it and risking a
+            // silent downgrade on the next write (spec §9). Surfaced legibly via PackageError's
+            // LocalizedError at the open/import call sites.
+            guard AnglesitePackage.compatibility(for: marker) == .current else {
+                throw AnglesitePackage.PackageError.markerTooNew(package.infoPlistURL)
+            }
             let validation = package.sourceValidation(fileManager: fileManager)
             return Site(
                 id: marker.siteID.uuidString,
@@ -124,7 +130,12 @@ public actor SiteStore {
     public func record(_ package: AnglesitePackage) async throws -> Site {
         var site = try Site.make(package: package, fileManager: fileManager)
         if let existing = sites.first(where: { $0.id == site.id }) {
-            site.bookmarkData = existing.bookmarkData ?? site.bookmarkData
+            // Carry the bookmark forward ONLY when the package is still at the same path. If it
+            // moved, the old bookmark embeds the old location and would grant the wrong path on
+            // MAS — drop it so SiteWindow.acquireGrant re-prompts a grant at the new location.
+            if existing.packageURL == site.packageURL {
+                site.bookmarkData = existing.bookmarkData ?? site.bookmarkData
+            }
         }
         site.lastSeen = Date()
         sites.removeAll { $0.id == site.id }
@@ -135,13 +146,17 @@ public actor SiteStore {
         return site
     }
 
-    /// Bump `lastSeen` for the entry with `id` (most-recently-used ordering). No-op if unknown.
+    /// Bump `lastSeen` for the entry with `id` (most-recently-used ordering). No-op if unknown or
+    /// already most-recent (so an open right after `record` doesn't re-persist — see #259 review).
     public func touch(id: String) async throws {
         guard let index = sites.firstIndex(where: { $0.id == id }) else { return }
+        guard index != 0 else { return }
         sites[index].lastSeen = Date()
         sites.sort { $0.lastSeen > $1.lastSeen }
         try persist()
-        await emitChange()
+        // A reorder changes no entity data, so skip the Spotlight `changeHandler` (like
+        // `setBookmark`); still push the new ordering to UI observers (Open Recent / launcher).
+        for continuation in changeStreamContinuations.values { continuation.yield(sites) }
     }
 
     /// Removes a site from the list. Does not delete files on disk.

@@ -101,10 +101,11 @@ struct SiteStoreRecentsTests {
         let movedPkg = AnglesitePackage(url: newPath)
         let movedSite = try await store.record(movedPkg)
 
-        // Verify identity is preserved, path updated, bookmark carried forward
+        // Identity preserved, path updated, single entry — but the stale bookmark (which embeds the
+        // OLD path) is dropped on a move so the next grant is re-minted at the new location (#259).
         #expect(movedSite.id == originalID)
         #expect(await store.find(id: originalID)?.packageURL == newPath)
-        #expect(await store.bookmarkData(for: originalID) == Data("bm".utf8))
+        #expect(await store.bookmarkData(for: originalID) == nil)
         #expect(await store.sites.filter { $0.id == originalID }.count == 1)
     }
 

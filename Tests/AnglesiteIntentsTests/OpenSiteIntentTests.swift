@@ -21,11 +21,12 @@ extension AppIntentsTests {
 
         @Test("SiteEntity maps id and directory from SiteStore.Site")
         func siteEntityMapping() async throws {
-            let testPath = "/tmp/MyProject.anglesite"
             let site = TestStore.site(id: "site-uuid-123", name: "My Project", path: "/tmp/MyProject")
             let entity = SiteEntity(site)
-            #expect(entity.id == "site-uuid-123")
-            #expect(entity.directory == URL(fileURLWithPath: testPath, isDirectory: true))
+            #expect(entity.id == site.id)
+            // Compare against the production-derived value, not a reconstructed string, so this
+            // stays correct if TestStore's package-URL derivation changes (#259).
+            #expect(entity.directory == site.packageURL)
         }
     }
 }
