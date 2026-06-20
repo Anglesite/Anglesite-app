@@ -45,8 +45,10 @@ fastlane/screenshots/**/*.png
 fastlane/test_output
 
 # Embedded runtimes (vendored at build time, not committed)
-Resources/node-runtime/
-Resources/plugin/
+# No trailing slash: also ignores a stray symlink at the bare path, which is
+# how self-referential symlinks were accidentally committed before (see #260).
+Resources/node-runtime
+Resources/plugin
 Resources/npm-cache/
 Resources/edit-overlay/
 node_modules/
