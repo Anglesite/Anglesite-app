@@ -69,6 +69,9 @@ struct AnglesiteApp: App {
     /// Live mirror of the site registry for the File ▸ Open Recent submenu. Held as `@State`
     /// so SwiftUI re-evaluates `.commands` when its `sites` change. Started in AppDelegate.
     @State private var recent = RecentSitesModel.shared
+    /// Tracks the site id of the currently key site window. SwiftUI's `@FocusedValue` updates
+    /// automatically as windows gain and lose key status — no manual set/clear needed.
+    @FocusedValue(\.siteID) private var focusedSiteID
     #if !ANGLESITE_MAS
     /// Sparkle updater, held for the app's lifetime so its automatic-check timer keeps firing.
     /// MAS builds update through the App Store and have no Sparkle dependency (Phase 10.1).
@@ -160,6 +163,18 @@ struct AnglesiteApp: App {
                         Button("No Recent Sites") {}.disabled(true)
                     }
                 }
+                Divider()
+                Button("Import Site…") {
+                    Task { @MainActor in
+                        do {
+                            if let site = try await SiteActions.importPackage() {
+                                openWindow(value: site.id)
+                            }
+                        } catch {
+                            NSAlert(error: error).runModal()
+                        }
+                    }
+                }
             }
             // "Check for Updates…" lives in the standard slot Mac users expect — directly
             // under "About Anglesite" in the application menu. `CommandGroup(after: .appInfo)`
@@ -170,6 +185,18 @@ struct AnglesiteApp: App {
                     .disabled(!updater.canCheckForUpdates)
             }
             #endif
+            // Export lives after the standard Save items. Enabled only when a site window is focused.
+            CommandGroup(after: .importExport) {
+                Button("Export Site Source…") {
+                    Task { @MainActor in
+                        if let id = focusedSiteID,
+                           let site = await SiteStore.shared.find(id: id) {
+                            SiteActions.exportSource(of: site)
+                        }
+                    }
+                }
+                .disabled(focusedSiteID == nil)
+            }
             // Debug pane lives off the View menu — `⌥⌘D` keeps it discoverable without crowding
             // the primary commands. Hidden in Release unless explicitly enabled (see init()).
             CommandGroup(after: .toolbar) {

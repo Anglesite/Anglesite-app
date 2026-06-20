@@ -92,6 +92,7 @@ struct SiteWindow: View {
         .onChange(of: preview.state) { _, newState in
             startup.ingest(state: newState)
         }
+        .focusedValue(\.siteID, site?.id ?? siteID)
         .onDisappear {
             preview.close()
             startup.stop()
