@@ -165,6 +165,19 @@ final class SiteStoreTests {
         #expect(await reader.find(id: site.id)?.name == "Alpha Production")
     }
 
+    @Test("setDisplayName returns the unchanged site when the name is identical")
+    func setDisplayNameNoOpWhenUnchanged() async throws {
+        let pkg = try makeValidPackage(named: "alpha")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        let site = try await store.record(pkg)
+        let first = try await store.setDisplayName("Alpha Production", for: site.id)
+
+        // Re-applying the same override short-circuits to the existing entry.
+        let again = try await store.setDisplayName("Alpha Production", for: site.id)
+        #expect(again == first)
+        #expect(await store.find(id: site.id)?.name == "Alpha Production")
+    }
+
     @Test("setDisplayName is a no-op for an unknown id")
     func setDisplayNameUnknownIDNoOp() async throws {
         let store = SiteStore(persistenceURL: persistenceURL)

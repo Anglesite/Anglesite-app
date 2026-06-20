@@ -217,6 +217,9 @@ public actor SiteStore {
         let package = AnglesitePackage(url: existing.packageURL)
         let config = SiteConfigStore(configDirectory: package.configURL, fileManager: fileManager)
         var settings = try await config.load()
+        // Renaming to the current value (or clearing an already-empty override) changes nothing —
+        // skip the disk write, the re-make, and the change broadcast.
+        guard settings.displayName != override else { return existing }
         settings.displayName = override
         try await config.save(settings)
 
