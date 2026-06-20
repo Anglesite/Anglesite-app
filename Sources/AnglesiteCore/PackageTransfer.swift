@@ -6,9 +6,20 @@ import Foundation
 /// never edits a plain directory in place, so Import copies into a fresh package and Export copies
 /// the package's `Source/` working tree back out.
 public enum PackageTransfer {
-    public enum TransferError: Error, Equatable, Sendable {
+    public enum TransferError: Error, Equatable, Sendable, LocalizedError {
         case sourceNotADirectory(URL)
         case destinationExists(URL)
+
+        // Legible messages so the export NSAlert / import ImportError show a real reason rather
+        // than a raw "error 1" (parity with AnglesitePackage.PackageError, #259).
+        public var errorDescription: String? {
+            switch self {
+            case .sourceNotADirectory:
+                return "The chosen item isn't a folder."
+            case .destinationExists:
+                return "Something already exists at that location. Choose a different name or folder."
+            }
+        }
     }
 
     /// Copy `sourceDir`'s tree into a new package's `Source/`, preserving an existing `.git`,

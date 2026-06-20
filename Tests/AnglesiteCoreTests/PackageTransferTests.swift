@@ -89,6 +89,18 @@ struct PackageTransferTests {
         #expect(!fm.fileExists(atPath: dest.appendingPathComponent("node_modules").path))
     }
 
+    @Test("export throws .destinationExists when the destination already exists")
+    func exportThrowsDestinationExists() throws {
+        let fm = FileManager.default
+        let root = try tempDir(); defer { try? fm.removeItem(at: root) }
+        let pkg = try makePackageWithSource(in: root)
+        let dest = root.appendingPathComponent("already-here", isDirectory: true)
+        try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+        #expect(throws: PackageTransfer.TransferError.destinationExists(dest)) {
+            try PackageTransfer.exportSource(of: pkg, to: dest, includeGit: false, fileManager: fm)
+        }
+    }
+
     @Test("import throws .destinationExists when package URL already exists")
     func importThrowsDestinationExists() throws {
         let fm = FileManager.default
