@@ -98,4 +98,18 @@ public enum ContentClassification: Equatable, Sendable {
     case portfolio
     case other(String)
 }
+
+/// On-device guided-generation result for a failed deploy. Mapped to the non-gated
+/// `DeployFailureSummary` before it crosses the FoundationModels gate.
+@Generable
+public struct GeneratedDeployFailureSummary: Equatable, Sendable {
+    @Guide(description: "One or two plain-language sentences explaining what went wrong with the deploy.")
+    public var summary: String
+
+    @Guide(description: "The single most likely root cause of the failure, in one sentence.")
+    public var likelyCause: String
+
+    @Guide(description: "A concrete next step the site owner can take to fix it. Empty string if none is clear.")
+    public var suggestedFix: String
+}
 #endif

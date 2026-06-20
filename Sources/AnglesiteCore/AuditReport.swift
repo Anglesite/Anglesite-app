@@ -84,3 +84,39 @@ public struct AuditReport: Sendable, Equatable {
         self.runnersSkipped = runnersSkipped
     }
 }
+
+public extension AuditReport {
+    /// A deterministic one-line overview of the findings — never throws, stable for a given report.
+    /// e.g. "1 accessibility issue, 3 SEO issues. The performance check couldn't run."
+    var summary: String {
+        if findings.isEmpty && runnersSkipped.isEmpty {
+            return "No issues found."
+        }
+        let clauses: [String] = Finding.Category.allCases.compactMap { category in
+            let count = findings.filter { $0.category == category }.count
+            guard count > 0 else { return nil }
+            return "\(count) \(Self.displayName(category)) issue\(count == 1 ? "" : "s")"
+        }
+        var sentence = clauses.isEmpty ? "No issues found in the checks that ran" : clauses.joined(separator: ", ")
+        sentence += "."
+        if !runnersSkipped.isEmpty {
+            sentence += " " + Self.skippedClause(runnersSkipped.map { Self.displayName($0.category) })
+        }
+        return sentence
+    }
+
+    private static func displayName(_ category: Finding.Category) -> String {
+        category == .seo ? "SEO" : category.rawValue
+    }
+
+    private static func skippedClause(_ names: [String]) -> String {
+        let joined: String
+        if names.count == 1 {
+            joined = names[0]
+        } else {
+            joined = names.dropLast().joined(separator: ", ") + " and " + (names.last ?? "")
+        }
+        let verb = names.count == 1 ? "check couldn't" : "checks couldn't"
+        return "The \(joined) \(verb) run."
+    }
+}
