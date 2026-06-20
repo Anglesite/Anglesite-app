@@ -160,6 +160,14 @@ struct AnglesiteApp: App {
                         Button("No Recent Sites") {}.disabled(true)
                     }
                 }
+                Divider()
+                Button("Import Site…") {
+                    Task { @MainActor in
+                        if let site = try? await SiteActions.importPackage() {
+                            openWindow(value: site.id)
+                        }
+                    }
+                }
             }
             // "Check for Updates…" lives in the standard slot Mac users expect — directly
             // under "About Anglesite" in the application menu. `CommandGroup(after: .appInfo)`
@@ -170,6 +178,18 @@ struct AnglesiteApp: App {
                     .disabled(!updater.canCheckForUpdates)
             }
             #endif
+            // Export lives after the standard Save items. Enabled only when a site window is focused.
+            CommandGroup(after: .importExport) {
+                Button("Export Site Source…") {
+                    Task { @MainActor in
+                        if let id = WindowRouter.shared.focusedSiteID,
+                           let site = await SiteStore.shared.find(id: id) {
+                            SiteActions.exportSource(of: site, includeGit: false)
+                        }
+                    }
+                }
+                .disabled(WindowRouter.shared.focusedSiteID == nil)
+            }
             // Debug pane lives off the View menu — `⌥⌘D` keeps it discoverable without crowding
             // the primary commands. Hidden in Release unless explicitly enabled (see init()).
             CommandGroup(after: .toolbar) {

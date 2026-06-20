@@ -19,6 +19,51 @@ enum SiteActions {
         }
     }
 
+    /// Pick a plain Anglesite directory, choose where to save the new package, copy it in, and
+    /// register the package. Returns the new site, or nil if either panel was cancelled.
+    static func importPackage() async throws -> SiteStore.Site? {
+        let picker = NSOpenPanel()
+        picker.canChooseDirectories = true
+        picker.canChooseFiles = false
+        picker.allowsMultipleSelection = false
+        picker.prompt = "Choose"
+        picker.message = "Choose an existing Anglesite site folder to import."
+        guard picker.runModal() == .OK, let sourceDir = picker.url else { return nil }
+
+        let name = sourceDir.deletingPathExtension().lastPathComponent
+        let save = NSSavePanel()
+        save.message = "Save the imported site package."
+        save.nameFieldStringValue = "\(name).anglesite"
+        save.directoryURL = AppSettings.shared.sitesRoot
+        guard save.runModal() == .OK, let dest = save.url else { return nil }
+
+        do {
+            let pkg = try PackageTransfer.importDirectory(sourceDir, toPackageAt: dest, displayName: name)
+            let site = try await SiteStore.shared.record(pkg)
+            #if ANGLESITE_MAS
+            if let bm = try? SecurityScopedBookmark.create(for: site.packageURL) {
+                try await SiteStore.shared.setBookmark(bm, for: site.id)
+            }
+            #endif
+            return site
+        } catch {
+            throw ImportError(folderName: sourceDir.lastPathComponent, underlying: error)
+        }
+    }
+
+    /// Export the given site's source tree to a chosen folder.
+    static func exportSource(of site: SiteStore.Site, includeGit: Bool) {
+        let save = NSSavePanel()
+        save.message = "Export this site's source files to a folder."
+        save.nameFieldStringValue = site.name
+        guard save.runModal() == .OK, let dest = save.url else { return }
+        do {
+            try PackageTransfer.exportSource(of: AnglesitePackage(url: site.packageURL), to: dest, includeGit: includeGit)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
     /// Run the package picker, register the chosen `.anglesite` package with `SiteStore`, and
     /// (on MAS) mint + persist a security-scoped bookmark so the grant survives relaunch.
     ///

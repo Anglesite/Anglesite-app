@@ -103,6 +103,11 @@ struct SiteWindow: View {
                 annotationProvider = nil
             }
             chat = nil
+            // Clear focused-site only if this window still owns it — a newly-focused window
+            // sets it before this onDisappear fires, and we must not clear that other window's value.
+            if WindowRouter.shared.focusedSiteID == siteID {
+                WindowRouter.shared.focusedSiteID = nil
+            }
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()
             scopedURL = nil
@@ -403,6 +408,7 @@ struct SiteWindow: View {
             return
         }
         site = resolved
+        WindowRouter.shared.focusedSiteID = resolved.id
         AppSettings.shared.lastOpenedSiteID = resolved.id
         try? await store.touch(id: resolved.id)
 
