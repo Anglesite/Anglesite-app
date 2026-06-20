@@ -74,4 +74,6 @@ public protocol EditInterpreting: Sendable {
 /// Thrown when on-device interpretation can't run (Apple Intelligence unavailable, etc.).
 public enum EditInterpretationError: Error, Sendable, Equatable {
     case unavailable(String)
+    /// The element\'s site isn\'t open in Anglesite (siteID/siteDirectory missing from context).
+    case siteUnavailable(String)
 }

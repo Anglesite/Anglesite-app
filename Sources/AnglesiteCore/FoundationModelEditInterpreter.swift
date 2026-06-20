@@ -63,7 +63,7 @@ public struct FoundationModelEditInterpreter: EditInterpreting {
     public init(assistant: FoundationModelAssistant) {
         self.generate = { instruction, element in
             guard let siteID = element.siteID, let siteDirectory = element.siteDirectory else {
-                throw EditInterpretationError.unavailable("siteID/siteDirectory not provided in element context")
+                throw EditInterpretationError.siteUnavailable("siteID/siteDirectory not provided in element context")
             }
             let prompt = Self.buildPrompt(instruction: instruction, element: element)
             let context = AssistantContext(

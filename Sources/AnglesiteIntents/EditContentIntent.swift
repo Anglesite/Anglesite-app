@@ -41,20 +41,31 @@ public struct EditContentIntent: AppIntent {
         }
 
         // 1. Interpret the instruction on-device.
+        // Decode tag + textContent once from the selector we already validated above.
+        let selectorDict: [String: JSONValue]
+        if case .object(let d) = selector { selectorDict = d } else { selectorDict = [:] }
+        let tag: String
+        if case .string(let t) = selectorDict["tag"] { tag = t } else { tag = "" }
+        let textContent: String?
+        if case .string(let t) = selectorDict["textContent"] { textContent = t } else { textContent = nil }
+
         let siteDirectory = await SiteStore.shared.find(id: element.siteID)?.path
         let interpreted: InterpretedEdit
         do {
             interpreted = try await interp.interpret(
                 instruction: instruction,
                 element: InterpretedElementContext(
-                    tag: element.elementTag,
-                    currentText: element.currentText,
+                    tag: tag,
+                    currentText: textContent,
                     pagePath: element.pagePath,
                     displayName: element.displayName,
                     siteID: element.siteID,
                     siteDirectory: siteDirectory
                 )
             )
+        } catch EditInterpretationError.siteUnavailable {
+            return .result(dialog: IntentDialog(stringLiteral:
+                "Open this site in Anglesite first, then try the edit again."))
         } catch {
             return .result(dialog: IntentDialog(stringLiteral:
                 "Editing by voice needs Apple Intelligence, which isn't available here."))

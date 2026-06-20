@@ -76,22 +76,6 @@ extension ElementEntity {
         return jv
     }
 
-    /// The element's HTML tag (e.g. `"h1"`, `"p"`, `"img"`), decoded from the stored selector JSON.
-    /// Returns `""` when the selector can't be decoded (same guard as `selectorJSON()`'s `tag` check).
-    public var elementTag: String {
-        guard let jv = selectorJSON(), case .object(let dict) = jv,
-              case .string(let t)? = dict["tag"] else { return "" }
-        return t
-    }
-
-    /// The element's current visible text, decoded from the selector's `textContent` field.
-    /// `nil` when absent (images, elements with no inline text) or the selector can't be decoded.
-    public var currentText: String? {
-        guard let jv = selectorJSON(), case .object(let dict) = jv,
-              case .string(let t)? = dict["textContent"] else { return nil }
-        return t
-    }
-
     /// Encode a structured selector to the string form stored on the entity. Round-trips with
     /// `selectorJSON()`. Non-object inputs return `"{}"` — `selectorJSON()`'s `tag` guard then
     /// rejects them on the way back, so the nil-on-bad-input contract holds end-to-end.

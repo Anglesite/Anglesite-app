@@ -43,6 +43,16 @@ private actor EditCancelGate {
     }
 }
 
+// MARK: - Stub interpreter (for cancel tests — needs a non-crashing interpreter before the bridge)
+
+/// Returns a minimal text edit so `perform()` advances past the interpreter to the bridge.
+private struct CancelTestInterpreter: EditInterpreting {
+    func interpret(instruction: String, element: InterpretedElementContext) async throws -> InterpretedEdit {
+        InterpretedEdit(kind: .text, newText: "stub", attributeName: nil, attributeValue: nil,
+                        styleProperty: nil, styleValue: nil, summary: "stub edit")
+    }
+}
+
 // MARK: - Routers
 
 /// Routes through a gate before returning its configured reply — lets us cancel the
@@ -105,8 +115,10 @@ extension AppIntentsTests {
             intent.instruction = "make it bigger"
 
             let performTask: Task<String, Error> = Task {
-                let result = try await IntentEditBridgeOverride.$scoped.withValue(bridge) {
-                    try await intent.perform()
+                let result = try await EditInterpreterOverride.$scoped.withValue(CancelTestInterpreter()) {
+                    try await IntentEditBridgeOverride.$scoped.withValue(bridge) {
+                        try await intent.perform()
+                    }
                 }
                 return "\(result)"  // opaque ProvidesDialog — interpolate to read the dialog text
             }
@@ -145,8 +157,10 @@ extension AppIntentsTests {
             intent.element = Self.fixture()
             intent.instruction = "change the color"
 
-            let dialog = await IntentEditBridgeOverride.$scoped.withValue(bridge) {
-                "\((try? await intent.perform()) as Any)"
+            let dialog = await EditInterpreterOverride.$scoped.withValue(CancelTestInterpreter()) {
+                await IntentEditBridgeOverride.$scoped.withValue(bridge) {
+                    "\((try? await intent.perform()) as Any)"
+                }
             }
             #expect(dialog.lowercased().contains("cancel"),
                     "a 'canceled' reply should produce the Canceled dialog, got: \(dialog)")

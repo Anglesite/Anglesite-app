@@ -15,6 +15,14 @@ extension AppIntentsTests {
 
     @Suite("EditContentIntent", .serialized)
     struct EditContentIntentTests {
+        /// Returns a minimal text edit so `perform()` advances past the interpreter to the bridge.
+        struct PassthroughInterpreter: EditInterpreting {
+            func interpret(instruction: String, element: InterpretedElementContext) async throws -> InterpretedEdit {
+                InterpretedEdit(kind: .text, newText: "stub", attributeName: nil, attributeValue: nil,
+                                styleProperty: nil, styleValue: nil, summary: "stub edit")
+            }
+        }
+
         actor RecordingRouter: EditRouter {
             private(set) var received: [EditMessage] = []
             let reply: EditReply
@@ -61,15 +69,17 @@ extension AppIntentsTests {
             intent.element = Self.fixture()
             intent.instruction = "make it bigger"
 
-            try await IntentEditBridgeOverride.$scoped.withValue(Self.bridge(router: router)) {
-                _ = try await intent.perform()
+            try await EditInterpreterOverride.$scoped.withValue(PassthroughInterpreter()) {
+                try await IntentEditBridgeOverride.$scoped.withValue(Self.bridge(router: router)) {
+                    _ = try await intent.perform()
+                }
             }
             let captured = await router.received
             #expect(captured.count == 1)
             let msg = captured[0]
             #expect(msg.path == "/about/")
-            #expect(msg.op == EditMessage.Op.applyInstruction)
-            #expect(msg.value == .string("make it bigger"))
+            #expect(msg.op == "replace-text")
+            #expect(msg.value == .string("stub"))  // PassthroughInterpreter's fixed payload
             guard case .object(let dict) = msg.selector else {
                 Issue.record("expected .object selector")
                 return
@@ -86,8 +96,10 @@ extension AppIntentsTests {
                 let intent = EditContentIntent()
                 intent.element = Self.fixture()
                 intent.instruction = "change it"
-                try await IntentEditBridgeOverride.$scoped.withValue(Self.bridge(router: router)) {
-                    _ = try await intent.perform()
+                try await EditInterpreterOverride.$scoped.withValue(PassthroughInterpreter()) {
+                    try await IntentEditBridgeOverride.$scoped.withValue(Self.bridge(router: router)) {
+                        _ = try await intent.perform()
+                    }
                 }
                 #expect(await router.received.count == 1, "status \(status) didn't reach the router")
             }
@@ -107,8 +119,10 @@ extension AppIntentsTests {
             intent.element = element
             intent.instruction = "submit it"
 
-            try await IntentEditBridgeOverride.$scoped.withValue(Self.bridge(router: router)) {
-                _ = try await intent.perform()
+            try await EditInterpreterOverride.$scoped.withValue(PassthroughInterpreter()) {
+                try await IntentEditBridgeOverride.$scoped.withValue(Self.bridge(router: router)) {
+                    _ = try await intent.perform()
+                }
             }
             #expect(await router.received.isEmpty, "bridge must not be called when selector won't decode")
         }
@@ -124,8 +138,10 @@ extension AppIntentsTests {
 
             // IntentEditBridgeOverride.scoped is set, so the confirmation prompt is skipped
             // (it has no UI surface in tests) and the edit routes as before.
-            try await IntentEditBridgeOverride.$scoped.withValue(Self.bridge(router: router)) {
-                _ = try await intent.perform()
+            try await EditInterpreterOverride.$scoped.withValue(PassthroughInterpreter()) {
+                try await IntentEditBridgeOverride.$scoped.withValue(Self.bridge(router: router)) {
+                    _ = try await intent.perform()
+                }
             }
             #expect(await router.received.count == 1, "test-scoped edit must route past the confirmation gate")
         }
@@ -149,8 +165,10 @@ extension AppIntentsTests {
             intent.element = Self.fixture(siteID: "/Users/x/Sites/beta")
             intent.instruction = "do the thing"
 
-            try await IntentEditBridgeOverride.$scoped.withValue(bridge) {
-                _ = try await intent.perform()
+            try await EditInterpreterOverride.$scoped.withValue(PassthroughInterpreter()) {
+                try await IntentEditBridgeOverride.$scoped.withValue(bridge) {
+                    _ = try await intent.perform()
+                }
             }
             #expect(await spy.lastAsked == "/Users/x/Sites/beta")
         }
