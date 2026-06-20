@@ -54,7 +54,7 @@ struct NewSiteWizard: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Name your site").font(.title2.bold())
             TextField("Site name", text: $model.draft.name)
-            Text("Folder: ~/Sites/\(model.slugPreview)").font(.caption).foregroundStyle(.secondary)
+            Text("Package: ~/Sites/\(model.slugPreview).anglesite").font(.caption).foregroundStyle(.secondary)
             if let err = model.detailsError {
                 Text(err).font(.caption).foregroundStyle(.red)
                     .accessibilityLabel("Error")

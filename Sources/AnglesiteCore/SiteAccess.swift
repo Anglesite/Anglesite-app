@@ -28,13 +28,13 @@ public enum SiteAccess {
         #if ANGLESITE_MAS
         guard let data = await store.bookmarkData(for: site.id) else {
             throw AccessError.noGrant(
-                "\(site.name) has no folder grant. Open it once via Open Folder… in Anglesite, then try again."
+                "\(site.name) has no folder grant. Open it once via Open Site… in Anglesite, then try again."
             )
         }
         let resolved = try SecurityScopedBookmark.resolve(data)
         guard resolved.url.startAccessingSecurityScopedResource() else {
             throw AccessError.noGrant(
-                "Couldn't access \(site.name)'s folder. Re-add it via Open Folder… in Anglesite."
+                "Couldn't access \(site.name)'s folder. Re-add it via Open Site… in Anglesite."
             )
         }
         defer { resolved.url.stopAccessingSecurityScopedResource() }
