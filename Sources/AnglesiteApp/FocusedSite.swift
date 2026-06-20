@@ -21,9 +21,12 @@ struct ExportSiteCommands: Commands {
         // Export lives after the standard Save items. Enabled only when a site window is focused.
         CommandGroup(after: .importExport) {
             Button("Export Site Source…") {
+                // Capture the focused id at press time — reading it inside the Task would resolve it
+                // at execution time, so a focus shift between click and dispatch could export the
+                // wrong window.
+                guard let id = focusedSiteID else { return }
                 Task { @MainActor in
-                    if let id = focusedSiteID,
-                       let site = await SiteStore.shared.find(id: id) {
+                    if let site = await SiteStore.shared.find(id: id) {
                         SiteActions.exportSource(of: site)
                     }
                 }
