@@ -37,8 +37,19 @@ enum SiteActions {
         save.directoryURL = AppSettings.shared.sitesRoot
         guard save.runModal() == .OK, let dest = save.url else { return nil }
 
+        // The tree copy can be large (it may include node_modules) — run it off the main actor so
+        // the import doesn't stall the UI. On failure after the copy created the package, clean up
+        // the orphan; a `destinationExists` throw comes from importDirectory itself (before it
+        // creates anything), so it lands in the outer catch and never deletes a pre-existing dir.
+        let pkg: AnglesitePackage
         do {
-            let pkg = try PackageTransfer.importDirectory(sourceDir, toPackageAt: dest, displayName: name)
+            pkg = try await Task.detached {
+                try PackageTransfer.importDirectory(sourceDir, toPackageAt: dest, displayName: name)
+            }.value
+        } catch {
+            throw ImportError(folderName: sourceDir.lastPathComponent, underlying: error)
+        }
+        do {
             let site = try await SiteStore.shared.record(pkg)
             #if ANGLESITE_MAS
             // Propagate (don't swallow with try?) — a grantless imported site silently fails to
@@ -48,20 +59,34 @@ enum SiteActions {
             #endif
             return site
         } catch {
+            // record/bookmark failed after importDirectory wrote the package — remove the orphan
+            // (we created it this call) so it isn't left invisible-and-unopenable on disk.
+            try? FileManager.default.removeItem(at: pkg.url)
             throw ImportError(folderName: sourceDir.lastPathComponent, underlying: error)
         }
     }
 
-    /// Export the given site's source tree to a chosen folder.
-    static func exportSource(of site: SiteStore.Site, includeGit: Bool) {
+    /// Export the given site's source tree to a chosen folder, with an opt-in for `.git` history.
+    static func exportSource(of site: SiteStore.Site) {
         let save = NSSavePanel()
         save.message = "Export this site's source files to a folder."
         save.nameFieldStringValue = site.name
+        let gitToggle = NSButton(checkboxWithTitle: "Include Git history (.git)", target: nil, action: nil)
+        gitToggle.state = .off
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 28))
+        gitToggle.frame = NSRect(x: 12, y: 4, width: 256, height: 20)
+        accessory.addSubview(gitToggle)
+        save.accessoryView = accessory
         guard save.runModal() == .OK, let dest = save.url else { return }
-        do {
-            try PackageTransfer.exportSource(of: AnglesitePackage(url: site.packageURL), to: dest, includeGit: includeGit)
-        } catch {
-            NSAlert(error: error).runModal()
+        let includeGit = gitToggle.state == .on
+        let pkgURL = site.packageURL
+        // Off-load the copy from the main actor; surface any failure back on main via NSAlert.
+        Task.detached {
+            do {
+                try PackageTransfer.exportSource(of: AnglesitePackage(url: pkgURL), to: dest, includeGit: includeGit)
+            } catch {
+                await MainActor.run { NSAlert(error: error).runModal() }
+            }
         }
     }
 

@@ -191,7 +191,7 @@ struct AnglesiteApp: App {
                     Task { @MainActor in
                         if let id = focusedSiteID,
                            let site = await SiteStore.shared.find(id: id) {
-                            SiteActions.exportSource(of: site, includeGit: false)
+                            SiteActions.exportSource(of: site)
                         }
                     }
                 }

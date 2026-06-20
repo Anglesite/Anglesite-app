@@ -82,14 +82,18 @@ public enum PackageTransfer {
         guard !fileManager.fileExists(atPath: destinationDir.path) else {
             throw TransferError.destinationExists(destinationDir)
         }
-        // Copy wholesale, then prune the excluded top-level entries — simpler and safer than a
-        // filtered deep enumerate, and the excluded dirs are always top-level in an Astro project.
-        try fileManager.copyItem(at: package.sourceURL, to: destinationDir)
-        let nodeModules = destinationDir.appendingPathComponent("node_modules", isDirectory: true)
-        if fileManager.fileExists(atPath: nodeModules.path) { try fileManager.removeItem(at: nodeModules) }
-        if !includeGit {
-            let git = destinationDir.appendingPathComponent(".git", isDirectory: true)
-            if fileManager.fileExists(atPath: git.path) { try fileManager.removeItem(at: git) }
+        // Copy the excluded directories' *siblings* rather than copy-all-then-prune: copying the
+        // whole tree first would temporarily double disk usage and waste time on a multi-GB
+        // node_modules we immediately delete. The excluded dirs are always top-level in an Astro
+        // project, so a top-level filtered copy is sufficient (and preserves hidden files like
+        // .gitignore / .site-config that aren't excluded).
+        var excluded: Set<String> = ["node_modules"]
+        if !includeGit { excluded.insert(".git") }
+        try fileManager.createDirectory(at: destinationDir, withIntermediateDirectories: true)
+        let entries = try fileManager.contentsOfDirectory(
+            at: package.sourceURL, includingPropertiesForKeys: nil, options: [])
+        for entry in entries where !excluded.contains(entry.lastPathComponent) {
+            try fileManager.copyItem(at: entry, to: destinationDir.appendingPathComponent(entry.lastPathComponent))
         }
     }
 }
