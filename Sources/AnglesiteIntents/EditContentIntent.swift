@@ -161,9 +161,9 @@ extension ContentDialogs {
     /// say back to the user. Fall through to a generic phrasing otherwise.
     public static func editFailed(displayName: String, reason: String?) -> String {
         if let reason, !reason.isEmpty {
-            return "Couldn't edit \(displayName): \(reason)"
+            return "Couldn\u{2019}t edit \(displayName): \(reason)"
         }
-        return "Couldn't edit \(displayName)."
+        return "Couldn\u{2019}t edit \(displayName)."
     }
 
     /// `.ambiguous`-status dialog. Distinct from `.failed` because the user can rephrase and try
@@ -172,14 +172,14 @@ extension ContentDialogs {
         if let detail, !detail.isEmpty {
             return "Not sure how to edit \(displayName): \(detail)"
         }
-        return "Not sure how to edit \(displayName) -- try rephrasing."
+        return "Not sure how to edit \(displayName) \u{2014} try rephrasing."
     }
 
     /// When the entity's stored selector won't decode back into the structured shape
     /// `EditMessage` requires. Shouldn't happen at runtime (the encoder/decoder round-trip is
     /// tested), but the failure mode is well-defined enough to deserve a dialog.
     public static func editInvalidSelector(displayName: String) -> String {
-        "Lost track of \(displayName) -- try selecting it again."
+        "Lost track of \(displayName) \u{2014} try selecting it again."
     }
 
     /// Confirmation summary shown before a Siri-driven edit mutates source files (#239).
