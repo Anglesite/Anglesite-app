@@ -41,9 +41,10 @@ enum SiteActions {
             let pkg = try PackageTransfer.importDirectory(sourceDir, toPackageAt: dest, displayName: name)
             let site = try await SiteStore.shared.record(pkg)
             #if ANGLESITE_MAS
-            if let bm = try? SecurityScopedBookmark.create(for: site.packageURL) {
-                try await SiteStore.shared.setBookmark(bm, for: site.id)
-            }
+            // Propagate (don't swallow with try?) — a grantless imported site silently fails to
+            // preview at open. Matches pickAndRegisterSite; mint from the canonicalized packageURL.
+            let bm = try SecurityScopedBookmark.create(for: site.packageURL)
+            try await SiteStore.shared.setBookmark(bm, for: site.id)
             #endif
             return site
         } catch {
