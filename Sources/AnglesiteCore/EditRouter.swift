@@ -18,6 +18,11 @@ public struct EditReply: Sendable, Equatable, Encodable {
     /// Op-scoped metadata. For `replace-image-src` carries `{ src, srcset? }`. `nil` for ops
     /// that don't surface overlay-side metadata.
     public let result: ImageResult?
+    /// Preview-only: the source fragment before/after the would-be change (`.preview` status).
+    public let before: String?
+    public let after: String?
+    /// The op the preview/apply was for (e.g. "edit-style"). `nil` outside preview.
+    public let op: String?
 
     public struct ImageResult: Sendable, Equatable, Encodable {
         public let src: String
@@ -30,7 +35,7 @@ public struct EditReply: Sendable, Equatable, Encodable {
     }
 
     public enum Status: String, Sendable, Equatable, Encodable {
-        case applied, failed, ambiguous
+        case applied, failed, ambiguous, preview
     }
 
     public init(
@@ -39,7 +44,10 @@ public struct EditReply: Sendable, Equatable, Encodable {
         message: String?,
         file: String? = nil,
         commit: String? = nil,
-        result: ImageResult? = nil
+        result: ImageResult? = nil,
+        before: String? = nil,
+        after: String? = nil,
+        op: String? = nil
     ) {
         self.id = id
         self.status = status
@@ -47,6 +55,9 @@ public struct EditReply: Sendable, Equatable, Encodable {
         self.file = file
         self.commit = commit
         self.result = result
+        self.before = before
+        self.after = after
+        self.op = op
     }
 }
 

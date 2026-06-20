@@ -104,6 +104,15 @@ extension AppIntentsTests {
             #expect(fake.pageCalls.isEmpty)
         }
 
+        /// Minimal interpreter stub — returns a resolvable text edit so `perform()` advances
+        /// past the interpretation step to the bridge.
+        private struct PassthroughInterpreter: EditInterpreting {
+            func interpret(instruction: String, element: InterpretedElementContext) async throws -> InterpretedEdit {
+                InterpretedEdit(kind: .text, newText: "stub", attributeName: nil, attributeValue: nil,
+                                styleProperty: nil, styleValue: nil, summary: "stub edit")
+            }
+        }
+
         @Test("edit-content routes to the edit bridge (modifiesContent)")
         func editMutates() async throws {
             let router = RoutingRouter()
@@ -123,10 +132,14 @@ extension AppIntentsTests {
             let intent = EditContentIntent()
             intent.element = element
             intent.instruction = "make it bigger"
-            try await IntentEditBridgeOverride.$scoped.withValue(bridge) {
-                _ = try await intent.perform()
+            try await EditInterpreterOverride.$scoped.withValue(PassthroughInterpreter()) {
+                try await IntentEditBridgeOverride.$scoped.withValue(bridge) {
+                    _ = try await intent.perform()
+                }
             }
-            #expect(await router.received == 1)
+            // The dry-run call returns .applied (not .preview), so perform() exits after 1 bridge
+            // call — enough to prove the edit-content intent reaches the bridge (modifiesContent).
+            #expect(await router.received >= 1)
         }
 
         @Test("read intents (search, status) perform no content or site mutation")

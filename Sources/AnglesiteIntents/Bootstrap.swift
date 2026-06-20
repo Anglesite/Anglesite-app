@@ -24,6 +24,16 @@ private let contentLog = Logger(subsystem: "dev.anglesite.app", category: "conte
 /// `Task`, which races with the launcher view's own `task` modifier. The handler is registered
 /// before the load here, so the load *will* emit even if the launcher already raced ahead and
 /// missed it — emission is idempotent (the indexer dedups by id set).
+
+/// Fallback interpreter used when the Xcode-27 / `FoundationModels` toolchain is absent (CI).
+/// Always throws `.unavailable` so the intent's catch path surfaces the "needs Apple Intelligence"
+/// dialog rather than a fatalError from the missing `@Dependency` factory.
+private struct UnavailableEditInterpreter: EditInterpreting {
+    func interpret(instruction: String, element: InterpretedElementContext) async throws -> InterpretedEdit {
+        throw EditInterpretationError.unavailable("FoundationModels not available on this toolchain")
+    }
+}
+
 public enum AnglesiteIntents {
     @discardableResult
     public static func bootstrap(contentGraph: SiteContentGraph) async -> ContentSpotlightIndexer {
@@ -49,6 +59,17 @@ public enum AnglesiteIntents {
             routerProvider: { siteID in await EditRouterRegistry.shared.router(for: siteID) }
         )
         AppDependencyManager.shared.add { () -> IntentEditBridge in editBridge }
+        // FM-backed edit interpreter for `EditContentIntent` (B.6 / #251). Gated behind the
+        // Xcode-27 compiler so `AnglesiteIntents` still builds on CI's older toolchain (#128).
+        // The interpreter is app-wide (no per-site state); siteID/siteDirectory are threaded
+        // through `InterpretedElementContext` by `perform()` at interpret time.
+        #if compiler(>=6.4)
+        let fmAssistant = FoundationModelAssistant()
+        let editInterpreter: any EditInterpreting = FoundationModelEditInterpreter(assistant: fmAssistant)
+        #else
+        let editInterpreter: any EditInterpreting = UnavailableEditInterpreter()
+        #endif
+        AppDependencyManager.shared.add { () -> any EditInterpreting in editInterpreter }
 
         await SiteStore.shared.setChangeHandler { sites in
             do {

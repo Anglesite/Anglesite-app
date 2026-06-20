@@ -65,6 +65,10 @@ public struct MCPApplyEditRouter: EditRouter {
             let result = try await toolCaller("apply_edit", args)
             let text = result.content.compactMap(\.text).joined(separator: "\n")
             let trimmed = text.isEmpty ? nil : text
+            if let preview = Self.parsePreview(text) {
+                return EditReply(id: message.id, status: .preview, message: nil,
+                                 file: preview.file, before: preview.before, after: preview.after, op: preview.op)
+            }
             let parsed = Self.parseStructured(text)
             if result.isError {
                 return EditReply(
@@ -96,6 +100,26 @@ public struct MCPApplyEditRouter: EditRouter {
         } catch {
             return EditReply(id: message.id, status: .failed, message: "\(error)")
         }
+    }
+
+    struct PreviewParsed: Equatable {
+        let file: String?
+        let op: String?
+        let before: String
+        let after: String
+    }
+
+    /// Parses an `anglesite:edit-preview` JSON body from the MCP tool's content text. Returns
+    /// `nil` when the body is not a valid preview response.
+    static func parsePreview(_ text: String) -> PreviewParsed? {
+        guard !text.isEmpty,
+              let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (json["type"] as? String) == "anglesite:edit-preview",
+              let before = json["before"] as? String,
+              let after = json["after"] as? String
+        else { return nil }
+        return PreviewParsed(file: json["file"] as? String, op: json["op"] as? String, before: before, after: after)
     }
 
     /// Parses the plugin's edit-applied JSON body out of the MCP tool's content text. Returns
