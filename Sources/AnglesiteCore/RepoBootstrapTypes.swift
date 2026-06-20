@@ -22,6 +22,9 @@ public struct RemoteRepo: Sendable, Equatable {
         if trimmed.hasPrefix("git@") || (!trimmed.contains("://") && trimmed.contains(":")) {
             // scp-like: git@github.com:owner/name.git — host is between "@" and ":"
             guard let at = trimmed.firstIndex(of: "@"), let colon = trimmed.firstIndex(of: ":") else { return nil }
+            // A ":" before the "@" (e.g. "host:user@path") would make the host range start > end
+            // and trap on the subscript. Reject rather than crash.
+            guard at < colon else { return nil }
             host = String(trimmed[trimmed.index(after: at)..<colon])
             let path = trimmed[trimmed.index(after: colon)...].split(separator: "/")
             guard path.count >= 2 else { return nil }
@@ -82,8 +85,12 @@ public struct GHRepoProvider: RepoProvider {
 
     public func createAndPush(name: String, isPrivate: Bool, source: URL) async throws -> RemoteRepo {
         let visibility = isPrivate ? "--private" : "--public"
+        // `--` terminates flag parsing, so `name` (the positional) must come last, after all flags —
+        // it guards a future caller passing a leading-hyphen name from having it read as a flag.
+        // (`gh repo create -- name --private` is rejected by gh; the terminator must follow the flags.)
         let create = try await run(env,
-            ["gh", "repo", "create", name, visibility, "--source", source.path, "--remote", "origin", "--push"],
+            ["gh", "repo", "create", visibility,
+             "--source", source.path(percentEncoded: false), "--remote", "origin", "--push", "--", name],
             source)
         guard create.exitCode == 0 else {
             throw RepoBootstrapError(reason: Self.firstLine(create.stderr) ?? "Couldn't create the GitHub repository.")

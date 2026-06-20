@@ -48,11 +48,32 @@ public actor RepoBootstrap {
         let dirty = !status.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard noCommits || dirty else { return }
 
+        // Refuse to stage likely-secret files. `git add -A` would otherwise sweep .env/.env.local
+        // etc. into the repo; "private by default" doesn't protect a repo later made public or
+        // visible org-wide, and secrets persist in history even after a force-push.
+        let secrets = Self.dotenvFiles(inPorcelain: status.stdout)
+        guard secrets.isEmpty else {
+            throw RepoBootstrapError(reason: "Refusing to publish: \(secrets.joined(separator: ", ")) "
+                + "would be committed. Add \(secrets.count == 1 ? "it" : "them") to .gitignore first.")
+        }
+
         emit(.progress(step: .committing, message: "Committing your site…"))
         let add = try await run(env, ["git", "add", "-A"], source)
         guard add.exitCode == 0 else { throw RepoBootstrapError(reason: "git add failed.\n\(add.stderr)") }
         let commit = try await run(env, ["git", "commit", "-m", "Initial commit"], source)
         guard commit.exitCode == 0 else { throw RepoBootstrapError(reason: "git commit failed.\n\(commit.stderr)") }
+    }
+
+    /// Paths in `git status --porcelain` output whose filename is a dotenv secret (`.env` or
+    /// `.env.<anything>`). Porcelain v1 lines are `XY <path>` (or `XY <old> -> <new>` for renames).
+    static func dotenvFiles(inPorcelain porcelain: String) -> [String] {
+        porcelain.split(whereSeparator: \.isNewline).compactMap { line in
+            guard line.count > 3 else { return nil }
+            let entry = String(line.dropFirst(3))                       // strip the 2 status cols + space
+            let path = entry.components(separatedBy: " -> ").last ?? entry   // rename → use the new path
+            let name = (path as NSString).lastPathComponent
+            return (name == ".env" || name.hasPrefix(".env.")) ? path : nil
+        }
     }
 
     /// Detect → (auth) → ensure committable → create + push. Streams progress; settles to
@@ -92,12 +113,17 @@ public actor RepoBootstrap {
         }
     }
 
-    /// Production wiring: `git`/`gh` run through `ProcessSupervisor.shared.run` (mirrors how
-    /// `SiteScaffolder` shells out for one-shot commands; output is captured into the surfaced
-    /// reason rather than streamed, since these are short-lived).
-    public static func live(supervisor: ProcessSupervisor = .shared) -> RepoBootstrap {
+    /// Production wiring: `git`/`gh` run through `ProcessSupervisor.shared.run`. The one-shot `run`
+    /// path captures rather than streams, so the runner forwards captured stdout/stderr to
+    /// `LogCenter` itself — per CLAUDE.md "logs are sacred", every spawned subprocess must reach
+    /// the debug pane.
+    public static func live(supervisor: ProcessSupervisor = .shared, logCenter: LogCenter = .shared) -> RepoBootstrap {
         let runner: RepoCommandRunner = { executable, args, cwd in
-            try await supervisor.run(executable: executable, arguments: args, currentDirectoryURL: cwd)
+            let result = try await supervisor.run(executable: executable, arguments: args, currentDirectoryURL: cwd)
+            let source = "repo-bootstrap"
+            if !result.stdout.isEmpty { await logCenter.append(source: source, stream: .stdout, text: result.stdout) }
+            if !result.stderr.isEmpty { await logCenter.append(source: source, stream: .stderr, text: result.stderr) }
+            return result
         }
         return RepoBootstrap(provider: GHRepoProvider(run: runner), run: runner)
     }

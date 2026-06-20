@@ -131,4 +131,36 @@ import Foundation
         _ = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "My Cool Site!", isPrivate: true))
         #expect(await capturing.capturedName == "my-cool-site")
     }
+
+    @Test func publishRefusesWhenDotenvWouldBeCommitted() async {
+        // A dirty tree containing a .env file must abort before staging — never create the repo.
+        let capturing = CapturingProvider(result: .success(repo()))
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: capturing,
+            run: runner(log, [
+                (["git", "remote", "get-url"], fail()),                       // no origin → proceed
+                (["git", "rev-parse", "--is-inside-work-tree"], ok()),        // already a repo
+                (["git", "rev-parse", "HEAD"], ok("abc123")),                 // has commits
+                (["git", "status"], ok("?? .env\n M src/page.astro")),        // dirty, includes .env
+            ]))
+        let events = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "site", isPrivate: true))
+        if case .failed(let reason) = events.last {
+            #expect(reason.contains(".env"))
+        } else {
+            Issue.record("expected .failed, got \(String(describing: events.last))")
+        }
+        #expect(await !log.calls.contains(["git", "add", "-A"]))   // never staged
+        #expect(await capturing.capturedName == nil)               // never created the repo
+    }
+
+    @Test func dotenvFilesDetectsSecretsAndIgnoresOthers() {
+        let porcelain = "?? .env\n M config/.env.local\n?? README.md\nA  foo.env.bak\nR  old.txt -> new.txt"
+        let found = RepoBootstrap.dotenvFiles(inPorcelain: porcelain)
+        #expect(found.contains(".env"))
+        #expect(found.contains("config/.env.local"))
+        #expect(!found.contains("README.md"))
+        #expect(!found.contains("foo.env.bak"))   // basename isn't .env / .env.* — not a secret
+        #expect(!found.contains("new.txt"))
+    }
 }

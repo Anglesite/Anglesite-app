@@ -32,4 +32,9 @@ import Foundation
     @Test func rejectsNonGitHubSSHHost() {
         #expect(RemoteRepo.parse(remoteURL: "git@gitlab.com:foo/bar.git") == nil)
     }
+
+    /// A ":" before "@" used to make the scp-branch host range start > end and trap. Must return nil.
+    @Test func rejectsColonBeforeAtWithoutCrashing() {
+        #expect(RemoteRepo.parse(remoteURL: "host:user@path/repo.git") == nil)
+    }
 }
