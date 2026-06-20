@@ -12,18 +12,15 @@ public struct NativeContentOperations: ContentOperationsService {
     private let siteDirectory: @Sendable (_ siteID: String) async -> URL?
     private let gitCommit: GitCommit
     private let now: @Sendable () -> Date
-    private let fileManager: FileManager
 
     public init(
         siteDirectory: @escaping @Sendable (_ siteID: String) async -> URL?,
-        gitCommit: @escaping GitCommit = NativeContentOperations.processGitCommit,
-        now: @escaping @Sendable () -> Date = { Date() },
-        fileManager: FileManager = .default
+        gitCommit: @escaping GitCommit = { proj, rel, msg in await NativeContentOperations.processGitCommit(proj, rel, msg) },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.siteDirectory = siteDirectory
         self.gitCommit = gitCommit
         self.now = now
-        self.fileManager = fileManager
     }
 
     public func createPage(siteID: String, name: String, route: String?, onProgress: ProgressHandler? = nil) async -> ContentCreateResult {
@@ -41,7 +38,7 @@ public struct NativeContentOperations: ContentOperationsService {
 
         let relPath = ContentScaffold.pageRelativePath(normalizedRoute: normalized)
         let abs = root.appendingPathComponent(relPath)
-        if fileManager.fileExists(atPath: abs.path) {
+        if FileManager.default.fileExists(atPath: abs.path) {
             return .failed(reason: "A page already exists at \(relPath)")
         }
 
@@ -76,7 +73,7 @@ public struct NativeContentOperations: ContentOperationsService {
 
         let relPath = ContentScaffold.postRelativePath(collection: coll, slug: finalSlug)
         let abs = root.appendingPathComponent(relPath)
-        if fileManager.fileExists(atPath: abs.path) {
+        if FileManager.default.fileExists(atPath: abs.path) {
             return .failed(reason: "A \(coll) entry already exists at \(relPath)")
         }
 
@@ -91,7 +88,7 @@ public struct NativeContentOperations: ContentOperationsService {
     }
 
     private func write(_ contents: String, to abs: URL) throws {
-        try fileManager.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
         try contents.write(to: abs, atomically: true, encoding: .utf8)
     }
 
