@@ -69,6 +69,9 @@ struct AnglesiteApp: App {
     /// Live mirror of the site registry for the File ▸ Open Recent submenu. Held as `@State`
     /// so SwiftUI re-evaluates `.commands` when its `sites` change. Started in AppDelegate.
     @State private var recent = RecentSitesModel.shared
+    /// Tracks the site id of the currently key site window. SwiftUI's `@FocusedValue` updates
+    /// automatically as windows gain and lose key status — no manual set/clear needed.
+    @FocusedValue(\.siteID) private var focusedSiteID
     #if !ANGLESITE_MAS
     /// Sparkle updater, held for the app's lifetime so its automatic-check timer keeps firing.
     /// MAS builds update through the App Store and have no Sparkle dependency (Phase 10.1).
@@ -101,8 +104,8 @@ struct AnglesiteApp: App {
             openWindow(value: site.id)
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Couldn't open that folder"
-            // `SiteActions.ImportError.localizedDescription` names the folder and the reason;
+            alert.messageText = "Couldn't open that site"
+            // `SiteActions.ImportError.localizedDescription` names the package and the reason;
             // other errors fall back to their OS-provided message rather than a raw enum dump.
             alert.informativeText = error.localizedDescription
             alert.alertStyle = .warning
@@ -116,6 +119,25 @@ struct AnglesiteApp: App {
         // own .task — see SitesLauncherView.onFirstAppear().
         Window("Sites", id: "sites") {
             SitesWindowRoot(openWindow: openWindow)
+                .onOpenURL { url in
+                    // Guard on the extension only (zero I/O on the main thread); `record` reads and
+                    // validates the marker and throws a legible error if it isn't a real package.
+                    guard url.pathExtension == AnglesitePackage.packageExtension else { return }
+                    Task { @MainActor in
+                        do {
+                            let site = try await SiteStore.shared.record(AnglesitePackage(url: url))
+                            #if ANGLESITE_MAS
+                            // Mint from the canonicalized recorded path; let a failure surface to the
+                            // catch (logged) rather than silently leaving the site grantless.
+                            let bm = try SecurityScopedBookmark.create(for: site.packageURL)
+                            try await SiteStore.shared.setBookmark(bm, for: site.id)
+                            #endif
+                            openWindow(value: site.id)
+                        } catch {
+                            await LogCenter.shared.append(source: "open-url", stream: .stderr, text: "open \(url.lastPathComponent) failed: \(error.localizedDescription)")
+                        }
+                    }
+                }
         }
         .windowResizability(.contentSize)
         .commands {
@@ -141,6 +163,18 @@ struct AnglesiteApp: App {
                         Button("No Recent Sites") {}.disabled(true)
                     }
                 }
+                Divider()
+                Button("Import Site…") {
+                    Task { @MainActor in
+                        do {
+                            if let site = try await SiteActions.importPackage() {
+                                openWindow(value: site.id)
+                            }
+                        } catch {
+                            NSAlert(error: error).runModal()
+                        }
+                    }
+                }
             }
             // "Check for Updates…" lives in the standard slot Mac users expect — directly
             // under "About Anglesite" in the application menu. `CommandGroup(after: .appInfo)`
@@ -151,6 +185,18 @@ struct AnglesiteApp: App {
                     .disabled(!updater.canCheckForUpdates)
             }
             #endif
+            // Export lives after the standard Save items. Enabled only when a site window is focused.
+            CommandGroup(after: .importExport) {
+                Button("Export Site Source…") {
+                    Task { @MainActor in
+                        if let id = focusedSiteID,
+                           let site = await SiteStore.shared.find(id: id) {
+                            SiteActions.exportSource(of: site)
+                        }
+                    }
+                }
+                .disabled(focusedSiteID == nil)
+            }
             // Debug pane lives off the View menu — `⌥⌘D` keeps it discoverable without crowding
             // the primary commands. Hidden in Release unless explicitly enabled (see init()).
             CommandGroup(after: .toolbar) {

@@ -12,7 +12,7 @@ struct SiteOperationsProgressSeamTests {
         let site = SiteStore.Site(
             id: "nope",
             name: "nope",
-            path: URL(fileURLWithPath: "/tmp/nope"),
+            packageURL: URL(fileURLWithPath: "/tmp/nope.anglesite"),
             isValid: false,
             missingSentinels: []
         )

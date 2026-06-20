@@ -2,6 +2,13 @@ import SwiftUI
 import AnglesiteCore
 import AnglesiteIntents
 
+/// Which content the main pane shows: the live preview, or the inline text editor
+/// for a specific file. Driven by navigator selection (`applyNavigatorSelection`).
+private enum MainPaneMode: Equatable {
+    case preview
+    case editor(FileRef)
+}
+
 /// Root view for a single per-site window. Owns the site's `PreviewModel`,
 /// `DeployModel`, and `ChatModel` as `@State` — lifecycle is bound to the window:
 /// when the window opens we resolve the `siteID` to a `SiteStore.Site` and start
@@ -60,6 +67,15 @@ struct SiteWindow: View {
     /// Non-nil ⟺ the Siri AI Readiness sheet is presented (`.sheet(item:)`); coupling presentation
     /// to the model rather than a separate Bool makes an empty, undismissable sheet impossible.
     @State private var siriReadinessModel: SiriReadinessModel?
+    @State private var navigator: SiteNavigatorModel?
+    @State private var mainPaneMode: MainPaneMode = .preview
+    /// Sidebar visibility persisted per scene (window), per the design spec. Column WIDTH is restored
+    /// automatically by `NavigationSplitView`'s own scene state, so only explicit visibility is wired.
+    @SceneStorage("siteNavigator.sidebarVisible") private var sidebarVisible = true
+    /// The open file's editor state. Owned here (not in `MainPaneEditorView`) so navigating away can
+    /// auto-save it and the Preview/Editor toggle keeps the buffer alive. Replaced when a different
+    /// file opens; cleared on window close / site replay.
+    @State private var editorModel: FileEditorModel?
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -88,10 +104,15 @@ struct SiteWindow: View {
         // the current site — otherwise it holds stale probes scoped to the original site.id.
         .onChange(of: site?.id) { _, _ in
             siriReadinessModel = nil
+            // Persist any unsaved edits before dropping the old site's editor on replay (#188 reuse).
+            persistEditorBufferBestEffort()
+            editorModel = nil
+            mainPaneMode = .preview
         }
         .onChange(of: preview.state) { _, newState in
             startup.ingest(state: newState)
         }
+        .focusedValue(\.siteID, site?.id ?? siteID)
         .onDisappear {
             preview.close()
             startup.stop()
@@ -103,6 +124,13 @@ struct SiteWindow: View {
                 annotationProvider = nil
             }
             chat = nil
+            navigator?.stop()
+            navigator = nil
+            // Window closing: persist unsaved edits unconditionally (consistent with
+            // auto-save-on-leave). No conflict dialog is possible during teardown, so we don't gate
+            // on a flush return value — just write the buffer best-effort, off the main actor.
+            persistEditorBufferBestEffort()
+            editorModel = nil
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()
             scopedURL = nil
@@ -112,10 +140,24 @@ struct SiteWindow: View {
 
     @ViewBuilder
     private func siteUI(for site: SiteStore.Site) -> some View {
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    mainPane(for: site)
+        NavigationSplitView(columnVisibility: Binding(
+            get: { sidebarVisible ? .all : .detailOnly },
+            set: { sidebarVisible = ($0 != .detailOnly) }
+        )) {
+            if let navigator {
+                SiteNavigatorView(model: navigator)
+                    .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
+                    .onChange(of: navigator.selection) { _, newID in
+                        applyNavigatorSelection(newID)
+                    }
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } detail: {
+            ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        mainPane(for: site)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     if chatPresented, let chat {
                         Divider()
@@ -160,7 +202,7 @@ struct SiteWindow: View {
             // Backup — lowest priority, first to collapse into the native overflow chevron.
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    backup.backup(siteID: site.id, siteDirectory: site.path)
+                    backup.backup(siteID: site.id, siteDirectory: site.sourceDirectory)
                 } label: {
                     Label("Backup", systemImage: "externaldrive.fill.badge.icloud")
                 }
@@ -174,7 +216,7 @@ struct SiteWindow: View {
             // Audit — low priority, collapses before Chat.
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    audit.audit(siteID: site.id, siteDirectory: site.path)
+                    audit.audit(siteID: site.id, siteDirectory: site.sourceDirectory)
                 } label: {
                     if audit.isRunning {
                         Label("Auditing…", systemImage: "magnifyingglass")
@@ -220,7 +262,7 @@ struct SiteWindow: View {
             ToolbarItem(placement: .primaryAction) {
                 HealthBadgeView(
                     model: health,
-                    onRecheck: { health.recheck(siteID: site.id, siteDirectory: site.path) },
+                    onRecheck: { health.recheck(siteID: site.id, siteDirectory: site.sourceDirectory) },
                     onAskClaude: {
                         #if !ANGLESITE_MAS
                         chatPresented = true
@@ -235,7 +277,7 @@ struct SiteWindow: View {
             // Declared LAST so it renders at the trailing edge (macOS primary-action position).
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    deploy.deploy(siteID: site.id, siteDirectory: site.path)
+                    deploy.deploy(siteID: site.id, siteDirectory: site.sourceDirectory)
                 } label: {
                     Label("Deploy", systemImage: "paperplane.fill")
                 }
@@ -280,7 +322,7 @@ struct SiteWindow: View {
             AuditSheetView(
                 model: audit,
                 siteName: site.name,
-                onRunAgain: { audit.audit(siteID: site.id, siteDirectory: site.path) }
+                onRunAgain: { audit.audit(siteID: site.id, siteDirectory: site.sourceDirectory) }
             )
         }
         .sheet(item: $siriReadinessModel) { model in
@@ -303,10 +345,80 @@ struct SiteWindow: View {
             }
         }
         .annotatedAsSite(site)
+        }
     }
 
     @ViewBuilder
     private func mainPane(for site: SiteStore.Site) -> some View {
+        VStack(spacing: 0) {
+            if editorModel != nil {
+                Picker("", selection: Binding(
+                    get: { paneSelection },
+                    set: { setPaneSelection($0) }
+                )) {
+                    Text("Preview").tag(0)
+                    Text("Editor").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 180)
+                .padding(6)
+                Divider()
+            }
+            mainPaneContent(for: site)
+        }
+    }
+
+    private var paneSelection: Int {
+        if case .editor = mainPaneMode { return 1 }
+        return 0
+    }
+
+    private func setPaneSelection(_ value: Int) {
+        if value == 0 {
+            // Switching to Preview auto-saves the open editor (abort on an unresolved conflict).
+            // The flush is async (off-main IO), so do it in a Task and only switch on success.
+            Task { if await leaveCurrentEditor() { mainPaneMode = .preview } }
+        } else if value == 1, let model = editorModel {
+            mainPaneMode = .editor(model.file)
+        }
+    }
+
+    /// Flush the open editor before leaving it: auto-saves a dirty buffer, but returns false (and the
+    /// model raises its conflict alert) when the file changed externally — so the caller aborts the
+    /// switch instead of clobbering the other tool's edit. Safe to call when not editing. Async
+    /// because the save/check IO runs off the main actor.
+    private func leaveCurrentEditor() async -> Bool {
+        guard case .editor = mainPaneMode, let model = editorModel else { return true }
+        return await model.flushBeforeLeaving()
+    }
+
+    /// Best-effort off-main save of the open editor's buffer when the editor is torn down (window
+    /// close or site replay), where no conflict dialog can be shown. Consistent with the
+    /// auto-save-on-leave model; last-writer-wins on the rare teardown-time external conflict.
+    private func persistEditorBufferBestEffort() {
+        guard let model = editorModel, model.isDirty else { return }
+        let url = model.file.url
+        let contents = model.text
+        Task.detached(priority: .userInitiated) { try? FileDocumentIO.save(contents, to: url) }
+    }
+
+    @ViewBuilder
+    private func mainPaneContent(for site: SiteStore.Site) -> some View {
+        switch mainPaneMode {
+        case .editor:
+            if let editorModel {
+                MainPaneEditorView(model: editorModel)
+            } else {
+                previewPane(for: site)
+            }
+        case .preview:
+            previewPane(for: site)
+        }
+    }
+
+    @ViewBuilder
+    private func previewPane(for site: SiteStore.Site) -> some View {
         switch preview.state {
         case .ready(_, let url):
             PreviewView(url: preview.displayURL ?? url, router: preview.editRouter, annotationProvider: annotationProvider)
@@ -324,7 +436,7 @@ struct SiteWindow: View {
                         .font(.callout).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).frame(maxWidth: 420)
                     Button("Retry") {
-                        preview.open(siteID: site.id, siteDirectory: site.path)
+                        preview.open(siteID: site.id, siteDirectory: site.sourceDirectory)
                     }
                 }
             }
@@ -380,6 +492,36 @@ struct SiteWindow: View {
         }
     }
 
+    /// Route a navigator selection: pages/posts switch to preview and navigate; files open the editor.
+    /// Async — leaving the current editor flushes it to disk off the main actor first, and aborts the
+    /// switch if an external conflict needs resolving.
+    @MainActor
+    private func applyNavigatorSelection(_ id: String?) {
+        guard let id, let target = navigator?.target(for: id) else { return }
+        switch target {
+        case .route(let route):
+            Task {
+                guard await leaveCurrentEditor() else { return }   // abort if a conflict needs resolving
+                mainPaneMode = .preview
+                if route.isEmpty || route == "/" {
+                    preview.clearRoute()
+                } else {
+                    preview.navigate(toRoute: route)
+                }
+            }
+        case .file(let file):
+            if editorModel?.file.id == file.id {
+                mainPaneMode = .editor(file)   // re-show the already-open file (buffer intact)
+                return
+            }
+            Task {
+                guard await leaveCurrentEditor() else { return }   // flush the previous file first
+                editorModel = FileEditorModel(file: file)
+                mainPaneMode = .editor(file)
+            }
+        }
+    }
+
     private func loadAndStart() async {
         // SwiftUI's NSPersistentUIManager will happily restore a WindowGroup with a
         // nil payload, or one whose value no longer matches a known site (sites.json
@@ -394,7 +536,6 @@ struct SiteWindow: View {
         let store = SiteStore.shared
         do {
             try await store.load()
-            _ = try await store.refresh()
         } catch {
             // Non-fatal: we'll fall back to whatever's already in the persisted list.
         }
@@ -405,6 +546,7 @@ struct SiteWindow: View {
         }
         site = resolved
         AppSettings.shared.lastOpenedSiteID = resolved.id
+        try? await store.touch(id: resolved.id)
 
         #if ANGLESITE_MAS
         await acquireGrant(for: resolved, in: store)
@@ -425,7 +567,18 @@ struct SiteWindow: View {
             PreviewAnnotationProviderRegistry.shared.register(provider, for: resolved.id)
         }
 
-        preview.open(siteID: resolved.id, siteDirectory: resolved.path)
+        preview.open(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
+        // Scan from the package ROOT (not Source/): SiteFileTree's adaptive layout detects the
+        // `.anglesite` package here and resolves Source/ for Components/Styles plus the sibling
+        // Config/ + Info.plist for the Metadata group. Handing it Source/ would hide Metadata.
+        // Stop any prior navigator (window replay into the same instance) right before replacing it,
+        // so its observe task doesn't leak and keep streaming for the stale site. Done here at the
+        // deterministic replacement point rather than in `onChange(of: site?.id)`, which could race
+        // this creation and stop the freshly-made navigator instead.
+        navigator?.stop()
+        let navModel = SiteNavigatorModel(graph: contentGraph)
+        navModel.start(siteID: resolved.id, siteRoot: resolved.packageURL)
+        navigator = navModel
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
         applyPendingNavigation(for: resolved.id)
@@ -460,7 +613,7 @@ struct SiteWindow: View {
         // agentic loop with no network (#193).
         chat = ChatModel(
             siteID: resolved.id,
-            siteDirectory: resolved.path,
+            siteDirectory: resolved.sourceDirectory,
             assistant: FoundationModelAssistant(
                 tier: .onDevice,
                 editBridge: makeEditBridge(),
@@ -497,9 +650,9 @@ struct SiteWindow: View {
                 contentGraph: contentGraph
             )
         case .claude:
-            assistant = ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.path)
+            assistant = ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
         }
-        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.path, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
+        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.sourceDirectory, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
         #endif
         // Auto alt-text (C.7 / #157): after a successful image drop, generate alt text on-device and
         // apply it to the `<img>`. Target-agnostic — the on-device vision model runs on both builds.
@@ -507,7 +660,7 @@ struct SiteWindow: View {
         // recurse. Best-effort and opt-out via Settings.
         let altTextGenerator = AltTextGenerator(
             siteID: resolved.id,
-            siteDirectory: resolved.path,
+            siteDirectory: resolved.sourceDirectory,
             isEnabled: { AppSettings.shared.autoGenerateAltText },
             produce: { imageURL, context in
                 try await FoundationModelAssistant(tier: .onDevice).generateStructured(
@@ -553,7 +706,7 @@ struct SiteWindow: View {
         guard let bookmark = await store.bookmarkData(for: site.id) else {
             await LogCenter.shared.append(
                 source: "grant:\(site.id)", stream: .stderr,
-                text: "No security-scoped bookmark for \(site.name); preview will fail until the folder is re-added via Open Folder…"
+                text: "No security-scoped bookmark for \(site.name); preview will fail until the package is re-added via Open Site…"
             )
             return
         }

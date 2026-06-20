@@ -111,15 +111,43 @@ public actor SiteContentGraph {
     private var images: [String: Image] = [:]
     private var changeHandler: ChangeHandler?
 
+    /// Additive multi-subscriber broadcast for UI observers (the Site Navigator), keyed by a
+    /// per-subscription `UUID`. Distinct from `changeHandler` (the indexer's single awaited hook):
+    /// these are fire-and-forget siteID feeds. Pruned via the stream's `onTermination`.
+    private var changeStreamContinuations: [UUID: AsyncStream<String>.Continuation] = [:]
+
     public init() {}
 
     public func setChangeHandler(_ handler: ChangeHandler?) {
         changeHandler = handler
     }
 
+    /// A multi-subscriber stream of affected siteIDs, one per real mutation. Actor-isolated so the
+    /// continuation registers synchronously before this returns: there is no subscribe-time snapshot
+    /// to mask a registration race, so a caller that subscribes then mutates must not miss the emit.
+    /// (A content change is an event — the navigator reads the graph back itself on first load.)
+    /// Callers `await` it.
+    public func changeStream() -> AsyncStream<String> {
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: String.self, bufferingPolicy: .bufferingNewest(8))
+        let id = UUID()
+        changeStreamContinuations[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            // onTermination runs off-actor at an arbitrary time; hop back to prune.
+            Task { await self?.removeContinuation(id) }
+        }
+        return stream
+    }
+
+    private func removeContinuation(_ id: UUID) {
+        changeStreamContinuations[id] = nil
+    }
+
     private func emitChange(_ siteID: String) async {
-        guard let handler = changeHandler else { return }
-        await handler(siteID)
+        if let handler = changeHandler { await handler(siteID) }
+        for continuation in changeStreamContinuations.values {
+            continuation.yield(siteID)
+        }
     }
 
     // MARK: - Bulk load
