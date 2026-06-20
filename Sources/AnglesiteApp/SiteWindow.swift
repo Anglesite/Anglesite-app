@@ -92,7 +92,7 @@ struct SiteWindow: View {
             }
         }
         .task(id: siteID) { await loadAndStart() }
-        .task(id: site?.id) { await observeRemoval() }
+        .task(id: site?.id) { await observeStoreChanges() }
         // Warm path: an already-open window reacts to a new `PreviewSiteIntent` request (the
         // cold path is `applyPendingNavigation` in `loadAndStart`). Mirrors how `SitesLauncherView`
         // pairs `.onChange` with an initial consume for `newSiteRequested`.
@@ -460,19 +460,24 @@ struct SiteWindow: View {
         IntentEditBridge(routerProvider: { id in await EditRouterRegistry.shared.router(for: id) })
     }
 
-    /// Auto-close this window when its site leaves the registry (#188). Subscribes to the store's
-    /// broadcast only after `site` is resolved; on the first snapshot that no longer contains this
+    /// React to registry changes for this window's site (#188, #266). Subscribes to the store's
+    /// broadcast only after `site` is resolved. On the first snapshot that no longer contains this
     /// site's id — an explicit `remove(id:)` from the launcher, or a `refresh()` that prunes a stale
-    /// entry — dismisses the window. `dismissWindow()` triggers `onDisappear`, which stops the
+    /// entry — dismisses the window: `dismissWindow()` triggers `onDisappear`, which stops the
     /// dev-server/MCP subprocess and releases the MAS security-scoped grant, so no teardown is
-    /// duplicated here. The `for await` loop is cancelled when the window tears down or `site`
-    /// changes, which terminates the stream and prunes the store-side continuation.
-    private func observeRemoval() async {
+    /// duplicated here. Otherwise, if the entry's `name` changed (a rename via `setDisplayName`),
+    /// refresh the local `@State site` so `.navigationTitle` and the drawer headings update live.
+    /// The `for await` loop is cancelled when the window tears down or `site` changes, which
+    /// terminates the stream and prunes the store-side continuation.
+    private func observeStoreChanges() async {
         guard let resolvedID = site?.id else { return }
         for await snapshot in SiteStore.shared.changeStream() {
-            if !snapshot.contains(where: { $0.id == resolvedID }) {
+            guard let entry = snapshot.first(where: { $0.id == resolvedID }) else {
                 dismissWindow()
                 return
+            }
+            if entry.name != site?.name {
+                site?.name = entry.name
             }
         }
     }
