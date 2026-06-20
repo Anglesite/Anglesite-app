@@ -540,10 +540,11 @@ struct SiteWindow: View {
         }
 
         preview.open(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
-        // Scan the Astro source tree (Source/), the same dir the preview opens — that's where the
-        // owner's editable files live under the #242 package model (resolved.path is gone).
+        // Scan from the package ROOT (not Source/): SiteFileTree's adaptive layout detects the
+        // `.anglesite` package here and resolves Source/ for Components/Styles plus the sibling
+        // Config/ + Info.plist for the Metadata group. Handing it Source/ would hide Metadata.
         let navModel = SiteNavigatorModel(graph: contentGraph)
-        navModel.start(siteID: resolved.id, siteRoot: resolved.sourceDirectory)
+        navModel.start(siteID: resolved.id, siteRoot: resolved.packageURL)
         navigator = navModel
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
