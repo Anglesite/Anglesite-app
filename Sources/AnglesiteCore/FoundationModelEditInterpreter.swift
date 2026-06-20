@@ -106,7 +106,7 @@ public struct FoundationModelEditInterpreter: EditInterpreting {
     // MARK: Private
 
     static func buildPrompt(instruction: String, element: InterpretedElementContext) -> String {
-        var lines = [
+        let lines = [
             "Interpret this edit instruction for a website element.",
             "Element: <\(element.tag)>" + (element.currentText.map { " with text \"\($0)\"" } ?? ""),
             "Page: \(element.pagePath)",

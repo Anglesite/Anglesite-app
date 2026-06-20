@@ -4,7 +4,7 @@ import Foundation
 
 @Suite("MCPApplyEditRouter edit-preview parsing")
 struct MCPApplyEditRouterPreviewTests {
-    @Test("parseStructured recognizes an edit-preview body")
+    @Test("parsePreview recognizes an edit-preview body")
     func parsesPreview() throws {
         let body = #"{"type":"anglesite:edit-preview","id":"1","file":"src/pages/about.astro","range":{"start":0,"end":40},"op":"edit-style","before":"<h1>Hi</h1>","after":"<h1 class=\"ang-abc123\">Hi</h1>\n<style>\n  .ang-abc123 { color: teal; }\n</style>"}"#
         let parsed = MCPApplyEditRouter.parsePreview(body)

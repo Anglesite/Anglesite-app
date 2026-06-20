@@ -28,9 +28,8 @@ public struct EditMessage: Sendable, Equatable {
         /// `"replace-attr"` — generic attribute set (e.g. `href`, `alt`).
         public static let replaceAttr = "replace-attr"
         /// `"apply-instruction"` — natural-language edit forwarded to the plugin for
-        /// interpretation. Used by Siri AI's `EditContentIntent` (B.5 / #149). Paired plugin
-        /// support is forward-looking; until it lands, `apply_edit` returns `.failed` for
-        /// this op and the intent's dialog explains the situation.
+        /// interpretation. Used by Foundation Models' chat `ApplyEditTool` (#251). Siri AI's
+        /// `EditContentIntent` (B.5 / #149) now emits concrete ops instead.
         public static let applyInstruction = "apply-instruction"
     }
 
