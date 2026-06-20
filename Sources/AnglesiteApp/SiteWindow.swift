@@ -614,6 +614,7 @@ struct SiteWindow: View {
         chat = ChatModel(
             siteID: resolved.id,
             siteDirectory: resolved.sourceDirectory,
+            configDirectory: resolved.configDirectory,
             assistant: FoundationModelAssistant(
                 tier: .onDevice,
                 editBridge: makeEditBridge(),
@@ -652,7 +653,7 @@ struct SiteWindow: View {
         case .claude:
             assistant = ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
         }
-        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.sourceDirectory, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
+        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.sourceDirectory, configDirectory: resolved.configDirectory, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
         #endif
         // Auto alt-text (C.7 / #157): after a successful image drop, generate alt text on-device and
         // apply it to the `<img>`. Target-agnostic — the on-device vision model runs on both builds.

@@ -1,13 +1,13 @@
 import Foundation
 
-/// Per-site chat history persisted to `<siteDirectory>/.anglesite/chat-history.jsonl` (per the
+/// Per-site chat history persisted to `<configDirectory>/chat-history.jsonl` (per the
 /// build-plan cross-cutting decision). Append-only JSONL — one record per line — so the file
 /// stays usable from the command line (`tail -f`, `grep`, `jq`) and from other tools that
 /// might want to read the history without going through Anglesite.
 ///
 /// Atomicity: appends use `FileHandle.write(_:)` after seeking to end. We don't rotate or
 /// truncate; the file is expected to grow slowly enough that disk pressure isn't a concern
-/// for v0.5. (Bigger sites can `truncate -s 0 .anglesite/chat-history.jsonl` manually.)
+/// for v0.5. (Bigger sites can `truncate -s 0 Config/chat-history.jsonl` manually.)
 public actor ChatHistoryStore {
     public enum Role: String, Sendable, Codable, Equatable {
         case user
@@ -41,10 +41,10 @@ public actor ChatHistoryStore {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
-    public init(siteDirectory: URL, fileManager: FileManager = .default) {
-        self.fileURL = siteDirectory
-            .appendingPathComponent(".anglesite", isDirectory: true)
-            .appendingPathComponent("chat-history.jsonl")
+    public init(configDirectory: URL, fileManager: FileManager = .default) {
+        // Config/ is already the app-owned per-site dir (no nested .anglesite/ — that was the
+        // pre-package layout; P3 import migrates old history into Config/).
+        self.fileURL = configDirectory.appendingPathComponent("chat-history.jsonl")
         self.fileManager = fileManager
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -103,7 +103,7 @@ public actor ChatHistoryStore {
         return entries
     }
 
-    /// Append one entry. Creates `<site>/.anglesite/` and the history file if missing.
+    /// Append one entry. Creates the Config/ parent directory and the history file if missing.
     public func append(_ entry: Entry) throws {
         let parent = fileURL.deletingLastPathComponent()
         if !fileManager.fileExists(atPath: parent.path) {
