@@ -56,4 +56,26 @@ public enum PackageTransfer {
         succeeded = true
         return pkg
     }
+
+    /// Copy `package`'s `Source/` working tree to `destinationDir`. Always omits `node_modules/`;
+    /// omits `.git` unless `includeGit`. `destinationDir` must not already exist.
+    public static func exportSource(
+        of package: AnglesitePackage,
+        to destinationDir: URL,
+        includeGit: Bool,
+        fileManager: FileManager = .default
+    ) throws {
+        guard !fileManager.fileExists(atPath: destinationDir.path) else {
+            throw TransferError.destinationExists(destinationDir)
+        }
+        // Copy wholesale, then prune the excluded top-level entries — simpler and safer than a
+        // filtered deep enumerate, and the excluded dirs are always top-level in an Astro project.
+        try fileManager.copyItem(at: package.sourceURL, to: destinationDir)
+        let nodeModules = destinationDir.appendingPathComponent("node_modules", isDirectory: true)
+        if fileManager.fileExists(atPath: nodeModules.path) { try fileManager.removeItem(at: nodeModules) }
+        if !includeGit {
+            let git = destinationDir.appendingPathComponent(".git", isDirectory: true)
+            if fileManager.fileExists(atPath: git.path) { try fileManager.removeItem(at: git) }
+        }
+    }
 }

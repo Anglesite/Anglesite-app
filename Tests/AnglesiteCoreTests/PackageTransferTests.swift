@@ -50,4 +50,42 @@ struct PackageTransferTests {
             _ = try PackageTransfer.importDirectory(file, toPackageAt: root.appendingPathComponent("X.anglesite"), displayName: "X", fileManager: fm)
         }
     }
+
+    private func makePackageWithSource(in root: URL) throws -> AnglesitePackage {
+        let fm = FileManager.default
+        let (pkg, _) = try AnglesitePackage.createSkeleton(at: root.appendingPathComponent("Acme.anglesite", isDirectory: true), displayName: "Acme")
+        try Data("// astro".utf8).write(to: pkg.sourceURL.appendingPathComponent("astro.config.ts"))
+        try fm.createDirectory(at: pkg.sourceURL.appendingPathComponent("node_modules/foo"), withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: pkg.sourceURL.appendingPathComponent("node_modules/foo/index.js"))
+        try fm.createDirectory(at: pkg.sourceURL.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        try Data("[core]".utf8).write(to: pkg.sourceURL.appendingPathComponent(".git/config"))
+        return pkg
+    }
+
+    @Test("export copies Source/ out, always excluding node_modules; .git excluded by default")
+    func exportExcludesByDefault() throws {
+        let fm = FileManager.default
+        let root = try tempDir(); defer { try? fm.removeItem(at: root) }
+        let pkg = try makePackageWithSource(in: root)
+        let dest = root.appendingPathComponent("exported", isDirectory: true)
+
+        try PackageTransfer.exportSource(of: pkg, to: dest, includeGit: false, fileManager: fm)
+
+        #expect(fm.fileExists(atPath: dest.appendingPathComponent("astro.config.ts").path))
+        #expect(!fm.fileExists(atPath: dest.appendingPathComponent("node_modules").path))
+        #expect(!fm.fileExists(atPath: dest.appendingPathComponent(".git").path))
+    }
+
+    @Test("export keeps .git when includeGit is true")
+    func exportKeepsGitWhenRequested() throws {
+        let fm = FileManager.default
+        let root = try tempDir(); defer { try? fm.removeItem(at: root) }
+        let pkg = try makePackageWithSource(in: root)
+        let dest = root.appendingPathComponent("exported-git", isDirectory: true)
+
+        try PackageTransfer.exportSource(of: pkg, to: dest, includeGit: true, fileManager: fm)
+
+        #expect(fm.fileExists(atPath: dest.appendingPathComponent(".git/config").path))
+        #expect(!fm.fileExists(atPath: dest.appendingPathComponent("node_modules").path))
+    }
 }
