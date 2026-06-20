@@ -34,7 +34,8 @@ public struct IntentEditBridge: Sendable {
         filePath: String,
         selector: JSONValue,
         op: String,
-        value: JSONValue?
+        value: JSONValue?,
+        dryRun: Bool = false
     ) async -> EditReply {
         let id = makeID()
         guard let router = await routerProvider(siteID) else {
@@ -44,7 +45,7 @@ public struct IntentEditBridge: Sendable {
                 message: "No edit router available for this site — open it in Anglesite, or check that the plugin is bundled."
             )
         }
-        let message = EditMessage(id: id, type: .applyEdit, path: filePath, selector: selector, op: op, value: value)
+        let message = EditMessage(id: id, type: .applyEdit, path: filePath, selector: selector, op: op, value: value, dryRun: dryRun)
         return await router.apply(message)
     }
 }
