@@ -49,7 +49,7 @@ public struct EditContentIntent: AppIntent {
         let textContent: String?
         if case .string(let t) = selectorDict["textContent"] { textContent = t } else { textContent = nil }
 
-        let siteDirectory = await SiteStore.shared.find(id: element.siteID)?.path
+        let siteDirectory = await SiteStore.shared.find(id: element.siteID)?.sourceDirectory
         let interpreted: InterpretedEdit
         do {
             interpreted = try await interp.interpret(
