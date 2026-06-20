@@ -625,9 +625,9 @@ struct SiteWindow: View {
             undoCommand: undoCommand
         )
         #else
-        // Developer ID build: Claude is the default backend, but Settings → Assistant lets the user
-        // opt into Apple's on-device Foundation Models (#160). The choice is read here at
-        // construction, so a settings change takes effect for the next-opened site window.
+        // Developer ID build: Apple's on-device Foundation Models is the default backend; Settings →
+        // Assistant lets the user opt back into the legacy Claude path (#160). The choice is read here
+        // at construction, so a settings change takes effect for the next-opened site window.
         //
         // NOTE: `FoundationModelAssistant` is defined inside `#if compiler(>=6.4)` (see
         // FoundationModelAssistant.swift). This call site is unguarded because CI builds on

@@ -103,11 +103,17 @@ public final class AppSettings: @unchecked Sendable {
     }
 
     /// DevID-only (Settings → Assistant): use Apple's on-device Foundation Models for chat instead
-    /// of Claude. Defaults to `false` so Claude stays the default backend. MAS ignores this — it has
-    /// no Claude CLI and always uses Foundation Models. Read at `ChatModel` construction, so a change
-    /// takes effect for the next-opened site window (#160).
+    /// of Claude. Defaults to `true` — Apple Foundation Models is the default backend; Claude is an
+    /// opt-in legacy path slated for removal as the app moves off Claude Code. Stored
+    /// inverted-from-absent so an untouched install defaults to Foundation Models. MAS ignores this —
+    /// it has no Claude CLI and always uses Foundation Models. Read at `ChatModel` construction, so a
+    /// change takes effect for the next-opened site window (#160).
     public var preferFoundationModels: Bool {
-        get { defaults.bool(forKey: Key.preferFoundationModels) }
+        get {
+            // Absent → Foundation Models by default; an explicit stored value wins.
+            guard defaults.object(forKey: Key.preferFoundationModels) != nil else { return true }
+            return defaults.bool(forKey: Key.preferFoundationModels)
+        }
         set { defaults.set(newValue, forKey: Key.preferFoundationModels) }
     }
 

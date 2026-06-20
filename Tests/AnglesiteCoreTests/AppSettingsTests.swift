@@ -66,10 +66,10 @@ final class AppSettingsTests {
 
     // MARK: Assistant model (C.10 — DevID model tier picker)
 
-    @Test("preferFoundationModels defaults to false (Claude is the default backend)")
-    func preferFoundationModelsDefaultsToFalse() {
+    @Test("preferFoundationModels defaults to true (Foundation Models is the default backend)")
+    func preferFoundationModelsDefaultsToTrue() {
         let settings = AppSettings(defaults: defaults)
-        #expect(!settings.preferFoundationModels)
+        #expect(settings.preferFoundationModels)
     }
 
     @Test("preferFoundationModels round trip") func preferFoundationModelsRoundTrip() {
