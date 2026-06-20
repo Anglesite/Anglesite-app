@@ -69,6 +69,10 @@ struct SiteWindow: View {
     @State private var siriReadinessModel: SiriReadinessModel?
     @State private var navigator: SiteNavigatorModel?
     @State private var mainPaneMode: MainPaneMode = .preview
+    /// The open file's editor state. Owned here (not in `MainPaneEditorView`) so navigating away can
+    /// auto-save it and the Preview/Editor toggle keeps the buffer alive. Replaced when a different
+    /// file opens; cleared on window close / site replay.
+    @State private var editorModel: FileEditorModel?
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -97,6 +101,8 @@ struct SiteWindow: View {
         // the current site — otherwise it holds stale probes scoped to the original site.id.
         .onChange(of: site?.id) { _, _ in
             siriReadinessModel = nil
+            editorModel = nil
+            mainPaneMode = .preview
         }
         .onChange(of: preview.state) { _, newState in
             startup.ingest(state: newState)
@@ -114,6 +120,8 @@ struct SiteWindow: View {
             chat = nil
             navigator?.stop()
             navigator = nil
+            _ = editorModel?.flushBeforeLeaving()
+            editorModel = nil
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()
             scopedURL = nil
@@ -331,10 +339,10 @@ struct SiteWindow: View {
     @ViewBuilder
     private func mainPane(for site: SiteStore.Site) -> some View {
         VStack(spacing: 0) {
-            if case .editor = mainPaneMode {
+            if editorModel != nil {
                 Picker("", selection: Binding(
                     get: { paneSelection },
-                    set: { setPaneSelection($0, for: site) }
+                    set: { setPaneSelection($0) }
                 )) {
                     Text("Preview").tag(0)
                     Text("Editor").tag(1)
@@ -354,16 +362,34 @@ struct SiteWindow: View {
         return 0
     }
 
-    private func setPaneSelection(_ value: Int, for site: SiteStore.Site) {
-        if value == 0 { mainPaneMode = .preview }
-        // value == 1 keeps the current .editor(file); no-op when already editing.
+    private func setPaneSelection(_ value: Int) {
+        if value == 0 {
+            // Switching to Preview auto-saves the open editor (abort on an unresolved conflict).
+            guard leaveCurrentEditor() else { return }
+            mainPaneMode = .preview
+        } else if value == 1, let model = editorModel {
+            mainPaneMode = .editor(model.file)
+        }
+    }
+
+    /// Flush the open editor before leaving it: auto-saves a dirty buffer, but returns false (and the
+    /// model raises its conflict alert) when the file changed externally — so the caller aborts the
+    /// switch instead of clobbering the other tool's edit. Safe to call when not editing.
+    @discardableResult
+    private func leaveCurrentEditor() -> Bool {
+        guard case .editor = mainPaneMode, let model = editorModel else { return true }
+        return model.flushBeforeLeaving()
     }
 
     @ViewBuilder
     private func mainPaneContent(for site: SiteStore.Site) -> some View {
         switch mainPaneMode {
-        case .editor(let file):
-            MainPaneEditorView(file: file)
+        case .editor:
+            if let editorModel {
+                MainPaneEditorView(model: editorModel)
+            } else {
+                previewPane(for: site)
+            }
         case .preview:
             previewPane(for: site)
         }
@@ -450,6 +476,7 @@ struct SiteWindow: View {
         guard let id, let target = navigator?.target(for: id) else { return }
         switch target {
         case .route(let route):
+            guard leaveCurrentEditor() else { return }   // abort if a conflict needs resolving
             mainPaneMode = .preview
             if route.isEmpty || route == "/" {
                 preview.clearRoute()
@@ -457,6 +484,12 @@ struct SiteWindow: View {
                 preview.navigate(toRoute: route)
             }
         case .file(let file):
+            if editorModel?.file.id == file.id {
+                mainPaneMode = .editor(file)   // re-show the already-open file (buffer intact)
+                return
+            }
+            guard leaveCurrentEditor() else { return }   // flush the previous file first
+            editorModel = FileEditorModel(file: file)
             mainPaneMode = .editor(file)
         }
     }
