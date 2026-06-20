@@ -18,6 +18,9 @@ final class FileEditorModel {
     /// Keep/Reload. Drives the conflict alert in `MainPaneEditorView`.
     var conflictDiskContents: String?
 
+    /// True only when there are unsaved edits AND the file loaded cleanly. The `loadError == nil`
+    /// term means an errored file is never "dirty", so callers (e.g. the Save button's
+    /// `disabled(!isDirty)`) don't need a separate `loadError` guard — this property absorbs it.
     var isDirty: Bool { text != savedText && loadError == nil }
 
     init(file: FileRef) {
