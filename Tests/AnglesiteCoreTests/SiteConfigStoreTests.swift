@@ -64,4 +64,31 @@ struct SiteConfigStoreTests {
         try await store.save(SiteSettings(displayName: nil))
         #expect(try await store.load() == SiteSettings())
     }
+
+    // MARK: - Synchronous `read` seam (#266)
+
+    @Test("read returns empty settings when the file is absent")
+    func readDefaultsWhenMissing() throws {
+        let dir = try tempConfigDir()
+        defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+        #expect(try SiteConfigStore.read(from: dir) == SiteSettings())
+    }
+
+    @Test("read decodes the same settings the actor's load returns")
+    func readMatchesLoad() async throws {
+        let dir = try tempConfigDir()
+        defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+        let store = SiteConfigStore(configDirectory: dir)
+        try await store.save(SiteSettings(displayName: "Acme HQ"))
+        #expect(try SiteConfigStore.read(from: dir) == (try await store.load()))
+        #expect(try SiteConfigStore.read(from: dir).displayName == "Acme HQ")
+    }
+
+    @Test("read falls back to defaults on a corrupt plist rather than throwing")
+    func readDefaultsWhenCorrupt() throws {
+        let dir = try tempConfigDir()
+        defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+        try Data("not a plist".utf8).write(to: dir.appendingPathComponent("settings.plist"))
+        #expect(try SiteConfigStore.read(from: dir) == SiteSettings())
+    }
 }

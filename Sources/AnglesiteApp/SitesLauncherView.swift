@@ -33,6 +33,10 @@ struct SitesLauncherView: View {
     /// stays stable through the dismiss animation — reading `siteToRemove?.name` directly would
     /// collapse to "" the instant the dialog clears the optional.
     @State private var siteToRemoveName = ""
+    /// The site awaiting a rename, or nil when no rename prompt is up. Drives the rename `.alert`.
+    @State private var siteToRename: SiteStore.Site?
+    /// Bound to the rename alert's text field; seeded with the current name when the prompt opens.
+    @State private var renameText = ""
     private struct NewSiteSession: Identifiable {
         let id = UUID()
         let model: NewSiteWizardModel
@@ -147,6 +151,9 @@ struct SitesLauncherView: View {
                   ? "Open \(site.name) in its own window"
                   : "Site is missing required files: \(site.missingSentinels.joined(separator: ", "))")
             .contextMenu {
+                Button("Rename…", systemImage: "pencil") {
+                    promptRename(site)
+                }
                 Button("Remove from Anglesite…", systemImage: "minus.circle", role: .destructive) {
                     promptRemove(site)
                 }
@@ -173,6 +180,19 @@ struct SitesLauncherView: View {
             // Removal only forgets the site here — the package on disk is untouched, matching
             // `SiteStore.remove(id:)`. Owners can still open it in Finder, VS Code, or the CLI.
             Text("This removes it from Anglesite's list only. The files in \(site.packageURL.path) are left on disk.")
+        }
+        .alert(
+            "Rename Site",
+            isPresented: Binding(
+                get: { siteToRename != nil },
+                set: { if !$0 { siteToRename = nil } }
+            )
+        ) {
+            TextField("Site name", text: $renameText)
+            Button("Rename") { if let site = siteToRename { commitRename(site) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Sets a display name just for Anglesite. Leave blank to use the site's built-in name.")
         }
     }
 
@@ -232,6 +252,28 @@ struct SitesLauncherView: View {
     private func promptRemove(_ site: SiteStore.Site) {
         siteToRemoveName = site.name
         siteToRemove = site
+    }
+
+    /// Open the rename alert for `site`, seeding the field with its current name.
+    private func promptRename(_ site: SiteStore.Site) {
+        renameText = site.name
+        siteToRename = site
+    }
+
+    /// Persist a display-name override for `site` via `SiteStore.setDisplayName` (blank clears it
+    /// back to the marker name) and refresh the local list. An open `SiteWindow` for this site
+    /// updates its title independently — it observes `SiteStore.changeStream()`.
+    private func commitRename(_ site: SiteStore.Site) {
+        Task {
+            do {
+                guard let updated = try await SiteStore.shared.setDisplayName(renameText, for: site.id) else { return }
+                if let index = sites.firstIndex(where: { $0.id == updated.id }) {
+                    sites[index].name = updated.name
+                }
+            } catch {
+                loadError = "Couldn't rename \(site.name): \(error)"
+            }
+        }
     }
 
     /// Forget `site` from the registry without touching its files. On MAS this also drops the

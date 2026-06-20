@@ -39,6 +39,24 @@ public actor SiteConfigStore {
     /// a corrupt one, must never block opening a site — the next `save` rewrites it cleanly. I/O
     /// errors reading an existing file still throw.
     public func load() throws -> SiteSettings {
+        try Self.read(from: fileURL.deletingLastPathComponent(), fileManager: fileManager)
+    }
+
+    /// Synchronous, actor-independent read of a package's `settings.plist`. Same contract as
+    /// `load()` — absent or undecodable file → default `SiteSettings`; an I/O error reading an
+    /// existing file throws. Exists so synchronous call sites (e.g. `SiteStore.Site.make`, which
+    /// resolves the `displayName` override at construction, #266) can read settings without
+    /// hopping onto the actor.
+    ///
+    /// - Important: Performs synchronous, blocking file I/O on the calling executor. Today's only
+    ///   callers reach it via `Site.make` from `SiteStore` actor methods (off the main thread).
+    ///   Do not call it — or `Site.make` — from a `@MainActor` context, or it will block the main
+    ///   thread on disk.
+    public nonisolated static func read(
+        from configDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws -> SiteSettings {
+        let fileURL = configDirectory.appendingPathComponent("settings.plist")
         guard fileManager.fileExists(atPath: fileURL.path) else { return SiteSettings() }
         let data = try Data(contentsOf: fileURL)
         return (try? PropertyListDecoder().decode(SiteSettings.self, from: data)) ?? SiteSettings()
