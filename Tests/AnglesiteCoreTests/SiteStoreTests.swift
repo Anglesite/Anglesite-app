@@ -120,6 +120,14 @@ final class SiteStoreTests {
         #expect(site.name == "alpha")
     }
 
+    @Test("Site.make falls back to the marker name when settings.plist is corrupt")
+    func makeFallsBackWhenSettingsCorrupt() throws {
+        let pkg = try makeValidPackage(named: "alpha")
+        try Data("not a plist".utf8).write(to: pkg.configURL.appendingPathComponent("settings.plist"))
+        let site = try SiteStore.Site.make(package: pkg)
+        #expect(site.name == "alpha")
+    }
+
     @Test("setDisplayName persists the override and updates the in-memory name")
     func setDisplayNameUpdatesName() async throws {
         let pkg = try makeValidPackage(named: "alpha")

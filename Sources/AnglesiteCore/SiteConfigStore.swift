@@ -47,6 +47,11 @@ public actor SiteConfigStore {
     /// existing file throws. Exists so synchronous call sites (e.g. `SiteStore.Site.make`, which
     /// resolves the `displayName` override at construction, #266) can read settings without
     /// hopping onto the actor.
+    ///
+    /// - Important: Performs synchronous, blocking file I/O on the calling executor. Today's only
+    ///   callers reach it via `Site.make` from `SiteStore` actor methods (off the main thread).
+    ///   Do not call it — or `Site.make` — from a `@MainActor` context, or it will block the main
+    ///   thread on disk.
     public nonisolated static func read(
         from configDirectory: URL,
         fileManager: FileManager = .default
