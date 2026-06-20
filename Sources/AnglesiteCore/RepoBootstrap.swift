@@ -54,4 +54,48 @@ public actor RepoBootstrap {
         let commit = try await run(env, ["git", "commit", "-m", "Initial commit"], source)
         guard commit.exitCode == 0 else { throw RepoBootstrapError(reason: "git commit failed.\n\(commit.stderr)") }
     }
+
+    /// Detect → (auth) → ensure committable → create + push. Streams progress; settles to
+    /// `.published` / `.needsAuth` / `.failed`. Idempotent: an already-published site yields
+    /// `.published(existing)` with no side effects.
+    public nonisolated func publish(source: URL, repoName: String, isPrivate: Bool) -> AsyncStream<Event> {
+        AsyncStream { continuation in
+            let task = Task {
+                let emit: @Sendable (Event) -> Void = { continuation.yield($0) }
+
+                emit(.progress(step: .checkingRemote, message: "Checking for an existing remote…"))
+                if let existing = await self.remote(of: source) {
+                    emit(.published(existing)); continuation.finish(); return
+                }
+
+                if await self.provider.isAuthenticated() == false {
+                    emit(.needsAuth); continuation.finish(); return
+                }
+
+                do {
+                    try await self.ensureCommittable(source: source, emit: emit)
+                    emit(.progress(step: .creatingRepo, message: "Creating private repository on GitHub…"))
+                    let created = try await self.provider.createAndPush(name: repoName, isPrivate: isPrivate, source: source)
+                    emit(.progress(step: .pushing, message: "Pushed to \(created.url.absoluteString)"))
+                    emit(.published(created))
+                } catch let err as RepoBootstrapError {
+                    emit(.failed(reason: err.reason))
+                } catch {
+                    emit(.failed(reason: "\(error)"))
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// Production wiring: `git`/`gh` run through `ProcessSupervisor.shared.run` (mirrors how
+    /// `SiteScaffolder` shells out for one-shot commands; output is captured into the surfaced
+    /// reason rather than streamed, since these are short-lived).
+    public static func live(supervisor: ProcessSupervisor = .shared) -> RepoBootstrap {
+        let runner: RepoCommandRunner = { executable, args, cwd in
+            try await supervisor.run(executable: executable, arguments: args, currentDirectoryURL: cwd)
+        }
+        return RepoBootstrap(provider: GHRepoProvider(run: runner), run: runner)
+    }
 }

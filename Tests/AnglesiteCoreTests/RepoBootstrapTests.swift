@@ -26,6 +26,67 @@ import Foundation
     }
     private func repo() -> RemoteRepo { .init(url: URL(string: "https://github.com/acme/site")!, owner: "acme", name: "site") }
 
+    /// Drain a publish stream into an array.
+    private func collect(_ stream: AsyncStream<RepoBootstrap.Event>) async -> [RepoBootstrap.Event] {
+        var out: [RepoBootstrap.Event] = []
+        for await e in stream { out.append(e) }
+        return out
+    }
+
+    @Test func publishShortCircuitsWhenAlreadyPublished() async {
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: StubProvider(authed: true, result: .success(repo())),
+            run: runner(log, [(["git", "remote", "get-url"], ok("https://github.com/acme/site.git"))]))
+        let events = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "site", isPrivate: true))
+        #expect(events.last == .published(repo()))
+        // No git init / commit attempted.
+        #expect(await !log.calls.contains(["git", "init"]))
+    }
+
+    @Test func publishEmitsNeedsAuthWhenNotAuthenticated() async {
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: StubProvider(authed: false, result: .success(repo())),
+            run: runner(log, [(["git", "remote", "get-url"], fail())]))   // no origin
+        let events = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "site", isPrivate: true))
+        #expect(events.contains(.needsAuth))
+        #expect(events.last == .needsAuth)
+    }
+
+    @Test func publishInitsCommitsThenPublishes() async {
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: StubProvider(authed: true, result: .success(repo())),
+            run: runner(log, [
+                (["git", "remote", "get-url"], fail()),                 // no origin → proceed
+                (["git", "rev-parse", "--is-inside-work-tree"], fail()), // not a repo → init
+                (["git", "init"], ok()),
+                (["git", "rev-parse", "HEAD"], fail()),                  // no commits → commit
+                (["git", "status"], ok(" M file")),
+                (["git", "add"], ok()),
+                (["git", "commit"], ok()),
+            ]))
+        let events = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "site", isPrivate: true))
+        #expect(events.last == .published(repo()))
+        #expect(await log.calls.contains(["git", "init"]))
+        #expect(await log.calls.contains(["git", "commit", "-m", "Initial commit"]))
+    }
+
+    @Test func publishSurfacesProviderError() async {
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: StubProvider(authed: true, result: .failure(RepoBootstrapError(reason: "Name already exists"))),
+            run: runner(log, [
+                (["git", "remote", "get-url"], fail()),
+                (["git", "rev-parse", "--is-inside-work-tree"], ok()),   // already a repo
+                (["git", "rev-parse", "HEAD"], ok("abc123")),            // has commits
+                (["git", "status"], ok("")),                             // clean
+            ]))
+        let events = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "site", isPrivate: true))
+        #expect(events.last == .failed(reason: "Name already exists"))
+    }
+
     @Test func remoteReturnsParsedRepoWhenOriginSet() async {
         let log = CallLog()
         let b = RepoBootstrap(
