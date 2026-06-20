@@ -2,6 +2,13 @@ import SwiftUI
 import AnglesiteCore
 import AnglesiteIntents
 
+/// Which content the main pane shows: the live preview, or the inline text editor
+/// for a specific file. Driven by navigator selection (`applyNavigatorSelection`).
+private enum MainPaneMode: Equatable {
+    case preview
+    case editor(FileRef)
+}
+
 /// Root view for a single per-site window. Owns the site's `PreviewModel`,
 /// `DeployModel`, and `ChatModel` as `@State` — lifecycle is bound to the window:
 /// when the window opens we resolve the `siteID` to a `SiteStore.Site` and start
@@ -60,6 +67,8 @@ struct SiteWindow: View {
     /// Non-nil ⟺ the Siri AI Readiness sheet is presented (`.sheet(item:)`); coupling presentation
     /// to the model rather than a separate Bool makes an empty, undismissable sheet impossible.
     @State private var siriReadinessModel: SiriReadinessModel?
+    @State private var navigator: SiteNavigatorModel?
+    @State private var mainPaneMode: MainPaneMode = .preview
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -103,6 +112,8 @@ struct SiteWindow: View {
                 annotationProvider = nil
             }
             chat = nil
+            navigator?.stop()
+            navigator = nil
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()
             scopedURL = nil
@@ -112,10 +123,21 @@ struct SiteWindow: View {
 
     @ViewBuilder
     private func siteUI(for site: SiteStore.Site) -> some View {
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    mainPane(for: site)
+        NavigationSplitView {
+            if let navigator {
+                SiteNavigatorView(model: navigator)
+                    .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
+                    .onChange(of: navigator.selection) { _, newID in
+                        applyNavigatorSelection(newID)
+                    }
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } detail: {
+            ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        mainPane(for: site)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     if chatPresented, let chat {
                         Divider()
@@ -303,10 +325,52 @@ struct SiteWindow: View {
             }
         }
         .annotatedAsSite(site)
+        }
     }
 
     @ViewBuilder
     private func mainPane(for site: SiteStore.Site) -> some View {
+        VStack(spacing: 0) {
+            if case .editor = mainPaneMode {
+                Picker("", selection: Binding(
+                    get: { paneSelection },
+                    set: { setPaneSelection($0, for: site) }
+                )) {
+                    Text("Preview").tag(0)
+                    Text("Editor").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 180)
+                .padding(6)
+                Divider()
+            }
+            mainPaneContent(for: site)
+        }
+    }
+
+    private var paneSelection: Int {
+        if case .editor = mainPaneMode { return 1 }
+        return 0
+    }
+
+    private func setPaneSelection(_ value: Int, for site: SiteStore.Site) {
+        if value == 0 { mainPaneMode = .preview }
+        // value == 1 keeps the current .editor(file); no-op when already editing.
+    }
+
+    @ViewBuilder
+    private func mainPaneContent(for site: SiteStore.Site) -> some View {
+        switch mainPaneMode {
+        case .editor(let file):
+            MainPaneEditorView(file: file)
+        case .preview:
+            previewPane(for: site)
+        }
+    }
+
+    @ViewBuilder
+    private func previewPane(for site: SiteStore.Site) -> some View {
         switch preview.state {
         case .ready(_, let url):
             PreviewView(url: preview.displayURL ?? url, router: preview.editRouter, annotationProvider: annotationProvider)
@@ -380,6 +444,23 @@ struct SiteWindow: View {
         }
     }
 
+    /// Route a navigator selection: pages/posts switch to preview and navigate; files open the editor.
+    @MainActor
+    private func applyNavigatorSelection(_ id: String?) {
+        guard let id, let target = navigator?.target(for: id) else { return }
+        switch target {
+        case .route(let route):
+            mainPaneMode = .preview
+            if route.isEmpty || route == "/" {
+                preview.clearRoute()
+            } else {
+                preview.navigate(toRoute: route)
+            }
+        case .file(let file):
+            mainPaneMode = .editor(file)
+        }
+    }
+
     private func loadAndStart() async {
         // SwiftUI's NSPersistentUIManager will happily restore a WindowGroup with a
         // nil payload, or one whose value no longer matches a known site (sites.json
@@ -426,6 +507,11 @@ struct SiteWindow: View {
         }
 
         preview.open(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
+        // Scan the Astro source tree (Source/), the same dir the preview opens — that's where the
+        // owner's editable files live under the #242 package model (resolved.path is gone).
+        let navModel = SiteNavigatorModel(graph: contentGraph)
+        navModel.start(siteID: resolved.id, siteRoot: resolved.sourceDirectory)
+        navigator = navModel
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
         applyPendingNavigation(for: resolved.id)
