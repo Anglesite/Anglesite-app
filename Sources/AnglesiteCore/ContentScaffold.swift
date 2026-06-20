@@ -5,12 +5,13 @@ import Foundation
 /// sidecar's `create-content.mjs` so switching the create backend produces no git churn.
 public enum ContentScaffold {
 
-    /// lowercase → NFKD → strip combining marks → drop `"` → non-alphanumerics (incl. `'`) to `-` → trim `-`.
+    /// lowercase → NFKD → strip combining marks → drop `'` and `"` → non-alphanumerics to `-` → trim `-`.
     public static func slugify(_ value: String) -> String {
         let lowered = value.lowercased()
         let decomposed = lowered.decomposedStringWithCompatibilityMapping // NFKD
         let stripped = String(decomposed.unicodeScalars.filter { !(0x0300...0x036F ~= $0.value) })
         let noQuotes = stripped
+            .replacingOccurrences(of: "'", with: "")
             .replacingOccurrences(of: "\"", with: "")
         let hyphenated = noQuotes.replacingOccurrences(
             of: "[^a-z0-9]+", with: "-", options: .regularExpression)

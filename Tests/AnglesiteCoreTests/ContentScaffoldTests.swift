@@ -9,7 +9,7 @@ struct ContentScaffoldTests {
     func slugifyBasics() {
         #expect(ContentScaffold.slugify("About Us") == "about-us")
         #expect(ContentScaffold.slugify("Héllo Wörld") == "hello-world")
-        #expect(ContentScaffold.slugify("  --Tom's Page--  ") == "tom-s-page")
+        #expect(ContentScaffold.slugify("  --Tom's Page--  ") == "toms-page")
         #expect(ContentScaffold.slugify("A/B") == "a-b")
         #expect(ContentScaffold.slugify("\"Quoted\"") == "quoted")
     }
