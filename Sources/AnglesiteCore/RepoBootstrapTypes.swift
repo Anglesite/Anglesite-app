@@ -48,3 +48,49 @@ public struct RepoBootstrapError: Error, Equatable, Sendable {
     public let reason: String
     public init(reason: String) { self.reason = reason }
 }
+
+/// Run a subprocess and capture its output. Production: `ProcessSupervisor.shared.run`.
+public typealias RepoCommandRunner = @Sendable (_ executable: URL, _ args: [String], _ cwd: URL?) async throws -> ProcessSupervisor.RunResult
+
+/// Creates the remote repository and pushes to it. The part that differs between `gh` (DevID)
+/// and a future REST/token impl (#71). Git-side preflight lives in `RepoBootstrap`, not here.
+public protocol RepoProvider: Sendable {
+    /// True if the provider has usable credentials (no interactive prompt needed).
+    func isAuthenticated() async -> Bool
+    /// Create the remote repo, wire `origin` in `source`, and push. Throws `RepoBootstrapError`.
+    func createAndPush(name: String, isPrivate: Bool, source: URL) async throws -> RemoteRepo
+}
+
+/// GitHub provider backed by the `gh` CLI. Reuses `gh`'s credential store (per CLAUDE.md the app
+/// does not own GitHub creds). DevID only — the UI that drives it is `#if !ANGLESITE_MAS`.
+public struct GHRepoProvider: RepoProvider {
+    private let run: RepoCommandRunner
+    private let env = URL(fileURLWithPath: "/usr/bin/env")
+
+    public init(run: @escaping RepoCommandRunner) { self.run = run }
+
+    public func isAuthenticated() async -> Bool {
+        guard let r = try? await run(env, ["gh", "auth", "status"], nil) else { return false }
+        return r.exitCode == 0
+    }
+
+    public func createAndPush(name: String, isPrivate: Bool, source: URL) async throws -> RemoteRepo {
+        let visibility = isPrivate ? "--private" : "--public"
+        let create = try await run(env,
+            ["gh", "repo", "create", name, visibility, "--source", source.path, "--remote", "origin", "--push"],
+            source)
+        guard create.exitCode == 0 else {
+            throw RepoBootstrapError(reason: Self.firstLine(create.stderr) ?? "Couldn't create the GitHub repository.")
+        }
+        // origin is now set; read it back as the source of truth rather than parsing gh's output.
+        let originRead = try await run(env, ["git", "remote", "get-url", "origin"], source)
+        guard originRead.exitCode == 0, let repo = RemoteRepo.parse(remoteURL: originRead.stdout) else {
+            throw RepoBootstrapError(reason: "Repository created, but couldn't read its origin URL.")
+        }
+        return repo
+    }
+
+    private static func firstLine(_ s: String) -> String? {
+        s.split(whereSeparator: \.isNewline).map(String.init).first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+    }
+}
