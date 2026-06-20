@@ -24,6 +24,19 @@ import Foundation
             try result.get()
         }
     }
+
+    /// Provider that records the `name` passed to `createAndPush` so tests can assert it was slugified.
+    actor CapturingProvider: RepoProvider {
+        var capturedName: String?
+        let result: Result<RemoteRepo, RepoBootstrapError>
+        init(result: Result<RemoteRepo, RepoBootstrapError>) { self.result = result }
+        func isAuthenticated() async -> Bool { true }
+        func createAndPush(name: String, isPrivate: Bool, source: URL) async throws -> RemoteRepo {
+            capturedName = name
+            return try result.get()
+        }
+    }
+
     private func repo() -> RemoteRepo { .init(url: URL(string: "https://github.com/acme/site")!, owner: "acme", name: "site") }
 
     /// Drain a publish stream into an array.
@@ -101,5 +114,21 @@ import Foundation
             provider: StubProvider(authed: true, result: .success(repo())),
             run: runner(log, [(["git", "remote", "get-url"], fail())]))
         #expect(await b.remote(of: URL(fileURLWithPath: "/tmp/s")) == nil)
+    }
+
+    @Test func publishSlugifiesDisplayName() async {
+        // Display names with spaces/punctuation must be slugified before reaching the provider.
+        let capturing = CapturingProvider(result: .success(repo()))
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: capturing,
+            run: runner(log, [
+                (["git", "remote", "get-url"], fail()),
+                (["git", "rev-parse", "--is-inside-work-tree"], ok()),  // already a repo
+                (["git", "rev-parse", "HEAD"], ok("abc123")),           // has commits
+                (["git", "status"], ok("")),                            // clean
+            ]))
+        _ = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "My Cool Site!", isPrivate: true))
+        #expect(await capturing.capturedName == "my-cool-site")
     }
 }

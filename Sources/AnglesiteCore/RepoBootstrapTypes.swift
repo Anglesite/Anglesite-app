@@ -13,20 +13,22 @@ public struct RemoteRepo: Sendable, Equatable {
     }
 
     /// Parse a git remote URL (https or scp-like ssh) into owner/name + a browser URL.
-    /// Returns nil for empty/unparseable input.
+    /// Returns nil for empty/unparseable input or if the host is not github.com.
     public static func parse(remoteURL raw: String) -> RemoteRepo? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        var owner = "", name = ""
+        var owner = "", name = "", host = ""
         if trimmed.hasPrefix("git@") || (!trimmed.contains("://") && trimmed.contains(":")) {
-            // scp-like: git@github.com:owner/name.git
-            guard let colon = trimmed.firstIndex(of: ":") else { return nil }
+            // scp-like: git@github.com:owner/name.git — host is between "@" and ":"
+            guard let at = trimmed.firstIndex(of: "@"), let colon = trimmed.firstIndex(of: ":") else { return nil }
+            host = String(trimmed[trimmed.index(after: at)..<colon])
             let path = trimmed[trimmed.index(after: colon)...].split(separator: "/")
             guard path.count >= 2 else { return nil }
             owner = String(path[path.count - 2])
             name = String(path[path.count - 1])
-        } else if let u = URL(string: trimmed), u.host != nil {
+        } else if let u = URL(string: trimmed), let urlHost = u.host {
+            host = urlHost
             let comps = u.path.split(separator: "/")
             guard comps.count >= 2 else { return nil }
             owner = String(comps[comps.count - 2])
@@ -34,6 +36,10 @@ public struct RemoteRepo: Sendable, Equatable {
         } else {
             return nil
         }
+
+        // Only accept github.com remotes — non-GitHub origins (GitLab, Bitbucket, etc.) must not
+        // produce a broken github.com browse URL or mislead consumers about published state.
+        guard host.lowercased() == "github.com" || host.lowercased() == "www.github.com" else { return nil }
 
         if name.hasSuffix(".git") { name = String(name.dropLast(4)) }
         guard !owner.isEmpty, !name.isEmpty, let browse = URL(string: "https://github.com/\(owner)/\(name)") else {

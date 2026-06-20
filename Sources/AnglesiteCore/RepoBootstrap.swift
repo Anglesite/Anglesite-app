@@ -75,7 +75,10 @@ public actor RepoBootstrap {
                 do {
                     try await self.ensureCommittable(source: source, emit: emit)
                     emit(.progress(step: .creatingRepo, message: "Creating private repository on GitHub…"))
-                    let created = try await self.provider.createAndPush(name: repoName, isPrivate: isPrivate, source: source)
+                    // Sanitize the display name: callers pass human names ("My Cool Site!"); GitHub
+                    // repo names must be URL-safe slugs, so derive one via SiteSlug.
+                    let slug = SiteSlug.derive(from: repoName)
+                    let created = try await self.provider.createAndPush(name: slug, isPrivate: isPrivate, source: source)
                     emit(.progress(step: .pushing, message: "Pushed to \(created.url.absoluteString)"))
                     emit(.published(created))
                 } catch let err as RepoBootstrapError {

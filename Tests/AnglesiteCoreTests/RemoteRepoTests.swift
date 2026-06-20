@@ -24,4 +24,12 @@ import Foundation
         #expect(RemoteRepo.parse(remoteURL: "") == nil)
         #expect(RemoteRepo.parse(remoteURL: "not-a-url") == nil)
     }
+
+    @Test func rejectsNonGitHubHTTPSHost() {
+        #expect(RemoteRepo.parse(remoteURL: "https://gitlab.com/foo/bar.git") == nil)
+    }
+
+    @Test func rejectsNonGitHubSSHHost() {
+        #expect(RemoteRepo.parse(remoteURL: "git@gitlab.com:foo/bar.git") == nil)
+    }
 }
