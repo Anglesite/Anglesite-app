@@ -144,6 +144,24 @@ extension ContentDialogs {
         return "Update \(displayName) on \(pagePath)? Change: \(change)."
     }
 
+    /// Before/after confirmation summary (#251). Spoken-friendly per kind; long fragments are
+    /// truncated so Siri doesn't read paragraphs. Sourced from the plugin dry-run preview.
+    public static func editConfirmation(edit: InterpretedEdit, pagePath: String, before: String?, after: String?) -> String {
+        func clip(_ s: String, _ n: Int = 60) -> String { s.count <= n ? s : String(s.prefix(n)) + "…" }
+        switch edit.kind {
+        case .text:
+            if let b = before, let a = after {
+                return "Change the text from \"\(clip(b))\" to \"\(clip(a))\" on \(pagePath)?"
+            }
+            return "Change the text to \"\(clip(edit.newText ?? ""))\" on \(pagePath)?"
+        case .attribute:
+            let name = edit.attributeName ?? "attribute"
+            return "Change \(name) to \"\(clip(edit.attributeValue ?? ""))\" on \(pagePath)?"
+        case .style:
+            return "Set \(edit.styleProperty ?? "style") to \(clip(edit.styleValue ?? "")) on \(pagePath)?"
+        }
+    }
+
     /// Dispatch on the reply status. Single entry point the intent's `perform()` uses.
     public static func editReply(_ reply: EditReply, displayName: String) -> String {
         switch reply.status {
