@@ -43,6 +43,15 @@ struct SiteConfigStoreTests {
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("settings.plist").path))
     }
 
+    @Test("load falls back to defaults when settings.plist is corrupt/incompatible")
+    func loadFallsBackOnUndecodable() async throws {
+        let dir = try tempConfigDir()
+        defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+        try Data("not a plist".utf8).write(to: dir.appendingPathComponent("settings.plist"))
+        let store = SiteConfigStore(configDirectory: dir)
+        #expect(try await store.load() == SiteSettings())
+    }
+
     @Test("a second save overwrites the first (atomic replace, not merge)")
     func saveOverwritesPrevious() async throws {
         let dir = try tempConfigDir()
