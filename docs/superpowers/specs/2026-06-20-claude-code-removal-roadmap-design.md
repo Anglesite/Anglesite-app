@@ -84,22 +84,27 @@ Every MCP tool and skill sorts into one of six buckets. Hybrids (deterministic s
 generative copy) appear in two buckets with the split called out.
 
 ### Bucket 1 — Hot-path → native Swift
-The highest-frequency deterministic operations. Ported off the Node sidecar into Swift to
-cut subprocess hops on the common edit loop.
+High-frequency deterministic operations that are cheap to port — pure filesystem, JSON,
+and git work with no HTML/AST parsing. Ported off the Node sidecar into Swift to cut
+subprocess hops.
 
-- `apply_edit`, `undo_edit` (selector resolve + patch + git per-edit commit)
 - `create_page`, `create_post` (template expansion + git)
 - `list_content` (filesystem scan → structured JSON)
 - `add_annotation` / `list_annotations` / `resolve_annotation` (JSON store)
 
-**Risk:** `apply_edit`'s selector resolver/patcher (`selector.mjs`, `patcher.mjs`) parses
-HTML/Astro. A faithful Swift port needs an HTML/AST parser (e.g. SwiftSoup) and an
-Astro-component-aware strategy. This is the single largest port; see §8.
+**Decision:** `apply_edit` / `undo_edit` are deliberately **not** here — they stay in the
+Node sidecar (Bucket 2). Their selector resolver/patcher (`selector.mjs`, `patcher.mjs`)
+parses HTML/Astro, which a Swift port would have to reimplement against an HTML/AST parser
+with Astro-component awareness. Not worth the risk for no AI benefit; the sidecar already
+does it correctly and is called directly from Swift.
 
 ### Bucket 2 — JS-ecosystem → bundled Node sidecar
-Keep in Node because they depend on the JS ecosystem; just stop routing them through
-Claude. The app calls them directly (as it already calls the MCP server).
+Keep in Node because they depend on the JS ecosystem (or on parsing HTML/Astro); just stop
+routing them through Claude. The app calls them directly (as it already calls the MCP
+server).
 
+- `apply_edit` / `undo_edit` — selector resolve + patch + git per-edit commit. Stays in
+  the sidecar: the patcher parses HTML/Astro and a Swift reimplementation buys nothing.
 - Astro dev server + production build
 - Sharp — image optimization (`optimize-images`)
 - Satori — OG image generation (`og-images`)
@@ -168,8 +173,9 @@ then `ClaudeAgent` is deleted. Within each slice, **tool before brain.**
 
 Proposed slice order (each independently shippable):
 
-1. **Edit text/attribute** — Bucket 1 `apply_edit` Swift port + FM/Siri/overlay
-   front-doors. Highest frequency, exercises the hardest port first.
+1. **Edit text/attribute** — `apply_edit` stays in the sidecar (Bucket 2); this slice
+   wires the FM/Siri/overlay front-doors over it. Mostly proven already (overlay + Siri NL
+   edit ship today); the work is routing chat through `FoundationModelAssistant`.
 2. **Create page/post** — Bucket 1 scaffolding + Bucket 4 short-copy. Self-contained.
 3. **Add a feature (integrations)** — Bucket 3 wizard framework, proven on `contact` /
    `newsletter` / `booking`, then templated across the rest of the integration set.
@@ -190,10 +196,6 @@ This is *stronger*: a non-LLM gate can't be prompt-injected or talked out of run
 
 ## 8. Risks & open questions
 
-- **`apply_edit` Swift port (Bucket 1) is the critical path.** Astro-component-aware
-  selector resolution + patching is non-trivial in Swift. *Open question:* port fully to
-  Swift, or keep `apply_edit` alone in the Node sidecar (Bucket 2) and port only the
-  cheaper hot paths? Resolve before committing slice 1.
 - **PCC availability & latency** for Bucket 5 — confirm the FoundationModels PCC tier is
   callable from both DevID and MAS builds and that quality clears the bar for `copy-edit` /
   `design-interview` before depending on it. The doc assumes Apple ships this; validate.
