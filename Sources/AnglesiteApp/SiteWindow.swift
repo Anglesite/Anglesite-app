@@ -52,6 +52,9 @@ struct SiteWindow: View {
     /// annotations (Siri AI Phase B / #146 + #148).
     @State private var annotationProvider: PreviewAnnotationProvider?
     @State private var deploy = DeployModel()
+    #if !ANGLESITE_MAS
+    @State private var publish = PublishModel()
+    #endif
     @State private var backup = BackupModel()
     @State private var audit = AuditModel()
     // Chat is now on both targets: DevID backs it with Claude (`ClaudeAssistant`), MAS with the
@@ -273,6 +276,29 @@ struct SiteWindow: View {
             }
             .visibilityPriority(.high)
 
+            #if !ANGLESITE_MAS
+            // Publish to GitHub — create+push a remote, or open it if one already exists (#68).
+            ToolbarItem(placement: .primaryAction) {
+                if let remote = publish.existingRemote {
+                    Button {
+                        NSWorkspace.shared.open(remote.url)
+                    } label: {
+                        Label("View on GitHub", systemImage: "arrow.up.forward.square")
+                    }
+                    .help("Open this site's GitHub repository")
+                } else {
+                    Button {
+                        publish.publish(source: site.sourceDirectory, repoName: site.name)
+                    } label: {
+                        Label("Publish to GitHub", systemImage: "square.and.arrow.up.on.square")
+                    }
+                    .disabled(publish.isRunning || !site.isValid)
+                    .help(site.isValid ? "Create a private GitHub repo and push this site" : "Site is missing required files")
+                }
+            }
+            .visibilityPriority(.low)
+            #endif
+
             // Deploy — primary action, highest priority so it is the last to collapse.
             // Declared LAST so it renders at the trailing edge (macOS primary-action position).
             ToolbarItem(placement: .primaryAction) {
@@ -325,6 +351,21 @@ struct SiteWindow: View {
                 onRunAgain: { audit.audit(siteID: site.id, siteDirectory: site.sourceDirectory) }
             )
         }
+        #if !ANGLESITE_MAS
+        .sheet(isPresented: $publish.sheetPresented) {
+            PublishSheet(model: publish, siteName: site.name)
+        }
+        .sheet(isPresented: $publish.authSheetPresented) {
+            GitHubAuthSheetView { result in
+                switch result {
+                case .authenticated:
+                    publish.authCompleted(source: site.sourceDirectory, repoName: site.name)
+                case .failed, .cancelled:
+                    publish.authSheetPresented = false
+                }
+            }
+        }
+        #endif
         .sheet(item: $siriReadinessModel) { model in
             NavigationStack {
                 ScrollView {
@@ -702,6 +743,9 @@ struct SiteWindow: View {
         deploy.onScanComplete = { [health] outcome in
             health.ingestDeployOutcome(outcome)
         }
+        #if !ANGLESITE_MAS
+        publish.refreshRemote(source: resolved.sourceDirectory)
+        #endif
     }
 
     #if ANGLESITE_MAS
