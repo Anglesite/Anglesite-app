@@ -440,7 +440,7 @@ private struct ToolCallCard: View {
 // compiles on both targets; only this preview needs the Claude-backed convenience init.
 #if !ANGLESITE_MAS
 #Preview {
-    ChatView(model: ChatModel(siteID: "preview", siteDirectory: URL(fileURLWithPath: NSTemporaryDirectory())))
+    ChatView(model: ChatModel(siteID: "preview", siteDirectory: URL(fileURLWithPath: NSTemporaryDirectory()), configDirectory: URL(fileURLWithPath: NSTemporaryDirectory())))
         .frame(width: 420, height: 560)
 }
 #endif

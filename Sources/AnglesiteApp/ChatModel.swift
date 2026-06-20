@@ -114,13 +114,13 @@ final class ChatModel {
     private var surfacedAnnotationIDs: Set<String> = []
 
     #if !ANGLESITE_MAS
-    init(siteID: String, siteDirectory: URL, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
+    init(siteID: String, siteDirectory: URL, configDirectory: URL, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
         self.siteID = siteID
         self.siteDirectory = siteDirectory
         let assistant = ClaudeAssistant(siteID: siteID, siteDirectory: siteDirectory)
         self.assistant = assistant
         self.transcript = ConversationTranscript(providerName: assistant.capabilities.providerName)
-        self.history = ChatHistoryStore(siteDirectory: siteDirectory)
+        self.history = ChatHistoryStore(configDirectory: configDirectory)
         self.annotationFeed = annotationFeed
         self.annotationResolver = annotationResolver
         self.undoCommand = undoCommand
@@ -129,12 +129,12 @@ final class ChatModel {
 
     /// Test/injecting initializer: supply the assistant (typically a stub or fixture conforming to `ConversationalAssistant`)
     /// and an optional history-store override.
-    init(siteID: String, siteDirectory: URL, assistant: any ConversationalAssistant, history: ChatHistoryStore? = nil, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
+    init(siteID: String, siteDirectory: URL, configDirectory: URL, assistant: any ConversationalAssistant, history: ChatHistoryStore? = nil, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
         self.siteID = siteID
         self.siteDirectory = siteDirectory
         self.assistant = assistant
         self.transcript = ConversationTranscript(providerName: assistant.capabilities.providerName)
-        self.history = history ?? ChatHistoryStore(siteDirectory: siteDirectory)
+        self.history = history ?? ChatHistoryStore(configDirectory: configDirectory)
         self.annotationFeed = annotationFeed
         self.annotationResolver = annotationResolver
         self.undoCommand = undoCommand
