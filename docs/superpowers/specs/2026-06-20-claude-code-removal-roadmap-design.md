@@ -29,6 +29,7 @@ These were settled during brainstorming and constrain everything below.
 | **End-state for Claude Code** | Full removal. No `claude` binary, no Claude-plugin loading, `ClaudeAgent` deleted. |
 | **Generative backstop** | Apple Intelligence only — on-device Foundation Models, escalating to Private Cloud Compute (PCC). **No external LLM APIs, ever.** |
 | **Deterministic substrate** | Port hot paths to native Swift; keep Node only for things that need the JS ecosystem (Astro build, Sharp, Satori, Pagefind, Keystatic). |
+| **JS execution location** | **All JS runs inside the container** (the Node sidecar — Astro, Sharp, Satori, Pagefind, Keystatic, `apply_edit`/`undo_edit`) — in-guest (#59/#66/#69), reached over the in-container MCP HTTP/WS transport (#64), **not** host-spawned. The embedded host Node + JIT re-sign apparatus retires once the container runtimes land (#70). Until then, the sidecar stays host-spawned as today (interim only). |
 | **Anything that exceeds even PCC** | Simplified or retired — not shipped as a degraded cloud call. |
 
 ## 3. The interface today — three layers
@@ -100,8 +101,10 @@ does it correctly and is called directly from Swift.
 
 ### Bucket 2 — JS-ecosystem → bundled Node sidecar
 Keep in Node because they depend on the JS ecosystem (or on parsing HTML/Astro); just stop
-routing them through Claude. The app calls them directly (as it already calls the MCP
-server).
+routing them through Claude. **End-state: all of this JS runs inside the container** (#59),
+reached over the in-container MCP HTTP/WS transport (#64) — not host-spawned. (Interim, until
+the container runtimes land, they remain a host-spawned sidecar called directly as today; the
+in-guest move is what lets the embedded host Node retire — #70.)
 
 - `apply_edit` / `undo_edit` — selector resolve + patch + git per-edit commit. Stays in
   the sidecar: the patcher parses HTML/Astro and a Swift reimplementation buys nothing.
@@ -213,11 +216,13 @@ This is *stronger*: a non-LLM gate can't be prompt-injected or talked out of run
 - `--plugin-dir` wiring in `buildArguments()`; the `claude` binary expectation.
 - The plugin's **skill markdown** (the prose) and its `hooks.json` Claude hook.
 - The plugin repo's deterministic guts are **absorbed, not deleted**: hot paths → Swift
-  (Bucket 1), JS-ecosystem pieces → bundled Node sidecar (Bucket 2),
-  `pre-deploy-check.sh` → direct app-run gate (§7).
-- `copy-plugin.sh`'s Claude-plugin packaging shrinks to "bundle the Node sidecar +
-  templates." The two-repo coordination model (paired PRs for MCP schema) ends; the app
-  owns the sidecar.
+  (Bucket 1), JS-ecosystem pieces → Node sidecar that runs **in the container** (Bucket 2;
+  #59/#66/#69), `pre-deploy-check.sh` → direct app-run gate (§7).
+- With all JS in-guest, the embedded **host** Node + JIT re-sign apparatus retires (#70):
+  the sidecar is built into the OCI image (#62), not bundled into the app, so
+  `copy-plugin.sh`'s Claude-plugin packaging is replaced by image build + "bundle templates
+  only." The two-repo coordination model (paired PRs for MCP schema) ends; the app owns the
+  sidecar.
 
 ## 10. Phasing summary
 
