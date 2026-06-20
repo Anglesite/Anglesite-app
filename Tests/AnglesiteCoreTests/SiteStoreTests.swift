@@ -90,6 +90,81 @@ final class SiteStoreTests {
         #expect(await reloaded.bookmarkData(for: site.id) == nil)
     }
 
+    // MARK: - displayName override (#266)
+
+    /// Write a `settings.plist` override into a package's `Config/`.
+    private func writeOverride(_ name: String?, into pkg: AnglesitePackage) async throws {
+        try await SiteConfigStore(configDirectory: pkg.configURL).save(SiteSettings(displayName: name))
+    }
+
+    @Test("Site.make prefers the settings displayName override over the marker name")
+    func makePrefersOverride() async throws {
+        let pkg = try makeValidPackage(named: "alpha")
+        try await writeOverride("Alpha Production", into: pkg)
+        let site = try SiteStore.Site.make(package: pkg)
+        #expect(site.name == "Alpha Production")
+    }
+
+    @Test("Site.make falls back to the marker name when the override is nil")
+    func makeFallsBackWhenNoOverride() async throws {
+        let pkg = try makeValidPackage(named: "alpha")
+        let site = try SiteStore.Site.make(package: pkg)
+        #expect(site.name == "alpha")
+    }
+
+    @Test("Site.make falls back to the marker name when the override is blank")
+    func makeFallsBackWhenOverrideBlank() async throws {
+        let pkg = try makeValidPackage(named: "alpha")
+        try await writeOverride("   ", into: pkg)
+        let site = try SiteStore.Site.make(package: pkg)
+        #expect(site.name == "alpha")
+    }
+
+    @Test("setDisplayName persists the override and updates the in-memory name")
+    func setDisplayNameUpdatesName() async throws {
+        let pkg = try makeValidPackage(named: "alpha")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        let site = try await store.record(pkg)
+
+        let updated = try await store.setDisplayName("Alpha Production", for: site.id)
+        #expect(updated?.name == "Alpha Production")
+        #expect(await store.find(id: site.id)?.name == "Alpha Production")
+        // Persisted to settings.plist (a fresh make() re-resolves it).
+        #expect(try SiteConfigStore.read(from: pkg.configURL).displayName == "Alpha Production")
+    }
+
+    @Test("setDisplayName with blank input clears the override back to the marker name")
+    func setDisplayNameClearsOnBlank() async throws {
+        let pkg = try makeValidPackage(named: "alpha")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        let site = try await store.record(pkg)
+        _ = try await store.setDisplayName("Alpha Production", for: site.id)
+
+        let cleared = try await store.setDisplayName("  ", for: site.id)
+        #expect(cleared?.name == "alpha")
+        #expect(try SiteConfigStore.read(from: pkg.configURL).displayName == nil)
+    }
+
+    @Test("setDisplayName persists the new name across a reload")
+    func setDisplayNamePersistsAcrossReload() async throws {
+        let pkg = try makeValidPackage(named: "alpha")
+        let writer = SiteStore(persistenceURL: persistenceURL)
+        let site = try await writer.record(pkg)
+        _ = try await writer.setDisplayName("Alpha Production", for: site.id)
+
+        let reader = SiteStore(persistenceURL: persistenceURL)
+        try await reader.load()
+        #expect(await reader.find(id: site.id)?.name == "Alpha Production")
+    }
+
+    @Test("setDisplayName is a no-op for an unknown id")
+    func setDisplayNameUnknownIDNoOp() async throws {
+        let store = SiteStore(persistenceURL: persistenceURL)
+        let result = try await store.setDisplayName("ghost", for: "no-such-id")
+        #expect(result == nil)
+        #expect(await store.sites.isEmpty)
+    }
+
     // MARK: - Change handler
 
     actor ChangeRecorder {

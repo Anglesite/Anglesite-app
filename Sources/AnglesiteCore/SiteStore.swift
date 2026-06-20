@@ -17,8 +17,10 @@ public actor SiteStore {
     public struct Site: Sendable, Codable, Equatable, Identifiable {
         /// The package's stable marker UUID (string). Path-independent — survives moves (#242).
         public let id: String
-        /// Display name (from the package marker).
-        public let name: String
+        /// Resolved display name: the `Config/settings.plist` `displayName` override if set,
+        /// else the package marker's displayName (#266). Mutable — `SiteStore.setDisplayName`
+        /// updates it in place when an owner renames the site.
+        public var name: String
         /// The `.anglesite` package directory.
         public let packageURL: URL
         public var isValid: Bool
@@ -52,8 +54,9 @@ public actor SiteStore {
             self.bookmarkData = bookmarkData
         }
 
-        /// Build a `Site` from a package on disk: id = marker UUID, name = marker displayName,
-        /// validity = whether `Source/` passes the project sentinels.
+        /// Build a `Site` from a package on disk: id = marker UUID, name = resolved display name
+        /// (settings override ?? marker displayName), validity = whether `Source/` passes the
+        /// project sentinels.
         public static func make(package: AnglesitePackage, fileManager: FileManager = .default) throws -> Site {
             let marker = try package.readMarker(fileManager: fileManager)
             // Refuse a package written by a newer build rather than opening it and risking a
@@ -65,11 +68,27 @@ public actor SiteStore {
             let validation = package.sourceValidation(fileManager: fileManager)
             return Site(
                 id: marker.siteID.uuidString,
-                name: marker.displayName,
+                name: resolvedName(marker: marker, configURL: package.configURL, fileManager: fileManager),
                 packageURL: canonicalizePackageURL(package.url),
                 isValid: validation.isValid,
                 missingSentinels: validation.missing
             )
+        }
+
+        /// The owner-facing display name: a non-blank `settings.plist` override wins, otherwise the
+        /// marker's displayName. A settings read error never blocks opening a site — it falls back
+        /// to the marker name (settings are non-critical; #266).
+        static func resolvedName(
+            marker: AnglesitePackage.Marker,
+            configURL: URL,
+            fileManager: FileManager = .default
+        ) -> String {
+            let settings = (try? SiteConfigStore.read(from: configURL, fileManager: fileManager)) ?? SiteSettings()
+            if let override = settings.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !override.isEmpty {
+                return override
+            }
+            return marker.displayName
         }
     }
 
@@ -181,6 +200,33 @@ public actor SiteStore {
         guard let index = sites.firstIndex(where: { $0.id == id }) else { return }
         sites[index].bookmarkData = data
         try persist()
+    }
+
+    /// Set (or clear, with a nil/blank `name`) the owner-facing display-name override for the site
+    /// with `id`. Writes `Config/settings.plist`, then re-resolves the in-memory + persisted name
+    /// via `Site.make` (so a clear falls back to the marker name) and broadcasts the change so an
+    /// open window's title and the launcher list refresh live (#266). Returns the updated site, or
+    /// `nil` if `id` is unknown.
+    @discardableResult
+    public func setDisplayName(_ name: String?, for id: String) async throws -> Site? {
+        guard let index = sites.firstIndex(where: { $0.id == id }) else { return nil }
+        let existing = sites[index]
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let override = (trimmed?.isEmpty == false) ? trimmed : nil
+
+        let package = AnglesitePackage(url: existing.packageURL)
+        let config = SiteConfigStore(configDirectory: package.configURL, fileManager: fileManager)
+        var settings = try await config.load()
+        settings.displayName = override
+        try await config.save(settings)
+
+        var updated = try Site.make(package: package, fileManager: fileManager)
+        updated.lastSeen = existing.lastSeen
+        updated.bookmarkData = existing.bookmarkData
+        sites[index] = updated
+        try persist()
+        await emitChange()
+        return updated
     }
 
     // MARK: - Change notification
