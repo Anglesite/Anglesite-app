@@ -52,14 +52,19 @@ public struct FoundationModelEditInterpreter: EditInterpreting {
         self.generate = generate
     }
 
-    /// Production wiring. Builds a prompt from the instruction and element context, calls
-    /// `FoundationModelAssistant.generateStructured(prompt:context:resultType:)`, and surfaces
-    /// `AssistantError.unavailable` as `EditInterpretationError.unavailable`.
+    /// App-wide production wiring. Builds a prompt from the instruction and element context,
+    /// resolves `siteID` and `siteDirectory` from the element context (threaded through by
+    /// `perform()` from the `ElementEntity`), and calls
+    /// `FoundationModelAssistant.generateStructured`. Surfaces `AssistantError.unavailable`
+    /// as `EditInterpretationError.unavailable`.
     ///
-    /// `AssistantContext` requires `siteID` and `siteDirectory`; the element route is passed
-    /// as `currentPageRoute` so the model's session instructions mention the active page.
-    public init(assistant: FoundationModelAssistant, siteID: String, siteDirectory: URL) {
+    /// This initializer carries no per-site state — it is safe to register once at app startup
+    /// via `AppDependencyManager` and reuse across all edits.
+    public init(assistant: FoundationModelAssistant) {
         self.generate = { instruction, element in
+            guard let siteID = element.siteID, let siteDirectory = element.siteDirectory else {
+                throw EditInterpretationError.unavailable("siteID/siteDirectory not provided in element context")
+            }
             let prompt = Self.buildPrompt(instruction: instruction, element: element)
             let context = AssistantContext(
                 siteID: siteID,

@@ -53,8 +53,15 @@ public struct InterpretedElementContext: Sendable, Equatable {
     public let currentText: String?
     public let pagePath: String
     public let displayName: String
-    public init(tag: String, currentText: String?, pagePath: String, displayName: String) {
-        self.tag = tag; self.currentText = currentText; self.pagePath = pagePath; self.displayName = displayName
+    /// Site the element belongs to. Required for the FM interpreter to build an `AssistantContext`.
+    public let siteID: String?
+    /// Root directory of the site on disk. Required for the FM interpreter's `AssistantContext`.
+    public let siteDirectory: URL?
+
+    public init(tag: String, currentText: String?, pagePath: String, displayName: String,
+                siteID: String? = nil, siteDirectory: URL? = nil) {
+        self.tag = tag; self.currentText = currentText; self.pagePath = pagePath
+        self.displayName = displayName; self.siteID = siteID; self.siteDirectory = siteDirectory
     }
 }
 

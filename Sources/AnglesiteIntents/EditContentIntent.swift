@@ -2,28 +2,16 @@ import AppIntents
 import AnglesiteCore
 import Foundation
 
-/// Phase B.5 (#149). Apply a natural-language instruction to an onscreen element.
+/// Phase B.5 (#149) / B.6 (#251). Apply a natural-language instruction to an onscreen element.
 ///
 /// **Wire-up:**
 /// 1. Siri's `appEntityUIElementProvider` (B.4 / #148) resolves "this heading" / "that image"
 ///    into a concrete `ElementEntity` from `PreviewAnnotationProvider`.
 /// 2. Siri fills `EditContentIntent`'s parameters with the entity + the user's spoken phrase
-///    ("make it bigger", "change the color to teal", …).
-/// 3. `perform()` decodes the entity's stored selector back into a structured `JSONValue`,
-///    confirms the change with the user (#239 — review before mutating source files; skipped
-///    under test scope), then builds an `EditMessage` and routes it via `IntentEditBridge` →
-///    `EditRouterRegistry.shared` → the open window's `MCPApplyEditRouter` → plugin
-///    `apply_edit` MCP tool.
-/// 4. Plugin interprets the instruction (the natural-language op is the plugin's responsibility,
-///    not the app's) and commits the patch.
-/// 5. The reply's status drives the dialog: applied / failed / ambiguous, each phrased the way
-///    Siri reads them aloud.
-///
-/// **Operation tag** is `"apply-instruction"` — forward-looking. The existing plugin op set
-/// (`replace-text`, `replace-image-src`, `replace-attr`) doesn't accept free-form NL today, so
-/// in-progress smoke testing will hit `.failed` until the paired plugin change ships. The
-/// failure path is well-tested and the dialog explains the situation — shipping the app side
-/// now unblocks the plugin work to land independently.
+///    ("make it bigger", "change the color to teal", ...).
+/// 3. `perform()` interprets the instruction on-device (B.6) to resolve a concrete op, then
+///    dry-runs via the bridge to get a before/after preview, confirms with the user, and applies.
+/// 4. Plugin applies the structured patch and the reply status drives the final dialog.
 public struct EditContentIntent: AppIntent {
     public static let title: LocalizedStringResource = "Edit Content"
     public static let description = IntentDescription(
@@ -33,52 +21,100 @@ public struct EditContentIntent: AppIntent {
     @Parameter(title: "Element") public var element: ElementEntity
     @Parameter(
         title: "Change",
-        description: "A natural-language description of the change to apply, e.g. “make it bigger” or “change the color to teal”."
+        description: "A natural-language description of the change to apply, e.g. make it bigger or change the color to teal."
     ) public var instruction: String
     @Dependency private var bridge: IntentEditBridge
+    @Dependency private var interpreter: any EditInterpreting
 
     public init() {}
 
     public static var parameterSummary: some ParameterSummary {
-        Summary("Change \(\.$element) — \(\.$instruction)")
+        Summary("Change \(\.$element) \u{2014} \(\.$instruction)")
     }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
-        let scoped = IntentEditBridgeOverride.scoped
-        let resolved = scoped ?? bridge
+        let bridge = IntentEditBridgeOverride.scoped ?? self.bridge
+        let interp = EditInterpreterOverride.scoped ?? self.interpreter
+
         guard let selector = element.selectorJSON() else {
-            return .result(dialog: IntentDialog(stringLiteral: ContentDialogs.editInvalidSelector(
-                displayName: element.displayName
-            )))
+            return .result(dialog: IntentDialog(stringLiteral: ContentDialogs.editInvalidSelector(displayName: element.displayName)))
         }
-        // #239: Siri must review the edit before it mutates source files. Confirm after the
-        // target is resolved (so the summary names the element/page) and before routing (so a
-        // decline leaves the working tree untouched — `perform` exits here, never calling the
-        // bridge). Skipped under test scope, which has no UI surface — same pattern as the
-        // Site intents' `SiteOperationsOverride.scoped` guard around `requestConfirmation`.
-        if scoped == nil {
-            try await requestConfirmation(dialog: IntentDialog(stringLiteral: ContentDialogs.editConfirmation(
-                displayName: element.displayName,
-                pagePath: element.pagePath,
-                instruction: instruction
-            )))
+
+        // 1. Interpret the instruction on-device.
+        let siteDirectory = await SiteStore.shared.find(id: element.siteID)?.path
+        let interpreted: InterpretedEdit
+        do {
+            interpreted = try await interp.interpret(
+                instruction: instruction,
+                element: InterpretedElementContext(
+                    tag: element.elementTag,
+                    currentText: element.currentText,
+                    pagePath: element.pagePath,
+                    displayName: element.displayName,
+                    siteID: element.siteID,
+                    siteDirectory: siteDirectory
+                )
+            )
+        } catch {
+            return .result(dialog: IntentDialog(stringLiteral:
+                "Editing by voice needs Apple Intelligence, which isn't available here."))
         }
-        let reply = await resolved.applyEdit(
+        guard let resolved = interpreted.resolveOp() else {
+            return .result(dialog: IntentDialog(stringLiteral:
+                ContentDialogs.editAmbiguous(displayName: element.displayName, detail: nil)))
+        }
+
+        // 2. Dry-run: compute the would-be change without writing.
+        let preview = await bridge.applyEdit(
             siteID: element.siteID,
             filePath: element.pagePath,
             selector: selector,
-            op: EditMessage.Op.applyInstruction,
-            value: .string(instruction)
+            op: resolved.op,
+            value: resolved.value,
+            dryRun: true
+        )
+        if preview.status != .preview {
+            // Refusal / ambiguous / failed surfaced by the plugin -- relay it, no apply.
+            return .result(dialog: IntentDialog(stringLiteral:
+                ContentDialogs.editReply(preview, displayName: element.displayName)))
+        }
+
+        // 3. Confirm (decline -> exit before apply; tree untouched).
+        let decision = ConfirmationOverride.scoped
+        if let decision {
+            if decision == .decline {
+                return .result(dialog: IntentDialog(stringLiteral: "Okay, I won't change \(element.displayName)."))
+            }
+            // .confirm falls through to apply
+        } else {
+            // Production: real Siri confirmation dialog showing a before/after diff.
+            try await requestConfirmation(dialog: IntentDialog(stringLiteral:
+                ContentDialogs.editConfirmation(
+                    edit: interpreted,
+                    pagePath: element.pagePath,
+                    before: preview.before,
+                    after: preview.after
+                )
+            ))
+        }
+
+        // 4. Apply for real.
+        let reply = await bridge.applyEdit(
+            siteID: element.siteID,
+            filePath: element.pagePath,
+            selector: selector,
+            op: resolved.op,
+            value: resolved.value
         )
         // Cancellation is self-describing: `MCPApplyEditRouter` maps an interrupted edit to a
         // `.failed` reply whose message is exactly "canceled". Key off that, not `Task.isCancelled`
-        // — otherwise a *genuine* plugin failure that merely coincides with cancellation would be
+        // -- otherwise a genuine plugin failure that coincides with cancellation would be
         // mislabelled "Canceled" and the real error swallowed.
         if reply.status == .failed, reply.message == "canceled" {
             return .result(dialog: IntentDialog(stringLiteral: "Canceled the edit to \(element.displayName)."))
         }
-        let dialog = ContentDialogs.editReply(reply, displayName: element.displayName)
-        return .result(dialog: IntentDialog(stringLiteral: dialog))
+        return .result(dialog: IntentDialog(stringLiteral:
+            ContentDialogs.editReply(reply, displayName: element.displayName)))
     }
 }
 
@@ -87,7 +123,7 @@ public struct EditContentIntent: AppIntent {
 //
 // **Why the `#if compiler(>=6.4)` guard is load-bearing.** `Package.swift` only includes the
 // `AnglesiteIntentsTests` test target when `compiler(>=6.4)`. The `AnglesiteIntents` library
-// target itself, however, compiles on whatever toolchain `swift build` is using — including
+// target itself, however, compiles on whatever toolchain `swift build` is using -- including
 // the Xcode 26.3 / Swift 6.3 CI runner that GH's `macos-15` provides today (the runner that
 // runs `swift test` against `AnglesiteCoreTests` and `AnglesiteBridgeTests`). `LongRunningIntent`
 // and `CancellableIntent` are macOS 26+ symbols not present on that toolchain, so an
@@ -101,7 +137,7 @@ extension EditContentIntent: LongRunningIntent, CancellableIntent {}
 
 extension ContentDialogs {
     /// `.applied`-status dialog. Mentions the file the patch landed on when the plugin reports
-    /// one (so "edit this heading" → "Edited h1 — Welcome in src/pages/about.astro.") and falls
+    /// one (so "edit this heading" -> "Edited h1 -- Welcome in src/pages/about.astro.") and falls
     /// back to a shorter form otherwise.
     public static func editApplied(displayName: String, file: String?) -> String {
         if let file, !file.isEmpty {
@@ -114,30 +150,30 @@ extension ContentDialogs {
     /// say back to the user. Fall through to a generic phrasing otherwise.
     public static func editFailed(displayName: String, reason: String?) -> String {
         if let reason, !reason.isEmpty {
-            return "Couldn’t edit \(displayName): \(reason)"
+            return "Couldn't edit \(displayName): \(reason)"
         }
-        return "Couldn’t edit \(displayName)."
+        return "Couldn't edit \(displayName)."
     }
 
     /// `.ambiguous`-status dialog. Distinct from `.failed` because the user can rephrase and try
-    /// again — wording acknowledges the ambiguity rather than blaming a hard error.
+    /// again -- wording acknowledges the ambiguity rather than blaming a hard error.
     public static func editAmbiguous(displayName: String, detail: String?) -> String {
         if let detail, !detail.isEmpty {
             return "Not sure how to edit \(displayName): \(detail)"
         }
-        return "Not sure how to edit \(displayName) — try rephrasing."
+        return "Not sure how to edit \(displayName) -- try rephrasing."
     }
 
     /// When the entity's stored selector won't decode back into the structured shape
     /// `EditMessage` requires. Shouldn't happen at runtime (the encoder/decoder round-trip is
     /// tested), but the failure mode is well-defined enough to deserve a dialog.
     public static func editInvalidSelector(displayName: String) -> String {
-        "Lost track of \(displayName) — try selecting it again."
+        "Lost track of \(displayName) -- try selecting it again."
     }
 
     /// Confirmation summary shown before a Siri-driven edit mutates source files (#239).
     /// Names the element, the page it lives on, and the requested change so the user can
-    /// review before confirming. App-only summary — a structured diff is a deferred follow-up
+    /// review before confirming. App-only summary -- a structured diff is a deferred follow-up
     /// gated on a plugin `apply_edit` dry-run.
     public static func editConfirmation(displayName: String, pagePath: String, instruction: String) -> String {
         let change = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -147,7 +183,7 @@ extension ContentDialogs {
     /// Before/after confirmation summary (#251). Spoken-friendly per kind; long fragments are
     /// truncated so Siri doesn't read paragraphs. Sourced from the plugin dry-run preview.
     public static func editConfirmation(edit: InterpretedEdit, pagePath: String, before: String?, after: String?) -> String {
-        func clip(_ s: String, _ n: Int = 60) -> String { s.count <= n ? s : String(s.prefix(n)) + "…" }
+        func clip(_ s: String, _ n: Int = 60) -> String { s.count <= n ? s : String(s.prefix(n)) + "\u{2026}" }
         switch edit.kind {
         case .text:
             if let b = before, let a = after {
@@ -169,7 +205,7 @@ extension ContentDialogs {
         case .failed: return editFailed(displayName: displayName, reason: reply.message)
         case .ambiguous: return editAmbiguous(displayName: displayName, detail: reply.message)
         case .preview:
-            // editReply is called on the final apply — .preview here means dry-run leaked through;
+            // editReply is called on the final apply -- .preview here means dry-run leaked through;
             // treat conservatively as not applied.
             return editFailed(displayName: displayName, reason: "unexpected preview reply")
         }
