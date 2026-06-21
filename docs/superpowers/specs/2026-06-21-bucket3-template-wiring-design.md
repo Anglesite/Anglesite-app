@@ -9,57 +9,63 @@
 
 The Bucket 3 framework (shipped on `main`) writes a site's integration config into `.site-config`
 and copies/injects Astro components, but the **app-owned website template doesn't consume any of
-it**. Concretely (verified on `main`):
+it**. Verified on `main`:
 
 - `Resources/Template/` has **no config bridge** — no `config.ts`, no `csp.ts`. `astro.config.mjs`
   is `defineConfig({})` and `scaffold.sh` only writes `ANGLESITE_VERSION` to `.site-config`.
 - The scaffolded pages (`book.astro`, `donate.astro`) read `import.meta.env.BOOKING_*` /
   `DONATIONS_*`, which nothing populates — so they render no data.
-- The floating-booking and giscus integrations use `injectAtAnchor` to drop `<BookingWidget>` /
-  `<Comments>` into layouts, but never add the component `import` to the layout frontmatter — an
-  Astro build error (C1).
+- The floating-booking and giscus integrations inject `<BookingWidget>` / `<Comments>` into layouts
+  via `injectAtAnchor` but never add the component `import` to the layout frontmatter — an Astro
+  build error (C1).
 - Inline booking drops the user's `eventSlug` (I4).
 
-So a GUI/Siri/chat-driven setup writes correct config that produces a site that either renders
-nothing or fails to build. This spec makes the template **consume** the config the framework writes.
+This spec makes the template **consume** the config the framework writes.
 
 ## 2. Approach (locked)
 
-**`readConfig()` in Astro frontmatter + config-driven conditional render.** A small build-time
-`readConfig(key)` helper reads the flat `.site-config`; pages and layouts read the keys they need
-in frontmatter and conditionally render the integration component. The Swift scaffolder's job
-simplifies to **writing `.site-config`** (plus copying on-demand pages) — no more snippet injection
-for the trio.
+**`readConfig()` in Astro frontmatter + config-driven conditional render, with components copied
+on-demand and their import + render injected into the layout at setup.**
 
-Rejected alternatives: a Vite/`import.meta.env` bridge in `astro.config.mjs` (adds define
-machinery and still needs a separate fix for injected-component imports); scaffolder-side literal
-value injection (duplicates values between files and `.site-config`, messy re-runs).
+- A build-time `readConfig(key)` helper reads the flat `.site-config`. Pages and the injected layout
+  snippets read keys in frontmatter and conditionally render the component.
+- **Components stay on-demand** — copied only when their integration is set up; a site never carries
+  unused integration component files.
+- Because a layout that renders `<BookingWidget>` must `import` it (and `tsconfig` is
+  `astro/tsconfigs/strict` → `noUnusedLocals`), the import and the render are **injected into the
+  layout at setup time**, alongside copying the component. No always-present component assets.
 
-### Structural consequence: components ship in the base template
+This resolves **C1** (the import is injected with the render), **I3** (a real build-time bridge via
+`readConfig`), **I4** (`BOOKING_EVENT_SLUG`), and settles the **giscus data-model** (`repoId`/
+`categoryId`/`mapping` become `.site-config` keys read at build).
 
-A layout that conditionally renders `<BookingWidget>` must `import` it, and `tsconfig` extends
-`astro/tsconfigs/strict` (`noUnusedLocals`), so the imported component must always exist. Therefore
-the three components (`BookingWidget`, `DonationButton`, `Comments`) are **permanent base-template
-assets** — present in every scaffolded site, rendering *nothing* unless their config is set (zero
-output cost when unused). Consequences:
+Rejected: shipping components as permanent base assets (simpler engine, but unused files in every
+site — explicitly declined); a Vite/`import.meta.env` bridge (define machinery + still needs the
+import fix); scaffolder-side literal-value injection (duplicates values, messy re-runs).
 
-- **Layouts** (`BaseLayout`, `BlogPost`) ship pre-wired: import the component + conditionally render
-  it from `.site-config`.
-- **Pages** (`/book`, `/donate`) remain **copied on-demand** by the scaffolder — standalone routes a
-  site only gets when it set up that integration.
-- **Integration setup (Swift)** = write `.site-config` keys (+ copy the on-demand page).
-- `Operation.injectAtAnchor`, `MarkerInjector`, and the scaffolder's `injectAnchor` step **stay** in
-  the codebase (tested, available for future integrations) — the trio simply no longer uses them.
+## 3. Engine change: `MarkerInjector` learns a comment style
 
-This resolves **C1** (no orphan imports — components always present), **I3** (a real build-time
-bridge), **I4** (`BOOKING_EVENT_SLUG`), and the **giscus data-model** decision (`repoId`/`categoryId`/
-`mapping` become `.site-config` keys read at build).
+`MarkerInjector.inject` today wraps the injected block in **HTML** comment delimiters
+(`<!-- anglesite:<id>:start -->`). Astro **frontmatter** (the `---` block) is TypeScript — HTML
+comments are invalid there. So `MarkerInjector` gains a `CommentStyle` (`.html` for template-body
+injection, `.line` for `//`-delimited frontmatter injection):
 
-## 3. Template changes (`Resources/Template/`)
+```swift
+public enum CommentStyle: Sendable { case html, line }   // <!-- … -->  vs  // …
+public static func inject(snippet: String, withID id: String, atAnchor anchor: String,
+                          into content: String, style: CommentStyle = .html) -> Result<String, Failure>
+```
 
-### `scripts/config.ts` (new)
+`Operation.injectAtAnchor` and `PlannedStep.injectAnchor` gain a `style: CommentStyle` field; the
+planner threads it through and `IntegrationScaffolder`'s inject step passes it to `MarkerInjector`.
+The self-healing/idempotency logic is unchanged — only the delimiter strings vary by style.
 
-Pure KEY=value parser, ported from the plugin template:
+## 4. Template changes (`Resources/Template/`)
+
+### `scripts/config.ts` (new — base helper)
+
+Pure KEY=value parser, ported from the plugin template. (A *script* helper, not a component — always
+present, no unused-import concern.)
 
 ```ts
 import { existsSync, readFileSync } from "node:fs";
@@ -68,7 +74,6 @@ import { resolve } from "node:path";
 export function readConfigFromString(content: string, key: string): string | undefined {
   return content.match(new RegExp(`^${key}=(.+)$`, "m"))?.[1]?.trim();
 }
-
 export function readConfig(
   key: string,
   configPath: string = resolve(process.cwd(), ".site-config"),
@@ -78,138 +83,129 @@ export function readConfig(
 }
 ```
 
-### Components (permanent base assets)
+`scaffold.sh` already lays down `scripts/` from the template, so `config.ts` ships in every new site
+(verify, don't assume).
 
-`src/components/{BookingWidget,DonationButton,Comments}.astro` already exist in the template (added
-in the Bucket 3 work). They become permanent base assets — `scaffold.sh` already lays down `src/`
-from the template, so they ship in every new site. No change beyond confirming they're props-driven
-and render nothing when their props are empty/undefined.
+### Components — on-demand
 
-### `src/layouts/BaseLayout.astro` (floating booking)
+`src/components/{BookingWidget,DonationButton,Comments}.astro` are **not** base assets. They're
+copied into a site only when their integration is set up (by the scaffolder). They are props-driven
+and render nothing when props are empty.
 
-Frontmatter imports `BookingWidget` + `readConfig`, reads booking config, conditionally renders the
-floating widget. The existing `<!-- anglesite:body-end -->` anchor stays as a harmless marker
-(injection no longer used).
+### Layouts ship with two anchors, no pre-imports
+
+`src/layouts/BaseLayout.astro` and `src/layouts/BlogPost.astro` ship with an **import anchor** in
+frontmatter and a **body anchor**, and nothing integration-specific otherwise (so an un-configured
+site builds clean — no imports, no renders):
 
 ```astro
 ---
-import BookingWidget from "../components/BookingWidget.astro";
-import { readConfig } from "../../scripts/config";
-const bookingFloating = readConfig("BOOKING_STYLE") === "floating";
+// anglesite:imports
 ---
+<body>
   <slot />
-  {bookingFloating && (
-    <BookingWidget
-      provider={readConfig("BOOKING_PROVIDER")}
-      username={readConfig("BOOKING_USERNAME")}
-      eventSlug={readConfig("BOOKING_EVENT_SLUG")}
-      buttonText={readConfig("BOOKING_BUTTON_TEXT")}
-      style="floating"
-    />
-  )}
   <!-- anglesite:body-end -->
 </body>
 ```
+(`BlogPost.astro` uses `<!-- anglesite:comments -->` as its body anchor.)
 
-(The exact relative import path from `src/layouts/` to `scripts/config.ts` is verified during
-implementation; `scaffold.sh` must ensure `scripts/config.ts` lands in the scaffolded site.)
+At setup, the scaffolder injects (each layout hosts exactly one integration in the trio):
 
-### `src/layouts/BlogPost.astro` (giscus)
-
-Imports `Comments` + `readConfig`, renders when `GISCUS_REPO` is set:
-
-```astro
----
-import Comments from "../components/Comments.astro";
-import { readConfig } from "../../scripts/config";
-const showComments = !!readConfig("GISCUS_REPO");
----
-  <slot />
-  {showComments && (
-    <Comments
-      repo={readConfig("GISCUS_REPO")}
-      repoId={readConfig("GISCUS_REPO_ID")}
-      category={readConfig("GISCUS_CATEGORY")}
-      categoryId={readConfig("GISCUS_CATEGORY_ID")}
-      mapping={readConfig("GISCUS_MAPPING")}
-    />
+- **frontmatter** (`// anglesite:imports`, `.line` style) — a delimited block with the component
+  import **and** the `readConfig` import:
+  ```ts
+  // anglesite:booking:start
+  import BookingWidget from "../components/BookingWidget.astro";
+  import { readConfig } from "../../scripts/config";
+  // anglesite:booking:end
+  ```
+- **body** (`<!-- anglesite:body-end -->`, `.html` style) — the config-gated render:
+  ```astro
+  {readConfig("BOOKING_STYLE") === "floating" && (
+    <BookingWidget provider={readConfig("BOOKING_PROVIDER")} username={readConfig("BOOKING_USERNAME")}
+      eventSlug={readConfig("BOOKING_EVENT_SLUG")} buttonText={readConfig("BOOKING_BUTTON_TEXT")} style="floating" />
   )}
-  <!-- anglesite:comments -->
-```
+  ```
 
-### `src/pages/{book,donate}.astro` (copied on-demand)
+giscus injects the analogous `Comments` import + a `{!!readConfig("GISCUS_REPO") && <Comments … />}`
+render into `BlogPost.astro`. (One-integration-per-layout in the trio, so each layout's frontmatter
+carries its own `readConfig` import with no cross-integration duplication; a future
+two-integrations-in-one-layout case would need shared-import dedup — out of scope.)
 
-Rewrite to read via `readConfig()` instead of `import.meta.env`. `book.astro` reads
-`BOOKING_PROVIDER`/`BOOKING_USERNAME`/`BOOKING_EVENT_SLUG` (style fixed `inline`); `donate.astro`
-reads `DONATIONS_LINK`/`DONATIONS_BUTTON_TEXT`/`DONATIONS_PROVIDER` (match `DonationButton`'s prop
-names `href`/`label`/`provider`).
+### Pages — on-demand (`src/pages/{book,donate}.astro`)
 
-### `scripts/scaffold.sh`
+Copied on-demand; rewritten to read via `readConfig()` instead of `import.meta.env`. Each imports
+its on-demand component (copied alongside it): `book.astro` → `BookingWidget` (reads
+`BOOKING_PROVIDER`/`BOOKING_USERNAME`/`BOOKING_EVENT_SLUG`, `style="inline"`); `donate.astro` →
+`DonationButton` (reads `DONATIONS_LINK`→`href`, `DONATIONS_BUTTON_TEXT`→`label`,
+`DONATIONS_PROVIDER`→`provider`). For v1, booking `style == "button"` is treated like `inline`
+(the `/book` page) — a distinct in-page button placement is deferred.
 
-Confirm the scaffold lays down `scripts/config.ts` and the three components into the new site (they
-live under the template `src/`/`scripts/`, which `scaffold.sh` already copies — verify, don't assume).
+## 5. Swift descriptor changes (`AnglesiteCore`, `IntegrationCatalog`)
 
-## 4. Swift changes (`AnglesiteCore`)
+- **booking:**
+  - `copyFile BookingWidget.astro` (on-demand, `when: .always`).
+  - `injectAtAnchor` **frontmatter** import block into `BaseLayout.astro` (`style: .line`) — `when: style == "floating"`.
+  - `injectAtAnchor` **body** render block into `BaseLayout.astro` (`style: .html`) — `when: style == "floating"`.
+  - `copyFile /book` page — `when: style == "inline"` (button treated as inline for v1).
+  - `writeConfig`: `BOOKING_PROVIDER`, `BOOKING_USERNAME`, `BOOKING_STYLE`, **`BOOKING_EVENT_SLUG`**,
+    **`BOOKING_BUTTON_TEXT`** (last two fix I4).
+  - `addCSPDomains(fromProvider: true)`.
+- **giscus:**
+  - `copyFile Comments.astro` (on-demand).
+  - `injectAtAnchor` frontmatter import block into `BlogPost.astro` (`.line`).
+  - `injectAtAnchor` body render block into `BlogPost.astro` (`.html`).
+  - `writeConfig`: `GISCUS_REPO`, `GISCUS_CATEGORY`, **`GISCUS_REPO_ID`**, **`GISCUS_CATEGORY_ID`**,
+    **`GISCUS_MAPPING`**.
+  - `addCSPDomains(fromProvider: false, extra: ["giscus.app"])`.
+- **donations:**
+  - `copyFile DonationButton.astro` (on-demand) + `copyFile /donate` page.
+  - `writeConfig`: `DONATIONS_PROVIDER`, `DONATIONS_LINK`, `DONATIONS_BUTTON_TEXT`.
+  - `addCSPDomains(fromProvider: true)`.
 
-Descriptor-data only; the planner and scaffolder engines are unchanged (they already handle
-`copyFile`/`writeConfig`/`addCSPDomains`; we remove `injectAtAnchor` steps from the trio's plans).
+The booking/giscus `style: .line` frontmatter import op is the new capability; everything else uses
+existing op kinds. The planner already resolves `injectAtAnchor`; it now also carries `style`.
 
-In `IntegrationCatalog`:
+## 6. Error handling
 
-- **booking:** add `BOOKING_EVENT_SLUG = {{eventSlug}}` and `BOOKING_BUTTON_TEXT = {{buttonText}}` to
-  `writeConfig` (fixes I4). Remove the `injectAtAnchor BaseLayout` op and the
-  `copyFile BookingWidget.astro` op (base asset). Keep `copyFile /book` gated on
-  `style == "inline"`, `BOOKING_PROVIDER/USERNAME/STYLE`, and provider CSP.
-- **giscus:** add `GISCUS_REPO_ID = {{repoId}}`, `GISCUS_CATEGORY_ID = {{categoryId}}`,
-  `GISCUS_MAPPING = {{mapping}}` to `writeConfig`. Remove the `injectAtAnchor BlogPost` op and the
-  `copyFile Comments.astro` op. Keep `giscus.app` CSP.
-- **donations:** remove the `copyFile DonationButton.astro` op (base asset). Keep `copyFile /donate`,
-  `DONATIONS_*` config, and provider CSP.
+`readConfig` returns `undefined` for a missing key/file → components receive `undefined` props and
+render nothing; layout conditionals are false. A site that has **not** set up an integration has no
+injected import/render blocks at all, so it builds clean under `noUnusedLocals`. Injection is
+idempotent (delimited blocks, self-healing) — re-running setup replaces the block, not duplicates.
 
-Net: the trio's descriptors become `writeConfig` + `addCSPDomains` (+ on-demand page `copyFile`)
-only. `Operation.injectAtAnchor` / `MarkerInjector` / the scaffolder's `injectAnchor` step are
-retained but unused by the trio.
-
-## 5. Error handling
-
-`readConfig` returns `undefined` for a missing key or absent file. Components receive `undefined`
-props and render nothing/an empty state, and the layout conditionals are false — so a site that has
-**not** set up an integration still builds cleanly (no orphan imports, no missing data crash). This
-is the `noUnusedLocals`-safe path: the imported component is always referenced inside the
-conditional.
-
-## 6. Testing
+## 7. Testing
 
 **Swift (`AnglesiteCoreTests`, Swift Testing):**
-- `IntegrationCatalogTests`: assert the new keys are present (`BOOKING_EVENT_SLUG`,
-  `BOOKING_BUTTON_TEXT`, `GISCUS_REPO_ID`, `GISCUS_CATEGORY_ID`, `GISCUS_MAPPING`); repoint or remove
-  `injectedSnippetsCarryNoClientDirective` (no trio `injectAtAnchor` snippets remain).
-- `IntegrationPlannerTests`: floating-booking and giscus plans no longer contain an `injectAnchor`
-  step — assert `writeConfig`/`addCSP` only; assert `BOOKING_EVENT_SLUG` and the giscus IDs appear in
-  the resolved `upsertConfig`.
-- `IntegrationScaffolderTests` / `IntegrationOperationsTests`: drop assertions that depended on
-  layout injection for the trio.
+- `MarkerInjectorTests`: add `.line` (JS-comment) cases — insert, idempotent replace, orphan-heal,
+  anchor-not-found — paralleling the existing `.html` cases.
+- `IntegrationCatalogTests`: assert the new config keys (`BOOKING_EVENT_SLUG`, `BOOKING_BUTTON_TEXT`,
+  `GISCUS_REPO_ID`, `GISCUS_CATEGORY_ID`, `GISCUS_MAPPING`); update
+  `injectedSnippetsCarryNoClientDirective` to cover both the frontmatter and body inject ops.
+- `IntegrationPlannerTests`: floating-booking and giscus plans now contain **two** `injectAnchor`
+  steps (frontmatter `.line` + body `.html`) with the right snippets; assert the new keys appear in
+  `upsertConfig`; assert the frontmatter step's snippet contains the component + `readConfig` imports.
+- `IntegrationScaffolderTests`: a `.line`-style inject into a fixture frontmatter applies idempotently.
 
 **Template (`IntegrationTemplateAssetsTests`, classic URL APIs only — see the
 `libswift_DarwinFoundation3` CI note):**
 - assert `scripts/config.ts` exists;
-- assert `BaseLayout.astro` / `BlogPost.astro` / `book.astro` / `donate.astro` reference `readConfig`
-  and do **not** reference `import.meta.env`;
-- update the `pageEnvKeysAreWrittenByDescriptors` guard to extract `readConfig("KEY")` calls (instead
-  of `import.meta.env.KEY`) and assert they are a subset of the keys the matching descriptor writes.
+- assert `BaseLayout.astro` / `BlogPost.astro` ship the `// anglesite:imports` anchor + their body
+  anchor, and do **not** statically import the integration components (they're injected/on-demand);
+- assert `book.astro` / `donate.astro` reference `readConfig` and not `import.meta.env`;
+- update the `pageEnvKeysAreWrittenByDescriptors` guard to extract `readConfig("KEY")` calls and
+  assert ⊆ descriptor-written keys.
 
 **Build smoke (the real proof) — explicitly scoped:** CI's JS lane builds the edit-overlay, not the
-Astro template, so a full `astro build` of a scaffolded site is **not** added here. The Swift +
-asset tests verify the wiring statically (files exist, reference `readConfig`, keys line up). A
-one-off manual `npm run build` of a booking/donations/giscus-configured scaffold is the acceptance
-check, noted in the PR. Adding a template-build CI lane is a separate follow-up, not part of this
-slice.
+Astro template, so a full `astro build` of a scaffolded+configured site is **not** added here. The
+Swift + asset tests verify the wiring statically. A one-off manual `npm run build` of a
+booking/donations/giscus-configured scaffold is the acceptance check, noted in the PR. A
+template-build CI lane is a separate follow-up.
 
-## 7. Out of scope (tracked separately)
+## 8. Out of scope (tracked separately)
 
-- Wiring `BlogPost.astro` to an actual blog collection/route — giscus has no host page until the
-  template gains a blog system. The layout exists and conditionally renders; routing real posts
-  through it is a separate template feature.
-- CSP → `public/_headers` enforcement (the descriptors write `SCRIPT_ALLOW` into `.site-config`;
-  generating `_headers` from it / the §7 native pre-deploy gate is a separate slice).
-- The `githubSponsors` → `github-sponsors` provider-id casing is already fixed on `main`.
+- Wiring `BlogPost.astro` to an actual blog collection/route (giscus has no host page until the
+  template gains a blog system).
+- A distinct in-page booking **button** placement (`style == "button"` treated as inline for v1).
+- CSP → `public/_headers` enforcement (descriptors write `SCRIPT_ALLOW` into `.site-config`;
+  generating `_headers` / the native pre-deploy gate is a separate slice).
+- A two-integrations-in-one-layout shared-`readConfig`-import case (trio is one-per-layout).
