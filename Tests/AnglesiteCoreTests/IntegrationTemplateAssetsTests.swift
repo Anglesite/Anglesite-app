@@ -20,6 +20,7 @@ import Foundation
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+        #expect(FileManager.default.fileExists(atPath: repoRoot.appending(path: "Package.swift").path), "repo-root detection drifted")
         return repoRoot.appending(path: "Resources/Template")
     }
 

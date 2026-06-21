@@ -11,7 +11,7 @@ public enum IntegrationDialogs {
         "Set up \(integration) on \(siteName)."
     }
     public static func failed(reason: String, siteName: String) -> String {
-        "Couldn't finish that on \(siteName): \(reason)"
+        "Couldn't finish that on \(siteName): \(reason)."
     }
     public static func planPrompt(summary: String) -> String {
         "Here's the plan:\n\(summary)"
@@ -161,18 +161,53 @@ public struct AddGiscusIntent: AppIntent {
     }
 }
 
-// MARK: - Test-only helper
+// MARK: - Test-only helpers
 
 extension AddBookingIntent {
     /// Drives plan→apply directly, bypassing the AppIntents `requestConfirmation` gate.
-    /// Only callable when `IntegrationOperationsOverride.scoped` is bound (tests crash otherwise).
+    /// Only callable when `IntegrationOperationsOverride.scoped` is bound.
     func confirmAndApplyForTesting() async throws -> String {
-        let svc = IntegrationOperationsOverride.scoped!
+        guard let svc = IntegrationOperationsOverride.scoped else {
+            fatalError("confirmAndApplyForTesting requires a bound IntegrationOperationsOverride.scoped")
+        }
         let answers: Answers = [
             "provider": provider,
             "username": username,
             "style": style ?? "inline",
         ]
         return await applyIntegration(ops: svc, id: .booking, answers: answers, site: site)
+    }
+}
+
+extension AddDonationsIntent {
+    /// Drives plan→apply directly, bypassing the AppIntents `requestConfirmation` gate.
+    /// Only callable when `IntegrationOperationsOverride.scoped` is bound.
+    func confirmAndApplyForTesting() async throws -> String {
+        guard let svc = IntegrationOperationsOverride.scoped else {
+            fatalError("confirmAndApplyForTesting requires a bound IntegrationOperationsOverride.scoped")
+        }
+        let answers: Answers = [
+            "provider": provider,
+            "link": link,
+        ]
+        return await applyIntegration(ops: svc, id: .donations, answers: answers, site: site)
+    }
+}
+
+extension AddGiscusIntent {
+    /// Drives plan→apply directly, bypassing the AppIntents `requestConfirmation` gate.
+    /// Only callable when `IntegrationOperationsOverride.scoped` is bound.
+    func confirmAndApplyForTesting() async throws -> String {
+        guard let svc = IntegrationOperationsOverride.scoped else {
+            fatalError("confirmAndApplyForTesting requires a bound IntegrationOperationsOverride.scoped")
+        }
+        let answers: Answers = [
+            "repo": repo,
+            "repoId": repoId,
+            "category": "Announcements",
+            "categoryId": categoryId,
+            "mapping": "pathname",
+        ]
+        return await applyIntegration(ops: svc, id: .giscus, answers: answers, site: site)
     }
 }

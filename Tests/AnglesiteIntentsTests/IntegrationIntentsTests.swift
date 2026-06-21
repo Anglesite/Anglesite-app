@@ -25,6 +25,29 @@ import AnglesiteCore
         #expect(dialog.contains("booking") || dialog.contains("Acme"))
     }
 
+    @Test func donationsIntentBuildsAnswersAndReportsSuccess() async throws {
+        let intent = AddDonationsIntent()
+        intent.site = SiteEntity(id: "s1", name: "Acme", creationDate: nil, modificationDate: nil)
+        intent.provider = "stripe"
+        intent.link = "https://donate.stripe.com/test"
+        let dialog = try await IntegrationOperationsOverride.$scoped.withValue(FakeService(terminal: .done(integrationID: "donations"))) {
+            try await intent.confirmAndApplyForTesting()
+        }
+        #expect(dialog.contains("donations") || dialog.contains("Acme"))
+    }
+
+    @Test func giscusIntentBuildsAnswersAndReportsSuccess() async throws {
+        let intent = AddGiscusIntent()
+        intent.site = SiteEntity(id: "s1", name: "Acme", creationDate: nil, modificationDate: nil)
+        intent.repo = "acme/site"
+        intent.repoId = "R_kgDO123"
+        intent.categoryId = "DIC_kwDO123"
+        let dialog = try await IntegrationOperationsOverride.$scoped.withValue(FakeService(terminal: .done(integrationID: "giscus"))) {
+            try await intent.confirmAndApplyForTesting()
+        }
+        #expect(dialog.contains("giscus") || dialog.contains("Acme"))
+    }
+
     @Test func dialogsCoverSuccessAndFailure() {
         #expect(IntegrationDialogs.applied(integration: "booking", siteName: "Acme").contains("Acme"))
         #expect(IntegrationDialogs.failed(reason: "nope", siteName: "Acme").contains("nope"))

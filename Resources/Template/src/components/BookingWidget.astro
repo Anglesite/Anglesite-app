@@ -69,7 +69,7 @@ const calendlyUrl = eventSlug
 {provider === "calendly" && style === "floating" && (
   <link href="https://assets.calendly.com/assets/external/widget.css" rel="stylesheet" />
   <script is:inline define:vars={{ calendlyUrl, buttonText, brandColor: `#${colorHex}` }}>
-    window.onload=function(){Calendly.initBadgeWidget({url:calendlyUrl,text:buttonText,color:brandColor,textColor:'#ffffff'})};
+    window.addEventListener("load", function(){Calendly.initBadgeWidget({url:calendlyUrl,text:buttonText,color:brandColor,textColor:'#ffffff'})});
   </script>
   <script src="https://assets.calendly.com/assets/external/widget.js" async></script>
 )}

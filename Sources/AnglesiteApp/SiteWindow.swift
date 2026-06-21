@@ -29,6 +29,8 @@ struct SiteWindow: View {
     /// populates the indexer after this window was constructed — see `ContentIndexerStore`.
     private let contentIndexerStore: ContentIndexerStore
 
+    private let integrationOps = IntegrationOperations.live()
+
     init(siteID: String?, contentGraph: SiteContentGraph, contentIndexerStore: ContentIndexerStore) {
         self.siteID = siteID
         self.contentGraph = contentGraph
@@ -340,7 +342,7 @@ struct SiteWindow: View {
                 Button {
                     guard integrationWizardModel == nil else { return }
                     integrationWizardModel = IntegrationWizardModel(
-                        service: IntegrationOperations.live(), siteID: site.id)
+                        service: integrationOps, siteID: site.id)
                 } label: {
                     Label("Add Integration…", systemImage: "puzzlepiece.extension")
                 }
@@ -692,7 +694,7 @@ struct SiteWindow: View {
                 tier: .onDevice,
                 editBridge: makeEditBridge(),
                 contentGraph: contentGraph,
-                integrationService: IntegrationOperations.live()
+                integrationService: integrationOps
             ),
             annotationFeed: feed,
             annotationResolver: annotationResolver,
@@ -723,7 +725,7 @@ struct SiteWindow: View {
                 tier: tier,
                 editBridge: makeEditBridge(),
                 contentGraph: contentGraph,
-                integrationService: IntegrationOperations.live()
+                integrationService: integrationOps
             )
         case .claude:
             assistant = ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)

@@ -18,7 +18,7 @@ struct IntegrationWizard: View {
             Divider()
             footer
         }
-        .frame(width: 520, height: 460)
+        .frame(minWidth: 520, idealWidth: 520, minHeight: 400, idealHeight: 500)
     }
 
     // MARK: Steps
@@ -101,10 +101,18 @@ struct IntegrationWizard: View {
 
     private var applying: some View {
         VStack(spacing: 12) {
-            ProgressView()
-            Text("Setting up…").foregroundStyle(.secondary)
+            if case .failed(_, let message) = model.progress.last {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                Text("Couldn't finish setup").font(.headline)
+                Text(message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Button("Back") { model.back() }
+            } else {
+                ProgressView()
+                Text("Setting up…").foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 
     // MARK: Footer
@@ -119,7 +127,10 @@ struct IntegrationWizard: View {
             switch model.step {
             case .review:
                 Button("Set Up") {
-                    Task { await model.apply(); onClose() }
+                    Task {
+                        await model.apply()
+                        if case .done = model.progress.last { onClose() }
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!model.canContinue)
