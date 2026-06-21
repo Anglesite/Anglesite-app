@@ -70,6 +70,30 @@ Without `vmnet`, the local-container path loses the "each container gets a dedic
 
 The pattern: shipping a Virtualization-using app on MAS is **rare**, requires negotiation with Apple, and even when it works the App Store version is usually a stripped-down variant. Anglesite is not a virtualization vendor; the runway to make the case to Apple is much longer than the runway to ship via the Cloudflare path.
 
+## Addendum — MAS precedent found (2026-06-20)
+
+A shipping, **sandboxed Mac App Store** app drives Apple Containerization in-process: [`try-containers/Containers`](https://github.com/try-containers/Containers) ("Containers — Run LXCs", [App Store](https://apps.apple.com/us/app/containers-run-lxcs/id6759180330), requires macOS 26+). This is a direct counter-data-point to the Precedent table above, which had **no** Virtualization-using app on the MAS.
+
+What its source shows:
+
+- **In-process runtime, not the CLI/daemon.** `ContainerSystem/Services/SandboxedContainersService.swift` (header: *"runs LinuxContainer directly in-process, bypassing XPC and child process spawning entirely"*, dated 2026-02-04) imports the real `Containerization` / `ContainerizationOS` / `ContainerizationOCI` packages and calls `VZVirtualMachineManager(...)` directly. It depends on `github.com/apple/container` (per `project.pbxproj`) but **does not** ship the `container` daemon. This is exactly the "embed the Swift package directly" approach #60 proposed and #69 specs — so it sidesteps **Wall 1** entirely, confirming Wall 1 is avoidable.
+- **`Containers.entitlements`** (sandboxed MAS build):
+  - `com.apple.security.virtualization` → `true`
+  - `com.apple.security.temporary-exception.files.absolute-path.read-write` → `/Users/`
+  - `com.apple.security.temporary-exception.files.absolute-path.read-only` → `/etc/resolver/`
+  - `com.apple.security.temporary-exception.apple-events` → `com.apple.systemevents`
+  - **No `com.apple.vm.networking`.**
+
+### What this revises
+
+- **Wall 2 (`com.apple.security.virtualization`) is demonstrably clearable by an indie on MAS.** The spike rated this "negotiable / possible-but-uncertain." We now have a non-virtualization-vendor indie that got it granted for a sandboxed MAS app. Downgrade Wall 2 from "uncertain hurdle" to "clearable, with the usual restricted-entitlement provisioning-profile request."
+- **Wall 3 (`com.apple.vm.networking`) — still the load-bearing wall, but the precedent reframes it.** The Containers app ships **without** `vmnet`, which means it either (a) runs containers with reduced/host-proxied networking rather than routable per-container IPs, or (b) the in-process `LinuxContainer` path doesn't need `vmnet` for its networking model. **This is the open question to resolve before any MAS-local runtime for Anglesite**, because §0's design depends on the `http://<container-ip>:4321` routable-IP property. Study how `SandboxedContainersService` does networking without `vmnet` — that's the missing piece, not the entitlement.
+
+### What does *not* change
+
+- **Cloudflare-on-MAS remains the shipping decision.** It works today with zero Apple negotiation; the precedent only tells us a MAS-local path is *more feasible than the spike assumed*, not that it's free. Revisit local-on-MAS only if offline MAS editing becomes a priority (see the Appendix's option #1 trade-off).
+- The temporary-exception entitlements (broad `/Users/` RW, `/etc/resolver/` read, AppleEvents to System Events) are App-Review-approved case by case — a real but surmountable review conversation.
+
 ## What the binary spike actually produced (2026-06-09 run)
 
 The 3-config matrix was run on macOS 27.0 / Apple Silicon (build 26A5353q). The runnable harness lives at [`Spikes/ContainerSpike/`](../../Spikes/ContainerSpike/) with each configuration recorded under `Entitlements/`. Results, in order of run:
