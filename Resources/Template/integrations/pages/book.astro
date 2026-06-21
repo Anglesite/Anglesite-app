@@ -1,12 +1,13 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 import BookingWidget from "../components/BookingWidget.astro";
+import { readConfig } from "../../scripts/config";
 ---
 
 <BaseLayout title="Book a time">
   <BookingWidget
-    provider={import.meta.env.BOOKING_PROVIDER}
-    username={import.meta.env.BOOKING_USERNAME}
+    provider={readConfig("BOOKING_PROVIDER")}
+    username={readConfig("BOOKING_USERNAME")}
     style="inline"
   />
 </BaseLayout>

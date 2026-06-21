@@ -28,21 +28,45 @@ import Foundation
         return repoRoot.appendingPathComponent("Resources/Template")
     }
 
-    @Test func requiredAssetsExist() {
+    @Test func configHelperExists() {
+        #expect(FileManager.default.fileExists(atPath: templateRoot().appendingPathComponent("scripts/config.ts").path))
+    }
+
+    @Test func onDemandAssetsAreStagedNotInSrc() {
         let root = templateRoot()
-        let paths = [
-            "src/components/BookingWidget.astro",
-            "src/components/DonationButton.astro",
-            "src/components/Comments.astro",
-            "src/pages/book.astro",
-            "src/pages/donate.astro",
-        ]
-        for p in paths {
-            #expect(
-                FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path),
-                "missing \(p)"
-            )
+        // staged (copied on-demand):
+        for p in ["integrations/components/BookingWidget.astro", "integrations/components/DonationButton.astro",
+                  "integrations/components/Comments.astro", "integrations/pages/book.astro", "integrations/pages/donate.astro"] {
+            #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "missing staged \(p)")
         }
+        // NOT base-scaffolded:
+        for p in ["src/components/BookingWidget.astro", "src/pages/book.astro", "src/pages/donate.astro"] {
+            #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "should be staged, not in src: \(p)")
+        }
+    }
+
+    @Test func layoutsHaveImportAndBodyAnchors() throws {
+        let root = templateRoot()
+        let base = try String(contentsOf: root.appendingPathComponent("src/layouts/BaseLayout.astro"), encoding: .utf8)
+        #expect(base.contains("// anglesite:imports"))
+        #expect(base.contains("<!-- anglesite:body-end -->"))
+        let blog = try String(contentsOf: root.appendingPathComponent("src/layouts/BlogPost.astro"), encoding: .utf8)
+        #expect(blog.contains("// anglesite:imports"))
+        #expect(blog.contains("<!-- anglesite:comments -->"))
+    }
+
+    @Test func onDemandPagesUseReadConfigNotImportMetaEnv() throws {
+        let root = templateRoot()
+        for p in ["integrations/pages/book.astro", "integrations/pages/donate.astro"] {
+            let s = try String(contentsOf: root.appendingPathComponent(p), encoding: .utf8)
+            #expect(s.contains("readConfig("), "\(p) should use readConfig")
+            #expect(!s.contains("import.meta.env"), "\(p) must not use import.meta.env")
+        }
+    }
+
+    @Test func scaffoldExcludesIntegrationsDir() throws {
+        let s = try String(contentsOf: templateRoot().appendingPathComponent("scripts/scaffold.sh"), encoding: .utf8)
+        #expect(s.contains("--exclude='integrations/'"))
     }
 
     // Collect all .writeConfig ConfigEntry keys from a descriptor's operations.
@@ -56,11 +80,11 @@ import Foundation
         return keys
     }
 
-    // Extract all import.meta.env.IDENTIFIER tokens from an Astro file.
-    private func envKeysReferenced(in source: String) -> Set<String> {
+    // Extract all readConfig("KEY") tokens from an Astro file.
+    private func readConfigKeysReferenced(in source: String) -> Set<String> {
         var keys = Set<String>()
-        // Match import.meta.env.SOME_KEY (uppercase identifiers only — these are env vars)
-        let pattern = #"import\.meta\.env\.([A-Z][A-Z0-9_]*)"#
+        // Match readConfig("SOME_KEY") or readConfig('SOME_KEY')
+        let pattern = #"readConfig\(["']([A-Z][A-Z0-9_]*)["']\)"#
         let regex = try! NSRegularExpression(pattern: pattern)
         let range = NSRange(source.startIndex..., in: source)
         for match in regex.matches(in: source, range: range) {
@@ -71,39 +95,28 @@ import Foundation
         return keys
     }
 
-    /// Guard test: env keys referenced by each integration page must be a subset of the
+    /// Guard test: config keys referenced by each integration page must be a subset of the
     /// keys that its descriptor writes via .writeConfig operations.
     /// This catches mismatches like DONATIONS_LABEL (page) vs DONATIONS_BUTTON_TEXT (descriptor).
     @Test func pageEnvKeysAreWrittenByDescriptors() throws {
         let root = templateRoot()
 
-        // Booking: src/pages/book.astro
-        let bookURL = root.appendingPathComponent("src/pages/book.astro")
+        // Booking: integrations/pages/book.astro
+        let bookURL = root.appendingPathComponent("integrations/pages/book.astro")
         let bookSource = try String(contentsOf: bookURL, encoding: .utf8)
-        let bookReferenced = envKeysReferenced(in: bookSource)
+        let bookReferenced = readConfigKeysReferenced(in: bookSource)
         let bookWritten = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .booking))
         let bookUnknown = bookReferenced.subtracting(bookWritten)
         #expect(bookUnknown.isEmpty,
-            "book.astro references env keys not written by booking descriptor: \(bookUnknown.sorted())")
+            "book.astro references config keys not written by booking descriptor: \(bookUnknown.sorted())")
 
-        // Donations: src/pages/donate.astro
-        let donateURL = root.appendingPathComponent("src/pages/donate.astro")
+        // Donations: integrations/pages/donate.astro
+        let donateURL = root.appendingPathComponent("integrations/pages/donate.astro")
         let donateSource = try String(contentsOf: donateURL, encoding: .utf8)
-        let donateReferenced = envKeysReferenced(in: donateSource)
+        let donateReferenced = readConfigKeysReferenced(in: donateSource)
         let donateWritten = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .donations))
         let donateUnknown = donateReferenced.subtracting(donateWritten)
         #expect(donateUnknown.isEmpty,
-            "donate.astro references env keys not written by donations descriptor: \(donateUnknown.sorted())")
-    }
-
-    @Test func layoutsHaveAnchors() throws {
-        let root = templateRoot()
-        let baseURL = root.appendingPathComponent("src/layouts/BaseLayout.astro")
-        let base = try String(contentsOf: baseURL, encoding: .utf8)
-        #expect(base.contains("<!-- anglesite:body-end -->"))
-
-        let blogURL = root.appendingPathComponent("src/layouts/BlogPost.astro")
-        let blog = try String(contentsOf: blogURL, encoding: .utf8)
-        #expect(blog.contains("<!-- anglesite:comments -->"))
+            "donate.astro references config keys not written by donations descriptor: \(donateUnknown.sorted())")
     }
 }
