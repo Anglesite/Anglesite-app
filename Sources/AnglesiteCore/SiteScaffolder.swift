@@ -95,6 +95,17 @@ public actor SiteScaffolder {
                                       tagline: draft.tagline, siteDirectory: siteDir, fileManager: fileManager) }
         catch { emit(.warning(step: "writingContent", message: humanize(error))) }
 
+        // 4b. Optional hero image (Image Playground, #92) — non-blocking. Only when the owner
+        // generated one in the wizard; copies it into public/ and references it from the homepage.
+        if let hero = draft.heroImageURL {
+            do {
+                try HeroImage.install(from: hero, headline: draft.headline, siteName: draft.name,
+                                      siteDirectory: siteDir, fileManager: fileManager)
+            } catch {
+                emit(.warning(step: "writingContent", message: "Hero image not added: \(humanize(error))"))
+            }
+        }
+
         // 5. npm install (cwd = Source/, non-fatal — site still opens with the deps-not-installed preview state)
         emit(.installing)
         if let node = NodeRuntime.bundledExecutableURL {
