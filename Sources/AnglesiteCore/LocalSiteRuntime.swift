@@ -115,9 +115,10 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
                 // anyway (preview is the primary feature; the edit pipeline is an enhancement).
                 await startMCPClient(siteID: siteID, siteDirectory: siteDirectory)
                 guard gen == generation else { return }
-                // Populate the content graph from the now-initialized MCP server. Best-effort:
-                // a missing/erroring `list_content` (older plugin) just leaves the graph empty.
-                await populateContentGraph(siteID: siteID, generation: gen)
+                // Populate the content graph with a native scan of the site's `Source/` directory
+                // (Bucket 1, #275). Replaces the `list_content` MCP round-trip — same projection,
+                // no subprocess hop. An empty/unscannable site just leaves the graph empty.
+                await populateContentGraph(siteID: siteID, siteDirectory: siteDirectory, generation: gen)
                 guard gen == generation else { return }
                 setState(.ready(siteID: siteID, url: url))
             } catch {
@@ -154,43 +155,17 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
         }
     }
 
-    /// Call the plugin's `list_content` MCP tool and load the result into `contentGraph`. A no-op
-    /// when no graph is attached. The whole path is best-effort: a missing tool (older plugin,
-    /// surfaced as `MCPError.rpcError`), an `isError` result, a malformed payload, or the MCP
-    /// client not running all log a warning and leave the graph empty — preview is unaffected.
-    private func populateContentGraph(siteID: String, generation gen: Int) async {
+    /// Scan the site's `Source/` directory (`siteDirectory`) into `contentGraph` via the native
+    /// `ContentScanner` (Bucket 1, #275). A no-op when no graph is attached. The scan is read-only
+    /// and total — an empty or partial site simply yields fewer entries; nothing throws.
+    private func populateContentGraph(siteID: String, siteDirectory: URL, generation gen: Int) async {
         guard let graph = contentGraph else { return }
-        guard await mcpClient.isRunning else { return }
-        do {
-            let result = try await mcpClient.callTool(name: "list_content")
-            // A newer start() may have superseded us during the call — don't pollute the shared
-            // graph with a site this window is no longer showing; that start() loads its own.
-            guard gen == generation else { return }
-            guard !result.isError else {
-                await logCenter.append(
-                    source: "mcp:\(siteID)", stream: .stderr,
-                    text: "list_content returned an error result — content graph left empty"
-                )
-                return
-            }
-            let text = result.content.first(where: { $0.type == "text" })?.text ?? ""
-            let listing = try ContentListing.parse(jsonText: text, siteID: siteID)
-            await graph.load(siteID: siteID, pages: listing.pages, posts: listing.posts, images: listing.images)
-            loadedGraphSiteID = siteID
-        } catch let MCPClient.MCPError.rpcError(code, _) where code == -32601 {
-            // Method-not-found: older plugin without the tool — expected, not worth alarming about.
-            // Any *other* RPC error means `list_content` exists but failed, so it falls through to
-            // the stderr branch below where it stays visible in the Debug pane (logs are sacred).
-            await logCenter.append(
-                source: "mcp:\(siteID)", stream: .stdout,
-                text: "list_content not available (older plugin) — content graph left empty"
-            )
-        } catch {
-            await logCenter.append(
-                source: "mcp:\(siteID)", stream: .stderr,
-                text: "list_content population failed: \(error) — content graph left empty"
-            )
-        }
+        let listing = ContentScanner.scan(projectRoot: siteDirectory, siteID: siteID)
+        // A newer start() may have superseded us during the scan — don't pollute the shared graph
+        // with a site this window is no longer showing; that start() loads its own.
+        guard gen == generation else { return }
+        await graph.load(siteID: siteID, pages: listing.pages, posts: listing.posts, images: listing.images)
+        loadedGraphSiteID = siteID
     }
 
     private func startMCPClient(siteID: String, siteDirectory: URL) async {
