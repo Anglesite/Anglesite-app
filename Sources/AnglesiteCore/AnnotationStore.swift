@@ -50,7 +50,9 @@ public enum AnnotationStore {
     /// the Node store's `JSON.stringify({ version, annotations }, null, 2) + "\n"`.
     public static func save(_ annotations: [Annotation], in directory: URL) throws {
         let text = serialize(annotations) + "\n"
-        try Data(text.utf8).write(to: directory.appendingPathComponent(filename))
+        // `.atomic` writes to a sibling temp file and renames it over the target, so a crash
+        // mid-write can't truncate annotations.json (which `load` would then read back as []).
+        try Data(text.utf8).write(to: directory.appendingPathComponent(filename), options: .atomic)
     }
 
     /// Render the versioned wrapper exactly as `JSON.stringify(obj, null, 2)` would: keys in
@@ -171,6 +173,9 @@ public enum AnnotationStore {
         guard let index = annotations.firstIndex(where: { $0.id == id }) else {
             throw AnnotationStoreError.notFound(id)
         }
+        // NOTE: re-stamps `resolvedAt` even if already resolved — this deliberately mirrors
+        // `annotations.mjs`'s unconditional `resolveAnnotation`. Don't add an early-return guard
+        // without also changing the Node reference, or the two stores diverge.
         let existing = annotations[index]
         let resolved = Annotation(
             id: existing.id,

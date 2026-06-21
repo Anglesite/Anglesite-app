@@ -14,8 +14,9 @@ struct ContentScannerTests {
             .appendingPathComponent("content-scan-\(UUID().uuidString)", isDirectory: true)
         for (rel, contents) in files {
             let url = root.appendingPathComponent(rel)
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? Data(contents.utf8).write(to: url)
+            // `try!` so a failed setup write points here, not at a confusing downstream assertion.
+            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try! Data(contents.utf8).write(to: url)
         }
         return root
     }

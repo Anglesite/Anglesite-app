@@ -60,12 +60,17 @@ public enum Frontmatter {
 
     // MARK: - Helpers
 
+    /// Compiled once — `frontmatterBlock` runs per page/post file during a scan, so recompiling
+    /// this dotall pattern each call would be O(files).
+    private static let frontmatterPattern = try! NSRegularExpression(
+        pattern: "^---\\r?\\n([\\s\\S]*?)\\r?\\n---"
+    )
+
     /// Extract the text between the opening `---<newline>` and the first following `<newline>---`,
     /// anchored at the very start of `source`. `nil` if there is no such block.
     private static func frontmatterBlock(_ source: String) -> String? {
-        let pattern = try! NSRegularExpression(pattern: "^---\\r?\\n([\\s\\S]*?)\\r?\\n---")
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
-        guard let match = pattern.firstMatch(in: source, range: range),
+        guard let match = frontmatterPattern.firstMatch(in: source, range: range),
               let captured = Range(match.range(at: 1), in: source)
         else { return nil }
         return String(source[captured])

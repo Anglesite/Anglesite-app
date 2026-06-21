@@ -43,7 +43,8 @@ struct AnnotationStoreTests {
         let root = makeRoot()
         let home = try AnnotationStore.add(in: root, path: "/", selector: "#hero", text: "a", sourceFile: nil, now: now)
         _ = try AnnotationStore.add(in: root, path: "/about", selector: "h1", text: "b", sourceFile: nil, now: now)
-        _ = try AnnotationStore.resolve(in: root, id: AnnotationStore.add(in: root, path: "/", selector: ".x", text: "c", sourceFile: nil, now: now).id, now: now)
+        let toResolve = try AnnotationStore.add(in: root, path: "/", selector: ".x", text: "c", sourceFile: nil, now: now)
+        _ = try AnnotationStore.resolve(in: root, id: toResolve.id, now: now)
 
         // Default: only unresolved, all paths.
         let all = AnnotationStore.list(in: root)
@@ -65,6 +66,17 @@ struct AnnotationStoreTests {
         #expect(resolved.resolvedAt == resolvedAt)
         // Persisted: a fresh load reflects the resolution.
         #expect(AnnotationStore.load(in: root).first?.resolved == true)
+    }
+
+    @Test("resolve re-stamps resolvedAt on a second call (mirrors the Node store)")
+    func resolveReStamps() throws {
+        let root = makeRoot()
+        let a = try AnnotationStore.add(in: root, path: "/", selector: "#hero", text: "a", sourceFile: nil, now: now)
+        _ = try AnnotationStore.resolve(in: root, id: a.id, now: now)
+        let later = now.addingTimeInterval(120)
+        let second = try AnnotationStore.resolve(in: root, id: a.id, now: later)
+        // Deliberate: `annotations.mjs` re-stamps unconditionally, so we do too.
+        #expect(second.resolvedAt == later)
     }
 
     @Test("resolve throws notFound for an unknown id")

@@ -160,7 +160,12 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
     /// and total — an empty or partial site simply yields fewer entries; nothing throws.
     private func populateContentGraph(siteID: String, siteDirectory: URL, generation gen: Int) async {
         guard let graph = contentGraph else { return }
-        let listing = ContentScanner.scan(projectRoot: siteDirectory, siteID: siteID)
+        // Run the recursive filesystem scan off the actor so it doesn't block this runtime from
+        // processing other messages (stop signals, state queries) for the scan's duration — the
+        // old MCP path yielded the actor on every `await`, and this preserves that.
+        let listing = await Task.detached(priority: .utility) {
+            ContentScanner.scan(projectRoot: siteDirectory, siteID: siteID)
+        }.value
         // A newer start() may have superseded us during the scan — don't pollute the shared graph
         // with a site this window is no longer showing; that start() loads its own.
         guard gen == generation else { return }

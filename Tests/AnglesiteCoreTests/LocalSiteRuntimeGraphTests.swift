@@ -41,12 +41,13 @@ struct LocalSiteRuntimeGraphTests {
     private func makeSite(_ files: [String: String] = [:]) -> URL {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("runtime-graph-\(UUID().uuidString)", isDirectory: true)
+        // `try!` so a failed setup write points here, not at a confusing downstream assertion.
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         for (rel, contents) in files {
             let url = root.appendingPathComponent(rel)
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? Data(contents.utf8).write(to: url)
+            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try! Data(contents.utf8).write(to: url)
         }
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }
 
