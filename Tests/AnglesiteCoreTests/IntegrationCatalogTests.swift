@@ -27,4 +27,14 @@ import Testing
             operations: [])
         #expect(bad.validate().contains { $0.contains("nope") })
     }
+
+    @Test func validateCatchesDanglingFieldReference() {
+        let bad = IntegrationDescriptor(
+            id: .booking, displayName: "x", summary: "x",
+            providers: [],
+            fields: [Field(key: "real", label: "Real", kind: .text)],
+            operations: [.writeConfig([ConfigEntry(key: "k", value: "v")],
+                                      when: .fieldEquals(key: "nope", value: "x"))])
+        #expect(bad.validate().contains { $0.contains("nope") })
+    }
 }
