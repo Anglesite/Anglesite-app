@@ -11,7 +11,11 @@ import Foundation
 @Suite struct IntegrationTemplateAssetsTests {
 
     private func templateRoot() -> URL {
-        let here = URL(filePath: #filePath)
+        // NOTE: use the classic URL APIs (fileURLWithPath / appendingPathComponent / .path), NOT the
+        // newer URL(filePath:) / appending(path:) / path(percentEncoded:). The latter are vended by
+        // the swift-foundation overlay (libswift_DarwinFoundation3.dylib), which the macOS-26 CI
+        // runners don't ship — a test bundle that links it can't load there. See PR #283 CI notes.
+        let here = URL(fileURLWithPath: #filePath)
         // here      = .../Tests/AnglesiteCoreTests/IntegrationTemplateAssetsTests.swift
         // parent[0] = .../Tests/AnglesiteCoreTests/
         // parent[1] = .../Tests/
@@ -20,8 +24,8 @@ import Foundation
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        #expect(FileManager.default.fileExists(atPath: repoRoot.appending(path: "Package.swift").path), "repo-root detection drifted")
-        return repoRoot.appending(path: "Resources/Template")
+        #expect(FileManager.default.fileExists(atPath: repoRoot.appendingPathComponent("Package.swift").path), "repo-root detection drifted")
+        return repoRoot.appendingPathComponent("Resources/Template")
     }
 
     @Test func requiredAssetsExist() {
@@ -35,7 +39,7 @@ import Foundation
         ]
         for p in paths {
             #expect(
-                FileManager.default.fileExists(atPath: root.appending(path: p).path(percentEncoded: false)),
+                FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path),
                 "missing \(p)"
             )
         }
@@ -74,7 +78,7 @@ import Foundation
         let root = templateRoot()
 
         // Booking: src/pages/book.astro
-        let bookURL = root.appending(path: "src/pages/book.astro")
+        let bookURL = root.appendingPathComponent("src/pages/book.astro")
         let bookSource = try String(contentsOf: bookURL, encoding: .utf8)
         let bookReferenced = envKeysReferenced(in: bookSource)
         let bookWritten = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .booking))
@@ -83,7 +87,7 @@ import Foundation
             "book.astro references env keys not written by booking descriptor: \(bookUnknown.sorted())")
 
         // Donations: src/pages/donate.astro
-        let donateURL = root.appending(path: "src/pages/donate.astro")
+        let donateURL = root.appendingPathComponent("src/pages/donate.astro")
         let donateSource = try String(contentsOf: donateURL, encoding: .utf8)
         let donateReferenced = envKeysReferenced(in: donateSource)
         let donateWritten = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .donations))
@@ -94,11 +98,11 @@ import Foundation
 
     @Test func layoutsHaveAnchors() throws {
         let root = templateRoot()
-        let baseURL = root.appending(path: "src/layouts/BaseLayout.astro")
+        let baseURL = root.appendingPathComponent("src/layouts/BaseLayout.astro")
         let base = try String(contentsOf: baseURL, encoding: .utf8)
         #expect(base.contains("<!-- anglesite:body-end -->"))
 
-        let blogURL = root.appending(path: "src/layouts/BlogPost.astro")
+        let blogURL = root.appendingPathComponent("src/layouts/BlogPost.astro")
         let blog = try String(contentsOf: blogURL, encoding: .utf8)
         #expect(blog.contains("<!-- anglesite:comments -->"))
     }
