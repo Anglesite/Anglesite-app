@@ -66,7 +66,6 @@ public enum IntegrationCatalog {
             Field(key: "style", label: "Placement", kind: .choice([
                 Choice(value: "inline", label: "On a /book page"),
                 Choice(value: "floating", label: "Floating button (site-wide)"),
-                Choice(value: "button", label: "Inline button"),
             ]), defaultValue: "inline"),
             Field(key: "buttonText", label: "Button text", kind: .text, isOptional: true,
                   defaultValue: "Book a time", visibleWhen: .fieldEquals(key: "style", value: "floating")),

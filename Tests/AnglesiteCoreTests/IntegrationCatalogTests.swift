@@ -16,7 +16,7 @@ import Testing
         let booking = IntegrationCatalog.descriptor(for: .booking)
         let style = booking.fields.first { $0.key == "style" }
         guard case .choice(let choices)? = style?.kind else { Issue.record("no style choice"); return }
-        #expect(Set(choices.map { $0.value }) == Set(["inline", "floating", "button"]))
+        #expect(Set(choices.map { $0.value }) == Set(["inline", "floating"]))
     }
 
     @Test func validateCatchesDanglingProviderReference() {
