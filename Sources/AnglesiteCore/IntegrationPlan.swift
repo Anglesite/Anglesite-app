@@ -45,4 +45,6 @@ public enum IntegrationError: Error, Equatable, Sendable {
     case invalidValue(key: String, reason: String)
     case unknownProvider(String)
     case providerRequired
+    case siteNotFound
+    case templateUnavailable
 }
