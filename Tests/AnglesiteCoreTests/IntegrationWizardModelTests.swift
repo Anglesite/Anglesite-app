@@ -41,4 +41,23 @@ import Foundation
         await m.apply()
         #expect(m.progress.contains(.done(integrationID: "giscus")))
     }
+
+    @Test func advanceSurfacesPlanFailure() async {
+        struct FailingService: IntegrationOperationsService {
+            func descriptors() -> [IntegrationDescriptor] { IntegrationCatalog.all }
+            func plan(integrationID: IntegrationID, answers: Answers, siteID: String) async -> Result<OperationPlan, IntegrationError> {
+                .failure(.missingRequiredField(key: "username"))
+            }
+            func apply(_ plan: OperationPlan, siteID: String) async -> IntegrationScaffolder.SetupStep {
+                .done(integrationID: plan.integrationID.rawValue)
+            }
+        }
+        let m = IntegrationWizardModel(service: FailingService(), siteID: "s")
+        m.selectedID = .booking
+        m.step = .fields
+        await m.advance()  // fields -> review (plan fails)
+        #expect(m.step == .review)
+        #expect(m.plan == nil)
+        #expect(m.planError != nil)
+    }
 }

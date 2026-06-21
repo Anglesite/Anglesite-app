@@ -50,6 +50,9 @@ public enum AnglesiteIntents {
         AppDependencyManager.shared.add { () -> any ContentOperationsService in
             NativeContentOperations(siteDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory })
         }
+        AppDependencyManager.shared.add { () -> any IntegrationOperationsService in
+            IntegrationOperations.live()
+        }
         // `EditContentIntent` (B.5 / #149) routes natural-language edits through
         // `IntentEditBridge`, which asks `EditRouterRegistry.shared` for the live edit router of
         // the requested site. The registry is populated by `PreviewModel.open()` and cleared by

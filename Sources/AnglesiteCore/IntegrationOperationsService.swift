@@ -40,3 +40,14 @@ public struct IntegrationOperations: IntegrationOperationsService {
         return terminal
     }
 }
+
+public extension IntegrationOperations {
+    /// The production instance: resolves a site id to its `Source/` dir via `SiteStore.shared`
+    /// and the template root via `TemplateRuntime`. Single construction path for every front-door.
+    static func live() -> IntegrationOperations {
+        IntegrationOperations(
+            sourceDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory },
+            templateDirectory: { TemplateRuntime.resolve().url }
+        )
+    }
+}

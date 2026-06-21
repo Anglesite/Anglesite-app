@@ -54,6 +54,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private let tier: FoundationModelTier
     private let editBridge: IntentEditBridge?
     private let contentGraph: SiteContentGraph?
+    private let integrationService: (any IntegrationOperationsService)?
     private let logger = Logger(subsystem: "dev.anglesite.app", category: "FoundationModelAssistant")
     /// The current conversational turn's consumer-facing ``TurnRelay``, retained so ``cancel()`` can
     /// wind it down. Cancelling stops *delivery* only — it never cancels the model stream, because
@@ -77,11 +78,13 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     public init(
         tier: FoundationModelTier = .onDevice,
         editBridge: IntentEditBridge? = nil,
-        contentGraph: SiteContentGraph? = nil
+        contentGraph: SiteContentGraph? = nil,
+        integrationService: (any IntegrationOperationsService)? = nil
     ) {
         self.tier = tier
         self.editBridge = editBridge
         self.contentGraph = contentGraph
+        self.integrationService = integrationService
         if tier == .privateCloudCompute {
             // v1 has no separate PCC session; fall back to on-device with a logged warning so the
             // requested tier degrades gracefully rather than erroring (see spec / #155).
@@ -270,11 +273,15 @@ public actor FoundationModelAssistant: ConversationalAssistant {
 
     /// Tool names for the `.started` event (emitted only on the `converse` path) so the chat UI can
     /// reflect what's wired. Never empty — the conversational session always carries
-    /// `SpotlightSearchTool`; the edit/search pair is added only when both deps are present.
+    /// `SpotlightSearchTool`; the edit/search pair is added only when both deps are present;
+    /// `SetupIntegrationTool` is added when an `integrationService` is provided.
     private var attachedToolNames: [String] {
         var names = [Self.spotlightToolDisplayName]
         if editBridge != nil && contentGraph != nil {
             names += [ApplyEditTool.toolName, SearchContentTool.toolName]
+        }
+        if integrationService != nil {
+            names.append(SetupIntegrationTool.toolName)
         }
         return names
     }
@@ -324,6 +331,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
                 contextSelector: context.selectedElementSelector
             ))
             tools.append(SearchContentTool(contentGraph: contentGraph, siteID: context.siteID))
+        }
+        if let integrationService {
+            tools.append(SetupIntegrationTool(service: integrationService, siteID: context.siteID))
         }
         // `tools` is empty only on the one-shot paths (`includeSpotlight: false`) with no
         // editBridge/contentGraph; the converse path always appends Spotlight, so its session is

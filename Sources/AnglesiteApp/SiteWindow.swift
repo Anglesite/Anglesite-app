@@ -70,6 +70,9 @@ struct SiteWindow: View {
     /// Non-nil ⟺ the Siri AI Readiness sheet is presented (`.sheet(item:)`); coupling presentation
     /// to the model rather than a separate Bool makes an empty, undismissable sheet impossible.
     @State private var siriReadinessModel: SiriReadinessModel?
+    /// Non-nil ⟺ the Add Integration wizard is presented. Coupling presentation to the model
+    /// (`.sheet(item:)`) prevents an empty sheet if construction somehow lags.
+    @State private var integrationWizardModel: IntegrationWizardModel?
     @State private var navigator: SiteNavigatorModel?
     @State private var mainPaneMode: MainPaneMode = .preview
     /// Sidebar visibility persisted per scene (window), per the design spec. Column WIDTH is restored
@@ -331,6 +334,19 @@ struct SiteWindow: View {
                 .help("Check whether Siri workflows are ready for this site")
                 .disabled(contentIndexerStore.indexer == nil)
             }
+
+            // Add Integration — lowest priority, only when a site is open.
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    guard integrationWizardModel == nil else { return }
+                    integrationWizardModel = IntegrationWizardModel(
+                        service: IntegrationOperations.live(), siteID: site.id)
+                } label: {
+                    Label("Add Integration…", systemImage: "puzzlepiece.extension")
+                }
+                .help("Set up a third-party integration for this site")
+            }
+            .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
         }
         .sheet(isPresented: $deploy.blockedPresented) {
             if case .blocked(let failures, let warnings) = deploy.phase {
@@ -383,6 +399,17 @@ struct SiteWindow: View {
                         Button("Done") { siriReadinessModel = nil }
                     }
                 }
+            }
+        }
+        .sheet(item: $integrationWizardModel) { model in
+            NavigationStack {
+                IntegrationWizard(model: model, onClose: { integrationWizardModel = nil })
+                    .navigationTitle("Add Integration")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { integrationWizardModel = nil }
+                        }
+                    }
             }
         }
         .annotatedAsSite(site)
@@ -664,7 +691,8 @@ struct SiteWindow: View {
             assistant: FoundationModelAssistant(
                 tier: .onDevice,
                 editBridge: makeEditBridge(),
-                contentGraph: contentGraph
+                contentGraph: contentGraph,
+                integrationService: IntegrationOperations.live()
             ),
             annotationFeed: feed,
             annotationResolver: annotationResolver,
@@ -694,7 +722,8 @@ struct SiteWindow: View {
             assistant = FoundationModelAssistant(
                 tier: tier,
                 editBridge: makeEditBridge(),
-                contentGraph: contentGraph
+                contentGraph: contentGraph,
+                integrationService: IntegrationOperations.live()
             )
         case .claude:
             assistant = ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)

@@ -3,13 +3,15 @@ import Foundation
 import Observation
 
 @MainActor @Observable
-public final class IntegrationWizardModel {
+public final class IntegrationWizardModel: Identifiable {
     public enum Step: Int, CaseIterable { case pickIntegration, pickProvider, fields, review, applying }
 
+    public let id = UUID()
     public var step: Step = .pickIntegration
     public var selectedID: IntegrationID?
     public var answers: Answers = [:]
     public internal(set) var plan: OperationPlan?
+    public internal(set) var planError: String?
     public internal(set) var progress: [IntegrationScaffolder.SetupStep] = []
 
     private let service: any IntegrationOperationsService
@@ -24,6 +26,8 @@ public final class IntegrationWizardModel {
         guard let id = selectedID else { return nil }
         return service.descriptors().first { $0.id == id }
     }
+
+    public var descriptorsForPicker: [IntegrationDescriptor] { service.descriptors() }
 
     public var visibleFields: [Field] {
         guard let descriptor else { return [] }
@@ -50,8 +54,16 @@ public final class IntegrationWizardModel {
         guard let next = Step(rawValue: step.rawValue + 1) else { return }
         step = next
         if step == .review, let id = selectedID {
-            if case .success(let p) = await service.plan(integrationID: id, answers: answers, siteID: siteID) {
+            let result = await service.plan(integrationID: id, answers: answers, siteID: siteID)
+            switch result {
+            case .success(let p):
                 plan = p
+                planError = nil
+            case .failure(let error):
+                plan = nil
+                let descriptor = service.descriptors().first { $0.id == id }
+                    ?? IntegrationCatalog.descriptor(for: id)
+                planError = SetupIntegrationArguments.reply(for: .failure(error), descriptor: descriptor)
             }
         }
     }
