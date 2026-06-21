@@ -24,14 +24,20 @@ public actor ProcessSupervisor {
     /// reaches every child the app spawned. Tests build their own instances.
     public static let shared = ProcessSupervisor()
 
-    /// Ignore `SIGPIPE` process-wide. Every child's stdin pipe is owned here; if a child closes its
-    /// read end (crash/exit) while we're mid-write, the default `SIGPIPE` disposition terminates the
-    /// **whole process** with signal 13 — which under `swift test --parallel` aborts the entire test
-    /// run with no failing-test marker. Ignoring it makes the write fail with `EPIPE` instead, which
-    /// `FileHandle`/backend writes already surface or absorb. Installed exactly once (Swift evaluates
-    /// a `static let` lazily and thread-safely) the first time any supervisor is constructed — before
-    /// any child can exist — so both the app and the test process are covered.
-    private static let ignoreSIGPIPE: Void = { signal(SIGPIPE, SIG_IGN) }()
+    /// Neutralize `SIGPIPE` process-wide. Every child's stdin pipe is owned here; if a child closes
+    /// its read end (crash/exit) while we're mid-write, the default `SIGPIPE` disposition terminates
+    /// the **whole process** with signal 13 — which under `swift test --parallel` aborts the entire
+    /// test run with no failing-test marker. A no-op handler makes the write fail with `EPIPE`
+    /// instead, which `FileHandle`/backend writes already surface or absorb.
+    ///
+    /// We install a no-op handler rather than `SIG_IGN` deliberately: the Swift-vended
+    /// `Darwin.SIG_IGN` constant is exported from the `libswift_DarwinFoundation3` overlay, which the
+    /// macOS-26 CI runners don't ship — referencing it makes the whole test bundle fail to load
+    /// ("Library not loaded: libswift_DarwinFoundation3.dylib"). A non-capturing closure handler
+    /// avoids that symbol entirely while achieving the same crash-suppression. Installed exactly once
+    /// (Swift evaluates a `static let` lazily and thread-safely) the first time any supervisor is
+    /// constructed — before any child can exist — so both the app and the test process are covered.
+    private static let ignoreSIGPIPE: Void = { signal(SIGPIPE, { _ in }) }()
 
     private let backend: SupervisorBackend
 
