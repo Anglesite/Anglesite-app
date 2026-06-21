@@ -74,7 +74,7 @@ public enum IntegrationCatalog {
             .copyFile(from: TemplateRef("src/pages/book.astro"),
                       to: "src/pages/book.astro", when: .fieldEquals(key: "style", value: "inline")),
             .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:body-end -->",
-                            snippet: "<BookingWidget provider=\"{{provider}}\" username=\"{{username}}\" eventSlug=\"{{eventSlug}}\" style=\"floating\" buttonText=\"{{buttonText}}\" client:load />",
+                            snippet: "<BookingWidget provider=\"{{provider}}\" username=\"{{username}}\" eventSlug=\"{{eventSlug}}\" style=\"floating\" buttonText=\"{{buttonText}}\" />",
                             when: .fieldEquals(key: "style", value: "floating")),
             .writeConfig([
                 ConfigEntry(key: "BOOKING_PROVIDER", value: "{{provider}}"),
@@ -132,7 +132,7 @@ public enum IntegrationCatalog {
             .copyFile(from: TemplateRef("src/components/Comments.astro"),
                       to: "src/components/Comments.astro", when: .always),
             .injectAtAnchor(file: "src/layouts/BlogPost.astro", anchor: "<!-- anglesite:comments -->",
-                            snippet: "<Comments repo=\"{{repo}}\" repoId=\"{{repoId}}\" category=\"{{category}}\" categoryId=\"{{categoryId}}\" mapping=\"{{mapping}}\" client:visible />",
+                            snippet: "<Comments repo=\"{{repo}}\" repoId=\"{{repoId}}\" category=\"{{category}}\" categoryId=\"{{categoryId}}\" mapping=\"{{mapping}}\" />",
                             when: .always),
             .writeConfig([
                 ConfigEntry(key: "GISCUS_REPO", value: "{{repo}}"),
