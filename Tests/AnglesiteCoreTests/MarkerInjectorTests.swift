@@ -82,4 +82,41 @@ import Testing
                                              into: "<body>\(anchor)</body>").get()
         #expect(out.contains("<!-- anglesite:booking:start -->\n<X/>\n<!-- anglesite:booking:end -->"))
     }
+
+    @Test func lineStyleHealsOrphanedStartMarker() {
+        // Dangling start (end was hand-deleted).
+        let anchor = "// anglesite:imports"
+        let orphaned = "---\n// anglesite:booking:start\nconst x = 1;\n\(anchor)\n---"
+        let result = try! MarkerInjector.inject(
+            snippet: "import Booking from \"../components/BookingWidget.astro\";",
+            withID: "booking", atAnchor: anchor, into: orphaned, style: .line).get()
+        // Exactly one start marker.
+        #expect(result.components(separatedBy: "// anglesite:booking:start").count == 2)
+        // A complete block is present.
+        #expect(result.contains("// anglesite:booking:start\nimport Booking from"))
+        #expect(result.contains("// anglesite:booking:end"))
+    }
+
+    @Test func lineStyleHealsOrphanedEndMarker() {
+        // Dangling end (start was hand-deleted).
+        let anchor = "// anglesite:imports"
+        let orphaned = "---\n// anglesite:booking:end\nconst x = 1;\n\(anchor)\n---"
+        let result = try! MarkerInjector.inject(
+            snippet: "import Booking from \"../components/BookingWidget.astro\";",
+            withID: "booking", atAnchor: anchor, into: orphaned, style: .line).get()
+        // Exactly one end marker.
+        #expect(result.components(separatedBy: "// anglesite:booking:end").count == 2)
+        // A complete block is present.
+        #expect(result.contains("// anglesite:booking:start\nimport Booking from"))
+        #expect(result.contains("// anglesite:booking:end"))
+    }
+
+    @Test func lineStyleLeavesOrdinaryTsCommentUntouched() {
+        let anchor = "// anglesite:imports"
+        let doc = "---\n// This is a regular TypeScript comment\nconst x = 1;\n\(anchor)\n---"
+        let result = try! MarkerInjector.inject(
+            snippet: "import Foo from \"../components/Foo.astro\";",
+            withID: "foo", atAnchor: anchor, into: doc, style: .line).get()
+        #expect(result.contains("// This is a regular TypeScript comment"))
+    }
 }

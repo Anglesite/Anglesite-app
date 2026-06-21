@@ -95,6 +95,18 @@ import Foundation
         return keys
     }
 
+    @Test func scaffoldDoesNotExcludeConfigTs() throws {
+        let s = try String(contentsOf: templateRoot().appendingPathComponent("scripts/scaffold.sh"), encoding: .utf8)
+        // config.ts must ship to scaffolded sites — ensure it's not excluded.
+        #expect(!s.contains("config.ts"), "scaffold.sh must not exclude config.ts")
+        // The only excludes should be the known set.
+        let allowedExcludes = ["scaffold.sh", "themes.ts", "node_modules", ".DS_Store", "integrations"]
+        let excludeLines = s.components(separatedBy: "\n").filter { $0.contains("--exclude=") }
+        for line in excludeLines {
+            #expect(allowedExcludes.contains { line.contains($0) }, "unexpected exclude in scaffold.sh: \(line)")
+        }
+    }
+
     /// Guard test: config keys referenced by each integration page must be a subset of the
     /// keys that its descriptor writes via .writeConfig operations.
     /// This catches mismatches like DONATIONS_LABEL (page) vs DONATIONS_BUTTON_TEXT (descriptor).

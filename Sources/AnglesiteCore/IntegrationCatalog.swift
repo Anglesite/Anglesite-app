@@ -73,10 +73,7 @@ public enum IntegrationCatalog {
         operations: [
             .copyFile(from: TemplateRef("integrations/components/BookingWidget.astro"),
                       to: "src/components/BookingWidget.astro",
-                      when: .fieldEquals(key: "style", value: "floating")),
-            .copyFile(from: TemplateRef("integrations/components/BookingWidget.astro"),
-                      to: "src/components/BookingWidget.astro",
-                      when: .fieldEquals(key: "style", value: "inline")),
+                      when: .always),
             .copyFile(from: TemplateRef("integrations/pages/book.astro"),
                       to: "src/pages/book.astro", when: .fieldEquals(key: "style", value: "inline")),
             .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "// anglesite:imports",
