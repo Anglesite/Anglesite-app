@@ -1,5 +1,8 @@
 import SwiftUI
 import AnglesiteCore
+#if canImport(ImagePlayground)
+import ImagePlayground
+#endif
 
 /// The New Site wizard sheet. Presented from SitesLauncherView; calls `onComplete(siteID)`
 /// when the site is scaffolded and registered.
@@ -16,6 +19,7 @@ struct NewSiteWizard: View {
             footer
         }
         .frame(width: 520, height: 460)
+        .modifier(ImagePlaygroundPresenter(model: model))
     }
 
     @ViewBuilder private var content: some View {
@@ -102,7 +106,46 @@ struct NewSiteWizard: View {
             TextField("Welcome to \u{2026}", text: $model.draft.headline)
             Text("One line about you (optional)").font(.headline).padding(.top, 8)
             TextField("What you do, in a sentence", text: $model.draft.blurb)
+            heroImageSection
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Optional Image Playground hero image (#92). Hidden entirely when Apple Intelligence /
+    /// Image Playground isn't available on this device — sites work fine without it.
+    @ViewBuilder private var heroImageSection: some View {
+        if isImagePlaygroundAvailable {
+            Divider().padding(.vertical, 4)
+            Text("Hero image (optional)").font(.headline)
+            if model.hasHeroImage {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        .accessibilityHidden(true)
+                    Text("Hero image ready").font(.callout)
+                    Spacer()
+                    Button("Regenerate\u{2026}") { model.showingImagePlayground = true }
+                    Button("Remove") { model.setHeroImage(nil) }
+                }
+            } else {
+                Button {
+                    model.showingImagePlayground = true
+                } label: {
+                    Label("Generate hero image\u{2026}", systemImage: "wand.and.stars")
+                }
+                Text("Uses Apple Intelligence on your device. No content leaves your Mac without your say-so.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// True only when the Image Playground sheet can actually present (Apple Intelligence enabled,
+    /// OS new enough). Compiled-out / false on platforms without the framework.
+    private var isImagePlaygroundAvailable: Bool {
+        #if canImport(ImagePlayground)
+        if #available(macOS 26.0, *) {
+            return ImagePlaygroundViewController.isAvailable
+        }
+        #endif
+        return false
     }
 
     private var buildingStep: some View {
@@ -185,6 +228,34 @@ struct NewSiteWizard: View {
                 Button("Close") { onCancel() }
             }
         }.padding(.horizontal, 16).padding(.vertical, 10)
+    }
+}
+
+/// Presents the Image Playground sheet for the wizard's hero-image action (#92).
+///
+/// Isolated in a `ViewModifier` so the availability `#if`/`#available` gating lives in one place
+/// and `NewSiteWizard.body` stays clean. On platforms without the framework (or older OSes), this
+/// is an inert pass-through and the button that drives `showingImagePlayground` is never shown.
+private struct ImagePlaygroundPresenter: ViewModifier {
+    @Bindable var model: NewSiteWizardModel
+
+    func body(content: Content) -> some View {
+        #if canImport(ImagePlayground)
+        if #available(macOS 26.0, *) {
+            content.imagePlaygroundSheet(
+                isPresented: $model.showingImagePlayground,
+                concepts: model.heroImageConcepts.map { ImagePlaygroundConcept.text($0) }
+            ) { url in
+                // Image Playground hands back a URL to the generated image in a temporary
+                // location; stash it on the draft so the scaffolder copies it into the site.
+                model.setHeroImage(url)
+            }
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
     }
 }
 

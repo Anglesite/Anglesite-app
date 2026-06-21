@@ -28,6 +28,19 @@ public struct AnglesitePackage: Sendable, Equatable {
     public var sourceURL: URL { url.appendingPathComponent("Source", isDirectory: true) }
     public var configURL: URL { url.appendingPathComponent("Config", isDirectory: true) }
 
+    /// App-owned sync state, inside `Config/` (never in the `Source/` git repo).
+    public var syncDirectoryURL: URL { configURL.appendingPathComponent("sync", isDirectory: true) }
+
+    /// Single-file `git bundle` mirror of the `Source/` repo's history.
+    ///
+    /// This is the iCloud-syncable artifact (#283): iCloud Drive syncs a single opaque file
+    /// atomically and reliably, where a live `.git` directory — thousands of loose objects and
+    /// refs — desyncs, spawns `… 2` conflict copies, and corrupts under concurrent edits. The
+    /// bundle travels in `Config/sync/` so it rides along with the package in iCloud while staying
+    /// out of the `Source/` working tree. `BundleSync` writes it from `Source/` and, on a peer Mac,
+    /// fetches from it to fast-forward the local repo — the bundle acts as an iCloud-mediated remote.
+    public var syncBundleURL: URL { syncDirectoryURL.appendingPathComponent("source.bundle", isDirectory: false) }
+
     // MARK: - Marker
 
     /// The `Info.plist` marker: stable identity + format version + provenance. Encoded with
