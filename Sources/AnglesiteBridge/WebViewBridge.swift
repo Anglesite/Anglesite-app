@@ -15,7 +15,9 @@ public enum WebViewBridge {
     /// the user-content controller under the `anglesite` namespace — that's the JS → native channel
     /// for edit messages from the overlay. The overlay bundle (`edit-overlay/overlay.js`) is
     /// injected via `WKUserScript` at `atDocumentEnd` when present; missing bundle is non-fatal —
-    /// the preview just loads without edit affordances.
+    /// the preview just loads without edit affordances. The configuration is also opted into the
+    /// full inline Writing Tools experience (#91, see `enableWritingTools`) so Apple Intelligence's
+    /// rewrite / proofread / tone / summarize popover is offered in editable Keystatic prose fields.
     ///
     /// `@MainActor` because every WebKit type touched here (`WKWebViewConfiguration`,
     /// `WKUserContentController`, `WKWebsiteDataStore`, `WKUserScript`) is main-actor isolated
@@ -27,6 +29,7 @@ public enum WebViewBridge {
         #if DEBUG
         config.websiteDataStore = .nonPersistent()
         #endif
+        enableWritingTools(on: config)
         if let handler {
             config.userContentController.add(handler, name: scriptMessageNamespace)
         }
@@ -61,5 +64,34 @@ public enum WebViewBridge {
         #if DEBUG
         webView.isInspectable = true
         #endif
+    }
+
+    /// Opt the preview into the full inline Writing Tools experience (#91).
+    ///
+    /// Writing Tools is Apple Intelligence's on-device / Private Cloud Compute rewrite engine —
+    /// rewrite, proofread, tone shift (friendly / professional / concise), and summarize, all with
+    /// **zero** external API / LLM token cost. WebKit surfaces the system popover natively for
+    /// *editable* web content (`contenteditable` / `<input>` / `<textarea>`): when the overlay
+    /// promotes a Keystatic prose element to `contentEditable = "true"` (see `overlay.ts`'s
+    /// click-to-edit), selecting text inside it offers the popover. The rewrite is applied **inline
+    /// to the DOM**, so it flows back through the existing pipeline unchanged — the overlay's
+    /// blur-time `replace-text` `apply-edit` captures the rewritten `textContent`, routes it through
+    /// `MCPApplyEditRouter` → the plugin's `apply_edit` tool, and lands as a single undoable commit.
+    /// No new message type is needed.
+    ///
+    /// On macOS the behavior is a **configuration** property (`WKWebViewConfiguration`, settable
+    /// before the web view is created), not a `WKWebView` instance property — `WKWebView` only
+    /// exposes the read-only `isWritingToolsActive`. `.complete` selects the full inline experience;
+    /// the WebKit default is `.limited` (a panel-only fallback), so this opt-in is required to get
+    /// the inline popover. Gated on macOS 15.0+ since `writingToolsBehavior` (and Writing Tools
+    /// itself) ships there; the app's deployment target is higher, but the guard keeps
+    /// `AnglesiteBridge` (which declares a lower SPM floor and builds on CI's older runners) honest.
+    /// On a Mac without Apple Intelligence this is a safe no-op: WebKit simply never offers the
+    /// affordance.
+    @MainActor
+    public static func enableWritingTools(on configuration: WKWebViewConfiguration) {
+        if #available(macOS 15.0, *) {
+            configuration.writingToolsBehavior = .complete
+        }
     }
 }

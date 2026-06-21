@@ -78,6 +78,13 @@ function attachClickToEdit(awaitReply: (id: string, handler: (r: { status: strin
 
     const originalText = target.textContent ?? "";
 
+    // Apple Intelligence Writing Tools (#91) rides this same path with no extra wiring. Once the
+    // element is `contentEditable`, WebKit offers the system Writing Tools popover (rewrite /
+    // proofread / tone shift / summarize) on text selection — gated app-side by
+    // `WebViewBridge.enableWritingTools` setting `writingToolsBehavior = .complete`. A Writing
+    // Tools rewrite mutates `textContent` in place (WebKit applies it inline to the DOM), so the
+    // blur-time diff below captures it exactly like a typed edit: one `replace-text` apply-edit,
+    // one undoable commit. No new message type, and no Claude/LLM tokens.
     const finish = () => {
       target.contentEditable = "false";
       target.classList.remove(EDITABLE_CLASS);
