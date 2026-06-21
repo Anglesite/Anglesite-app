@@ -87,6 +87,24 @@ jobs:
       - name: Build (debug)
         run: swift build -c debug
 
+      # TEMP DEBUG (remove): the test bundle links libswift_DarwinFoundation3.dylib, which this
+      # runner lacks, so it can't load. List the symbols imported from that overlay (demangled) to
+      # pinpoint the offending Foundation API, then swap it for an older equivalent. PR #283.
+      - name: DEBUG which symbols pull libswift_DarwinFoundation3
+        continue-on-error: true
+        run: |
+          set -x
+          swift build --build-tests -c debug
+          BUNDLE=$(find .build -path '*AnglesitePackageTests.xctest/Contents/MacOS/AnglesitePackageTests' | head -1)
+          echo "bundle: $BUNDLE"
+          echo "===== otool -L (linked dylibs) ====="
+          otool -L "$BUNDLE" | grep -i foundation || true
+          echo "===== undefined symbols imported from DarwinFoundation3 (mangled) ====="
+          nm -m "$BUNDLE" 2>/dev/null | grep -i 'DarwinFoundation3' | head -60 || true
+          echo "===== same, demangled ====="
+          nm -m "$BUNDLE" 2>/dev/null | grep -i 'DarwinFoundation3' \
+            | sed -E 's/.*(_\$s[A-Za-z0-9_]*).*/\1/' | sort -u | xcrun swift-demangle | head -60 || true
+
       - name: Test
         env:
           ANGLESITE_PLUGIN_PATH: ${{ github.workspace }}/anglesite-plugin
