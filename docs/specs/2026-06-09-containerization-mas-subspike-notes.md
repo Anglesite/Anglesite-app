@@ -72,7 +72,7 @@ The pattern: shipping a Virtualization-using app on MAS is **rare**, requires ne
 
 ## Addendum — MAS precedent found (2026-06-20)
 
-A shipping, **sandboxed Mac App Store** app drives Apple Containerization in-process: [`try-containers/Containers`](https://github.com/try-containers/Containers) ("Containers — Run LXCs", [App Store](https://apps.apple.com/us/app/containers-run-lxcs/id6759180330), requires macOS 26+). This is a direct counter-data-point to the Precedent table above, which had **no** Virtualization-using app on the MAS.
+A shipping, **sandboxed Mac App Store** app drives Apple Containerization in-process: [`try-containers/Containers`](https://github.com/try-containers/Containers) ("Containers — Run LXCs", [App Store](https://apps.apple.com/app/containers-run-lxcs/id6759180330), requires macOS 26+). This is a direct counter-data-point to the Precedent table above, which had **no** Virtualization-using app on the MAS.
 
 What its source shows:
 
@@ -86,8 +86,8 @@ What its source shows:
 
 ### What this revises
 
-- **Wall 2 (`com.apple.security.virtualization`) is demonstrably clearable by an indie on MAS.** The spike rated this "negotiable / possible-but-uncertain." We now have a non-virtualization-vendor indie that got it granted for a sandboxed MAS app. Downgrade Wall 2 from "uncertain hurdle" to "clearable, with the usual restricted-entitlement provisioning-profile request."
-- **Wall 3 (`com.apple.vm.networking`) — still the load-bearing wall, but the precedent reframes it.** The Containers app ships **without** `vmnet`, which means it either (a) runs containers with reduced/host-proxied networking rather than routable per-container IPs, or (b) the in-process `LinuxContainer` path doesn't need `vmnet` for its networking model. **This is the open question to resolve before any MAS-local runtime for Anglesite**, because §0's design depends on the `http://<container-ip>:4321` routable-IP property. Study how `SandboxedContainersService` does networking without `vmnet` — that's the missing piece, not the entitlement.
+- **Wall 2 (`com.apple.security.virtualization`) is demonstrably clearable by an indie on MAS.** The spike rated this "negotiable / possible-but-uncertain." We now have a non-virtualization-vendor indie that got it granted for a sandboxed MAS app. Downgrade Wall 2 from "uncertain hurdle" to "clearable": it requires a provisioning-profile request to Apple (the same restricted-entitlement approval process `Containers` went through) — non-trivial but not a showstopper.
+- **Wall 3 (`com.apple.vm.networking`) — still the load-bearing wall, but the precedent reframes it.** The Containers app ships **without** `vmnet`, which means it either (a) runs containers with reduced/host-proxied networking rather than routable per-container IPs, or (b) the in-process `LinuxContainer` path doesn't need `vmnet` for its networking model. **This is the open question to resolve before any MAS-local runtime for Anglesite** (see #69, `LocalContainerSiteRuntime` — where the investigation lands), because §0's design depends on the `http://<container-ip>:4321` routable-IP property. Study how `SandboxedContainersService` does networking without `vmnet` — that's the missing piece, not the entitlement.
 
 ### What does *not* change
 
