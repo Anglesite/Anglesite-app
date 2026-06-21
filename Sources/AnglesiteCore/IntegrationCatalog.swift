@@ -26,7 +26,7 @@ public extension IntegrationDescriptor {
         }
         for (i, op) in operations.enumerated() {
             switch op {
-            case .copyFile(_, _, let w), .writeConfig(_, let w), .injectAtAnchor(_, _, _, let w):
+            case .copyFile(_, _, let w), .writeConfig(_, let w), .injectAtAnchor(_, _, _, let w, _):
                 check(w, "operation \(i)")
             case .addCSPDomains(let fromProvider, _, let w):
                 check(w, "operation \(i)")
@@ -78,7 +78,7 @@ public enum IntegrationCatalog {
                       to: "src/pages/book.astro", when: .fieldEquals(key: "style", value: "inline")),
             .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:body-end -->",
                             snippet: "<BookingWidget provider=\"{{provider}}\" username=\"{{username}}\" eventSlug=\"{{eventSlug}}\" style=\"floating\" buttonText=\"{{buttonText}}\" />",
-                            when: .fieldEquals(key: "style", value: "floating")),
+                            when: .fieldEquals(key: "style", value: "floating"), style: .html),
             .writeConfig([
                 ConfigEntry(key: "BOOKING_PROVIDER", value: "{{provider}}"),
                 ConfigEntry(key: "BOOKING_USERNAME", value: "{{username}}"),
@@ -136,7 +136,7 @@ public enum IntegrationCatalog {
                       to: "src/components/Comments.astro", when: .always),
             .injectAtAnchor(file: "src/layouts/BlogPost.astro", anchor: "<!-- anglesite:comments -->",
                             snippet: "<Comments repo=\"{{repo}}\" repoId=\"{{repoId}}\" category=\"{{category}}\" categoryId=\"{{categoryId}}\" mapping=\"{{mapping}}\" />",
-                            when: .always),
+                            when: .always, style: .html),
             .writeConfig([
                 ConfigEntry(key: "GISCUS_REPO", value: "{{repo}}"),
                 ConfigEntry(key: "GISCUS_CATEGORY", value: "{{category}}"),

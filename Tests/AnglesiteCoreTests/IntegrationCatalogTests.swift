@@ -43,7 +43,7 @@ import Testing
     /// snippet against carrying one (regression guard for the build-breaker the final review found).
     @Test(arguments: IntegrationCatalog.all)
     func injectedSnippetsCarryNoClientDirective(_ descriptor: IntegrationDescriptor) {
-        for case .injectAtAnchor(_, _, let snippet, _) in descriptor.operations {
+        for case .injectAtAnchor(_, _, let snippet, _, _) in descriptor.operations {
             #expect(!snippet.raw.contains("client:"), "\(descriptor.id) snippet has a client: directive: \(snippet.raw)")
         }
     }

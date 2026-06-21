@@ -47,7 +47,7 @@ import Foundation
         let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
             answers: ["provider": "cal", "username": "jane", "style": "floating"],
             sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
-        #expect(r.steps.contains { if case .injectAnchor(let f, _, _, let s) = $0 { return f.contains("BaseLayout") && s.contains("jane") }; return false })
+        #expect(r.steps.contains { if case .injectAnchor(let f, _, _, let s, _) = $0 { return f.contains("BaseLayout") && s.contains("jane") }; return false })
         #expect(!r.steps.contains { if case .createFile(let p, _) = $0 { return p == "src/pages/book.astro" }; return false })
     }
 
