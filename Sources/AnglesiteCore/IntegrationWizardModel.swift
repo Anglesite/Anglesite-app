@@ -72,7 +72,17 @@ public final class IntegrationWizardModel: Identifiable {
         }
     }
 
-    public func back() { if let prev = Step(rawValue: step.rawValue - 1) { step = prev } }
+    public func back() {
+        guard let prev = Step(rawValue: step.rawValue - 1) else { return }
+        // Mirror advance()'s forward-skip: a provider-less integration (e.g. giscus) never shows the
+        // provider step, so backing out of .fields must hop straight to .pickIntegration rather than
+        // strand the user on an empty .pickProvider screen (where canContinue would be false).
+        if prev == .pickProvider, descriptor?.providers.isEmpty == true {
+            step = .pickIntegration
+            return
+        }
+        step = prev
+    }
 
     public func apply() async {
         guard let plan else { return }

@@ -82,4 +82,23 @@ import Foundation
         #expect(m.plan == nil, "Stale plan must not survive a failed re-plan")
         #expect(m.planError != nil)
     }
+
+    @Test func backSkipsProviderStepForProviderlessIntegration() {
+        // giscus has no providers; advance() skips pickProvider going forward, so back() out of
+        // .fields must hop straight to .pickIntegration — never stranding on an empty .pickProvider.
+        let m = IntegrationWizardModel(service: FakeService(), siteID: "s")
+        m.selectedID = .giscus
+        m.step = .fields
+        m.back()
+        #expect(m.step == .pickIntegration)
+    }
+
+    @Test func backGoesToProviderStepForProviderBackedIntegration() {
+        // booking HAS providers; backing out of .fields lands on .pickProvider as usual.
+        let m = IntegrationWizardModel(service: FakeService(), siteID: "s")
+        m.selectedID = .booking
+        m.step = .fields
+        m.back()
+        #expect(m.step == .pickProvider)
+    }
 }
