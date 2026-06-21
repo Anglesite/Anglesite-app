@@ -44,11 +44,11 @@ public enum AnglesiteIntents {
         AppDependencyManager.shared.add { () -> any SiteOperationsService in
             SiteOperations(factory: LiveCommandFactory())
         }
-        // Content create intents (A.5 #139) run the plugin's create_page/create_post headlessly
-        // via a shared pool; pooled Node processes are drained on quit by ProcessSupervisor.
-        let headlessPool = HeadlessRuntimePool()
+        // Content create intents (A.5 #139) now use native in-process scaffolding (Bucket 1,
+        // Slice 2). Replaces the MCP-routed ContentOperations; the Node create_page/create_post
+        // tools are retired in the roadmap's cleanup slice.
         AppDependencyManager.shared.add { () -> any ContentOperationsService in
-            ContentOperations(pool: headlessPool, siteDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory })
+            NativeContentOperations(siteDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory })
         }
         // `EditContentIntent` (B.5 / #149) routes natural-language edits through
         // `IntentEditBridge`, which asks `EditRouterRegistry.shared` for the live edit router of

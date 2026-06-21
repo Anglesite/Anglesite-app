@@ -111,12 +111,12 @@ private struct AdvancedSettingsView: View {
 // Developer ID only — the chat backend is a choice here, but the MAS build has no `claude` CLI and
 // always uses on-device Foundation Models. Gated out of MAS at the call site in AdvancedSettingsView.
 #if !ANGLESITE_MAS
-/// Settings → Assistant. Chooses the chat backend: Claude (default) or Apple's on-device Foundation
-/// Models, and — when the latter is on — which tier. The choice is read at `ChatModel` construction
-/// (`SiteWindow.loadAndStart`), so it applies to newly opened site windows rather than live-swapping
-/// an active conversation.
+/// Settings → Assistant. Chooses the chat backend: Apple's on-device Foundation Models (default) or
+/// Claude (legacy), and — when the former is on — which tier. The choice is read at `ChatModel`
+/// construction (`SiteWindow.loadAndStart`), so it applies to newly opened site windows rather than
+/// live-swapping an active conversation.
 private struct AssistantSettingsSection: View {
-    @AppStorage(AppSettings.Key.preferFoundationModels) private var preferFoundationModels: Bool = false
+    @AppStorage(AppSettings.Key.preferFoundationModels) private var preferFoundationModels: Bool = true
     @AppStorage(AppSettings.Key.foundationModelTier) private var tier: FoundationModelTier = .onDevice
 
     var body: some View {
@@ -140,7 +140,7 @@ private struct AssistantSettingsSection: View {
 
     private var caption: String {
         guard preferFoundationModels else {
-            return "Claude (the default) runs the full-power model via the bundled `claude` CLI. Apple's on-device model keeps chat free, private, and offline, but is less capable. Takes effect for newly opened site windows."
+            return "Claude runs the full-power model via the bundled `claude` CLI. This is the legacy backend and will be removed as Anglesite moves off Claude Code; Apple Foundation Models is now the default. Takes effect for newly opened site windows."
         }
         switch tier {
         case .onDevice:

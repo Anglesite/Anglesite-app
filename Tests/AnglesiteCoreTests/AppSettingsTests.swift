@@ -66,10 +66,10 @@ final class AppSettingsTests {
 
     // MARK: Assistant model (C.10 — DevID model tier picker)
 
-    @Test("preferFoundationModels defaults to false (Claude is the default backend)")
-    func preferFoundationModelsDefaultsToFalse() {
+    @Test("preferFoundationModels defaults to true (Foundation Models is the default backend)")
+    func preferFoundationModelsDefaultsToTrue() {
         let settings = AppSettings(defaults: defaults)
-        #expect(!settings.preferFoundationModels)
+        #expect(settings.preferFoundationModels)
     }
 
     @Test("preferFoundationModels round trip") func preferFoundationModelsRoundTrip() {
@@ -126,6 +126,43 @@ final class AppSettingsTests {
         #expect(!settings.announcesLiveUpdates)
         settings.announcesLiveUpdates = true
         #expect(settings.announcesLiveUpdates)
+    }
+
+    // MARK: Assistant-default migration
+
+    @Test("assistant-default migration: fresh install keeps the Foundation Models default")
+    func migrationFreshInstall() {
+        let settings = AppSettings(defaults: defaults)
+        settings.migrateAssistantDefaultIfNeeded()
+        #expect(settings.preferFoundationModels) // absent → FM default
+        #expect(defaults.object(forKey: AppSettings.Key.preferFoundationModels) == nil) // not pinned
+    }
+
+    @Test("assistant-default migration: existing install is pinned to Claude")
+    func migrationExistingInstall() {
+        defaults.set("site-1", forKey: AppSettings.Key.lastOpenedSiteID)
+        let settings = AppSettings(defaults: defaults)
+        settings.migrateAssistantDefaultIfNeeded()
+        #expect(!settings.preferFoundationModels) // upgrade → Claude preserved
+    }
+
+    @Test("assistant-default migration: respects an explicit prior choice")
+    func migrationRespectsExplicitChoice() {
+        defaults.set("site-1", forKey: AppSettings.Key.lastOpenedSiteID)
+        defaults.set(true, forKey: AppSettings.Key.preferFoundationModels)
+        let settings = AppSettings(defaults: defaults)
+        settings.migrateAssistantDefaultIfNeeded()
+        #expect(settings.preferFoundationModels) // untouched
+    }
+
+    @Test("assistant-default migration: runs only once")
+    func migrationRunsOnce() {
+        defaults.set("site-1", forKey: AppSettings.Key.lastOpenedSiteID)
+        let settings = AppSettings(defaults: defaults)
+        settings.migrateAssistantDefaultIfNeeded() // pins to Claude
+        settings.preferFoundationModels = true     // user later opts into FM
+        settings.migrateAssistantDefaultIfNeeded() // must NOT re-pin
+        #expect(settings.preferFoundationModels)
     }
 
     // MARK: DebugPaneVisibility
