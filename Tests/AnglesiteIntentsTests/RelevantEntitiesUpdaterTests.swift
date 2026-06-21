@@ -34,7 +34,7 @@ extension AppIntentsTests {
                 site("a", "A"), site("b", "B"), site("c", "C"), site("d", "D"),
             ])
 
-            #expect(outcome == .init(published: 3, skipped: false))
+            #expect(outcome == .init(count: 3, skipped: false))
             let batches = await backend.updatedBatches
             #expect(batches.count == 1)
             #expect(batches[0].map(\.id) == ["a", "b", "c"])
@@ -47,7 +47,7 @@ extension AppIntentsTests {
             _ = try await updater.refresh([site("a", "A"), site("b", "B"), site("c", "C")])
             let outcome = try await updater.refresh([site("a", "A"), site("b", "B"), site("c", "C")])
 
-            #expect(outcome == .init(published: 3, skipped: true))
+            #expect(outcome == .init(count: 3, skipped: true))
             let batches = await backend.updatedBatches
             #expect(batches.count == 1) // second refresh did not call the backend
         }
@@ -59,7 +59,7 @@ extension AppIntentsTests {
             _ = try await updater.refresh([site("a", "A"), site("b", "B"), site("c", "C")])
             let outcome = try await updater.refresh([site("b", "B"), site("a", "A"), site("c", "C")])
 
-            #expect(outcome == .init(published: 3, skipped: false))
+            #expect(outcome == .init(count: 3, skipped: false))
             let batches = await backend.updatedBatches
             #expect(batches.count == 2)
             #expect(batches[1].map(\.id) == ["b", "a", "c"])
@@ -73,7 +73,7 @@ extension AppIntentsTests {
             // d and e swap below the top-3 — top-3 id list (a,b,c) is unchanged.
             let outcome = try await updater.refresh([site("a", "A"), site("b", "B"), site("c", "C"), site("e", "E")])
 
-            #expect(outcome == .init(published: 3, skipped: true))
+            #expect(outcome == .init(count: 3, skipped: true))
             let batches = await backend.updatedBatches
             #expect(batches.count == 1)
         }
@@ -86,8 +86,8 @@ extension AppIntentsTests {
             let cleared = try await updater.refresh([])
             let again = try await updater.refresh([])
 
-            #expect(cleared == .init(published: 0, skipped: false))
-            #expect(again == .init(published: 0, skipped: true))
+            #expect(cleared == .init(count: 0, skipped: false))
+            #expect(again == .init(count: 0, skipped: true))
             let batches = await backend.updatedBatches
             #expect(batches.count == 2)          // initial push + one clear
             #expect(batches[1].isEmpty)
@@ -113,7 +113,7 @@ extension AppIntentsTests {
             // Same snapshot: because the first push threw, the id list was not recorded,
             // so this is NOT deduped — it retries and succeeds.
             let outcome = try await updater.refresh([site("a", "A"), site("b", "B")])
-            #expect(outcome == .init(published: 2, skipped: false))
+            #expect(outcome == .init(count: 2, skipped: false))
             let batches = await backend.succeededBatches
             #expect(batches.count == 1)
             #expect(batches[0].map(\.id) == ["a", "b"])

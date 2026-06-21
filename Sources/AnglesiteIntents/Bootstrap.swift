@@ -108,7 +108,7 @@ public enum AnglesiteIntents {
             for await sites in SiteStore.shared.changeStream() {
                 do {
                     let outcome = try await relevant.refresh(sites)
-                    relevantLog.info("relevant published=\(outcome.published, privacy: .public) skipped=\(outcome.skipped, privacy: .public)")
+                    relevantLog.info("relevant count=\(outcome.count, privacy: .public) skipped=\(outcome.skipped, privacy: .public)")
                 } catch {
                     relevantLog.error("relevant refresh failed: \(error.localizedDescription, privacy: .public)")
                 }

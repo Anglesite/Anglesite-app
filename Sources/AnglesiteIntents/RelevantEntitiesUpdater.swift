@@ -23,11 +23,13 @@ public actor RelevantEntitiesUpdater {
 
     /// Result returned to callers (today: tests only) so they can assert the diff outcome.
     public struct Outcome: Sendable, Equatable {
-        public let published: Int
+        /// Size of the top-N candidate window this refresh considered — NOT necessarily the
+        /// number sent to the backend. When `skipped` is true the backend was not called at all.
+        public let count: Int
         public let skipped: Bool
 
-        public init(published: Int, skipped: Bool) {
-            self.published = published
+        public init(count: Int, skipped: Bool) {
+            self.count = count
             self.skipped = skipped
         }
     }
@@ -46,11 +48,11 @@ public actor RelevantEntitiesUpdater {
         let top = Array(sites.prefix(maxCount))
         let ids = top.map(\.id)
         guard ids != lastPushedIDs else {
-            return Outcome(published: top.count, skipped: true)
+            return Outcome(count: top.count, skipped: true)
         }
         try await backend.update(top.map(SiteEntity.init))
         lastPushedIDs = ids
-        return Outcome(published: top.count, skipped: false)
+        return Outcome(count: top.count, skipped: false)
     }
 }
 
@@ -65,5 +67,14 @@ public actor RelevantEntitiesUpdater {
 struct LiveRelevantEntitiesBackend: RelevantEntitiesBackend {
     func update(_ entities: [SiteEntity]) async throws {
         // No-op until a public AppEntityContext factory exists (see type doc). Track: #124.
+        //
+        // Intended call once a non-audio context can be constructed (signature confirmed against
+        // the Xcode 27 AppIntents.swiftinterface — `updateEntities(_:for:)` takes `[any AppEntity]`
+        // and an `AppEntityContext`):
+        //
+        //     try await RelevantEntities.shared.updateEntities(entities, for: <AppEntityContext>)
+        //
+        // The blocker is solely the `for:` argument: macOS 27 beta 1 exposes only
+        // `AppEntityContext.audio(_:)`. Re-enable when a general/document factory ships.
     }
 }
