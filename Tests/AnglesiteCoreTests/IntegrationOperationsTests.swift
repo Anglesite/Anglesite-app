@@ -6,7 +6,8 @@ import Foundation
 @Suite struct IntegrationOperationsTests {
     func makeTemplate() -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("tmpl-\(UUID().uuidString)")
-        for p in ["src/components/Comments.astro"] {
+        // Task 3 moved integration components to the on-demand staging area integrations/components/.
+        for p in ["integrations/components/Comments.astro"] {
             let url = root.appendingPathComponent(p)
             try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try! "C".write(to: url, atomically: true, encoding: .utf8)
@@ -18,7 +19,10 @@ import Foundation
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("src-\(UUID().uuidString)")
         try! FileManager.default.createDirectory(at: root.appendingPathComponent("src/layouts"), withIntermediateDirectories: true)
         if withBlogLayout {
-            try! "<article><slot/><!-- anglesite:comments --></article>\n"
+            // Layout carries both anchors: the frontmatter import anchor (line-style) and the
+            // body render anchor (html-style). Giscus does a dual inject: imports first, then
+            // the <Comments /> render tag.
+            try! "---\n// anglesite:imports\n---\n<article><slot/><!-- anglesite:comments --></article>\n"
                 .write(to: root.appendingPathComponent("src/layouts/BlogPost.astro"), atomically: true, encoding: .utf8)
         }
         return root

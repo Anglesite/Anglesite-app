@@ -38,9 +38,10 @@ extension AppIntentsTests {
             let confirmsAtRuntime: Bool
         }
 
-        /// The eight supported workflows, transcribed from the smoke-matrix doc. `site-status` is
+        /// The documented workflows, transcribed from the smoke-matrix doc. `site-status` is
         /// the matrix's row 5b (a sibling read intent); `add-page`/`add-post` are row 6's two
         /// intents. `OpenSiteIntent` is row 1 (no curated phrase — reached via entity tap).
+        /// `add-booking`, `add-donations`, `add-comments` are the bucket-3 integration intents (#282).
         static let workflows: [Workflow] = [
             Workflow(label: "Open this site", operationID: "open-site", sideEffect: .readOnly, confirmsAtRuntime: false),
             Workflow(label: "Back up this site", operationID: "backup-site", sideEffect: .createsContent, confirmsAtRuntime: false),
@@ -52,6 +53,9 @@ extension AppIntentsTests {
             Workflow(label: "Add post", operationID: "add-post", sideEffect: .createsContent, confirmsAtRuntime: false),
             Workflow(label: "Preview a page", operationID: "preview-site", sideEffect: .readOnly, confirmsAtRuntime: false),
             Workflow(label: "Edit visible content with confirmation", operationID: "edit-content", sideEffect: .modifiesContent, confirmsAtRuntime: true),
+            Workflow(label: "Add booking integration", operationID: "add-booking", sideEffect: .createsContent, confirmsAtRuntime: true),
+            Workflow(label: "Add donations integration", operationID: "add-donations", sideEffect: .createsContent, confirmsAtRuntime: true),
+            Workflow(label: "Add comments integration", operationID: "add-comments", sideEffect: .createsContent, confirmsAtRuntime: true),
         ]
 
         /// Capabilities the doc marks manual-only. These map to no automated assertion by design;
