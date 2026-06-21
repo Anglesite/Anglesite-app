@@ -11,13 +11,18 @@ public enum MarkerInjector {
         let block = "\(start)\n\(snippet)\n\(end)"
 
         // Replace an existing delimited block if present (idempotent re-run).
-        if let r = content.range(of: start), let e = content.range(of: end) {
+        if let r = content.range(of: start), let e = content.range(of: end), r.lowerBound < e.lowerBound {
             let replaced = content.replacingCharacters(in: r.lowerBound..<e.upperBound, with: block)
             return .success(replaced)
         }
-        // Otherwise insert immediately before the anchor comment.
+        // Otherwise strip any orphaned lone marker lines (self-healing), then insert before anchor.
         guard let a = content.range(of: anchor) else { return .failure(.anchorNotFound(anchor)) }
-        let inserted = content.replacingCharacters(in: a.lowerBound..<a.lowerBound, with: "\(block)\n")
+        let stripped = content
+            .components(separatedBy: "\n")
+            .filter { $0.trimmingCharacters(in: .whitespaces) != start && $0.trimmingCharacters(in: .whitespaces) != end }
+            .joined(separator: "\n")
+        let a2 = stripped.range(of: anchor)!
+        let inserted = stripped.replacingCharacters(in: a2.lowerBound..<a2.lowerBound, with: "\(block)\n")
         return .success(inserted)
     }
 }
