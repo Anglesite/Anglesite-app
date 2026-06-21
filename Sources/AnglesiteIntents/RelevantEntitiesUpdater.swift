@@ -54,7 +54,16 @@ public actor RelevantEntitiesUpdater {
     }
 }
 
-/// Production backend — real `RelevantEntities` call wired in Task 2.
+/// Production backend for the macOS 27 App Intents relevance surface.
+///
+/// Deferred: `RelevantEntities.shared.updateEntities(_:for:)` requires an `AppEntityContext`,
+/// which has no public initializer in macOS 27 beta 1 — the only public factory is `.audio(_:)`,
+/// which is semantically wrong for site entities. Rather than bind the private initializer, this
+/// stays a no-op until Apple exposes a general/document `AppEntityContext` factory; re-enabling is
+/// then a one-line change here. The rest of the pipeline (top-N MRU diff in `RelevantEntitiesUpdater`,
+/// the `changeStream()` consumer in `bootstrap`) is live and exercised. Track at #124.
 struct LiveRelevantEntitiesBackend: RelevantEntitiesBackend {
-    func update(_ entities: [SiteEntity]) async throws {}
+    func update(_ entities: [SiteEntity]) async throws {
+        // No-op until a public AppEntityContext factory exists (see type doc). Track: #124.
+    }
 }

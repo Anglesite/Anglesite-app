@@ -4,6 +4,7 @@ import OSLog
 
 private let log = Logger(subsystem: "dev.anglesite.app", category: "spotlight-indexer")
 private let contentLog = Logger(subsystem: "dev.anglesite.app", category: "content-spotlight-indexer")
+private let relevantLog = Logger(subsystem: "dev.anglesite.app", category: "relevant-entities")
 
 /// Public entry point that registers production dependencies with `AppDependencyManager` and
 /// hooks the Spotlight indexer to `SiteStore.shared`.
@@ -93,6 +94,27 @@ public enum AnglesiteIntents {
                 contentLog.error("reindex failed: \(error.localizedDescription, privacy: .public)")
             }
         }
+        // Surface the top-N most-recently-used sites to macOS 27's Siri/Spotlight "relevant
+        // entities" suggestions (B.1 / #124). Driven off `changeStream()` rather than the
+        // Spotlight `changeHandler` because relevance must track MRU *reordering* (site opens
+        // bump order via `touch()`, which the data-only `changeHandler` deliberately skips —
+        // SiteStore.swift). `changeStream()` yields the current snapshot on subscribe, on data
+        // changes, and on reorders, so the initial set publishes without a separate kick.
+        let relevant = RelevantEntitiesUpdater.shared
+        // Intentionally app-lifetime and never cancelled: the handle is discarded and the
+        // `for await` holds the stream open for the life of the process (matching the
+        // long-lived `setChangeHandler` closures above). `bootstrap` runs once per app launch.
+        Task {
+            for await sites in SiteStore.shared.changeStream() {
+                do {
+                    let outcome = try await relevant.refresh(sites)
+                    relevantLog.info("relevant published=\(outcome.published, privacy: .public) skipped=\(outcome.skipped, privacy: .public)")
+                } catch {
+                    relevantLog.error("relevant refresh failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        }
+
         do {
             try await SiteStore.shared.load()
         } catch {
