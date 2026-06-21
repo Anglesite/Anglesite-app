@@ -634,22 +634,15 @@ struct SiteWindow: View {
         let mcpClient: @Sendable () async -> MCPClient? = { [preview] in
             await preview.mcpClient()
         }
-        let feed = AnnotationFeedFactory.viaMCP(mcpClient: mcpClient)
+        // Annotations are read/resolved by the native `AnnotationStore` over
+        // `Source/annotations.json` (#275) — no MCP hop. `undo_edit` stays MCP-backed (Bucket 2).
+        let sourceDirectory = resolved.sourceDirectory
+        let feed = AnnotationFeedFactory.native(directory: sourceDirectory)
         let undoCommand = UndoCommand(mcpClient: mcpClient)
-        // Resolve directly via the same per-site MCP client the feed uses — only a
-        // `resolve_annotation` tool call, no chat backend involved.
+        // Resolve directly against the on-disk store — `AnnotationStore.resolve` throws if the id
+        // is unknown, surfacing as a chat error the same way the MCP path did.
         let annotationResolver: ChatModel.AnnotationResolver = { id in
-            guard let client = await mcpClient() else {
-                throw NSError(domain: "AnnotationFeed", code: 1, userInfo: [NSLocalizedDescriptionKey: "no MCP client"])
-            }
-            let result = try await client.callTool(
-                name: "resolve_annotation",
-                arguments: .object(["id": .string(id)])
-            )
-            if result.isError {
-                let detail = result.content.compactMap(\.text).joined(separator: "\n")
-                throw NSError(domain: "AnnotationFeed", code: 2, userInfo: [NSLocalizedDescriptionKey: detail])
-            }
+            try AnnotationStore.resolve(in: sourceDirectory, id: id)
         }
         #if ANGLESITE_MAS
         // Sandboxed App Store build: there's no `claude` CLI to shell out to, so chat is backed by

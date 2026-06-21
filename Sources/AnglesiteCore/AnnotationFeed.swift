@@ -48,6 +48,14 @@ public typealias AnnotationFeed = @Sendable () async throws -> [Annotation]
 
 /// Builds a production `AnnotationFeed` and parses the plugin's JSON shape.
 public enum AnnotationFeedFactory {
+    /// Builds an `AnnotationFeed` backed by the native `AnnotationStore` (#275) — reads the
+    /// unresolved annotations straight from `<sourceDirectory>/annotations.json` with no MCP hop.
+    /// `directory` is the site's `Source/` root (where the store and the edit overlay agree the
+    /// file lives). Never throws: a missing/empty file yields `[]`.
+    public static func native(directory: URL) -> AnnotationFeed {
+        return { AnnotationStore.list(in: directory) }
+    }
+
     /// Builds an `AnnotationFeed` that calls the plugin's `list_annotations` MCP tool through
     /// the supplied weak getter, and parses the first text content block as a JSON array of
     /// annotations. Tolerant of `nil` clients (returns `[]`) so a freshly-opened site whose
