@@ -138,6 +138,17 @@ import Foundation
         #expect(r.warnings.isEmpty)
     }
 
+    @Test func summaryDescribesEachStepKind() {
+        let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+            answers: ["provider": "cal", "username": "jane", "style": "inline"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
+        let s = r.summary
+        #expect(s.contains("Create src/components/BookingWidget.astro"))
+        #expect(s.contains("Create src/pages/book.astro"))
+        #expect(s.contains("Set 3 config keys"))
+        #expect(s.contains("Allow 1 domain"))
+    }
+
     @Test func brandColorWarningFiresOnlyWhenReferenced() throws {
         // Synthetic descriptor whose writeConfig references {{brandColor}}.
         let desc = IntegrationDescriptor(

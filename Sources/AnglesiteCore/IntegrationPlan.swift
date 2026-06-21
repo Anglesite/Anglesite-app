@@ -25,7 +25,19 @@ public struct OperationPlan: Sendable, Equatable {
     public init(integrationID: IntegrationID, steps: [PlannedStep], warnings: [PlanWarning]) {
         self.integrationID = integrationID; self.steps = steps; self.warnings = warnings
     }
-    public var summary: String { /* Task 6 */ "" }
+    public var summary: String {
+        var lines: [String] = []
+        for step in steps {
+            switch step {
+            case .createFile(let path, _): lines.append("Create \(path)")
+            case .upsertConfig(let kvs): lines.append("Set \(kvs.count) config key\(kvs.count == 1 ? "" : "s")")
+            case .injectAnchor(let file, _, _, _): lines.append("Add a component to \(file)")
+            case .addCSP(let domains): lines.append("Allow \(domains.count) domain\(domains.count == 1 ? "" : "s") in the site's security policy")
+            }
+        }
+        for w in warnings { lines.append("⚠︎ \(w.message)") }
+        return lines.joined(separator: "\n")
+    }
 }
 
 public enum IntegrationError: Error, Equatable, Sendable {
