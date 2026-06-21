@@ -1,0 +1,14 @@
+---
+// DonationButton props: href (donation link), label (button text).
+// DONATIONS_LINK is the provider-specific donation URL set in .site-config.
+import BaseLayout from "../layouts/BaseLayout.astro";
+import DonationButton from "../components/DonationButton.astro";
+---
+
+<BaseLayout title="Donate">
+  <DonationButton
+    href={import.meta.env.DONATIONS_LINK}
+    label={import.meta.env.DONATIONS_LABEL}
+    client:load
+  />
+</BaseLayout>

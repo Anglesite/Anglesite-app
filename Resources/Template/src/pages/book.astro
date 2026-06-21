@@ -1,0 +1,13 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import BookingWidget from "../components/BookingWidget.astro";
+---
+
+<BaseLayout title="Book a time">
+  <BookingWidget
+    provider={import.meta.env.BOOKING_PROVIDER}
+    username={import.meta.env.BOOKING_USERNAME}
+    style="inline"
+    client:load
+  />
+</BaseLayout>
