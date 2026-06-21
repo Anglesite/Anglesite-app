@@ -86,6 +86,15 @@ public struct AnglesiteShortcuts: AppShortcutsProvider {
             shortTitle: "Edit Content",
             systemImageName: "pencil"
         )
+        // NOTE: the Bucket 3 integration intents (AddBookingIntent / AddDonationsIntent /
+        // AddGiscusIntent) are deliberately NOT registered as `AppShortcut`s. `AppShortcutsProvider`
+        // allows at most 10 curated phrases and the nine above already fill the budget; adding the
+        // three integrations pushed it to 12 and broke the build. The integration intents remain
+        // fully first-class — they keep their `OperationDescriptor`s, are invocable from the
+        // Shortcuts app, the FM chat tool (`SetupIntegrationTool`), and the GUI "Add Integration…"
+        // wizard. Only the zero-setup Siri phrase is omitted. Reinstate a phrase (and drop a less
+        // voice-natural one to stay within 10) if a future iteration wants Siri-first integration
+        // setup. See PR discussion.
     }
 }
 

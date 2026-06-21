@@ -1,0 +1,22 @@
+---
+// BlogPost.astro — giscus injection target.
+// The template has no blog content collection yet; wiring real posts to this
+// layout is follow-up work. This file exists so that the /anglesite:giscus
+// skill's `injectAtAnchor` call has a target (<!-- anglesite:comments -->)
+// and the asset test passes. Tracked separately.
+import BaseLayout from "./BaseLayout.astro";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<BaseLayout title={title} description={description}>
+  <article>
+    <slot />
+    <!-- anglesite:comments -->
+  </article>
+</BaseLayout>

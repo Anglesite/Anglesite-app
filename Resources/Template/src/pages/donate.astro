@@ -1,0 +1,18 @@
+---
+// DonationButton props: href, label?, variant?, provider?
+// Keys written by the donations descriptor (.site-config):
+//   DONATIONS_PROVIDER, DONATIONS_LINK, DONATIONS_BUTTON_TEXT
+// NOTE: descriptor provider id for GitHub Sponsors is "githubSponsors" (camelCase) but
+// DonationButton's provider prop union expects "github-sponsors" (hyphen). Degrades
+// gracefully (only affects CSS class); casing reconciliation is a follow-up task.
+import BaseLayout from "../layouts/BaseLayout.astro";
+import DonationButton from "../components/DonationButton.astro";
+---
+
+<BaseLayout title="Donate">
+  <DonationButton
+    href={import.meta.env.DONATIONS_LINK}
+    label={import.meta.env.DONATIONS_BUTTON_TEXT}
+    provider={import.meta.env.DONATIONS_PROVIDER}
+  />
+</BaseLayout>
