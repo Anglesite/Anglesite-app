@@ -627,6 +627,11 @@ public enum IntegrationCatalog {
             .injectAtAnchor(file: "src/layouts/BlogPost.astro", anchor: "<!-- anglesite:comments -->",
                             snippet: "<Comments repo=\"{{repo}}\" repoId=\"{{repoId}}\" category=\"{{category}}\" categoryId=\"{{categoryId}}\" mapping=\"{{mapping}}\" client:visible />",
                             when: .always),
+            // `repoId`/`categoryId` are injected as component props in the snippet above, NOT
+            // written to `.site-config`. Verified against the plugin's `Comments.astro`, which
+            // reads `repoId`/`categoryId`/`category`/`mapping` from `Astro.props` (not
+            // `import.meta.env`). `.site-config` only persists `GISCUS_REPO`/`GISCUS_CATEGORY`
+            // for human reference + the pre-deploy CSP scan; the build needs nothing more.
             .writeConfig([
                 ConfigEntry(key: "GISCUS_REPO", value: "{{repo}}"),
                 ConfigEntry(key: "GISCUS_CATEGORY", value: "{{category}}"),
@@ -1341,10 +1346,28 @@ public struct IntegrationOperations: IntegrationOperationsService {
 }
 ```
 
-Note: `IntegrationError` has no `siteNotFound`/`templateMissing` cases, so the placeholder
-`.providerRequired` returns above are wrong. **Add two cases to `IntegrationError` in
-`IntegrationPlan.swift`:** `case siteNotFound` and `case templateUnavailable`, then return those
-here. Update the `planFailsWhenSiteNotFound` test to `#expect(r == .failure(.siteNotFound))`.
+- [ ] **Step 3a: Add the two new `IntegrationError` cases (required before this compiles)**
+
+`IntegrationError` (defined in Task 5's `IntegrationPlan.swift`) has only `missingRequiredField`,
+`invalidValue`, `unknownProvider`, `providerRequired`. The `IntegrationOperations.plan`/`apply`
+above need site- and template-resolution failures, and Task 10's `reply(for:)` switches
+exhaustively over `IntegrationError`. Add both cases to the enum in `IntegrationPlan.swift`:
+
+```swift
+public enum IntegrationError: Error, Equatable, Sendable {
+    case missingRequiredField(key: String)
+    case invalidValue(key: String, reason: String)
+    case unknownProvider(String)
+    case providerRequired
+    case siteNotFound          // <-- add
+    case templateUnavailable   // <-- add
+}
+```
+
+Then in `IntegrationOperations.plan`, return `.failure(.siteNotFound)` when `sourceDirectory(siteID)`
+is nil and `.failure(.templateUnavailable)` when `templateDirectory()` is nil (replace the
+placeholder `.providerRequired` returns shown above). Set the `planFailsWhenSiteNotFound` test to
+`#expect(r == .failure(.siteNotFound))`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1732,6 +1755,16 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
   `IntegrationOperationsOverride.scoped` (`@TaskLocal`). Mirrors `AddPageIntent` + `ContentDialogs` +
   `ContentOperationsOverride`.
 
+**Notes for the implementer:**
+- `SiteEntity` already exists at `Sources/AnglesiteIntents/SiteEntity.swift` (used by the existing
+  `SiteIntents`/`ContentIntents`). Reuse it — do not define a new one. It carries `id` and
+  `displayName`.
+- **Deliberate API reduction:** `AddGiscusIntent` hardcodes `category: "Announcements"` and
+  `mapping: "pathname"` rather than exposing them as `@Parameter`s, to keep the Siri surface
+  small. This does NOT delegate to the descriptor's `defaultValue`s (those drive the GUI/FM
+  paths only). If a later iteration wants Siri control over category/mapping, add the
+  `@Parameter`s then. Keep this simplification for v1 and leave a code comment saying so.
+
 - [ ] **Step 1: Write the failing test**
 
 ```swift
@@ -1988,13 +2021,17 @@ the end of the article body:
 </article>
 ```
 
-3. Port the three components and two pages from the plugin template
-(`/Users/dwk/Developer/github.com/Anglesite/anglesite/template/src/components/BookingWidget.astro`,
-`ConsentBanner`-style `DonationButton.astro`, `Comments.astro`, and the `book`/`donate` pages) into
-`Resources/Template/`. Each component reads its props (already provider-aware in the plugin
-template). If a component is absent in the plugin, create a minimal Astro component that renders the
-provider embed from props — full embed code is in the plugin's `template/scripts/booking.ts` /
-`donations` helpers; copy those helpers' output verbatim into the component.
+3. Port the three components and two pages from the plugin template into `Resources/Template/`.
+The plugin checkout path is **`$ANGLESITE_PLUGIN_SRC`** (per CLAUDE.md — do not hardcode an
+absolute path; it differs per machine and is unset in CI). Sources:
+`$ANGLESITE_PLUGIN_SRC/template/src/components/BookingWidget.astro`,
+`$ANGLESITE_PLUGIN_SRC/template/src/components/DonationButton.astro`,
+`$ANGLESITE_PLUGIN_SRC/template/src/components/Comments.astro`, and the `book`/`donate` pages
+under `$ANGLESITE_PLUGIN_SRC/template/src/pages/`. Each component reads its props from
+`Astro.props` (already provider-aware in the plugin template — verified for `Comments.astro`). If
+a component is absent in the plugin, create a minimal Astro component that renders the provider
+embed from props — full embed code is in the plugin's `template/scripts/booking.ts` / `donations`
+helpers; copy those helpers' output verbatim into the component.
 
 4. The `book.astro` / `donate.astro` pages import and render the component:
 
@@ -2037,16 +2074,30 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - Produces: the running app surfaces. This task is **app-target wiring** — not CI-tested (hosted-app
   limitation). Verification is a clean build of both schemes.
 
-- [ ] **Step 1: Register the service in `Bootstrap.swift`**
+- [ ] **Step 1: Add a single `IntegrationOperations.live` factory, then register it in `Bootstrap.swift`**
 
-After the `NativeContentOperations` registration block, add:
+To avoid two divergent construction sites (the App Intents DI registration and the GUI), define
+ONE production factory in `AnglesiteCore` (in `IntegrationOperationsService.swift`) and use it from
+both front-doors:
+
+```swift
+public extension IntegrationOperations {
+    /// The production instance: resolves a site id to its `Source/` dir via `SiteStore.shared`
+    /// and the template root via `TemplateRuntime`. Single construction path for every front-door.
+    static func live() -> IntegrationOperations {
+        IntegrationOperations(
+            sourceDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory },
+            templateDirectory: { TemplateRuntime.resolve().url }
+        )
+    }
+}
+```
+
+Then in `Bootstrap.swift`, after the `NativeContentOperations` registration block:
 
 ```swift
 AppDependencyManager.shared.add { () -> any IntegrationOperationsService in
-    IntegrationOperations(
-        sourceDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory },
-        templateDirectory: { TemplateRuntime.resolve().url }
-    )
+    IntegrationOperations.live()
 }
 ```
 
@@ -2162,17 +2213,20 @@ and presents the sheet:
 ```swift
 // Where site commands are built (needs the focused site's id):
 Button("Add Integration…") {
-    let model = IntegrationWizardModel(
-        service: IntegrationOperations(
-            sourceDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory },
-            templateDirectory: { TemplateRuntime.resolve().url }),
-        siteID: focusedSiteID)
+    // Use the SAME single production factory the Bootstrap DI registration uses — do NOT
+    // re-inline the closures here (that would duplicate construction and drift from the
+    // registered service). The model takes `service:` so tests inject a fake; production
+    // passes `.live()`.
+    let model = IntegrationWizardModel(service: IntegrationOperations.live(), siteID: focusedSiteID)
     // present `IntegrationWizard(model: model, onClose: { dismiss sheet })` via the window's sheet state
 }
 ```
 
 (Follow the exact sheet-presentation pattern already used for `NewSiteWizard` / `PublishSheet` in the
-site window — a `@State` flag gating `.sheet(isPresented:)`.)
+site window — a `@State` flag gating `.sheet(isPresented:)`. `NewSiteWizard` likewise constructs its
+model with shared collaborators in the app target; routing both the GUI and DI through
+`IntegrationOperations.live()` keeps a single construction path while staying consistent with that
+established wizard pattern.)
 
 - [ ] **Step 5: Build both schemes to verify wiring**
 
@@ -2202,7 +2256,8 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ## Self-Review
 
-**1. Spec coverage:**
+**1. Spec coverage:** (all `§` references below are sections of the design doc,
+`docs/superpowers/specs/2026-06-20-bucket3-wizard-framework-design.md`, not this plan.)
 - §3 architecture (one capability, three front-doors, Core engine) → Tasks 5–11, 13. ✓
 - §4 descriptor model (all types) → Task 1; catalog → Task 4. ✓
 - §5 plan→apply, OperationPlan, idempotency, failure model → Tasks 5–7. ✓

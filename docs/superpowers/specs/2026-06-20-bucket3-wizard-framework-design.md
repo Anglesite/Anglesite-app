@@ -49,11 +49,14 @@ One capability, three front-doors, over a shared deterministic engine — all in
 ### Module placement
 
 - **`AnglesiteCore`** — `IntegrationDescriptor` + the three descriptors, `IntegrationScaffolder`
-  (the `plan`/`apply` engine), the `IntegrationOperationsService` protocol, and
-  `SetupIntegrationTool`. The engine is pure value-in/value-out, so it is unit-testable on
-  CI without a hosted app (matching the project's hosted-app CI limitation).
-- **`AnglesiteApp`** — the GUI `IntegrationWizardModel` (`@Observable`) + `IntegrationWizard`
-  view, following `NewSiteWizardModel` / `NewSiteWizard`.
+  (the `plan`/`apply` engine), the `IntegrationOperationsService` protocol,
+  `SetupIntegrationTool`, **and the GUI `IntegrationWizardModel` (`@Observable`)**. The
+  engine and the wizard model are pure value-in/value-out, so they are unit-testable on
+  CI without a hosted app (matching the project's hosted-app CI limitation). This places
+  `IntegrationWizardModel` in `AnglesiteCore` exactly as `NewSiteWizardModel` already lives
+  there — only the SwiftUI view sits in the app target.
+- **`AnglesiteApp`** — the `IntegrationWizard` SwiftUI view only (binds to the
+  `AnglesiteCore` model), following `NewSiteWizard`.
 - **`AnglesiteIntents`** — the per-integration App Intents, following `SiteIntents`
   conventions (`@Parameter`, `@Dependency`, `*Override.scoped` TaskLocal for tests).
 
