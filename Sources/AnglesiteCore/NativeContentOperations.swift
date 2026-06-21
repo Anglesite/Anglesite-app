@@ -12,15 +12,21 @@ public struct NativeContentOperations: ContentOperationsService {
     private let siteDirectory: @Sendable (_ siteID: String) async -> URL?
     private let gitCommit: GitCommit
     private let now: @Sendable () -> Date
+    // FileManager is a thread-safe singleton but not Sendable; nonisolated(unsafe) preserves the
+    // test-injection seam (the plan's intended seam for write-failure paths) without breaking the
+    // struct's Sendable conformance.
+    private nonisolated(unsafe) let fileManager: FileManager
 
     public init(
         siteDirectory: @escaping @Sendable (_ siteID: String) async -> URL?,
-        gitCommit: @escaping GitCommit = { proj, rel, msg in await NativeContentOperations.processGitCommit(proj, rel, msg) },
-        now: @escaping @Sendable () -> Date = { Date() }
+        gitCommit: @escaping GitCommit = NativeContentOperations.processGitCommit,
+        now: @escaping @Sendable () -> Date = { Date() },
+        fileManager: FileManager = .default
     ) {
         self.siteDirectory = siteDirectory
         self.gitCommit = gitCommit
         self.now = now
+        self.fileManager = fileManager
     }
 
     public func createPage(siteID: String, name: String, route: String?, onProgress: ProgressHandler? = nil) async -> ContentCreateResult {
@@ -30,7 +36,7 @@ public struct NativeContentOperations: ContentOperationsService {
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return .failed(reason: "create_page requires a non-empty name") }
 
-        let base = (route?.isEmpty == false) ? route! : ContentScaffold.slugify(title)
+        let base = route.flatMap { $0.isEmpty ? nil : $0 } ?? ContentScaffold.slugify(title)
         let normalized = ContentScaffold.normalizeRoute(base)
         guard normalized != "/" else {
             return .failed(reason: "create_page can't scaffold the site root; give the page a name or route")
@@ -38,7 +44,7 @@ public struct NativeContentOperations: ContentOperationsService {
 
         let relPath = ContentScaffold.pageRelativePath(normalizedRoute: normalized)
         let abs = root.appendingPathComponent(relPath)
-        if FileManager.default.fileExists(atPath: abs.path) {
+        if fileManager.fileExists(atPath: abs.path) {
             return .failed(reason: "A page already exists at \(relPath)")
         }
 
@@ -67,13 +73,13 @@ public struct NativeContentOperations: ContentOperationsService {
             return .failed(reason: "Invalid collection name: \(coll)")
         }
 
-        let slugSource = (slug?.isEmpty == false) ? slug! : cleanTitle
+        let slugSource = slug.flatMap { $0.isEmpty ? nil : $0 } ?? cleanTitle
         let finalSlug = ContentScaffold.slugify(slugSource)
         guard !finalSlug.isEmpty else { return .failed(reason: "create_post could not derive a slug from the title") }
 
         let relPath = ContentScaffold.postRelativePath(collection: coll, slug: finalSlug)
         let abs = root.appendingPathComponent(relPath)
-        if FileManager.default.fileExists(atPath: abs.path) {
+        if fileManager.fileExists(atPath: abs.path) {
             return .failed(reason: "A \(coll) entry already exists at \(relPath)")
         }
 
@@ -88,14 +94,14 @@ public struct NativeContentOperations: ContentOperationsService {
     }
 
     private func write(_ contents: String, to abs: URL) throws {
-        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
         try contents.write(to: abs, atomically: true, encoding: .utf8)
     }
 
     /// Stage and commit exactly `relPath` on the current branch. Returns the new HEAD SHA,
     /// or nil on any failure (not a repo, rejecting hook, git missing) — best-effort, mirroring
     /// the Node sidecar's `commitFile`.
-    public static func processGitCommit(_ projectRoot: URL, _ relPath: String, _ message: String) async -> String? {
+    @Sendable public static func processGitCommit(_ projectRoot: URL, _ relPath: String, _ message: String) async -> String? {
         let git = URL(fileURLWithPath: "/usr/bin/git")
         func run(_ args: [String]) async -> ProcessSupervisor.RunResult? {
             let result = try? await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: projectRoot)
