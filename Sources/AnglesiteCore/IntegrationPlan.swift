@@ -35,7 +35,7 @@ public struct OperationPlan: Sendable, Equatable {
             case .addCSP(let domains): lines.append("Allow \(domains.count) domain\(domains.count == 1 ? "" : "s") in the site's security policy")
             }
         }
-        for w in warnings { lines.append("⚠︎ \(w.message)") }
+        for w in warnings { lines.append("Warning: \(w.message)") }
         return lines.joined(separator: "\n")
     }
 }

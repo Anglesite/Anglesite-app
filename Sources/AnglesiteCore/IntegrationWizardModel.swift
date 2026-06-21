@@ -38,7 +38,7 @@ public final class IntegrationWizardModel: Identifiable {
     public var canContinue: Bool {
         switch step {
         case .pickIntegration: return selectedID != nil
-        case .pickProvider: return descriptor?.providers.isEmpty == true || answers["provider"] != nil
+        case .pickProvider: return answers["provider"] != nil
         case .fields:
             return visibleFields.allSatisfy { $0.isOptional || !($0.value(in: answers)).isEmpty }
         case .review: return plan != nil
@@ -54,6 +54,10 @@ public final class IntegrationWizardModel: Identifiable {
         guard let next = Step(rawValue: step.rawValue + 1) else { return }
         step = next
         if step == .review, let id = selectedID {
+            // Clear any stale plan synchronously before the async call so the UI never shows
+            // a previous result while a new one is in flight.
+            plan = nil
+            planError = nil
             let result = await service.plan(integrationID: id, answers: answers, siteID: siteID)
             switch result {
             case .success(let p):

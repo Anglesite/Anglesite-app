@@ -29,4 +29,14 @@ import Testing
         #expect(s.contains("Allow 1 domain"))
         #expect(s.lowercased().contains("confirm") || s.lowercased().contains("apply"))
     }
+
+    @Test func applyReplyMapsDoneToSuccessString() {
+        let s = SetupIntegrationArguments.applyReply(for: .done(integrationID: "booking"))
+        #expect(s == "Set up booking.")
+    }
+
+    @Test func applyReplyMapsFailedToErrorString() {
+        let s = SetupIntegrationArguments.applyReply(for: .failed(step: "configuring", message: "disk full"))
+        #expect(s == "Setup failed: disk full.")
+    }
 }

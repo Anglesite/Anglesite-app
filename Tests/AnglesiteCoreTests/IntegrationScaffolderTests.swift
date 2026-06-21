@@ -69,4 +69,19 @@ import Foundation
         #expect(steps.contains { if case .warning = $0 { return true }; return false })
         #expect(try! String(contentsOf: path, encoding: .utf8) == "HAND EDITED")  // not clobbered
     }
+
+    /// A plan with both a .upsertConfig and a .addCSP must produce a single .site-config containing both,
+    /// proving neither step clobbers the other (they're batched into one read-modify-write).
+    @Test func batchesConfigWritesIntoSinglePass() async {
+        let src = makeSource()
+        let plan = OperationPlan(integrationID: .donations, steps: [
+            .upsertConfig([ConfigKV(key: "DONATIONS_PROVIDER", value: "stripe")]),
+            .addCSP(["js.stripe.com"]),
+        ], warnings: [])
+        let steps = await collect(IntegrationScaffolder().apply(plan, in: src))
+        #expect(steps.contains(.done(integrationID: "donations")))
+        let cfg = try! String(contentsOf: src.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(cfg.contains("DONATIONS_PROVIDER=stripe"))
+        #expect(cfg.contains("SCRIPT_ALLOW=js.stripe.com"))
+    }
 }

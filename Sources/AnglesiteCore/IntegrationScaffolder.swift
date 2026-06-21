@@ -53,23 +53,33 @@ public actor IntegrationScaffolder {
                     }
                 } catch { return emit(.failed(step: "writingFiles", message: humanize(error))) }
 
-            case .upsertConfig(let kvs):
-                emit(.configuring)
-                let url = source.appendingPathComponent(".site-config")
-                let current = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-                let updated = SiteConfigFile.upsert(kvs.map { ($0.key, $0.value) }, into: current)
-                do { try updated.write(to: url, atomically: true, encoding: .utf8) }
-                catch { return emit(.failed(step: "configuring", message: humanize(error))) }
-
-            case .addCSP(let domains):
-                emit(.configuring)
-                let url = source.appendingPathComponent(".site-config")
-                let current = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-                let updated = SiteConfigFile.addCSPDomains(domains, into: current)
-                do { try updated.write(to: url, atomically: true, encoding: .utf8) }
-                catch { return emit(.failed(step: "configuring", message: humanize(error))) }
+            case .upsertConfig, .addCSP:
+                // Config mutations are batched below; nothing to do per-step here.
+                continue
             }
         }
+
+        // Batch all config mutations into a single read-modify-write to avoid lost-update races.
+        let configSteps = plan.steps.filter { if case .upsertConfig = $0 { return true }
+                                              if case .addCSP = $0 { return true }
+                                              return false }
+        if !configSteps.isEmpty {
+            emit(.configuring)
+            let url = source.appendingPathComponent(".site-config")
+            var current = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            for step in configSteps {
+                switch step {
+                case .upsertConfig(let kvs):
+                    current = SiteConfigFile.upsert(kvs.map { ($0.key, $0.value) }, into: current)
+                case .addCSP(let domains):
+                    current = SiteConfigFile.addCSPDomains(domains, into: current)
+                default: break
+                }
+            }
+            do { try current.write(to: url, atomically: true, encoding: .utf8) }
+            catch { return emit(.failed(step: "configuring", message: humanize(error))) }
+        }
+
         emit(.done(integrationID: plan.integrationID.rawValue))
     }
 

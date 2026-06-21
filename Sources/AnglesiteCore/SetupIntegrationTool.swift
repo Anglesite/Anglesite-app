@@ -16,11 +16,12 @@ public enum SetupIntegrationArguments {
     public static func id(for type: String) -> IntegrationID? { IntegrationID(rawValue: type) }
 
     /// Turn a plan result into a chat reply: re-prompt on missing field, else a confirm-before-apply summary.
+    /// Appends a hint instructing the model to call again with `apply: true` once the user confirms.
     public static func reply(for result: Result<OperationPlan, IntegrationError>,
                              descriptor: IntegrationDescriptor) -> String {
         switch result {
         case .success(let plan):
-            return "Here's what I'll set up:\n\(plan.summary)\n\nConfirm to apply, or tell me what to change."
+            return "Here's what I'll set up:\n\(plan.summary)\n\nConfirm to apply, or tell me what to change. When the user confirms, call this tool again with apply: true."
         case .failure(.missingRequiredField(let key)):
             let label = descriptor.fields.first { $0.key == key }?.label ?? key
             return "I need the \(label) to continue."
@@ -36,6 +37,15 @@ public enum SetupIntegrationArguments {
             return "I couldn't find that site."
         case .failure(.templateUnavailable):
             return "The site template isn't available right now."
+        }
+    }
+
+    /// Map the terminal apply step to a short user-facing string.
+    public static func applyReply(for step: IntegrationScaffolder.SetupStep) -> String {
+        switch step {
+        case .done(let id): return "Set up \(id)."
+        case .failed(_, let message): return "Setup failed: \(message)."
+        default: return "Setup finished."
         }
     }
 }
@@ -56,6 +66,8 @@ public struct SetupIntegrationTool: Tool, Sendable {
         public var provider: String?
         @Guide(description: "Field values as key=value pairs, comma-separated (e.g. 'username=jane,style=inline').")
         public var config: String?
+        @Guide(description: "Set to true ONLY after the user has confirmed they want these changes applied.")
+        public var apply: Bool?
     }
 
     private let service: any IntegrationOperationsService
@@ -70,8 +82,16 @@ public struct SetupIntegrationTool: Tool, Sendable {
         }
         var answers = SetupIntegrationArguments.parseConfig(arguments.config)
         if let p = arguments.provider { answers["provider"] = p }
+        let descriptor = IntegrationCatalog.descriptor(for: id)
         let result = await service.plan(integrationID: id, answers: answers, siteID: siteID)
-        return SetupIntegrationArguments.reply(for: result, descriptor: IntegrationCatalog.descriptor(for: id))
+        guard case .success(let plan) = result else {
+            return SetupIntegrationArguments.reply(for: result, descriptor: descriptor)
+        }
+        if arguments.apply == true {
+            let terminal = await service.apply(plan, siteID: siteID)
+            return SetupIntegrationArguments.applyReply(for: terminal)
+        }
+        return SetupIntegrationArguments.reply(for: .success(plan), descriptor: descriptor)
     }
 }
 #endif

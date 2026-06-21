@@ -43,7 +43,10 @@ public enum IntegrationCatalog {
     public static let all: [IntegrationDescriptor] = [booking, donations, giscus]
 
     public static func descriptor(for id: IntegrationID) -> IntegrationDescriptor {
-        all.first { $0.id == id }!
+        guard let d = all.first(where: { $0.id == id }) else {
+            fatalError("Unregistered integration: \(id)")
+        }
+        return d
     }
 
     // MARK: booking
@@ -92,7 +95,7 @@ public enum IntegrationCatalog {
         providers: [
             Provider(id: "stripe", displayName: "Stripe", cspDomains: ["js.stripe.com"]),
             Provider(id: "liberapay", displayName: "Liberapay", cspDomains: ["liberapay.com"]),
-            Provider(id: "githubSponsors", displayName: "GitHub Sponsors", cspDomains: ["github.com"]),
+            Provider(id: "github-sponsors", displayName: "GitHub Sponsors", cspDomains: ["github.com"]),
         ],
         fields: [
             Field(key: "link", label: "Donation link", kind: .url,

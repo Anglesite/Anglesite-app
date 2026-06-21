@@ -32,4 +32,13 @@ import Testing
         #expect(once == twice)
         #expect(twice == "SCRIPT_ALLOW=app.cal.com\n")
     }
+
+    /// CRLF input must be normalized to LF: the output key is replaced and no \r appears.
+    @Test func upsertNormalizesCRLF() {
+        let crlf = "SITE_NAME=Acme\r\nBOOKING_PROVIDER=cal\r\n"
+        let out = SiteConfigFile.upsert([("BOOKING_PROVIDER", "calendly")], into: crlf)
+        #expect(!out.contains("\r"), "Output must not contain \\r after CRLF normalization")
+        #expect(out.contains("BOOKING_PROVIDER=calendly"))
+        #expect(out.contains("SITE_NAME=Acme"))
+    }
 }

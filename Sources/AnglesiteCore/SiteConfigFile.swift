@@ -5,6 +5,8 @@ public enum SiteConfigFile {
     public static let cspKey = "SCRIPT_ALLOW"
 
     public static func upsert(_ entries: [(key: String, value: String)], into contents: String) -> String {
+        // Normalize CRLF to LF so stray \r don't appear in split lines or output.
+        let contents = contents.replacingOccurrences(of: "\r\n", with: "\n")
         var lines = contents.isEmpty ? [] : contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         if lines.last == "" { lines.removeLast() }  // normalize trailing newline
         for (key, value) in entries {

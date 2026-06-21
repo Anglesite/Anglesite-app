@@ -60,4 +60,26 @@ import Foundation
         #expect(m.plan == nil)
         #expect(m.planError != nil)
     }
+
+    /// Advancing to review with a service that fails planning must leave `plan == nil`,
+    /// proving no stale success survives the cleared-then-refailed path.
+    @Test func advanceClearsStalePlanBeforeRecomputing() async {
+        struct FailingService: IntegrationOperationsService {
+            func descriptors() -> [IntegrationDescriptor] { IntegrationCatalog.all }
+            func plan(integrationID: IntegrationID, answers: Answers, siteID: String) async -> Result<OperationPlan, IntegrationError> {
+                .failure(.siteNotFound)
+            }
+            func apply(_ plan: OperationPlan, siteID: String) async -> IntegrationScaffolder.SetupStep {
+                .done(integrationID: plan.integrationID.rawValue)
+            }
+        }
+        let m = IntegrationWizardModel(service: FailingService(), siteID: "s")
+        m.selectedID = .booking
+        m.step = .fields
+        // Seed a stale success plan to prove it gets cleared.
+        m.plan = OperationPlan(integrationID: .booking, steps: [], warnings: [])
+        await m.advance()  // advance to review; plan() fails → plan must be nil
+        #expect(m.plan == nil, "Stale plan must not survive a failed re-plan")
+        #expect(m.planError != nil)
+    }
 }
