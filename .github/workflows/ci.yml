@@ -69,7 +69,12 @@ jobs:
         run: |
           set -euo pipefail
           ls -d /Applications/Xcode*.app 2>/dev/null | sort -V
-          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          # Skip Xcode 26.3 on the current runner image: its toolchain builds test targets that
+          # link /usr/lib/swift/libswift_DarwinFoundation3.dylib, which the image does not ship, so
+          # `swift test` fails to load AnglesitePackageTests.xctest ("Library not loaded"). Prefer the
+          # newest *working* Xcode — 26.3 is excluded, so 27 is still auto-selected once it lands.
+          # Remove the grep once the 26.3 image is repaired (or Xcode 27 is available).
+          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | grep -vE '/Xcode_26\.3(\.app|\.[0-9]+\.app)$' | tail -1)
           echo "Selecting: $LATEST"
           sudo xcode-select -s "$LATEST"
 
@@ -104,7 +109,12 @@ jobs:
         # Same toolchain rationale as build-test: CLAUDE.md mandates Xcode 27+.
         run: |
           set -euo pipefail
-          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          # Skip Xcode 26.3 on the current runner image: its toolchain builds test targets that
+          # link /usr/lib/swift/libswift_DarwinFoundation3.dylib, which the image does not ship, so
+          # `swift test` fails to load AnglesitePackageTests.xctest ("Library not loaded"). Prefer the
+          # newest *working* Xcode — 26.3 is excluded, so 27 is still auto-selected once it lands.
+          # Remove the grep once the 26.3 image is repaired (or Xcode 27 is available).
+          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | grep -vE '/Xcode_26\.3(\.app|\.[0-9]+\.app)$' | tail -1)
           echo "Selecting: $LATEST"
           sudo xcode-select -s "$LATEST"
 
@@ -175,7 +185,12 @@ jobs:
         run: |
           set -euo pipefail
           ls -d /Applications/Xcode*.app 2>/dev/null | sort -V
-          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          # Skip Xcode 26.3 on the current runner image: its toolchain builds test targets that
+          # link /usr/lib/swift/libswift_DarwinFoundation3.dylib, which the image does not ship, so
+          # `swift test` fails to load AnglesitePackageTests.xctest ("Library not loaded"). Prefer the
+          # newest *working* Xcode — 26.3 is excluded, so 27 is still auto-selected once it lands.
+          # Remove the grep once the 26.3 image is repaired (or Xcode 27 is available).
+          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | grep -vE '/Xcode_26\.3(\.app|\.[0-9]+\.app)$' | tail -1)
           echo "Selecting: $LATEST"
           sudo xcode-select -s "$LATEST"
 
