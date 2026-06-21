@@ -78,4 +78,101 @@ import Foundation
             sourceDirectory: makeSource(), templateDirectory: makeTemplate())
         #expect((try? r.get()) != nil)
     }
+
+    // MARK: - New coverage
+
+    @Test func unknownProviderFails() {
+        let r = IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+            answers: ["provider": "bogus", "username": "j", "style": "inline"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate())
+        #expect(r == .failure(.unknownProvider("bogus")))
+    }
+
+    @Test func choiceInvalidValueFails() {
+        let r = IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+            answers: ["provider": "cal", "username": "j", "style": "weird"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate())
+        if case .failure(.invalidValue(let key, _)) = r { #expect(key == "style") }
+        else { Issue.record("expected .failure(.invalidValue(key: \"style\", ...)), got \(r)") }
+    }
+
+    @Test func emailFieldValidatesAtSign() {
+        let desc = IntegrationDescriptor(
+            id: .booking,
+            displayName: "Test",
+            summary: "",
+            providers: [],
+            fields: [Field(key: "contactEmail", label: "Email", kind: .email)],
+            operations: [])
+
+        let bad = IntegrationPlanner.plan(descriptor: desc,
+            answers: ["contactEmail": "notanemail"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate())
+        if case .failure(.invalidValue(let key, _)) = bad { #expect(key == "contactEmail") }
+        else { Issue.record("expected .failure(.invalidValue) for non-@ email, got \(bad)") }
+
+        let good = IntegrationPlanner.plan(descriptor: desc,
+            answers: ["contactEmail": "a@b.com"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate())
+        #expect((try? good.get()) != nil)
+    }
+
+    @Test func optionalFieldMayBeEmpty() {
+        // Omitting the optional eventSlug should succeed.
+        let rOk = IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+            answers: ["provider": "cal", "username": "jane", "style": "inline"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate())
+        #expect((try? rOk.get()) != nil)
+
+        // Omitting the required username must fail.
+        let rFail = IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+            answers: ["provider": "cal", "style": "inline"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate())
+        #expect(rFail == .failure(.missingRequiredField(key: "username")))
+    }
+
+    @Test func giscusEmitsNoBrandColorWarning() {
+        let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .giscus),
+            answers: ["repo": "o/r", "repoId": "R", "category": "General", "categoryId": "C", "mapping": "pathname"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
+        #expect(r.warnings.isEmpty)
+    }
+
+    @Test func brandColorWarningFiresOnlyWhenReferenced() throws {
+        // Synthetic descriptor whose writeConfig references {{brandColor}}.
+        let desc = IntegrationDescriptor(
+            id: .booking,
+            displayName: "BrandTest",
+            summary: "",
+            providers: [],
+            fields: [],
+            operations: [.writeConfig([ConfigEntry(key: "PRIMARY_COLOR", value: "{{brandColor}}")], when: .always)])
+
+        // (a) No global.css → warning fires, resolved value is the default #000000.
+        let srcNoCSS = makeSource()
+        let planA = try IntegrationPlanner.plan(descriptor: desc,
+            answers: [:], sourceDirectory: srcNoCSS, templateDirectory: makeTemplate()).get()
+        #expect(!planA.warnings.isEmpty)
+        let stepA = planA.steps.first
+        if case .upsertConfig(let kvs) = stepA {
+            #expect(kvs.first?.value == "#000000")
+        } else {
+            Issue.record("expected upsertConfig step, got \(String(describing: stepA))")
+        }
+
+        // (b) global.css present with --color-primary → no warning, resolved value matches.
+        let srcWithCSS = makeSource()
+        let cssDir = srcWithCSS.appendingPathComponent("src/styles")
+        try FileManager.default.createDirectory(at: cssDir, withIntermediateDirectories: true)
+        try ":root { --color-primary: #abcdef; }".write(
+            to: cssDir.appendingPathComponent("global.css"), atomically: true, encoding: .utf8)
+        let planB = try IntegrationPlanner.plan(descriptor: desc,
+            answers: [:], sourceDirectory: srcWithCSS, templateDirectory: makeTemplate()).get()
+        #expect(planB.warnings.isEmpty)
+        if case .upsertConfig(let kvs) = planB.steps.first {
+            #expect(kvs.first?.value == "#abcdef")
+        } else {
+            Issue.record("expected upsertConfig step, got \(String(describing: planB.steps.first))")
+        }
+    }
 }
