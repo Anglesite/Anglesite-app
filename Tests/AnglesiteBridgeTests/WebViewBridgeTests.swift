@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import WebKit
 @testable import AnglesiteBridge
 
 /// `@MainActor` because `WebViewBridge.makeOverlayUserScript` builds a `WKUserScript`, and WebKit
@@ -32,6 +33,24 @@ struct WebViewBridgeTests {
         // The test runner's own bundle does not contain `edit-overlay/overlay.js`; it must report
         // that absence with `nil` rather than crashing.
         #expect(WebViewBridge.makeOverlayUserScript(in: Bundle(for: BundleAnchor.self)) == nil)
+    }
+
+    @available(macOS 15.0, *)
+    @Test("Enable Writing Tools opts the configuration into the complete behavior (#91)")
+    func enableWritingToolsSetsCompleteBehavior() {
+        let config = WKWebViewConfiguration()
+        // A fresh configuration is `.default` (raw 0) — which WebKit treats as the panel-only
+        // `.limited` experience. Confirm we move it to the full inline `.complete` experience.
+        #expect(config.writingToolsBehavior != .complete)
+        WebViewBridge.enableWritingTools(on: config)
+        #expect(config.writingToolsBehavior == .complete)
+    }
+
+    @available(macOS 15.0, *)
+    @Test("localDevConfiguration enables Writing Tools (#91)")
+    func localDevConfigurationEnablesWritingTools() {
+        let config = WebViewBridge.localDevConfiguration()
+        #expect(config.writingToolsBehavior == .complete)
     }
 }
 

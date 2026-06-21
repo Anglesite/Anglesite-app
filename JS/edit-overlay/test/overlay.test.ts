@@ -124,6 +124,29 @@ describe("click-to-edit", () => {
     expect(msg.selector.textContent).toBe("original-text");
     expect(msg.value).toBe("new-text-the-user-typed");
   });
+
+  it("captures a Writing Tools rewrite as a single replace-text edit (#91)", () => {
+    // Apple Intelligence Writing Tools applies its rewrite inline to the DOM while the element is
+    // still focused/contentEditable — modeled here by mutating `textContent` after the click but
+    // before blur. The blur-time diff must then send exactly one `replace-text` apply-edit carrying
+    // the rewritten text, so the rewrite lands as one undoable commit through the existing pipeline.
+    const main = document.createElement("main");
+    document.body.appendChild(main);
+    const p = makeText(main, "p", "we makes great stuff");
+
+    p.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // WebKit's Writing Tools rewrite of the contentEditable element.
+    p.textContent = "We make great things.";
+    p.dispatchEvent(new FocusEvent("blur"));
+
+    expect(sent.length).toBe(1);
+    const msg = sent[0] as { type: string; op: string; selector: { textContent?: string }; value: unknown };
+    expect(msg.type).toBe("anglesite:apply-edit");
+    expect(msg.op).toBe("replace-text");
+    expect(msg.value).toBe("We make great things.");
+    // Selector snapshot reflects the pre-rewrite source text so the server-side patcher resolves it.
+    expect(msg.selector.textContent).toBe("we makes great stuff");
+  });
 });
 
 describe("image drop", () => {
