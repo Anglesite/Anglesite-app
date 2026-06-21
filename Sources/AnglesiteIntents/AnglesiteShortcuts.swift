@@ -86,6 +86,34 @@ public struct AnglesiteShortcuts: AppShortcutsProvider {
             shortTitle: "Edit Content",
             systemImageName: "pencil"
         )
+        // Bucket 3 integration intents: booking, donations, giscus comments.
+        AppShortcut(
+            intent: AddBookingIntent(),
+            phrases: [
+                "Add booking to my site with \(.applicationName)",
+                "Add a booking widget with \(.applicationName)",
+            ],
+            shortTitle: "Add Booking",
+            systemImageName: "calendar.badge.plus"
+        )
+        AppShortcut(
+            intent: AddDonationsIntent(),
+            phrases: [
+                "Add donations to my site with \(.applicationName)",
+                "Add a donation button with \(.applicationName)",
+            ],
+            shortTitle: "Add Donations",
+            systemImageName: "heart.circle"
+        )
+        AppShortcut(
+            intent: AddGiscusIntent(),
+            phrases: [
+                "Add comments to my site with \(.applicationName)",
+                "Add giscus comments with \(.applicationName)",
+            ],
+            shortTitle: "Add Comments",
+            systemImageName: "bubble.left.and.bubble.right"
+        )
     }
 }
 
@@ -105,5 +133,8 @@ extension AnglesiteShortcuts {
         "AddPostIntent",
         "PreviewSiteIntent",
         "EditContentIntent",
+        "AddBookingIntent",
+        "AddDonationsIntent",
+        "AddGiscusIntent",
     ]
 }

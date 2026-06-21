@@ -55,6 +55,9 @@ extension AppIntentsTests {
                 // TODO(#239/#250): flip requiresConfirmation to true when the EditContentIntent
                 // confirmation gate lands — this assertion passes on stale data until then.
                 "edit-content": .init(sideEffect: .modifiesContent, requiresConfirmation: false, isCancellable: true, resultShape: .none),
+                "add-booking": .init(sideEffect: .createsContent, requiresConfirmation: true, isCancellable: false, resultShape: .none),
+                "add-donations": .init(sideEffect: .createsContent, requiresConfirmation: true, isCancellable: false, resultShape: .none),
+                "add-comments": .init(sideEffect: .createsContent, requiresConfirmation: true, isCancellable: false, resultShape: .none),
             ]
             #expect(expected.count == AnglesiteOperations.all.count)
             for descriptor in AnglesiteOperations.all {

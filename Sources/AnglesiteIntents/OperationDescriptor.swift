@@ -131,6 +131,24 @@ public enum AnglesiteOperations {
             requiresConfirmation: false, isCancellable: true,
             resultShape: .none
         ),
+        OperationDescriptor(
+            operationID: "add-booking", displayName: "Add Booking",
+            intentTypeName: "AddBookingIntent", sideEffect: .createsContent,
+            requiresConfirmation: true, isCancellable: false,
+            resultShape: .none
+        ),
+        OperationDescriptor(
+            operationID: "add-donations", displayName: "Add Donations",
+            intentTypeName: "AddDonationsIntent", sideEffect: .createsContent,
+            requiresConfirmation: true, isCancellable: false,
+            resultShape: .none
+        ),
+        OperationDescriptor(
+            operationID: "add-comments", displayName: "Add Comments",
+            intentTypeName: "AddGiscusIntent", sideEffect: .createsContent,
+            requiresConfirmation: true, isCancellable: false,
+            resultShape: .none
+        ),
     ]
 
     /// Look up a descriptor by intent type name. `nil` if none registered.
