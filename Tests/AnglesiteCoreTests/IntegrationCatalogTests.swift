@@ -47,4 +47,20 @@ import Testing
             #expect(!snippet.raw.contains("client:"), "\(descriptor.id) snippet has a client: directive: \(snippet.raw)")
         }
     }
+
+    @Test func bookingWritesEventSlugAndButtonText() {
+        let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .booking))
+        #expect(keys.isSuperset(of: ["BOOKING_PROVIDER", "BOOKING_USERNAME", "BOOKING_STYLE", "BOOKING_EVENT_SLUG", "BOOKING_BUTTON_TEXT"]))
+    }
+
+    @Test func giscusWritesAllIds() {
+        let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .giscus))
+        #expect(keys.isSuperset(of: ["GISCUS_REPO", "GISCUS_CATEGORY", "GISCUS_REPO_ID", "GISCUS_CATEGORY_ID", "GISCUS_MAPPING"]))
+    }
+
+    private func writtenConfigKeys(for d: IntegrationDescriptor) -> Set<String> {
+        var k = Set<String>()
+        for case .writeConfig(let entries, _) in d.operations { for e in entries { k.insert(e.key) } }
+        return k
+    }
 }

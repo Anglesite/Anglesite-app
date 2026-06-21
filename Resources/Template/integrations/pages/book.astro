@@ -8,6 +8,7 @@ import { readConfig } from "../../scripts/config";
   <BookingWidget
     provider={readConfig("BOOKING_PROVIDER")}
     username={readConfig("BOOKING_USERNAME")}
+    eventSlug={readConfig("BOOKING_EVENT_SLUG")}
     style="inline"
   />
 </BaseLayout>
