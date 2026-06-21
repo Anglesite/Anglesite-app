@@ -300,10 +300,19 @@ public actor BundleSync {
 
     private func fetchBundle(_ bundleURL: URL, into sourceDirectory: URL) async -> ImportResult? {
         do {
+            // Both branches and tags land in the synthetic `icloud/*` namespace we own, never in the
+            // user's real `refs/heads/*` / `refs/tags/*`. The `+` forces only those (ours-to-clobber)
+            // refs. This keeps the import non-destructive symmetrically: branches fast-forward only via
+            // the explicit `merge --ff-only` below, and a *diverged* local tag is preserved rather than
+            // force-overwritten. New tags still propagate — git's automatic tag-following materializes
+            // tags that point at fetched objects into `refs/tags/*`, and auto-follow only ever *creates*
+            // a missing tag, never rewrites an existing one. (Fetching tags straight into `refs/tags/*`
+            // without `--force` would instead make the whole fetch exit non-zero on any tag divergence,
+            // turning a benign tag conflict into a failed import.)
             let fetch = try await runner(sourceDirectory, [
-                "fetch", "--force", bundleURL.path,
-                "refs/heads/*:refs/remotes/\(Self.remoteRefspace)/*",
-                "refs/tags/*:refs/tags/*"
+                "fetch", bundleURL.path,
+                "+refs/heads/*:refs/remotes/\(Self.remoteRefspace)/*",
+                "+refs/tags/*:refs/remotes/\(Self.remoteRefspace)/tags/*"
             ])
             guard fetch.exitCode == 0 else {
                 return .failed(reason: gitMessage("git fetch", fetch), exitCode: fetch.exitCode)

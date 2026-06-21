@@ -199,7 +199,33 @@ struct BundleSyncTests {
         #expect(result == .initialized(branch: "main"))
     }
 
+    @Test("importBundle routes tags through the icloud namespace, never force-overwriting local refs/tags/*")
+    func importFetchKeepsTagsNonDestructive() async throws {
+        let (source, bundleURL) = try makeRepoWithBundle()
+        let recorder = ArgRecorder()
+        let base = existingRepoRunner(branch: "main", relation: .behind)
+        let sync = BundleSync(runner: { dir, args in
+            await recorder.record(args)
+            return try await base(dir, args)
+        })
+        _ = await sync.importBundle(at: bundleURL, into: source)
+
+        let fetch = try #require(await recorder.all.first { $0.first == "fetch" }, "expected a git fetch")
+        // Tags must not be force-fetched into the user's real tag namespace (would clobber a diverged
+        // local tag); they ride in the synthetic icloud namespace, symmetric with branches.
+        #expect(!fetch.contains("--force"))
+        #expect(!fetch.contains("refs/tags/*:refs/tags/*"))
+        #expect(fetch.contains("+refs/heads/*:refs/remotes/icloud/*"))
+        #expect(fetch.contains("+refs/tags/*:refs/remotes/icloud/tags/*"))
+    }
+
     // MARK: - Import runner helpers
+
+    /// Thread-safe collector for the argument vectors the fake runner sees.
+    private actor ArgRecorder {
+        private(set) var all: [[String]] = []
+        func record(_ args: [String]) { all.append(args) }
+    }
 
     private enum Relation { case behind, ahead, equal, diverged }
 
