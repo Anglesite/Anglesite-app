@@ -85,6 +85,26 @@ import Foundation
         #expect(r == .failure(.providerRequired))
     }
 
+    /// A staged component that the descriptor copies but that is absent from the template must
+    /// hard-fail the plan — otherwise its `import` would be injected with no file behind it,
+    /// turning a clear up-front error into a deferred Astro build break.
+    @Test func missingStagedAssetFailsRatherThanOrphaningImport() throws {
+        let template = makeTemplate()
+        // Remove a component the booking (floating) descriptor copies + imports. Require it to
+        // exist first so a future makeTemplate() change yields a clear diagnostic, not a crash.
+        let widget = template.appendingPathComponent("integrations/components/BookingWidget.astro")
+        try #require(FileManager.default.fileExists(atPath: widget.path))
+        try FileManager.default.removeItem(at: widget)
+        let r = IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+            answers: ["provider": "cal", "username": "jane", "style": "floating"],
+            sourceDirectory: makeSource(), templateDirectory: template)
+        guard case .failure(.missingTemplateAsset(let path)) = r else {
+            Issue.record("expected .failure(.missingTemplateAsset), got \(r)")
+            return
+        }
+        #expect(path == "integrations/components/BookingWidget.astro")
+    }
+
     @Test func missingGlobalCSSWarnsNotThrows() {
         // giscus has no {{brandColor}} use, so use a source dir with no global.css and confirm a plan
         // still returns; the warning path is asserted via booking which references brandColor only if used.

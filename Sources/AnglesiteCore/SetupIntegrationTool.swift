@@ -37,6 +37,11 @@ public enum SetupIntegrationArguments {
             return "I couldn't find that site."
         case .failure(.templateUnavailable):
             return "The site template isn't available right now."
+        case .failure(.missingTemplateAsset):
+            // The missing path is carried on the error value for logging; keep the user-facing
+            // message generic, matching `.templateUnavailable` (this is a packaging failure, not
+            // actionable user input).
+            return "The site template is incomplete — a required component is missing. Please reinstall Anglesite."
         }
     }
 

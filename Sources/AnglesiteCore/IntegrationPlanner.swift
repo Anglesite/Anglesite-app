@@ -66,8 +66,10 @@ public enum IntegrationPlanner {
                 let dest = to.resolve(tokens)
                 let src = templateDirectory.appendingPathComponent(from.path)
                 guard let contents = try? String(contentsOf: src, encoding: .utf8) else {
-                    warnings.append(PlanWarning("Template file missing: \(from.path)"))
-                    continue
+                    // Hard-fail: skipping the copy would leave the descriptor's matching `import`
+                    // injection pointing at a file that was never written — a deferred Astro build
+                    // break. Surface it now as a clear, up-front error instead.
+                    return .failure(.missingTemplateAsset(path: from.path))
                 }
                 steps.append(.createFile(relativePath: dest, contents: contents))
             case .writeConfig(let entries, let when):
