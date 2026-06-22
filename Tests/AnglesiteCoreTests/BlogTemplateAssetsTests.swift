@@ -52,7 +52,7 @@ import Foundation
         #expect(s.contains("getStaticPaths"))
         #expect(s.contains("getCollection(\"blog\""))
         // drafts excluded from the generated paths
-        #expect(s.contains("draft"))
+        #expect(s.contains("!data.draft"))
         // post body rendered into the layout slot
         #expect(s.contains("<Content />"))
         #expect(s.contains("<BlogPost"))
@@ -66,7 +66,7 @@ import Foundation
         #expect(s.contains("import BaseLayout from \"../../layouts/BaseLayout.astro\""))
         #expect(s.contains("getCollection(\"blog\""))
         #expect(s.contains("/blog/"))
-        #expect(s.contains("draft"))   // drafts filtered from the listing
+        #expect(s.contains("!data.draft"))   // drafts filtered from the listing
     }
 
     @Test func homepageLinksToBlog() throws {
