@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for `xcodebuild -exportArchive` of the AnglesiteMAS (Mac App Store) target.
+  Consumed by scripts/release-mas.sh, which substitutes __TEAM_ID__ and
+  __PROVISIONING_PROFILE__ from the environment and writes the result to
+  build/exportOptions-appstore.plist (gitignored).
+
+  Counterpart to scripts/exportOptions.plist (the Developer ID / Sparkle export). The
+  difference that matters: method `app-store-connect` produces a Mac Installer
+  Distribution-signed .pkg ready for App Store Connect, vs. `developer-id` which
+  produces a notarizable, self-distributed .app.
+-->
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>app-store-connect</string>
+    <key>teamID</key>
+    <string>__TEAM_ID__</string>
+    <key>signingStyle</key>
+    <string>manual</string>
+    <!-- Signs the outer installer package. The .app inside is signed Apple Distribution
+         (project.yml AnglesiteMAS Release CODE_SIGN_IDENTITY); the .pkg wrapper needs the
+         Mac Installer Distribution cert. -->
+    <key>installerSigningCertificate</key>
+    <string>Mac Installer Distribution</string>
+    <!-- Manual signing requires an explicit App Store provisioning profile for the bundle id. -->
+    <key>provisioningProfiles</key>
+    <dict>
+        <key>dev.anglesite.app.mas</key>
+        <string>__PROVISIONING_PROFILE__</string>
+    </dict>
+    <key>uploadSymbols</key>
+    <true/>
+    <!-- We bump MARKETING_VERSION / CURRENT_PROJECT_VERSION ourselves in project.yml;
+         don't let Xcode rewrite them at export. -->
+    <key>manageAppVersionAndBuildNumber</key>
+    <false/>
+</dict>
+</plist>
