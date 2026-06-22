@@ -47,4 +47,7 @@ public enum IntegrationError: Error, Equatable, Sendable {
     case providerRequired
     case siteNotFound
     case templateUnavailable
+    /// A staged asset the descriptor copies is absent from the template — a hard error, since
+    /// proceeding would inject an `import` for a file that was never written.
+    case missingTemplateAsset(path: String)
 }

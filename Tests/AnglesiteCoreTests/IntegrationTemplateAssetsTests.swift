@@ -39,8 +39,10 @@ import Foundation
                   "integrations/components/Comments.astro", "integrations/pages/book.astro", "integrations/pages/donate.astro"] {
             #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "missing staged \(p)")
         }
-        // NOT base-scaffolded:
-        for p in ["src/components/BookingWidget.astro", "src/pages/book.astro", "src/pages/donate.astro"] {
+        // NOT base-scaffolded: every staged asset must be absent from src/ (covers all five —
+        // both components previously omitted, DonationButton and Comments, are now checked).
+        for p in ["src/components/BookingWidget.astro", "src/components/DonationButton.astro",
+                  "src/components/Comments.astro", "src/pages/book.astro", "src/pages/donate.astro"] {
             #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "should be staged, not in src: \(p)")
         }
     }

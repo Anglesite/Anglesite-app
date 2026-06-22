@@ -37,6 +37,8 @@ public enum SetupIntegrationArguments {
             return "I couldn't find that site."
         case .failure(.templateUnavailable):
             return "The site template isn't available right now."
+        case .failure(.missingTemplateAsset(let path)):
+            return "The site template is incomplete — \(path) is missing."
         }
     }
 
