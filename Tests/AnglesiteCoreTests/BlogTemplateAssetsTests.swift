@@ -68,4 +68,10 @@ import Foundation
         #expect(s.contains("/blog/"))
         #expect(s.contains("draft"))   // drafts filtered from the listing
     }
+
+    @Test func homepageLinksToBlog() throws {
+        let root = templateRoot()
+        let s = try String(contentsOf: root.appendingPathComponent("src/pages/index.astro"), encoding: .utf8)
+        #expect(s.contains("href=\"/blog/\""), "homepage should link to /blog/")
+    }
 }
