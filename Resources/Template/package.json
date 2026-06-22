@@ -4,6 +4,7 @@
   "version": "0.0.1",
   "scripts": {
     "dev": "astro dev",
+    "prebuild": "npx tsx scripts/csp.ts",
     "build": "astro build",
     "preview": "astro preview",
     "check": "npx tsx scripts/pre-deploy-check.ts"

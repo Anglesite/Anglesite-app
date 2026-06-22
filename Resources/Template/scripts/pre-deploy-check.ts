@@ -15,7 +15,9 @@
  */
 
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseAllowedDomains } from "./csp";
 
 interface Issue {
   severity: "error" | "warning";
@@ -25,6 +27,8 @@ interface Issue {
 
 const JSON_MODE = process.argv.includes("--json");
 const DIST_DIR = join(process.cwd(), "dist");
+const HEADERS_FILE = join(DIST_DIR, "_headers");
+const CONFIG_FILE = join(process.cwd(), ".site-config");
 
 const PII_PATTERNS = [
   { name: "email", pattern: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g },
@@ -56,6 +60,44 @@ async function* walk(dir: string): AsyncGenerator<string> {
   }
 }
 
+/**
+ * Validate the generated CSP. Returns one error Issue per problem:
+ * missing _headers, no CSP directive, or a configured SCRIPT_ALLOW domain
+ * absent from the CSP.
+ */
+export function checkHeaders(headersContent: string | null, configContent: string): Issue[] {
+  const issues: Issue[] = [];
+  if (headersContent === null) {
+    issues.push({ severity: "error", message: "No dist/_headers — CSP is not enforced.", file: "_headers" });
+    return issues;
+  }
+  const cspLine = headersContent
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.startsWith("Content-Security-Policy:"));
+  if (!cspLine) {
+    issues.push({ severity: "error", message: "dist/_headers has no Content-Security-Policy.", file: "_headers" });
+    return issues;
+  }
+  const cspTokens = new Set(
+    cspLine
+      .replace(/^Content-Security-Policy:/, "")
+      .split(/[\s;]+/)
+      .filter((t) => t.length > 0),
+  );
+  const allow = parseAllowedDomains(configContent);
+  for (const domain of allow) {
+    if (!cspTokens.has(domain)) {
+      issues.push({
+        severity: "error",
+        message: `Configured integration domain "${domain}" is missing from the CSP.`,
+        file: "_headers",
+      });
+    }
+  }
+  return issues;
+}
+
 async function scan(): Promise<Issue[]> {
   const issues: Issue[] = [];
 
@@ -65,6 +107,14 @@ async function scan(): Promise<Issue[]> {
     issues.push({ severity: "warning", message: "No dist/ directory found — nothing to scan." });
     return issues;
   }
+
+  const headersContent = await readFile(HEADERS_FILE, "utf-8").catch((e: NodeJS.ErrnoException) =>
+    e.code === "ENOENT" ? null : Promise.reject(e),
+  );
+  const configContent = await readFile(CONFIG_FILE, "utf-8").catch((e: NodeJS.ErrnoException) =>
+    e.code === "ENOENT" ? "" : Promise.reject(e),
+  );
+  issues.push(...checkHeaders(headersContent, configContent));
 
   for await (const file of walk(DIST_DIR)) {
     if (!/\.(html?|js|css|json|xml|txt)$/i.test(file)) continue;
@@ -132,4 +182,6 @@ async function main() {
   process.exit(hasErrors ? 1 : 0);
 }
 
-main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}
