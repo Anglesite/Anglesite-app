@@ -43,8 +43,8 @@ import Foundation
         #expect(!r.steps.contains { if case .injectAnchor = $0 { return true }; return false })
     }
 
-    @Test func bookingFloatingInjectsIntoLayout() {
-        let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+    @Test func bookingFloatingInjectsIntoLayout() throws {
+        let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
             answers: ["provider": "cal", "username": "jane", "style": "floating"],
             sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
         let injects = r.steps.compactMap { step -> (String, MarkerInjector.CommentStyle)? in
