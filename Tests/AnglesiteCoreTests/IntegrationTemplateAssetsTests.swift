@@ -57,6 +57,13 @@ import Foundation
         #expect(blog.contains("<!-- anglesite:comments -->"))
     }
 
+    @Test func homepageHasImportAndHeroAnchors() throws {
+        let root = templateRoot()
+        let index = try String(contentsOf: root.appendingPathComponent("src/pages/index.astro"), encoding: .utf8)
+        #expect(index.contains("// anglesite:imports"))
+        #expect(index.contains("<!-- anglesite:hero-cta -->"))
+    }
+
     @Test func onDemandPagesUseReadConfigNotImportMetaEnv() throws {
         let root = templateRoot()
         for p in ["integrations/pages/book.astro", "integrations/pages/donate.astro"] {
