@@ -68,9 +68,11 @@ public enum IntegrationCatalog {
             Field(key: "style", label: "Placement", kind: .choice([
                 Choice(value: "inline", label: "On a /book page"),
                 Choice(value: "floating", label: "Floating button (site-wide)"),
+                Choice(value: "button", label: "Button on the home page"),
             ]), defaultValue: "inline"),
             Field(key: "buttonText", label: "Button text", kind: .text, isOptional: true,
-                  defaultValue: "Book a time", visibleWhen: .fieldEquals(key: "style", value: "floating")),
+                  defaultValue: "Book a time",
+                  visibleWhen: .fieldIn(key: "style", values: ["floating", "button"])),
         ],
         operations: [
             .copyFile(from: TemplateRef("integrations/components/BookingWidget.astro"),
@@ -84,6 +86,12 @@ public enum IntegrationCatalog {
             .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:body-end -->",
                             snippet: "{readConfig(\"BOOKING_STYLE\") === \"floating\" && (<BookingWidget provider={readConfig(\"BOOKING_PROVIDER\")} username={readConfig(\"BOOKING_USERNAME\")} eventSlug={readConfig(\"BOOKING_EVENT_SLUG\")} buttonText={readConfig(\"BOOKING_BUTTON_TEXT\")} style=\"floating\" />)}",
                             when: .fieldEquals(key: "style", value: "floating"), style: .html),
+            .injectAtAnchor(file: "src/pages/index.astro", anchor: "// anglesite:imports",
+                            snippet: "import BookingWidget from \"../components/BookingWidget.astro\";\nimport { readConfig } from \"../../scripts/config\";",
+                            when: .fieldEquals(key: "style", value: "button"), style: .line),
+            .injectAtAnchor(file: "src/pages/index.astro", anchor: "<!-- anglesite:hero-cta -->",
+                            snippet: "{readConfig(\"BOOKING_STYLE\") === \"button\" && (<BookingWidget provider={readConfig(\"BOOKING_PROVIDER\")} username={readConfig(\"BOOKING_USERNAME\")} eventSlug={readConfig(\"BOOKING_EVENT_SLUG\")} buttonText={readConfig(\"BOOKING_BUTTON_TEXT\")} style=\"button\" />)}",
+                            when: .fieldEquals(key: "style", value: "button"), style: .html),
             .writeConfig([
                 ConfigEntry(key: "BOOKING_PROVIDER", value: "{{provider}}"),
                 ConfigEntry(key: "BOOKING_USERNAME", value: "{{username}}"),

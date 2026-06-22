@@ -222,6 +222,18 @@ import Foundation
         }
     }
 
+    @Test func bookingButtonInjectsIntoHomepageHero() {
+        let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+            answers: ["provider": "cal", "username": "jane", "style": "button"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
+        let injects = r.steps.compactMap { step -> (String, MarkerInjector.CommentStyle)? in
+            if case .injectAnchor(let f, _, _, _, let style) = step { return (f, style) }; return nil
+        }
+        #expect(injects.contains { $0.0.contains("index.astro") && $0.1 == .line })
+        #expect(injects.contains { $0.0.contains("index.astro") && $0.1 == .html })
+        #expect(!r.steps.contains { if case .createFile(let p, _) = $0 { return p == "src/pages/book.astro" }; return false })
+    }
+
     @Test func fieldInVisibilityMatchesAnyListedValue() {
         let cond = Condition.fieldIn(key: "style", values: ["floating", "button"])
         #expect(IntegrationPlanner.isVisible(cond, answers: ["style": "floating"], providerID: nil))
