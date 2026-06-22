@@ -1,0 +1,84 @@
+#!/usr/bin/env npx tsx
+/**
+ * Build-time CSP generator. Reads SCRIPT_ALLOW from .site-config and writes a
+ * complete public/_headers file. Integration domains are applied broadly to the
+ * four directives embeds need (script/frame/connect/img). See
+ * docs/superpowers/specs/2026-06-22-csp-headers-enforcement-design.md.
+ */
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { readConfigFromString } from "./config";
+
+/** Directives each configured integration domain is added to. */
+const EMBED_DIRECTIVES = ["script-src", "frame-src", "connect-src", "img-src"];
+
+/** Baseline directive values (secure-by-default). */
+const BASE: Record<string, string[]> = {
+  "default-src": ["'self'"],
+  "script-src": ["'self'", "static.cloudflareinsights.com"],
+  "style-src": ["'self'", "'unsafe-inline'"],
+  "img-src": ["'self'", "data:"],
+  "font-src": ["'self'"],
+  "connect-src": ["'self'", "cloudflareinsights.com"],
+  "frame-src": ["'self'"],
+  "frame-ancestors": ["'none'"],
+  "base-uri": ["'self'"],
+  "form-action": ["'self'"],
+};
+
+/** Emission order for directives (stable, reproducible output). */
+const DIRECTIVE_ORDER = [
+  "default-src", "script-src", "style-src", "img-src", "font-src",
+  "connect-src", "frame-src", "frame-ancestors", "base-uri", "form-action",
+];
+
+/** Sorted, deduped, non-empty domains from the SCRIPT_ALLOW key. */
+export function parseAllowedDomains(configContent: string): string[] {
+  const raw = readConfigFromString(configContent, "SCRIPT_ALLOW") ?? "";
+  const domains = raw.split(",").map((d) => d.trim()).filter((d) => d.length > 0);
+  return [...new Set(domains)].sort();
+}
+
+/** Compose the Content-Security-Policy header value. */
+export function buildCSP(configContent: string): string {
+  const domains = parseAllowedDomains(configContent);
+  const directives: Record<string, string[]> = {};
+  for (const name of DIRECTIVE_ORDER) directives[name] = [...BASE[name]];
+  for (const name of EMBED_DIRECTIVES) {
+    for (const d of domains) {
+      if (!directives[name].includes(d)) directives[name].push(d);
+    }
+  }
+  return DIRECTIVE_ORDER.map((name) => `${name} ${directives[name].join(" ")}`).join("; ");
+}
+
+/** Compose the full public/_headers file body. */
+export function buildHeaders(configContent: string): string {
+  const csp = buildCSP(configContent);
+  return `/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()
+  Content-Security-Policy: ${csp}
+  Cache-Control: public, max-age=0, must-revalidate
+
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
+`;
+}
+
+function main(): void {
+  const configPath = resolve(process.cwd(), ".site-config");
+  const config = existsSync(configPath) ? readFileSync(configPath, "utf-8") : "";
+  const outPath = resolve(process.cwd(), "public", "_headers");
+  mkdirSync(dirname(outPath), { recursive: true });
+  writeFileSync(outPath, buildHeaders(config), "utf-8");
+  console.log(`Wrote ${outPath}`);
+}
+
+// Run only when invoked directly (e.g. `npx tsx scripts/csp.ts`), never on import.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}
