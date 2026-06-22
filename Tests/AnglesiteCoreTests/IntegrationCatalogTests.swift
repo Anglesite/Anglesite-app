@@ -48,6 +48,16 @@ import Testing
         #expect(bad.validate().contains { $0.contains("nope") })
     }
 
+    @Test func validateCatchesEmptyFieldInValues() {
+        let bad = IntegrationDescriptor(
+            id: .booking, displayName: "B", summary: "s",
+            providers: [Provider(id: "cal", displayName: "Cal", cspDomains: ["app.cal.com"])],
+            fields: [Field(key: "f", label: "F", kind: .text,
+                           visibleWhen: .fieldIn(key: "f", values: []))],
+            operations: [])
+        #expect(bad.validate().contains { $0.contains("empty values") })
+    }
+
     /// `client:*` hydration directives are only valid on framework components; on a plain `.astro`
     /// component (which our injected widgets are) Astro errors at build. Guard every injected
     /// snippet against carrying one (regression guard for the build-breaker the final review found).

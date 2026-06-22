@@ -17,6 +17,8 @@ public extension IntegrationDescriptor {
                 problems.append("\(context): condition references unknown field \"\(key)\"")
             case .fieldIn(let key, _) where !fieldKeys.contains(key):
                 problems.append("\(context): condition references unknown field \"\(key)\"")
+            case .fieldIn(_, let values) where values.isEmpty:
+                problems.append("\(context): fieldIn condition has an empty values list (always false)")
             default: break
             }
         }

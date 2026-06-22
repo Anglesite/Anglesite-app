@@ -233,6 +233,8 @@ import Foundation
         }
         #expect(injects.contains { $0.0.contains("index.astro") && $0.1 == .line })
         #expect(injects.contains { $0.0.contains("index.astro") && $0.1 == .html })
+        // The layout injections must not leak into the button plan (mirror of bookingFloatingInjectsIntoLayout).
+        #expect(!injects.contains { $0.0.contains("BaseLayout") })
         #expect(!r.steps.contains { if case .createFile(let p, _) = $0 { return p == "src/pages/book.astro" }; return false })
     }
 
