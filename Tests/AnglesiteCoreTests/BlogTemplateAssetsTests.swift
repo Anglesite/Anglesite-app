@@ -74,4 +74,21 @@ import Foundation
         let s = try String(contentsOf: root.appendingPathComponent("src/pages/index.astro"), encoding: .utf8)
         #expect(s.contains("href=\"/blog/\""), "homepage should link to /blog/")
     }
+
+    @Test func giscusInjectsIntoBodyNotFrontmatter() throws {
+        // MarkerInjector matches the FIRST occurrence of the anchor. If the anchor text
+        // also appears in BlogPost.astro's frontmatter doc-comment, giscus injects into
+        // the frontmatter and never renders. Guard the real layout against that regression.
+        let root = templateRoot()
+        let src = try String(contentsOf: root.appendingPathComponent("src/layouts/BlogPost.astro"), encoding: .utf8)
+        let out = try MarkerInjector.inject(
+            snippet: "<Comments />", withID: "comments",
+            atAnchor: "<!-- anglesite:comments -->", into: src, style: .html).get()
+        let frontmatterClose = out.range(of: "\n---\n")  // closing fence of Astro frontmatter
+        let injected = out.range(of: "<Comments />")
+        #expect(frontmatterClose != nil, "BlogPost.astro should have an Astro frontmatter fence")
+        #expect(injected != nil, "injected giscus snippet should be present")
+        #expect(injected!.lowerBound > frontmatterClose!.upperBound,
+                "giscus must inject into the <article> body, not the frontmatter — a duplicate anchor in a frontmatter comment makes the first-match injector target the wrong spot")
+    }
 }

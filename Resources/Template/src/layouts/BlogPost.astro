@@ -1,9 +1,8 @@
 ---
-// BlogPost.astro — giscus injection target.
-// The template has no blog content collection yet; wiring real posts to this
-// layout is follow-up work. This file exists so that the /anglesite:giscus
-// skill's `injectAtAnchor` call has a target (<!-- anglesite:comments -->)
-// and the asset test passes. Tracked separately.
+// BlogPost.astro — layout for an individual blog post. The post route
+// src/pages/blog/[...slug].astro renders through this layout; the Markdown body
+// fills the <slot/>, and the comments anchor in the <article> below is where the
+// giscus integration injects its widget when comments are set up.
 import BaseLayout from "./BaseLayout.astro";
 
 interface Props {
