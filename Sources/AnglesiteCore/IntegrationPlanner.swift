@@ -104,6 +104,7 @@ public enum IntegrationPlanner {
         case .always: return true
         case .providerIs(let p): return providerID == p
         case .fieldEquals(let key, let value): return answers[key] == value
+        case .fieldIn(let key, let values): return values.contains(answers[key] ?? "")
         }
     }
 

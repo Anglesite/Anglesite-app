@@ -35,16 +35,16 @@ import Foundation
         if case .failure(.invalidValue(let key, _)) = r { #expect(key == "link") } else { Issue.record("expected invalidValue") }
     }
 
-    @Test func bookingInlineProducesBookPageNotAnchorInjection() {
-        let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+    @Test func bookingInlineProducesBookPageNotAnchorInjection() throws {
+        let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
             answers: ["provider": "cal", "username": "jane", "style": "inline"],
             sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
         #expect(r.steps.contains { if case .createFile(let p, _) = $0 { return p == "src/pages/book.astro" }; return false })
         #expect(!r.steps.contains { if case .injectAnchor = $0 { return true }; return false })
     }
 
-    @Test func bookingFloatingInjectsIntoLayout() {
-        let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+    @Test func bookingFloatingInjectsIntoLayout() throws {
+        let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
             answers: ["provider": "cal", "username": "jane", "style": "floating"],
             sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
         let injects = r.steps.compactMap { step -> (String, MarkerInjector.CommentStyle)? in
@@ -52,11 +52,13 @@ import Foundation
         }
         #expect(injects.contains { $0.0.contains("BaseLayout") && $0.1 == .line })
         #expect(injects.contains { $0.0.contains("BaseLayout") && $0.1 == .html })
+        // The button-only homepage injections must not leak into the floating plan.
+        #expect(!injects.contains { $0.0.contains("index.astro") })
         #expect(!r.steps.contains { if case .createFile(let p, _) = $0 { return p == "src/pages/book.astro" }; return false })
     }
 
-    @Test func bookingFloatingInjectsFrontmatterImportAndBodyRender() {
-        let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+    @Test func bookingFloatingInjectsFrontmatterImportAndBodyRender() throws {
+        let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
             answers: ["provider": "cal", "username": "jane", "style": "floating"],
             sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
         let injects = r.steps.compactMap { step -> (String, MarkerInjector.CommentStyle)? in
@@ -66,16 +68,16 @@ import Foundation
         #expect(injects.contains { $0.0.contains("BaseLayout") && $0.1 == .html })
     }
 
-    @Test func providerSwitchSwapsCSPDomains() {
-        func csp(_ provider: String) -> [String] {
-            let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+    @Test func providerSwitchSwapsCSPDomains() throws {
+        func csp(_ provider: String) throws -> [String] {
+            let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
                 answers: ["provider": provider, "username": "j", "style": "inline"],
                 sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
             for case .addCSP(let d) in r.steps { return d }
             return []
         }
-        #expect(csp("cal") == ["app.cal.com"])
-        #expect(Set(csp("calendly")) == Set(["assets.calendly.com", "calendly.com"]))
+        #expect(try csp("cal") == ["app.cal.com"])
+        #expect(Set(try csp("calendly")) == Set(["assets.calendly.com", "calendly.com"]))
     }
 
     @Test func missingProviderForProviderBackedIntegrationFails() {
@@ -166,15 +168,15 @@ import Foundation
         #expect(rFail == .failure(.missingRequiredField(key: "username")))
     }
 
-    @Test func giscusEmitsNoBrandColorWarning() {
-        let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .giscus),
+    @Test func giscusEmitsNoBrandColorWarning() throws {
+        let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .giscus),
             answers: ["repo": "o/r", "repoId": "R", "category": "General", "categoryId": "C", "mapping": "pathname"],
             sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
         #expect(r.warnings.isEmpty)
     }
 
-    @Test func summaryDescribesEachStepKind() {
-        let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+    @Test func summaryDescribesEachStepKind() throws {
+        let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
             answers: ["provider": "cal", "username": "jane", "style": "inline"],
             sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
         let s = r.summary
@@ -220,5 +222,25 @@ import Foundation
         } else {
             Issue.record("expected upsertConfig step, got \(String(describing: planB.steps.first))")
         }
+    }
+
+    @Test func bookingButtonInjectsIntoHomepageHero() throws {
+        let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+            answers: ["provider": "cal", "username": "jane", "style": "button"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
+        let injects = r.steps.compactMap { step -> (String, MarkerInjector.CommentStyle)? in
+            if case .injectAnchor(let f, _, _, _, let style) = step { return (f, style) }; return nil
+        }
+        #expect(injects.contains { $0.0.contains("index.astro") && $0.1 == .line })
+        #expect(injects.contains { $0.0.contains("index.astro") && $0.1 == .html })
+        #expect(!r.steps.contains { if case .createFile(let p, _) = $0 { return p == "src/pages/book.astro" }; return false })
+    }
+
+    @Test func fieldInVisibilityMatchesAnyListedValue() {
+        let cond = Condition.fieldIn(key: "style", values: ["floating", "button"])
+        #expect(IntegrationPlanner.isVisible(cond, answers: ["style": "floating"], providerID: nil))
+        #expect(IntegrationPlanner.isVisible(cond, answers: ["style": "button"], providerID: nil))
+        #expect(!IntegrationPlanner.isVisible(cond, answers: ["style": "inline"], providerID: nil))
+        #expect(!IntegrationPlanner.isVisible(cond, answers: [:], providerID: nil))
     }
 }

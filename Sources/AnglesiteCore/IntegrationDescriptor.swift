@@ -26,6 +26,7 @@ public enum Condition: Sendable, Equatable {
     case always
     case providerIs(String)
     case fieldEquals(key: String, value: String)
+    case fieldIn(key: String, values: [String])
 }
 
 public struct Field: Sendable, Equatable, Identifiable {

@@ -16,7 +16,7 @@ import Testing
         let booking = IntegrationCatalog.descriptor(for: .booking)
         let style = booking.fields.first { $0.key == "style" }
         guard case .choice(let choices)? = style?.kind else { Issue.record("no style choice"); return }
-        #expect(Set(choices.map { $0.value }) == Set(["inline", "floating"]))
+        #expect(Set(choices.map { $0.value }) == Set(["inline", "floating", "button"]))
     }
 
     @Test func validateCatchesDanglingProviderReference() {
@@ -35,6 +35,16 @@ import Testing
             fields: [Field(key: "real", label: "Real", kind: .text)],
             operations: [.writeConfig([ConfigEntry(key: "k", value: "v")],
                                       when: .fieldEquals(key: "nope", value: "x"))])
+        #expect(bad.validate().contains { $0.contains("nope") })
+    }
+
+    @Test func validateCatchesDanglingFieldInReference() {
+        let bad = IntegrationDescriptor(
+            id: .booking, displayName: "B", summary: "s",
+            providers: [Provider(id: "cal", displayName: "Cal", cspDomains: ["app.cal.com"])],
+            fields: [Field(key: "f", label: "F", kind: .text,
+                           visibleWhen: .fieldIn(key: "nope", values: ["x"]))],
+            operations: [])
         #expect(bad.validate().contains { $0.contains("nope") })
     }
 
