@@ -224,8 +224,8 @@ import Foundation
         }
     }
 
-    @Test func bookingButtonInjectsIntoHomepageHero() {
-        let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+    @Test func bookingButtonInjectsIntoHomepageHero() throws {
+        let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
             answers: ["provider": "cal", "username": "jane", "style": "button"],
             sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
         let injects = r.steps.compactMap { step -> (String, MarkerInjector.CommentStyle)? in

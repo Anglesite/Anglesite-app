@@ -33,7 +33,7 @@ Add a multi-value visibility condition so a field can be shown for more than one
 **Interfaces:**
 - Produces: `Condition.fieldIn(key: String, values: [String])` — true when `answers[key]` is one of `values`. Consumed by Task 3's `buttonText` field.
 
-- [ ] **Step 1: Write the failing visibility test**
+- [x] **Step 1: Write the failing visibility test**
 
 In `Tests/AnglesiteCoreTests/IntegrationPlannerTests.swift`, add inside the `IntegrationPlannerTests` suite:
 
@@ -47,7 +47,7 @@ In `Tests/AnglesiteCoreTests/IntegrationPlannerTests.swift`, add inside the `Int
     }
 ```
 
-- [ ] **Step 2: Write the failing validation test**
+- [x] **Step 2: Write the failing validation test**
 
 In `Tests/AnglesiteCoreTests/IntegrationCatalogTests.swift`, add inside the suite (mirrors `validateCatchesDanglingFieldReference`):
 
@@ -63,12 +63,12 @@ In `Tests/AnglesiteCoreTests/IntegrationCatalogTests.swift`, add inside the suit
     }
 ```
 
-- [ ] **Step 3: Run both tests to verify they fail**
+- [x] **Step 3: Run both tests to verify they fail**
 
 Run: `swift test --package-path . --filter "fieldInVisibilityMatchesAnyListedValue|validateCatchesDanglingFieldInReference"`
 Expected: FAIL — compile error `type 'Condition' has no member 'fieldIn'`.
 
-- [ ] **Step 4: Add the enum case**
+- [x] **Step 4: Add the enum case**
 
 In `Sources/AnglesiteCore/IntegrationDescriptor.swift`, the `Condition` enum currently reads:
 
@@ -91,7 +91,7 @@ public enum Condition: Sendable, Equatable {
 }
 ```
 
-- [ ] **Step 5: Evaluate the case in `isVisible`**
+- [x] **Step 5: Evaluate the case in `isVisible`**
 
 In `Sources/AnglesiteCore/IntegrationPlanner.swift`, `isVisible` currently reads:
 
@@ -118,7 +118,7 @@ Add the new branch:
     }
 ```
 
-- [ ] **Step 6: Validate the case in `validate`'s `check`**
+- [x] **Step 6: Validate the case in `validate`'s `check`**
 
 In `Sources/AnglesiteCore/IntegrationCatalog.swift`, the `check` closure currently reads:
 
@@ -152,12 +152,12 @@ Add a `fieldIn` branch before `default`:
         }
 ```
 
-- [ ] **Step 7: Run both tests to verify they pass**
+- [x] **Step 7: Run both tests to verify they pass**
 
 Run: `swift test --package-path . --filter "fieldInVisibilityMatchesAnyListedValue|validateCatchesDanglingFieldInReference"`
 Expected: PASS (2 tests).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add Sources/AnglesiteCore/IntegrationDescriptor.swift Sources/AnglesiteCore/IntegrationPlanner.swift Sources/AnglesiteCore/IntegrationCatalog.swift Tests/AnglesiteCoreTests/IntegrationPlannerTests.swift Tests/AnglesiteCoreTests/IntegrationCatalogTests.swift
@@ -179,7 +179,7 @@ Add the two inert anchors the `button` placement injects into. They are no-op co
 **Interfaces:**
 - Produces: anchors `// anglesite:imports` (frontmatter) and `<!-- anglesite:hero-cta -->` (inside `.hero`). Consumed by Task 3's injection ops.
 
-- [ ] **Step 1: Write the failing anchor test**
+- [x] **Step 1: Write the failing anchor test**
 
 In `Tests/AnglesiteCoreTests/IntegrationTemplateAssetsTests.swift`, add inside the suite (mirrors `layoutsHaveImportAndBodyAnchors`):
 
@@ -192,12 +192,12 @@ In `Tests/AnglesiteCoreTests/IntegrationTemplateAssetsTests.swift`, add inside t
     }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `swift test --package-path . --filter homepageHasImportAndHeroAnchors`
 Expected: FAIL — `#expect(index.contains("// anglesite:imports"))` is false.
 
-- [ ] **Step 3: Add the anchors to `index.astro`**
+- [x] **Step 3: Add the anchors to `index.astro`**
 
 Replace the full contents of `Resources/Template/src/pages/index.astro` with:
 
@@ -222,12 +222,12 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 </BaseLayout>
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `swift test --package-path . --filter homepageHasImportAndHeroAnchors`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Resources/Template/src/pages/index.astro Tests/AnglesiteCoreTests/IntegrationTemplateAssetsTests.swift
@@ -251,7 +251,7 @@ Add the `button` choice, make `buttonText` visible for `button` too, and add the
 - Consumes: `Condition.fieldIn` (Task 1); homepage anchors `// anglesite:imports` and `<!-- anglesite:hero-cta -->` (Task 2).
 - Produces: a `style == "button"` plan that emits two `.injectAnchor` steps targeting `src/pages/index.astro` (one `.line` import, one `.html` render) and no `book.astro` `createFile`.
 
-- [ ] **Step 1: Update the choice-set assertion (failing test)**
+- [x] **Step 1: Update the choice-set assertion (failing test)**
 
 In `Tests/AnglesiteCoreTests/IntegrationCatalogTests.swift`, `bookingHasStyleChoiceDrivingPlacement` currently asserts:
 
@@ -265,7 +265,7 @@ Change it to:
         #expect(Set(choices.map { $0.value }) == Set(["inline", "floating", "button"]))
 ```
 
-- [ ] **Step 2: Write the failing planner test**
+- [x] **Step 2: Write the failing planner test**
 
 In `Tests/AnglesiteCoreTests/IntegrationPlannerTests.swift`, add inside the suite (mirrors `bookingFloatingInjectsIntoLayout`):
 
@@ -283,12 +283,12 @@ In `Tests/AnglesiteCoreTests/IntegrationPlannerTests.swift`, add inside the suit
     }
 ```
 
-- [ ] **Step 3: Run both tests to verify they fail**
+- [x] **Step 3: Run both tests to verify they fail**
 
 Run: `swift test --package-path . --filter "bookingHasStyleChoiceDrivingPlacement|bookingButtonInjectsIntoHomepageHero"`
 Expected: FAIL — choice set is `{inline, floating}`; no `index.astro` injection steps.
 
-- [ ] **Step 4: Add the `button` choice and fix `buttonText` visibility**
+- [x] **Step 4: Add the `button` choice and fix `buttonText` visibility**
 
 In `Sources/AnglesiteCore/IntegrationCatalog.swift`, the booking `fields` `style`/`buttonText` entries currently read:
 
@@ -314,7 +314,7 @@ Replace with:
                   visibleWhen: .fieldIn(key: "style", values: ["floating", "button"])),
 ```
 
-- [ ] **Step 5: Add the two `button` injection operations**
+- [x] **Step 5: Add the two `button` injection operations**
 
 In the same booking descriptor, the `operations` array currently has the two `floating`-gated `injectAtAnchor` ops (targeting `src/layouts/BaseLayout.astro`) followed by `.writeConfig`. Insert the two `button`-gated ops immediately **after** the second floating `injectAtAnchor` (the `.html` one ending `style: .html)` for `BaseLayout.astro`) and **before** `.writeConfig`:
 
@@ -327,17 +327,17 @@ In the same booking descriptor, the `operations` array currently has the two `fl
                             when: .fieldEquals(key: "style", value: "button"), style: .html),
 ```
 
-- [ ] **Step 6: Run both tests to verify they pass**
+- [x] **Step 6: Run both tests to verify they pass**
 
 Run: `swift test --package-path . --filter "bookingHasStyleChoiceDrivingPlacement|bookingButtonInjectsIntoHomepageHero"`
 Expected: PASS (2 tests).
 
-- [ ] **Step 7: Run the full integration suite (regression + asset guards)**
+- [x] **Step 7: Run the full integration suite (regression + asset guards)**
 
 Run: `swift test --package-path . --filter Integration`
 Expected: PASS — all integration suites green, including `IntegrationCatalogTests.descriptorsValidate` (every descriptor's `validate()` returns `[]`), `bookingWritesEventSlugAndButtonText`, and `IntegrationTemplateAssetsTests`. If any asset-completeness fixture fails, update the expected fixture list to match.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add Sources/AnglesiteCore/IntegrationCatalog.swift Tests/AnglesiteCoreTests/IntegrationCatalogTests.swift Tests/AnglesiteCoreTests/IntegrationPlannerTests.swift
@@ -354,22 +354,22 @@ Prove the whole package still builds and that the app target links (per project 
 
 **Files:** none (verification only).
 
-- [ ] **Step 1: Run the full Swift test suite**
+- [x] **Step 1: Run the full Swift test suite**
 
 Run: `swift test --package-path .`
 Expected: PASS — full suite green (no regressions in `AnglesiteCoreTests`, `AnglesiteIntentsTests`, `AnglesiteBridgeTests`).
 
-- [ ] **Step 2: Generate the Xcode project (fresh worktree has none)**
+- [x] **Step 2: Generate the Xcode project (fresh worktree has none)**
 
 Run: `ANGLESITE_PLUGIN_SRC=/Users/dwk/Developer/github.com/Anglesite/anglesite xcodegen generate`
 Expected: `Created project at Anglesite.xcodeproj`.
 
-- [ ] **Step 3: Build the app target**
+- [x] **Step 3: Build the app target**
 
 Run: `xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build`
 Expected: `** BUILD SUCCEEDED **`.
 
-- [ ] **Step 4: No commit needed** (verification task — nothing changed).
+- [x] **Step 4: No commit needed** (verification task — nothing changed).
 
 ---
 
