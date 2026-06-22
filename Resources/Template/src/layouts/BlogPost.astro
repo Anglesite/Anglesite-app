@@ -8,14 +8,24 @@ import BaseLayout from "./BaseLayout.astro";
 interface Props {
   title: string;
   description?: string;
+  pubDate?: Date;
 }
 
-const { title, description } = Astro.props;
+const { title, description, pubDate } = Astro.props;
 // anglesite:imports — integration component imports are injected here on setup
 ---
 
 <BaseLayout title={title} description={description}>
   <article>
+    <p><a href="/blog/">← All posts</a></p>
+    <h1>{title}</h1>
+    {
+      pubDate && (
+        <time datetime={pubDate.toISOString()}>
+          {pubDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" })}
+        </time>
+      )
+    }
     <slot />
     <!-- anglesite:comments -->
   </article>

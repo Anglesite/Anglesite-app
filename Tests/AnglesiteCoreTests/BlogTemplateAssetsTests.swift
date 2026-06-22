@@ -56,6 +56,21 @@ import Foundation
         // post body rendered into the layout slot
         #expect(s.contains("<Content />"))
         #expect(s.contains("<BlogPost"))
+        // pubDate forwarded so the layout can display the publication date
+        #expect(s.contains("pubDate={post.data.pubDate}"))
+    }
+
+    @Test func blogPostLayoutRendersTitleAndDate() throws {
+        let root = templateRoot()
+        let s = try String(contentsOf: root.appendingPathComponent("src/layouts/BlogPost.astro"), encoding: .utf8)
+        // visible heading + publication date in the article body
+        #expect(s.contains("<h1>{title}</h1>"), "post should render its title as an <h1>")
+        #expect(s.contains("pubDate"), "layout should accept/render pubDate")
+        #expect(s.contains("<time"), "date should use a semantic <time> element")
+        // render the date in UTC so a build machine behind UTC doesn't shift it a day
+        #expect(s.contains("timeZone: \"UTC\""), "date must render in UTC to match the datetime attribute")
+        // the giscus import anchor must survive any layout edits (descriptor injects here)
+        #expect(s.contains("// anglesite:imports"), "imports anchor must remain for giscus injection")
     }
 
     @Test func blogIndexListsCollection() throws {
@@ -67,6 +82,9 @@ import Foundation
         #expect(s.contains("getCollection(\"blog\""))
         #expect(s.contains("/blog/"))
         #expect(s.contains("!data.draft"))   // drafts filtered from the listing
+        // each entry shows its publication date in a semantic <time> element
+        #expect(s.contains("<time"))
+        #expect(s.contains("pubDate"))
     }
 
     @Test func homepageLinksToBlog() throws {
