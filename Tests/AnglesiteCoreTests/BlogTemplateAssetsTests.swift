@@ -41,4 +41,31 @@ import Foundation
         #expect(s.contains("title:"))
         #expect(s.contains("pubDate:"))
     }
+
+    @Test func postRouteRendersThroughBlogPostLayout() throws {
+        let root = templateRoot()
+        let route = root.appendingPathComponent("src/pages/blog/[...slug].astro")
+        #expect(FileManager.default.fileExists(atPath: route.path), "missing post route")
+        let s = try String(contentsOf: route, encoding: .utf8)
+        // renders through BlogPost (the giscus host layout)
+        #expect(s.contains("import BlogPost from \"../../layouts/BlogPost.astro\""))
+        #expect(s.contains("getStaticPaths"))
+        #expect(s.contains("getCollection(\"blog\""))
+        // drafts excluded from the generated paths
+        #expect(s.contains("draft"))
+        // post body rendered into the layout slot
+        #expect(s.contains("<Content />"))
+        #expect(s.contains("<BlogPost"))
+    }
+
+    @Test func blogIndexListsCollection() throws {
+        let root = templateRoot()
+        let index = root.appendingPathComponent("src/pages/blog/index.astro")
+        #expect(FileManager.default.fileExists(atPath: index.path), "missing blog index")
+        let s = try String(contentsOf: index, encoding: .utf8)
+        #expect(s.contains("import BaseLayout from \"../../layouts/BaseLayout.astro\""))
+        #expect(s.contains("getCollection(\"blog\""))
+        #expect(s.contains("/blog/"))
+        #expect(s.contains("draft"))   // drafts filtered from the listing
+    }
 }

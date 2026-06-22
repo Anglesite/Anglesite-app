@@ -1,0 +1,28 @@
+---
+import { getCollection } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+const posts = (await getCollection("blog", ({ data }) => !data.draft)).sort(
+  (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf(),
+);
+---
+
+<BaseLayout title="Blog" description="Latest posts">
+  <main>
+    <h1>Blog</h1>
+    {
+      posts.length === 0 ? (
+        <p>No posts yet. Add a Markdown file in <code>src/content/blog/</code> to get started.</p>
+      ) : (
+        <ul>
+          {posts.map((post) => (
+            <li>
+              <a href={`/blog/${post.id}/`}>{post.data.title}</a>
+              {post.data.description && <p>{post.data.description}</p>}
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </main>
+</BaseLayout>
