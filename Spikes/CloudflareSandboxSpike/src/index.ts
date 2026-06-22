@@ -9,13 +9,15 @@
 // API per https://developers.cloudflare.com/sandbox/ (SDK 0.12.x):
 //   getSandbox, proxyToSandbox, sandbox.exec/startProcess/exposePort/getProcessLogs/destroy
 
-import { getSandbox, proxyToSandbox } from "@cloudflare/sandbox";
+import { getSandbox, proxyToSandbox, Sandbox } from "@cloudflare/sandbox";
 
 // Required: the Worker must re-export the Sandbox Durable Object class.
-export { Sandbox } from "@cloudflare/sandbox";
+export { Sandbox };
 
 interface Env {
-  Sandbox: DurableObjectNamespace;
+  // Typed with the Sandbox class so getSandbox/proxyToSandbox accept it (the SDK's
+  // helpers require DurableObjectNamespace<Sandbox>, not a bare namespace).
+  Sandbox: DurableObjectNamespace<Sandbox>;
   DEFAULT_GIT_URL: string;
   DEFAULT_GIT_REF: string;
   SITE_DIR: string;

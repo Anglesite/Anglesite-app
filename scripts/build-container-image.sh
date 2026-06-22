@@ -15,13 +15,19 @@
 # Env overrides:
 #   IMAGE_REPO            registry repo (default: ghcr.io/anglesite/anglesite-devserver)
 #   IMAGE_TAG            human tag    (default: dev)
+#   PLATFORM             build arch   (default: linux/arm64). Set linux/amd64 for the
+#                        Cloudflare substrate (CF Containers are amd64-only), or a
+#                        comma list "linux/amd64,linux/arm64" for a multi-arch manifest.
 #   ANGLESITE_PLUGIN_SRC plugin checkout (default: ../anglesite sibling, like copy-plugin.sh)
 #
-# Distribution (decision Q-D): the image is built once for linux/arm64 and pushed
-# to a registry BY DIGEST. Apple Containerization pulls that exact digest; the
-# Cloudflare substrate layers its sandbox init on top via container/Dockerfile.cloudflare
-# (#61). Pinning by digest is what makes the two substrates reproducibly identical —
-# see container/README.md.
+# Distribution (decision Q-D): the canonical image is pushed to a registry BY DIGEST.
+# Apple Containerization runs arm64 (local, Apple Silicon); Cloudflare Containers run
+# amd64 (remote) — so "one image, two substrates" is one Dockerfile built per-arch (or
+# multi-arch) and pinned by digest. The Cloudflare substrate layers its sandbox init on
+# top via container/Dockerfile.cloudflare (#61). See container/README.md.
+#
+# NOTE: a multi-arch (comma) PLATFORM only works with --push — buildx cannot --load a
+# multi-platform manifest into the local Docker image store. Asking for both errors out.
 
 set -euo pipefail
 
@@ -32,10 +38,18 @@ VERSION_FILE="$SCRIPT_DIR/node-version.txt"
 
 IMAGE_REPO="${IMAGE_REPO:-ghcr.io/anglesite/anglesite-devserver}"
 IMAGE_TAG="${IMAGE_TAG:-dev}"
-PLATFORM="linux/arm64"
+PLATFORM="${PLATFORM:-linux/arm64}"
 
 PUSH=0
 [[ "${1:-}" == "--push" ]] && PUSH=1
+
+# buildx can only --load a single-platform image into the local store. A multi-arch
+# (comma-separated) PLATFORM must be pushed straight to the registry.
+if [[ "$PLATFORM" == *,* && $PUSH -eq 0 ]]; then
+    echo "PLATFORM='$PLATFORM' is multi-arch; buildx cannot --load it locally." >&2
+    echo "Re-run with --push (multi-arch goes straight to \$IMAGE_REPO), or set a single PLATFORM." >&2
+    exit 1
+fi
 
 [[ -f "$VERSION_FILE" ]] || { echo "missing $VERSION_FILE" >&2; exit 1; }
 NODE_VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
@@ -86,6 +100,7 @@ OUTPUT="--load"
 echo "==> Building $IMAGE_REF for $PLATFORM (Node v$NODE_VERSION)"
 docker buildx build \
     --platform "$PLATFORM" \
+    --provenance=false \
     --build-arg "NODE_VERSION=$NODE_VERSION" \
     --tag "$IMAGE_REF" \
     --metadata-file "$META" \
@@ -95,7 +110,7 @@ docker buildx build \
 DIGEST=$(awk -F'"' '/containerimage.digest/{print $4}' "$META" 2>/dev/null || true)
 
 echo
-echo "Built $IMAGE_REF (linux/arm64, Node v$NODE_VERSION)"
+echo "Built $IMAGE_REF ($PLATFORM, Node v$NODE_VERSION)"
 if [[ -n "$DIGEST" ]]; then
     echo "Digest: $DIGEST"
     echo

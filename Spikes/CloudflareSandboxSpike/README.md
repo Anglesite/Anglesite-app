@@ -32,14 +32,12 @@ The real consumer is `RemoteSandboxSiteRuntime` (#66); this only validates the s
 ## Run it
 
 ```sh
-# 0. Build + push the canonical image.
-#    ⚠️ scripts/build-container-image.sh is HARDCODED to linux/arm64 today. Cloudflare
-#    Containers run linux/amd64, so the script needs an amd64 / multi-arch build before
-#    this deploys to CF (see ARCH NOTE below — this is a spike finding/follow-up). For now,
-#    to get an amd64 image, edit PLATFORM in the script (or `docker buildx build --platform
-#    linux/amd64 ...` by hand against the staged context).
-IMAGE_TAG=spike scripts/build-container-image.sh --push   # arm64 today; prints the digest
+# 0. Build + push the canonical image FOR amd64 (Cloudflare Containers are amd64-only).
+#    PLATFORM is now an env override (default linux/arm64 for Apple Containerization);
+#    set it to linux/amd64 here. Requires the Docker daemon running + registry login.
+PLATFORM=linux/amd64 IMAGE_TAG=spike scripts/build-container-image.sh --push   # prints the digest
 #    → note the printed digest; set CANONICAL_IMAGE in ./Dockerfile to pin it.
+#    (Multi-arch "linux/amd64,linux/arm64" also works, but only with --push.)
 
 # 1. Install + deploy the spike Worker (builds ./Dockerfile = canonical + /sandbox + cloudflared).
 cd Spikes/CloudflareSandboxSpike
@@ -54,7 +52,7 @@ AUTH=(-H "Authorization: Bearer $SPIKE_SECRET")
 BASE="https://anglesite-sandbox-spike.<your-subdomain>.workers.dev"
 
 # 2. Cold start: clone + hydrate + astro dev. Records phase timings.
-curl "${AUTH[@]}" -X POST "$BASE/start?repo=https://github.com/Anglesite/<a-real-site>.git&ref=main"
+curl "${AUTH[@]}" -X POST "$BASE/start?repo=https://github.com/Anglesite/anglesite.dwk.io.git&ref=main"
 
 # 3a. Preview via tunnel (no DNS needed):
 curl "${AUTH[@]}" -X POST "$BASE/tunnel"
@@ -97,18 +95,22 @@ docker build -t anglesite-sandbox-spike:local \
   Spikes/CloudflareSandboxSpike
 # Smoke the canonical image's dev server locally (clone + hydrate + astro dev):
 docker run --rm -p 4321:4321 \
-  -e ANGLESITE_GIT_URL=https://github.com/Anglesite/<a-real-site>.git \
+  -e ANGLESITE_GIT_URL=https://github.com/Anglesite/anglesite.dwk.io.git \
   ghcr.io/anglesite/anglesite-devserver:spike
 # → open http://localhost:4321
 ```
 
-## ⚠️ ARCH NOTE — likely the spike's first real finding
+## ⚠️ ARCH NOTE — the spike's first confirmed finding (Q-D)
 
-Cloudflare Containers run **linux/amd64**; `scripts/build-container-image.sh` builds
-**linux/arm64** (Apple Silicon / Apple Containerization). The "one image, two substrates"
-goal (container/README.md) needs the canonical image built **multi-arch** (`linux/amd64,linux/arm64`)
-or a per-substrate arch. Build the canonical image for amd64 before deploying here, and
-record the multi-arch decision in the findings doc (feeds Q-D image distribution).
+Cloudflare Containers run **linux/amd64**; Apple Containerization (local) runs **linux/arm64**
+(Apple Silicon). `scripts/build-container-image.sh` defaulted to arm64 and is now `PLATFORM`-
+overridable (`PLATFORM=linux/amd64 … --push`, or `linux/amd64,linux/arm64` multi-arch with
+`--push` only — buildx can't `--load` a multi-arch manifest). The build also passes
+`--provenance=false` so the push is a plain image manifest, not an attestation index that
+Apple `container` / CF image pull can choke on. **Open decision for #66/#62 (feeds Q-D image
+distribution):** ship one multi-arch image pinned by digest, or two per-substrate images?
+Record the call + registry-size/build-time cost here once the live run confirms the amd64
+image actually boots in a Sandbox.
 
 ## Notes / gotchas baked into the scaffold
 
