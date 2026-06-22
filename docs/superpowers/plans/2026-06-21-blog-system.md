@@ -424,3 +424,83 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - Richer frontmatter (tags + tag pages, author, hero image, `updatedDate`).
 - RSS feed, pagination, reading-time.
 - Any change to the giscus descriptor, `MarkerInjector`, `IntegrationScaffolder`, or other Swift/engine source.
+
+---
+
+## Task 4: Fix duplicate giscus anchor in `BlogPost.astro` (added post-review)
+
+**Why:** Discovered during Task 3 review. The giscus descriptor (`IntegrationCatalog.swift:145`) injects at anchor `<!-- anglesite:comments -->` into `src/layouts/BlogPost.astro`, and `MarkerInjector.inject` finds the anchor with `content.range(of: anchor)` — the **first** occurrence. `BlogPost.astro` contains that exact string **twice**: once in the frontmatter `//` doc-comment (line 5) and once as the real HTML body anchor (line 21). So real giscus setup injects into the **frontmatter**, not the body — giscus never renders. This is a pre-existing latent bug (from #287) that #288 makes live, and it defeats the feature's purpose. The same doc-comment is now factually wrong (it says the blog is "follow-up work… Tracked separately" — that work is this branch). This task is a deliberate, reviewed exception to the "do not touch `BlogPost.astro`" constraint.
+
+**Files:**
+- Modify: `Resources/Template/src/layouts/BlogPost.astro` (frontmatter doc-comment only — anchors and code untouched)
+- Test: `Tests/AnglesiteCoreTests/BlogTemplateAssetsTests.swift` (append one behavioral test)
+
+**Interfaces:**
+- Consumes: `MarkerInjector.inject(snippet:withID:atAnchor:into:style:)` (real AnglesiteCore symbol; `@testable import AnglesiteCore` already present in the test file).
+
+- [ ] **Step 1: Write the failing test** (append to `BlogTemplateAssetsTests.swift`)
+
+This is behavioral: it runs the real injector against the real layout and asserts the giscus block lands in the body (after the Astro frontmatter fence), not in the frontmatter.
+
+```swift
+    @Test func giscusInjectsIntoBodyNotFrontmatter() throws {
+        // MarkerInjector matches the FIRST occurrence of the anchor. If the anchor text
+        // also appears in BlogPost.astro's frontmatter doc-comment, giscus injects into
+        // the frontmatter and never renders. Guard the real layout against that regression.
+        let root = templateRoot()
+        let src = try String(contentsOf: root.appendingPathComponent("src/layouts/BlogPost.astro"), encoding: .utf8)
+        let out = try MarkerInjector.inject(
+            snippet: "<Comments />", withID: "comments",
+            atAnchor: "<!-- anglesite:comments -->", into: src, style: .html).get()
+        let frontmatterClose = out.range(of: "\n---\n")  // closing fence of Astro frontmatter
+        let injected = out.range(of: "<Comments />")
+        #expect(frontmatterClose != nil, "BlogPost.astro should have an Astro frontmatter fence")
+        #expect(injected != nil, "injected giscus snippet should be present")
+        #expect(injected!.lowerBound > frontmatterClose!.upperBound,
+                "giscus must inject into the <article> body, not the frontmatter — a duplicate anchor in a frontmatter comment makes the first-match injector target the wrong spot")
+    }
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --package-path . --filter BlogTemplateAssetsTests`
+Expected: FAIL on `giscusInjectsIntoBodyNotFrontmatter` — the injected `<Comments />` lands before the frontmatter close (first anchor match is the line-5 doc-comment).
+
+- [ ] **Step 3: Rewrite the frontmatter doc-comment** (`Resources/Template/src/layouts/BlogPost.astro`)
+
+Replace the comment block at the top of the frontmatter (the six `//` lines from `// BlogPost.astro — giscus injection target.` through `// and the asset test passes. Tracked separately.`) with this — note it must **not** contain the literal string `<!-- anglesite:comments -->`:
+
+```astro
+---
+// BlogPost.astro — layout for an individual blog post. The post route
+// src/pages/blog/[...slug].astro renders through this layout; the Markdown body
+// fills the <slot/>, and the comments anchor in the <article> below is where the
+// giscus integration injects its widget when comments are set up.
+import BaseLayout from "./BaseLayout.astro";
+```
+
+Leave everything else unchanged — the `// anglesite:imports` anchor (frontmatter), the `Props` interface, `const { title, description }`, and the real `<!-- anglesite:comments -->` body anchor inside `<article>` all stay exactly as they are.
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --package-path . --filter BlogTemplateAssetsTests`
+Expected: PASS (6 tests). The anchor now appears once, so the injector targets the body.
+
+- [ ] **Step 5: Full Swift suite green** (the `IntegrationTemplateAssetsTests.layoutsHaveImportAndBodyAnchors` test asserts BlogPost.astro still contains `// anglesite:imports` and `<!-- anglesite:comments -->` — both remain, so it must still pass)
+
+Run: `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer ANGLESITE_PLUGIN_PATH=/Users/dwk/Developer/github.com/Anglesite/anglesite swift test --package-path .`
+Expected: all green.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /Users/dwk/Developer/github.com/Anglesite/Anglesite-app/.claude/worktrees/288-blog-system
+git add Resources/Template/src/layouts/BlogPost.astro Tests/AnglesiteCoreTests/BlogTemplateAssetsTests.swift
+git commit -m "fix(#288): remove duplicate giscus anchor from BlogPost.astro frontmatter comment
+
+The anchor text appeared in both the doc-comment and the body, so MarkerInjector
+(first-match) injected giscus into the frontmatter. Rewrite the now-stale comment
+so the anchor occurs once and giscus lands in the post body.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
