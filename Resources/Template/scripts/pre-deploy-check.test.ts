@@ -32,3 +32,11 @@ test("CSP covering all configured domains passes", () => {
 test("no SCRIPT_ALLOW: a present CSP passes", () => {
   assert.deepEqual(checkHeaders(GOOD, ""), []);
 });
+
+test("multiple configured domains missing from CSP each produce an error", () => {
+  const issues = checkHeaders(GOOD, "SCRIPT_ALLOW=giscus.app,assets.calendly.com");
+  assert.equal(issues.length, 2);
+  assert.ok(issues.every((i) => i.severity === "error"));
+  assert.ok(issues.some((i) => /giscus\.app/.test(i.message)));
+  assert.ok(issues.some((i) => /assets\.calendly\.com/.test(i.message)));
+});

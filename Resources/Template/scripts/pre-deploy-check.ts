@@ -15,7 +15,6 @@
  */
 
 import { readdir, readFile, stat } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readConfigFromString } from "./config";
@@ -106,8 +105,12 @@ async function scan(): Promise<Issue[]> {
     return issues;
   }
 
-  const headersContent = existsSync(HEADERS_FILE) ? await readFile(HEADERS_FILE, "utf-8") : null;
-  const configContent = existsSync(CONFIG_FILE) ? await readFile(CONFIG_FILE, "utf-8") : "";
+  const headersContent = await readFile(HEADERS_FILE, "utf-8").catch((e: NodeJS.ErrnoException) =>
+    e.code === "ENOENT" ? null : Promise.reject(e),
+  );
+  const configContent = await readFile(CONFIG_FILE, "utf-8").catch((e: NodeJS.ErrnoException) =>
+    e.code === "ENOENT" ? "" : Promise.reject(e),
+  );
   issues.push(...checkHeaders(headersContent, configContent));
 
   for await (const file of walk(DIST_DIR)) {
