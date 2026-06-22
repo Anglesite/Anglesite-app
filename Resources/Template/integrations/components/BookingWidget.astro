@@ -7,10 +7,10 @@
  * appropriate page or layout.
  */
 interface Props {
-  provider: 'cal' | 'calendly';
-  username: string;
+  provider?: 'cal' | 'calendly';
+  username?: string;
   eventSlug?: string;
-  style: 'inline' | 'floating' | 'button';
+  style?: 'inline' | 'floating' | 'button';
   buttonText?: string;
   brandColor?: string;
 }

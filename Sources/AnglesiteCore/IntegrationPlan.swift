@@ -3,7 +3,7 @@ public typealias Answers = [String: String]   // field key → value; chosen pro
 public enum PlannedStep: Sendable, Equatable {
     case createFile(relativePath: String, contents: String)
     case upsertConfig([ConfigKV])
-    case injectAnchor(relativeFile: String, anchor: String, id: String, snippet: String)
+    case injectAnchor(relativeFile: String, anchor: String, id: String, snippet: String, style: MarkerInjector.CommentStyle)
     case addCSP([String])
 }
 
@@ -31,7 +31,7 @@ public struct OperationPlan: Sendable, Equatable {
             switch step {
             case .createFile(let path, _): lines.append("Create \(path)")
             case .upsertConfig(let kvs): lines.append("Set \(kvs.count) config key\(kvs.count == 1 ? "" : "s")")
-            case .injectAnchor(let file, _, _, _): lines.append("Add a component to \(file)")
+            case .injectAnchor(let file, _, _, _, _): lines.append("Add a component to \(file)")
             case .addCSP(let domains): lines.append("Allow \(domains.count) domain\(domains.count == 1 ? "" : "s") in the site's security policy")
             }
         }

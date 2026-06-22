@@ -39,6 +39,7 @@ mkdir -p "$TARGET"
 rsync -a \
     --exclude='scripts/scaffold.sh' \
     --exclude='scripts/themes.ts' \
+    --exclude='integrations/' \
     --exclude='node_modules/' \
     --exclude='.DS_Store' \
     "$TEMPLATE_ROOT/" "$TARGET/"

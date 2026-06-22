@@ -9,13 +9,13 @@
  */
 interface Props {
   /** GitHub repo in `owner/repo` form (must have Discussions enabled) */
-  repo: string;
+  repo?: string;
   /** Repository ID from the giscus.app generator */
-  repoId: string;
+  repoId?: string;
   /** Discussion category name (e.g., "Comments") */
-  category: string;
+  category?: string;
   /** Category ID from the giscus.app generator */
-  categoryId: string;
+  categoryId?: string;
   /** How posts map to discussions */
   mapping?: "pathname" | "url" | "title" | "og:title";
   /** "0" to hide reactions on the parent discussion, "1" to show */

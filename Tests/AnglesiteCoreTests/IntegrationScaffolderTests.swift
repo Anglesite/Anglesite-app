@@ -38,7 +38,7 @@ import Foundation
         let src = makeSource(withLayout: true)
         let plan = OperationPlan(integrationID: .booking, steps: [
             .injectAnchor(relativeFile: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:body-end -->",
-                          id: "booking", snippet: "<BookingWidget/>"),
+                          id: "booking", snippet: "<BookingWidget/>", style: .html),
         ], warnings: [])
         _ = await collect(IntegrationScaffolder().apply(plan, in: src))
         _ = await collect(IntegrationScaffolder().apply(plan, in: src))  // twice
@@ -51,7 +51,7 @@ import Foundation
         try! "<body></body>".write(to: src.appendingPathComponent("src/layouts/BaseLayout.astro"), atomically: true, encoding: .utf8)
         let plan = OperationPlan(integrationID: .booking, steps: [
             .injectAnchor(relativeFile: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:body-end -->",
-                          id: "booking", snippet: "<X/>"),
+                          id: "booking", snippet: "<X/>", style: .html),
         ], warnings: [])
         let steps = await collect(IntegrationScaffolder().apply(plan, in: src))
         #expect(steps.contains { if case .failed = $0 { return true }; return false })
@@ -83,5 +83,22 @@ import Foundation
         let cfg = try! String(contentsOf: src.appendingPathComponent(".site-config"), encoding: .utf8)
         #expect(cfg.contains("DONATIONS_PROVIDER=stripe"))
         #expect(cfg.contains("SCRIPT_ALLOW=js.stripe.com"))
+    }
+
+    @Test func appliesLineStyleInjectIntoFrontmatter() async {
+        let src = makeSource()  // existing helper that returns a temp dir
+        let rel = "src/layouts/BaseLayout.astro"
+        let url = src.appendingPathComponent(rel)
+        try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try! "---\n// anglesite:imports\n---\n<body><!-- anglesite:body-end --></body>".write(to: url, atomically: true, encoding: .utf8)
+        let plan = OperationPlan(integrationID: .booking, steps: [
+            .injectAnchor(relativeFile: rel, anchor: "// anglesite:imports", id: "booking",
+                          snippet: "import BookingWidget from \"../components/BookingWidget.astro\";", style: .line),
+        ], warnings: [])
+        var last: IntegrationScaffolder.SetupStep?
+        for await s in IntegrationScaffolder().apply(plan, in: src) { last = s }
+        #expect(last == .done(integrationID: "booking"))
+        let out = try! String(contentsOf: url, encoding: .utf8)
+        #expect(out.contains("// anglesite:booking:start\nimport BookingWidget"))
     }
 }

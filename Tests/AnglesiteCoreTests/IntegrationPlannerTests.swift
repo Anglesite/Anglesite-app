@@ -6,9 +6,9 @@ import Foundation
     /// Builds a throwaway template dir with the component/page files the planner copies.
     func makeTemplate() -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("tmpl-\(UUID().uuidString)")
-        for p in ["src/components/BookingWidget.astro", "src/pages/book.astro",
-                  "src/components/DonationButton.astro", "src/pages/donate.astro",
-                  "src/components/Comments.astro"] {
+        for p in ["integrations/components/BookingWidget.astro", "integrations/pages/book.astro",
+                  "integrations/components/DonationButton.astro", "integrations/pages/donate.astro",
+                  "integrations/components/Comments.astro"] {
             let url = root.appendingPathComponent(p)
             try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try! "TEMPLATE \(p)".write(to: url, atomically: true, encoding: .utf8)
@@ -47,8 +47,23 @@ import Foundation
         let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
             answers: ["provider": "cal", "username": "jane", "style": "floating"],
             sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
-        #expect(r.steps.contains { if case .injectAnchor(let f, _, _, let s) = $0 { return f.contains("BaseLayout") && s.contains("jane") }; return false })
+        let injects = r.steps.compactMap { step -> (String, MarkerInjector.CommentStyle)? in
+            if case .injectAnchor(let f, _, _, _, let style) = step { return (f, style) }; return nil
+        }
+        #expect(injects.contains { $0.0.contains("BaseLayout") && $0.1 == .line })
+        #expect(injects.contains { $0.0.contains("BaseLayout") && $0.1 == .html })
         #expect(!r.steps.contains { if case .createFile(let p, _) = $0 { return p == "src/pages/book.astro" }; return false })
+    }
+
+    @Test func bookingFloatingInjectsFrontmatterImportAndBodyRender() {
+        let r = try! IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
+            answers: ["provider": "cal", "username": "jane", "style": "floating"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
+        let injects = r.steps.compactMap { step -> (String, MarkerInjector.CommentStyle)? in
+            if case .injectAnchor(let file, _, _, _, let style) = step { return (file, style) }; return nil
+        }
+        #expect(injects.contains { $0.0.contains("BaseLayout") && $0.1 == .line })
+        #expect(injects.contains { $0.0.contains("BaseLayout") && $0.1 == .html })
     }
 
     @Test func providerSwitchSwapsCSPDomains() {
@@ -145,7 +160,7 @@ import Foundation
         let s = r.summary
         #expect(s.contains("Create src/components/BookingWidget.astro"))
         #expect(s.contains("Create src/pages/book.astro"))
-        #expect(s.contains("Set 3 config keys"))
+        #expect(s.contains("Set 5 config keys"))
         #expect(s.contains("Allow 1 domain"))
     }
 

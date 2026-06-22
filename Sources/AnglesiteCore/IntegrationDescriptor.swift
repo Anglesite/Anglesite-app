@@ -67,7 +67,7 @@ public enum Operation: Sendable, Equatable {
     case copyFile(from: TemplateRef, to: Template, when: Condition)
     case writeConfig([ConfigEntry], when: Condition)
     case addCSPDomains(fromProvider: Bool, extra: [String], when: Condition)
-    case injectAtAnchor(file: Template, anchor: String, snippet: Template, when: Condition)
+    case injectAtAnchor(file: Template, anchor: String, snippet: Template, when: Condition, style: MarkerInjector.CommentStyle)
 }
 
 public struct IntegrationDescriptor: Sendable, Equatable, Identifiable {

@@ -43,11 +43,11 @@ public actor IntegrationScaffolder {
                     try contents.write(to: url, atomically: true, encoding: .utf8)
                 } catch { return emit(.failed(step: "writingFiles", message: humanize(error))) }
 
-            case .injectAnchor(let rel, let anchor, let id, let snippet):
+            case .injectAnchor(let rel, let anchor, let id, let snippet, let style):
                 let url = source.appendingPathComponent(rel)
                 do {
                     let content = try String(contentsOf: url, encoding: .utf8)
-                    switch MarkerInjector.inject(snippet: snippet, withID: id, atAnchor: anchor, into: content) {
+                    switch MarkerInjector.inject(snippet: snippet, withID: id, atAnchor: anchor, into: content, style: style) {
                     case .success(let updated): try updated.write(to: url, atomically: true, encoding: .utf8)
                     case .failure(let f): return emit(.failed(step: "writingFiles", message: "\(rel): \(f)"))
                     }

@@ -81,13 +81,14 @@ public enum IntegrationPlanner {
                     domains = provider.cspDomains + extra
                 }
                 if !domains.isEmpty { steps.append(.addCSP(domains)) }
-            case .injectAtAnchor(let file, let anchor, let snippet, let when):
+            case .injectAtAnchor(let file, let anchor, let snippet, let when, let style):
                 guard isVisible(when, answers: effective, providerID: providerID) else { continue }
                 steps.append(.injectAnchor(
                     relativeFile: file.resolve(tokens),
                     anchor: anchor,
                     id: descriptor.id.rawValue,
-                    snippet: snippet.resolve(tokens)
+                    snippet: snippet.resolve(tokens),
+                    style: style
                 ))
             }
         }
@@ -109,7 +110,7 @@ public enum IntegrationPlanner {
         switch op {
         case .copyFile(_, let to, _): return to.raw.contains(needle)
         case .writeConfig(let entries, _): return entries.contains { $0.value.raw.contains(needle) }
-        case .injectAtAnchor(let file, _, let snippet, _): return file.raw.contains(needle) || snippet.raw.contains(needle)
+        case .injectAtAnchor(let file, _, let snippet, _, _): return file.raw.contains(needle) || snippet.raw.contains(needle)
         case .addCSPDomains: return false
         }
     }

@@ -1,0 +1,13 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import DonationButton from "../components/DonationButton.astro";
+import { readConfig } from "../../scripts/config";
+---
+
+<BaseLayout title="Donate">
+  <DonationButton
+    href={readConfig("DONATIONS_LINK")}
+    label={readConfig("DONATIONS_BUTTON_TEXT")}
+    provider={readConfig("DONATIONS_PROVIDER")}
+  />
+</BaseLayout>

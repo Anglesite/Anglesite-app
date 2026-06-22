@@ -1,12 +1,12 @@
 ---
 interface Props {
-  href: string;
+  href?: string;
   label?: string;
   variant?: "default" | "primary";
   provider?: "stripe" | "liberapay" | "github-sponsors";
 }
 const {
-  href,
+  href = "#",
   label = "Donate",
   variant = "default",
   provider = "stripe",
