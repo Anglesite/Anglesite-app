@@ -15,6 +15,8 @@ public extension IntegrationDescriptor {
                 problems.append("\(context): condition references unknown provider \"\(p)\"")
             case .fieldEquals(let key, _) where !fieldKeys.contains(key):
                 problems.append("\(context): condition references unknown field \"\(key)\"")
+            case .fieldIn(let key, _) where !fieldKeys.contains(key):
+                problems.append("\(context): condition references unknown field \"\(key)\"")
             default: break
             }
         }

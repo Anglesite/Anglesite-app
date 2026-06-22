@@ -221,4 +221,12 @@ import Foundation
             Issue.record("expected upsertConfig step, got \(String(describing: planB.steps.first))")
         }
     }
+
+    @Test func fieldInVisibilityMatchesAnyListedValue() {
+        let cond = Condition.fieldIn(key: "style", values: ["floating", "button"])
+        #expect(IntegrationPlanner.isVisible(cond, answers: ["style": "floating"], providerID: nil))
+        #expect(IntegrationPlanner.isVisible(cond, answers: ["style": "button"], providerID: nil))
+        #expect(!IntegrationPlanner.isVisible(cond, answers: ["style": "inline"], providerID: nil))
+        #expect(!IntegrationPlanner.isVisible(cond, answers: [:], providerID: nil))
+    }
 }

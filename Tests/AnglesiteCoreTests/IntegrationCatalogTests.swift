@@ -38,6 +38,16 @@ import Testing
         #expect(bad.validate().contains { $0.contains("nope") })
     }
 
+    @Test func validateCatchesDanglingFieldInReference() {
+        let bad = IntegrationDescriptor(
+            id: .booking, displayName: "B", summary: "s",
+            providers: [Provider(id: "cal", displayName: "Cal", cspDomains: ["app.cal.com"])],
+            fields: [Field(key: "f", label: "F", kind: .text,
+                           visibleWhen: .fieldIn(key: "nope", values: ["x"]))],
+            operations: [])
+        #expect(bad.validate().contains { $0.contains("nope") })
+    }
+
     /// `client:*` hydration directives are only valid on framework components; on a plain `.astro`
     /// component (which our injected widgets are) Astro errors at build. Guard every injected
     /// snippet against carrying one (regression guard for the build-breaker the final review found).
