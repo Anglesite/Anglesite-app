@@ -83,9 +83,16 @@ regenerates it deterministically. Baseline content equals `buildHeaders("")` (no
 ### `Resources/Template/package.json`
 
 - Add `"prebuild": "npx tsx scripts/csp.ts"` — npm runs this automatically before `build`, so
-  `npm run build` can never emit a stale `_headers`.
-- `check` also invokes the generator before scanning, so a local `npm run check` validates
-  against freshly generated headers.
+  `npm run build` can never emit a stale `_headers` (Astro then copies `public/` → `dist/`).
+- `check` is left unchanged: it scans `dist/`, which already holds the fresh `_headers` that
+  `prebuild` produced during the preceding `build`. (Regenerating `public/` inside `check` would
+  be pointless — it would not affect the already-built `dist/` the gate reads.)
+
+The TS test files added by this change must be kept out of scaffolded sites: `scaffold.sh`
+`rsync`s the template into each new site, so add `--exclude='scripts/*.test.ts'` to its exclude
+list. Because `pre-deploy-check.ts` currently calls `main()` unconditionally at module load,
+wrap that call in an ESM main-module guard so a test can import `checkHeaders` without
+triggering a scan.
 
 ### `Resources/Template/scripts/pre-deploy-check.ts`
 
