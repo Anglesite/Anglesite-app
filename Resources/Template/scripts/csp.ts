@@ -22,6 +22,7 @@ const BASE: Record<string, string[]> = {
   "font-src": ["'self'"],
   "connect-src": ["'self'", "cloudflareinsights.com"],
   "frame-src": ["'self'"],
+  "object-src": ["'none'"],
   "frame-ancestors": ["'none'"],
   "base-uri": ["'self'"],
   "form-action": ["'self'"],
@@ -30,7 +31,7 @@ const BASE: Record<string, string[]> = {
 /** Emission order for directives (stable, reproducible output). */
 const DIRECTIVE_ORDER = [
   "default-src", "script-src", "style-src", "img-src", "font-src",
-  "connect-src", "frame-src", "frame-ancestors", "base-uri", "form-action",
+  "connect-src", "frame-src", "object-src", "frame-ancestors", "base-uri", "form-action",
 ];
 
 /** Sorted, deduped, non-empty domains from the SCRIPT_ALLOW key. */

@@ -17,7 +17,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readConfigFromString } from "./config";
+import { parseAllowedDomains } from "./csp";
 
 interface Issue {
   severity: "error" | "warning";
@@ -85,10 +85,7 @@ export function checkHeaders(headersContent: string | null, configContent: strin
       .split(/[\s;]+/)
       .filter((t) => t.length > 0),
   );
-  const allow = (readConfigFromString(configContent, "SCRIPT_ALLOW") ?? "")
-    .split(",")
-    .map((d) => d.trim())
-    .filter((d) => d.length > 0);
+  const allow = parseAllowedDomains(configContent);
   for (const domain of allow) {
     if (!cspTokens.has(domain)) {
       issues.push({
