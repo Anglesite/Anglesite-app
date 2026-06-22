@@ -79,12 +79,18 @@ export function checkHeaders(headersContent: string | null, configContent: strin
     issues.push({ severity: "error", message: "dist/_headers has no Content-Security-Policy.", file: "_headers" });
     return issues;
   }
+  const cspTokens = new Set(
+    cspLine
+      .replace(/^Content-Security-Policy:/, "")
+      .split(/[\s;]+/)
+      .filter((t) => t.length > 0),
+  );
   const allow = (readConfigFromString(configContent, "SCRIPT_ALLOW") ?? "")
     .split(",")
     .map((d) => d.trim())
     .filter((d) => d.length > 0);
   for (const domain of allow) {
-    if (!cspLine.includes(domain)) {
+    if (!cspTokens.has(domain)) {
       issues.push({
         severity: "error",
         message: `Configured integration domain "${domain}" is missing from the CSP.`,

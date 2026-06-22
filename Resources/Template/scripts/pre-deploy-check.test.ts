@@ -40,3 +40,11 @@ test("multiple configured domains missing from CSP each produce an error", () =>
   assert.ok(issues.some((i) => /giscus\.app/.test(i.message)));
   assert.ok(issues.some((i) => /assets\.calendly\.com/.test(i.message)));
 });
+
+test("substring of an allowed domain does not satisfy coverage", () => {
+  const headers = `/*\n  Content-Security-Policy: default-src 'self'; frame-src 'self' app.cal.com\n`;
+  const issues = checkHeaders(headers, "SCRIPT_ALLOW=cal.com");
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].severity, "error");
+  assert.match(issues[0].message, /cal\.com/);
+});
