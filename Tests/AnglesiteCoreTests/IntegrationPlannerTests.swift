@@ -52,6 +52,8 @@ import Foundation
         }
         #expect(injects.contains { $0.0.contains("BaseLayout") && $0.1 == .line })
         #expect(injects.contains { $0.0.contains("BaseLayout") && $0.1 == .html })
+        // The button-only homepage injections must not leak into the floating plan.
+        #expect(!injects.contains { $0.0.contains("index.astro") })
         #expect(!r.steps.contains { if case .createFile(let p, _) = $0 { return p == "src/pages/book.astro" }; return false })
     }
 
