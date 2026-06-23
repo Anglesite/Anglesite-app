@@ -121,7 +121,11 @@ struct SiteWindow: View {
             startup.ingest(state: newState)
         }
         .focusedValue(\.siteID, site?.id ?? siteID)
-        .focusedValue(\.preview, preview)
+        // `focusedSceneValue` (not `focusedValue`): publishes while this site window is the active
+        // scene, regardless of where keyboard focus sits. The preview pane is a WKWebView (an AppKit
+        // responder), so nothing in SwiftUI's focus system is focused and a plain `focusedValue`
+        // would resolve to nil — leaving "Show Web Inspector" perpetually disabled.
+        .focusedSceneValue(\.preview, preview)
         .onDisappear {
             preview.close()
             startup.stop()
