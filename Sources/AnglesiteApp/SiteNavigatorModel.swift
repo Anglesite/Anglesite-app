@@ -75,6 +75,7 @@ final class SiteNavigatorModel {
     }
 
     func cancelEditing() {
+        draftTitle = ""
         editingItemID = nil
     }
 
