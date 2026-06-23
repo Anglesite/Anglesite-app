@@ -83,9 +83,21 @@ public enum ContentScanner {
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         guard let m = titleAttrRegex.firstMatch(in: text, range: range) else { return nil }
         for group in [1, 2] {
-            if let r = Range(m.range(at: group), in: text) { return String(text[r]) }
+            if let r = Range(m.range(at: group), in: text) {
+                return decodeHTMLEntities(String(text[r]))
+            }
         }
         return nil
+    }
+
+    /// Decode exactly the five HTML entities emitted by `PageTitleEditor.attrEscaped(_:delimiter:)`.
+    /// `&amp;` is decoded last so that `&amp;lt;` becomes `&lt;` rather than `<`.
+    private static func decodeHTMLEntities(_ s: String) -> String {
+        s.replacingOccurrences(of: "&lt;",   with: "<")
+         .replacingOccurrences(of: "&gt;",   with: ">")
+         .replacingOccurrences(of: "&quot;", with: "\"")
+         .replacingOccurrences(of: "&#39;",  with: "'")
+         .replacingOccurrences(of: "&amp;",  with: "&")
     }
 
     // MARK: - Posts

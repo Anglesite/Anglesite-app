@@ -77,4 +77,40 @@ struct PageTitleEditorTests {
         // Double-quoted delimiter: escape &, <, and the " delimiter; ' may stay literal.
         #expect(out.contains("title=\"Tom &amp; &quot;Jerry&quot; &lt;b&gt;\""))
     }
+
+    // MARK: - Round-trip tests (Fix 1: Frontmatter.unquote decodes YAML escapes)
+
+    @Test("round-trip: markdown with quotes and backslashes survives write→parse")
+    func roundTripMarkdownEscapes() {
+        let originalTitle = "a\"b\\c&more"
+        let src = "---\ntitle: \"old\"\n---\nbody\n"
+        let rewritten = ok(PageTitleEditor.rewrite(contents: src, fileExtension: "md", newTitle: originalTitle))
+        // Frontmatter.parse should now decode the YAML escapes and return the original title.
+        let parsed = Frontmatter.parse(rewritten)
+        #expect(parsed["title"] == .string(originalTitle))
+    }
+
+    @Test("round-trip: title with only backslash survives write→parse")
+    func roundTripBackslash() {
+        let originalTitle = "a\\b"
+        let src = "---\ntitle: \"x\"\n---\n"
+        let rewritten = ok(PageTitleEditor.rewrite(contents: src, fileExtension: "md", newTitle: originalTitle))
+        let parsed = Frontmatter.parse(rewritten)
+        #expect(parsed["title"] == .string(originalTitle))
+    }
+
+    // MARK: - Missing coverage: mdoc extension and unknown extension
+
+    @Test("mdoc: replaces frontmatter title (mdoc is a markdown-family extension)")
+    func mdocReplace() {
+        let src = "---\ntitle: \"Old\"\n---\nBody\n"
+        let out = ok(PageTitleEditor.rewrite(contents: src, fileExtension: "mdoc", newTitle: "New"))
+        #expect(out.contains("title: \"New\""))
+    }
+
+    @Test("unknown extension → noEditableLocation")
+    func unknownExtension() {
+        let r = PageTitleEditor.rewrite(contents: "---\ntitle: \"x\"\n---\n", fileExtension: "txt", newTitle: "New")
+        #expect(r == .failure(.noEditableLocation))
+    }
 }

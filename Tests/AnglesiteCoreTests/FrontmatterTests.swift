@@ -65,4 +65,46 @@ struct FrontmatterTests {
         #expect(fm["title"] == .string("T"))
         #expect(fm["draft"] == .bool(true))
     }
+
+    // MARK: - YAML escape decoding (Fix 1)
+
+    @Test("double-quoted scalar: decodes \\\" and \\\\ escapes")
+    func doubleQuotedEscapes() {
+        // Source line: title: "a\"b\\c"  — writer output for title a"b\c
+        let fm = Frontmatter.parse("---\ntitle: \"a\\\"b\\\\c\"\n---")
+        #expect(fm["title"] == .string("a\"b\\c"))
+    }
+
+    @Test("double-quoted scalar: \\n decodes to newline, \\t to tab")
+    func doubleQuotedNewlineTab() {
+        let fm = Frontmatter.parse("---\ntitle: \"line1\\nline2\"\ntag: \"a\\tb\"\n---")
+        #expect(fm["title"] == .string("line1\nline2"))
+        #expect(fm["tag"] == .string("a\tb"))
+    }
+
+    @Test("double-quoted scalar: \\\\n is backslash-then-n, NOT newline (single-pass guard)")
+    func doubleQuotedBackslashBackslashN() {
+        // Source: "a\\nb"  — escaped form of title a\nb (backslash then literal n)
+        let fm = Frontmatter.parse("---\ntitle: \"a\\\\nb\"\n---")
+        #expect(fm["title"] == .string("a\\nb"))
+    }
+
+    @Test("double-quoted scalar: unknown escape keeps backslash+char")
+    func doubleQuotedUnknownEscape() {
+        let fm = Frontmatter.parse("---\ntitle: \"hello\\xworld\"\n---")
+        #expect(fm["title"] == .string("hello\\xworld"))
+    }
+
+    @Test("single-quoted scalar: '' decodes to single quote")
+    func singleQuotedDoubling() {
+        // YAML single-quoted escape: '' → '
+        let fm = Frontmatter.parse("---\ntitle: 'it''s a test'\n---")
+        #expect(fm["title"] == .string("it's a test"))
+    }
+
+    @Test("unquoted scalar: returned as-is (no escape processing)")
+    func unquotedUnchanged() {
+        let fm = Frontmatter.parse("---\ntitle: plain value\n---")
+        #expect(fm["title"] == .string("plain value"))
+    }
 }

@@ -112,4 +112,37 @@ struct ContentScannerTests {
         #expect(listing.posts.isEmpty)
         #expect(listing.images.isEmpty)
     }
+
+    // MARK: - HTML entity decoding in title attribute (Fix 2)
+
+    @Test("page title: title= attribute HTML entities are decoded")
+    func pageTitleAttrEntityDecoding() {
+        // Writer emits: title="Tom &amp; &quot;X&quot;"  for original title: Tom & "X"
+        let root = makeSite([
+            "src/pages/test.astro": "<Layout title=\"Tom &amp; &quot;X&quot;\" />"
+        ])
+        let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
+        #expect(pages.first?.title == "Tom & \"X\"")
+    }
+
+    @Test("page title: all five emitted entities decode correctly")
+    func pageTitleAttrAllEntities() {
+        // &amp; &lt; &gt; &quot; &#39;
+        let root = makeSite([
+            "src/pages/ent.astro": "<L title=\"a&amp;b&lt;c&gt;d&quot;e&#39;f\" />"
+        ])
+        let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
+        #expect(pages.first?.title == "a&b<c>d\"e'f")
+    }
+
+    @Test("page title: &amp;lt; decodes to &lt; not < (amp decoded last)")
+    func pageTitleAttrAmpLast() {
+        // If &amp; is decoded first, &amp;lt; would become &lt; then < — wrong.
+        // Correct: &amp;lt; → &lt; (only one decode pass, amp last).
+        let root = makeSite([
+            "src/pages/amp.astro": "<L title=\"&amp;lt;\" />"
+        ])
+        let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
+        #expect(pages.first?.title == "&lt;")
+    }
 }
