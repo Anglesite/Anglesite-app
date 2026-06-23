@@ -11,7 +11,7 @@ final class KeychainStoreTests: XCTestCase {
     private var store: KeychainStore!
 
     override func setUp() async throws {
-        service = "dev.anglesite.tests." + UUID().uuidString
+        service = "io.dwk.anglesite.tests." + UUID().uuidString
         store = KeychainStore(service: service)
         try await probeKeychainOrSkip()
     }
