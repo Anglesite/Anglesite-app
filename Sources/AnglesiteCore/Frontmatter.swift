@@ -113,12 +113,57 @@ public enum Frontmatter {
         return .string(unquote(raw))
     }
 
-    /// Strip a single layer of matching `"` or `'` quotes, else return as-is.
+    /// Strip a single layer of matching `"` or `'` quotes and decode YAML escapes, else return as-is.
+    ///
+    /// - Double-quoted scalars: single-pass `\` decoding — `\"`→`"`, `\\`→`\`, `\n`→newline,
+    ///   `\t`→tab; unknown sequences keep both the backslash and the following character.
+    /// - Single-quoted scalars: `''`→`'` (YAML single-quote doubling). No backslash processing.
+    /// - Unquoted scalars: returned unchanged.
     private static func unquote(_ s: String) -> String {
-        if s.count >= 2,
-           (s.hasPrefix("\"") && s.hasSuffix("\"")) || (s.hasPrefix("'") && s.hasSuffix("'")) {
-            return String(s.dropFirst().dropLast())
+        guard s.count >= 2 else { return s }
+        if s.hasPrefix("\"") && s.hasSuffix("\"") {
+            return decodeDoubleQuoted(String(s.dropFirst().dropLast()))
+        }
+        if s.hasPrefix("'") && s.hasSuffix("'") {
+            // YAML single-quoted: only escape is '' → '
+            return String(s.dropFirst().dropLast()).replacingOccurrences(of: "''", with: "'")
         }
         return s
+    }
+
+    /// Single-pass YAML double-quoted escape decoder. Processes each character once so that
+    /// `\\n` (two source chars) decodes to `\` + `n` (not newline), guarding the chained-replace
+    /// pitfall.
+    private static func decodeDoubleQuoted(_ inner: String) -> String {
+        var result = ""
+        result.reserveCapacity(inner.unicodeScalars.count)
+        var idx = inner.startIndex
+        while idx < inner.endIndex {
+            let ch = inner[idx]
+            if ch == "\\" {
+                let next = inner.index(after: idx)
+                if next < inner.endIndex {
+                    switch inner[next] {
+                    case "\"": result.append("\"")
+                    case "\\": result.append("\\")
+                    case "n":  result.append("\n")
+                    case "t":  result.append("\t")
+                    default:
+                        // Unknown escape: keep backslash + char unchanged.
+                        result.append("\\")
+                        result.append(inner[next])
+                    }
+                    idx = inner.index(after: next)
+                } else {
+                    // Trailing backslash with no following char — keep it.
+                    result.append("\\")
+                    idx = next
+                }
+            } else {
+                result.append(ch)
+                idx = inner.index(after: idx)
+            }
+        }
+        return result
     }
 }

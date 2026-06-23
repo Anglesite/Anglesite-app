@@ -112,4 +112,52 @@ struct ContentScannerTests {
         #expect(listing.posts.isEmpty)
         #expect(listing.images.isEmpty)
     }
+
+    // MARK: - HTML entity decoding in title attribute (Fix 2)
+
+    @Test("page title: title= attribute HTML entities are decoded")
+    func pageTitleAttrEntityDecoding() {
+        // Writer emits: title="Tom &amp; &quot;X&quot;"  for original title: Tom & "X"
+        let root = makeSite([
+            "src/pages/test.astro": "<Layout title=\"Tom &amp; &quot;X&quot;\" />"
+        ])
+        let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
+        #expect(pages.first?.title == "Tom & \"X\"")
+    }
+
+    @Test("page title: all five emitted entities decode correctly")
+    func pageTitleAttrAllEntities() {
+        // &amp; &lt; &gt; &quot; &#39;
+        let root = makeSite([
+            "src/pages/ent.astro": "<L title=\"a&amp;b&lt;c&gt;d&quot;e&#39;f\" />"
+        ])
+        let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
+        #expect(pages.first?.title == "a&b<c>d\"e'f")
+    }
+
+    @Test("page title: &amp;lt; decodes to &lt; not < (amp decoded last)")
+    func pageTitleAttrAmpLast() {
+        // If &amp; is decoded first, &amp;lt; would become &lt; then < — wrong.
+        // Correct: &amp;lt; → &lt; (only one decode pass, amp last).
+        let root = makeSite([
+            "src/pages/amp.astro": "<L title=\"&amp;lt;\" />"
+        ])
+        let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
+        #expect(pages.first?.title == "&lt;")
+    }
+
+    @Test("round-trip: single-quoted .astro title with special chars survives rewrite → scan")
+    func astroSingleQuoteRoundTrip() {
+        // PageTitleEditor.attrEscaped (writer) must be symmetric with decodeHTMLEntities (reader),
+        // including the single-quote delimiter branch (&#39;).
+        let original = "Ben & Jerry's <Best> 'Picks'"
+        let written = PageTitleEditor.rewrite(
+            contents: "<Layout title='Old' />", fileExtension: "astro", newTitle: original)
+        guard case let .success(content) = written else {
+            Issue.record("rewrite failed: \(written)"); return
+        }
+        let root = makeSite(["src/pages/rt.astro": content])
+        let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
+        #expect(pages.first?.title == original)
+    }
 }
