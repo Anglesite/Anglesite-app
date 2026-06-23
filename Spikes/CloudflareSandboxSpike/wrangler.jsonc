@@ -32,7 +32,10 @@
   // The site to clone + serve. Override per-run with `wrangler deploy --var` or
   // the ?repo= / ?ref= query params on /start.
   "vars": {
-    "DEFAULT_GIT_URL": "https://github.com/Anglesite/anglesite-example.git",
+    // A real public Anglesite site (Astro 6.x, has .site-config + lockfile). Override
+    // per-run with ?repo=&ref= on /start. Note: the baked-deps hydrate fast-path (#5b)
+    // only hits if this site's lockfile matches the template's — else it's npm ci (a finding).
+    "DEFAULT_GIT_URL": "https://github.com/Anglesite/anglesite.dwk.io.git",
     "DEFAULT_GIT_REF": "main",
     "SITE_DIR": "/workspace",
     "DEV_PORT": "4321"

@@ -9,13 +9,15 @@
 // API per https://developers.cloudflare.com/sandbox/ (SDK 0.12.x):
 //   getSandbox, proxyToSandbox, sandbox.exec/startProcess/exposePort/getProcessLogs/destroy
 
-import { getSandbox, proxyToSandbox } from "@cloudflare/sandbox";
+import { getSandbox, proxyToSandbox, Sandbox } from "@cloudflare/sandbox";
 
 // Required: the Worker must re-export the Sandbox Durable Object class.
-export { Sandbox } from "@cloudflare/sandbox";
+export { Sandbox };
 
 interface Env {
-  Sandbox: DurableObjectNamespace;
+  // Typed with the Sandbox class so getSandbox/proxyToSandbox accept it (the SDK's
+  // helpers require DurableObjectNamespace<Sandbox>, not a bare namespace).
+  Sandbox: DurableObjectNamespace<Sandbox>;
   DEFAULT_GIT_URL: string;
   DEFAULT_GIT_REF: string;
   SITE_DIR: string;
@@ -180,8 +182,11 @@ export default {
 
         // ── In-container deploy: the plugin security hook must run here too ──
         case "/deploy": {
-          // pre-deploy-check is part of the bundled plugin/site; wrangler deploys.
-          const check = await sandbox.exec(`npm run -s pre-deploy-check || true`, { cwd: SITE_DIR });
+          // pre-deploy-check is the plugin's security gate. The app invariant (CLAUDE.md)
+          // is that a failure is ALWAYS surfaced and never bypassed — and #66 will copy
+          // this shape — so it must hard-gate the deploy, not be swallowed by `|| true`.
+          const check = await sandbox.exec(`npm run -s pre-deploy-check`, { cwd: SITE_DIR });
+          if (!check.success) return json({ phase: "pre-deploy-check", ...check }, 422);
           const build = await sandbox.exec(`npm run -s build`, { cwd: SITE_DIR });
           const deploy = build.success
             ? await sandbox.exec(`npx --yes wrangler deploy`, {

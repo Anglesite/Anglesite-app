@@ -40,10 +40,16 @@ desktop browser, and measure. No app changes.
   init binary (99 MB), cloudflared, `git`, the baked deps (`/opt/anglesite/baked`), and the scripts.
 - **⚠️ ARCH MISMATCH (the headline finding for Q-D).** `cloudflare/sandbox:0.12.1` is **linux/amd64-only**
   (`docker build` warns `InvalidBaseImagePlatform` on arm64). Cloudflare Containers run **amd64**;
-  `scripts/build-container-image.sh` is **hardcoded `linux/arm64`** (for Apple Silicon / Apple
+  `scripts/build-container-image.sh` was **hardcoded `linux/arm64`** (for Apple Silicon / Apple
   Containerization). So "one image, two substrates" can't be literally one arch — the canonical image
   must be built **multi-arch** (`linux/amd64,linux/arm64`) or per-substrate, and the build script needs
   a `PLATFORM`/multi-arch option. Cost (build time, registry size) → **Q-D**.
+  - **RESOLVED in the build script (#298, 2026-06-22):** `PLATFORM` is now an env override
+    (default `linux/arm64`; set `linux/amd64` for CF, or a comma list for multi-arch). A multi-arch
+    `PLATFORM` is rejected with `--load` (buildx can't load a multi-platform manifest) and a `--push`
+    build passes `--provenance=false` so the push is a plain image manifest, not an attestation index that
+    Apple `container` / CF image pull can reject. The **one-vs-two-image** distribution decision (Q-D)
+    is still open — pending the live run confirming the amd64 image boots in a Sandbox.
 - **Image strategy is a real fork for #66.** Two ways to combine the toolchains, to decide:
   - **A (current design):** canonical Anglesite image (multi-arch) as base + `COPY /container-server`
     from the sandbox image. Keeps toolchain layers byte-identical to what Apple Containerization runs,
