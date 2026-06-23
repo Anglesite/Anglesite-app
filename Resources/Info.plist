@@ -71,7 +71,7 @@
 			<true/>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>dev.anglesite.site</string>
+				<string>io.dwk.anglesite.site</string>
 			</array>
 		</dict>
 	</array>
@@ -79,7 +79,7 @@
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>dev.anglesite.site</string>
+			<string>io.dwk.anglesite.site</string>
 			<key>UTTypeDescription</key>
 			<string>Anglesite Site</string>
 			<key>UTTypeConformsTo</key>
