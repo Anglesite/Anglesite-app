@@ -47,7 +47,7 @@ PUSH=0
 # (comma-separated) PLATFORM must be pushed straight to the registry.
 if [[ "$PLATFORM" == *,* && $PUSH -eq 0 ]]; then
     echo "PLATFORM='$PLATFORM' is multi-arch; buildx cannot --load it locally." >&2
-    echo "Re-run with --push (multi-arch goes straight to \$IMAGE_REPO), or set a single PLATFORM." >&2
+    echo "Re-run with --push (multi-arch goes straight to ${IMAGE_REPO}), or set a single PLATFORM." >&2
     exit 1
 fi
 
@@ -97,17 +97,25 @@ META="$CTX/metadata.json"
 OUTPUT="--load"
 [[ $PUSH -eq 1 ]] && OUTPUT="--push"
 
-echo "==> Building $IMAGE_REF for $PLATFORM (Node v$NODE_VERSION)"
-docker buildx build \
-    --platform "$PLATFORM" \
-    --provenance=false \
-    --build-arg "NODE_VERSION=$NODE_VERSION" \
-    --tag "$IMAGE_REF" \
-    --metadata-file "$META" \
-    $OUTPUT \
-    "$CTX"
+BUILD_ARGS=(
+    --platform "$PLATFORM"
+    --build-arg "NODE_VERSION=$NODE_VERSION"
+    --tag "$IMAGE_REF"
+    --metadata-file "$META"
+    "$OUTPUT"
+)
+# Provenance attestations make a --push emit an OCI *index* manifest that both Apple
+# `container` and Cloudflare image pull can reject as an unexpected multi-arch image.
+# Strip them on push only; a local --load build keeps its (harmless) default metadata.
+[[ $PUSH -eq 1 ]] && BUILD_ARGS+=(--provenance=false)
 
-DIGEST=$(awk -F'"' '/containerimage.digest/{print $4}' "$META" 2>/dev/null || true)
+echo "==> Building $IMAGE_REF for $PLATFORM (Node v$NODE_VERSION)"
+docker buildx build "${BUILD_ARGS[@]}" "$CTX"
+
+# Informational only: the digest lets you pin both substrates to one image. The
+# `|| true` keeps a missing/absent metadata file from aborting the run under
+# `set -e` — callers that need to gate on the digest should check it themselves.
+DIGEST=$(awk -F'"' '/containerimage\.digest/{print $4}' "$META" 2>/dev/null || true)
 
 echo
 echo "Built $IMAGE_REF ($PLATFORM, Node v$NODE_VERSION)"

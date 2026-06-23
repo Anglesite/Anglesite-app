@@ -44,10 +44,10 @@ desktop browser, and measure. No app changes.
   Containerization). So "one image, two substrates" can't be literally one arch — the canonical image
   must be built **multi-arch** (`linux/amd64,linux/arm64`) or per-substrate, and the build script needs
   a `PLATFORM`/multi-arch option. Cost (build time, registry size) → **Q-D**.
-  - **RESOLVED in the build script (2026-06-22, this branch):** `PLATFORM` is now an env override
+  - **RESOLVED in the build script (#298, 2026-06-22):** `PLATFORM` is now an env override
     (default `linux/arm64`; set `linux/amd64` for CF, or a comma list for multi-arch). A multi-arch
-    `PLATFORM` is rejected with `--load` (buildx can't load a multi-platform manifest) and the build
-    passes `--provenance=false` so the push is a plain image manifest, not an attestation index that
+    `PLATFORM` is rejected with `--load` (buildx can't load a multi-platform manifest) and a `--push`
+    build passes `--provenance=false` so the push is a plain image manifest, not an attestation index that
     Apple `container` / CF image pull can reject. The **one-vs-two-image** distribution decision (Q-D)
     is still open — pending the live run confirming the amd64 image boots in a Sandbox.
 - **Image strategy is a real fork for #66.** Two ways to combine the toolchains, to decide:
