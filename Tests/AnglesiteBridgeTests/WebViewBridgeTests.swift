@@ -60,6 +60,13 @@ struct WebViewBridgeTests {
         #expect(webView.isInspectable)
     }
 
+    @Test("showInspector is a no-op for a nil web view")
+    func showInspectorNilIsNoOp() {
+        // The View-menu command forwards `PreviewModel`'s weak `webView`, which is nil before the
+        // preview's `makeNSView` runs and after teardown. Invoking the command then must not crash.
+        WebViewBridge.showInspector(nil)
+    }
+
     @Test("inspector(for:) resolves the private Web Inspector via KVC")
     func inspectorResolvesViaKVC() {
         // Verifies the private `_inspector` key still works on this OS — the only programmatic

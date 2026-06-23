@@ -49,7 +49,10 @@ struct WebInspectorCommands: Commands {
     @FocusedValue(\.preview) private var focusedPreview
 
     var body: some Commands {
-        CommandGroup(after: .sidebar) {
+        // `after: .toolbar` keeps "Show Web Inspector" adjacent to "Show Debug Pane" (which also uses
+        // `.toolbar`) — the two developer-tool toggles sit together (⌥⌘I next to ⌥⌘D). `.sidebar`
+        // would place it earlier, separated by the standard Toolbar entries.
+        CommandGroup(after: .toolbar) {
             Button("Show Web Inspector") {
                 focusedPreview?.showWebInspector()
             }

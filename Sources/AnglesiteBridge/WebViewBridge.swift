@@ -72,15 +72,20 @@ public enum WebViewBridge {
     /// String-based KVC is used rather than a linked symbol so no private symbol appears in the
     /// binary for static analysis. Side-effect-free — callers invoke `show` separately. Returns
     /// `nil` if the private key ever stops resolving (e.g. a future OS removes it), keeping
-    /// `showInspector(_:)` a safe no-op rather than a crash.
+    /// `showInspector(_:)` a safe no-op rather than a crash. Intentionally `internal` — it's an
+    /// implementation detail of `showInspector(_:)`, exposed only so `AnglesiteBridgeTests` can
+    /// assert the KVC key resolves (`@testable import`); not part of the module's public ABI.
     @MainActor
-    public static func inspector(for webView: WKWebView) -> NSObject? {
+    static func inspector(for webView: WKWebView) -> NSObject? {
         webView.value(forKey: "_inspector") as? NSObject
     }
 
-    /// Opens the Web Inspector for `webView`. No-ops if the private inspector can't be resolved.
+    /// Opens the Web Inspector for `webView`. No-ops when `webView` is nil (the caller's weak
+    /// reference before the preview's `makeNSView` runs, or after teardown) or when the private
+    /// inspector can't be resolved — so the "Show Web Inspector" command is always safe to invoke.
     @MainActor
-    public static func showInspector(_ webView: WKWebView) {
+    public static func showInspector(_ webView: WKWebView?) {
+        guard let webView else { return }
         inspector(for: webView)?.perform(Selector(("show")))
     }
 

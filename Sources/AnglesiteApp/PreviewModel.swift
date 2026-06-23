@@ -127,10 +127,9 @@ final class PreviewModel {
         return PreviewNavigation.targetURL(base: base, route: route)
     }
 
-    /// Open the Web Inspector for the live preview. No-ops if the preview web view hasn't been
-    /// created yet (dev server not ready). Backed by `WebViewBridge.showInspector(_:)`.
+    /// Open the Web Inspector for the live preview. Forwards the weak `webView`; the bridge no-ops
+    /// when it's nil (preview not yet created / torn down), so this is always safe to call.
     func showWebInspector() {
-        guard let webView else { return }
         WebViewBridge.showInspector(webView)
     }
 
