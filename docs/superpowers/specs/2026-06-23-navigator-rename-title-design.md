@@ -43,9 +43,11 @@ items that carry a title).
 
 - Component / Style / Metadata file rows — these are plain files, not titled
   content. A general "rename file" feature is future work.
-- An `.astro` / `.html` page with **no** `title=` attribute and no usable
-  frontmatter — there is no safe place to inject a title prop, so its Rename
-  affordance is disabled (not renamable).
+- An `.astro` / `.html` page with **no** `title=` attribute — there is no safe
+  place to inject a title prop, so renaming is **rejected at commit with an
+  alert** (no file change). It is not pre-disabled: pre-checking would require
+  reading every page file on each navigator refresh, so the check happens once,
+  on demand, when the user actually commits a rename.
 - Changing the filename, route, or URL.
 - Routing through the MCP/plugin server — this is a local file edit and runs
   entirely native.
@@ -87,37 +89,92 @@ Behavior:
 Escaping per format ensures quotes and special characters in a title cannot
 corrupt the file.
 
-### Rename flow — wired into `SiteNavigatorModel`
+### `NavigatorRenameService` (AnglesiteCore) — the testable flow
 
-The model already resolves navigator items against `SiteContentGraph` and the
-filesystem, so it can map a row id to a page/post and its `filePath` +
-extension.
+The load → rewrite → save → commit pipeline lives in AnglesiteCore (not the
+app-target model) because `swift test` covers Core but not the app target — the
+project's established pattern (cf. `TokenOnboarding`). File I/O and the git
+closure are injected so the flow is fully unit-testable.
 
 ```swift
-// Whether a row may be renamed (drives context-menu / Return availability).
-// False for non-titled file rows, and for astro/html pages with no title= attr.
-func canRename(_ id: String) -> Bool
+public struct NavigatorRenameService {
+    public enum RenameError: Error, Equatable {
+        case emptyTitle          // from PageTitleEditor
+        case noEditableLocation  // from PageTitleEditor
+        case io(String)          // load/save failure
+    }
+    public typealias GitCommit = NativeContentOperations.GitCommit
+        // (_ projectRoot: URL, _ relPath: String, _ message: String) async -> String?
 
-// Perform the rename: load → rewrite → save → git commit → graph refresh.
-func rename(_ id: String, to newTitle: String) async
+    public init(
+        loadContents: @escaping @Sendable (URL) throws -> String = { try FileDocumentIO.load($0).contents },
+        saveContents: @escaping @Sendable (String, URL) throws -> Void = { try FileDocumentIO.save($0, to: $1) },
+        gitCommit: @escaping GitCommit = NativeContentOperations.processGitCommit
+    )
+
+    // Returns the trimmed new title on success.
+    public func rename(
+        fileURL: URL,
+        fileExtension: String,
+        projectRoot: URL,
+        relativePath: String,
+        newTitle: String
+    ) async -> Result<String, RenameError>
+}
 ```
 
 `rename` steps:
 
-1. Resolve the item → file URL + extension. Bail (no-op) if not renamable.
-2. `FileDocumentIO.load(url)` to read current contents.
-3. `PageTitleEditor.rewrite(contents:fileExtension:newTitle:)`.
-   - `.emptyTitle` → abort, keep original title, clear edit state.
-   - `.noEditableLocation` → abort, surface an alert (should be pre-empted by
-     `canRename`, but handled defensively).
-4. `FileDocumentIO.save(newContents, to: url)`.
-5. Git commit via the **same injected `gitCommit` closure** that
-   `NativeContentOperations` uses, message `Rename title to "<newTitle>"`.
-6. Trigger a content-graph refresh for the affected file so the row re-renders
-   with the new title.
+1. `loadContents(fileURL)` → current contents (`.io` on failure).
+2. `PageTitleEditor.rewrite(contents:fileExtension:newTitle:)` — maps
+   `.emptyTitle` / `.noEditableLocation` straight through to `RenameError`.
+3. `saveContents(newContents, fileURL)` (`.io` on failure).
+4. Git commit **best-effort** via the injected closure, message
+   `anglesite: rename title to "<newTitle>"`. A nil result (not a repo,
+   rejecting hook, git missing) is ignored — the file is already saved and is
+   the source of truth, so a failed commit never rolls back the title. This
+   mirrors `NativeContentOperations`.
+5. Return `.success(trimmedTitle)`.
 
-Any load/save/git failure surfaces an alert and leaves the original title
-intact. File I/O and the git closure are injectable so the flow is testable.
+### Rename glue — `SiteNavigatorModel` (app target, thin)
+
+The model maps a row id to its `SiteContentGraph.Page`/`Post`, drives the
+service, then reflects the result in the graph + UI. This glue is not unit-tested
+(app target; consistent with other app glue).
+
+```swift
+// Section-based: true iff the id belongs to the Pages or Posts section.
+// (The astro-no-title case is caught at commit, not pre-disabled — see spec.)
+func canRename(_ id: String) -> Bool
+
+func beginEditing(_ id: String)   // editingItemID = id; draftTitle = current title
+func cancelEditing()              // editingItemID = nil
+func commitEditing() async        // resolve id → page/post; run the service; update graph
+```
+
+`commitEditing` steps:
+
+1. Resolve `editingItemID` → `SiteContentGraph.Page`/`Post` via the graph; bail
+   if gone. Derive `fileURL = sourceDirectory.appending(filePath)`,
+   `fileExtension` from `filePath`, `relativePath = filePath`,
+   `projectRoot = sourceDirectory`.
+2. `await renameService.rename(...)`.
+3. On `.success(newTitle)`: build an updated `Page`/`Post` value (same id, same
+   fields, `title = newTitle`) and `await graph.upsertPage(_:)` /
+   `upsertPost(_:)`. The graph emits a change → the navigator's existing
+   observer rebuilds `sections` with the new title.
+4. On `.emptyTitle`: silently revert (no write happened).
+5. On `.noEditableLocation` / `.io`: set `renameError` (an observable `String?`)
+   so the view shows an `.alert`. Original title preserved.
+6. Clear `editingItemID` in all cases.
+
+**`sourceDirectory` plumbing.** `Page.filePath`/`Post.filePath` are relative to
+the site's **source directory** (the `ContentScanner` project root), but
+`start(siteID:siteRoot:)` currently receives `siteRoot = packageURL` (for
+`SiteFileTree`, which adaptively resolves `Source/`). So `start` gains a
+`sourceDirectory: URL` parameter, stored on the model and used to resolve
+absolute file paths; the single call site in `SiteWindow` passes
+`resolved.sourceDirectory`.
 
 ### Navigator UI (`SiteNavigatorView` + `SiteNavigatorModel`)
 
@@ -125,26 +182,28 @@ intact. File I/O and the git closure are injectable so the flow is testable.
   - `editingItemID: String?` — which row is in edit mode.
   - `draftTitle: String` — the in-progress text.
   - A `@FocusState`-driven focus on the `TextField` (held in the view).
-- A row renders an inline `TextField(text: $draftTitle)` when
-  `editingItemID == item.id`, otherwise the existing `Text`. `onSubmit` →
-  `await model.rename(id, to: draftTitle)`; Esc / focus loss with no submit →
-  cancel (clear `editingItemID`).
-- `.contextMenu { Button("Rename") { model.beginEditing(id) } }` shown only when
-  `model.canRename(id)`.
+- A row renders an inline `TextField(text: $model.draftTitle)` when
+  `editingItemID == item.id`, otherwise the existing `Label`. `onSubmit` →
+  `Task { await model.commitEditing() }`; Esc / focus loss → `cancelEditing()`.
+- `.contextMenu { Button("Rename") { model.beginEditing(item.id) } }` shown only
+  when `model.canRename(item.id)`.
 - A keyboard path (`Return` on the selected renamable row) calls
   `beginEditing`. (Double-click may also begin editing; optional, since single
   click already selects + navigates the preview.)
+- `.alert` bound to `model.renameError` surfaces `.noEditableLocation` / `.io`
+  failures.
 
 ## Data flow
 
 ```
 control-click / Return on row
-  → model.beginEditing(id)        (editingItemID = id, draftTitle = current)
+  → model.beginEditing(id)         (editingItemID = id, draftTitle = current)
   → inline TextField
-  → onSubmit
-  → model.rename(id, to: draft)
-       load → PageTitleEditor.rewrite → save → git commit → graph refresh
-  → navigator rebuilds section with new title
+  → onSubmit → model.commitEditing()
+       resolve id → page/post
+       → renameService.rename(...)  (load → rewrite → save → best-effort commit)
+       → graph.upsertPage/Post(title: new)  → emits change
+  → navigator's observer rebuilds sections with new title
   → editingItemID = nil
 ```
 
@@ -153,9 +212,9 @@ control-click / Return on row
 | Situation | Behavior |
 |---|---|
 | Empty / whitespace title | No write; revert to original; clear edit state |
-| `.astro`/`.html` with no `title=` attr | Not renamable — Rename affordance disabled |
-| File load / save failure | Alert; original title preserved |
-| Git commit failure | Alert; file change kept, surfaced to user (consistent with existing native ops) |
+| `.astro`/`.html` with no `title=` attr | Rename rejected at commit with an alert; no file change |
+| File load / save failure | Alert (`.io`); original title preserved |
+| Git commit failure | Best-effort; ignored. File change kept (consistent with `NativeContentOperations`) |
 | Special chars / quotes in title | Escaped per format (YAML quote / HTML attr escape) |
 
 ## Testing
@@ -172,10 +231,19 @@ control-click / Return on row
 - Title containing quotes / `&` / `<` → correctly escaped per format.
 - Empty / whitespace title → `.emptyTitle`.
 
-**Model-level rename test:** with injected file I/O and `gitCommit` closure,
-verify the full load → rewrite → save → commit → refresh path runs and the
-graph/navigator reflect the new title; verify failures preserve the original
-title.
+**`NavigatorRenameService` tests (Swift Testing `@Test`, AnglesiteCore):** with
+injected `loadContents` / `saveContents` / `gitCommit`:
+
+- Success (markdown): saved contents carry the new frontmatter title; result is
+  `.success(trimmedTitle)`; git closure invoked with the right relPath/message.
+- `.emptyTitle` propagates; `saveContents` is **not** called.
+- `.noEditableLocation` (astro, no attr) propagates; `saveContents` not called.
+- `saveContents` throws → `.io`.
+- Git commit returns nil → still `.success` (best-effort), and the save still
+  happened.
+
+The `SiteNavigatorModel` glue (graph upsert, edit state) is app-target and not
+unit-tested, consistent with other app glue — it is exercised by the build.
 
 ## Non-goals / future work
 
