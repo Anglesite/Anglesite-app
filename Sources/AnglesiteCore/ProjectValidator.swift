@@ -2,26 +2,30 @@ import Foundation
 
 /// Decides whether a directory is an Anglesite site project.
 ///
+/// The sentinel filenames must match what the scaffolder actually writes (see
+/// `Resources/Template/` + `scaffold.sh`): the canonical markers are `.site-config` and
+/// `astro.config.mjs`. (They are *not* `anglesite.config.json` / `astro.config.ts`, which the
+/// template has never produced — using those flagged every freshly scaffolded site as invalid.)
+///
 /// Two tiers of sentinels:
 ///   - **Required** (`requiredSentinels`) — must be present for the directory to count as an
-///     Anglesite project at all: `anglesite.config.json` (identifies the project as Anglesite-
-///     managed) and `astro.config.ts` (it's an Astro site).
-///   - **Recommended** (`recommendedSentinels`) — written by `/anglesite:start` but not
-///     load-bearing for the core preview + edit pipeline: `keystatic.config.ts` (only needed
-///     if the owner wants Keystatic's CMS UI). A site missing only recommended sentinels is
-///     still valid; the UI can surface them as optional rather than blockers.
+///     Anglesite project at all: `.site-config` (identifies the project as Anglesite-managed and
+///     is read by `scripts/config.ts`'s `readConfig`) and `astro.config.mjs` (it's an Astro site).
+///   - **Recommended** (`recommendedSentinels`) — optional integration markers that aren't
+///     load-bearing for the core preview + edit pipeline. A site missing only recommended
+///     sentinels is still valid; the UI can surface them as optional rather than blockers.
+///     Currently empty (the template ships no optional-but-recommended marker), but the tier is
+///     retained for future integrations.
 ///
 /// `Result.isValid` checks required only. `Result.missing` reports everything missing (so the
-/// UI can show "missing: keystatic.config.ts" even on an otherwise-valid site).
-/// `Result.missingRequired` is the subset the UI uses to decide blocker vs. nice-to-have.
+/// UI can surface an otherwise-valid site's missing optional markers). `Result.missingRequired`
+/// is the subset the UI uses to decide blocker vs. nice-to-have.
 public enum ProjectValidator {
     public static let requiredSentinels: [String] = [
-        "anglesite.config.json",
-        "astro.config.ts"
+        ".site-config",
+        "astro.config.mjs"
     ]
-    public static let recommendedSentinels: [String] = [
-        "keystatic.config.ts"
-    ]
+    public static let recommendedSentinels: [String] = []
     /// Union of required + recommended. Existing callers (e.g., `SiteStore`'s "everything-missing
     /// means this isn't a project directory at all" filter) still use this set.
     public static let sentinels: [String] = requiredSentinels + recommendedSentinels

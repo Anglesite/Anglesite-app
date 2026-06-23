@@ -31,10 +31,9 @@ final class ProjectValidatorTests {
     }
 
     @Test("Is valid when only required sentinels present") func isValidWhenOnlyRequiredSentinelsPresent() throws {
-        // Smoke test (2026-05-22) exposed: a minimal site that has the *required* sentinels
-        // (anglesite.config.json + astro.config.ts) but is missing the *recommended* one
-        // (keystatic.config.ts) is a valid Anglesite project — keystatic is an optional
-        // integration, not a gating requirement. `isValid` should reflect that.
+        // A minimal site that has the *required* sentinels but is missing any *recommended*
+        // ones is still a valid Anglesite project — recommended markers are optional, not
+        // gating. `isValid` should reflect that.
         for name in ProjectValidator.requiredSentinels {
             try Data().write(to: tempDir.appendingPathComponent(name))
         }
@@ -44,14 +43,26 @@ final class ProjectValidatorTests {
         #expect(result.missingRequired == [])
     }
 
+    /// Regression for the Sites launcher showing every scaffolded site grayed-out with a warning
+    /// triangle: the validator required `anglesite.config.json` / `astro.config.ts`, filenames the
+    /// template never produced. The canonical scaffold (`scaffold.sh` + `Resources/Template/`)
+    /// writes `.site-config` and `astro.config.mjs`, so that exact pair must validate as a real
+    /// Anglesite site.
+    @Test("Canonical template layout (.site-config + astro.config.mjs) is valid") func canonicalTemplateLayoutIsValid() throws {
+        try Data().write(to: tempDir.appendingPathComponent(".site-config"))
+        try Data().write(to: tempDir.appendingPathComponent("astro.config.mjs"))
+        let result = ProjectValidator.validate(tempDir)
+        #expect(result.isValid, "a site scaffolded from the template must be valid")
+        #expect(result.missingRequired == [])
+    }
+
     @Test("Not valid when a required sentinel is missing") func notValidWhenARequiredSentinelIsMissing() throws {
-        // Only the recommended sentinel + one of the two required ones — still not a valid
-        // Anglesite project because anglesite.config.json is missing.
-        try Data().write(to: tempDir.appendingPathComponent("astro.config.ts"))
-        try Data().write(to: tempDir.appendingPathComponent("keystatic.config.ts"))
+        // Only one of the two required sentinels — still not a valid Anglesite project because
+        // `.site-config` (the Anglesite-managed marker) is missing.
+        try Data().write(to: tempDir.appendingPathComponent("astro.config.mjs"))
         let result = ProjectValidator.validate(tempDir)
         #expect(!result.isValid)
-        #expect(result.missingRequired == ["anglesite.config.json"])
+        #expect(result.missingRequired == [".site-config"])
     }
 
     @Test("Is valid when all sentinels present") func isValidWhenAllSentinelsPresent() throws {
