@@ -652,7 +652,7 @@ struct SiteWindow: View {
         // this creation and stop the freshly-made navigator instead.
         navigator?.stop()
         let navModel = SiteNavigatorModel(graph: contentGraph)
-        navModel.start(siteID: resolved.id, siteRoot: resolved.packageURL)
+        navModel.start(siteID: resolved.id, siteRoot: resolved.packageURL, sourceDirectory: resolved.sourceDirectory)
         navigator = navModel
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.

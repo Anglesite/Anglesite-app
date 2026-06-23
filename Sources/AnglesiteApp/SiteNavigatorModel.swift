@@ -12,6 +12,14 @@ final class SiteNavigatorModel {
     private(set) var sections: [NavigatorSection] = []
     var selection: String?
 
+    // Inline re-titling (Finder-style). `editingItemID` non-nil → that row shows a TextField.
+    var editingItemID: String?
+    var draftTitle: String = ""
+    var renameError: String?
+
+    private var sourceDirectory: URL?
+    private let renameService = NavigatorRenameService()
+
     private let graph: SiteContentGraph
     private var observeTask: Task<Void, Never>?
 
@@ -19,7 +27,8 @@ final class SiteNavigatorModel {
         self.graph = graph
     }
 
-    func start(siteID: String, siteRoot: URL) {
+    func start(siteID: String, siteRoot: URL, sourceDirectory: URL) {
+        self.sourceDirectory = sourceDirectory
         // Cancel any prior observer (window reuse: SwiftUI can replay a different site into the
         // same window) BEFORE starting the new one, so a stale refresh can't overwrite the new
         // site's sections. The initial load runs as the new task's first step, so it is tracked
@@ -47,6 +56,76 @@ final class SiteNavigatorModel {
             if let item = section.items.first(where: { $0.id == id }) { return item.target }
         }
         return nil
+    }
+
+    /// A row is renamable iff it is a page or post (route target). File rows (components/styles/
+    /// metadata) carry a `.file` target and are out of scope. The astro-without-title case is
+    /// caught at commit, not pre-disabled (pre-checking would read every page file per refresh).
+    func canRename(_ id: String) -> Bool {
+        guard let target = target(for: id) else { return false }
+        if case .route = target { return true }
+        return false
+    }
+
+    func beginEditing(_ id: String) {
+        guard canRename(id) else { return }
+        let current = sections.flatMap(\.items).first { $0.id == id }?.title ?? ""
+        draftTitle = current
+        editingItemID = id
+    }
+
+    func cancelEditing() {
+        editingItemID = nil
+    }
+
+    /// Resolve the editing row → page/post → file, run the rename service, then reflect the new
+    /// title into the graph (which re-emits and rebuilds the sidebar). Always clears edit state.
+    func commitEditing() async {
+        guard let id = editingItemID, let sourceDirectory else { editingItemID = nil; return }
+        editingItemID = nil
+
+        if let page = await graph.page(id: id) {
+            let url = sourceDirectory.appendingPathComponent(page.filePath)
+            let result = await renameService.rename(
+                fileURL: url,
+                fileExtension: (page.filePath as NSString).pathExtension,
+                projectRoot: sourceDirectory,
+                relativePath: page.filePath,
+                newTitle: draftTitle)
+            switch result {
+            case .success(let title):
+                await graph.upsertPage(SiteContentGraph.Page(
+                    id: page.id, siteID: page.siteID, route: page.route,
+                    filePath: page.filePath, title: title, lastModified: page.lastModified))
+            case .failure(.emptyTitle):
+                break  // no write happened; keep the old title silently
+            case .failure(.noEditableLocation):
+                renameError = "This page has no editable title to rename."
+            case .failure(.io(let msg)):
+                renameError = "Couldn't rename: \(msg)"
+            }
+        } else if let post = await graph.post(id: id) {
+            let url = sourceDirectory.appendingPathComponent(post.filePath)
+            let result = await renameService.rename(
+                fileURL: url,
+                fileExtension: (post.filePath as NSString).pathExtension,
+                projectRoot: sourceDirectory,
+                relativePath: post.filePath,
+                newTitle: draftTitle)
+            switch result {
+            case .success(let title):
+                await graph.upsertPost(SiteContentGraph.Post(
+                    id: post.id, siteID: post.siteID, collection: post.collection, slug: post.slug,
+                    title: title, draft: post.draft, publishDate: post.publishDate, tags: post.tags,
+                    filePath: post.filePath, lastModified: post.lastModified))
+            case .failure(.emptyTitle):
+                break
+            case .failure(.noEditableLocation):
+                renameError = "This post has no editable title to rename."
+            case .failure(.io(let msg)):
+                renameError = "Couldn't rename: \(msg)"
+            }
+        }
     }
 
     /// Rebuilds `sections` for the given site. Takes `siteID`/`siteRoot` as parameters (the values
