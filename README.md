@@ -70,8 +70,8 @@ There are two app targets, both ad-hoc-signed in Debug so they build without an 
 
 | Scheme | Bundle id | Distribution | Sandbox |
 |---|---|---|---|
-| `Anglesite` | `dev.anglesite.app` | Developer ID (notarized, Sparkle auto-update) | off |
-| `AnglesiteMAS` | `dev.anglesite.app.mas` | Mac App Store | on (App Sandbox) |
+| `Anglesite` (DevID) | `io.dwk.anglesite.devid` | Developer ID (retired — MAS only) | off |
+| `AnglesiteMAS` | `io.dwk.anglesite` | Mac App Store | on (App Sandbox) |
 
 > **Don't `xed .`** — this repo contains both a `Package.swift` and an `Anglesite.xcodeproj`. `xed .` opens the package, whose scheme picker only shows `Anglesite-Package` (libraries only, no runnable target). Open the `.xcodeproj` explicitly; the scheme picker should then show `Anglesite`, `AnglesiteMAS`, `AnglesiteCore`, and `AnglesiteBridge`, and ⌘R should run the app.
 

@@ -55,7 +55,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private let editBridge: IntentEditBridge?
     private let contentGraph: SiteContentGraph?
     private let integrationService: (any IntegrationOperationsService)?
-    private let logger = Logger(subsystem: "dev.anglesite.app", category: "FoundationModelAssistant")
+    private let logger = Logger(subsystem: "io.dwk.anglesite", category: "FoundationModelAssistant")
     /// The current conversational turn's consumer-facing ``TurnRelay``, retained so ``cancel()`` can
     /// wind it down. Cancelling stops *delivery* only — it never cancels the model stream, because
     /// cancelling Apple's on-device `streamResponse` mid-iteration traps the process (see ``converse``).
