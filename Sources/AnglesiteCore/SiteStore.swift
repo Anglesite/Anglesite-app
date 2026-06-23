@@ -131,14 +131,49 @@ public actor SiteStore {
     /// Loads the persisted site list from disk into memory. Safe to call before `record()`
     /// when the UI wants to render quickly. Skips the change emit on a fresh-install no-file
     /// path — there's nothing to propagate.
+    ///
+    /// Validity is **recomputed live** here rather than trusted from disk: `isValid` /
+    /// `missingSentinels` are filesystem-derived and go stale between launches (files added or
+    /// removed outside the app, or a change to the sentinel set itself), so a cached verdict can
+    /// be wrong — which once left every scaffolded site greyed-out in the launcher even after the
+    /// sentinel list was corrected, because the launcher reads only the cached value. When the
+    /// fresh check disagrees, the corrected list is persisted back so the next launch and the
+    /// Spotlight change-handler start from the right values.
     public func load() async throws {
         guard fileManager.fileExists(atPath: persistenceURL.path) else {
             sites = []
             return
         }
         let data = try Data(contentsOf: persistenceURL)
-        sites = try Self.decoder.decode([Site].self, from: data)
+        var loaded = try Self.decoder.decode([Site].self, from: data)
+        let changed = Self.revalidate(&loaded, fileManager: fileManager)
+        sites = loaded
+        if changed { try? persist() }
         await emitChange()
+    }
+
+    /// Recompute each entry's filesystem-derived `isValid` / `missingSentinels`. On MAS the package
+    /// lives behind a security-scoped grant, so resolve and start the per-site bookmark for the
+    /// duration of the check; on DevID there is no bookmark and the read just works. Returns `true`
+    /// if any entry's verdict changed (so the caller can persist the correction).
+    private static func revalidate(_ sites: inout [Site], fileManager: FileManager) -> Bool {
+        var changed = false
+        for index in sites.indices {
+            var scoped: URL?
+            if let bookmark = sites[index].bookmarkData,
+               let resolved = try? SecurityScopedBookmark.resolve(bookmark),
+               resolved.url.startAccessingSecurityScopedResource() {
+                scoped = resolved.url
+            }
+            let validation = AnglesitePackage(url: sites[index].packageURL).sourceValidation(fileManager: fileManager)
+            scoped?.stopAccessingSecurityScopedResource()
+            if sites[index].isValid != validation.isValid || sites[index].missingSentinels != validation.missing {
+                sites[index].isValid = validation.isValid
+                sites[index].missingSentinels = validation.missing
+                changed = true
+            }
+        }
+        return changed
     }
 
     /// Add or update a recents entry for `package`. Reads its marker for identity + name and

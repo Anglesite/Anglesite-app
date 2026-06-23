@@ -61,6 +61,41 @@ final class SiteStoreTests {
         #expect(loaded.map(\.name) == ["alpha"])
     }
 
+    /// Regression: validity is cached in `recents.json` but recomputed on `load()`. A registry
+    /// written by an older build (or before a sentinel-list fix) can hold a stale `isValid:false`
+    /// for a package that is actually valid on disk — that left every site greyed-out in the
+    /// launcher even after the validator was corrected, because the launcher reads the cached
+    /// value and `load()` never re-checked. `load()` must heal the verdict, and persist it back.
+    @Test("load re-validates a stale isValid against the live filesystem") func loadRevalidatesStaleValidity() async throws {
+        let pkg = try makeValidPackage(named: "alpha")
+        // Record normally, then corrupt the on-disk registry to a stale invalid verdict.
+        let writer = SiteStore(persistenceURL: persistenceURL)
+        let site = try await writer.record(pkg)
+        #expect(site.isValid)
+        let stale = SiteStore.Site(
+            id: site.id,
+            name: site.name,
+            packageURL: site.packageURL,
+            isValid: false,
+            missingSentinels: ["anglesite.config.json", "astro.config.ts"],
+            lastSeen: site.lastSeen
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode([stale]).write(to: persistenceURL)
+
+        let reader = SiteStore(persistenceURL: persistenceURL)
+        try await reader.load()
+        let loaded = await reader.sites
+        #expect(loaded.count == 1)
+        #expect(loaded[0].isValid, "load() should recompute validity from the live filesystem")
+        #expect(loaded[0].missingSentinels.isEmpty)
+
+        // The correction is healed back to disk, so a second reader sees it without re-checking.
+        let healed = try Data(contentsOf: persistenceURL)
+        #expect(String(decoding: healed, as: UTF8.self).contains("\"isValid\" : true"))
+    }
+
     @Test("Remove does not delete files") func removeDoesNotDeleteFiles() async throws {
         let pkg = try makeValidPackage(named: "alpha")
         let store = SiteStore(persistenceURL: persistenceURL)
