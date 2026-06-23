@@ -1,6 +1,6 @@
 name: Anglesite
 options:
-  bundleIdPrefix: dev.anglesite
+  bundleIdPrefix: io.dwk.anglesite
   deploymentTarget:
     macOS: "27.0"
   developmentLanguage: en
