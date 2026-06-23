@@ -34,7 +34,7 @@
 	<string>Anglesite needs to coordinate with helper processes (Astro dev server, MCP server) to preview and edit your site.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
-		<string>dev.anglesite.app.site-window</string>
+		<string>io.dwk.anglesite.site-window</string>
 	</array>
 	<!-- The site preview loads the local Astro dev server over plain http://localhost. -->
 	<key>NSAppTransportSecurity</key>

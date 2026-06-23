@@ -16,7 +16,7 @@ import Foundation
 /// resolve without parsing `userInfo`.
 public enum SiteEntityAnnotation {
     /// Reverse-DNS style; the suffix matches the SwiftUI scene that publishes it.
-    public static let activityType = "dev.anglesite.app.site-window"
+    public static let activityType = "io.dwk.anglesite.site-window"
 
     public static func makeSiteUserActivity(_ entity: SiteEntity) -> NSUserActivity {
         let activity = NSUserActivity(activityType: activityType)
