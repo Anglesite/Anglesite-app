@@ -26,8 +26,10 @@ public enum ProjectValidator {
         "astro.config.mjs"
     ]
     public static let recommendedSentinels: [String] = []
-    /// Union of required + recommended. Existing callers (e.g., `SiteStore`'s "everything-missing
-    /// means this isn't a project directory at all" filter) still use this set.
+    /// Union of required + recommended — the full set a caller can check without caring about the
+    /// tier split. No production code depends on it today (`SiteStore` validates via `validate`'s
+    /// `Result`); it's retained as the tier-agnostic API surface and is exercised by the tests.
+    /// While `recommendedSentinels` is empty this equals `requiredSentinels`.
     public static let sentinels: [String] = requiredSentinels + recommendedSentinels
 
     public struct Result: Sendable, Equatable {
