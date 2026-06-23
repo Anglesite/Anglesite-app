@@ -111,9 +111,17 @@ fi
 
 # Refresh the (gitignored) Xcode project from project.yml — a stale Anglesite.xcodeproj
 # missing recently-added Sources/ files fails to compile (and CI regenerates anyway).
+# Let xcodegen's output show: a broken project.yml otherwise surfaces only as a confusing
+# downstream compile error, and a stdout-only failure would be invisible under a redirect.
 if command -v xcodegen >/dev/null 2>&1; then
     echo "==> xcodegen generate (refresh project from project.yml)"
-    (cd "$REPO_ROOT" && xcodegen generate >/dev/null)
+    if ! (cd "$REPO_ROOT" && xcodegen generate); then
+        echo "error: xcodegen generate failed — fix project.yml before re-running" >&2
+        exit 1
+    fi
+else
+    echo "warning: xcodegen not found; Anglesite.xcodeproj may be stale — run" >&2
+    echo "         'brew install xcodegen' if the build fails to find recent Sources/ files" >&2
 fi
 
 DERIVED="$REPO_ROOT/build/mas-smoke"
@@ -125,12 +133,16 @@ echo "==> building AnglesiteMAS (real-signed: Apple Development, team $DEV_TEAM)
 # the smoke would pass for the wrong reasons. The post-build guard below re-asserts this.
 BUILD_LOG="$DERIVED/xcodebuild.log"
 mkdir -p "$DERIVED"
+# Stream output live AND capture it (a Debug MAS build runs minutes — a blank terminal
+# reads as a hang). `tee` to the log so the failure branch can still grep it; under
+# `set -o pipefail` the pipeline reports xcodebuild's exit, not tee's. (Don't append a
+# `| grep` here: a matched "error:" would make grep exit 0 and mask the failure.)
 if ! xcodebuild -project "$REPO_ROOT/Anglesite.xcodeproj" \
     -scheme AnglesiteMAS -configuration Debug \
     -derivedDataPath "$DERIVED" \
     CODE_SIGN_STYLE=Automatic CODE_SIGN_IDENTITY="Apple Development" \
     DEVELOPMENT_TEAM="$DEV_TEAM" -allowProvisioningUpdates \
-    build >"$BUILD_LOG" 2>&1; then
+    build 2>&1 | tee "$BUILD_LOG"; then
     echo "error: AnglesiteMAS build/sign failed. Relevant lines:" >&2
     grep -iE "error:|No Account for Team|No signing certificate|provisioning" "$BUILD_LOG" | tail -10 >&2
     echo "       If you see 'No Account for Team \"$DEV_TEAM\"', add that Apple ID in" >&2
