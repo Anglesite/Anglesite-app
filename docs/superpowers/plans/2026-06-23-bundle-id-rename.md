@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status (2026-06-23): EXECUTED in PR #302** via subagent-driven development — all 6 tasks implemented, each spec+quality reviewed clean, full `swift test` green, both schemes build. The single still-open box (Task 2 Step 5) is the manual GUI package-open smoke, deferred to the developer; App Store Connect registration of `io.dwk.anglesite` is out of scope (tracked separately). Do not re-execute completed tasks.
+
 **Goal:** Move the app identity from the dead `dev.anglesite.*` namespace (old team `M34HBJZNYA`) to `io.dwk.anglesite.*` under the signable `KH7H8Y25RT` team, unblocking #81's real-signed MAS smoke.
 
 **Architecture:** A mechanical rename across `project.yml`, two per-target `Info.plist`s, the Help Book plist, and four Swift identifier constants, verified by existing tests + scheme builds + a grep gate + a Launch-Services package-open smoke. No new runtime code; no migration shims.
@@ -32,7 +34,7 @@
 
 **Files:** none (environment setup)
 
-- [ ] **Step 1: Set the plugin source and generate the project**
+- [x] **Step 1: Set the plugin source and generate the project**
 
 ```bash
 export ANGLESITE_PLUGIN_SRC="$HOME/Developer/github.com/Anglesite/anglesite"
@@ -41,7 +43,7 @@ xcodegen generate
 
 Expected: `Created project at .../Anglesite.xcodeproj`.
 
-- [ ] **Step 2: Confirm a clean baseline build of both schemes**
+- [x] **Step 2: Confirm a clean baseline build of both schemes**
 
 ```bash
 xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build 2>&1 | tail -1
@@ -60,7 +62,7 @@ Expected: `** BUILD SUCCEEDED **` for both. If a baseline build fails, stop and 
 **Interfaces:**
 - Produces: the bundle IDs that App Store Connect / provisioning key on. No Swift consumes these directly.
 
-- [ ] **Step 1: Edit the DevID target's bundle id**
+- [x] **Step 1: Edit the DevID target's bundle id**
 
 In `project.yml`, the `Anglesite` (DevID) target:
 ```yaml
@@ -68,7 +70,7 @@ In `project.yml`, the `Anglesite` (DevID) target:
 ```
 (was `dev.anglesite.app`)
 
-- [ ] **Step 2: Edit the MAS target's bundle id**
+- [x] **Step 2: Edit the MAS target's bundle id**
 
 In `project.yml`, the `AnglesiteMAS` target:
 ```yaml
@@ -76,7 +78,7 @@ In `project.yml`, the `AnglesiteMAS` target:
 ```
 (was `dev.anglesite.app.mas`)
 
-- [ ] **Step 3: Regenerate and verify the IDs landed**
+- [x] **Step 3: Regenerate and verify the IDs landed**
 
 ```bash
 xcodegen generate
@@ -84,7 +86,7 @@ grep -n "PRODUCT_BUNDLE_IDENTIFIER" Anglesite.xcodeproj/project.pbxproj | grep -
 ```
 Expected: shows `io.dwk.anglesite.devid` and `io.dwk.anglesite` (no `dev.anglesite.app*`).
 
-- [ ] **Step 4: Build both schemes**
+- [x] **Step 4: Build both schemes**
 
 ```bash
 xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build 2>&1 | tail -1
@@ -92,7 +94,7 @@ xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debu
 ```
 Expected: `** BUILD SUCCEEDED **` for both.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add project.yml
@@ -112,7 +114,7 @@ git commit -m "refactor(bundle-id): rename app bundle IDs to io.dwk.anglesite[.d
 **Interfaces:**
 - Produces: `UTType.anglesiteSite` now `exportedAs: "io.dwk.anglesite.site"`. All call sites (`SiteActions.swift:102`, `NSOpenPanel`) use the symbol and are unaffected.
 
-- [ ] **Step 1: Edit the Swift UTType constant**
+- [x] **Step 1: Edit the Swift UTType constant**
 
 `Sources/AnglesiteCore/UTType+Anglesite.swift:12`:
 ```swift
@@ -120,11 +122,11 @@ git commit -m "refactor(bundle-id): rename app bundle IDs to io.dwk.anglesite[.d
 ```
 Update the surrounding doc comments (:5, :7, :11) that quote `dev.anglesite.site` to the new string.
 
-- [ ] **Step 2: Edit both Info.plists**
+- [x] **Step 2: Edit both Info.plists**
 
 In `Resources/Info.plist` AND `Resources/AnglesiteMAS-Info.plist`, replace **both** occurrences of `dev.anglesite.site` (the `LSItemContentTypes` string and the `UTTypeIdentifier` string) with `io.dwk.anglesite.site`. **Leave the `UTTypeTagSpecification` → `public.filename-extension` → `anglesite` entry unchanged.**
 
-- [ ] **Step 3: Verify no UTI string remains and the extension tag is intact**
+- [x] **Step 3: Verify no UTI string remains and the extension tag is intact**
 
 ```bash
 grep -rn "dev.anglesite.site" Resources/ Sources/
@@ -132,7 +134,7 @@ grep -n "anglesite" Resources/Info.plist | grep -i "filename-extension" -A2 || g
 ```
 Expected: first grep returns nothing; the `anglesite` extension string still present in the plist.
 
-- [ ] **Step 4: Build + test**
+- [x] **Step 4: Build + test**
 
 ```bash
 swift test --package-path . 2>&1 | tail -5
@@ -150,7 +152,7 @@ APP=$(xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration D
 ```
 Expected: an existing `.anglesite` package opens; the open panel filters correctly. Record PASS/FAIL.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Sources/AnglesiteCore/UTType+Anglesite.swift Resources/Info.plist Resources/AnglesiteMAS-Info.plist
@@ -169,11 +171,11 @@ git commit -m "refactor(bundle-id): rename package UTI to io.dwk.anglesite.site"
 **Interfaces:**
 - Produces: help book identity. `CFBundleHelpBookName` in both app plists MUST equal the help book's `CFBundleIdentifier`.
 
-- [ ] **Step 1: Edit all three strings**
+- [x] **Step 1: Edit all three strings**
 
 Set each of the three `dev.anglesite.app.help` occurrences to `io.dwk.anglesite.help`.
 
-- [ ] **Step 2: Verify consistency**
+- [x] **Step 2: Verify consistency**
 
 ```bash
 grep -rn "anglesite.app.help" Resources/   # expect: nothing
@@ -181,14 +183,14 @@ grep -rn "io.dwk.anglesite.help" Resources/Info.plist Resources/AnglesiteMAS-Inf
 ```
 Expected: three matches, all identical strings.
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 ```bash
 xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debug build 2>&1 | tail -1
 ```
 Expected: `** BUILD SUCCEEDED **`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Resources/Info.plist Resources/AnglesiteMAS-Info.plist Resources/Anglesite.help/Contents/Info.plist
@@ -208,18 +210,18 @@ git commit -m "refactor(bundle-id): rename Help Book id to io.dwk.anglesite.help
 - Consumes: nothing new.
 - Produces: `SiteEntityAnnotation.activityType == "io.dwk.anglesite.site-window"`, matching the `NSUserActivityTypes` array in both plists (App Intents / Spotlight donation rely on this match).
 
-- [ ] **Step 1: Edit the Swift constant**
+- [x] **Step 1: Edit the Swift constant**
 
 `Sources/AnglesiteIntents/SiteEntityAnnotation.swift:19`:
 ```swift
     public static let activityType = "io.dwk.anglesite.site-window"
 ```
 
-- [ ] **Step 2: Edit both plists' `NSUserActivityTypes`**
+- [x] **Step 2: Edit both plists' `NSUserActivityTypes`**
 
 Replace `dev.anglesite.app.site-window` with `io.dwk.anglesite.site-window` in both `Resources/Info.plist` and `Resources/AnglesiteMAS-Info.plist`.
 
-- [ ] **Step 3: Verify match + no stale string**
+- [x] **Step 3: Verify match + no stale string**
 
 ```bash
 grep -rn "site-window" Sources/ Resources/
@@ -227,7 +229,7 @@ grep -rn "dev.anglesite.app.site-window" .   # expect: nothing outside historica
 ```
 Expected: Swift constant and both plist entries all read `io.dwk.anglesite.site-window`.
 
-- [ ] **Step 4: Test (AppIntents schema conformance) + build**
+- [x] **Step 4: Test (AppIntents schema conformance) + build**
 
 ```bash
 swift test --package-path . --filter AnglesiteIntents 2>&1 | tail -5
@@ -235,7 +237,7 @@ xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debu
 ```
 Expected: tests pass; `** BUILD SUCCEEDED **`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/AnglesiteIntents/SiteEntityAnnotation.swift Resources/Info.plist Resources/AnglesiteMAS-Info.plist
@@ -254,7 +256,7 @@ git commit -m "refactor(bundle-id): rename site-window activity type to io.dwk.a
 **Interfaces:**
 - Produces: `KeychainStore.defaultService == "io.dwk.anglesite"`. Hard rename — existing tokens under the old service are abandoned (developer re-enters once).
 
-- [ ] **Step 1: Edit the default service constant + comment**
+- [x] **Step 1: Edit the default service constant + comment**
 
 `Sources/AnglesiteCore/KeychainStore.swift:32`:
 ```swift
@@ -262,25 +264,25 @@ git commit -m "refactor(bundle-id): rename site-window activity type to io.dwk.a
 ```
 Update the doc comment at :8 (`dev.anglesite.app` → `io.dwk.anglesite`).
 
-- [ ] **Step 2: Update the Settings help text**
+- [x] **Step 2: Update the Settings help text**
 
 `Sources/AnglesiteApp/SettingsView.swift:73` — change the inline `dev.anglesite.app` in the `Text(...)` to `io.dwk.anglesite`.
 
-- [ ] **Step 3: Update the test scratch prefix**
+- [x] **Step 3: Update the test scratch prefix**
 
 `Tests/AnglesiteCoreTests/KeychainStoreTests.swift:14`:
 ```swift
         service = "io.dwk.anglesite.tests." + UUID().uuidString
 ```
 
-- [ ] **Step 4: Test**
+- [x] **Step 4: Test**
 
 ```bash
 swift test --package-path . --filter KeychainStore 2>&1 | tail -5
 ```
 Expected: KeychainStore round-trip tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/AnglesiteCore/KeychainStore.swift Sources/AnglesiteApp/SettingsView.swift Tests/AnglesiteCoreTests/KeychainStoreTests.swift
@@ -298,22 +300,22 @@ git commit -m "refactor(bundle-id): rename Keychain service to io.dwk.anglesite 
 
 **Interfaces:** none (diagnostics + docs only).
 
-- [ ] **Step 1: Update logger subsystems**
+- [x] **Step 1: Update logger subsystems**
 
 In `FoundationModelAssistant.swift:58` and `Bootstrap.swift:5-7`, change `subsystem: "dev.anglesite.app"` → `subsystem: "io.dwk.anglesite"`.
 
-- [ ] **Step 2: Update the live docs**
+- [x] **Step 2: Update the live docs**
 
 In `CLAUDE.md`, `README.md`, `docs/xcode-setup.md`, and `docs/build-plan.md`, update the bundle-ID table rows and inline mentions to the new IDs. In `docs/build-plan.md:164`, replace the "the earlier `io.dwk.anglesite` candidate is dropped" line with a note that the project moved **to** `io.dwk.anglesite.*` on 2026-06-23 (team → `KH7H8Y25RT`, MAS-only), superseding the 2026-06-09 decision.
 
-- [ ] **Step 3: Global grep gate**
+- [x] **Step 3: Global grep gate**
 
 ```bash
 grep -rn "dev\.anglesite\.\(app\|site\)" --include="*.swift" --include="*.plist" --include="*.yml" --include="*.json" Sources/ Resources/ project.yml
 ```
 Expected: **no matches.** (Dated historical spec/plan docs under `docs/specs/` and `docs/superpowers/` that describe the old design at a point in time may retain the old strings; if any are confusing, annotate rather than rewrite. The gate above intentionally excludes `docs/`.)
 
-- [ ] **Step 4: Full test + both builds (regression sweep)**
+- [x] **Step 4: Full test + both builds (regression sweep)**
 
 ```bash
 swift test --package-path . 2>&1 | tail -5
@@ -322,7 +324,7 @@ xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debu
 ```
 Expected: all tests pass; both `** BUILD SUCCEEDED **`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/ docs/ CLAUDE.md README.md

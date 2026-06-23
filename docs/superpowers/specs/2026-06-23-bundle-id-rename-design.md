@@ -1,7 +1,7 @@
 # Bundle-ID + Package-UTI Rename → `io.dwk.anglesite.*`
 
 **Date:** 2026-06-23
-**Status:** Design approved; pending implementation plan
+**Status:** Implemented (PR #302, 2026-06-23)
 **Related:** #81 (real-signed MAS smoke, blocked on provisionable bundle ID), Phase 10.1 (#34), `project-mas-distribution-and-bundle-id` memory
 
 ## Motivation

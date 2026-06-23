@@ -45,7 +45,7 @@ Operationally: **File ▸ Import** copies a plain Anglesite directory into a new
 
 | Scheme | Bundle id | Distribution | Sandbox |
 |---|---|---|---|
-| `Anglesite` (DevID) | `io.dwk.anglesite.devid` | Developer ID (retired — MAS only) | off |
+| `Anglesite` (DevID) | `io.dwk.anglesite.devid` | Developer ID (deprioritized — local dev loop) | off |
 | `AnglesiteMAS` | `io.dwk.anglesite` | Mac App Store | App Sandbox |
 
 Both share the `Sources/AnglesiteApp` code and the same `InProcessBackend` spawn path. MAS-only differences are gated with `#if ANGLESITE_MAS` (set via `SWIFT_ACTIVE_COMPILATION_CONDITIONS` on the MAS *app target* only — **not** on the `AnglesiteCore`/`AnglesiteBridge` SPM package, so a guard in those packages is a no-op). The MAS build is sandboxed and holds a per-`SiteWindow` security-scoped bookmark grant so directly-spawned children inherit folder access; chat, Sparkle, and the `gh` Settings panel are compiled out of it.
