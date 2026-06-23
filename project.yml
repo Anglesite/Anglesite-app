@@ -73,7 +73,7 @@ targets:
         basedOnDependencyAnalysis: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.anglesite.app
+        PRODUCT_BUNDLE_IDENTIFIER: io.dwk.anglesite.devid
         PRODUCT_NAME: Anglesite
         INFOPLIST_FILE: Resources/Info.plist
         GENERATE_INFOPLIST_FILE: NO
@@ -158,7 +158,7 @@ targets:
         basedOnDependencyAnalysis: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.anglesite.app.mas
+        PRODUCT_BUNDLE_IDENTIFIER: io.dwk.anglesite
         # Distinct product name so the MAS build emits AnglesiteMAS.app instead of colliding
         # with the DevID Anglesite.app at the shared Products dir. The user-visible name stays
         # "Anglesite" via CFBundleDisplayName in AnglesiteMAS-Info.plist.
