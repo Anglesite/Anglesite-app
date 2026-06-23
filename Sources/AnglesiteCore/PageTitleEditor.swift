@@ -37,17 +37,25 @@ public enum PageTitleEditor {
     private static func rewriteMarkdown(_ contents: String, title: String) -> String {
         let yaml = "title: \(yamlQuoted(title))"
 
-        // A frontmatter block must start at byte 0 with `---` on its own line.
-        guard contents.hasPrefix("---\n") || contents == "---" || contents.hasPrefix("---\r\n") else {
-            return "---\n\(yaml)\n---\n\n\(contents)"
+        // Work in LF internally so the line logic is newline-agnostic, then restore CRLF on output
+        // if the source used it. (A trailing `\r` left on each split line would make `lines[0]`
+        // `"---\r"`, so the closing `---` fence is never found and a duplicate block gets prepended.)
+        let usesCRLF = contents.contains("\r\n")
+        let normalized = usesCRLF ? contents.replacingOccurrences(of: "\r\n", with: "\n") : contents
+        func finish(_ s: String) -> String {
+            usesCRLF ? s.replacingOccurrences(of: "\n", with: "\r\n") : s
         }
 
-        // Normalize to \n for line work; the templates use \n.
-        var lines = contents.components(separatedBy: "\n")
+        // A frontmatter block must start at byte 0 with `---` on its own line.
+        guard normalized.hasPrefix("---\n") || normalized == "---" else {
+            return finish("---\n\(yaml)\n---\n\n\(normalized)")
+        }
+
+        var lines = normalized.components(separatedBy: "\n")
         // lines[0] == "---". Find the closing fence.
         guard let close = lines.dropFirst().firstIndex(of: "---") else {
             // Malformed (no closing fence) — treat as no frontmatter and prepend a fresh block.
-            return "---\n\(yaml)\n---\n\n\(contents)"
+            return finish("---\n\(yaml)\n---\n\n\(normalized)")
         }
 
         // Look for an existing top-level `title:` between the fences.
@@ -56,7 +64,7 @@ public enum PageTitleEditor {
         } else {
             lines.insert(yaml, at: 1)
         }
-        return lines.joined(separator: "\n")
+        return finish(lines.joined(separator: "\n"))
     }
 
     /// The top-level key of a frontmatter line (`title: "x"` → `title`), or nil for indented /

@@ -145,4 +145,19 @@ struct ContentScannerTests {
         let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
         #expect(pages.first?.title == "&lt;")
     }
+
+    @Test("round-trip: single-quoted .astro title with special chars survives rewrite → scan")
+    func astroSingleQuoteRoundTrip() {
+        // PageTitleEditor.attrEscaped (writer) must be symmetric with decodeHTMLEntities (reader),
+        // including the single-quote delimiter branch (&#39;).
+        let original = "Ben & Jerry's <Best> 'Picks'"
+        let written = PageTitleEditor.rewrite(
+            contents: "<Layout title='Old' />", fileExtension: "astro", newTitle: original)
+        guard case let .success(content) = written else {
+            Issue.record("rewrite failed: \(written)"); return
+        }
+        let root = makeSite(["src/pages/rt.astro": content])
+        let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
+        #expect(pages.first?.title == original)
+    }
 }

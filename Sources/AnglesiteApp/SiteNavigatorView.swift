@@ -31,6 +31,9 @@ struct SiteNavigatorView: View {
             }
             .keyboardShortcut(.return, modifiers: [])
             .hidden()
+            // `.hidden()` still exposes the empty-label button to VoiceOver; keep it out of the
+            // accessibility tree (it's a keyboard-shortcut affordance, not a real control).
+            .accessibilityHidden(true)
             // Disabled while editing: otherwise this default-button shortcut swallows Return
             // before the focused TextField's onSubmit, so commits never fire (#299 review).
             .disabled(model.editingItemID != nil)

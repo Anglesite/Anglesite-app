@@ -82,8 +82,12 @@ final class SiteNavigatorModel {
     /// Resolve the editing row → page/post → file, run the rename service, then reflect the new
     /// title into the graph (which re-emits and rebuilds the sidebar). Always clears edit state.
     func commitEditing() async {
-        guard let id = editingItemID, let sourceDirectory else { editingItemID = nil; return }
+        guard let id = editingItemID, let sourceDirectory else { editingItemID = nil; draftTitle = ""; return }
+        // Capture the title before any await: the focus-loss path also calls commitEditing and a
+        // concurrent cancel/begin on the main actor could mutate `draftTitle` across a suspension.
+        let title = draftTitle
         editingItemID = nil
+        draftTitle = ""
 
         if let page = await graph.page(id: id) {
             let url = sourceDirectory.appendingPathComponent(page.filePath)
@@ -92,7 +96,7 @@ final class SiteNavigatorModel {
                 fileExtension: (page.filePath as NSString).pathExtension,
                 projectRoot: sourceDirectory,
                 relativePath: page.filePath,
-                newTitle: draftTitle)
+                newTitle: title)
             switch result {
             case .success(let title):
                 await graph.upsertPage(SiteContentGraph.Page(
@@ -112,7 +116,7 @@ final class SiteNavigatorModel {
                 fileExtension: (post.filePath as NSString).pathExtension,
                 projectRoot: sourceDirectory,
                 relativePath: post.filePath,
-                newTitle: draftTitle)
+                newTitle: title)
             switch result {
             case .success(let title):
                 await graph.upsertPost(SiteContentGraph.Post(

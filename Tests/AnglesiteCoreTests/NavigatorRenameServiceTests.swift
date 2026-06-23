@@ -61,6 +61,19 @@ struct NavigatorRenameServiceTests {
         if case .failure(.io) = r {} else { Issue.record("expected .io, got \(r)") }
     }
 
+    @Test("io: load failure maps to .io and never saves")
+    func loadFailure() async {
+        struct Boom: Error {}
+        let saved = Locked<Bool>(false)
+        let svc = NavigatorRenameService(
+            loadContents: { _ in throw Boom() },
+            saveContents: { _, _ in saved.set(true) },
+            gitCommit: { _, _, _ in "x" })
+        let r = await svc.rename(fileURL: url, fileExtension: "md", projectRoot: root, relativePath: "p.md", newTitle: "New")
+        if case .failure(.io) = r {} else { Issue.record("expected .io, got \(r)") }
+        #expect(saved.get() == false)
+    }
+
     @Test("git failure is best-effort: still success and the save happened")
     func gitBestEffort() async {
         let saved = Locked<Bool>(false)

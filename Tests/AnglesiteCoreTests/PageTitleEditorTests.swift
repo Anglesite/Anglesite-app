@@ -113,4 +113,29 @@ struct PageTitleEditorTests {
         let r = PageTitleEditor.rewrite(contents: "---\ntitle: \"x\"\n---\n", fileExtension: "txt", newTitle: "New")
         #expect(r == .failure(.noEditableLocation))
     }
+
+    // MARK: - CRLF line endings
+
+    @Test("markdown CRLF: updates the title in place, no duplicate block, CRLF preserved")
+    func mdCRLF() {
+        let src = "---\r\ntitle: \"Old\"\r\npubDate: 2026-01-01\r\n---\r\n\r\nBody\r\n"
+        let out = ok(PageTitleEditor.rewrite(contents: src, fileExtension: "md", newTitle: "New"))
+        // Title updated, parses back, and exactly one frontmatter block (no duplicate prepend).
+        #expect(Frontmatter.parse(out)["title"] == .string("New"))
+        #expect(out.components(separatedBy: "---").count == 3)
+        // Line endings preserved (no bare LF introduced).
+        #expect(!out.replacingOccurrences(of: "\r\n", with: "").contains("\n"))
+        #expect(out.contains("pubDate: 2026-01-01"))
+    }
+
+    // MARK: - lineKey matches top-level keys only
+
+    @Test("markdown: a `title:` substring inside another field's value is not mistaken for the key")
+    func mdTitleSubstringInValue() {
+        let src = "---\ndescription: \"has a title: suffix\"\ntitle: \"Old\"\n---\n\nBody\n"
+        let out = ok(PageTitleEditor.rewrite(contents: src, fileExtension: "md", newTitle: "New"))
+        #expect(Frontmatter.parse(out)["title"] == .string("New"))
+        // The description value is untouched.
+        #expect(out.contains("description: \"has a title: suffix\""))
+    }
 }
