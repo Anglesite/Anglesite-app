@@ -31,6 +31,9 @@ struct SiteNavigatorView: View {
             }
             .keyboardShortcut(.return, modifiers: [])
             .hidden()
+            // Disabled while editing: otherwise this default-button shortcut swallows Return
+            // before the focused TextField's onSubmit, so commits never fire (#299 review).
+            .disabled(model.editingItemID != nil)
         }
         .alert(
             "Rename failed",
@@ -54,8 +57,13 @@ struct SiteNavigatorView: View {
                 .onSubmit { Task { await model.commitEditing() } }
                 .onExitCommand { model.cancelEditing() }   // Esc
                 .onChange(of: editingFocused) { _, focused in
-                    // Clicking away ends editing without committing.
-                    if !focused && model.editingItemID == item.id { model.cancelEditing() }
+                    // TextField.onSubmit does not fire reliably inside a sidebar List on macOS — Return is
+                    // consumed by the list and only surfaces as focus loss. So commit on focus loss
+                    // (Return / Tab / click-away, Finder-style). Esc cancels first via onExitCommand,
+                    // which clears editingItemID, so this guard then skips the commit.
+                    if !focused && model.editingItemID == item.id {
+                        Task { await model.commitEditing() }
+                    }
                 }
                 .task { editingFocused = true }
                 .tag(item.id)
