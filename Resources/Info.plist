@@ -11,7 +11,7 @@
 	<key>CFBundleHelpBookFolder</key>
 	<string>Anglesite.help</string>
 	<key>CFBundleHelpBookName</key>
-	<string>dev.anglesite.app.help</string>
+	<string>io.dwk.anglesite.help</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
