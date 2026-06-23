@@ -30,6 +30,7 @@ public enum WebViewBridge {
         config.websiteDataStore = .nonPersistent()
         #endif
         enableWritingTools(on: config)
+        enableDeveloperExtras(on: config)
         if let handler {
             config.userContentController.add(handler, name: scriptMessageNamespace)
         }
@@ -57,11 +58,22 @@ public enum WebViewBridge {
         return WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
     }
 
-    /// Per-instance defaults that aren't expressible on the configuration. Enables the Web Inspector
-    /// in **all** build configurations: when inspectable, WebKit adds a native "Inspect Element" item
-    /// to the web view's context menu (satisfying control-click) and honors ⌥⌘I on the focused web
-    /// view. The View-menu "Show Web Inspector" command opens it programmatically via
-    /// `showInspector(_:)`.
+    /// Enables the **in-app** Web Inspector: the native "Inspect Element" context menu item
+    /// (control-click) and programmatic opening via `showInspector(_:)`. This rides WKPreferences'
+    /// private `developerExtrasEnabled` flag, set through string-based KVC — `isInspectable` alone
+    /// (see `applyLocalDevDefaults`) only enables Safari's *Develop-menu* inspection, not an in-app
+    /// inspector or context-menu item. Enabled in **all** build configurations.
+    ///
+    /// The KVC key is valid across supported macOS versions (covered by a bridge test that reads it
+    /// back); `setValue(_:forKey:)` on a missing key would trap, so a regression surfaces immediately.
+    @MainActor
+    public static func enableDeveloperExtras(on configuration: WKWebViewConfiguration) {
+        configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+    }
+
+    /// Per-instance defaults that aren't expressible on the configuration. Also opts the preview into
+    /// Safari's Develop-menu inspection in **all** build configurations (`isInspectable`), which
+    /// complements the in-app inspector enabled by `enableDeveloperExtras(on:)`.
     @MainActor
     public static func applyLocalDevDefaults(to webView: WKWebView) {
         webView.isInspectable = true
