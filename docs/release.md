@@ -1,15 +1,15 @@
 # Release pipeline
 
-This document covers the **Developer ID** distribution track for the `Anglesite` target, which
-ships auto-updates via [Sparkle 2.x](https://sparkle-project.org/). It walks the one-time setup
-and the per-release flow.
+Anglesite ships on two tracks:
 
-> **Mac App Store track (pending).** The sandboxed `AnglesiteMAS` target builds today, but its
-> submission pipeline — archive → export with `Apple Distribution` → `productbuild`/`altool`
-> upload to App Store Connect, including the bundled-Node re-sign (`scripts/resign-node.sh`) and
-> a WWDR-CA-G3 intermediate preflight — is **Phase 10.1 Task 12** and not yet built. The MAS build
-> has no Sparkle (the App Store handles its updates). See
-> [the sandboxed App Store plan](specs/2026-05-27-sandboxed-app-store-plan.md).
+- **Developer ID** (the `Anglesite` target) — self-distributed, auto-updated via
+  [Sparkle 2.x](https://sparkle-project.org/). Driven by `scripts/release.sh`.
+- **Mac App Store** (the sandboxed `AnglesiteMAS` target) — distributed through App Store
+  Connect, which handles its own updates (no Sparkle). Driven by `scripts/release-mas.sh`.
+  See [Mac App Store submission](#mac-app-store-submission) below.
+
+The first part of this document walks the Developer ID one-time setup and per-release flow;
+the App Store section follows.
 
 ## One-time setup (do once, ever)
 
@@ -96,6 +96,80 @@ scripts/generate-appcast.sh build/appcast.xml
 
 Drafts and prereleases are skipped. Releases missing the sparkle-* markers are skipped
 with a warning.
+
+## Mac App Store submission
+
+The sandboxed `AnglesiteMAS` target submits to App Store Connect via
+`scripts/release-mas.sh`. This is the App Store counterpart to the Developer ID flow above —
+no Sparkle, no appcast, no GitHub Release; App Store Connect is the distribution channel and
+ships updates itself.
+
+### One-time setup (App Store)
+
+1. **App Store Connect app record.** Create an app for bundle id `dev.anglesite.app.mas`
+   in [App Store Connect](https://appstoreconnect.apple.com/) → Apps. The build won't
+   upload until the record exists.
+
+2. **Certificates.** In the Apple Developer portal, create and install in your login keychain:
+   - an **Apple Distribution** certificate (signs the `.app`), and
+   - a **Mac Installer Distribution** certificate (signs the outer `.pkg`).
+   Also install the **Apple WWDR (G3)** intermediate from
+   <https://www.apple.com/certificateauthority/> — without it the distribution chain won't
+   validate at upload. `release-mas.sh` preflights all three and fails early with a pointer
+   if any is missing.
+
+3. **Provisioning profile.** Create a **Mac App Store** provisioning profile for
+   `dev.anglesite.app.mas` tied to the Apple Distribution cert, download it, and install it
+   (double-click, or drop into `~/Library/MobileDevice/Provisioning Profiles/`). Note its
+   name — you pass it as `PROVISIONING_PROFILE`.
+
+4. **App Store Connect API key** (keychain-free uploads). In App Store Connect → Users and
+   Access → Integrations → App Store Connect API, create a key with the *App Manager* role.
+   Download the `.p8` once and place it in `~/.appstoreconnect/private_keys/` (or
+   `~/.private_keys/`). Record the **Key ID** and **Issuer ID** — they become
+   `ASC_API_KEY_ID` and `ASC_API_ISSUER_ID`.
+
+### Per-release flow (App Store)
+
+Bump the version first if needed (same `project.yml` keys the Developer ID flow bumps —
+`MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`; App Store builds must use a build number
+not previously uploaded for that version). Then:
+
+```sh
+TEAM_ID=YOUR_TEAM_ID \
+PROVISIONING_PROFILE="Anglesite MAS App Store" \
+ASC_API_KEY_ID=XXXXXXXXXX \
+ASC_API_ISSUER_ID=00000000-0000-0000-0000-000000000000 \
+  scripts/release-mas.sh
+```
+
+The script:
+
+1. **Preflights** `TEAM_ID`, the provisioning profile, `xcodegen`/`xcodebuild`/`altool`, the
+   Apple Distribution + Mac Installer Distribution identities, the WWDR intermediate, and (for
+   upload) the ASC API key/issuer.
+2. Runs `xcodegen generate` and writes `build/exportOptions-appstore.plist` from the template
+   (`scripts/exportOptions-appstore.plist`, `method = app-store-connect`), substituting
+   `TEAM_ID` and the profile name.
+3. `xcodebuild archive` of the `AnglesiteMAS` scheme (Release).
+4. **Verifies the bundled-Node re-sign survived the archive** — `codesign --verify` on the
+   embedded `node`, and that its `TeamIdentifier` matches the app's team. This is the
+   `scripts/resign-node.sh` post-build phase's output; if it didn't hold, the bundle seal and
+   App Store acceptance would fail.
+5. `xcodebuild -exportArchive` → a Mac Installer Distribution-signed `.pkg`.
+6. `xcrun altool --validate-app`, then `xcrun altool --upload-app`.
+
+Pass **`--validate-only`** to archive, export, and validate without uploading — the
+credential-free dry run analogous to `notarize-dry-run.sh`. (`ASC_API_KEY_ID` /
+`ASC_API_ISSUER_ID` are still needed for the App Store Connect *validation* step; without them
+the script skips ASC validation and just produces the `.pkg`.)
+
+`Transporter.app` is the GUI fallback for the upload step: drop the exported `.pkg` onto it.
+
+### After upload
+
+App Store Connect processes the build (a few minutes), after which it appears under
+TestFlight / the app version. Attach it to a version and submit for review there.
 
 ## Why a `release.sh` and not CI?
 
