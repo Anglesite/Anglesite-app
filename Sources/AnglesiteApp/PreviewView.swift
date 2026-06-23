@@ -24,6 +24,11 @@ struct PreviewView: NSViewRepresentable {
     let router: EditRouter
     let annotationProvider: PreviewAnnotationProvider?
 
+    /// Called with the `WKWebView` once it's created, so the owning `PreviewModel` can hold a weak
+    /// reference and open the Web Inspector from the View menu. Defaults to a no-op for callers
+    /// (e.g. tests) that don't need it.
+    var onWebView: (WKWebView) -> Void = { _ in }
+
     func makeNSView(context: Context) -> WKWebView {
         let onVisibleElements: AnglesiteScriptHandler.VisibleElementsHandler? = annotationProvider.map { provider in
             // `provider` is `@MainActor`, so the implicit hop happens at the `update(_:)` call.
@@ -44,6 +49,7 @@ struct PreviewView: NSViewRepresentable {
         }
         webView.load(URLRequest(url: url))
         context.coordinator.loadedURL = url
+        onWebView(webView)
         return webView
     }
 

@@ -121,6 +121,7 @@ struct SiteWindow: View {
             startup.ingest(state: newState)
         }
         .focusedValue(\.siteID, site?.id ?? siteID)
+        .focusedValue(\.preview, preview)
         .onDisappear {
             preview.close()
             startup.stop()
@@ -491,7 +492,12 @@ struct SiteWindow: View {
     private func previewPane(for site: SiteStore.Site) -> some View {
         switch preview.state {
         case .ready(_, let url):
-            PreviewView(url: preview.displayURL ?? url, router: preview.editRouter, annotationProvider: annotationProvider)
+            PreviewView(
+                url: preview.displayURL ?? url,
+                router: preview.editRouter,
+                annotationProvider: annotationProvider,
+                onWebView: { [preview] webView in preview.webView = webView }
+            )
         case .starting:
             centeredStatus {
                 StartupProgressView(title: "Starting dev server for \(site.name)…", model: startup)

@@ -57,13 +57,31 @@ public enum WebViewBridge {
         return WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
     }
 
-    /// Per-instance dev tweaks that aren't expressible on the configuration. In Debug builds this
-    /// enables the Web Inspector (right-click → Inspect Element, or ⌥⌘I when the web view is focused).
+    /// Per-instance defaults that aren't expressible on the configuration. Enables the Web Inspector
+    /// in **all** build configurations: when inspectable, WebKit adds a native "Inspect Element" item
+    /// to the web view's context menu (satisfying control-click) and honors ⌥⌘I on the focused web
+    /// view. The View-menu "Show Web Inspector" command opens it programmatically via
+    /// `showInspector(_:)`.
     @MainActor
     public static func applyLocalDevDefaults(to webView: WKWebView) {
-        #if DEBUG
         webView.isInspectable = true
-        #endif
+    }
+
+    /// Resolves the web view's private Web Inspector object via KVC. macOS has **no public API** to
+    /// open the Web Inspector programmatically; `_inspector` (`_WKInspector`) is the only path.
+    /// String-based KVC is used rather than a linked symbol so no private symbol appears in the
+    /// binary for static analysis. Side-effect-free — callers invoke `show` separately. Returns
+    /// `nil` if the private key ever stops resolving (e.g. a future OS removes it), keeping
+    /// `showInspector(_:)` a safe no-op rather than a crash.
+    @MainActor
+    public static func inspector(for webView: WKWebView) -> NSObject? {
+        webView.value(forKey: "_inspector") as? NSObject
+    }
+
+    /// Opens the Web Inspector for `webView`. No-ops if the private inspector can't be resolved.
+    @MainActor
+    public static func showInspector(_ webView: WKWebView) {
+        inspector(for: webView)?.perform(Selector(("show")))
     }
 
     /// Opt the preview into the full inline Writing Tools experience (#91).

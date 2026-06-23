@@ -52,6 +52,23 @@ struct WebViewBridgeTests {
         let config = WebViewBridge.localDevConfiguration()
         #expect(config.writingToolsBehavior == .complete)
     }
+
+    @Test("applyLocalDevDefaults makes the web view inspectable in all build configurations")
+    func applyLocalDevDefaultsEnablesInspection() {
+        let webView = WKWebView()
+        WebViewBridge.applyLocalDevDefaults(to: webView)
+        #expect(webView.isInspectable)
+    }
+
+    @Test("inspector(for:) resolves the private Web Inspector via KVC")
+    func inspectorResolvesViaKVC() {
+        // Verifies the private `_inspector` key still works on this OS — the only programmatic
+        // path to open the Web Inspector. Resolving the object is side-effect-free; we never
+        // call `show` from a test (that would open a window).
+        let webView = WKWebView()
+        WebViewBridge.applyLocalDevDefaults(to: webView)
+        #expect(WebViewBridge.inspector(for: webView) != nil)
+    }
 }
 
 /// Anchors `Bundle(for:)` to the test bundle. Swift Testing suites are structs, so there's no
