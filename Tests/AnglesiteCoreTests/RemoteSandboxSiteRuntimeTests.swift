@@ -101,6 +101,43 @@ struct RemoteSandboxSiteRuntimeTests {
         #expect(await rt.state == .idle)
     }
 
+    // MARK: - setState dedup guard
+
+    /// Verifies that `setState` does NOT re-emit when the new state equals the current
+    /// state. Driven by calling `stop()` on an already-idle runtime: the initial `.idle`
+    /// yield from `observe()` is the only delivery; the redundant `.idle` from `stop()`
+    /// must be swallowed.
+    @Test("setState dedup: stop() on an already-idle runtime emits .idle exactly once")
+    func setStateDedup() async {
+        let (rt, _) = makeRuntime(.success(Self.ok))
+        let stream = await rt.observe()
+        let collector = StateCollector()
+
+        // Drain the stream in a background Task. We break after we see two states OR after
+        // a limit so the task doesn't hang if the duplicate is correctly suppressed.
+        let drainTask = Task {
+            var count = 0
+            for await s in stream {
+                await collector.append(s)
+                count += 1
+                // Stop after 2 to catch a spurious duplicate; break after 1 in normal operation.
+                if count >= 2 { break }
+            }
+        }
+
+        // Call stop() on the already-idle runtime — this would produce a duplicate .idle
+        // if the dedup guard is absent.
+        await rt.stop()
+
+        // Give the drain task a moment to collect any spurious emission, then cancel.
+        drainTask.cancel()
+        _ = await drainTask.result
+
+        let seen = await collector.states
+        // The only delivery should be the initial `.idle` from observe().
+        #expect(seen == [.idle])
+    }
+
     // MARK: - Live observe contract
 
     /// Attaches the observer BEFORE start() runs, then drives start() through a

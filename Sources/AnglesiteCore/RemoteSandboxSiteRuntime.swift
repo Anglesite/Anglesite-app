@@ -23,6 +23,10 @@ public actor RemoteSandboxSiteRuntime: SiteRuntime {
         control: any SandboxControlClient,
         mcpClient: MCPClient,
         mintToken: @escaping @Sendable () -> SessionToken = SessionToken.mint,
+        // Default carries no bearer token. The in-container MCP sidecar bearer check + a
+        // token-carrying connect closure are deferred to the iOS onboarding sub-plan (see
+        // design 2026-06-23 §5 and the plan's Deferred sub-plans); this tokenless default
+        // must NOT be wired into production.
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) }
     ) {
         self.gitRemote = gitRemote
@@ -82,6 +86,7 @@ public actor RemoteSandboxSiteRuntime: SiteRuntime {
     }
 
     private func setState(_ s: SiteRuntimeState) {
+        guard s != current else { return }
         current = s
         for c in observers.values { c.yield(s) }
     }
