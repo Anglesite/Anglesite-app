@@ -67,7 +67,92 @@ struct RemoteSandboxSiteRuntimeTests {
         #expect(seen.contains(.starting(siteID: "s1")))
         #expect(seen.last == .ready(siteID: "s1", url: Self.ok.previewURL))
     }
+
+    // MARK: - Stale-generation guard
+
+    /// Verifies that if `stop()` bumps `generation` while `control.start(...)` is suspended,
+    /// the superseded first `start()` drops its result and does NOT overwrite `.idle`.
+    @Test("stop during suspended start: stale-generation guard drops the result")
+    func staleGenerationGuardDropsSupersededStart() async throws {
+        let gated = GatedFakeSandboxControlClient(result: .success(Self.ok))
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let rt = RemoteSandboxSiteRuntime(
+            gitRemote: URL(string: "https://example.com/repo.git")!,
+            gitRef: "main",
+            control: gated,
+            mcpClient: mcp,
+            mintToken: { SessionToken(value: "fixedtoken") },
+            connect: { _, _ in })
+
+        // Begin start() in a background Task — it will park inside control.start().
+        let startTask = Task { await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused")) }
+
+        // Wait until the runtime is genuinely suspended inside control.start().
+        await gated.waitUntilParked()
+
+        // Now call stop() — this bumps generation and tears down.
+        await rt.stop()
+
+        // Release the gated control client so the first start() can resume.
+        await gated.release()
+        await startTask.value
+
+        // The stale-generation guard must have fired; state is .idle, not .ready.
+        #expect(await rt.state == .idle)
+    }
+
+    // MARK: - Live observe contract
+
+    /// Attaches the observer BEFORE start() runs, then drives start() through a
+    /// suspending control client so `.starting` is delivered to a live observer
+    /// (not drained from a buffer after the fact).
+    @Test("observe delivers .starting to a live observer while runtime is mid-start")
+    func observeDeliversStartingToLiveObserver() async throws {
+        let gated = GatedFakeSandboxControlClient(result: .success(Self.ok))
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let rt = RemoteSandboxSiteRuntime(
+            gitRemote: URL(string: "https://example.com/repo.git")!,
+            gitRef: "main",
+            control: gated,
+            mcpClient: mcp,
+            mintToken: { SessionToken(value: "fixedtoken") },
+            connect: { _, _ in })
+
+        // Attach the observer BEFORE start().
+        let stream = await rt.observe()
+        let collector = StateCollector()
+
+        // Drain the stream in a side task so we can interleave with start().
+        let drainTask = Task {
+            for await s in stream {
+                await collector.append(s)
+                if case .ready = s { break }
+            }
+        }
+
+        // Begin start() — parks inside control.start(), emitting .starting en route.
+        let startTask = Task { await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused")) }
+
+        // Wait until parked (runtime has emitted .starting and is mid-start).
+        await gated.waitUntilParked()
+
+        // Release so start() completes to .ready.
+        await gated.release()
+        await startTask.value
+        await drainTask.value
+
+        // The stream must have delivered both transitions to the live observer.
+        let seen = await collector.states
+        #expect(seen.contains(.starting(siteID: "s1")))
+        #expect(seen.last == .ready(siteID: "s1", url: Self.ok.previewURL))
+    }
 }
 
 /// Test-only sink so the injected `connect` closure can record the URL it was handed.
 actor ConnectedURLBox { private(set) var url: URL?; func set(_ u: URL) { url = u } }
+
+/// Actor-isolated collector for `SiteRuntimeState` sequences (avoids Sendable warnings).
+actor StateCollector {
+    private(set) var states: [SiteRuntimeState] = []
+    func append(_ s: SiteRuntimeState) { states.append(s) }
+}
