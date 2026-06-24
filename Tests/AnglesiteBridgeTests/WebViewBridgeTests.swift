@@ -53,50 +53,11 @@ struct WebViewBridgeTests {
         #expect(config.writingToolsBehavior == .complete)
     }
 
-    @Test("localDevConfiguration enables developer extras (in-app Inspect Element + Web Inspector)")
-    func localDevConfigurationEnablesDeveloperExtras() {
-        // `isInspectable` alone only enables Safari's Develop-menu inspection; the in-app
-        // "Inspect Element" context menu and programmatic `_inspector.show()` require WKPreferences'
-        // private `developerExtrasEnabled`. Reading it back via KVC also proves the key is valid on
-        // this OS (an invalid key would trap here).
-        let config = WebViewBridge.localDevConfiguration()
-        #expect(config.preferences.value(forKey: "developerExtrasEnabled") as? Bool == true)
-    }
-
-    @Test("applyLocalDevDefaults makes the web view inspectable in all build configurations")
-    func applyLocalDevDefaultsEnablesInspection() {
+    @Test("applyPreviewDefaults makes the web view inspectable in all build configurations")
+    func applyPreviewDefaultsEnablesInspection() {
         let webView = WKWebView()
-        WebViewBridge.applyLocalDevDefaults(to: webView)
+        WebViewBridge.applyPreviewDefaults(to: webView)
         #expect(webView.isInspectable)
-    }
-
-    @Test("showInspector is a no-op for a nil web view")
-    func showInspectorNilIsNoOp() {
-        // The View-menu command forwards `PreviewModel`'s weak `webView`, which is nil before the
-        // preview's `makeNSView` runs and after teardown. Invoking the command then must not crash.
-        WebViewBridge.showInspector(nil)
-    }
-
-    @Test("applyLocalDevDefaults disables inspector docking via a hidden attachment view")
-    func applyLocalDevDefaultsDisablesDocking() {
-        // WebKit's `platformCanAttach` returns false (hiding the inspector's dock buttons) when the
-        // inspected view's attachment view is hidden. Confirm we install a hidden one — docking a
-        // SwiftUI-embedded WKWebView fails, so the inspector must stay detached-only. This also
-        // proves the `_setInspectorAttachmentView:`/`_inspectorAttachmentView` SPI works on this OS.
-        let webView = WKWebView()
-        WebViewBridge.applyLocalDevDefaults(to: webView)
-        let attachmentView = webView.value(forKey: "_inspectorAttachmentView") as? NSView
-        #expect(attachmentView?.isHidden == true)
-    }
-
-    @Test("inspector(for:) resolves the private Web Inspector via KVC")
-    func inspectorResolvesViaKVC() {
-        // Verifies the private `_inspector` key still works on this OS — the only programmatic
-        // path to open the Web Inspector. Resolving the object is side-effect-free; we never
-        // call `show` from a test (that would open a window).
-        let webView = WKWebView()
-        WebViewBridge.applyLocalDevDefaults(to: webView)
-        #expect(WebViewBridge.inspector(for: webView) != nil)
     }
 }
 

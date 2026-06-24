@@ -1,6 +1,5 @@
 import SwiftUI
 import WebKit
-import AnglesiteBridge
 import AnglesiteCore
 
 /// SwiftUI-facing wrapper over a `SiteRuntime` actor: mirrors the runtime's `SiteRuntimeState` into
@@ -127,10 +126,12 @@ final class PreviewModel {
         return PreviewNavigation.targetURL(base: base, route: route)
     }
 
-    /// Open the Web Inspector for the live preview. Forwards the weak `webView`; the bridge no-ops
-    /// when it's nil (preview not yet created / torn down), so this is always safe to call.
+    /// Open the Web Inspector for the live preview. No-ops when the weak `webView` is nil
+    /// (preview not yet created / torn down), so this is always safe to call.
+    @MainActor
     func showWebInspector() {
-        WebViewBridge.showInspector(webView)
+        guard let webView else { return }
+        PreviewWebInspector.show(webView)
     }
 
     /// Exposes the runtime's `MCPClient` via the same weak-getter pattern `editRouter` uses,
