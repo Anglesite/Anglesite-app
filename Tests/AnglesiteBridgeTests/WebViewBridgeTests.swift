@@ -77,6 +77,18 @@ struct WebViewBridgeTests {
         WebViewBridge.showInspector(nil)
     }
 
+    @Test("applyLocalDevDefaults disables inspector docking via a hidden attachment view")
+    func applyLocalDevDefaultsDisablesDocking() {
+        // WebKit's `platformCanAttach` returns false (hiding the inspector's dock buttons) when the
+        // inspected view's attachment view is hidden. Confirm we install a hidden one — docking a
+        // SwiftUI-embedded WKWebView fails, so the inspector must stay detached-only. This also
+        // proves the `_setInspectorAttachmentView:`/`_inspectorAttachmentView` SPI works on this OS.
+        let webView = WKWebView()
+        WebViewBridge.applyLocalDevDefaults(to: webView)
+        let attachmentView = webView.value(forKey: "_inspectorAttachmentView") as? NSView
+        #expect(attachmentView?.isHidden == true)
+    }
+
     @Test("inspector(for:) resolves the private Web Inspector via KVC")
     func inspectorResolvesViaKVC() {
         // Verifies the private `_inspector` key still works on this OS — the only programmatic

@@ -1,5 +1,6 @@
 import Foundation
 import WebKit
+import AppKit
 
 /// Bridges the WKWebView preview to the native edit pipeline.
 ///
@@ -77,6 +78,28 @@ public enum WebViewBridge {
     @MainActor
     public static func applyLocalDevDefaults(to webView: WKWebView) {
         webView.isInspectable = true
+        disableInspectorDocking(on: webView)
+    }
+
+    /// Hides the Web Inspector's dock-to-window buttons, keeping it **detached-only**. Docking a
+    /// WKWebView embedded in a SwiftUI hierarchy fails — the inspector attaches to a host that gives
+    /// it no room and vanishes — so we remove the affordance entirely rather than let it break.
+    ///
+    /// Mechanism (from WebKit's `WebInspectorUIProxy::platformCanAttach`): docking is reported
+    /// unavailable when the inspected view's *attachment view* is `hidden`, and the frontend hides
+    /// its dock controls when attachment is unavailable. We set a hidden placeholder as the web
+    /// view's `_inspectorAttachmentView` (SPI). The detached `show` path doesn't use the attachment
+    /// view, so this is purely subtractive. The placeholder is added as a hidden, zero-frame subview
+    /// so the view hierarchy retains it (the SPI reference may not). `responds(to:)`-guarded so a
+    /// future OS that drops the SPI degrades to the prior detached-but-dockable behavior.
+    @MainActor
+    public static func disableInspectorDocking(on webView: WKWebView) {
+        let setAttachmentView = Selector(("_setInspectorAttachmentView:"))
+        guard webView.responds(to: setAttachmentView) else { return }
+        let placeholder = NSView(frame: .zero)
+        placeholder.isHidden = true
+        webView.addSubview(placeholder)
+        webView.perform(setAttachmentView, with: placeholder)
     }
 
     /// Resolves the web view's private Web Inspector object via KVC. macOS has **no public API** to
