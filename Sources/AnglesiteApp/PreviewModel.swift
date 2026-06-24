@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 import AnglesiteBridge
 import AnglesiteCore
 
@@ -21,6 +22,11 @@ final class PreviewModel {
     private(set) var activeRoute: String?
 
     private let runtime: any SiteRuntime
+
+    /// The live preview `WKWebView`, registered by `PreviewView` when it's created. Weak: SwiftUI's
+    /// `NSViewRepresentable` owns the web view's lifetime; the model only borrows it to open the Web
+    /// Inspector from the "Show Web Inspector" View-menu command (`showWebInspector()`).
+    weak var webView: WKWebView?
 
     /// The `EditRouter` that the WKWebView's `AnglesiteScriptHandler` forwards overlay edits to.
     /// Wired to the runtime's `MCPClient` via a weak getter so the router doesn't outlive the
@@ -119,6 +125,12 @@ final class PreviewModel {
         guard let base = readyURL else { return nil }
         guard let route = activeRoute else { return base }
         return PreviewNavigation.targetURL(base: base, route: route)
+    }
+
+    /// Open the Web Inspector for the live preview. Forwards the weak `webView`; the bridge no-ops
+    /// when it's nil (preview not yet created / torn down), so this is always safe to call.
+    func showWebInspector() {
+        WebViewBridge.showInspector(webView)
     }
 
     /// Exposes the runtime's `MCPClient` via the same weak-getter pattern `editRouter` uses,

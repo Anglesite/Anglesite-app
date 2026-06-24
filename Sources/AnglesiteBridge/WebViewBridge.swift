@@ -1,5 +1,6 @@
 import Foundation
 import WebKit
+import AppKit
 
 /// Bridges the WKWebView preview to the native edit pipeline.
 ///
@@ -30,6 +31,7 @@ public enum WebViewBridge {
         config.websiteDataStore = .nonPersistent()
         #endif
         enableWritingTools(on: config)
+        enableDeveloperExtras(on: config)
         if let handler {
             config.userContentController.add(handler, name: scriptMessageNamespace)
         }
@@ -57,13 +59,85 @@ public enum WebViewBridge {
         return WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
     }
 
-    /// Per-instance dev tweaks that aren't expressible on the configuration. In Debug builds this
-    /// enables the Web Inspector (right-click → Inspect Element, or ⌥⌘I when the web view is focused).
+    /// Enables the **in-app** Web Inspector: the native "Inspect Element" context menu item
+    /// (control-click) and programmatic opening via `showInspector(_:)`. This rides WKPreferences'
+    /// private `developerExtrasEnabled` flag, set through string-based KVC — `isInspectable` alone
+    /// (see `applyLocalDevDefaults`) only enables Safari's *Develop-menu* inspection, not an in-app
+    /// inspector or context-menu item. Enabled in **all** build configurations.
+    ///
+    /// The KVC key is valid across supported macOS versions (covered by a bridge test that reads it
+    /// back); `setValue(_:forKey:)` on a missing key would trap, so a regression surfaces immediately.
+    @MainActor
+    public static func enableDeveloperExtras(on configuration: WKWebViewConfiguration) {
+        configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+    }
+
+    /// Per-instance defaults that aren't expressible on the configuration. Also opts the preview into
+    /// Safari's Develop-menu inspection in **all** build configurations (`isInspectable`), which
+    /// complements the in-app inspector enabled by `enableDeveloperExtras(on:)`.
     @MainActor
     public static func applyLocalDevDefaults(to webView: WKWebView) {
-        #if DEBUG
         webView.isInspectable = true
-        #endif
+        disableInspectorDocking(on: webView)
+    }
+
+    /// Hides the Web Inspector's dock-to-window buttons, keeping it **detached-only**. Docking a
+    /// WKWebView embedded in a SwiftUI hierarchy fails — the inspector attaches to a host that gives
+    /// it no room and vanishes — so we remove the affordance entirely rather than let it break.
+    ///
+    /// Mechanism (from WebKit's `WebInspectorUIProxy::platformCanAttach`): docking is reported
+    /// unavailable when the inspected view's *attachment view* is `hidden`, and the frontend hides
+    /// its dock controls when attachment is unavailable. We set a hidden placeholder as the web
+    /// view's `_inspectorAttachmentView` (SPI). The detached `show` path doesn't use the attachment
+    /// view, so this is purely subtractive. The placeholder is added as a hidden, zero-frame subview
+    /// so the view hierarchy retains it (the SPI reference may not). `responds(to:)`-guarded so a
+    /// future OS that drops the SPI degrades to the prior detached-but-dockable behavior.
+    @MainActor
+    public static func disableInspectorDocking(on webView: WKWebView) {
+        let setAttachmentView = Selector(("_setInspectorAttachmentView:"))
+        guard webView.responds(to: setAttachmentView) else { return }
+        let placeholder = NSView(frame: .zero)
+        placeholder.isHidden = true
+        webView.addSubview(placeholder)
+        webView.perform(setAttachmentView, with: placeholder)
+    }
+
+    /// Resolves the web view's private Web Inspector object via KVC. macOS has **no public API** to
+    /// open the Web Inspector programmatically; `_inspector` (`_WKInspector`) is the only path.
+    /// String-based KVC is used rather than a linked symbol so no private symbol appears in the
+    /// binary for static analysis. Side-effect-free — callers invoke `show` separately. Returns
+    /// `nil` if the private key ever stops resolving (e.g. a future OS removes it), keeping
+    /// `showInspector(_:)` a safe no-op rather than a crash. Intentionally `internal` — it's an
+    /// implementation detail of `showInspector(_:)`, exposed only so `AnglesiteBridgeTests` can
+    /// assert the KVC key resolves (`@testable import`); not part of the module's public ABI.
+    @MainActor
+    static func inspector(for webView: WKWebView) -> NSObject? {
+        webView.value(forKey: "_inspector") as? NSObject
+    }
+
+    /// Opens the Web Inspector for `webView` in its own window. No-ops when `webView` is nil (the
+    /// caller's weak reference before the preview's `makeNSView` runs, or after teardown) or when the
+    /// private inspector can't be resolved — so the "Show Web Inspector" command is always safe to
+    /// invoke.
+    ///
+    /// `detach` forces a standalone window: a `_WKInspector` that opens "attached" tries to dock into
+    /// the WKWebView's host window, but the preview web view is embedded deep in a SwiftUI hierarchy
+    /// that gives it no room — so it connects (the inspect-mode highlight appears) with nowhere to
+    /// render its UI. Each private selector is guarded with `responds(to:)` so a future OS that drops
+    /// one degrades gracefully instead of trapping on an unrecognized selector.
+    @MainActor
+    public static func showInspector(_ webView: WKWebView?) {
+        guard let webView, let inspector = inspector(for: webView) else { return }
+        perform(Selector(("show")), on: inspector)
+        perform(Selector(("detach")), on: inspector)
+    }
+
+    /// Invokes `selector` on `target` only if it responds — private `_WKInspector` selectors vary by
+    /// OS, and `perform` on an unrecognized selector traps.
+    @MainActor
+    private static func perform(_ selector: Selector, on target: NSObject) {
+        guard target.responds(to: selector) else { return }
+        target.perform(selector)
     }
 
     /// Opt the preview into the full inline Writing Tools experience (#91).
