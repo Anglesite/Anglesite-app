@@ -33,6 +33,35 @@ review. To reduce static-symbol detection, the private inspector is reached via
 **string-based KVC** (`value(forKey: "_inspector")` + `perform(Selector(("show")))`)
 rather than a linked symbol. All private/WebKit access is isolated in `AnglesiteBridge`.
 
+## Implementation corrections (post-verification)
+
+Verifying in the running app overturned the original premise. **`isInspectable`
+does not give an in-app inspector** — per [Apple](https://developer.apple.com/documentation/safari-developer-tools/enabling-inspecting-content-in-your-apps)
+and [WebKit](https://webkit.org/blog/13936/enabling-the-inspection-of-web-content-in-apps/),
+it only enables inspection through **Safari's Develop menu**. It adds no "Inspect
+Element" context-menu item and does not make a programmatic open work. What actually
+ships:
+
+1. **In-app inspector is gated on `WKPreferences.developerExtrasEnabled`** (private,
+   set via string KVC in `WebViewBridge.enableDeveloperExtras(on:)` on the
+   configuration). This is the knob that adds the native "Inspect Element" context
+   menu (control-click) and makes the programmatic open functional. `isInspectable`
+   is kept too, for the complementary Safari-Develop-menu path.
+2. **The menu command must use `.focusedSceneValue`, not `.focusedValue`.** The
+   preview pane is a WKWebView (an AppKit responder), so SwiftUI's focus system is
+   empty and `.focusedValue(\.preview)` resolved to nil — the command was perpetually
+   disabled. `.focusedSceneValue` publishes while the site window is the active scene.
+3. **The inspector is opened detached** (`_WKInspector` `show` then `detach`, both
+   `responds(to:)`-guarded). Opened attached, it tries to dock into the WKWebView's
+   host window, which a SwiftUI-embedded web view can't provide — it connects but no
+   window appears. **Known limitation:** the inspector's own dock-to-window buttons
+   re-attach it and it vanishes; reinvoking "Show Web Inspector" reopens it detached.
+4. **Menu placement is `CommandGroup(after: .toolbar)`** (next to "Show Debug Pane"),
+   not `.sidebar`.
+
+The sections below are the original (pre-correction) design and are kept for context;
+where they conflict with the four points above, the points above are authoritative.
+
 ## Design
 
 ### 1. Enable inspection in all builds

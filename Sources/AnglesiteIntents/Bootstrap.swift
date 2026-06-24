@@ -2,9 +2,9 @@ import AppIntents
 import AnglesiteCore
 import OSLog
 
-private let log = Logger(subsystem: "dev.anglesite.app", category: "spotlight-indexer")
-private let contentLog = Logger(subsystem: "dev.anglesite.app", category: "content-spotlight-indexer")
-private let relevantLog = Logger(subsystem: "dev.anglesite.app", category: "relevant-entities")
+private let log = Logger(subsystem: "io.dwk.anglesite", category: "spotlight-indexer")
+private let contentLog = Logger(subsystem: "io.dwk.anglesite", category: "content-spotlight-indexer")
+private let relevantLog = Logger(subsystem: "io.dwk.anglesite", category: "relevant-entities")
 
 /// Public entry point that registers production dependencies with `AppDependencyManager` and
 /// hooks the Spotlight indexer to `SiteStore.shared`.

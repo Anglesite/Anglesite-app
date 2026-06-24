@@ -5,7 +5,7 @@ import Security
 ///
 /// One instance per service name; the service identifies the app to the keychain UI ("Anglesite
 /// wants to use 'Anglesite Cloudflare API token'…"). Production uses the default service
-/// `dev.anglesite.app` to match the app's bundle id; tests pass a scratch service per case so
+/// `io.dwk.anglesite` to match the app's bundle id; tests pass a scratch service per case so
 /// they don't collide with the real user's keychain entries.
 ///
 /// All operations are synchronous — `SecItemCopyMatching` / `SecItemAdd` block while the keychain
@@ -29,7 +29,7 @@ public struct KeychainStore: Sendable {
     }
 
     /// Default service identifier. Matches the app's bundle id.
-    public static let defaultService = "dev.anglesite.app"
+    public static let defaultService = "io.dwk.anglesite"
 
     /// Account key under the default service for the Cloudflare API token used by
     /// `wrangler deploy`. Centralized here so the Settings UI and `DeployCommand` refer to the

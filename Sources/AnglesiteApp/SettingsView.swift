@@ -70,7 +70,7 @@ private struct AdvancedSettingsView: View {
 
             Section("Credentials") {
                 CloudflareTokenRow()
-                Text("Stored in the macOS Keychain under `dev.anglesite.app`. The token is passed to `wrangler deploy` as `CLOUDFLARE_API_TOKEN` and never written to logs. An exported `CLOUDFLARE_API_TOKEN` in the shell that launched Anglesite takes precedence over this entry.")
+                Text("Stored in the macOS Keychain under `io.dwk.anglesite`. The token is passed to `wrangler deploy` as `CLOUDFLARE_API_TOKEN` and never written to logs. An exported `CLOUDFLARE_API_TOKEN` in the shell that launched Anglesite takes precedence over this entry.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

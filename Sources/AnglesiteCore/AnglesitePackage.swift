@@ -1,6 +1,6 @@
 import Foundation
 
-/// A `.anglesite` package on disk: a Finder-opaque directory (UTI `dev.anglesite.site`,
+/// A `.anglesite` package on disk: a Finder-opaque directory (UTI `io.dwk.anglesite.site`,
 /// `LSTypeIsPackage`) that wraps a git-tracked `Source/` Astro project, an app-owned `Config/`
 /// directory, and an `Info.plist` marker carrying a stable site UUID + a format version.
 ///

@@ -31,13 +31,13 @@ When in doubt, the plugin is the source of truth for skills, hooks, and the MCP 
 ## Site identity — the `.anglesite` package
 
 A site is a self-contained `.anglesite` **package** (#242) — a directory with the
-`dev.anglesite.site` package UTI (`LSTypeIsPackage`). Layout:
+`io.dwk.anglesite.site` package UTI (`LSTypeIsPackage`). Layout:
 
 - `Info.plist` — marker: format version + **stable site UUID** + display name + created date. Identity is the UUID (path-independent), so moving/renaming a package keeps its identity.
 - `Source/` — the Astro project, a git repo. The externally-editable, clonable unit; `cd`/git/VS Code/CLI descend into it.
 - `Config/` — app-owned per-site state (`settings.plist` via `SiteConfigStore`, `chat-history.jsonl`, caches). **Never** in git. `.site-config` stays in `Source/` (template/plugin-owned).
 
-`AnglesitePackage` (AnglesiteCore) is the single source of truth for this layout. The app opens packages explicitly — Finder double-click / `onOpenURL`, **File ▸ Open Site…** (an `NSOpenPanel` filtering on the `dev.anglesite.site` UTI via `UTType.anglesiteSite`), **Open Recent** — and discovers them via a **recents registry** (`SiteStore`, `recents.json`), not by scanning a folder. `SiteStore.Site` carries `packageURL` + computed `sourceDirectory`/`configDirectory` (there is no `path`).
+`AnglesitePackage` (AnglesiteCore) is the single source of truth for this layout. The app opens packages explicitly — Finder double-click / `onOpenURL`, **File ▸ Open Site…** (an `NSOpenPanel` filtering on the `io.dwk.anglesite.site` UTI via `UTType.anglesiteSite`), **Open Recent** — and discovers them via a **recents registry** (`SiteStore`, `recents.json`), not by scanning a folder. `SiteStore.Site` carries `packageURL` + computed `sourceDirectory`/`configDirectory` (there is no `path`).
 
 Operationally: **File ▸ Import** copies a plain Anglesite directory into a new package (migrating any legacy `.anglesite/` into `Config/`); **File ▸ Export** copies `Source/` back out. New sites scaffold into `Source/` (with `git init`); the dev server, deploy, and `pre-deploy-check` all run with cwd = `Source/`. On MAS, one security-scoped bookmark per package covers both `Source/` and `Config/`. `~/Sites/` is now just the default save location for new/imported packages — not a discovery root (there is no legacy `sites.json` migration, so Import is the upgrade path for pre-package sites).
 
@@ -45,8 +45,8 @@ Operationally: **File ▸ Import** copies a plain Anglesite directory into a new
 
 | Scheme | Bundle id | Distribution | Sandbox |
 |---|---|---|---|
-| `Anglesite` (DevID) | `dev.anglesite.app` | Developer ID + Sparkle auto-update | off |
-| `AnglesiteMAS` | `dev.anglesite.app.mas` | Mac App Store | App Sandbox |
+| `Anglesite` (DevID) | `io.dwk.anglesite.devid` | Developer ID (deprioritized — local dev loop) | off |
+| `AnglesiteMAS` | `io.dwk.anglesite` | Mac App Store | App Sandbox |
 
 Both share the `Sources/AnglesiteApp` code and the same `InProcessBackend` spawn path. MAS-only differences are gated with `#if ANGLESITE_MAS` (set via `SWIFT_ACTIVE_COMPILATION_CONDITIONS` on the MAS *app target* only — **not** on the `AnglesiteCore`/`AnglesiteBridge` SPM package, so a guard in those packages is a no-op). The MAS build is sandboxed and holds a per-`SiteWindow` security-scoped bookmark grant so directly-spawned children inherit folder access; chat, Sparkle, and the `gh` Settings panel are compiled out of it.
 
@@ -74,7 +74,7 @@ Resources/
 - **Process spawning is centralized** in `AnglesiteCore/ProcessSupervisor` — never call `Process()` from a view.
 - **Logs are sacred** — every spawned subprocess streams stdout+stderr into the debug pane. Do not silently `>/dev/null`.
 - **The app cannot bypass plugin security hooks** — `pre-deploy-check.sh` runs before every deploy, and the app surfaces failures rather than allowing override.
-- **The filesystem is the source of truth** — the app must never become the only way to edit a site. A site is now an `.anglesite` **package** (#242): Finder treats it as opaque (double-click opens it in Anglesite), but its `Source/` subdirectory is an ordinary git repo, so `cd`, `git`, VS Code, and the Claude Code CLI all descend into `Foo.anglesite/Source/` and keep working. App-owned per-site state lives beside it in `Foo.anglesite/Config/`, outside that repo. (Per #72 this still reframes to **Git** as the source of truth — the `Source/` repo, clonable anywhere, is the externally-editable copy — but only once the container runtimes (#66/#69) land and every site is a repo (#68). The package model is compatible with both states; don't finalize the filesystem→Git wording before that ships, or the doc describes an unshipped state.)
+- **Git is the source of truth** (#72) — the app must never become the only way to edit a site. A site's canonical, externally-editable copy is its `Source/` **git repo**, clonable anywhere. A site is an `.anglesite` **package** (#242): Finder treats it as opaque (double-click opens it in Anglesite), but `cd`, `git`, VS Code, and the Claude Code CLI all still descend into `Foo.anglesite/Source/` and keep working, and that repo can be cloned and edited outside the app entirely. App-owned per-site state lives beside it in `Foo.anglesite/Config/`, outside the repo (never in git). The app's own local working copy is not canonical: it lives **inside the site runtime/container** (#66/#69), hydrated from the repo when a site opens and pushed back to it — so any clone of the repo, not the app's working tree, is the unit everything else derives from. See [`docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md`](docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md) §8 (the #72 reconciliation) and the [containerization notes](docs/specs/2026-06-09-containerization-mas-subspike-notes.md).
 
 ## Worktrees (default for feature/agent work)
 

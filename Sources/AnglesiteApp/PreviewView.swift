@@ -23,7 +23,11 @@ struct PreviewView: NSViewRepresentable {
     let url: URL
     let router: EditRouter
     let annotationProvider: PreviewAnnotationProvider?
-    var onWebView: ((WKWebView) -> Void)? = nil
+
+    /// Called with the `WKWebView` once it's created, so the owning `PreviewModel` can hold a weak
+    /// reference and open the Web Inspector from the View menu. Defaults to a no-op for callers
+    /// (e.g. tests) that don't need it.
+    var onWebView: (WKWebView) -> Void = { _ in }
 
     func makeNSView(context: Context) -> WKWebView {
         let onVisibleElements: AnglesiteScriptHandler.VisibleElementsHandler? = annotationProvider.map { provider in
@@ -37,7 +41,6 @@ struct PreviewView: NSViewRepresentable {
         let handler = AnglesiteScriptHandler(router: router, onVisibleElements: onVisibleElements)
         let webView = WKWebView(frame: .zero, configuration: WebViewBridge.localDevConfiguration(handler: handler))
         WebViewBridge.applyLocalDevDefaults(to: webView)
-        onWebView?(webView)
         if let annotationProvider {
             webView.appEntityUIElementProvider = { [weak annotationProvider] _, hitContext in
                 guard let annotationProvider else { return [] }
@@ -46,6 +49,7 @@ struct PreviewView: NSViewRepresentable {
         }
         webView.load(URLRequest(url: url))
         context.coordinator.loadedURL = url
+        onWebView(webView)
         return webView
     }
 
