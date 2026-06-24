@@ -39,8 +39,11 @@ struct PreviewView: NSViewRepresentable {
             { @Sendable elements in await provider.update(elements) }
         }
         let handler = AnglesiteScriptHandler(router: router, onVisibleElements: onVisibleElements)
-        let webView = WKWebView(frame: .zero, configuration: WebViewBridge.localDevConfiguration(handler: handler))
-        WebViewBridge.applyLocalDevDefaults(to: webView)
+        let configuration = WebViewBridge.localDevConfiguration(handler: handler)
+        PreviewWebInspector.enableDeveloperExtras(on: configuration)
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        WebViewBridge.applyPreviewDefaults(to: webView)
+        PreviewWebInspector.applyInspectorDefaults(to: webView)
         if let annotationProvider {
             webView.appEntityUIElementProvider = { [weak annotationProvider] _, hitContext in
                 guard let annotationProvider else { return [] }
