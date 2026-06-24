@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 import AnglesiteBridge
 import AnglesiteCore
 
