@@ -14,6 +14,7 @@ final class PreviewModel {
     /// The site this model was last asked to open, so the UI can show "preview of X" even while
     /// the runtime is still `.starting`.
     private(set) var openSiteID: String?
+    weak var webView: WKWebView?
 
     /// The page route the preview should show, set by `navigate(toRoute:)` (e.g. from
     /// `PreviewSiteIntent`). `nil` means the site root. Persisted, not consumed, so a dev-server
@@ -126,5 +127,10 @@ final class PreviewModel {
     /// without spawning a duplicate MCP server.
     func mcpClient() async -> MCPClient? {
         await runtime.mcpClient
+    }
+
+    func showWebInspector() {
+        guard let webView else { return }
+        WebViewBridge.showInspector(webView)
     }
 }

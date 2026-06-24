@@ -30,3 +30,26 @@ struct ExportSiteCommands: Commands {
         }
     }
 }
+
+private struct FocusedPreviewKey: FocusedValueKey { typealias Value = PreviewModel }
+
+extension FocusedValues {
+    var preview: PreviewModel? {
+        get { self[FocusedPreviewKey.self] }
+        set { self[FocusedPreviewKey.self] = newValue }
+    }
+}
+
+struct WebInspectorCommands: Commands {
+    @FocusedValue(\.preview) private var focusedPreview: PreviewModel?
+
+    var body: some Commands {
+        CommandGroup(after: .sidebar) {
+            Button("Show Web Inspector") {
+                focusedPreview?.showWebInspector()
+            }
+            .keyboardShortcut("i", modifiers: [.command, .option])
+            .disabled(focusedPreview == nil)
+        }
+    }
+}

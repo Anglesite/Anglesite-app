@@ -52,6 +52,20 @@ struct WebViewBridgeTests {
         let config = WebViewBridge.localDevConfiguration()
         #expect(config.writingToolsBehavior == .complete)
     }
+
+    @Test("applyLocalDevDefaults unconditionally sets isInspectable to true")
+    func applyLocalDevDefaultsSetsIsInspectable() {
+        let webView = WKWebView()
+        #expect(!webView.isInspectable)
+        WebViewBridge.applyLocalDevDefaults(to: webView)
+        #expect(webView.isInspectable)
+    }
+
+    @Test("showInspector is safe to call and does not crash")
+    func showInspectorIsSafe() {
+        let webView = WKWebView()
+        WebViewBridge.showInspector(webView)
+    }
 }
 
 /// Anchors `Bundle(for:)` to the test bundle. Swift Testing suites are structs, so there's no

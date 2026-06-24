@@ -185,6 +185,7 @@ struct AnglesiteApp: App {
             #endif
             // Export is its own Commands type so @FocusedValue tracks scene focus (see ExportSiteCommands).
             ExportSiteCommands()
+            WebInspectorCommands()
             // Debug pane lives off the View menu — `⌥⌘D` keeps it discoverable without crowding
             // the primary commands. Hidden in Release unless explicitly enabled (see init()).
             CommandGroup(after: .toolbar) {

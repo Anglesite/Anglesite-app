@@ -23,6 +23,7 @@ struct PreviewView: NSViewRepresentable {
     let url: URL
     let router: EditRouter
     let annotationProvider: PreviewAnnotationProvider?
+    var onWebView: ((WKWebView) -> Void)? = nil
 
     func makeNSView(context: Context) -> WKWebView {
         let onVisibleElements: AnglesiteScriptHandler.VisibleElementsHandler? = annotationProvider.map { provider in
@@ -36,6 +37,7 @@ struct PreviewView: NSViewRepresentable {
         let handler = AnglesiteScriptHandler(router: router, onVisibleElements: onVisibleElements)
         let webView = WKWebView(frame: .zero, configuration: WebViewBridge.localDevConfiguration(handler: handler))
         WebViewBridge.applyLocalDevDefaults(to: webView)
+        onWebView?(webView)
         if let annotationProvider {
             webView.appEntityUIElementProvider = { [weak annotationProvider] _, hitContext in
                 guard let annotationProvider else { return [] }

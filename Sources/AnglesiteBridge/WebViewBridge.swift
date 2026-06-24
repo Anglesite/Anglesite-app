@@ -57,13 +57,18 @@ public enum WebViewBridge {
         return WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
     }
 
-    /// Per-instance dev tweaks that aren't expressible on the configuration. In Debug builds this
-    /// enables the Web Inspector (right-click → Inspect Element, or ⌥⌘I when the web view is focused).
+    /// Per-instance dev tweaks that aren't expressible on the configuration. Enables the Web
+    /// Inspector (right-click → Inspect Element, or ⌥⌘I when the web view is focused).
     @MainActor
     public static func applyLocalDevDefaults(to webView: WKWebView) {
-        #if DEBUG
         webView.isInspectable = true
-        #endif
+    }
+
+    /// Programmatically open the Web Inspector for the given web view.
+    @MainActor
+    public static func showInspector(_ webView: WKWebView) {
+        (webView.value(forKey: "_inspector") as? NSObject)?
+            .perform(Selector(("show")))
     }
 
     /// Opt the preview into the full inline Writing Tools experience (#91).
