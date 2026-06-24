@@ -92,13 +92,29 @@ public enum WebViewBridge {
         webView.value(forKey: "_inspector") as? NSObject
     }
 
-    /// Opens the Web Inspector for `webView`. No-ops when `webView` is nil (the caller's weak
-    /// reference before the preview's `makeNSView` runs, or after teardown) or when the private
-    /// inspector can't be resolved — so the "Show Web Inspector" command is always safe to invoke.
+    /// Opens the Web Inspector for `webView` in its own window. No-ops when `webView` is nil (the
+    /// caller's weak reference before the preview's `makeNSView` runs, or after teardown) or when the
+    /// private inspector can't be resolved — so the "Show Web Inspector" command is always safe to
+    /// invoke.
+    ///
+    /// `detach` forces a standalone window: a `_WKInspector` that opens "attached" tries to dock into
+    /// the WKWebView's host window, but the preview web view is embedded deep in a SwiftUI hierarchy
+    /// that gives it no room — so it connects (the inspect-mode highlight appears) with nowhere to
+    /// render its UI. Each private selector is guarded with `responds(to:)` so a future OS that drops
+    /// one degrades gracefully instead of trapping on an unrecognized selector.
     @MainActor
     public static func showInspector(_ webView: WKWebView?) {
-        guard let webView else { return }
-        inspector(for: webView)?.perform(Selector(("show")))
+        guard let webView, let inspector = inspector(for: webView) else { return }
+        perform(Selector(("show")), on: inspector)
+        perform(Selector(("detach")), on: inspector)
+    }
+
+    /// Invokes `selector` on `target` only if it responds — private `_WKInspector` selectors vary by
+    /// OS, and `perform` on an unrecognized selector traps.
+    @MainActor
+    private static func perform(_ selector: Selector, on target: NSObject) {
+        guard target.responds(to: selector) else { return }
+        target.perform(selector)
     }
 
     /// Opt the preview into the full inline Writing Tools experience (#91).
