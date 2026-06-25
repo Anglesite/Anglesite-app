@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import AnglesiteCore
+import AnglesiteContainer
 
 /// SwiftUI-facing wrapper over a `SiteRuntime` actor: mirrors the runtime's `SiteRuntimeState` into
 /// an observable property and exposes `open(...)` / `close()` for the view layer.
@@ -37,7 +38,7 @@ final class PreviewModel {
     /// into the default `LocalSiteRuntime` so opening this site populates the shared graph (A.8,
     /// #142). Tests inject an explicit `runtime` and leave the graph `nil`.
     init(contentGraph: SiteContentGraph? = nil, runtime: (any SiteRuntime)? = nil) {
-        let runtime = runtime ?? LocalSiteRuntime(contentGraph: contentGraph)
+        let runtime = runtime ?? Self.makeRuntime(contentGraph: contentGraph)
         self.runtime = runtime
         self.editRouter = MCPApplyEditRouter(mcpClient: { [weak runtime] in
             // `runtime` is the actor instance; reading `mcpClient` hops onto the actor.
@@ -79,6 +80,24 @@ final class PreviewModel {
             let current = self.editRouter
             Task { await EditRouterRegistry.shared.register(current, for: siteID) }
         }
+    }
+
+    /// Pick the runtime by capability (no feature flag): a local Apple-Containerization VM when the
+    /// build is entitled + the kernel/initfs are provisioned; otherwise the existing host-subprocess
+    /// runtime.
+    ///
+    /// `sourceRepo` is NOT passed here — `LocalContainerSiteRuntime.init` doesn't take it; it
+    /// receives it at `start(siteID:siteDirectory:)` time (forwarded from `open(siteID:siteDirectory:)`).
+    static func makeRuntime(contentGraph: SiteContentGraph?) -> any SiteRuntime {
+        if LocalContainerSupport.isAvailable(hasVirtualizationEntitlement: VirtualizationEntitlement.isPresent)
+            && BundledImage.isProvisioned {
+            return LocalContainerSiteRuntime(
+                ref: "HEAD",
+                control: ContainerizationControl(),
+                mcpClient: MCPClient(supervisor: .shared)
+            )
+        }
+        return LocalSiteRuntime(contentGraph: contentGraph)
     }
 
     func open(siteID: String, siteDirectory: URL) {
