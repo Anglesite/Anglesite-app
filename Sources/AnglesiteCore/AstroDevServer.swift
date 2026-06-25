@@ -115,7 +115,7 @@ public actor AstroDevServer {
             )
             subscription.cancel()
             currentURL = url
-            startURLWatcher(source: source)
+            await startURLWatcher(source: source)
             return url
         } catch {
             subscription.cancel()
@@ -146,12 +146,12 @@ public actor AstroDevServer {
     /// After the supervisor restarts a crashed dev server, Astro may bind a new port and print a
     /// fresh `Local …` line. This watcher picks that up, re-probes it, and republishes `readyURL`
     /// so a `PreviewView` can reload. Probing runs off-actor so a slow HTTP timeout can't stall us.
-    private func startURLWatcher(source: String) {
+    private func startURLWatcher(source: String) async {
         let center = logCenter
         let probe = readinessProbe
+        let sub = await center.subscribe()
+        watcherSubscription = sub
         watcherTask = Task { [weak self] in
-            let sub = await center.subscribe()
-            await self?.setWatcherSubscription(sub)
             for await line in sub.stream {
                 if Task.isCancelled { break }
                 guard line.source == source, line.stream == .stdout else { continue }
@@ -169,8 +169,6 @@ public actor AstroDevServer {
             }
         }
     }
-
-    private func setWatcherSubscription(_ sub: LogCenter.Subscription) { watcherSubscription = sub }
 
     private func publishReadyURL(_ url: URL) async {
         currentURL = url
