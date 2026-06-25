@@ -112,14 +112,13 @@ public struct ContainerizationControl: LocalContainerControl {
             try await runDetached(container, id: "astro", ["sh", "-lc",
                 "cd /workspace/site && npm install --no-audit --no-fund && npx astro dev --port 4321 --host 127.0.0.1"])
 
-            // TODO(#69): MCP sidecar not yet provisioned into the image — see plan §sidecar gap
-            // (mount from app bundle's Resources/plugin/ vs. two-stage image build vs. guest fetch).
-            // Task 6's image bakes Node + git + the vsock bridge only; /usr/local/lib/anglesite-mcp/
-            // does NOT exist, so this launch will fail at runtime until the sidecar is provisioned.
-            // Kept in the code path (and the 4399 proxy below) so the contract is complete and the
-            // gap is a single, clearly-marked provisioning task rather than a structural change.
+            // MCP sidecar: baked into the image at /usr/local/lib/anglesite-mcp/ by the two-stage
+            // Dockerfile (scripts/vendor-container-image.sh stages the plugin's server/ dir into the
+            // build context; npm ci runs on linux/arm64 so @img/sharp-linux-arm64 is the native prebuilt).
+            // The server reads config from ENV (not flags): ANGLESITE_MCP_TRANSPORT selects HTTP mode,
+            // ANGLESITE_MCP_PORT sets the listen port, ANGLESITE_PROJECT_ROOT points at the cloned repo.
             try await runDetached(container, id: "mcp", ["sh", "-lc",
-                "node /usr/local/lib/anglesite-mcp/index.mjs --port 4399"])
+                "ANGLESITE_MCP_TRANSPORT=http ANGLESITE_MCP_PORT=4399 ANGLESITE_PROJECT_ROOT=/workspace/site node /usr/local/lib/anglesite-mcp/server/index.mjs"])
 
             // Guest vsock<->TCP bridge: maps guest vsock ports onto the local TCP listeners above so
             // host-side dialVsock reaches them. baked by Task 6.

@@ -12,5 +12,11 @@ FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=bridge /vsock-bridge /usr/local/bin/vsock-bridge
-# The MCP sidecar + entrypoint are layered in by the build script from the app's bundled plugin.
+# MCP sidecar: staged by scripts/vendor-container-image.sh from the plugin's server/ dir.
+# npm ci runs on linux/arm64 → pulls @img/sharp-linux-arm64 (the native prebuilt) from the
+# lockfile. --omit=dev drops devDependencies. We intentionally do NOT pass --omit=optional
+# because @img/sharp-linux-arm64 is marked optional in the lockfile (platform-specific prebuilt);
+# npm's platform-cpu/os filters already skip macOS-only optionals like fsevents on linux/arm64.
+COPY mcp-sidecar/ /usr/local/lib/anglesite-mcp/
+RUN cd /usr/local/lib/anglesite-mcp && npm ci --omit=dev
 WORKDIR /workspace

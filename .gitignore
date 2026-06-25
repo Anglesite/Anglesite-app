@@ -57,6 +57,10 @@ node_modules/
 Resources/container-image/
 !Resources/container-image/.gitkeep
 
+# Transient MCP sidecar staging dir (populated from the plugin by scripts/vendor-container-image.sh,
+# cleaned up on exit; never committed — plugin source lives in the sibling anglesite repo).
+Containers/anglesite-dev/mcp-sidecar/
+
 # Vendored Linux kernel binary (populated by scripts/vendor-container-kernel.sh)
 Resources/container-kernel/*
 !Resources/container-kernel/.gitkeep
