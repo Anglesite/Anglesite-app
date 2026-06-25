@@ -18,8 +18,8 @@ struct VsockTCPProxyTests {
     private func connectTCPToProxy(to url: URL) throws -> FileHandle {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         #expect(fd >= 0)
-        // Set SO_RCVTIMEO so a splice failure fails the test instead of hanging CI.
-        var tv = timeval(tv_sec: 2, tv_usec: 0)
+        // Per-read backstop so reads return (EAGAIN) for readExactly to poll; not the deadline.
+        var tv = timeval(tv_sec: 1, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
@@ -34,16 +34,38 @@ struct VsockTCPProxyTests {
         return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
     }
 
-    /// Set SO_RCVTIMEO on an existing file descriptor (e.g. the guest socketpair peer) so a
-    /// splice failure fails the test instead of hanging CI.
-    private func setRecvTimeout(_ fh: FileHandle, seconds: Int = 2) {
+    /// Set SO_RCVTIMEO on an existing file descriptor (e.g. the guest socketpair peer) so each
+    /// `read` syscall returns (with EAGAIN) rather than blocking forever — this is what lets
+    /// `readExactly` poll. It is a per-read backstop, NOT the overall deadline.
+    private func setRecvTimeout(_ fh: FileHandle, seconds: Int = 1) {
         var tv = timeval(tv_sec: seconds, tv_usec: 0)
         setsockopt(fh.fileDescriptor, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     }
 
+    /// Read exactly `count` bytes from `fh`, accumulating across reads until the deadline. The
+    /// proxy's splice pipeline is event-driven (DispatchSource accept → actor hop → readability
+    /// handler) and can lag well past a second under heavy *parallel* test load on a small CI
+    /// runner, so a single timed `read` races the pipeline and fails spuriously (errno 35 / EAGAIN).
+    /// Polling against a generous deadline never fails on scheduling jitter, yet still bounds a
+    /// genuinely-stuck splice instead of hanging CI forever. Requires SO_RCVTIMEO on `fh` so each
+    /// `read` returns promptly to let the loop spin.
+    private func readExactly(_ count: Int, from fh: FileHandle, timeout: Duration = .seconds(10)) async -> Data {
+        let deadline = ContinuousClock.now + timeout
+        var acc = Data()
+        while acc.count < count && ContinuousClock.now < deadline {
+            if let chunk = try? fh.read(upToCount: count - acc.count), !chunk.isEmpty {
+                acc.append(chunk)
+            } else {
+                await Task.yield()
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+        }
+        return acc
+    }
+
     /// Poll `proxy.connectionCount` until it equals `n` or the timeout elapses, then return the
     /// final count. Replaces a fixed `Task.sleep` to avoid flaky CI timing.
-    private func waitUntilConnectionCount(_ proxy: VsockTCPProxy, _ n: Int, timeout: Duration = .seconds(2)) async -> Int {
+    private func waitUntilConnectionCount(_ proxy: VsockTCPProxy, _ n: Int, timeout: Duration = .seconds(10)) async -> Int {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
             let count = await proxy.connectionCount
@@ -62,8 +84,8 @@ struct VsockTCPProxyTests {
         let url = try await proxy.start()
         let client = try connectTCPToProxy(to: url)
         try client.write(contentsOf: Data("hello".utf8))
-        // Read 5 bytes from the guest peer.
-        let got = try guestPeer.read(upToCount: 5)
+        // Read 5 bytes from the guest peer (poll the event-driven splice; see readExactly).
+        let got = await readExactly(5, from: guestPeer)
         #expect(got == Data("hello".utf8))
         await proxy.stop()
     }
@@ -76,7 +98,7 @@ struct VsockTCPProxyTests {
         let client = try connectTCPToProxy(to: url)
         setRecvTimeout(client)
         try guestPeer.write(contentsOf: Data("world".utf8))
-        let got = try client.read(upToCount: 5)
+        let got = await readExactly(5, from: client)
         #expect(got == Data("world".utf8))
         await proxy.stop()
     }
@@ -101,7 +123,7 @@ struct VsockTCPProxyTests {
 
         // Write a byte so the accept + dial path completes before we check the count.
         try client.write(contentsOf: Data("ping".utf8))
-        _ = try guestPeer.read(upToCount: 4)
+        _ = await readExactly(4, from: guestPeer)
 
         // The connection should have been accepted and added.
         let countAfterConnect = await waitUntilConnectionCount(proxy, 1)
@@ -111,8 +133,8 @@ struct VsockTCPProxyTests {
         // which fires onClose → removeConnection via an async Task.
         try guestPeer.close()
 
-        // Poll with timeout instead of a fixed sleep: waits up to 2 s for the actor to process
-        // the onClose Task, then asserts.
+        // Poll with timeout instead of a fixed sleep: waits up to the deadline for the actor to
+        // process the onClose Task, then asserts.
         let countAfterClose = await waitUntilConnectionCount(proxy, 0)
         #expect(countAfterClose == 0)
 
