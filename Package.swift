@@ -36,6 +36,16 @@ var packageTargets: [Target] = [
         path: "Sources/AnglesiteIntents",
         swiftSettings: strictConcurrency
     ),
+    .target(
+        name: "AnglesiteContainer",
+        dependencies: [
+            "AnglesiteCore",
+            .product(name: "Containerization", package: "containerization")
+        ],
+        path: "Sources/AnglesiteContainer",
+        resources: [.copy("../../Resources/container-image")],
+        swiftSettings: strictConcurrency
+    ),
     // Test-only support shared across the test targets (e.g. the e2e prerequisite probes used by
     // both AnglesiteCoreTests and AnglesiteBridgeTests). Not exposed as a `.library` product, so
     // the app/xcodeproj never links it — only `swift test` builds it.
@@ -78,7 +88,11 @@ let package = Package(
     products: [
         .library(name: "AnglesiteCore", targets: ["AnglesiteCore"]),
         .library(name: "AnglesiteBridge", targets: ["AnglesiteBridge"]),
-        .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"])
+        .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"]),
+        .library(name: "AnglesiteContainer", targets: ["AnglesiteContainer"])
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/containerization.git", from: "0.1.0")
     ],
     targets: packageTargets
 )
