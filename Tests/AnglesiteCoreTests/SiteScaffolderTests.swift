@@ -70,6 +70,29 @@ final class SiteScaffolderTests: XCTestCase {
         XCTAssertTrue(css.contains("--color-primary: #1e3a5f;"))
     }
 
+    func testSiteConfigValuesAreSanitizedAndBlurbBackfillsTagline() async throws {
+        let root = tmpDir()
+        let scaffolder = makeScaffolder(root: root)
+        let draft = NewSiteDraft(siteType: .business,
+                                 name: "Acme\nEVIL=1",
+                                 domainChoice: .transfer,
+                                 domain: "example.com\nEVIL=1",
+                                 themeID: "classic",
+                                 headline: "Acme",
+                                 blurb: "Short description")
+
+        var steps: [SiteScaffolder.ScaffoldStep] = []
+        for await s in scaffolder.scaffold(draft) { steps.append(s) }
+
+        guard case .done? = steps.last else { return XCTFail("expected .done") }
+        let pkgURL = root.appendingPathComponent("acme-evil-1.anglesite")
+        let cfg = try String(contentsOf: pkgURL.appendingPathComponent("Source/.site-config"), encoding: .utf8)
+        XCTAssertTrue(cfg.contains("SITE_NAME=Acme"))
+        XCTAssertTrue(cfg.contains("DOMAIN=example.com"))
+        XCTAssertTrue(cfg.contains("TAGLINE=Short description"))
+        XCTAssertFalse(cfg.contains("EVIL=1"))
+    }
+
     func testCustomColorSchemeAndLogoAreApplied() async throws {
         let root = tmpDir()
         let logo = root.appendingPathComponent("brand.PNG")

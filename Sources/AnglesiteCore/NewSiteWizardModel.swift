@@ -48,7 +48,7 @@ public final class NewSiteWizardModel {
     }
 
     public var cloudflareDevPreview: String {
-        "\(slugPreview).cloudflare.dev"
+        "\(slugPreview).pages.dev"
     }
 
     public var canContinue: Bool {
@@ -56,7 +56,7 @@ public final class NewSiteWizardModel {
         case .details:
             return !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 && detailsError == nil
-                && (draft.domainChoice != .transfer || !draft.domain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                && (draft.domainChoice != .transfer || Self.isValidDomain(draft.domain))
         case .type:    return true
         case .look:    return draft.themeID == CustomTheme.id || catalog.theme(id: draft.themeID) != nil
         case .content: return true                  // content is optional
@@ -70,6 +70,16 @@ public final class NewSiteWizardModel {
         if draft.themeID != CustomTheme.id {
             draft.themeID = catalog.defaultThemeID(for: type)
         }
+    }
+
+    public static func isValidDomain(_ domain: String) -> Bool {
+        let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains("."),
+              trimmed.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+              trimmed.range(of: #"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$"#,
+                            options: .regularExpression) != nil
+        else { return false }
+        return true
     }
 
     /// Image Playground generation concepts for the current draft (#92).

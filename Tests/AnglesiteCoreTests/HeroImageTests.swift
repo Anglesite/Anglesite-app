@@ -29,6 +29,12 @@ struct HeroImageTests {
         ])
     }
 
+    @Test("concepts keep non-Latin site names")
+    func conceptsKeepNonLatinNames() {
+        let c = HeroImage.concepts(name: "私のウェブサイト", siteType: .personal, tagline: "")
+        #expect(c.first == "私のウェブサイト")
+    }
+
     @Test("custom image description leads the concepts")
     func customDescriptionLeads() {
         let c = HeroImage.concepts(name: "My Website", siteType: .blank, tagline: "", imageDescription: "Mist over green hills")
@@ -87,6 +93,15 @@ struct HeroImageTests {
         let once = HeroImage.insertHeroImage(into: hero, alt: "X")
         let twice = HeroImage.insertHeroImage(into: once, alt: "X")
         #expect(once == twice)
+    }
+
+    @Test("insertHeroImage keeps an existing logo before the hero image")
+    func insertsAfterLogo() {
+        let withLogo = LogoAsset.insertLogo(into: hero, urlPath: "/logo.png", alt: "Logo")
+        let out = HeroImage.insertHeroImage(into: withLogo, alt: "Hero")
+        let logoIdx = out.range(of: #"class="site-logo""#)!.lowerBound
+        let heroIdx = out.range(of: #"class="hero-image""#)!.lowerBound
+        #expect(logoIdx < heroIdx)
     }
 
     @Test("insertHeroImage is a no-op when the hero anchor is absent")

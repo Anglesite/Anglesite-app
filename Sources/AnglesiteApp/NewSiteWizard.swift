@@ -9,6 +9,8 @@ import ImagePlayground
 /// The New Site wizard sheet. Presented from SitesLauncherView; calls `onComplete(siteID)`
 /// when the site is scaffolded and registered.
 struct NewSiteWizard: View {
+    private static let cloudflareDomainsURL = URL(string: "https://www.cloudflare.com/products/registrar/")!
+
     @Bindable var model: NewSiteWizardModel
     let scaffolder: SiteScaffolder
     let onComplete: (String) -> Void
@@ -87,7 +89,7 @@ struct NewSiteWizard: View {
     @ViewBuilder private var domainChoiceDetails: some View {
         switch model.draft.domainChoice {
         case .buy:
-            Link("Open Cloudflare Domains", destination: URL(string: "https://www.cloudflare.com/products/registrar/")!)
+            Link("Open Cloudflare Domains", destination: Self.cloudflareDomainsURL)
                 .font(.caption)
         case .transfer:
             TextField("example.com", text: $model.draft.domain)
@@ -330,7 +332,7 @@ struct NewSiteWizard: View {
         }.padding(.horizontal, 16).padding(.vertical, 10)
     }
 
-    private func saveWebsite() {
+    @MainActor private func saveWebsite() {
         let panel = NSSavePanel()
         panel.title = "Save Your Website"
         panel.prompt = "Save"
@@ -352,7 +354,7 @@ struct NewSiteWizard: View {
         }
     }
 
-    private func chooseLogo() {
+    @MainActor private func chooseLogo() {
         let panel = NSOpenPanel()
         panel.title = "Choose Logo"
         panel.prompt = "Choose"
@@ -417,10 +419,14 @@ extension Color {
     }
 
     var hexString: String? {
-        guard let color = NSColor(self).usingColorSpace(.sRGB) else { return nil }
-        let red = Int(round(color.redComponent * 255))
-        let green = Int(round(color.greenComponent * 255))
-        let blue = Int(round(color.blueComponent * 255))
+        guard let color = NSColor(self).usingColorSpace(.sRGB) ?? NSColor(self).usingColorSpace(.deviceRGB) else { return nil }
+        let red = Self.clampedByte(color.redComponent)
+        let green = Self.clampedByte(color.greenComponent)
+        let blue = Self.clampedByte(color.blueComponent)
         return String(format: "#%02x%02x%02x", red, green, blue)
+    }
+
+    private static func clampedByte(_ component: CGFloat) -> Int {
+        min(255, max(0, Int(round(component * 255))))
     }
 }

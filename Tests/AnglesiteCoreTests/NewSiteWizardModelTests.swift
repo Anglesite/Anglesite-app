@@ -48,6 +48,10 @@ final class NewSiteWizardModelTests: XCTestCase {
         m.draft.domainChoice = .transfer
         m.draft.domain = ""
         XCTAssertFalse(m.canContinue)
+        m.draft.domain = "not a domain"
+        XCTAssertFalse(m.canContinue)
+        m.draft.domain = "localhost"
+        XCTAssertFalse(m.canContinue)
         m.draft.domain = "example.com"
         XCTAssertTrue(m.canContinue)
     }
@@ -64,7 +68,7 @@ final class NewSiteWizardModelTests: XCTestCase {
         m.draft.name = "My Cool Site"
         XCTAssertEqual(m.slugPreview, "my-cool-site")
         XCTAssertEqual(m.defaultSaveFileName, "my-cool-site.anglesite")
-        XCTAssertEqual(m.cloudflareDevPreview, "my-cool-site.cloudflare.dev")
+        XCTAssertEqual(m.cloudflareDevPreview, "my-cool-site.pages.dev")
     }
 
     // MARK: Build warnings (#229)

@@ -278,8 +278,9 @@ struct SiteWindow: View {
                     model: health,
                     onRecheck: { health.recheck(siteID: site.id, siteDirectory: site.sourceDirectory) },
                     onAskAssistant: {
+                        guard let chat else { return }
                         chatPresented = true
-                        chat?.send(healthAssistantPrompt)
+                        chat.send(healthAssistantPrompt)
                     }
                 )
             }

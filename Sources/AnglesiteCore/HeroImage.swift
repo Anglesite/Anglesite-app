@@ -65,8 +65,6 @@ public enum HeroImage {
         let normalized = name
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
         return normalized.isEmpty || normalized == "my website" || normalized == "a website" || normalized == "website"
     }
 
@@ -84,6 +82,9 @@ public enum HeroImage {
         guard source.contains(heroOpenLine) else { return source }
         guard !source.contains(#"src="\#(urlPath)""#) else { return source }
         let img = #"<img src="\#(urlPath)" alt="\#(attr(alt))" class="hero-image" />"#
+        if let logoRange = source.range(of: #"<img[^>]*class="site-logo"[^>]*>"#, options: .regularExpression) {
+            return source.replacingCharacters(in: logoRange, with: String(source[logoRange]) + "\n      " + img)
+        }
         return source.replacingOccurrences(of: heroOpenLine, with: heroOpenLine + "\n      " + img)
     }
 

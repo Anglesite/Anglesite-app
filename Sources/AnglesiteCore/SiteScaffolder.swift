@@ -73,11 +73,7 @@ public actor SiteScaffolder {
             }
         } catch { return emit(.failed(step: "copyingTemplate", message: humanize(error))) }
 
-        // 2b. Owner answers into .site-config (in Source/).
-        do { try appendSiteConfig(draft, siteDir: siteDir) }
-        catch { emit(.warning(step: "copyingTemplate", message: humanize(error))) }
-
-        // 2c. git init in Source/ (non-fatal — coordinates with #68).
+        // 2b. git init in Source/ (non-fatal — coordinates with #68).
         do { try await gitInit(siteDir) }
         catch { emit(.warning(step: "copyingTemplate", message: "git init skipped: \(humanize(error))")) }
 
@@ -92,19 +88,25 @@ public actor SiteScaffolder {
 
         // 4. Homepage (non-fatal)
         emit(.writingContent)
+        let metadataDescription = draft.tagline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? draft.blurb
+            : draft.tagline
         do { try HomepageWriter.write(headline: draft.headline, blurb: draft.blurb,
-                                      tagline: draft.tagline, siteDirectory: siteDir, fileManager: fileManager) }
+                                      tagline: metadataDescription, siteDirectory: siteDir, fileManager: fileManager) }
         catch { emit(.warning(step: "writingContent", message: humanize(error))) }
 
+        var logoPublicPath: String?
         if let logo = draft.logoURL {
             do {
-                let publicPath = try LogoAsset.install(from: logo, siteName: draft.name,
+                logoPublicPath = try LogoAsset.install(from: logo, siteName: draft.name,
                                                        siteDirectory: siteDir, fileManager: fileManager)
-                try appendSiteConfigValue(key: "LOGO", value: publicPath, siteDir: siteDir)
             } catch {
                 emit(.warning(step: "writingContent", message: "Logo not added: \(humanize(error))"))
             }
         }
+
+        do { try appendSiteConfig(draft, logoPublicPath: logoPublicPath, metadataDescription: metadataDescription, siteDir: siteDir) }
+        catch { emit(.warning(step: "writingContent", message: "Site metadata not written: \(humanize(error))")) }
 
         // 4b. Optional hero image (Image Playground, #92) — non-blocking. Only when the owner
         // generated one in the wizard; copies it into public/ and references it from the homepage.
@@ -139,37 +141,47 @@ public actor SiteScaffolder {
         } catch { emit(.failed(step: "registering", message: humanize(error))) }
     }
 
-    /// Append SITE_NAME / SITE_TYPE / TAGLINE without clobbering existing lines (e.g. ANGLESITE_VERSION).
-    private func appendSiteConfig(_ draft: NewSiteDraft, siteDir: URL) throws {
+    /// Append owner answers without clobbering existing lines (e.g. ANGLESITE_VERSION).
+    private func appendSiteConfig(_ draft: NewSiteDraft, logoPublicPath: String?,
+                                  metadataDescription: String, siteDir: URL) throws {
+        var values: [(String, String)] = [
+            ("SITE_NAME", draft.name),
+            ("SITE_TYPE", draft.siteType.rawValue),
+            ("DOMAIN_CHOICE", draft.domainChoice.rawValue),
+        ]
+        if draft.domainChoice == .transfer && !draft.domain.isEmpty { values.append(("DOMAIN", draft.domain)) }
+        if draft.themeID == CustomTheme.id {
+            values.append(contentsOf: [
+                ("THEME", CustomTheme.id),
+                ("COLOR_PRIMARY", draft.customPrimaryColor),
+                ("COLOR_ACCENT", draft.customAccentColor),
+            ])
+        } else {
+            values.append(("THEME", draft.themeID))
+        }
+        if !metadataDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            values.append(("TAGLINE", metadataDescription))
+        }
+        if let logoPublicPath { values.append(("LOGO", logoPublicPath)) }
+        try appendSiteConfigValues(values, siteDir: siteDir)
+    }
+
+    private func appendSiteConfigValues(_ values: [(String, String)], siteDir: URL) throws {
         let url = siteDir.appendingPathComponent(".site-config")
-        var contents = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let contentsExists = fileManager.fileExists(atPath: url.path)
+        var contents = contentsExists ? try String(contentsOf: url, encoding: .utf8) : ""
         func setKey(_ key: String, _ value: String) {
             guard !contents.contains("\n\(key)=") && !contents.hasPrefix("\(key)=") else { return }
             if !contents.isEmpty && !contents.hasSuffix("\n") { contents += "\n" }
-            contents += "\(key)=\(value)\n"
+            contents += "\(key)=\(Self.safeConfigValue(value))\n"
         }
-        setKey("SITE_NAME", draft.name)
-        setKey("SITE_TYPE", draft.siteType.rawValue)
-        setKey("DOMAIN_CHOICE", draft.domainChoice.rawValue)
-        if draft.domainChoice == .transfer && !draft.domain.isEmpty { setKey("DOMAIN", draft.domain) }
-        if draft.themeID == CustomTheme.id {
-            setKey("THEME", CustomTheme.id)
-            setKey("COLOR_PRIMARY", draft.customPrimaryColor)
-            setKey("COLOR_ACCENT", draft.customAccentColor)
-        } else {
-            setKey("THEME", draft.themeID)
-        }
-        if !draft.tagline.isEmpty { setKey("TAGLINE", draft.tagline) }
+        for (key, value) in values { setKey(key, value) }
         try contents.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    private func appendSiteConfigValue(key: String, value: String, siteDir: URL) throws {
-        let url = siteDir.appendingPathComponent(".site-config")
-        var contents = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        guard !contents.contains("\n\(key)=") && !contents.hasPrefix("\(key)=") else { return }
-        if !contents.isEmpty && !contents.hasSuffix("\n") { contents += "\n" }
-        contents += "\(key)=\(value)\n"
-        try contents.write(to: url, atomically: true, encoding: .utf8)
+    private static func safeConfigValue(_ value: String) -> String {
+        (value.components(separatedBy: .newlines).first ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func resolvedTheme(for draft: NewSiteDraft) -> Theme? {

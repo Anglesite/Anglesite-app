@@ -21,7 +21,7 @@ public enum LogoAsset {
     public static func insertLogo(into source: String, urlPath: String, alt: String) -> String {
         guard source.contains(HeroImage.heroOpenLine) else { return source }
         guard !source.contains(#"class="site-logo""#) else { return source }
-        let img = #"<img src="\#(urlPath)" alt="\#(HeroImage.attr(alt))" class="site-logo" />"#
+        let img = #"<img src="\#(HeroImage.attr(urlPath))" alt="\#(HeroImage.attr(alt))" class="site-logo" />"#
         return source.replacingOccurrences(of: HeroImage.heroOpenLine, with: HeroImage.heroOpenLine + "\n      " + img)
     }
 
@@ -34,8 +34,10 @@ public enum LogoAsset {
         let publicDir = siteDirectory.appendingPathComponent(assetDirectoryRelativePath, isDirectory: true)
         try fileManager.createDirectory(at: publicDir, withIntermediateDirectories: true)
         let dest = publicDir.appendingPathComponent(fileName(for: logoURL))
-        if fileManager.fileExists(atPath: dest.path) { try fileManager.removeItem(at: dest) }
-        try fileManager.copyItem(at: logoURL, to: dest)
+        if dest.standardizedFileURL != logoURL.standardizedFileURL {
+            if fileManager.fileExists(atPath: dest.path) { try fileManager.removeItem(at: dest) }
+            try fileManager.copyItem(at: logoURL, to: dest)
+        }
 
         let publicPath = publicURLPath(for: logoURL)
         let homepage = siteDirectory.appendingPathComponent("src/pages/index.astro")
