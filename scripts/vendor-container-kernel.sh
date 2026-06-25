@@ -68,7 +68,8 @@ else
 fi
 echo "Kernel copied → $KERNEL_OUT/vmlinux"
 
-# Basic sanity: must be non-trivially large (expect ~30–70 MB for an arm64 Linux kernel).
+# Basic sanity: must be non-trivially large (the Kata arm64 VM-optimized kernel is ~14 MB —
+# smaller than a general-purpose kernel; the 1 MiB floor below just catches truncation/zero-byte).
 KERNEL_SIZE=$(stat -f%z "$KERNEL_OUT/vmlinux" 2>/dev/null || stat -c%s "$KERNEL_OUT/vmlinux")
 if [[ "$KERNEL_SIZE" -lt 1048576 ]]; then
     echo "ERROR: vmlinux is suspiciously small (${KERNEL_SIZE} bytes) — extraction may have failed" >&2
@@ -110,7 +111,10 @@ rm -f "$INITFS_ARCHIVE"
 for f in oci-layout index.json blobs/sha256; do
     if [[ ! -e "$INITFS_OUT/$f" ]]; then
         echo "ERROR: OCI layout missing required entry: $f" >&2
-        # Fall back to skopeo if available.
+        # Fall back to skopeo if available. NOTE: this recovery path is only hit if the buildx
+        # OCI export above fails to produce a valid layout. The `oci:dir:tag` form skopeo writes
+        # is a tagged single-entry index; it has not been exercised against the Containerization
+        # initfs loader, so if you ever land here, verify the produced layout boots before relying on it.
         if command -v skopeo >/dev/null 2>&1; then
             echo "Falling back to skopeo…"
             find "$INITFS_OUT" -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
