@@ -1,5 +1,6 @@
 // swift-tools-version: 5.10
 import PackageDescription
+import Foundation
 
 // The macOS app target itself is owned by Anglesite.xcodeproj (generated from
 // project.yml via XcodeGen). This package exposes the supporting libraries
@@ -40,7 +41,9 @@ var packageTargets: [Target] = [
         name: "AnglesiteContainer",
         dependencies: [
             "AnglesiteCore",
-            .product(name: "Containerization", package: "containerization")
+            .product(name: "Containerization", package: "containerization"),
+            .product(name: "ContainerizationOCI", package: "containerization"),
+            .product(name: "ContainerizationExtras", package: "containerization")
         ],
         path: "Sources/AnglesiteContainer",
         resources: [.copy("../../Resources/container-image")],
@@ -79,6 +82,24 @@ packageTargets.append(
     )
 )
 #endif
+
+// AnglesiteContainerLocalTests depends on AnglesiteContainer, which pulls in the native
+// apple/containerization dependency and only links on Apple-Silicon dev machines with the
+// virtualization entitlement. A bare `swift test` (CI) must NEVER compile it — so, mirroring
+// the `#if compiler(>=6.4)` conditional-append above, the target is added only when
+// ANGLESITE_CONTAINER_TESTS=1 is set in the build environment. Every test inside it also guards
+// on ANGLESITE_CONTAINER_E2E at runtime. Run locally with:
+//   ANGLESITE_CONTAINER_TESTS=1 ANGLESITE_CONTAINER_E2E=1 swift test --filter ContainerizationControlTests
+if ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_TESTS"] == "1" {
+    packageTargets.append(
+        .testTarget(
+            name: "AnglesiteContainerLocalTests",
+            dependencies: ["AnglesiteContainer", "AnglesiteCore"],
+            path: "Tests/AnglesiteContainerLocalTests",
+            swiftSettings: strictConcurrency
+        )
+    )
+}
 
 let package = Package(
     name: "Anglesite",
