@@ -7,16 +7,33 @@ struct HeroImageTests {
 
     // MARK: - Concept / prompt construction
 
-    @Test("concepts include name, tagline, and a type style hint, dropping empties")
+    @Test("concepts include specific name, type style hint, and no-text guardrails")
     func conceptsBasics() {
         let c = HeroImage.concepts(name: "Blue Bottle", siteType: .business, tagline: "Slow-roasted coffee")
-        #expect(c == ["Blue Bottle", "Slow-roasted coffee", HeroImage.styleHint(for: .business)])
+        #expect(c == [
+            "Blue Bottle",
+            HeroImage.styleHint(for: .business),
+            "Slow-roasted coffee",
+            "wide decorative header background",
+            "no text, no letters, no website interface",
+        ])
     }
 
-    @Test("concepts drop empty / whitespace-only fields but always keep a style hint")
+    @Test("concepts drop empty / generic names but always keep a style hint")
     func conceptsDropEmpties() {
-        let c = HeroImage.concepts(name: "   ", siteType: .blog, tagline: "")
-        #expect(c == [HeroImage.styleHint(for: .blog)])
+        let c = HeroImage.concepts(name: "My Website", siteType: .blog, tagline: "")
+        #expect(c == [
+            HeroImage.styleHint(for: .blog),
+            "wide decorative header background",
+            "no text, no letters, no website interface",
+        ])
+    }
+
+    @Test("custom image description leads the concepts")
+    func customDescriptionLeads() {
+        let c = HeroImage.concepts(name: "My Website", siteType: .blank, tagline: "", imageDescription: "Mist over green hills")
+        #expect(c.first == "Mist over green hills")
+        #expect(c.contains("no text, no letters, no website interface"))
     }
 
     @Test("style hint differs per site type")
@@ -28,7 +45,7 @@ struct HeroImageTests {
     @Test("prompt joins concepts with commas")
     func promptJoins() {
         let p = HeroImage.prompt(name: "Acme", siteType: .portfolio, tagline: "We make things")
-        #expect(p == "Acme, We make things, \(HeroImage.styleHint(for: .portfolio))")
+        #expect(p == "Acme, \(HeroImage.styleHint(for: .portfolio)), We make things, wide decorative header background, no text, no letters, no website interface")
     }
 
     // MARK: - Path resolution

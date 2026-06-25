@@ -50,8 +50,9 @@ public actor SiteScaffolder {
     }
 
     private func runPipeline(_ draft: NewSiteDraft, emit: @Sendable (ScaffoldStep) -> Void) async {
-        let slug = SiteSlug.derive(from: draft.name)
-        let packageURL = sitesRoot.appendingPathComponent("\(slug).anglesite", isDirectory: true)
+        let fileName = packageFileName(for: draft)
+        let parentURL = draft.saveDirectory ?? sitesRoot
+        let packageURL = parentURL.appendingPathComponent(fileName, isDirectory: true)
 
         // 1. Package skeleton (dir + Source/ + Config/ + Info.plist marker).
         emit(.creatingFolder)
@@ -82,7 +83,7 @@ public actor SiteScaffolder {
 
         // 3. Theme (non-fatal). Resolve the owner's chosen theme; fall back to the first available.
         emit(.applyingTheme)
-        if let theme = catalog.theme(id: draft.themeID) ?? catalog.themes.first {
+        if let theme = resolvedTheme(for: draft) {
             do { try ThemeApplier.apply(theme, siteDirectory: siteDir, fileManager: fileManager) }
             catch { emit(.warning(step: "applyingTheme", message: humanize(error))) }
         } else {
@@ -94,6 +95,16 @@ public actor SiteScaffolder {
         do { try HomepageWriter.write(headline: draft.headline, blurb: draft.blurb,
                                       tagline: draft.tagline, siteDirectory: siteDir, fileManager: fileManager) }
         catch { emit(.warning(step: "writingContent", message: humanize(error))) }
+
+        if let logo = draft.logoURL {
+            do {
+                let publicPath = try LogoAsset.install(from: logo, siteName: draft.name,
+                                                       siteDirectory: siteDir, fileManager: fileManager)
+                try appendSiteConfigValue(key: "LOGO", value: publicPath, siteDir: siteDir)
+            } catch {
+                emit(.warning(step: "writingContent", message: "Logo not added: \(humanize(error))"))
+            }
+        }
 
         // 4b. Optional hero image (Image Playground, #92) — non-blocking. Only when the owner
         // generated one in the wizard; copies it into public/ and references it from the homepage.
@@ -139,8 +150,39 @@ public actor SiteScaffolder {
         }
         setKey("SITE_NAME", draft.name)
         setKey("SITE_TYPE", draft.siteType.rawValue)
+        setKey("DOMAIN_CHOICE", draft.domainChoice.rawValue)
+        if draft.domainChoice == .transfer && !draft.domain.isEmpty { setKey("DOMAIN", draft.domain) }
+        if draft.themeID == CustomTheme.id {
+            setKey("THEME", CustomTheme.id)
+            setKey("COLOR_PRIMARY", draft.customPrimaryColor)
+            setKey("COLOR_ACCENT", draft.customAccentColor)
+        } else {
+            setKey("THEME", draft.themeID)
+        }
         if !draft.tagline.isEmpty { setKey("TAGLINE", draft.tagline) }
         try contents.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func appendSiteConfigValue(key: String, value: String, siteDir: URL) throws {
+        let url = siteDir.appendingPathComponent(".site-config")
+        var contents = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        guard !contents.contains("\n\(key)=") && !contents.hasPrefix("\(key)=") else { return }
+        if !contents.isEmpty && !contents.hasSuffix("\n") { contents += "\n" }
+        contents += "\(key)=\(value)\n"
+        try contents.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func resolvedTheme(for draft: NewSiteDraft) -> Theme? {
+        if draft.themeID == CustomTheme.id {
+            return CustomTheme.make(primary: draft.customPrimaryColor, accent: draft.customAccentColor)
+        }
+        return catalog.theme(id: draft.themeID) ?? catalog.themes.first
+    }
+
+    private func packageFileName(for draft: NewSiteDraft) -> String {
+        let raw = draft.saveFileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = raw.isEmpty ? "\(SiteSlug.derive(from: draft.name)).anglesite" : raw
+        return base.hasSuffix(".anglesite") ? base : "\(base).anglesite"
     }
 
     private func humanize(_ error: Error) -> String { (error as NSError).localizedDescription }

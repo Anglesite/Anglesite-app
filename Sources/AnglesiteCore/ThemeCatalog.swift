@@ -27,7 +27,7 @@ public struct ThemeCatalog: Sendable {
     public func defaultThemeID(for type: SiteType) -> String {
         let preferred: [SiteType: String] = [
             .business: "classic", .personal: "elegant", .blog: "warm",
-            .portfolio: "bold", .organization: "community",
+            .portfolio: "bold", .organization: "community", .blank: "classic",
         ]
         let want = preferred[type] ?? "classic"
         if theme(id: want) != nil { return want }

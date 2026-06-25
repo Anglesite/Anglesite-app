@@ -336,7 +336,7 @@ struct SitesLauncherView: View {
         let knownSites = await SiteStore.shared.sites
         let takenSlugs = Set(knownSites.map { SiteSlug.derive(from: $0.name) })
 
-        let model = NewSiteWizardModel(catalog: catalog, slugTaken: { takenSlugs.contains($0) })
+        let model = NewSiteWizardModel(catalog: catalog, defaultSaveDirectory: sitesRoot, slugTaken: { takenSlugs.contains($0) })
 
         let scaffolder = SiteScaffolder(
             sitesRoot: sitesRoot,

@@ -15,6 +15,17 @@ final class SiteScaffolderTests: XCTestCase {
                      themeID: "classic", headline: "Acme", blurb: "Welcome to Acme.")
     }
 
+    private func makeScaffolder(root: URL, calls: CallRecorder = CallRecorder()) -> SiteScaffolder {
+        SiteScaffolder(
+            sitesRoot: root,
+            templateURL: URL(fileURLWithPath: "/template"),
+            catalog: ThemeCatalog(themes: [theme]),
+            run: fakeRunner(calls: calls),
+            gitInit: { _ in },
+            register: { pkg in try SiteStore.Site.make(package: pkg) }
+        )
+    }
+
     private let theme = Theme(id: "classic", name: "Classic", blurb: "", swatch: [],
                               cssVars: ["color-primary": "#1e3a5f"])
 
@@ -30,8 +41,8 @@ final class SiteScaffolderTests: XCTestCase {
                 let astro = cwd.appendingPathComponent("src/pages/index.astro")
                 try? FileManager.default.createDirectory(at: css.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try? FileManager.default.createDirectory(at: astro.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try? ":root {\n  --color-primary: #2563eb;\n}".write(to: css, atomically: true, encoding: .utf8)
-                try? "<h1>Welcome</h1>".write(to: astro, atomically: true, encoding: .utf8)
+                try? ":root {\n  --color-primary: #2563eb;\n  --color-accent: #f59e0b;\n}".write(to: css, atomically: true, encoding: .utf8)
+                try? "<section class=\"hero\">\n  <h1>Welcome</h1>\n</section>".write(to: astro, atomically: true, encoding: .utf8)
                 try? "ANGLESITE_VERSION=1.0.0".write(to: cwd.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
             }
             let exit = args.contains(where: { $0.hasSuffix("scaffold.sh") }) ? scaffoldExit : npmExit
@@ -41,17 +52,7 @@ final class SiteScaffolderTests: XCTestCase {
 
     func testHappyPathEmitsStepsInOrderAndRegisters() async throws {
         let root = tmpDir()
-        let calls = CallRecorder()
-        let scaffolder = SiteScaffolder(
-            sitesRoot: root,
-            templateURL: URL(fileURLWithPath: "/template"),
-            catalog: ThemeCatalog(themes: [theme]),
-            run: fakeRunner(calls: calls),
-            gitInit: { _ in },
-            // Production registers via SiteStore.record → Site.make, whose id is the marker UUID.
-            // Use the real factory so the assertion reflects production output, not a path stand-in.
-            register: { pkg in try SiteStore.Site.make(package: pkg) }
-        )
+        let scaffolder = makeScaffolder(root: root)
         var steps: [SiteScaffolder.ScaffoldStep] = []
         for await s in scaffolder.scaffold(makeDraft()) { steps.append(s) }
 
@@ -67,6 +68,58 @@ final class SiteScaffolderTests: XCTestCase {
         // Theme + homepage applied in Source/:
         let css = try String(contentsOf: pkgURL.appendingPathComponent("Source/src/styles/global.css"), encoding: .utf8)
         XCTAssertTrue(css.contains("--color-primary: #1e3a5f;"))
+    }
+
+    func testCustomColorSchemeAndLogoAreApplied() async throws {
+        let root = tmpDir()
+        let logo = root.appendingPathComponent("brand.PNG")
+        try Data("logo".utf8).write(to: logo)
+        let scaffolder = makeScaffolder(root: root)
+        var draft = makeDraft()
+        draft.themeID = CustomTheme.id
+        draft.customPrimaryColor = "#123456"
+        draft.customAccentColor = "#abcdef"
+        draft.logoURL = logo
+
+        var steps: [SiteScaffolder.ScaffoldStep] = []
+        for await s in scaffolder.scaffold(draft) { steps.append(s) }
+
+        guard case .done? = steps.last else { return XCTFail("expected .done") }
+        let pkgURL = root.appendingPathComponent("acme-co.anglesite")
+        let css = try String(contentsOf: pkgURL.appendingPathComponent("Source/src/styles/global.css"), encoding: .utf8)
+        XCTAssertTrue(css.contains("--color-primary: #123456;"))
+        XCTAssertTrue(css.contains("--color-accent: #abcdef;"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pkgURL.appendingPathComponent("Source/public/logo.png").path))
+        let home = try String(contentsOf: pkgURL.appendingPathComponent("Source/src/pages/index.astro"), encoding: .utf8)
+        XCTAssertTrue(home.contains(#"src="/logo.png""#))
+        XCTAssertTrue(home.contains(#"class="site-logo""#))
+        let cfg = try String(contentsOf: pkgURL.appendingPathComponent("Source/.site-config"), encoding: .utf8)
+        XCTAssertTrue(cfg.contains("THEME=__custom"))
+        XCTAssertTrue(cfg.contains("COLOR_PRIMARY=#123456"))
+        XCTAssertTrue(cfg.contains("COLOR_ACCENT=#abcdef"))
+        XCTAssertTrue(cfg.contains("LOGO=/logo.png"))
+    }
+
+    func testCustomSaveLocationAndDomainAreUsed() async throws {
+        let root = tmpDir()
+        let saveDirectory = root.appendingPathComponent("Chosen", isDirectory: true)
+        try FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
+        let scaffolder = makeScaffolder(root: root)
+        var draft = makeDraft()
+        draft.domainChoice = .transfer
+        draft.domain = "example.com"
+        draft.saveDirectory = saveDirectory
+        draft.saveFileName = "Example Website"
+
+        var steps: [SiteScaffolder.ScaffoldStep] = []
+        for await s in scaffolder.scaffold(draft) { steps.append(s) }
+
+        guard case .done? = steps.last else { return XCTFail("expected .done") }
+        let pkgURL = saveDirectory.appendingPathComponent("Example Website.anglesite")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pkgURL.path))
+        let cfg = try String(contentsOf: pkgURL.appendingPathComponent("Source/.site-config"), encoding: .utf8)
+        XCTAssertTrue(cfg.contains("DOMAIN_CHOICE=transfer"))
+        XCTAssertTrue(cfg.contains("DOMAIN=example.com"))
     }
 
     func testScaffoldFailureIsFatal() async throws {

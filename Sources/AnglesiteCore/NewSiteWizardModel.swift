@@ -4,9 +4,9 @@ import Observation
 @MainActor
 @Observable
 public final class NewSiteWizardModel {
-    public enum Step: Int, CaseIterable { case type, details, look, content, building }
+    public enum Step: Int, CaseIterable { case details, type, look, content, save, building }
 
-    public var step: Step = .type
+    public var step: Step = .details
     public var draft = NewSiteDraft(siteType: .business, name: "")
     /// Drives the Image Playground sheet presentation in the Content step (#92).
     public var showingImagePlayground = false
@@ -15,16 +15,20 @@ public final class NewSiteWizardModel {
     public private(set) var completedSiteID: String?
 
     public let catalog: ThemeCatalog
+    public let defaultSaveDirectory: URL?
     private let slugTaken: @Sendable (String) -> Bool
 
-    public init(catalog: ThemeCatalog, slugTaken: @escaping @Sendable (String) -> Bool) {
+    public init(catalog: ThemeCatalog, defaultSaveDirectory: URL? = nil, slugTaken: @escaping @Sendable (String) -> Bool) {
         self.catalog = catalog
+        self.defaultSaveDirectory = defaultSaveDirectory
         self.slugTaken = slugTaken
         // Seed a default theme for the initial type.
         draft.themeID = catalog.defaultThemeID(for: draft.siteType)
     }
 
     public var slugPreview: String { SiteSlug.derive(from: draft.name) }
+
+    public var defaultSaveFileName: String { "\(slugPreview).anglesite" }
 
     /// Non-fatal build warnings (e.g. a failed install), surfaced so a failure isn't hidden behind a dead-end preview (#229).
     public var warnings: [String] {
@@ -43,24 +47,34 @@ public final class NewSiteWizardModel {
         return nil
     }
 
+    public var cloudflareDevPreview: String {
+        "\(slugPreview).cloudflare.dev"
+    }
+
     public var canContinue: Bool {
         switch step {
+        case .details:
+            return !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && detailsError == nil
+                && (draft.domainChoice != .transfer || !draft.domain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         case .type:    return true
-        case .details: return !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && detailsError == nil
-        case .look:    return catalog.theme(id: draft.themeID) != nil
+        case .look:    return draft.themeID == CustomTheme.id || catalog.theme(id: draft.themeID) != nil
         case .content: return true                  // content is optional
+        case .save:    return true
         case .building: return false
         }
     }
 
     public func choose(type: SiteType) {
         draft.siteType = type
-        draft.themeID = catalog.defaultThemeID(for: type)
+        if draft.themeID != CustomTheme.id {
+            draft.themeID = catalog.defaultThemeID(for: type)
+        }
     }
 
     /// Image Playground generation concepts for the current draft (#92).
     public var heroImageConcepts: [String] {
-        HeroImage.concepts(name: draft.name, siteType: draft.siteType, tagline: draft.tagline)
+        HeroImage.concepts(name: draft.name, siteType: draft.siteType, tagline: draft.tagline, imageDescription: draft.heroImagePrompt)
     }
 
     /// Whether a hero image has been generated and staged for scaffolding.
@@ -75,6 +89,9 @@ public final class NewSiteWizardModel {
     /// Runs the scaffolder, accumulating progress. Returns the new site id on success.
     public func build(using scaffolder: SiteScaffolder) async -> String? {
         step = .building
+        if draft.saveFileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            draft.saveFileName = defaultSaveFileName
+        }
         if draft.headline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             draft.headline = draft.name
         }
