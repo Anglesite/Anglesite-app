@@ -6,10 +6,12 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"golang.org/x/sys/unix"
 )
@@ -17,9 +19,16 @@ import (
 func main() {
 	for _, arg := range os.Args[1:] {
 		parts := strings.SplitN(arg, ":", 2)
-		vport, _ := strconv.Atoi(parts[0])
-		tport := parts[1]
-		go listen(uint32(vport), tport)
+		if len(parts) != 2 {
+			log.Printf("skipping malformed arg %q (want vport:tport)", arg)
+			continue
+		}
+		vport, err := strconv.Atoi(parts[0])
+		if err != nil {
+			log.Printf("skipping malformed arg %q: bad vport: %v", arg, err)
+			continue
+		}
+		go listen(uint32(vport), parts[1])
 	}
 	select {} // run forever
 }
@@ -37,17 +46,61 @@ func listen(vport uint32, tcpPort string) {
 	}
 }
 
-func splice(vfd int, tcpPort string) {
-	vconn := osConn(vfd)
-	tconn, err := net.Dial("tcp", "127.0.0.1:"+tcpPort)
-	if err != nil { vconn.Close(); return }
-	go func() { io.Copy(tconn, vconn); tconn.Close() }()
-	io.Copy(vconn, tconn); vconn.Close()
+// closeWriter is the half-close interface supported by *net.TCPConn and similar.
+type closeWriter interface {
+	CloseWrite() error
 }
 
-func osConn(fd int) net.Conn {
+func splice(vfd int, tcpPort string) {
+	vconn, err := osConn(vfd)
+	if err != nil {
+		unix.Close(vfd)
+		return
+	}
+	tconn, err := net.Dial("tcp", "127.0.0.1:"+tcpPort)
+	if err != nil {
+		vconn.Close()
+		return
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// vsock → TCP
+	go func() {
+		defer wg.Done()
+		io.Copy(tconn, vconn)
+		// Signal EOF to the TCP side without closing the read direction.
+		if cw, ok := tconn.(closeWriter); ok {
+			cw.CloseWrite()
+		} else {
+			tconn.Close()
+		}
+	}()
+
+	// TCP → vsock
+	go func() {
+		defer wg.Done()
+		io.Copy(vconn, tconn)
+		// Signal EOF to the vsock side without closing the read direction.
+		if cw, ok := vconn.(closeWriter); ok {
+			cw.CloseWrite()
+		} else {
+			vconn.Close()
+		}
+	}()
+
+	wg.Wait()
+	tconn.Close()
+	vconn.Close()
+}
+
+func osConn(fd int) (net.Conn, error) {
 	f := os.NewFile(uintptr(fd), fmt.Sprintf("vsock-%d", fd))
-	c, _ := net.FileConn(f) // net.FileConn dup's the fd
+	c, err := net.FileConn(f) // net.FileConn dup's the fd
 	f.Close()
-	return c
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
 }
