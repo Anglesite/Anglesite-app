@@ -117,6 +117,8 @@ public struct ContainerizationControl: LocalContainerControl {
             // build context; npm ci runs on linux/arm64 so @img/sharp-linux-arm64 is the native prebuilt).
             // The server reads config from ENV (not flags): ANGLESITE_MCP_TRANSPORT selects HTTP mode,
             // ANGLESITE_MCP_PORT sets the listen port, ANGLESITE_PROJECT_ROOT points at the cloned repo.
+            // ANGLESITE_MCP_HOST is intentionally unset — it defaults to 127.0.0.1, which is correct:
+            // the in-guest vsock bridge reaches the sidecar via dial("tcp","127.0.0.1:4399").
             try await runDetached(container, id: "mcp", ["sh", "-lc",
                 "ANGLESITE_MCP_TRANSPORT=http ANGLESITE_MCP_PORT=4399 ANGLESITE_PROJECT_ROOT=/workspace/site node /usr/local/lib/anglesite-mcp/server/index.mjs"])
 

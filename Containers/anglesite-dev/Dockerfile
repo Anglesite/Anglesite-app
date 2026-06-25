@@ -18,5 +18,11 @@ COPY --from=bridge /vsock-bridge /usr/local/bin/vsock-bridge
 # because @img/sharp-linux-arm64 is marked optional in the lockfile (platform-specific prebuilt);
 # npm's platform-cpu/os filters already skip macOS-only optionals like fsevents on linux/arm64.
 COPY mcp-sidecar/ /usr/local/lib/anglesite-mcp/
-RUN cd /usr/local/lib/anglesite-mcp && npm ci --omit=dev
+# Playwright is an unused optionalDependency of the plugin. We keep `npm ci` (reproducible; lock-exact)
+# and cannot pass --omit=optional because @img/sharp-linux-arm64 is also optional (platform prebuilt).
+# ENV prevents playwright's postinstall from downloading ~300 MB of browsers; rm strips the pkg dirs.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+RUN cd /usr/local/lib/anglesite-mcp \
+    && npm ci --omit=dev \
+    && rm -rf node_modules/playwright node_modules/playwright-core node_modules/.cache/ms-playwright
 WORKDIR /workspace
