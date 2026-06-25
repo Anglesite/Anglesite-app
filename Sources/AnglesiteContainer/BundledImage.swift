@@ -61,32 +61,40 @@ public enum BundledImage {
 
     /// Path to the Linux kernel binary the VM boots.
     ///
-    /// - TODO(#69): the kernel is NOT yet vendored into the app bundle — Task 6 only vendors the OCI
-    ///   app layout. Provisioning it (vendor a kernel into `Resources/container-image-kernel` via a
-    ///   `vendor-container-kernel.sh`, vs. ship Apple's `vminit` kernel, vs. fetch on first boot) is an
-    ///   unresolved design decision above Task 7's scope. Until then this resolves only via the
-    ///   `ANGLESITE_CONTAINER_KERNEL` override (set on an entitled dev machine for the gated e2e test);
-    ///   the bundled fallback throws so the gap surfaces loudly rather than silently mis-booting.
+    /// Vendored by `scripts/vendor-container-kernel.sh` into `Resources/container-kernel/vmlinux`.
+    /// The bundled-resource branch checks that `vmlinux` actually exists inside the directory before
+    /// returning it — otherwise `isProvisioned` would spuriously return `true` on an unvendored build
+    /// (the `.copy` rule always bundles the `.gitkeep`-containing dir even when vmlinux is absent).
+    /// Override with `ANGLESITE_CONTAINER_KERNEL` to point at a freshly-built kernel for local dev.
     public static func kernelURL() throws -> URL {
         if let override = ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_KERNEL"] {
             return URL(fileURLWithPath: override)
         }
-        if let url = resourceBundle?.url(forResource: "container-kernel", withExtension: nil) {
-            return url
+        if let dirURL = resourceBundle?.url(forResource: "container-kernel", withExtension: nil) {
+            let kernelURL = dirURL.appendingPathComponent("vmlinux")
+            if FileManager.default.fileExists(atPath: kernelURL.path) {
+                return kernelURL
+            }
         }
         throw BundledImageError.kernelNotProvisioned
     }
 
     /// Path to the vminit initfs OCI layout (the guest-agent root filesystem the VM mounts first).
     ///
-    /// - TODO(#69): like the kernel, the initfs is NOT yet vendored — same unresolved provisioning
-    ///   decision. Resolves only via `ANGLESITE_CONTAINER_INITFS` until vendored; bundled fallback throws.
+    /// Vendored by `scripts/vendor-container-kernel.sh` into `Resources/container-initfs/` as an
+    /// OCI image layout. The bundled-resource branch checks that `index.json` exists inside the
+    /// directory before returning it — the `.copy` rule always bundles the `.gitkeep`-containing dir
+    /// even when the layout blobs are absent, so we must verify the real artifact is present.
+    /// Override with `ANGLESITE_CONTAINER_INITFS` to point at a different layout for local dev.
     public static func initfsLayoutURL() throws -> URL {
         if let override = ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_INITFS"] {
             return URL(fileURLWithPath: override)
         }
-        if let url = resourceBundle?.url(forResource: "container-initfs", withExtension: nil) {
-            return url
+        if let dirURL = resourceBundle?.url(forResource: "container-initfs", withExtension: nil) {
+            let indexURL = dirURL.appendingPathComponent("index.json")
+            if FileManager.default.fileExists(atPath: indexURL.path) {
+                return dirURL
+            }
         }
         throw BundledImageError.initfsNotProvisioned
     }
