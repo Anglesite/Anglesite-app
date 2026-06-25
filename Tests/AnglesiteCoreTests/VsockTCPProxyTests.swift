@@ -63,4 +63,31 @@ struct VsockTCPProxyTests {
         #expect((url.port ?? 0) > 0)
         await proxy.stop()
     }
+
+    @Test("closed connection is removed from connections (no unbounded growth)")
+    func closedConnectionRemovedFromConnections() async throws {
+        let (guestForProxy, guestPeer) = socketPair()
+        let proxy = VsockTCPProxy(guestPort: 4321, dial: { _ in guestForProxy })
+        let url = try await proxy.start()
+        let client = try connectTCP(to: url)
+
+        // Write a byte so the accept + dial path completes before we check the count.
+        try client.write(contentsOf: Data("ping".utf8))
+        _ = try guestPeer.read(upToCount: 4)
+
+        // The connection should have been accepted and added.
+        var count = await proxy.connectionCount
+        #expect(count == 1)
+
+        // Close the guest peer — the proxy's readabilityHandler sees EOF and calls close(),
+        // which fires onClose → removeConnection via an async Task.
+        try guestPeer.close()
+        // Give the Task time to run on the actor.
+        try await Task.sleep(for: .milliseconds(200))
+
+        count = await proxy.connectionCount
+        #expect(count == 0)
+
+        await proxy.stop()
+    }
 }

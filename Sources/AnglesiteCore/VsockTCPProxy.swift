@@ -53,7 +53,10 @@ public actor VsockTCPProxy {
         source.setEventHandler { [weak self] in
             let conn = accept(fd, nil, nil)
             guard conn >= 0 else { return }
-            Task { await self?.handleAccepted(conn) }
+            Task { [weak self] in
+                guard let self else { close(conn); return }
+                await self.handleAccepted(conn)
+            }
         }
         source.resume()
         self.acceptSource = source
@@ -74,12 +77,22 @@ public actor VsockTCPProxy {
         do {
             let guest = try await dial(guestPort)
             let conn = ProxyConnection(tcp: tcp, guest: guest)
+            conn.onClose = { [weak self] c in
+                Task { await self?.removeConnection(c) }
+            }
             connections.append(conn)
             conn.start()
         } catch {
             try? tcp.close()
         }
     }
+
+    private func removeConnection(_ conn: ProxyConnection) {
+        connections.removeAll { $0 === conn }
+    }
+
+    /// Number of live connections. Exposed for testing only.
+    var connectionCount: Int { connections.count }
 }
 
 /// One spliced TCP↔vsock pair. Uses each handle's `readabilityHandler` to copy bytes both ways;
@@ -89,6 +102,9 @@ final class ProxyConnection: @unchecked Sendable {
     private let guest: FileHandle
     private let lock = NSLock()
     private var closed = false
+    /// Called exactly once, after the connection closes, with `self` as the argument.
+    /// Invoked outside the lock to avoid re-entrancy / deadlock.
+    var onClose: (@Sendable (_ conn: ProxyConnection) -> Void)?
 
     init(tcp: FileHandle, guest: FileHandle) { self.tcp = tcp; self.guest = guest }
 
@@ -106,12 +122,22 @@ final class ProxyConnection: @unchecked Sendable {
     }
 
     func close() {
-        lock.lock(); defer { lock.unlock() }
-        guard !closed else { return }
+        // Capture whether this call is the one that transitions to closed.
+        // Release the lock before invoking onClose to avoid re-entrancy / deadlock.
+        let shouldNotify: Bool
+        lock.lock()
+        if closed {
+            lock.unlock()
+            return
+        }
         closed = true
         tcp.readabilityHandler = nil
         guest.readabilityHandler = nil
         try? tcp.close()
         try? guest.close()
+        shouldNotify = true
+        lock.unlock()
+
+        if shouldNotify { onClose?(self) }
     }
 }
