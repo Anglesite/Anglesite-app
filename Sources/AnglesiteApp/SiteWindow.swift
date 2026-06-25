@@ -64,6 +64,7 @@ struct SiteWindow: View {
     // `loadAndStart()`; the panel UI is target-agnostic.
     @State private var chat: ChatModel?
     @State private var chatPresented = false
+    @State private var assistantChoice: AssistantChoice = .foundationModel(.onDevice)
     @State private var health = HealthModel(runner: DefaultHealthCheckRunner())
     /// Drives the determinate startup progress bar shown in `mainPane` while the dev server boots.
     @State private var startup = StartupProgressModel()
@@ -276,11 +277,10 @@ struct SiteWindow: View {
                 HealthBadgeView(
                     model: health,
                     onRecheck: { health.recheck(siteID: site.id, siteDirectory: site.sourceDirectory) },
-                    onAskClaude: {
-                        #if !ANGLESITE_MAS
+                    onAskAssistant: {
+                        guard let chat else { return }
                         chatPresented = true
-                        chat?.send("/anglesite:check")
-                        #endif
+                        chat.send(healthAssistantPrompt)
                     }
                 )
             }
@@ -607,6 +607,15 @@ struct SiteWindow: View {
         }
     }
 
+    private var healthAssistantPrompt: String {
+        switch assistantChoice {
+        case .claude:
+            return "/anglesite:check"
+        case .foundationModel:
+            return "Audit this site for issues and suggest improvements to make it deploy-ready. Review the available site content and call out concrete files or sections when relevant."
+        }
+    }
+
     private func loadAndStart() async {
         // SwiftUI's NSPersistentUIManager will happily restore a WindowGroup with a
         // nil payload, or one whose value no longer matches a known site (sites.json
@@ -684,6 +693,7 @@ struct SiteWindow: View {
             try AnnotationStore.resolve(in: sourceDirectory, id: id)
         }
         #if ANGLESITE_MAS
+        assistantChoice = .foundationModel(.onDevice)
         // Sandboxed App Store build: there's no `claude` CLI to shell out to, so chat is backed by
         // the on-device `FoundationModelAssistant` (#159). This is the MAS build's first chat pane.
         // The per-site `editBridge` + app-lifetime `contentGraph` attach `ApplyEditTool` +
@@ -722,7 +732,9 @@ struct SiteWindow: View {
         // construction stays here because it needs App-owned deps (the edit bridge, content graph).
         // `makeEditBridge()` is only called in the on-device arm — the Claude path does no bridge work.
         let assistant: any ConversationalAssistant
-        switch resolveAssistantChoice(preferFoundationModels: settings.preferFoundationModels, tier: settings.foundationModelTier) {
+        let choice = resolveAssistantChoice(preferFoundationModels: settings.preferFoundationModels, tier: settings.foundationModelTier)
+        assistantChoice = choice
+        switch choice {
         case .foundationModel(let tier):
             assistant = FoundationModelAssistant(
                 tier: tier,

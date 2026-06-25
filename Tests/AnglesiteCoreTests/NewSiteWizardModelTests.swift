@@ -16,6 +16,19 @@ final class NewSiteWizardModelTests: XCTestCase {
         XCTAssertEqual(m.draft.themeID, "warm")
     }
 
+    func testPickingTypeDoesNotReplaceCustomTheme() {
+        let m = NewSiteWizardModel(catalog: catalog(), slugTaken: { _ in false })
+        m.draft.themeID = CustomTheme.id
+        m.choose(type: .blog)
+        XCTAssertEqual(m.draft.themeID, CustomTheme.id)
+    }
+
+    func testStartsWithUniversalWebsiteIdentityStep() {
+        let m = NewSiteWizardModel(catalog: catalog(), slugTaken: { _ in false })
+        XCTAssertEqual(m.step, .details)
+        XCTAssertFalse(m.canContinue)
+    }
+
     func testCannotContinuePastDetailsWithEmptyOrTakenName() {
         let m = NewSiteWizardModel(catalog: catalog(), slugTaken: { $0 == "taken" })
         m.step = .details
@@ -28,10 +41,34 @@ final class NewSiteWizardModelTests: XCTestCase {
         XCTAssertTrue(m.canContinue)
     }
 
+    func testTransferDomainRequiresDomainValue() {
+        let m = NewSiteWizardModel(catalog: catalog(), slugTaken: { _ in false })
+        m.step = .details
+        m.draft.name = "Fresh One"
+        m.draft.domainChoice = .transfer
+        m.draft.domain = ""
+        XCTAssertFalse(m.canContinue)
+        m.draft.domain = "not a domain"
+        XCTAssertFalse(m.canContinue)
+        m.draft.domain = "localhost"
+        XCTAssertFalse(m.canContinue)
+        m.draft.domain = "example.com"
+        XCTAssertTrue(m.canContinue)
+    }
+
+    func testLookStepAcceptsCustomTheme() {
+        let m = NewSiteWizardModel(catalog: catalog(), slugTaken: { _ in false })
+        m.step = .look
+        m.draft.themeID = CustomTheme.id
+        XCTAssertTrue(m.canContinue)
+    }
+
     func testSlugPreviewTracksName() {
         let m = NewSiteWizardModel(catalog: catalog(), slugTaken: { _ in false })
         m.draft.name = "My Cool Site"
         XCTAssertEqual(m.slugPreview, "my-cool-site")
+        XCTAssertEqual(m.defaultSaveFileName, "my-cool-site.anglesite")
+        XCTAssertEqual(m.cloudflareDevPreview, "my-cool-site.pages.dev")
     }
 
     // MARK: Build warnings (#229)

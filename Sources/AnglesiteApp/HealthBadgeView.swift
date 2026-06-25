@@ -8,12 +8,12 @@ import AnglesiteCore
 /// The view is intentionally dumb: it reads `HealthModel`'s settled state and
 /// surfaces the same data structures `BlockedDeploySheetView` already renders
 /// (`PreDeployCheck.ScanFailure` / `ScanWarning`). The two actions — Recheck
-/// and Ask Claude — call back into the owner via closures so this view doesn't
+/// and Ask Assistant — call back into the owner via closures so this view doesn't
 /// need to know about `SiteStore`, `ChatModel`, or any wiring.
 struct HealthBadgeView: View {
     @Bindable var model: HealthModel
     let onRecheck: () -> Void
-    let onAskClaude: () -> Void
+    let onAskAssistant: () -> Void
 
     @State private var popoverPresented: Bool = false
 
@@ -214,14 +214,12 @@ struct HealthBadgeView: View {
 
     private var footerButtons: some View {
         HStack {
-            #if !ANGLESITE_MAS
-            Button("Ask Claude") {
+            Button("Ask Assistant") {
                 popoverPresented = false
-                onAskClaude()
+                onAskAssistant()
             }
             .controlSize(.small)
-            .help("Open the chat panel and run /anglesite:check for a deeper audit")
-            #endif
+            .help("Open the chat panel for a deeper AI audit of this site")
 
             Spacer()
 

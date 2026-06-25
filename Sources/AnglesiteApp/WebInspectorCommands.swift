@@ -15,6 +15,8 @@ extension FocusedValues {
 /// Enabled only when a site window is focused; a no-op until that window's dev server is ready and
 /// the web view exists, and in MAS builds where the private WebKit open path compiles out.
 struct WebInspectorCommands: Commands {
+    // SwiftUI exposes `.focusedSceneValue(...)` as the publishing modifier; command readers still
+    // use `@FocusedValue`. There is no `@FocusedSceneValue` property wrapper in the macOS 27 SDK.
     @FocusedValue(\.preview) private var focusedPreview
 
     var body: some Commands {

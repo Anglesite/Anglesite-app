@@ -63,6 +63,14 @@ main {
   text-align: center;
 }
 
+.site-logo {
+  display: block;
+  width: min(12rem, 48vw);
+  max-height: 6rem;
+  object-fit: contain;
+  margin: 0 auto calc(var(--spacing-unit) * 6);
+}
+
 .hero h1 {
   font-size: clamp(2rem, 5vw, 3.5rem);
   margin-block-end: calc(var(--spacing-unit) * 4);

@@ -21,37 +21,51 @@ public enum HeroImage {
     /// Relative path (from the site `Source/` dir) of the saved image file.
     public static var assetRelativePath: String { "\(assetDirectoryRelativePath)/\(fileName)" }
 
-    /// Build the natural-language concepts handed to `ImagePlaygroundConcept.extracted(from:)`.
+    /// Build the natural-language concepts handed to `ImagePlaygroundConcept.text(_:)`.
     ///
-    /// Image Playground works best with short, descriptive phrases rather than one long sentence,
-    /// so we emit a few focused concepts derived from the site's name, type, and tagline. Empty
-    /// fields are dropped. A site-type styling hint always anchors the result so even a bare name
-    /// yields a usable, on-brand image.
-    public static func concepts(name: String, siteType: SiteType, tagline: String) -> [String] {
+    /// Image Playground works best with short, descriptive phrases rather than one long sentence.
+    /// Avoid words such as "website", "screen", and "interface" in the default concepts because
+    /// they often produce a fake UI screenshot rather than an image that works as a page hero.
+    public static func concepts(name: String, siteType: SiteType, tagline: String, imageDescription: String = "") -> [String] {
         var out: [String] = []
+        let custom = imageDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let t = tagline.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !n.isEmpty { out.append(n) }
-        if !t.isEmpty { out.append(t) }
+        if !custom.isEmpty {
+            out.append(custom)
+        } else if !isGenericSiteName(n) {
+            out.append(n)
+        }
         out.append(styleHint(for: siteType))
+        if !t.isEmpty { out.append(t) }
+        out.append("wide decorative header background")
+        out.append("no text, no letters, no website interface")
         return out
     }
 
     /// A single concatenated prompt string, for the fallback `extracted(from:)` text path and
     /// for logging. Concepts joined with commas.
-    public static func prompt(name: String, siteType: SiteType, tagline: String) -> String {
-        concepts(name: name, siteType: siteType, tagline: tagline).joined(separator: ", ")
+    public static func prompt(name: String, siteType: SiteType, tagline: String, imageDescription: String = "") -> String {
+        concepts(name: name, siteType: siteType, tagline: tagline, imageDescription: imageDescription).joined(separator: ", ")
     }
 
     /// Per-type visual styling hint that keeps the generated image on-brand.
     static func styleHint(for siteType: SiteType) -> String {
         switch siteType {
-        case .business:     return "modern professional business hero illustration"
-        case .personal:     return "warm friendly personal website hero illustration"
-        case .blog:         return "editorial blog header illustration"
-        case .portfolio:    return "creative portfolio showcase hero illustration"
-        case .organization: return "welcoming community organization hero illustration"
+        case .business:     return "modern professional abstract illustration"
+        case .personal:     return "warm friendly personal abstract illustration"
+        case .blog:         return "editorial abstract header illustration"
+        case .portfolio:    return "creative abstract portfolio illustration"
+        case .organization: return "welcoming community abstract illustration"
+        case .blank:        return "simple abstract geometric illustration"
         }
+    }
+
+    private static func isGenericSiteName(_ name: String) -> Bool {
+        let normalized = name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized.isEmpty || normalized == "my website" || normalized == "a website" || normalized == "website"
     }
 
     /// The exact hero `<section>` the template ships, anchoring a targeted (non-fuzzy) insert.
@@ -68,6 +82,9 @@ public enum HeroImage {
         guard source.contains(heroOpenLine) else { return source }
         guard !source.contains(#"src="\#(urlPath)""#) else { return source }
         let img = #"<img src="\#(urlPath)" alt="\#(attr(alt))" class="hero-image" />"#
+        if let logoRange = source.range(of: #"<img[^>]*class="site-logo"[^>]*>"#, options: .regularExpression) {
+            return source.replacingCharacters(in: logoRange, with: String(source[logoRange]) + "\n      " + img)
+        }
         return source.replacingOccurrences(of: heroOpenLine, with: heroOpenLine + "\n      " + img)
     }
 
