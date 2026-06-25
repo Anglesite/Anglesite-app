@@ -1,5 +1,3 @@
-import Foundation
-
 /// Decides whether `LocalContainerSiteRuntime` can run on this build/host. The entitlement is the
 /// real gate (it's unforgeable — an un-entitled build is SIGKILL'd by `amfid` at launch, see the
 /// #60 spike), so no feature flag is needed: a build without it simply reports `false` and the app
@@ -22,7 +20,8 @@ public enum LocalContainerSupport {
         #endif
     }
 
-    /// True on macOS 26+ (the floor for Apple Containerization's vsock + NAT model).
+    /// True on macOS 26+ (the Apple-Containerization floor; intentionally below the app's macOS 27
+    /// deployment target — every host the app runs on qualifies; do not raise this check).
     public static var hostOSIsSupported: Bool {
         if #available(macOS 26.0, *) { return true } else { return false }
     }

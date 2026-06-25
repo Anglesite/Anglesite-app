@@ -24,6 +24,7 @@ public actor VsockTCPProxy {
     /// Bind + listen on 127.0.0.1:0, install the accept handler, and return the loopback URL with
     /// the OS-assigned port. Throws `LocalContainerError.bootFailed` on any socket error.
     public func start() throws -> URL {
+        guard listenFD < 0 else { throw LocalContainerError.bootFailed("already started") }
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { throw LocalContainerError.bootFailed("socket() failed") }
         var yes: Int32 = 1
@@ -65,6 +66,8 @@ public actor VsockTCPProxy {
     }
 
     public func stop() {
+        // cancel() is async wrt GCD delivery, so one more handler invocation may fire after this;
+        // accept() on the closed fd returns EBADF (<0), which the handler's `guard conn >= 0` catches cleanly.
         acceptSource?.cancel()
         acceptSource = nil
         if listenFD >= 0 { close(listenFD); listenFD = -1 }
@@ -77,11 +80,8 @@ public actor VsockTCPProxy {
         do {
             let guest = try await dial(guestPort)
             let conn = ProxyConnection(tcp: tcp, guest: guest)
-            conn.onClose = { [weak self] c in
-                Task { await self?.removeConnection(c) }
-            }
             connections.append(conn)
-            conn.start()
+            conn.start(onClose: { [weak self] c in Task { await self?.removeConnection(c) } })
         } catch {
             try? tcp.close()
         }
@@ -104,11 +104,14 @@ final class ProxyConnection: @unchecked Sendable {
     private var closed = false
     /// Called exactly once, after the connection closes, with `self` as the argument.
     /// Invoked outside the lock to avoid re-entrancy / deadlock.
-    var onClose: (@Sendable (_ conn: ProxyConnection) -> Void)?
+    private var onClose: (@Sendable (_ conn: ProxyConnection) -> Void)?
 
     init(tcp: FileHandle, guest: FileHandle) { self.tcp = tcp; self.guest = guest }
 
-    func start() {
+    /// Begin pumping bytes in both directions. `onClose` is provided here (set-once, private) so
+    /// there is no mutable public var window between construction and the first read handler firing.
+    func start(onClose: @escaping @Sendable (ProxyConnection) -> Void) {
+        self.onClose = onClose
         pump(from: tcp, to: guest)
         pump(from: guest, to: tcp)
     }
@@ -122,9 +125,8 @@ final class ProxyConnection: @unchecked Sendable {
     }
 
     func close() {
-        // Capture whether this call is the one that transitions to closed.
-        // Release the lock before invoking onClose to avoid re-entrancy / deadlock.
-        let shouldNotify: Bool
+        // Idempotent: only the first caller transitions closed → true.
+        // Handlers are cleared + fds closed under the lock; onClose invoked AFTER unlock (never under the lock).
         lock.lock()
         if closed {
             lock.unlock()
@@ -135,9 +137,8 @@ final class ProxyConnection: @unchecked Sendable {
         guest.readabilityHandler = nil
         try? tcp.close()
         try? guest.close()
-        shouldNotify = true
         lock.unlock()
 
-        if shouldNotify { onClose?(self) }
+        onClose?(self)
     }
 }

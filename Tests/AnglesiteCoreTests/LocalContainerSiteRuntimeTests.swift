@@ -10,7 +10,6 @@ struct LocalContainerSiteRuntimeTests {
         let fake = FakeLocalContainerControl(startResult: result)
         let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
         let rt = LocalContainerSiteRuntime(
-            sourceRepo: URL(fileURLWithPath: "/sites/Foo.anglesite/Source"),
             ref: "HEAD",
             control: fake,
             mcpClient: mcp,
@@ -72,7 +71,7 @@ struct LocalContainerSiteRuntimeTests {
         let gated = GatedFakeLocalContainerControl(result: .success(Self.ok))
         let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
         let rt = LocalContainerSiteRuntime(
-            sourceRepo: URL(fileURLWithPath: "/sites/Foo/Source"), ref: "HEAD",
+            ref: "HEAD",
             control: gated, mcpClient: mcp, connect: { _, _ in })
         let startTask = Task { await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused")) }
         await gated.waitUntilParked()
@@ -80,5 +79,87 @@ struct LocalContainerSiteRuntimeTests {
         await gated.release()
         await startTask.value
         #expect(await rt.state == .idle)
+    }
+
+    // MARK: - Observer tests (ported from RemoteSandboxSiteRuntimeTests)
+
+    @Test("observe yields starting then ready")
+    func observeTransitions() async {
+        let (rt, _) = makeRuntime(.success(Self.ok))
+        let stream = await rt.observe()
+        await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+        var seen: [SiteRuntimeState] = []
+        for await s in stream { seen.append(s); if case .ready = s { break } }
+        #expect(seen.contains(.starting(siteID: "s1")))
+        #expect(seen.last == .ready(siteID: "s1", url: Self.ok.previewURL))
+    }
+
+    /// Verifies that `setState` does NOT re-emit when the new state equals the current state.
+    /// Driven by calling `stop()` on an already-idle runtime: the initial `.idle` yield from
+    /// `observe()` is the only delivery; the redundant `.idle` from `stop()` must be swallowed.
+    @Test("setState dedup: stop() on an already-idle runtime emits .idle exactly once")
+    func setStateDedup() async {
+        let (rt, _) = makeRuntime(.success(Self.ok))
+        let stream = await rt.observe()
+        let collector = StateCollector()
+
+        // Drain the stream in a background Task. Break after 2 to catch a spurious duplicate.
+        let drainTask = Task {
+            var count = 0
+            for await s in stream {
+                await collector.append(s)
+                count += 1
+                if count >= 2 { break }
+            }
+        }
+
+        // Call stop() on the already-idle runtime — would produce a duplicate .idle without the dedup guard.
+        await rt.stop()
+
+        drainTask.cancel()
+        _ = await drainTask.result
+
+        let seen = await collector.states
+        // The only delivery should be the initial `.idle` from observe().
+        #expect(seen == [.idle])
+    }
+
+    /// Attaches the observer BEFORE start() runs, then drives start() through a suspending control
+    /// client so `.starting` is delivered to a live observer (not drained from a buffer after the fact).
+    @Test("observe delivers .starting to a live observer while runtime is mid-start")
+    func observeDeliversStartingToLiveObserver() async throws {
+        let gated = GatedFakeLocalContainerControl(result: .success(Self.ok))
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let rt = LocalContainerSiteRuntime(
+            ref: "HEAD",
+            control: gated, mcpClient: mcp, connect: { _, _ in })
+
+        // Attach the observer BEFORE start().
+        let stream = await rt.observe()
+        let collector = StateCollector()
+
+        // Drain the stream in a side task so we can interleave with start().
+        let drainTask = Task {
+            for await s in stream {
+                await collector.append(s)
+                if case .ready = s { break }
+            }
+        }
+
+        // Begin start() — parks inside control.start(), emitting .starting en route.
+        let startTask = Task { await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused")) }
+
+        // Wait until parked (runtime has emitted .starting and is mid-start).
+        await gated.waitUntilParked()
+
+        // Release so start() completes to .ready.
+        await gated.release()
+        await startTask.value
+        await drainTask.value
+
+        // The stream must have delivered both transitions to the live observer.
+        let seen = await collector.states
+        #expect(seen.contains(.starting(siteID: "s1")))
+        #expect(seen.last == .ready(siteID: "s1", url: Self.ok.previewURL))
     }
 }

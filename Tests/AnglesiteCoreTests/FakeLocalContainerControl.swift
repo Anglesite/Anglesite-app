@@ -21,6 +21,10 @@ actor FakeLocalContainerControl: LocalContainerControl {
 /// A `LocalContainerControl` whose `start` suspends until `release()` is called — for
 /// deterministically interleaving a concurrent `stop()`/second `start()` while the first
 /// `start()` is parked. Mirrors `GatedFakeSandboxControlClient`.
+///
+/// Note: the park/release rendezvous relies on Swift's cooperative executor not running the
+/// spawned `start()` Task before `waitUntilParked()` installs its continuation. This matches the
+/// pattern in `GatedFakeSandboxControlClient` and is sufficient for Swift Testing's executor.
 actor GatedFakeLocalContainerControl: LocalContainerControl {
     private let result: Result<LocalContainerSession, LocalContainerError>
     private(set) var stopped: [String] = []

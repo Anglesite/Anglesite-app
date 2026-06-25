@@ -1088,9 +1088,11 @@ public struct ContainerizationControl: LocalContainerControl {
             throw LocalContainerError.bootFailed("\(error)")
         }
 
-        // 3. Hydrate from the repo: clone the host file:// repo at `ref` into /workspace.
+        // 3. Hydrate from the repo: clone the host file:// repo into /workspace, then check out ref.
+        //    Two steps because `--branch` rejects "HEAD" and bare SHAs; `git checkout` accepts both.
         do {
-            try await container.exec(["git", "clone", "--branch", ref, sourceRepo.path, "/workspace/site"])
+            try await container.exec(["git", "clone", sourceRepo.path, "/workspace/site"])
+            try await container.exec(["git", "-C", "/workspace/site", "checkout", ref])
         } catch {
             try? await container.stop()
             throw LocalContainerError.cloneFailed("\(error)")

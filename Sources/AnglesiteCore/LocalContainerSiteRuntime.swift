@@ -6,7 +6,6 @@ import Foundation
 /// repo, connect the MCP client to the returned MCP endpoint, settle to `.ready`/`.failed`.
 /// Spawns nothing in-process.
 public actor LocalContainerSiteRuntime: SiteRuntime {
-    private let sourceRepo: URL
     private let ref: String
     private let control: any LocalContainerControl
     public let mcpClient: MCPClient
@@ -18,13 +17,11 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private var activeSiteID: String?
 
     public init(
-        sourceRepo: URL,
         ref: String,
         control: any LocalContainerControl,
         mcpClient: MCPClient,
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) }
     ) {
-        self.sourceRepo = sourceRepo
         self.ref = ref
         self.control = control
         self.mcpClient = mcpClient
@@ -62,6 +59,9 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         }
     }
 
+    /// Tear down the running container and return to `.idle`. Intentionally fire-and-forget at the
+    /// callsite: queued `readabilityHandler`s on the vsock proxy may still fire after teardown but
+    /// are idempotent; in-flight bytes are not drained by design.
     public func stop() async {
         generation += 1
         await teardown()
