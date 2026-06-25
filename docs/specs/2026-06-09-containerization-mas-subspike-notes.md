@@ -198,3 +198,66 @@ Whichever way it goes, the question deserves an explicit answer in the plan, not
 - Apple Developer Forums — ["How to request com.apple.vm.\* entitlements"](https://developer.apple.com/forums/thread/656411) (restricted, DTS-only, "virtualization software developers")
 - Anil Madhavapeddy, ["Under the hood with Apple's new Containerization framework"](https://anil.recoil.org/notes/apple-containerisation)
 - Howard Oakley, ["Sandbox and isolate your VMs with a new version of ViableS"](https://eclecticlight.co/2023/08/30/sandbox-and-isolate-your-vms-with-a-new-version-of-viables/) (precedent: sandboxed Virtualization app, DevID, no MAS plans)
+
+---
+
+## Addendum — Wall 3 resolved: NAT + vsock clears the vmnet requirement (2026-06-25)
+
+The 2026-06-20 addendum left **the** open question: the `try-containers/Containers`
+MAS app drives Apple Containerization in-process and ships **without**
+`com.apple.vm.networking`, so *how* does it network — and can Anglesite reach guest
+ports without vmnet? Source review of both `try-containers/Containers` and
+`apple/containerization` resolves it: **Wall 3 is clearable. `com.apple.vm.networking`
+is not needed.**
+
+### What the precedent actually does
+
+- **Outbound (guest → internet):** `NATInterface` → `VZNATNetworkDeviceAttachment()`
+  — Virtualization.framework's built-in NAT. Needs only `com.apple.security.virtualization`,
+  **not** vmnet. (`apple/containerization` `Sources/Containerization/VZVirtualMachineInstance.swift`;
+  used by `try-containers/Containers` `ContainerSystem/Services/SandboxedContainersService.swift`.)
+  Note `NATInterface` (vmnet-free) is a *distinct* type from `NATNetworkInterface` / `VmnetNetwork`
+  (the vmnet-backed types the `container` daemon uses) — the precedent uses the former.
+- **Inbound (host → guest port):** **vsock** (`VZVirtioSocketDevice`), which needs only
+  `.virtualization`. `LinuxContainer.dialVsock(port:)` returns a `FileHandle` to a guest port;
+  every VM gets a `VZVirtioSocketDeviceConfiguration` automatically. The library already ships
+  `UnixSocketRelay` + `VsockListener` + a bidirectional relay doing vsock↔socket splicing.
+
+### Why this dissolves Wall 3 for Anglesite
+
+Wall 3 was "load-bearing" only because §0 of the design assumed the **routable
+per-container IP** (`http://<container-ip>:4321`) that *bridged*/vmnet networking provides.
+Anglesite doesn't need a routable IP — it needs a URL the `WKWebView` can load and an MCP
+HTTP/WS endpoint. Both are delivered by a **host-side vsock→TCP proxy**:
+
+1. Host listens on `127.0.0.1:14321`; each accepted TCP conn → `container.dialVsock(port: 4321)`;
+   splice bidirectionally (reuse the library's relay). `WKWebView` loads `http://127.0.0.1:14321`.
+2. Same for the MCP server: `127.0.0.1:14399` → guest vsock 4399; `MCPClient.connect(httpEndpoint:)`.
+3. Guest side: a vsock-listen→TCP bridge per port in the OCI image
+   (`socat vsock-listen:N,fork TCP:127.0.0.1:N`, or a compiled helper), since Astro/Node
+   speak TCP not vsock.
+
+This is exactly the "vsock + host proxy" workaround the original Wall 3 analysis dismissed as
+"roughly as much work as the Cloudflare path" — but the shipping MAS precedent shows it is
+viable and modest (~5–8 dev-days for a PoC: host `VsockTCPProxy` ~1–2d reusing
+`BidirectionalRelay`; guest bridge ~0.5d; `LocalContainerSiteRuntime` integration ~2–3d; amd64→
+**arm64** image for Apple Silicon ~1–2d).
+
+### Entitlements for the MAS-local runtime (#69)
+
+| Entitlement | Status |
+|---|---|
+| `com.apple.security.virtualization` | **Restricted — request from Apple.** Wall 2; the `try-containers/Containers` precedent confirms an indie can get it granted for a sandboxed MAS app. |
+| `com.apple.security.network.client` / `.server` | Standard MAS — for the `127.0.0.1` proxy listen/connect. |
+| `com.apple.security.temporary-exception.files.absolute-path.read-write` (`/Users/`) | Temporary exception (App-Review case-by-case), as in the precedent. |
+| `com.apple.vm.networking` | **NOT needed.** This was Wall 3; the NAT+vsock architecture avoids it. |
+
+### Net
+
+The local-container path (#69 `LocalContainerSiteRuntime`) is **architecturally viable on MAS**,
+contingent only on the (clearable, precedented) `com.apple.security.virtualization` grant. The
+remaining engineering is the vsock→TCP proxy + guest bridge + the runtime integration — landed
+under #69. Sources (with commit SHAs) and the full Q&A: see the Wall 3 research notes that fed
+this addendum (`try-containers/Containers` `SandboxedContainersService.swift` /
+`Containers.entitlements`; `apple/containerization` `VZVirtualMachineInstance.swift`,
+`VirtualMachineInstance.swift`, `LinuxContainer.swift`, `UnixSocketRelay.swift`, `VsockListener.swift`).
