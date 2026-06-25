@@ -10,6 +10,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Drop AnglesiteContainer (and its native apple/containerization graph) from every SwiftPM/xcodebuild
+# manifest evaluation in CI. `swift build`/`swift test` compile all products, so without this the
+# macos-15 runner would try to build the Swift-6.2/native container stack it can neither build nor
+# run. No CI lane builds the container runtime yet; a future app-build lane (#69 Task 8) that needs
+# it can override this at the job level. Mechanism: Package.swift gates target+product+dependency on
+# this var.
+env:
+  ANGLESITE_SKIP_CONTAINER: '1'
+
 jobs:
   edit-overlay:
     name: JS edit-overlay (lint/typecheck/test)

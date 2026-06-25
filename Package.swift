@@ -13,6 +13,17 @@ let strictConcurrency: [SwiftSetting] = [
     .enableUpcomingFeature("StrictConcurrency")
 ]
 
+// AnglesiteContainer imports apple/containerization — a Swift 6.2, macOS-15+ package that pulls in
+// the native NIO/gRPC/protobuf graph and only links on Apple-Silicon machines with the
+// virtualization entitlement. `swift build` / `swift test` compile ALL of a package's products, so
+// an *unconditional* AnglesiteContainer product would force CI's macos-15 runner to compile that
+// whole graph (slow, and it can't run there anyway). The target/product/dependency are therefore
+// included BY DEFAULT — so the Xcode app build, which evaluates this manifest without being able to
+// inject env, gets the product to link — and dropped only when ANGLESITE_SKIP_CONTAINER=1, which
+// CI sets at the workflow level. The virtualization entitlement, not this flag, gates the runtime
+// at launch (see the #69 design §3 / §2.6).
+let includeContainer = ProcessInfo.processInfo.environment["ANGLESITE_SKIP_CONTAINER"] != "1"
+
 // AnglesiteIntentsTests is conditionally included only on Swift 6.4+ (Xcode 27).
 // The test binary loads `AnglesiteIntents` whose AppIntent metadata references
 // `AppIntent.supportedModes` — a macOS 26+ symbol not present on the macOS 15
@@ -35,18 +46,6 @@ var packageTargets: [Target] = [
         name: "AnglesiteIntents",
         dependencies: ["AnglesiteCore"],
         path: "Sources/AnglesiteIntents",
-        swiftSettings: strictConcurrency
-    ),
-    .target(
-        name: "AnglesiteContainer",
-        dependencies: [
-            "AnglesiteCore",
-            .product(name: "Containerization", package: "containerization"),
-            .product(name: "ContainerizationOCI", package: "containerization"),
-            .product(name: "ContainerizationExtras", package: "containerization")
-        ],
-        path: "Sources/AnglesiteContainer",
-        resources: [.copy("../../Resources/container-image")],
         swiftSettings: strictConcurrency
     ),
     // Test-only support shared across the test targets (e.g. the e2e prerequisite probes used by
@@ -72,6 +71,23 @@ var packageTargets: [Target] = [
     )
 ]
 
+if includeContainer {
+    packageTargets.append(
+        .target(
+            name: "AnglesiteContainer",
+            dependencies: [
+                "AnglesiteCore",
+                .product(name: "Containerization", package: "containerization"),
+                .product(name: "ContainerizationOCI", package: "containerization"),
+                .product(name: "ContainerizationExtras", package: "containerization")
+            ],
+            path: "Sources/AnglesiteContainer",
+            resources: [.copy("../../Resources/container-image")],
+            swiftSettings: strictConcurrency
+        )
+    )
+}
+
 #if compiler(>=6.4)
 packageTargets.append(
     .testTarget(
@@ -90,7 +106,7 @@ packageTargets.append(
 // ANGLESITE_CONTAINER_TESTS=1 is set in the build environment. Every test inside it also guards
 // on ANGLESITE_CONTAINER_E2E at runtime. Run locally with:
 //   ANGLESITE_CONTAINER_TESTS=1 ANGLESITE_CONTAINER_E2E=1 swift test --filter ContainerizationControlTests
-if ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_TESTS"] == "1" {
+if includeContainer && ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_TESTS"] == "1" {
     packageTargets.append(
         .testTarget(
             name: "AnglesiteContainerLocalTests",
@@ -101,19 +117,30 @@ if ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_TESTS"] == "1" {
     )
 }
 
+var packageProducts: [Product] = [
+    .library(name: "AnglesiteCore", targets: ["AnglesiteCore"]),
+    .library(name: "AnglesiteBridge", targets: ["AnglesiteBridge"]),
+    .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"])
+]
+
+var packageDependencies: [Package.Dependency] = []
+
+// Keep the AnglesiteContainer product and its native dependency together with the target above:
+// excluded as one unit under ANGLESITE_SKIP_CONTAINER=1 so the manifest never references a missing
+// package/product, included by default otherwise.
+if includeContainer {
+    packageProducts.append(.library(name: "AnglesiteContainer", targets: ["AnglesiteContainer"]))
+    packageDependencies.append(
+        .package(url: "https://github.com/apple/containerization.git", .upToNextMinor(from: "0.34.0"))
+    )
+}
+
 let package = Package(
     name: "Anglesite",
     platforms: [
         .macOS("27.0")
     ],
-    products: [
-        .library(name: "AnglesiteCore", targets: ["AnglesiteCore"]),
-        .library(name: "AnglesiteBridge", targets: ["AnglesiteBridge"]),
-        .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"]),
-        .library(name: "AnglesiteContainer", targets: ["AnglesiteContainer"])
-    ],
-    dependencies: [
-        .package(url: "https://github.com/apple/containerization.git", .upToNextMinor(from: "0.34.0"))
-    ],
+    products: packageProducts,
+    dependencies: packageDependencies,
     targets: packageTargets
 )
