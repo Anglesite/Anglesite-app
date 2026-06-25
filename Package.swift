@@ -113,7 +113,7 @@ let package = Package(
         .library(name: "AnglesiteContainer", targets: ["AnglesiteContainer"])
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/containerization.git", from: "0.1.0")
+        .package(url: "https://github.com/apple/containerization.git", .upToNextMinor(from: "0.34.0"))
     ],
     targets: packageTargets
 )

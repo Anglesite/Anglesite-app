@@ -33,7 +33,7 @@ mkdir -p "$OUT"
 ARCHIVE="$OUT/image.tar"
 docker buildx build \
     --platform linux/arm64 \
-    --output "type=oci,dest=${ARCHIVE}" \
+    --output "type=oci,name=anglesite-dev:latest,dest=${ARCHIVE}" \
     --builder anglesite-oci \
     "$CTX"
 
