@@ -148,7 +148,7 @@ Compute. Escalation is a runtime tier choice; the front-door is unchanged.
 
 - `copy-edit` (whole-site critique + rewrites)
 - `design-interview` (multi-turn brand conversation + palette/typography)
-- `social-media` (strategy + brand-voice posts), `repurpose` (per-platform variants; renamed from `syndicate` to free that term for POSSE syndication — #341)
+- `social-media` (strategy + brand-voice posts), `repurpose` (per-platform variants)
 - `reputation` (review-response drafts)
 - `animate` (motion-design direction; CSS syntax itself is deterministic)
 - `i18n` content translation
