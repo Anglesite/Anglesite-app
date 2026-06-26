@@ -257,6 +257,14 @@ Claude-removal roadmap's `syndicate` is *generative copy variants* (Bucket 5) �
 **that is not POSSE**; real syndication is API posting + backfeed plumbing, a
 deterministic capability layered over `@dwk/workers`, not an AI one.
 
+> **Action item — naming collision (follow-up issue needed).** This document can't
+> rename the existing roadmap bucket, but `Syndicate` in the integration-wizard
+> roadmap (AI copy variants) collides head-on with POSSE *syndication* (the real
+> protocol feature above). **File a follow-up issue to rename the Bucket 5
+> `Syndicate` entry** (e.g. to `repurpose` or `variant`) so the two stop being
+> conflated. Without the rename, the next reader of the integration-wizard docs will
+> assume `Syndicate` means POSSE — it does not.
+
 ### 5.3 Invisible publishing + local-first queue
 
 Vision: "there should rarely be a visible Publish button"; edits auto-regenerate,
@@ -401,10 +409,21 @@ This dissolves the cross-platform/AI contradiction an earlier draft flagged:
   against those, exactly as the vision intends ("interoperate instead of replace") —
   the apps are interchangeable clients; the user's site is the durable identity.
 
-So platform breadth is no longer a contradiction to "resolve before building." The
-Apple app spans macOS/iOS/iPadOS by feature set (iOS/iPad as a leaner V-4-era
-addition over the same code); the vision's "future: Windows, Linux" becomes
-downstream **native** apps, neither gating the Apple pivot.
+So the *platform-family direction* is decided (one Apple app; Windows/Linux
+separate). But that is a direction, not a scoped plan.
+
+**Scope caveat — iOS/iPadOS is a substantial, currently-unscoped epic, not "free"
+because it shares the codebase.** Today this app is macOS-only, and an iOS/iPadOS
+target is real work that is on *no* current roadmap or issue: it needs its own
+scene/navigation model (`UIWindowScene`, no `NSOpenPanel`, no AppKit multi-window),
+the remote Cloudflare runtime as the *only* runtime option (correct per above, but
+`RemoteSandboxSiteRuntime` #66/#71 are still open), and a separate App Store
+submission with different sandbox rules. **Treat iOS/iPadOS as its own future epic
+that needs a dedicated design doc + issue before it enters a phase (no earlier than
+the V-3/V-4 era), so it doesn't arrive as surprise scope.** The decision here is
+"when we do other Apple devices, they're this codebase, not a rewrite" — not "iOS
+is already planned work." The vision's "future: Windows, Linux" likewise becomes
+downstream **native** apps, none gating the macOS pivot.
 
 ---
 
@@ -480,18 +499,20 @@ and the social layer is **composed from `@dwk/workers`**, not built in-house (§
 `@dwk/workers` integration phases are gated on that package reaching a stable,
 conformant release.
 
-| Phase | Theme | Contents | Vision products unlocked |
-|---|---|---|---|
-| **V-0** | *Finish the substrate* | Continue Claude-removal + MAS + container runtime (already in flight). No vision-specific work; just don't stall it. | — |
-| **V-1** | *Typed content + feeds* | Content-type registry (§5.1) for Note/Article/Photo/Album/Bookmark; per-type editors; **RSS/Atom/JSON feeds** + **microformats2** in templates (the only protocol pieces written in-app — both static). | Blog, digital garden, link collection, photo album, portfolio. |
-| **V-2** | *Make it social (outbound)* | Provision the per-site **Cloudflare Worker** composing `@dwk/webmention` (send) + `@dwk/indieauth`; POSSE syndication to Mastodon/Bluesky (API posting + backfeed via `@dwk/webmention`); the publish queue / "invisible publish" (§5.3). | "Publish once, syndicate everywhere"; replaces basic social posting. |
-| **V-3** | *Make it social (inbound)* | Add `@dwk/micropub` + `@dwk/webmention` (receive) + `@dwk/websub` to the Worker; received interactions rendered on the page + snapshotted to git; typed objects wired to Micropub create/update/delete. | Comments/likes/replies on your own site; posting from external/IndieWeb clients. |
-| **V-4** | *Federation + reader* | Add `@dwk/activitypub` (actor/inbox/outbox/followers) + `@dwk/microsub` (follow/timeline) + `@dwk/webfinger`/identity. | Appear natively in the Fediverse; follow others; replaces Mastodon-class following. |
-| **V-5** | *Communities + discovery* | Separate epic (§5.6/§5.7) — federation backend already in `@dwk/workers` (ActivityPub Groups + ATProto); this phase is the moderation/membership/directory **UX** + content modeling. Gated on V-3/V-4 backend. Spike first. | Groups, Meetup, neighborhood/club sites. |
+| Phase | Theme | Contents | Prerequisites | Vision products unlocked |
+|---|---|---|---|---|
+| **V-0** | *Finish the substrate* | Continue Claude-removal + MAS + container runtime (already in flight). No vision-specific work; just don't stall it. | — | — |
+| **V-1** | *Typed content + feeds* | Content-type registry (§5.1) for Note/Article/Photo/Album/Bookmark; per-type editors; **RSS/Atom/JSON feeds** + **microformats2** in templates (the only protocol pieces written in-app — both static). | None — Astro-native + small deps (§8). | Blog, digital garden, link collection, photo album, portfolio. |
+| **V-2** | *Make it social (outbound)* | Provision the per-site **Cloudflare Worker** composing `@dwk/webmention` (send) + `@dwk/indieauth`; POSSE syndication to Mastodon/Bluesky (API posting + backfeed via `@dwk/webmention`); the publish queue / "invisible publish" (§5.3). | **`@dwk/workers` stable release** (webmention/indieauth packages) + **passing webmention.rocks** (§5.2). | "Publish once, syndicate everywhere"; replaces basic social posting. |
+| **V-3** | *Make it social (inbound)* | Add `@dwk/micropub` + `@dwk/webmention` (receive) + `@dwk/websub` to the Worker; received interactions rendered on the page + snapshotted to git; typed objects wired to Micropub create/update/delete. | **`@dwk/workers` stable** + **passing micropub.rocks / webmention.rocks** (§5.2); data-canonicality decision (§6.2). | Comments/likes/replies on your own site; posting from external/IndieWeb clients. |
+| **V-4** | *Federation + reader* | Add `@dwk/activitypub` (actor/inbox/outbox/followers) + `@dwk/microsub` (follow/timeline) + `@dwk/webfinger`/identity. | `@dwk/workers` activitypub/microsub conformant; V-3 backend live. | Appear natively in the Fediverse; follow others; replaces Mastodon-class following. |
+| **V-5** | *Communities + discovery* | Separate epic (§5.6/§5.7) — federation backend already in `@dwk/workers` (ActivityPub Groups + ATProto); this phase is the moderation/membership/directory **UX** + content modeling. Spike first. | V-3/V-4 backend live; own design + issue. | Groups, Meetup, neighborhood/club sites. |
 
-**iOS/iPadOS** ride this same Apple codebase with a leaner feature set (natural in
-the V-3/V-4 era, on the remote Cloudflare runtime — §5.8), not a separate effort.
-**Dropped for V1 (see §5.4): migration/import from other social platforms.** Also
+**iOS/iPadOS** would ride this same Apple codebase with a leaner feature set (on the
+remote Cloudflare runtime), but it is a **separate, currently-unscoped epic needing
+its own design doc + issue before it enters a phase** — no earlier than the V-3/V-4
+era (§5.8). It is *not* free-by-virtue-of-shared-code and is not on this critical
+path. **Dropped for V1 (see §5.4): migration/import from other social platforms.** Also
 out of v1 scope by decision (revisit later, none on the critical path):
 multi-provider deploy (§5.5), self-hosting via `@dwk/server`, and the separate
 native **Windows/Linux** apps (§5.8). Commerce, newsletters, and membership layer
