@@ -96,23 +96,6 @@ struct AnglesiteApp: App {
         )
     }
 
-    /// File ▸ Open Site… — window-independent, so it runs from any focused window.
-    @MainActor
-    private func openSiteFromMenu() async {
-        do {
-            guard let site = try await SiteActions.pickAndRegisterSite() else { return }
-            openWindow(value: site.id)
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "Couldn't open that site"
-            // `SiteActions.ImportError.localizedDescription` names the package and the reason;
-            // other errors fall back to their OS-provided message rather than a raw enum dump.
-            alert.informativeText = error.localizedDescription
-            alert.alertStyle = .warning
-            alert.runModal()
-        }
-    }
-
     var body: some Scene {
         // The launcher is the first scene so it's the default window at launch (used when
         // SwiftUI has nothing to restore). It autoopens the most-recently-used site from its
@@ -141,19 +124,8 @@ struct AnglesiteApp: App {
         }
         .windowResizability(.contentSize)
         .commands {
-            CommandGroup(replacing: .newItem) {
-                Button("New Site") {
-                    // Ensure the launcher exists to host the wizard sheet, then ask it to open.
-                    openWindow(id: "sites")
-                    WindowRouter.shared.requestNewSite()
-                }
-                .keyboardShortcut("n")
-
-                Button("Open Site…") {
-                    Task { await openSiteFromMenu() }
-                }
-                .keyboardShortcut("o")
-
+            NewContentCommands()
+            CommandGroup(after: .newItem) {
                 Menu("Open Recent") {
                     ForEach(recent.sites) { site in
                         Button(site.name) { openWindow(value: site.id) }

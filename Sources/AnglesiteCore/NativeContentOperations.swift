@@ -30,6 +30,16 @@ public struct NativeContentOperations: ContentOperationsService {
     }
 
     public func createPage(siteID: String, name: String, route: String?, onProgress: ProgressHandler? = nil) async -> ContentCreateResult {
+        await createPage(siteID: siteID, name: name, route: route, template: .standard, onProgress: onProgress)
+    }
+
+    public func createPage(
+        siteID: String,
+        name: String,
+        route: String?,
+        template: ContentScaffold.PageTemplate,
+        onProgress: ProgressHandler? = nil
+    ) async -> ContentCreateResult {
         onProgress?(.createResolvingRuntime)
         guard let root = await siteDirectory(siteID) else { return .siteNotFound }
 
@@ -51,7 +61,8 @@ public struct NativeContentOperations: ContentOperationsService {
         onProgress?(.createCallingPlugin)
         let contents = ContentScaffold.renderPage(
             title: title,
-            layoutImport: ContentScaffold.layoutImport(normalizedRoute: normalized))
+            layoutImport: ContentScaffold.layoutImport(normalizedRoute: normalized),
+            template: template)
         do { try write(contents, to: abs) }
         catch { return .failed(reason: "\(error)") }
 
@@ -90,6 +101,46 @@ public struct NativeContentOperations: ContentOperationsService {
 
         onProgress?(.createFinalizing)
         _ = await gitCommit(root, relPath, "anglesite: add \(coll) \(finalSlug)")
+        return .created(filePath: relPath, identifier: finalSlug)
+    }
+
+    public func createCollectionEntry(
+        siteID: String,
+        title: String,
+        descriptor: ContentTypeDescriptor,
+        slug: String?,
+        onProgress: ProgressHandler? = nil
+    ) async -> ContentCreateResult {
+        guard let collection = descriptor.collection else {
+            return .failed(reason: "\(descriptor.displayName) is not a collection-backed content type")
+        }
+
+        onProgress?(.createResolvingRuntime)
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else { return .failed(reason: "New collection entries need a non-empty title") }
+        guard collection.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil else {
+            return .failed(reason: "Invalid collection name: \(collection)")
+        }
+
+        let slugSource = slug.flatMap { $0.isEmpty ? nil : $0 } ?? cleanTitle
+        let finalSlug = ContentScaffold.slugify(slugSource)
+        guard !finalSlug.isEmpty else { return .failed(reason: "Could not derive a slug from the title") }
+
+        let relPath = ContentScaffold.postRelativePath(collection: collection, slug: finalSlug)
+        let abs = root.appendingPathComponent(relPath)
+        if fileManager.fileExists(atPath: abs.path) {
+            return .failed(reason: "A \(collection) entry already exists at \(relPath)")
+        }
+
+        onProgress?(.createCallingPlugin)
+        let contents = ContentScaffold.renderCollectionEntry(title: cleanTitle, descriptor: descriptor, now: now())
+        do { try write(contents, to: abs) }
+        catch { return .failed(reason: "\(error)") }
+
+        onProgress?(.createFinalizing)
+        _ = await gitCommit(root, relPath, "anglesite: add \(collection) \(finalSlug)")
         return .created(filePath: relPath, identifier: finalSlug)
     }
 

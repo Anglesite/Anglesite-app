@@ -18,9 +18,13 @@ public enum ContentScanner {
     private static let entryExtensions: Set<String> = [".md", ".mdx", ".mdoc", ".markdown"]
     /// Raster/vector image extensions surfaced from `public/images/`.
     private static let imageExtensions: Set<String> = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".avif"]
-    /// Collections whose entries are "posts" in the graph's sense (title / publishDate / draft /
-    /// tags). Other collections (gallery, team, menus, …) don't fit the Post shape (#140).
-    private static let articleCollections = ["posts", "notes", "episodes", "experiments"]
+    /// Collections whose entries can fit today's `SiteContentGraph.Post` shape well enough for
+    /// navigator/search. Typed editors can grow a richer graph later; for now registry-backed
+    /// collection entries still deserve to appear after File > New > Collection creates them.
+    private static let articleCollections = Array(Set(
+        ["posts", "blog", "notes", "episodes", "experiments"]
+        + ContentTypeRegistry.builtIns.compactMap(\.collection)
+    )).sorted()
 
     public static func scan(projectRoot: URL, siteID: String) -> ContentListing {
         ContentListing(
@@ -112,7 +116,10 @@ public enum ContentScanner {
                 let relPosix = relativePosix(abs, from: projectRoot)
                 let fm = readFrontmatter(abs)
                 let slug = stringField(fm, "slug") ?? basenameWithoutExtension(abs)
-                let title = stringField(fm, "title") ?? slug
+                let title = stringField(fm, "title")
+                    ?? stringField(fm, "name")
+                    ?? stringField(fm, "itemReviewed")
+                    ?? slug
                 let tags: [String]
                 if case let .array(t)? = fm["tags"] { tags = t } else { tags = [] }
                 out.append(SiteContentGraph.Post(
