@@ -1,7 +1,12 @@
 import SwiftUI
 import WebKit
 import AnglesiteCore
+// AnglesiteContainer (the local-container runtime + entitlement probe) links into the DevID app only;
+// the MAS target does not link it (container distribution is deferred). Guard so the shared
+// PreviewModel still compiles for AnglesiteMAS, which always uses the host LocalSiteRuntime.
+#if !ANGLESITE_MAS
 import AnglesiteContainer
+#endif
 
 /// SwiftUI-facing wrapper over a `SiteRuntime` actor: mirrors the runtime's `SiteRuntimeState` into
 /// an observable property and exposes `open(...)` / `close()` for the view layer.
@@ -89,6 +94,9 @@ final class PreviewModel {
     /// `sourceRepo` is NOT passed here — `LocalContainerSiteRuntime.init` doesn't take it; it
     /// receives it at `start(siteID:siteDirectory:)` time (forwarded from `open(siteID:siteDirectory:)`).
     static func makeRuntime(contentGraph: SiteContentGraph?) -> any SiteRuntime {
+        #if !ANGLESITE_MAS
+        // Container runtime is DevID-only (MAS doesn't link AnglesiteContainer). On MAS this whole
+        // branch compiles out and the host runtime below is always used.
         if LocalContainerSupport.isAvailable(hasVirtualizationEntitlement: VirtualizationEntitlement.isPresent)
             && BundledImage.isProvisioned {
             return LocalContainerSiteRuntime(
@@ -97,6 +105,7 @@ final class PreviewModel {
                 mcpClient: MCPClient(supervisor: .shared)
             )
         }
+        #endif
         return LocalSiteRuntime(contentGraph: contentGraph)
     }
 
