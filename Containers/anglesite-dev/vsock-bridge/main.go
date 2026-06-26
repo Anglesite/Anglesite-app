@@ -35,7 +35,7 @@ func main() {
 			log.Printf("skipping malformed arg %q: bad tport: %v", arg, err)
 			continue
 		}
-		go listen(uint32(vport), parts[1])
+		go listen(uint32(vport), strconv.Itoa(tport))
 	}
 	// No signal handling: LinuxContainer.stop() tears down the whole VM, which kills
 	// this process and all goroutines — per-process cleanup is unnecessary.

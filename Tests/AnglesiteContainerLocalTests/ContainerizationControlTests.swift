@@ -21,12 +21,16 @@ struct ContainerizationControlTests {
         let repo = try makeThrowawayAstroRepo()
         defer { try? FileManager.default.removeItem(at: repo) }
         let session = try await control.start(siteID: "e2e", sourceRepo: repo, ref: "HEAD")
+        // Safety net: fires on any exit path (incl. a thrown #expect below) so a failed
+        // assertion doesn't leave the VM running. stop() is idempotent, so the awaited
+        // happy-path stop below is harmless after this.
+        defer { Task { try? await control.stop(siteID: "e2e") } }
 
         // The preview URL must serve HTTP 200 within the ready window.
         let (_, resp) = try await URLSession.shared.data(from: session.previewURL)
         #expect((resp as? HTTPURLResponse)?.statusCode == 200)
 
-        // Await teardown so the VM does not outlive the test.
+        // Await teardown on the happy path so the VM is down before the test returns.
         try? await control.stop(siteID: "e2e")
     }
 
