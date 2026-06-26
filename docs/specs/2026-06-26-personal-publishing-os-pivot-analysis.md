@@ -150,6 +150,41 @@ a purpose-built editor. Today: 3 generic types.
   `Resources/Template/`, and App-Intent entities (the `ContentEntities` pattern
   already exists for Page/Post/Image — extend it).
 
+**Astro leverage — the spine is native, with a few ecosystem pieces (no turnkey
+kit).** There is *no* drop-in npm package that ships ready-made Note/Photo/Event/
+Recipe components; that purpose-built layer is ours to build. But the *plumbing*
+under each typed object is largely off-the-shelf:
+
+- **Astro Content Collections + Zod schemas are the typed-object mechanism** — and
+  the template already uses them (`src/content.config.ts`, the `blog` glob loader).
+  Each typed object = a collection with its own Zod schema; this is exactly the
+  per-type "frontmatter schema" the registry needs, and it gives compile-time types
+  and validation for free. Astro 5's **Content Layer loaders** further let a
+  collection pull from non-file sources (useful later for imported/syndicated data).
+- **One schema, two projections.** Define the Zod schema once per type and emit
+  *both* IndieWeb **microformats2** (h-entry/h-card classes in the `.astro`
+  template — pure markup/CSS-class work, no package) *and* **schema.org JSON-LD**
+  via [`astro-seo-schema`](https://www.npmjs.com/package/astro-seo-schema) (v6) with
+  [`schema-dts`](https://www.npmjs.com/package/schema-dts) types. mf2 powers
+  Webmention/federation; JSON-LD powers search rich-results. Recipe/Event/Review map
+  cleanly to schema.org types here.
+- **Feeds:** the official [`@astrojs/rss`](https://www.npmjs.com/package/@astrojs/rss)
+  generates RSS straight from collections — directly satisfies §5.2's static feed
+  pillar and feeds `@dwk/microsub`/`@dwk/websub`.
+- **Media:** Astro's native `astro:assets` `<Image>`/`<Picture>` (backed by Sharp,
+  which the app already bundles) covers Photo/Album.
+- **Embeds/citations:** [`astro-embed`](https://www.npmjs.com/package/astro-embed)
+  (Tweet/YouTube/etc.) is useful for rendering the *referenced* thing in Bookmark/
+  Like/Repost/Reply objects.
+- **Reference implementation:** the [Astro Cactus theme](https://github.com/chrismwilliams/astro-theme-cactus)
+  is the best-documented example of webmention *display* + mf2 layout on Astro.
+  (Note: it uses webmention.io to receive — we don't need that; `@dwk/webmention`
+  is our receiver per §5.2. Cactus is a display/markup reference, not a backend.)
+
+Net: the per-type **schema, structured-data, feed, and media** plumbing is mostly
+Astro-native or a small dependency; what Anglesite genuinely builds is the
+**Swift-side typed editors** and the **per-type templates** (with mf2 classes).
+
 This is the most tractable pillar: it's additive, fits existing patterns, and is a
 prerequisite for everything social (a "Reply" *is* a content object with a
 `u-in-reply-to`).
