@@ -18,9 +18,15 @@ public final class AppSettings: @unchecked Sendable {
         public static let debugPaneEnabled   = "anglesite.debugPaneEnabled"
         public static let lastOpenedSiteID   = "anglesite.lastOpenedSiteID"
         public static let sitesRootBookmark  = "anglesite.sitesRootBookmark"
-        public static let foundationModelTier    = "anglesite.foundationModelTier"
         public static let autoGenerateAltText = "anglesite.autoGenerateAltText"
         public static let announcesLiveUpdates = "anglesite.announcesLiveUpdates"
+        public static let didCleanLegacyChatBackendDefaults = "anglesite.didCleanLegacyChatBackendDefaults"
+    }
+
+    private enum LegacyKey {
+        static let preferFoundationModels = "anglesite.preferFoundationModels"
+        static let didMigrateAssistantDefault = "anglesite.didMigrateAssistantDefault"
+        static let foundationModelTier = "anglesite.foundationModelTier"
     }
 
     private let defaults: UserDefaults
@@ -101,13 +107,6 @@ public final class AppSettings: @unchecked Sendable {
         }
     }
 
-    /// Which Foundation Models tier to use for chat. Defaults to
-    /// ``FoundationModelTier/onDevice``; an unknown persisted value also resolves to on-device.
-    public var foundationModelTier: FoundationModelTier {
-        get { FoundationModelTier(rawValue: defaults.string(forKey: Key.foundationModelTier) ?? "") ?? .onDevice }
-        set { defaults.set(newValue.rawValue, forKey: Key.foundationModelTier) }
-    }
-
     /// When on (the default), dropping an image onto the preview auto-generates alt text with the
     /// on-device vision model and applies it to the `<img>` (C.7, #157). Both targets. No-ops
     /// gracefully when Apple Intelligence is unavailable. Stored inverted-from-absent so an
@@ -148,6 +147,15 @@ public final class AppSettings: @unchecked Sendable {
                 defaults.removeObject(forKey: Key.lastOpenedSiteID)
             }
         }
+    }
+
+    /// One-time cleanup for settings removed when chat became Foundation Models-only.
+    public func removeLegacyChatBackendDefaultsIfNeeded() {
+        guard !defaults.bool(forKey: Key.didCleanLegacyChatBackendDefaults) else { return }
+        defaults.removeObject(forKey: LegacyKey.preferFoundationModels)
+        defaults.removeObject(forKey: LegacyKey.didMigrateAssistantDefault)
+        defaults.removeObject(forKey: LegacyKey.foundationModelTier)
+        defaults.set(true, forKey: Key.didCleanLegacyChatBackendDefaults)
     }
 }
 

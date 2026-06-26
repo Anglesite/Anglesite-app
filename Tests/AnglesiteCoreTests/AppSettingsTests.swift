@@ -64,28 +64,6 @@ final class AppSettingsTests {
         #expect(!settings.debugPaneEnabled)
     }
 
-    // MARK: Assistant model
-
-    @Test("foundationModelTier defaults to on-device") func foundationModelTierDefaultsToOnDevice() {
-        let settings = AppSettings(defaults: defaults)
-        #expect(settings.foundationModelTier == .onDevice)
-    }
-
-    @Test("foundationModelTier round trip") func foundationModelTierRoundTrip() {
-        let settings = AppSettings(defaults: defaults)
-        settings.foundationModelTier = .privateCloudCompute
-        #expect(settings.foundationModelTier == .privateCloudCompute)
-        settings.foundationModelTier = .onDevice
-        #expect(settings.foundationModelTier == .onDevice)
-    }
-
-    @Test("foundationModelTier falls back to on-device for an unknown stored value")
-    func foundationModelTierUnknownFallsBack() {
-        defaults.set("quantum-cloud", forKey: AppSettings.Key.foundationModelTier)
-        let settings = AppSettings(defaults: defaults)
-        #expect(settings.foundationModelTier == .onDevice)
-    }
-
     // MARK: Auto alt-text (C.7 — vision alt-text pipeline)
 
     @Test("autoGenerateAltText defaults to true (on)") func autoAltTextDefaultsToTrue() {
@@ -112,6 +90,24 @@ final class AppSettingsTests {
         #expect(!settings.announcesLiveUpdates)
         settings.announcesLiveUpdates = true
         #expect(settings.announcesLiveUpdates)
+    }
+
+    @Test("legacy chat backend defaults are cleaned once") func legacyChatBackendDefaultsCleanedOnce() {
+        defaults.set(false, forKey: "anglesite.preferFoundationModels")
+        defaults.set(true, forKey: "anglesite.didMigrateAssistantDefault")
+        defaults.set("privateCloudCompute", forKey: "anglesite.foundationModelTier")
+
+        let settings = AppSettings(defaults: defaults)
+        settings.removeLegacyChatBackendDefaultsIfNeeded()
+
+        #expect(defaults.object(forKey: "anglesite.preferFoundationModels") == nil)
+        #expect(defaults.object(forKey: "anglesite.didMigrateAssistantDefault") == nil)
+        #expect(defaults.object(forKey: "anglesite.foundationModelTier") == nil)
+        #expect(defaults.bool(forKey: AppSettings.Key.didCleanLegacyChatBackendDefaults))
+
+        defaults.set(false, forKey: "anglesite.preferFoundationModels")
+        settings.removeLegacyChatBackendDefaultsIfNeeded()
+        #expect(defaults.object(forKey: "anglesite.preferFoundationModels") != nil)
     }
 
     // MARK: DebugPaneVisibility

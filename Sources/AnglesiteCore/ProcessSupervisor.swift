@@ -1,6 +1,6 @@
 import Foundation
 
-/// Spawns and supervises subprocesses (Astro dev server, MCP server, Claude agent, ad-hoc Node smoke tests).
+/// Spawns and supervises subprocesses (Astro dev server, MCP server, ad-hoc Node smoke tests).
 ///
 /// All subprocess spawning in the app goes through this actor. Direct `Process()` use from views or
 /// other modules is not allowed — it would bypass log streaming and shutdown handling.

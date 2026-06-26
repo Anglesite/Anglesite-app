@@ -768,11 +768,6 @@ struct SiteWindow: View {
         let annotationResolver: ChatModel.AnnotationResolver = { id in
             try AnnotationStore.resolve(in: sourceDirectory, id: id)
         }
-        #if ANGLESITE_MAS
-        let tier: FoundationModelTier = .onDevice
-        #else
-        let tier = AppSettings.shared.foundationModelTier
-        #endif
         // Chat is backed by the on-device `FoundationModelAssistant` (#159).
         // The per-site `editBridge` + app-lifetime `contentGraph` attach `ApplyEditTool` +
         // `SearchContentTool`, so the on-device path advertises `supportsTools` and runs a local
@@ -783,7 +778,7 @@ struct SiteWindow: View {
             configDirectory: resolved.configDirectory,
             assistant: KnowledgeAugmentedAssistant(
                 base: FoundationModelAssistant(
-                    tier: tier,
+                    tier: .onDevice,
                     editBridge: makeEditBridge(),
                     contentGraph: contentGraph,
                     knowledgeIndex: knowledgeIndex,
