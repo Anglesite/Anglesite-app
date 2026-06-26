@@ -71,7 +71,7 @@ final class DeployModel {
         command: DeployCommand = DeployCommand(),
         logCenter: LogCenter = .shared,
         keychain: KeychainStore = KeychainStore(),
-        verifier: TokenVerifying = WranglerTokenVerifier(),
+        verifier: TokenVerifying = CloudflareAPITokenVerifier(),
         summarizer: any DeployFailureSummarizing = DeploySummarizerFactory.makeDefault()
     ) {
         self.command = command
