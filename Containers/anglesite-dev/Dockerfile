@@ -1,7 +1,7 @@
 # Anglesite local dev-server image (arm64 / Apple Silicon). Built and exported as an OCI layout by
 # scripts/vendor-container-image.sh, then bundled into AnglesiteContainer. Bakes Node + git +
-# the vsock→TCP bridge. The MCP sidecar is layered in by a later change (TODO(#69)); it is NOT
-# baked here.
+# the vsock→TCP bridge + the app's MCP sidecar (the plugin's server/, npm ci'd for linux-arm64 so
+# sharp's native binary is correct) so a fresh container needs no in-guest install.
 
 # Build the vsock bridge.
 FROM --platform=linux/arm64 golang:1.22-bookworm AS bridge
