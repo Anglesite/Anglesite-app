@@ -29,7 +29,7 @@ final class HomepageWriterTests: XCTestCase {
         let out = HomepageWriter.fill(astro, headline: "Acme", blurb: "", tagline: "We do things.")
         XCTAssertTrue(out.contains(#"description="We do things.""#))
         XCTAssertTrue(out.contains("<h1>Acme</h1>"))
-        // Intro paragraph untouched when no blurb:
+        // When no blurb is provided, the intro paragraph keeps the template default.
         XCTAssertTrue(out.contains("ready to customize in Anglesite"))
     }
 
