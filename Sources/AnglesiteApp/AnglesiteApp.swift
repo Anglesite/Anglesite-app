@@ -116,7 +116,6 @@ struct AnglesiteApp: App {
     private let debugPaneMenuVisible: Bool
 
     init() {
-        AppSettings.shared.migrateAssistantDefaultIfNeeded()
         #if DEBUG
         let isDebugBuild = true
         #else

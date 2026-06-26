@@ -18,11 +18,9 @@ public final class AppSettings: @unchecked Sendable {
         public static let debugPaneEnabled   = "anglesite.debugPaneEnabled"
         public static let lastOpenedSiteID   = "anglesite.lastOpenedSiteID"
         public static let sitesRootBookmark  = "anglesite.sitesRootBookmark"
-        public static let preferFoundationModels = "anglesite.preferFoundationModels"
         public static let foundationModelTier    = "anglesite.foundationModelTier"
         public static let autoGenerateAltText = "anglesite.autoGenerateAltText"
         public static let announcesLiveUpdates = "anglesite.announcesLiveUpdates"
-        public static let didMigrateAssistantDefault = "anglesite.didMigrateAssistantDefault"
     }
 
     private let defaults: UserDefaults
@@ -103,45 +101,8 @@ public final class AppSettings: @unchecked Sendable {
         }
     }
 
-    /// DevID-only (Settings → Assistant): use Apple's on-device Foundation Models for chat instead
-    /// of Claude. Defaults to `true` — Apple Foundation Models is the default backend; Claude is an
-    /// opt-in legacy path slated for removal as the app moves off Claude Code. Stored
-    /// inverted-from-absent so an untouched install defaults to Foundation Models. MAS ignores this —
-    /// it has no Claude CLI and always uses Foundation Models. Read at `ChatModel` construction, so a
-    /// change takes effect for the next-opened site window (#160).
-    public var preferFoundationModels: Bool {
-        get {
-            // Absent → Foundation Models by default; an explicit stored value wins.
-            guard defaults.object(forKey: Key.preferFoundationModels) != nil else { return true }
-            return defaults.bool(forKey: Key.preferFoundationModels)
-        }
-        set { defaults.set(newValue, forKey: Key.preferFoundationModels) }
-    }
-
-    /// One-time upgrade migration (run once at launch). Before this version, Foundation Models was
-    /// opt-in (`preferFoundationModels` defaulted to `false` = Claude). The default is now `true`.
-    /// For an EXISTING install that never chose a backend, silently switching to Foundation Models
-    /// would change a working setup unannounced — so pin those users to the prior default (Claude);
-    /// they can opt into Foundation Models in Settings. New installs (no prior Anglesite state) keep
-    /// the new Foundation Models default.
-    public func migrateAssistantDefaultIfNeeded() {
-        guard defaults.object(forKey: Key.didMigrateAssistantDefault) == nil else { return } // run once
-        defer { defaults.set(true, forKey: Key.didMigrateAssistantDefault) }
-        guard defaults.object(forKey: Key.preferFoundationModels) == nil else { return } // user already chose
-        guard isExistingInstallPriorToAssistantDefaultFlip else { return } // new install → keep FM default
-        defaults.set(false, forKey: Key.preferFoundationModels) // upgrade → preserve Claude
-    }
-
-    /// Heuristic: any previously-persisted Anglesite setting means this is an upgrade, not a fresh install.
-    private var isExistingInstallPriorToAssistantDefaultFlip: Bool {
-        [Key.pluginPathOverride, Key.templatePathOverride, Key.sitesRootOverride, Key.debugPaneEnabled,
-         Key.lastOpenedSiteID, Key.sitesRootBookmark, Key.foundationModelTier, Key.autoGenerateAltText,
-         Key.announcesLiveUpdates].contains { defaults.object(forKey: $0) != nil }
-    }
-
-    /// DevID-only (Settings → Assistant): which Foundation Models tier to use when
-    /// ``preferFoundationModels`` is on. Defaults to ``FoundationModelTier/onDevice``; an unknown
-    /// persisted value also resolves to on-device.
+    /// Which Foundation Models tier to use for chat. Defaults to
+    /// ``FoundationModelTier/onDevice``; an unknown persisted value also resolves to on-device.
     public var foundationModelTier: FoundationModelTier {
         get { FoundationModelTier(rawValue: defaults.string(forKey: Key.foundationModelTier) ?? "") ?? .onDevice }
         set { defaults.set(newValue.rawValue, forKey: Key.foundationModelTier) }

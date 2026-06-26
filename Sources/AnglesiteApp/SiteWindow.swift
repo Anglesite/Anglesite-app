@@ -85,12 +85,10 @@ struct SiteWindow: View {
     #endif
     @State private var backup = BackupModel()
     @State private var audit = AuditModel()
-    // Chat is now on both targets: DevID backs it with Claude (`ClaudeAssistant`), MAS with the
-    // on-device `FoundationModelAssistant` (#159). The backend is chosen at construction in
-    // `loadAndStart()`; the panel UI is target-agnostic.
+    // Chat is now on both targets and backed by the on-device `FoundationModelAssistant`;
+    // the panel UI is target-agnostic.
     @State private var chat: ChatModel?
     @State private var chatPresented = false
-    @State private var assistantChoice: AssistantChoice = .foundationModel(.onDevice)
     @State private var health = HealthModel(runner: DefaultHealthCheckRunner())
     /// Drives the determinate startup progress bar shown in `mainPane` while the dev server boots.
     @State private var startup = StartupProgressModel()
@@ -672,12 +670,7 @@ struct SiteWindow: View {
     }
 
     private var healthAssistantPrompt: String {
-        switch assistantChoice {
-        case .claude:
-            return "/anglesite:check"
-        case .foundationModel:
-            return "Audit this site for issues and suggest improvements to make it deploy-ready. Review the available site content and call out concrete files or sections when relevant."
-        }
+        "Audit this site for issues and suggest improvements to make it deploy-ready. Review the available site content and call out concrete files or sections when relevant."
     }
 
     private func saveWebsiteTitle(_ title: String) async {
@@ -776,9 +769,11 @@ struct SiteWindow: View {
             try AnnotationStore.resolve(in: sourceDirectory, id: id)
         }
         #if ANGLESITE_MAS
-        assistantChoice = .foundationModel(.onDevice)
-        // Sandboxed App Store build: there's no `claude` CLI to shell out to, so chat is backed by
-        // the on-device `FoundationModelAssistant` (#159). This is the MAS build's first chat pane.
+        let tier: FoundationModelTier = .onDevice
+        #else
+        let tier = AppSettings.shared.foundationModelTier
+        #endif
+        // Chat is backed by the on-device `FoundationModelAssistant` (#159).
         // The per-site `editBridge` + app-lifetime `contentGraph` attach `ApplyEditTool` +
         // `SearchContentTool`, so the on-device path advertises `supportsTools` and runs a local
         // agentic loop with no network (#193).
@@ -788,7 +783,7 @@ struct SiteWindow: View {
             configDirectory: resolved.configDirectory,
             assistant: KnowledgeAugmentedAssistant(
                 base: FoundationModelAssistant(
-                    tier: .onDevice,
+                    tier: tier,
                     editBridge: makeEditBridge(),
                     contentGraph: contentGraph,
                     knowledgeIndex: knowledgeIndex,
@@ -801,50 +796,6 @@ struct SiteWindow: View {
             annotationResolver: annotationResolver,
             undoCommand: undoCommand
         )
-        #else
-        // Developer ID build: Apple's on-device Foundation Models is the default backend; Settings →
-        // Assistant lets the user opt back into the legacy Claude path (#160). The choice is read here
-        // at construction, so a settings change takes effect for the next-opened site window.
-        //
-        // NOTE: `FoundationModelAssistant` is defined inside `#if compiler(>=6.4)` (see
-        // FoundationModelAssistant.swift). This call site is unguarded because CI builds on
-        // Xcode 27 / Swift 6.4; the MAS branch above relies on the same assumption. If the toolchain
-        // floor ever drops below 6.4, both branches need a `#if compiler(>=6.4)` fallback.
-        //
-        // Like the MAS branch, the on-device path gets the per-site `editBridge` + app-lifetime
-        // `contentGraph` so it attaches `ApplyEditTool` + `SearchContentTool` and advertises
-        // `supportsTools` (#193). The Claude path carries its own tool surface and ignores these.
-        let settings = AppSettings.shared
-        // The settings → backend decision is a pure function in `AnglesiteCore`
-        // (`resolveAssistantChoice`) so it's unit-tested without the App target (#161 item 7);
-        // construction stays here because it needs App-owned deps (the edit bridge, content graph).
-        // `makeEditBridge()` is only called in the on-device arm — the Claude path does no bridge work.
-        let assistant: any ConversationalAssistant
-        let choice = resolveAssistantChoice(preferFoundationModels: settings.preferFoundationModels, tier: settings.foundationModelTier)
-        assistantChoice = choice
-        switch choice {
-        case .foundationModel(let tier):
-            assistant = FoundationModelAssistant(
-                tier: tier,
-                editBridge: makeEditBridge(),
-                contentGraph: contentGraph,
-                knowledgeIndex: knowledgeIndex,
-                semanticRanker: semanticRanker,
-                integrationService: integrationOps
-            )
-        case .claude:
-            assistant = ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
-        }
-        chat = ChatModel(
-            siteID: resolved.id,
-            siteDirectory: resolved.sourceDirectory,
-            configDirectory: resolved.configDirectory,
-            assistant: KnowledgeAugmentedAssistant(base: assistant, index: knowledgeIndex),
-            annotationFeed: feed,
-            annotationResolver: annotationResolver,
-            undoCommand: undoCommand
-        )
-        #endif
         // Auto alt-text (C.7 / #157): after a successful image drop, generate alt text on-device and
         // apply it to the `<img>`. Target-agnostic — the on-device vision model runs on both builds.
         // The follow-up edit routes through its own (post-process-free) apply_edit router so it can't

@@ -1,11 +1,13 @@
 import SwiftUI
 import AppKit
 import AnglesiteCore
+#if compiler(>=6.4)
+import FoundationModels
+#endif
 
 /// Chat panel UI. Renders the live conversation between the user and the site's
-/// ``ConversationalAssistant`` — Claude (`ClaudeAgent`) on the Developer ID build, the on-device
-/// `FoundationModelAssistant` on the Mac App Store build. Designed to live in a right-hand pane of
-/// the main window so the user can see the preview and chat side by side.
+/// ``ConversationalAssistant`` backed by Foundation Models. Designed to live in a right-hand pane
+/// of the main window so the user can see the preview and chat side by side.
 ///
 /// Markdown is rendered via SwiftUI's native `AttributedString(markdown:)` — covers bold,
 /// italic, code spans, and links without pulling in a markdown library. Multi-line code blocks
@@ -436,11 +438,59 @@ private struct ToolCallCard: View {
     }
 }
 
-// DevID-only: the no-assistant convenience init below is `#if !ANGLESITE_MAS`. The panel itself
-// compiles on both targets; only this preview needs the Claude-backed convenience init.
-#if !ANGLESITE_MAS
+private actor PreviewAssistant: ConversationalAssistant {
+    nonisolated var capabilities: AssistantCapabilities {
+        AssistantCapabilities(
+            supportsStreaming: true,
+            supportsStructuredOutput: false,
+            supportsVision: false,
+            supportsTools: false,
+            maxContextTokens: nil,
+            providerName: "Preview"
+        )
+    }
+
+    func generate(prompt: String, context: AssistantContext) async throws -> AsyncThrowingStream<String, Error> {
+        _ = context
+        return AsyncThrowingStream { continuation in
+            continuation.yield("Preview response to: \(prompt)")
+            continuation.finish()
+        }
+    }
+
+    #if compiler(>=6.4)
+    func generateStructured<T: Generable & Sendable>(
+        prompt: String,
+        context: AssistantContext,
+        resultType: T.Type
+    ) async throws -> T {
+        _ = prompt
+        _ = context
+        _ = resultType
+        throw AssistantError.unsupported("Preview assistant does not support structured output")
+    }
+    #endif
+
+    func converse(prompt: String, context: AssistantContext) async throws -> AsyncStream<AssistantEvent> {
+        _ = context
+        return AsyncStream { continuation in
+            continuation.yield(.started(model: "Preview", toolNames: []))
+            continuation.yield(.textDelta("Preview response to: \(prompt)"))
+            continuation.yield(.turnComplete(nil))
+            continuation.finish()
+        }
+    }
+
+    func cancel() async {}
+    func resetSession() async {}
+}
+
 #Preview {
-    ChatView(model: ChatModel(siteID: "preview", siteDirectory: URL(fileURLWithPath: NSTemporaryDirectory()), configDirectory: URL(fileURLWithPath: NSTemporaryDirectory())))
+    ChatView(model: ChatModel(
+        siteID: "preview",
+        siteDirectory: URL(fileURLWithPath: NSTemporaryDirectory()),
+        configDirectory: URL(fileURLWithPath: NSTemporaryDirectory()),
+        assistant: PreviewAssistant()
+    ))
         .frame(width: 420, height: 560)
 }
-#endif
