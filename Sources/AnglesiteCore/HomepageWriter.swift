@@ -10,10 +10,10 @@ public enum HomepageWriter {
     static let titleLine =
         #"title="Welcome — Your New Anglesite Business Website""#
     static let descLine =
-        #"description="Your business website is ready to set up. Run /start in Claude to begin the guided setup.""#
+        #"description="Your business website is ready to set up in Anglesite.""#
     static let h1Line = "<h1>Welcome</h1>"
     static let introLine =
-        "<p>This site is ready to set up. Type <code>/start</code> in Claude Desktop to get started.</p>"
+        "<p>This site is ready to customize in Anglesite. Open the app to edit your pages, add content, and publish when you're ready.</p>"
 
     public static func fill(_ source: String, headline: String, blurb: String, tagline: String) -> String {
         var out = source

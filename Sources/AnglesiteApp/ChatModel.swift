@@ -58,7 +58,7 @@ final class ChatModel {
         let reply = messages.last(where: { $0.role == .assistant })?.content ?? ""
         return .completed(reply: reply)
     }
-    /// Mirrors the last `turnComplete.usage` claude reported. `ChatView` shows this in the
+    /// Mirrors the last `turnComplete.usage` the assistant reported. `ChatView` shows this in the
     /// footer so the user can see token + cost telemetry without diving into the Debug pane.
     private(set) var lastUsage: TurnTelemetry?
 

@@ -75,7 +75,7 @@ public struct SystemMCPBridgeProbe: ReadinessProbe {
     public func check() async -> ReadinessFinding {
         if registered {
             return ReadinessFinding(id: id, title: title, level: .ok,
-                detail: "Anglesite's tools are exposed to the system MCP bridge for Claude Code and other agents.")
+                detail: "Anglesite's tools are exposed to the system MCP bridge for external agents.")
         }
         return ReadinessFinding(id: id, title: title, level: .unsupported,
             detail: "System-wide MCP exposure is not available in this build (Phase D, #135).")
