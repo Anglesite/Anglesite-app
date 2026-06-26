@@ -37,6 +37,10 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
     /// App-lifetime local RAG index for project-aware assistant retrieval (#307). Rebuilt when a
     /// site starts and unloaded with the content graph on close.
     private let knowledgeIndex: SiteKnowledgeIndex?
+    /// App-lifetime on-device semantic ranker, synced from the knowledge index after each rebuild
+    /// so assistant retrieval can rank by meaning, not just keywords (#312). Unloaded with the
+    /// other shared indexes on close.
+    private let semanticRanker: SemanticRanker?
     private let logCenter: LogCenter
     private let resolveCommand: CommandResolver
     private let resolveMCPCommand: MCPCommandResolver
@@ -56,6 +60,7 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
         mcpClient: MCPClient? = nil,
         contentGraph: SiteContentGraph? = nil,
         knowledgeIndex: SiteKnowledgeIndex? = nil,
+        semanticRanker: SemanticRanker? = nil,
         supervisor: ProcessSupervisor = .shared,
         logCenter: LogCenter = .shared,
         resolveCommand: @escaping CommandResolver = LocalSiteRuntime.resolveAstroCommand,
@@ -67,6 +72,7 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
         self.mcpClient = mcpClient ?? MCPClient(supervisor: supervisor, logCenter: logCenter)
         self.contentGraph = contentGraph
         self.knowledgeIndex = knowledgeIndex
+        self.semanticRanker = semanticRanker
         self.logCenter = logCenter
         self.resolveCommand = resolveCommand
         self.resolveMCPCommand = resolveMCPCommand
@@ -157,6 +163,7 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
         if let siteID = loadedSharedIndexSiteID {
             await contentGraph?.unload(siteID: siteID)
             await knowledgeIndex?.unload(siteID: siteID)
+            await semanticRanker?.unload(siteID: siteID)
             loadedSharedIndexSiteID = nil
         }
     }
@@ -183,6 +190,15 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
         guard gen == generation else {
             await contentGraph?.unload(siteID: siteID)
             await knowledgeIndex?.unload(siteID: siteID)
+            return
+        }
+        if let documents = await knowledgeIndex?.documents(siteID: siteID) {
+            await semanticRanker?.sync(siteID: siteID, documents: documents)
+        }
+        guard gen == generation else {
+            await contentGraph?.unload(siteID: siteID)
+            await knowledgeIndex?.unload(siteID: siteID)
+            await semanticRanker?.unload(siteID: siteID)
             return
         }
         loadedSharedIndexSiteID = siteID

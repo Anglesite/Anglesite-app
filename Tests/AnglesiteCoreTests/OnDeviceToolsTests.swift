@@ -335,5 +335,29 @@ struct FoundationModelAssistantToolWiringTests {
             SearchKnowledgeTool.toolName,
         ])
     }
+
+    @Test("a semantic ranker is accepted and the knowledge tool is still advertised (#312)")
+    func startedReportsKnowledgeToolWithRanker() async throws {
+        guard modelAvailable() else { return }
+        let router = FakeEditRouter(reply: EditReply(id: "x", status: .applied, message: nil))
+        let assistant = FoundationModelAssistant(
+            tier: .onDevice,
+            editBridge: makeBridge(router),
+            contentGraph: SiteContentGraph(),
+            knowledgeIndex: SiteKnowledgeIndex(),
+            semanticRanker: SemanticRanker(provider: FakeEmbeddingProvider(dimension: 8), cache: nil)
+        )
+        let context = AssistantContext(siteID: "site-1", siteDirectory: URL(fileURLWithPath: "/tmp/site"))
+
+        var startedToolNames: [String]?
+        for await event in try await assistant.converse(prompt: "Say hi.", context: context) {
+            if case .started(_, let toolNames) = event {
+                startedToolNames = toolNames
+                break
+            }
+        }
+        // The ranker is wired into SearchKnowledgeTool without changing the advertised tool set.
+        #expect(startedToolNames?.contains(SearchKnowledgeTool.toolName) == true)
+    }
 }
 #endif
