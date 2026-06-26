@@ -57,7 +57,6 @@ node_modules/
 # e.g. the V-1.2 render smoke test and local dev — never committed)
 Resources/Template/dist/
 Resources/Template/.astro/
-Resources/Template/package-lock.json
 
 # Vendored arm64 OCI image (populated by scripts/vendor-container-image.sh; bundled into AnglesiteContainer)
 Resources/container-image/

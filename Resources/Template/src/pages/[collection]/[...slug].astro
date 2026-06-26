@@ -2,8 +2,10 @@
 import { getCollection, render } from "astro:content";
 import Hentry from "../../layouts/Hentry.astro";
 
+type PersonalCollection = "notes" | "articles" | "photos" | "albums" | "bookmarks" | "replies" | "likes";
+
 export async function getStaticPaths() {
-  const collections = ["notes", "articles", "photos", "albums", "bookmarks", "replies", "likes"];
+  const collections: PersonalCollection[] = ["notes", "articles", "photos", "albums", "bookmarks", "replies", "likes"];
   const paths = [];
   for (const collection of collections) {
     const entries = await getCollection(collection);

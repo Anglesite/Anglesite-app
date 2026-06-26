@@ -123,7 +123,8 @@ public struct NativeContentOperations: ContentOperationsService {
             return .failed(reason: "A \(collection) entry already exists at \(relPath)")
         }
 
-        onProgress?(.createCallingPlugin)
+        // No `.createCallingPlugin` here: this is a native Swift write with no plugin involved.
+        // `.createFinalizing` (below) covers the write + commit milestone honestly.
         let contents = ContentScaffold.renderEntry(
             descriptor: descriptor, title: cleanTitle.isEmpty ? nil : cleanTitle, now: now())
         do { try write(contents, to: abs) }
