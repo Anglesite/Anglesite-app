@@ -36,27 +36,34 @@ public struct AstroHTMLValidator: CustomAnalyticsHTMLValidating, Sendable {
             return "Custom analytics HTML couldn't be validated because the embedded Node runtime isn't available. Rebuild Anglesite and try again."
         }
 
+        let workDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent("anglesite-astro-html-validation-\(UUID().uuidString)", isDirectory: true)
+        let cleanup: @Sendable () -> Void = {
+            try? FileManager.default.removeItem(at: workDirectory)
+        }
         do {
-            let workDirectory = fileManager.temporaryDirectory
-                .appendingPathComponent("anglesite-astro-html-validation-\(UUID().uuidString)", isDirectory: true)
-            try fileManager.createDirectory(at: workDirectory, withIntermediateDirectories: true)
-            defer { try? fileManager.removeItem(at: workDirectory) }
+            return try await withTaskCancellationHandler {
+                try fileManager.createDirectory(at: workDirectory, withIntermediateDirectories: true)
+                defer { cleanup() }
 
-            let snippetURL = workDirectory.appendingPathComponent("custom-analytics.html")
-            let scriptURL = workDirectory.appendingPathComponent("validate-custom-analytics.mjs")
-            try snippet.write(to: snippetURL, atomically: true, encoding: .utf8)
-            try Self.validationScript.write(to: scriptURL, atomically: true, encoding: .utf8)
+                let snippetURL = workDirectory.appendingPathComponent("custom-analytics.html")
+                let scriptURL = workDirectory.appendingPathComponent("validate-custom-analytics.mjs")
+                try snippet.write(to: snippetURL, atomically: true, encoding: .utf8)
+                try Self.validationScript.write(to: scriptURL, atomically: true, encoding: .utf8)
 
-            let result = try await run(
-                node,
-                [scriptURL.path, siteDirectory.path, snippetURL.path],
-                siteDirectory
-            )
-            guard result.exitCode != 0 else { return nil }
-            let message = [result.stderr, result.stdout]
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .first { !$0.isEmpty }
-            return "Custom analytics HTML is invalid: \(Self.friendlyMessage(message))"
+                let result = try await run(
+                    node,
+                    [scriptURL.path, siteDirectory.path, snippetURL.path],
+                    siteDirectory
+                )
+                guard result.exitCode != 0 else { return nil }
+                let message = [result.stderr, result.stdout]
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first { !$0.isEmpty }
+                return "Custom analytics HTML is invalid: \(Self.friendlyMessage(message))"
+            } onCancel: {
+                cleanup()
+            }
         } catch {
             return "Custom analytics HTML couldn't be validated: \(error.localizedDescription)"
         }

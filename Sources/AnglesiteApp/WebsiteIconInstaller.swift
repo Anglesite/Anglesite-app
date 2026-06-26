@@ -30,7 +30,11 @@ enum WebsiteIconInstaller {
 
     static func install(from imageURL: URL, siteName: String, siteDirectory: URL,
                         fileManager: FileManager = .default) throws -> Result {
-        guard let image = NSImage(contentsOf: imageURL), image.isValid else {
+        guard let image = NSImage(contentsOf: imageURL),
+              image.isValid,
+              image.size.width > 0,
+              image.size.height > 0
+        else {
             throw InstallError.unreadableImage(imageURL)
         }
 

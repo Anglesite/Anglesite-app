@@ -62,7 +62,7 @@ struct NavigatorTreeTests {
 
         let site = try #require(sections.first)
         #expect(site.id == .metadata)
-        #expect(site.title == "")
+        #expect(site.title == nil)
         #expect(site.items.map(\.title) == ["Acme"])
         #expect(site.items.first?.target == .file(info))
     }

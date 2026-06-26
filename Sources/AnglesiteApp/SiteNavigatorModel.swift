@@ -68,7 +68,8 @@ final class SiteNavigatorModel {
                 id: section.id,
                 title: section.title,
                 items: section.items.map {
-                    NavigatorItem(id: $0.id, title: title, target: $0.target)
+                    guard case .file(let file) = $0.target, file.name == "Info.plist" else { return $0 }
+                    return NavigatorItem(id: $0.id, title: title, target: $0.target)
                 }
             )
         }

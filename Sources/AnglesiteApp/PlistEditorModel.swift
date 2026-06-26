@@ -23,7 +23,13 @@ final class PlistEditorModel {
     private(set) var isSavingAnalytics = false
     private(set) var isConfiguringCloudflareAnalytics = false
     private(set) var hasWebsiteIcons = false
-    var analyticsSettings = WebsiteAnalyticsAsset.Settings()
+    var analyticsSettings = WebsiteAnalyticsAsset.Settings() {
+        didSet {
+            if oldValue.customHeadTag != analyticsSettings.customHeadTag {
+                analyticsError = nil
+            }
+        }
+    }
     private(set) var savedAnalyticsSettings = WebsiteAnalyticsAsset.Settings()
     var conflictDiskContents: String?
 
@@ -220,7 +226,7 @@ final class PlistEditorModel {
         defer { isConfiguringCloudflareAnalytics = false }
 
         do {
-            guard let token = try cloudflareToken(), !token.isEmpty else {
+            guard let token = try await cloudflareToken(), !token.isEmpty else {
                 analyticsError = CloudflareWebAnalyticsError.missingToken.localizedDescription
                 return
             }
@@ -245,11 +251,37 @@ final class PlistEditorModel {
         return WebsiteAnalyticsAsset.parseMigratingLegacySettings(layoutSource: source, config: config)
     }
 
-    private func cloudflareToken() throws -> String? {
-        if let env = ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"], !env.isEmpty {
+    private func cloudflareToken() async throws -> String? {
+        do {
+            if let token = try keychain.readCloudflareToken(), !token.isEmpty {
+                return token
+            }
+        } catch {
+            if cloudflareEnvironmentToken() == nil {
+                throw error
+            }
+            await LogCenter.shared.append(
+                source: "analytics",
+                stream: .stderr,
+                text: "Could not read Cloudflare API token from Keychain; falling back to CLOUDFLARE_API_TOKEN."
+            )
+        }
+        if let env = cloudflareEnvironmentToken() {
+            await LogCenter.shared.append(
+                source: "analytics",
+                stream: .stderr,
+                text: "Using CLOUDFLARE_API_TOKEN environment fallback for Cloudflare Analytics."
+            )
             return env
         }
-        return try keychain.readCloudflareToken()
+        return nil
+    }
+
+    private func cloudflareEnvironmentToken() -> String? {
+        let token = ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let token, !token.isEmpty else { return nil }
+        return token
     }
 
     private static func isWebsiteTitleEntry(_ entry: PlistDocumentIO.PlistEntry) -> Bool {
@@ -257,14 +289,8 @@ final class PlistEditorModel {
     }
 
     func entriesForSaving() -> [PlistDocumentIO.PlistEntry] {
-        var merged = allEntries
-        for entry in entries {
-            if let index = merged.firstIndex(where: { $0.key == entry.key }) {
-                merged[index] = entry
-            } else {
-                merged.append(entry)
-            }
-        }
+        var merged = allEntries.filter { !Self.isWebsiteTitleEntry($0) }
+        merged.append(contentsOf: entries)
         return merged
     }
 }

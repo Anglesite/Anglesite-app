@@ -17,9 +17,9 @@ public struct NavigatorItem: Sendable, Equatable, Identifiable {
 
 public struct NavigatorSection: Sendable, Equatable, Identifiable {
     public let id: FileGroup
-    public let title: String
+    public let title: String?
     public let items: [NavigatorItem]
-    public init(id: FileGroup, title: String, items: [NavigatorItem]) {
+    public init(id: FileGroup, title: String?, items: [NavigatorItem]) {
         self.id = id; self.title = title; self.items = items
     }
 }
@@ -34,8 +34,8 @@ public func postRoute(for post: SiteContentGraph.Post) -> String {
 }
 
 /// Display titles for the five groups, in canonical sidebar order.
-private let groupTitles: [(FileGroup, String)] = [
-    (.metadata, ""), (.pages, "Pages"), (.posts, "Posts"),
+private let groupTitles: [(FileGroup, String?)] = [
+    (.metadata, nil), (.pages, "Pages"), (.posts, "Posts"),
     (.components, "Components"), (.styles, "Styles"),
 ]
 

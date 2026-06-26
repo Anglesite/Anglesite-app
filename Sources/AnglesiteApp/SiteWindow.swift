@@ -9,6 +9,18 @@ private enum MainPaneMode: Equatable {
     case editor(FileRef)
 }
 
+private enum ActiveEditor {
+    case text(FileEditorModel)
+    case plist(PlistEditorModel)
+
+    var file: FileRef {
+        switch self {
+        case .text(let model): model.file
+        case .plist(let model): model.file
+        }
+    }
+}
+
 /// Root view for a single per-site window. Owns the site's `PreviewModel`,
 /// `DeployModel`, and `ChatModel` as `@State` — lifecycle is bound to the window:
 /// when the window opens we resolve the `siteID` to a `SiteStore.Site` and start
@@ -84,8 +96,7 @@ struct SiteWindow: View {
     /// The open file's editor state. Owned here (not in `MainPaneEditorView`) so navigating away can
     /// auto-save it and the Preview/Editor toggle keeps the buffer alive. Replaced when a different
     /// file opens; cleared on window close / site replay.
-    @State private var editorModel: FileEditorModel?
-    @State private var plistEditorModel: PlistEditorModel?
+    @State private var activeEditor: ActiveEditor?
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -116,8 +127,7 @@ struct SiteWindow: View {
             siriReadinessModel = nil
             // Persist any unsaved edits before dropping the old site's editor on replay (#188 reuse).
             persistEditorBufferBestEffort()
-            editorModel = nil
-            plistEditorModel = nil
+            activeEditor = nil
             mainPaneMode = .preview
         }
         .onChange(of: preview.state) { _, newState in
@@ -146,8 +156,7 @@ struct SiteWindow: View {
             // auto-save-on-leave). No conflict dialog is possible during teardown, so we don't gate
             // on a flush return value — just write the buffer best-effort, off the main actor.
             persistEditorBufferBestEffort()
-            editorModel = nil
-            plistEditorModel = nil
+            activeEditor = nil
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()
             scopedURL = nil
@@ -468,49 +477,47 @@ struct SiteWindow: View {
     /// because the save/check IO runs off the main actor.
     private func leaveCurrentEditor() async -> Bool {
         guard case .editor = mainPaneMode else { return true }
-        if let model = editorModel {
+        switch activeEditor {
+        case .text(let model):
             return await model.flushBeforeLeaving()
-        }
-        if let model = plistEditorModel {
+        case .plist(let model):
             return await model.flushBeforeLeaving()
+        case nil:
+            return true
         }
-        return true
     }
 
     /// Best-effort off-main save of the open editor's buffer when the editor is torn down (window
     /// close or site replay), where no conflict dialog can be shown. Consistent with the
     /// auto-save-on-leave model; last-writer-wins on the rare teardown-time external conflict.
     private func persistEditorBufferBestEffort() {
-        if let model = editorModel, model.isDirty {
+        switch activeEditor {
+        case .text(let model) where model.isDirty:
             let url = model.file.url
             let contents = model.text
             Task.detached(priority: .userInitiated) { try? FileDocumentIO.save(contents, to: url) }
-        }
-        if let model = plistEditorModel, model.isDirty, model.validationMessage == nil {
-            let url = model.file.url
-            let entries = model.entriesForSaving()
-            Task.detached(priority: .userInitiated) { try? PlistDocumentIO.save(entries, to: url) }
-        }
-        if let model = plistEditorModel, model.isAnalyticsDirty {
-            let sourceDirectory = model.sourceDirectory
-            let settings = model.analyticsSettings
-            Task.detached(priority: .userInitiated) {
-                try? WebsiteAnalyticsAsset.install(settings, siteDirectory: sourceDirectory)
+        case .plist(let model):
+            if model.isDirty, model.validationMessage == nil {
+                let url = model.file.url
+                let entries = model.entriesForSaving()
+                Task.detached(priority: .userInitiated) { try? PlistDocumentIO.save(entries, to: url) }
             }
+        case .text, nil:
+            break
         }
     }
 
     private var activeEditorFile: FileRef? {
-        editorModel?.file ?? plistEditorModel?.file
+        activeEditor?.file
     }
 
     @ViewBuilder
     private func mainPaneContent(for site: SiteStore.Site) -> some View {
         switch mainPaneMode {
         case .editor:
-            if let editorModel {
+            if case .text(let editorModel) = activeEditor {
                 MainPaneEditorView(model: editorModel)
-            } else if let plistEditorModel {
+            } else if case .plist(let plistEditorModel) = activeEditor {
                 PlistEditorView(model: plistEditorModel) { title in
                     Task { await saveWebsiteTitle(title) }
                 }
@@ -634,15 +641,13 @@ struct SiteWindow: View {
                 guard await leaveCurrentEditor() else { return }   // flush the previous file first
                 switch EditorKind.resolve(for: file) {
                 case .text:
-                    editorModel = FileEditorModel(file: file)
-                    plistEditorModel = nil
+                    activeEditor = .text(FileEditorModel(file: file))
                 case .plist:
-                    plistEditorModel = PlistEditorModel(
+                    activeEditor = .plist(PlistEditorModel(
                         file: file,
                         websiteTitle: site?.name ?? file.name,
                         sourceDirectory: site?.sourceDirectory ?? file.url.deletingLastPathComponent()
-                    )
-                    editorModel = nil
+                    ))
                 }
                 mainPaneMode = .editor(file)
             }

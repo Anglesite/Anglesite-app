@@ -10,15 +10,15 @@ struct SiteNavigatorView: View {
     var body: some View {
         List(selection: $model.selection) {
             ForEach(model.sections) { section in
-                if section.title.isEmpty {
-                    ForEach(section.items) { item in
-                        row(for: item, in: section)
-                    }
-                } else {
-                    Section(section.title) {
+                if let title = section.title {
+                    Section(title) {
                         ForEach(section.items) { item in
                             row(for: item, in: section)
                         }
+                    }
+                } else {
+                    ForEach(section.items) { item in
+                        row(for: item, in: section)
                     }
                 }
             }

@@ -44,7 +44,7 @@ public enum WebsiteAnalyticsAsset {
 
     public static func parseSettings(from source: String) -> Settings {
         Settings(
-            cloudflareToken: firstCapture(in: source, pattern: #"data-cf-beacon=['"]\{"token":"([^"]+)"\}['"]"#) ?? "",
+            cloudflareToken: cloudflareToken(in: source) ?? "",
             customHeadTag: customTag(in: source) ?? ""
         )
     }
@@ -217,7 +217,8 @@ public enum WebsiteAnalyticsAsset {
         let customTag = settings.customHeadTag.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if !cloudflareToken.isEmpty {
-            lines.append(#"<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token":"\#(attr(cloudflareToken))"}'></script>"#)
+            let beacon = cloudflareBeaconAttributeValue(token: cloudflareToken)
+            lines.append(#"<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='\#(beacon)'></script>"#)
         }
         if !customTag.isEmpty {
             lines.append(customStart)
@@ -251,10 +252,13 @@ public enum WebsiteAnalyticsAsset {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
         guard let match = regex.firstMatch(in: source, range: range),
-              match.numberOfRanges > 1,
-              let capture = Range(match.range(at: 1), in: source)
+              match.numberOfRanges > 1
         else { return nil }
-        return String(source[capture])
+        for index in 1..<match.numberOfRanges {
+            guard let capture = Range(match.range(at: index), in: source) else { continue }
+            return String(source[capture])
+        }
+        return nil
     }
 
     private static func hasDanglingHTMLComment(in snippet: String) -> Bool {
@@ -293,8 +297,44 @@ public enum WebsiteAnalyticsAsset {
 
     private static func attr(_ value: String) -> String {
         value.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "'", with: "&#39;")
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    private static func cloudflareBeaconAttributeValue(token: String) -> String {
+        let object = ["token": token]
+        let data = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]))
+            ?? Data(#"{"token":""}"#.utf8)
+        return singleQuotedAttr(String(decoding: data, as: UTF8.self))
+    }
+
+    private static func singleQuotedAttr(_ value: String) -> String {
+        value.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "'", with: "&#39;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    private static func cloudflareToken(in source: String) -> String? {
+        guard let json = firstCapture(in: source, pattern: #"data-cf-beacon=(?:"([^"]+)"|'([^']+)')"#) else {
+            return nil
+        }
+        let decoded = htmlAttributeDecode(json)
+        guard let data = decoded.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let token = object["token"] as? String
+        else { return nil }
+        return token
+    }
+
+    private static func htmlAttributeDecode(_ value: String) -> String {
+        value.replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&amp;", with: "&")
     }
 }

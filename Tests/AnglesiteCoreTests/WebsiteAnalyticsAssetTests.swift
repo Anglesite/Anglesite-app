@@ -67,6 +67,17 @@ struct WebsiteAnalyticsAssetTests {
         #expect(WebsiteAnalyticsAsset.parseSettings(from: source) == settings)
     }
 
+    @Test("Cloudflare beacon token is JSON encoded and round trips")
+    func cloudflareBeaconTokenIsJSONEncoded() {
+        let token = #"cf'token\with"quotes&chars"#
+        let settings = WebsiteAnalyticsAsset.Settings(cloudflareToken: token)
+
+        let source = WebsiteAnalyticsAsset.apply(settings, to: layout)
+
+        #expect(source.contains(#"data-cf-beacon='{"token":"cf&#39;token\\with\"quotes&amp;chars"}'"#))
+        #expect(WebsiteAnalyticsAsset.parseSettings(from: source).cloudflareToken == token)
+    }
+
     @Test("install writes layout and adds custom script CSP domains")
     func installPatchesLayoutAndConfig() throws {
         let fm = FileManager.default

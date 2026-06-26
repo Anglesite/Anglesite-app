@@ -31,11 +31,7 @@ struct PlistEditorView: View {
         }
         .onChange(of: selectedTab) { oldValue, _ in
             if oldValue == .analytics {
-                Task {
-                    if await model.saveAnalytics() == false {
-                        selectedTab = .analytics
-                    }
-                }
+                Task { await model.saveAnalytics() }
             }
         }
         .onChange(of: controlActiveState) { _, new in
@@ -94,6 +90,11 @@ struct PlistEditorView: View {
 
                     if let validationMessage = model.validationMessage {
                         Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+                    }
+                    if selectedTab != .analytics, let analyticsError = model.analyticsError {
+                        Label(analyticsError, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                             .font(.callout)
                     }
@@ -232,7 +233,7 @@ struct PlistEditorView: View {
     }
 
     private var customAnalyticsMessage: String? {
-        model.customAnalyticsValidationMessage ?? model.analyticsError
+        model.analyticsError ?? model.customAnalyticsValidationMessage
     }
 
     private func saveWebsiteTitle() async {
