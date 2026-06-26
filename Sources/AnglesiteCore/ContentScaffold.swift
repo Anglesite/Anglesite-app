@@ -129,62 +129,42 @@ public enum ContentScaffold {
         """ + "\n"
     }
 
-    public static func renderCollectionEntry(
-        title: String,
-        descriptor: ContentTypeDescriptor,
-        now: Date
-    ) -> String {
+    /// Render a new content entry's file contents from its descriptor: a YAML frontmatter block
+    /// (one line per non-markdown field, in declaration order) followed by a placeholder body for
+    /// the type's `markdown` field, if any. Pure; mirrors `renderPost`'s ISO8601 date format.
+    public static func renderEntry(descriptor: ContentTypeDescriptor, title: String?, now: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let publishDate = formatter.string(from: now)
-        var frontmatter: [String] = []
-        var bodyFieldName: String?
+        let dateTime = formatter.string(from: now)
 
-        let fieldNames = Set(descriptor.fields.map(\.name))
-        if fieldNames.contains("title") {
-            frontmatter.append(#"title: "\#(escapeYAML(title))""#)
-        } else if fieldNames.contains("name") {
-            frontmatter.append(#"name: "\#(escapeYAML(title))""#)
-            frontmatter.append(#"title: "\#(escapeYAML(title))""#)
-        } else if fieldNames.contains("itemReviewed") {
-            frontmatter.append(#"itemReviewed: "\#(escapeYAML(title))""#)
-            frontmatter.append(#"title: "\#(escapeYAML(title))""#)
-        } else {
-            frontmatter.append(#"title: "\#(escapeYAML(title))""#)
-        }
-
+        var lines: [String] = ["---"]
+        var bodyPlaceholder: String?
         for field in descriptor.fields {
-            if frontmatter.contains(where: { $0.hasPrefix(field.name + ":") }) { continue }
             switch field.kind {
             case .markdown:
-                bodyFieldName = bodyFieldName ?? field.name
+                bodyPlaceholder = "Write your \(descriptor.displayName.lowercased()) here."
             case .datetime:
-                frontmatter.append("\(field.name): \(publishDate)")
+                lines.append("\(field.name): \(dateTime)")
             case .date:
-                frontmatter.append("\(field.name): \(String(publishDate.prefix(10)))")
+                lines.append("\(field.name): \(String(dateTime.prefix(10)))")
             case .bool:
-                frontmatter.append("\(field.name): false")
+                lines.append("\(field.name): false")
             case .number:
-                frontmatter.append("\(field.name): 0")
-            case .stringArray:
-                frontmatter.append("\(field.name): []")
+                lines.append("\(field.name): 0")
+            case .stringArray, .imageArray:
+                lines.append("\(field.name): []")
             case .string, .text, .url, .image:
-                frontmatter.append(#"\#(field.name): """#)
+                let value = (field.name == "title" || field.name == "name") ? (title ?? "") : ""
+                lines.append("\(field.name): \"\(escapeYAML(value))\"")
             }
         }
+        lines.append("---")
 
-        if !fieldNames.contains("draft") {
-            frontmatter.append("draft: true")
+        var output = lines.joined(separator: "\n") + "\n"
+        if let bodyPlaceholder {
+            output += "\n\(bodyPlaceholder)\n"
         }
-
-        let body = bodyFieldName.map { "Write your \($0) here." } ?? "Write your entry here."
-        return """
-        ---
-        \(frontmatter.joined(separator: "\n"))
-        ---
-
-        \(body)
-        """ + "\n"
+        return output
     }
 
     // MARK: - Escaping (order matters: `&` first)

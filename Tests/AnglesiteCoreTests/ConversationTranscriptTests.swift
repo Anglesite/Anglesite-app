@@ -315,19 +315,3 @@ struct ConversationTranscriptAppendTests {
         #expect(t.messages.first { $0.role == .user }?.content == "go")
     }
 }
-
-@Suite("resolveAssistantChoice: tier selection seam")
-struct AssistantChoiceTests {
-
-    @Test("with Foundation Models off, the choice is Claude regardless of tier")
-    func prefersClaudeWhenFlagOff() {
-        #expect(resolveAssistantChoice(preferFoundationModels: false, tier: .onDevice) == .claude)
-        #expect(resolveAssistantChoice(preferFoundationModels: false, tier: .privateCloudCompute) == .claude)
-    }
-
-    @Test("with Foundation Models on, the choice carries the selected tier")
-    func picksFoundationModelWithTierWhenFlagOn() {
-        #expect(resolveAssistantChoice(preferFoundationModels: true, tier: .onDevice) == .foundationModel(.onDevice))
-        #expect(resolveAssistantChoice(preferFoundationModels: true, tier: .privateCloudCompute) == .foundationModel(.privateCloudCompute))
-    }
-}

@@ -2,11 +2,10 @@ import Foundation
 
 /// A provider-agnostic streaming event from a ``ConversationalAssistant``.
 ///
-/// Mirrors exactly the subset of `ClaudeAgent.Event` that `ChatModel` consumes — the cases the
-/// chat UI ignores (`messageID` on text, `stopReason` on completion) are intentionally dropped so
-/// a non-Claude backend (Foundation Models, #155) can populate the same surface without faking a
-/// subprocess. See `docs/superpowers/specs/2026-06-13-content-assistant-refactor-design.md`.
-/// The `toolUse`/`toolResult` cases use `id:` instead of `ClaudeAgent.Event`'s `toolUseID:` deliberately — `id` is provider-neutral.
+/// Minimal event surface consumed by `ChatModel`: the cases the transcript knows how to render plus
+/// lifecycle/error/usage metadata. Keeping this provider-neutral lets Foundation Models populate
+/// the chat surface without faking a subprocess protocol.
+/// The `toolUse`/`toolResult` cases use the provider-neutral `id:` label deliberately.
 public enum AssistantEvent: Sendable, Equatable {
     /// First event of a turn: the resolved model and the tool names available this turn.
     case started(model: String?, toolNames: [String])
@@ -30,7 +29,8 @@ public enum AssistantEvent: Sendable, Equatable {
 
 /// Token/cost telemetry for one completed turn.
 ///
-/// `ClaudeAgent.Usage`'s `cacheReadInputTokens`/`cacheCreationInputTokens` are intentionally omitted here; callers that need them should read `ClaudeAgent.Usage` directly.
+/// Cache-specific token fields are intentionally omitted here; callers that need backend-specific
+/// telemetry should read the concrete backend directly.
 public struct AssistantUsage: Sendable, Equatable {
     public let inputTokens: Int
     public let outputTokens: Int
@@ -46,7 +46,7 @@ public struct AssistantUsage: Sendable, Equatable {
 }
 
 /// Errors thrown by a ``ContentAssistant`` when a requested capability isn't supported by the
-/// backend (e.g. Claude cannot do FoundationModels guided generation).
+/// backend (for example, not every backend can do FoundationModels guided generation).
 public enum AssistantError: Error, Sendable, Equatable {
     case unsupported(String)
     /// Thrown by ``ContentAssistant/generate(prompt:context:)`` when the underlying stream produces

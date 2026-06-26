@@ -64,42 +64,6 @@ final class AppSettingsTests {
         #expect(!settings.debugPaneEnabled)
     }
 
-    // MARK: Assistant model (C.10 — DevID model tier picker)
-
-    @Test("preferFoundationModels defaults to true (Foundation Models is the default backend)")
-    func preferFoundationModelsDefaultsToTrue() {
-        let settings = AppSettings(defaults: defaults)
-        #expect(settings.preferFoundationModels)
-    }
-
-    @Test("preferFoundationModels round trip") func preferFoundationModelsRoundTrip() {
-        let settings = AppSettings(defaults: defaults)
-        settings.preferFoundationModels = true
-        #expect(settings.preferFoundationModels)
-        settings.preferFoundationModels = false
-        #expect(!settings.preferFoundationModels)
-    }
-
-    @Test("foundationModelTier defaults to on-device") func foundationModelTierDefaultsToOnDevice() {
-        let settings = AppSettings(defaults: defaults)
-        #expect(settings.foundationModelTier == .onDevice)
-    }
-
-    @Test("foundationModelTier round trip") func foundationModelTierRoundTrip() {
-        let settings = AppSettings(defaults: defaults)
-        settings.foundationModelTier = .privateCloudCompute
-        #expect(settings.foundationModelTier == .privateCloudCompute)
-        settings.foundationModelTier = .onDevice
-        #expect(settings.foundationModelTier == .onDevice)
-    }
-
-    @Test("foundationModelTier falls back to on-device for an unknown stored value")
-    func foundationModelTierUnknownFallsBack() {
-        defaults.set("quantum-cloud", forKey: AppSettings.Key.foundationModelTier)
-        let settings = AppSettings(defaults: defaults)
-        #expect(settings.foundationModelTier == .onDevice)
-    }
-
     // MARK: Auto alt-text (C.7 — vision alt-text pipeline)
 
     @Test("autoGenerateAltText defaults to true (on)") func autoAltTextDefaultsToTrue() {
@@ -128,41 +92,22 @@ final class AppSettingsTests {
         #expect(settings.announcesLiveUpdates)
     }
 
-    // MARK: Assistant-default migration
+    @Test("legacy chat backend defaults are cleaned once") func legacyChatBackendDefaultsCleanedOnce() {
+        defaults.set(false, forKey: "anglesite.preferFoundationModels")
+        defaults.set(true, forKey: "anglesite.didMigrateAssistantDefault")
+        defaults.set("privateCloudCompute", forKey: "anglesite.foundationModelTier")
 
-    @Test("assistant-default migration: fresh install keeps the Foundation Models default")
-    func migrationFreshInstall() {
         let settings = AppSettings(defaults: defaults)
-        settings.migrateAssistantDefaultIfNeeded()
-        #expect(settings.preferFoundationModels) // absent → FM default
-        #expect(defaults.object(forKey: AppSettings.Key.preferFoundationModels) == nil) // not pinned
-    }
+        settings.removeLegacyChatBackendDefaultsIfNeeded()
 
-    @Test("assistant-default migration: existing install is pinned to Claude")
-    func migrationExistingInstall() {
-        defaults.set("site-1", forKey: AppSettings.Key.lastOpenedSiteID)
-        let settings = AppSettings(defaults: defaults)
-        settings.migrateAssistantDefaultIfNeeded()
-        #expect(!settings.preferFoundationModels) // upgrade → Claude preserved
-    }
+        #expect(defaults.object(forKey: "anglesite.preferFoundationModels") == nil)
+        #expect(defaults.object(forKey: "anglesite.didMigrateAssistantDefault") == nil)
+        #expect(defaults.object(forKey: "anglesite.foundationModelTier") == nil)
+        #expect(defaults.bool(forKey: AppSettings.Key.didCleanLegacyChatBackendDefaults))
 
-    @Test("assistant-default migration: respects an explicit prior choice")
-    func migrationRespectsExplicitChoice() {
-        defaults.set("site-1", forKey: AppSettings.Key.lastOpenedSiteID)
-        defaults.set(true, forKey: AppSettings.Key.preferFoundationModels)
-        let settings = AppSettings(defaults: defaults)
-        settings.migrateAssistantDefaultIfNeeded()
-        #expect(settings.preferFoundationModels) // untouched
-    }
-
-    @Test("assistant-default migration: runs only once")
-    func migrationRunsOnce() {
-        defaults.set("site-1", forKey: AppSettings.Key.lastOpenedSiteID)
-        let settings = AppSettings(defaults: defaults)
-        settings.migrateAssistantDefaultIfNeeded() // pins to Claude
-        settings.preferFoundationModels = true     // user later opts into FM
-        settings.migrateAssistantDefaultIfNeeded() // must NOT re-pin
-        #expect(settings.preferFoundationModels)
+        defaults.set(false, forKey: "anglesite.preferFoundationModels")
+        settings.removeLegacyChatBackendDefaultsIfNeeded()
+        #expect(defaults.object(forKey: "anglesite.preferFoundationModels") != nil)
     }
 
     // MARK: DebugPaneVisibility

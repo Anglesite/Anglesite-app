@@ -1,8 +1,6 @@
 // `ChatModel` is target-agnostic: it depends on the `ConversationalAssistant` protocol, so it
-// compiles and runs on both the Developer ID and Mac App Store targets. Only the Claude-constructing
-// convenience init below is `#if !ANGLESITE_MAS` (the MAS build has no `claude` CLI to shell out to).
-// MAS constructs `ChatModel` via the injecting init with a `FoundationModelAssistant` backend (#159);
-// DevID uses the convenience init (Claude) by default.
+// compiles and runs on both the Developer ID and Mac App Store targets. Production constructs it
+// with a `FoundationModelAssistant` backend; tests and previews inject lightweight fakes.
 import Foundation
 import Observation
 import AnglesiteBridge
@@ -60,7 +58,7 @@ final class ChatModel {
         let reply = messages.last(where: { $0.role == .assistant })?.content ?? ""
         return .completed(reply: reply)
     }
-    /// Mirrors the last `turnComplete.usage` claude reported. `ChatView` shows this in the
+    /// Mirrors the last `turnComplete.usage` the assistant reported. `ChatView` shows this in the
     /// footer so the user can see token + cost telemetry without diving into the Debug pane.
     private(set) var lastUsage: TurnTelemetry?
 
@@ -112,20 +110,6 @@ final class ChatModel {
     /// IDs of annotations already surfaced in chat, so repeated calls to `loadAnnotations()`
     /// don't double-post the same sticky note when the user revisits a site mid-session.
     private var surfacedAnnotationIDs: Set<String> = []
-
-    #if !ANGLESITE_MAS
-    init(siteID: String, siteDirectory: URL, configDirectory: URL, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
-        self.siteID = siteID
-        self.siteDirectory = siteDirectory
-        let assistant = ClaudeAssistant(siteID: siteID, siteDirectory: siteDirectory)
-        self.assistant = assistant
-        self.transcript = ConversationTranscript(providerName: assistant.capabilities.providerName)
-        self.history = ChatHistoryStore(configDirectory: configDirectory)
-        self.annotationFeed = annotationFeed
-        self.annotationResolver = annotationResolver
-        self.undoCommand = undoCommand
-    }
-    #endif
 
     /// Test/injecting initializer: supply the assistant (typically a stub or fixture conforming to `ConversationalAssistant`)
     /// and an optional history-store override.

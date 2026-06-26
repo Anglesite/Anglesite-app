@@ -29,6 +29,7 @@ public struct ContentTypeField: Sendable, Equatable {
         case image         // a site-relative media path
         case number
         case stringArray   // e.g. tags
+        case imageArray    // an ordered list of site-relative media paths (e.g. album photos)
     }
 
     public let name: String
@@ -164,7 +165,7 @@ extension ContentTypeRegistry {
 
     // MARK: Personal (h-entry family)
 
-    static let personalTypes: [ContentTypeDescriptor] = [note, article, photo, bookmark, reply]
+    static let personalTypes: [ContentTypeDescriptor] = [note, article, photo, album, bookmark, reply, like]
 
     static let note = ContentTypeDescriptor(
         id: "note",
@@ -234,6 +235,30 @@ extension ContentTypeRegistry {
         )
     )
 
+    static let album = ContentTypeDescriptor(
+        id: "album",
+        displayName: "Album",
+        storage: .collection("albums"),
+        fields: [
+            ContentTypeField("title", .string, required: true),
+            ContentTypeField("images", .imageArray, required: true),
+            ContentTypeField("body", .markdown),
+            ContentTypeField("publishDate", .datetime, required: true),
+            ContentTypeField("tags", .stringArray),
+        ],
+        projections: ContentTypeProjections(
+            microformat: "h-entry",
+            microformatProperties: [
+                "title": "p-name",
+                "images": "u-photo",
+                "body": "e-content",
+                "publishDate": "dt-published",
+                "tags": "p-category",
+            ],
+            schemaType: "ImageGallery"
+        )
+    )
+
     static let bookmark = ContentTypeDescriptor(
         id: "bookmark",
         displayName: "Bookmark",
@@ -275,6 +300,24 @@ extension ContentTypeRegistry {
                 "publishDate": "dt-published",
             ],
             schemaType: "Comment"
+        )
+    )
+
+    static let like = ContentTypeDescriptor(
+        id: "like",
+        displayName: "Like",
+        storage: .collection("likes"),
+        fields: [
+            ContentTypeField("likeOf", .url, required: true),
+            ContentTypeField("publishDate", .datetime, required: true),
+        ],
+        projections: ContentTypeProjections(
+            microformat: "h-entry",
+            microformatProperties: [
+                "likeOf": "u-like-of",
+                "publishDate": "dt-published",
+            ],
+            schemaType: nil
         )
     )
 

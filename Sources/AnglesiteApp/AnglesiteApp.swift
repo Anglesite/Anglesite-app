@@ -24,6 +24,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let contentGraph = SiteContentGraph()
     /// Project-local retrieval index used by assistant tools for file-cited RAG context (#307).
     let knowledgeIndex = SiteKnowledgeIndex()
+    /// On-device semantic ranker layered over `knowledgeIndex`, synced by the preview runtime so
+    /// assistant retrieval ranks by meaning, not just keywords (#312). `nil` when no on-device
+    /// embedding model is available — the whole chain takes `SemanticRanker?`, so retrieval then
+    /// degrades to pure lexical (never the test-double fake, which would blend nonsense vectors).
+    ///
+    /// Populated asynchronously from `applicationDidFinishLaunching` because building the
+    /// `NLContextualEmbedding` provider calls `model.load()` (hundreds of ms of asset/model init),
+    /// which must not run on the main thread during launch. A site window opened in the brief
+    /// pre-load window captures `nil` and stays lexical-only for that session (reopening picks up
+    /// the ranker) — an acceptable degradation since the launcher is shown first.
+    ///
+    /// In-memory for v0: the per-site `Config/` embedding cache (`SemanticIndexCache`) and
+    /// incremental `upsert`/`remove` re-embedding are built + tested but deliberately not wired
+    /// yet — the shared app-global index architecture needs per-site cache routing the runtime
+    /// can derive, which is a follow-up.
+    var semanticRanker: SemanticRanker?
+
+    /// On-device embedding provider, best-first: the multilingual transformer
+    /// (`NLContextualEmbedding`), then the lighter `NLEmbedding.sentenceEmbedding`, then `nil`
+    /// (→ pure-lexical retrieval). Never the test-double fake. Runs the model load, so call it off
+    /// the main thread.
+    private static func makeEmbeddingProvider() -> (any EmbeddingProvider)? {
+        if let contextual = NLContextualEmbeddingProvider() { return contextual }
+        if let sentence = NLEmbeddingProvider() { return sentence }
+        return nil
+    }
     let contentIndexerStore = ContentIndexerStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -35,6 +61,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { [contentGraph, contentIndexerStore] in
             // This Task inherits the @MainActor context, so the store write needs no extra hop.
             contentIndexerStore.indexer = await AnglesiteIntents.bootstrap(contentGraph: contentGraph)
+        }
+
+        // Build the on-device embedding provider off the main thread (model load is expensive),
+        // then publish the ranker on the main actor for new site windows to capture.
+        Task { [weak self] in
+            let provider = await Task.detached(priority: .utility) { Self.makeEmbeddingProvider() }.value
+            await MainActor.run { self?.semanticRanker = provider.map { SemanticRanker(provider: $0, cache: nil) } }
         }
 
         // Begin mirroring the site registry so the File ▸ Open Recent submenu is populated
@@ -83,7 +116,8 @@ struct AnglesiteApp: App {
     private let debugPaneMenuVisible: Bool
 
     init() {
-        AppSettings.shared.migrateAssistantDefaultIfNeeded()
+        AppSettings.shared.removeLegacyChatBackendDefaultsIfNeeded()
+
         #if DEBUG
         let isDebugBuild = true
         #else
@@ -94,6 +128,24 @@ struct AnglesiteApp: App {
             settingEnabled: AppSettings.shared.debugPaneEnabled,
             optionHeldAtLaunch: NSEvent.modifierFlags.contains(.option)
         )
+    }
+
+    private func showAboutPanel() {
+        // Credits carries the build info the standard fields don't: the dev phase and the
+        // host OS. App name and version come from the bundle via .applicationName and the
+        // default .applicationVersion (CFBundleShortVersionString) — passing "Phase X" there
+        // would clobber the real version and render as "Version Phase X".
+        let credits = NSAttributedString(
+            string: "Phase \(BuildInfo.phase) · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)",
+            attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]
+        )
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [
+            .applicationName: BuildInfo.appName,
+            .credits: credits
+        ])
     }
 
     var body: some Scene {
@@ -124,6 +176,10 @@ struct AnglesiteApp: App {
         }
         .windowResizability(.contentSize)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Anglesite") { showAboutPanel() }
+            }
+
             NewContentCommands()
             CommandGroup(after: .newItem) {
                 Menu("Open Recent") {
@@ -186,6 +242,7 @@ struct AnglesiteApp: App {
                 siteID: siteID,
                 contentGraph: appDelegate.contentGraph,
                 knowledgeIndex: appDelegate.knowledgeIndex,
+                semanticRanker: appDelegate.semanticRanker,
                 contentIndexerStore: appDelegate.contentIndexerStore
             )
                 .frame(minWidth: 960, minHeight: 600)

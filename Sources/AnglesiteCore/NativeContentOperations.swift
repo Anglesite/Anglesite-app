@@ -104,29 +104,31 @@ public struct NativeContentOperations: ContentOperationsService {
         return .created(filePath: relPath, identifier: finalSlug)
     }
 
-    public func createCollectionEntry(
+    /// Create a typed content entry (V-1.2). Looks the type up in `registry`, derives a slug from
+    /// `title`, renders frontmatter via `ContentScaffold.renderEntry`, writes it, and commits —
+    /// the same write/commit path as `createPost`. Collection-stored types only; page-stored types
+    /// (e.g. `businessProfile`) are #345.
+    public func createTyped(
         siteID: String,
+        typeID: String,
         title: String,
-        descriptor: ContentTypeDescriptor,
-        slug: String?,
+        slug: String? = nil,
+        registry: ContentTypeRegistry = ContentTypeRegistry(),
         onProgress: ProgressHandler? = nil
     ) async -> ContentCreateResult {
-        guard let collection = descriptor.collection else {
-            return .failed(reason: "\(descriptor.displayName) is not a collection-backed content type")
-        }
-
         onProgress?(.createResolvingRuntime)
         guard let root = await siteDirectory(siteID) else { return .siteNotFound }
-
-        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanTitle.isEmpty else { return .failed(reason: "New collection entries need a non-empty title") }
-        guard collection.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil else {
-            return .failed(reason: "Invalid collection name: \(collection)")
+        guard let descriptor = registry.descriptor(id: typeID) else {
+            return .failed(reason: "Unknown content type: \(typeID)")
+        }
+        guard let collection = descriptor.collection else {
+            return .failed(reason: "Page-stored type \(typeID) is not supported by createTyped yet")
         }
 
-        let slugSource = slug.flatMap { $0.isEmpty ? nil : $0 } ?? cleanTitle
-        let finalSlug = ContentScaffold.slugify(slugSource)
-        guard !finalSlug.isEmpty else { return .failed(reason: "Could not derive a slug from the title") }
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanSlug = (slug ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalSlug = ContentScaffold.slugify(cleanSlug.isEmpty ? (cleanTitle.isEmpty ? descriptor.id : cleanTitle) : cleanSlug)
+        guard !finalSlug.isEmpty else { return .failed(reason: "createTyped could not derive a slug") }
 
         let relPath = ContentScaffold.postRelativePath(collection: collection, slug: finalSlug)
         let abs = root.appendingPathComponent(relPath)
@@ -134,8 +136,10 @@ public struct NativeContentOperations: ContentOperationsService {
             return .failed(reason: "A \(collection) entry already exists at \(relPath)")
         }
 
-        onProgress?(.createCallingPlugin)
-        let contents = ContentScaffold.renderCollectionEntry(title: cleanTitle, descriptor: descriptor, now: now())
+        // No `.createCallingPlugin` here: this is a native Swift write with no plugin involved.
+        // `.createFinalizing` (below) covers the write + commit milestone honestly.
+        let contents = ContentScaffold.renderEntry(
+            descriptor: descriptor, title: cleanTitle.isEmpty ? nil : cleanTitle, now: now())
         do { try write(contents, to: abs) }
         catch { return .failed(reason: "\(error)") }
 

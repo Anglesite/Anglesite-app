@@ -23,13 +23,6 @@ private struct AdvancedSettingsView: View {
 
     var body: some View {
         Form {
-            // The chat backend is a choice only on the Developer ID build — the sandboxed MAS build
-            // has no `claude` CLI and always uses on-device Foundation Models, so there's nothing to
-            // pick. See ChatModel.swift / SiteWindow.swift.
-            #if !ANGLESITE_MAS
-            AssistantSettingsSection()
-            #endif
-
             Section("Editing") {
                 Toggle("Auto-generate alt text for dropped images", isOn: $autoGenerateAltText)
                 Text("When you drop an image onto the preview, Anglesite uses Apple's on-device vision model to write descriptive alt text and applies it automatically. Runs locally; requires Apple Intelligence to be enabled. Purely decorative images get empty alt text and role=\"presentation\".")
@@ -107,50 +100,6 @@ private struct AdvancedSettingsView: View {
         .padding()
     }
 }
-
-// Developer ID only — the chat backend is a choice here, but the MAS build has no `claude` CLI and
-// always uses on-device Foundation Models. Gated out of MAS at the call site in AdvancedSettingsView.
-#if !ANGLESITE_MAS
-/// Settings → Assistant. Chooses the chat backend: Apple's on-device Foundation Models (default) or
-/// Claude (legacy), and — when the former is on — which tier. The choice is read at `ChatModel`
-/// construction (`SiteWindow.loadAndStart`), so it applies to newly opened site windows rather than
-/// live-swapping an active conversation.
-private struct AssistantSettingsSection: View {
-    @AppStorage(AppSettings.Key.preferFoundationModels) private var preferFoundationModels: Bool = true
-    @AppStorage(AppSettings.Key.foundationModelTier) private var tier: FoundationModelTier = .onDevice
-
-    var body: some View {
-        Section("Assistant") {
-            Toggle("Use Apple Foundation Models instead of Claude", isOn: $preferFoundationModels)
-
-            if preferFoundationModels {
-                Picker("Model", selection: $tier) {
-                    ForEach(FoundationModelTier.pickerCases, id: \.self) { tier in
-                        Text(tier.displayName).tag(tier)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            Text(caption)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var caption: String {
-        guard preferFoundationModels else {
-            return "Claude runs the full-power model via the bundled `claude` CLI. This is the legacy backend and will be removed as Anglesite moves off Claude Code; Apple Foundation Models is now the default. Takes effect for newly opened site windows."
-        }
-        switch tier {
-        case .onDevice:
-            return "Apple's ~3B on-device model — free, private, and works offline, no subscription. Requires Apple Intelligence to be enabled in System Settings. Takes effect for newly opened site windows."
-        case .privateCloudCompute:
-            return "Apple's Private Cloud Compute tier advertises a larger context window. This version backs it with the same on-device session; the larger-context path arrives later. Takes effect for newly opened site windows."
-        }
-    }
-}
-#endif
 
 /// Cloudflare API token row. Reads the current state from the Keychain on appear; saves a new
 /// value on commit; clears the slot on "Clear". The field stays a `SecureField` so the token

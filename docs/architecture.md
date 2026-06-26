@@ -34,7 +34,7 @@ flowchart TB
     end
 
     subgraph pcc["Private Cloud Compute — Apple cloud, no external APIs"]
-        pccgen["Bucket 5 heavy generation<br/>copy-edit · design-interview · social · syndicate"]
+        pccgen["Bucket 5 heavy generation<br/>copy-edit · design-interview · social · repurpose"]
     end
 
     subgraph container["Site container — per-site runtime<br/>(Apple Containerization local · Cloudflare Sandbox fallback)"]
@@ -85,7 +85,7 @@ flowchart TB
 |---|---|---|
 | **Apple device (host)** | The Swift app: front-doors (GUI / Siri / chat), the `FoundationModelAssistant` orchestrator, deterministic Swift (Bucket 1 hot-paths + Bucket 3 wizards), the native `pre-deploy-check` gate, `MCPClient`, and the `WKWebView` preview. | User input; in-process Apple Intelligence API; `MCPClient` to the container. |
 | **Apple Intelligence (on-device)** | The ~3B on-device Foundation Models + vision, with the registered FM `Tool`s (`ApplyEditTool`, `SearchContentTool`, Spotlight). | Called in-process by the FM brain; never leaves the device. |
-| **Private Cloud Compute** | Heavy generation that exceeds the on-device ceiling (Bucket 5: copy-edit, design-interview, social, syndicate). Apple-operated; **no external LLM APIs ever**. | The FM brain escalates to the PCC tier over Apple's attested, encrypted channel. |
+| **Private Cloud Compute** | Heavy generation that exceeds the on-device ceiling (Bucket 5: copy-edit, design-interview, social, repurpose). Apple-operated; **no external LLM APIs ever**. | The FM brain escalates to the PCC tier over Apple's attested, encrypted channel. |
 | **Site container (per-site)** | **All JavaScript**: the Node MCP server and everything it drives in-guest — `apply_edit`/`undo_edit` (HTML/Astro patcher), the Astro dev server + build, Sharp, Satori, Pagefind, Keystatic. Apple Containerization locally; Cloudflare Sandbox as the fallback on MAS / iOS / non-Apple-Silicon. | The host reaches it only over the in-container **MCP HTTP/WS transport** (#64) — not by host-spawning Node. |
 | **Site `Source/` (git repo)** | The filesystem source of truth — the clonable, externally-editable unit. | Mounted into the container; written by the in-guest JS and by Swift Bucket-1 hot-paths; read by `WKWebView` via the dev server. |
 | **Cloudflare (deploy target)** | The published site (Workers). | Deploy runs only after the native `pre-deploy-check` gate passes. |

@@ -99,6 +99,35 @@ struct NativeContentOperationsTests {
         #expect(reason.contains("Invalid collection name"))
     }
 
+    @Test("createTyped writes a like to its collection and commits")
+    func createTypedLike() async throws {
+        let (ops, root, spy) = makeOps()
+        let result = await ops.createTyped(siteID: "s1", typeID: "like", title: "Cool post")
+        #expect(result == .created(filePath: "src/content/likes/cool-post.md", identifier: "cool-post"))
+        let written = try String(
+            contentsOf: root.appendingPathComponent("src/content/likes/cool-post.md"), encoding: .utf8)
+        #expect(written.contains("likeOf: \"\""))
+        #expect(written.contains("publishDate:"))
+        let calls = await spy.calls
+        #expect(calls.count == 1)
+        #expect(calls.first?.1 == "src/content/likes/cool-post.md")
+        #expect(calls.first?.2 == "anglesite: add likes cool-post")
+    }
+
+    @Test("createTyped rejects an unknown type")
+    func createTypedUnknown() async {
+        let (ops, _, _) = makeOps()
+        let result = await ops.createTyped(siteID: "s1", typeID: "nope", title: "x")
+        #expect(result == .failed(reason: "Unknown content type: nope"))
+    }
+
+    @Test("createTyped refuses page-stored types")
+    func createTypedPageStored() async {
+        let (ops, _, _) = makeOps()
+        let result = await ops.createTyped(siteID: "s1", typeID: "businessProfile", title: "x")
+        #expect(result == .failed(reason: "Page-stored type businessProfile is not supported by createTyped yet"))
+    }
+
     @Test("processGitCommit returns a SHA in a real repo, nil outside one")
     func realGit() async throws {
         // Outside a repo → nil (best-effort).

@@ -25,7 +25,9 @@ import Foundation
         let s = try String(contentsOf: cfg, encoding: .utf8)
         #expect(s.contains("defineCollection"))
         #expect(s.contains("glob("))
-        #expect(s.contains("collections = { blog }"))
+        // V-1.2 (#344) expanded the export to { blog, notes, articles, … }; blog must remain registered.
+        #expect(s.range(of: #"collections = \{[^}]*\bblog\b[^}]*\}"#, options: .regularExpression) != nil,
+                "blog must remain in the collections export")
         // minimal schema fields
         for field in ["title:", "pubDate:", "description:", "draft:"] {
             #expect(s.contains(field), "schema missing \(field)")

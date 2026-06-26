@@ -1,0 +1,35 @@
+---
+import BaseLayout from "./BaseLayout.astro";
+
+interface Props {
+  entry: { data: Record<string, any> };
+}
+
+const { entry } = Astro.props;
+const d = entry.data;
+const title = d.title ?? d.name;
+const iso = d.publishDate ? new Date(d.publishDate).toISOString() : undefined;
+const human = d.publishDate ? new Date(d.publishDate).toLocaleDateString() : undefined;
+const images: string[] = Array.isArray(d.images) ? d.images : [];
+const tags: string[] = Array.isArray(d.tags) ? d.tags : [];
+---
+
+<BaseLayout title={title ?? "Post"} description={d.summary}>
+  <article class="h-entry">
+    {title && <h1 class="p-name">{title}</h1>}
+    {d.image && <img class="u-photo" src={d.image} alt={d.caption ?? ""} />}
+    {images.map((src) => <img class="u-photo" src={src} alt="" />)}
+    {d.bookmarkOf && <a class="u-bookmark-of" href={d.bookmarkOf}>{d.bookmarkOf}</a>}
+    {d.inReplyTo && <a class="u-in-reply-to" href={d.inReplyTo}>In reply to</a>}
+    {d.likeOf && <a class="u-like-of" href={d.likeOf}>Liked this</a>}
+    {/* TODO(#349): article `summary` (registry p-summary) is not emitted here yet — only photo caption is. */}
+    {d.caption && <p class="p-summary">{d.caption}</p>}
+    <div class="e-content"><slot /></div>
+    {iso && <time class="dt-published" datetime={iso}>{human}</time>}
+    {tags.length > 0 && (
+      <ul class="tags">
+        {tags.map((t) => <li><a class="p-category" href={`/tags/${t}`}>{t}</a></li>)}
+      </ul>
+    )}
+  </article>
+</BaseLayout>

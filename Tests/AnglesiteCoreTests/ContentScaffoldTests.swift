@@ -52,4 +52,40 @@ struct ContentScaffoldTests {
         #expect(out.contains("publishDate: 2025-06-15T15:06:40.000Z"))
         #expect(out.hasSuffix("Write your post here.\n"))
     }
+
+    @Test("renderEntry emits frontmatter for a note with body below the block")
+    func renderEntryNote() {
+        let note = try! #require(ContentTypeRegistry().descriptor(id: "note"))
+        let out = ContentScaffold.renderEntry(
+            descriptor: note, title: nil, now: Date(timeIntervalSince1970: 1_750_000_000))
+        #expect(out == """
+        ---
+        publishDate: 2025-06-15T15:06:40.000Z
+        tags: []
+        ---
+
+        Write your note here.
+
+        """)
+    }
+
+    @Test("renderEntry fills the title field and uses imageArray/url defaults")
+    func renderEntryAlbumAndLike() {
+        let registry = ContentTypeRegistry()
+        let album = try! #require(registry.descriptor(id: "album"))
+        let albumOut = ContentScaffold.renderEntry(
+            descriptor: album, title: "Trip", now: Date(timeIntervalSince1970: 1_750_000_000))
+        #expect(albumOut.contains("title: \"Trip\""))
+        #expect(albumOut.contains("images: []"))
+        #expect(albumOut.contains("publishDate: 2025-06-15T15:06:40.000Z"))
+        #expect(albumOut.contains("Write your album here."))
+
+        let like = try! #require(registry.descriptor(id: "like"))
+        let likeOut = ContentScaffold.renderEntry(
+            descriptor: like, title: nil, now: Date(timeIntervalSince1970: 1_750_000_000))
+        #expect(likeOut.contains("likeOf: \"\""))
+        #expect(likeOut.contains("publishDate: 2025-06-15T15:06:40.000Z"))
+        // No markdown field on a like → no body placeholder.
+        #expect(!likeOut.contains("Write your"))
+    }
 }

@@ -9,10 +9,10 @@ final class HomepageWriterTests: XCTestCase {
 
     <BaseLayout
       title="Welcome — Your New Anglesite Business Website"
-      description="Your business website is ready to set up. Run /start in Claude to begin the guided setup."
+      description="Your business website is ready to set up in Anglesite."
     >
       <h1>Welcome</h1>
-      <p>This site is ready to set up. Type <code>/start</code> in Claude Desktop to get started.</p>
+      <p>This site is ready to customize in Anglesite. Open the app to edit your pages, add content, and publish when you're ready.</p>
     </BaseLayout>
     """
 
@@ -29,8 +29,8 @@ final class HomepageWriterTests: XCTestCase {
         let out = HomepageWriter.fill(astro, headline: "Acme", blurb: "", tagline: "We do things.")
         XCTAssertTrue(out.contains(#"description="We do things.""#))
         XCTAssertTrue(out.contains("<h1>Acme</h1>"))
-        // Intro paragraph untouched when no blurb:
-        XCTAssertTrue(out.contains("Type <code>/start</code>"))
+        // When no blurb is provided, the intro paragraph keeps the template default.
+        XCTAssertTrue(out.contains("ready to customize in Anglesite"))
     }
 
     func testEscapesAttributeAndMarkup() {

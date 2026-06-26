@@ -222,17 +222,3 @@ public struct ConversationTranscript: Equatable, Sendable {
         return String(describing: raw)
     }
 }
-
-/// Which backend should serve a site window's chat. The decision (a pure function of the user's
-/// settings) is separated from construction (which needs App-target dependencies like the edit
-/// bridge and content graph) so it can be unit-tested in Core (#161 item 7).
-public enum AssistantChoice: Equatable, Sendable {
-    case claude
-    case foundationModel(FoundationModelTier)
-}
-
-/// Resolves the chat backend from the user's settings. Foundation Models off → Claude; on → the
-/// selected tier. `SiteWindow` calls this on the Developer ID path; the MAS build is on-device only.
-public func resolveAssistantChoice(preferFoundationModels: Bool, tier: FoundationModelTier) -> AssistantChoice {
-    preferFoundationModels ? .foundationModel(tier) : .claude
-}
