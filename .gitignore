@@ -57,6 +57,14 @@ node_modules/
 Resources/container-image/
 !Resources/container-image/.gitkeep
 
+# Vendored Linux kernel binary (populated by scripts/vendor-container-kernel.sh)
+Resources/container-kernel/*
+!Resources/container-kernel/.gitkeep
+
+# Vendored vminit initfs OCI layout (populated by scripts/vendor-container-kernel.sh)
+Resources/container-initfs/*
+!Resources/container-initfs/.gitkeep
+
 # Generated Apple Help search index (rebuilt by scripts/build-help-index.sh)
 Resources/Anglesite.help/**/*.helpindex
 

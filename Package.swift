@@ -82,7 +82,11 @@ if includeContainer {
                 .product(name: "ContainerizationExtras", package: "containerization")
             ],
             path: "Sources/AnglesiteContainer",
-            resources: [.copy("../../Resources/container-image")],
+            resources: [
+                .copy("../../Resources/container-image"),
+                .copy("../../Resources/container-kernel"),
+                .copy("../../Resources/container-initfs")
+            ],
             swiftSettings: strictConcurrency
         )
     )
