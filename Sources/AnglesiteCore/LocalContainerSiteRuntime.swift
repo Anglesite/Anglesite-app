@@ -12,6 +12,8 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private let knowledgeIndex: SiteKnowledgeIndex?
     private let semanticRanker: SemanticRanker?
     private let connect: @Sendable (MCPClient, URL) async throws -> Void
+    private let makeFileWatcher: @Sendable () -> any SiteFileWatching
+    private var fileWatcher: (any SiteFileWatching)?
 
     private var current: SiteRuntimeState = .idle
     private var observers: [UUID: AsyncStream<SiteRuntimeState>.Continuation] = [:]
@@ -25,7 +27,8 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         mcpClient: MCPClient,
         knowledgeIndex: SiteKnowledgeIndex? = nil,
         semanticRanker: SemanticRanker? = nil,
-        connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) }
+        connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) },
+        makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { FSEventsFileWatcher() }
     ) {
         self.ref = ref
         self.control = control
@@ -33,6 +36,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
         self.connect = connect
+        self.makeFileWatcher = makeFileWatcher
     }
 
     public var state: SiteRuntimeState { current }
@@ -72,6 +76,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
                 return
             }
             loadedKnowledgeSiteID = siteID
+            startFileWatcher(siteID: siteID, projectRoot: siteDirectory, generation: gen)
             activeSiteID = siteID
             setState(.ready(siteID: siteID, url: session.previewURL))
         } catch {
@@ -93,6 +98,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
 
     private func teardown() async {
         await mcpClient.stop()
+        stopFileWatcher()
         if let siteID = loadedKnowledgeSiteID {
             await knowledgeIndex?.unload(siteID: siteID)
             await semanticRanker?.unload(siteID: siteID)
@@ -102,6 +108,29 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             try? await control.stop(siteID: id)
             activeSiteID = nil
         }
+    }
+
+    private func startFileWatcher(siteID: String, projectRoot: URL, generation gen: Int) {
+        guard knowledgeIndex != nil else { return }
+        let watcher = makeFileWatcher()
+        do {
+            try watcher.start(root: projectRoot) { [weak self] batch in
+                Task { await self?.applyFileChanges(batch, siteID: siteID, projectRoot: projectRoot, generation: gen) }
+            }
+            fileWatcher = watcher
+        } catch {
+            // Best-effort: stale index is acceptable; the container reindexes on next open.
+        }
+    }
+
+    private func stopFileWatcher() {
+        fileWatcher?.stop()
+        fileWatcher = nil
+    }
+
+    private func applyFileChanges(_ batch: FileChangeBatch, siteID: String, projectRoot: URL, generation gen: Int) async {
+        guard gen == generation, let knowledgeIndex else { return }
+        await KnowledgeReindex.apply(batch, to: knowledgeIndex, siteID: siteID, projectRoot: projectRoot)
     }
 
     private func setState(_ s: SiteRuntimeState) {
