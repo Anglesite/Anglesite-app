@@ -87,6 +87,9 @@ Resources/Anglesite.help/**/*.helpindex
 # Claude Code harness state
 .claude/
 
+# Codex harness state (worktrees, agent scratch)
+.Codex/
+
 .superpowers/
 
 # Playwright MCP browser-session artifacts
