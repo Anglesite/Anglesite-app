@@ -146,6 +146,24 @@ struct AnglesiteApp: App {
         }
     }
 
+    private func showAboutPanel() {
+        // Credits carries the build info the standard fields don't: the dev phase and the
+        // host OS. App name and version come from the bundle via .applicationName and the
+        // default .applicationVersion (CFBundleShortVersionString) — passing "Phase X" there
+        // would clobber the real version and render as "Version Phase X".
+        let credits = NSAttributedString(
+            string: "Phase \(BuildInfo.phase) · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)",
+            attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]
+        )
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [
+            .applicationName: BuildInfo.appName,
+            .credits: credits
+        ])
+    }
+
     var body: some Scene {
         // The launcher is the first scene so it's the default window at launch (used when
         // SwiftUI has nothing to restore). It autoopens the most-recently-used site from its
@@ -174,6 +192,10 @@ struct AnglesiteApp: App {
         }
         .windowResizability(.contentSize)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Anglesite") { showAboutPanel() }
+            }
+
             CommandGroup(replacing: .newItem) {
                 Button("New Site") {
                     // Ensure the launcher exists to host the wizard sheet, then ask it to open.
