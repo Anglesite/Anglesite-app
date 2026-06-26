@@ -12,15 +12,10 @@ import FoundationModels
 /// Provider-agnostic surface for LLM-backed content assistance.
 ///
 /// Conformers wrap a concrete backend behind one streaming + structured API so callers
-/// (`ChatModel`, the on-device feature tools) don't depend on a specific provider:
+/// (`ChatModel`, the on-device feature tools) don't depend on a concrete implementation.
 ///
-/// - ``ClaudeAssistant`` (DevID-only) wraps the existing `ClaudeAgent` subprocess.
-/// - `FoundationModelAssistant` (both targets) wraps Apple's `LanguageModel`, on-device or PCC.
-///
-/// - Note: ``generate(prompt:context:)`` yields **plain text** chunks. `ClaudeAgent` emits a
-///   richer event stream (tool use, token usage) that this surface intentionally flattens.
-///   Consumers that need those events still talk to `ClaudeAgent` directly until the C.3
-///   `ChatModel` refactor reconciles the two streams. See issue #153.
+/// - Note: ``generate(prompt:context:)`` yields **plain text** chunks. Conversational callers use
+///   ``ConversationalAssistant`` when they need a richer event stream.
 public protocol ContentAssistant: Sendable {
     /// Streams a free-form text response for `prompt`, one chunk at a time.
     ///
@@ -36,8 +31,7 @@ public protocol ContentAssistant: Sendable {
     ///
     /// - Note: Requires `FoundationModels`, so it's gated to the Xcode-27 toolchain (#128).
     ///   Production builds always have it; CI on Xcode 26.3 sees the streaming surface only.
-    /// - Note: `T` is constrained to `Sendable` so the actor-isolated conformers
-    ///   (``FoundationModelAssistant``, ``ClaudeAssistant``) can return it across this
+    /// - Note: `T` is constrained to `Sendable` so actor-isolated conformers can return it across this
     ///   `nonisolated` boundary without a data-race warning. Tightening a `public` requirement is
     ///   technically source-breaking for out-of-module conformers, but every conformer is internal
     ///   to this app, and all `@Generable` result types already conform to `Sendable`.
@@ -104,7 +98,7 @@ public struct AssistantMessage: Sendable, Equatable {
 }
 
 /// Static capability descriptor for a ``ContentAssistant`` backend. Used to gate features
-/// (vision, tools) and route requests by tier (on-device vs. PCC vs. Claude).
+/// (vision, tools) and route requests by tier.
 public struct AssistantCapabilities: Sendable, Equatable {
     public let supportsStreaming: Bool
     public let supportsStructuredOutput: Bool
@@ -112,7 +106,7 @@ public struct AssistantCapabilities: Sendable, Equatable {
     public let supportsTools: Bool
     /// Maximum input context window in tokens, or `nil` when the backend doesn't expose one.
     public let maxContextTokens: Int?
-    /// Human-readable provider label, e.g. "On-Device", "Private Cloud Compute", "Claude".
+    /// Human-readable provider label, e.g. "On-Device" or "Private Cloud Compute".
     public let providerName: String
 
     public init(

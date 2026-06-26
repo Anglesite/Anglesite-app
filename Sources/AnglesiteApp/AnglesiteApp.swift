@@ -116,7 +116,8 @@ struct AnglesiteApp: App {
     private let debugPaneMenuVisible: Bool
 
     init() {
-        AppSettings.shared.migrateAssistantDefaultIfNeeded()
+        AppSettings.shared.removeLegacyChatBackendDefaultsIfNeeded()
+
         #if DEBUG
         let isDebugBuild = true
         #else
