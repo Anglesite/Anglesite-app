@@ -131,6 +131,13 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private func applyFileChanges(_ batch: FileChangeBatch, siteID: String, projectRoot: URL, generation gen: Int) async {
         guard gen == generation, let knowledgeIndex else { return }
         await KnowledgeReindex.apply(batch, to: knowledgeIndex, siteID: siteID, projectRoot: projectRoot)
+        // A stop()/site-switch may have superseded us during the apply above; if so, drop anything
+        // we re-added for a site this runtime no longer owns — mirroring populateSharedIndexes'
+        // post-await unload discipline.
+        guard gen == generation else {
+            await knowledgeIndex.unload(siteID: siteID)
+            return
+        }
     }
 
     private func setState(_ s: SiteRuntimeState) {

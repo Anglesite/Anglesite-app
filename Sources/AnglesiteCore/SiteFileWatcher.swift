@@ -154,4 +154,6 @@ public final class FSEventsFileWatcher: SiteFileWatching, @unchecked Sendable {
             FSEventStreamRelease(s)
         }
     }
+
+    deinit { stop() }
 }
