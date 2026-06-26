@@ -18,6 +18,7 @@ final class SiteNavigatorModel {
     var renameError: String?
 
     private var sourceDirectory: URL?
+    private var websiteTitle: String?
     private let renameService = NavigatorRenameService()
 
     private let graph: SiteContentGraph
@@ -27,8 +28,9 @@ final class SiteNavigatorModel {
         self.graph = graph
     }
 
-    func start(siteID: String, siteRoot: URL, sourceDirectory: URL) {
+    func start(siteID: String, siteRoot: URL, sourceDirectory: URL, websiteTitle: String) {
         self.sourceDirectory = sourceDirectory
+        self.websiteTitle = websiteTitle
         // Cancel any prior observer (window reuse: SwiftUI can replay a different site into the
         // same window) BEFORE starting the new one, so a stale refresh can't overwrite the new
         // site's sections. The initial load runs as the new task's first step, so it is tracked
@@ -56,6 +58,21 @@ final class SiteNavigatorModel {
             if let item = section.items.first(where: { $0.id == id }) { return item.target }
         }
         return nil
+    }
+
+    func updateWebsiteTitle(_ title: String) {
+        websiteTitle = title
+        sections = sections.map { section in
+            guard section.id == .metadata else { return section }
+            return NavigatorSection(
+                id: section.id,
+                title: section.title,
+                items: section.items.map {
+                    guard case .file(let file) = $0.target, file.name == "Info.plist" else { return $0 }
+                    return NavigatorItem(id: $0.id, title: title, target: $0.target)
+                }
+            )
+        }
     }
 
     /// A row is renamable iff it is a page or post (route target). File rows (components/styles/
@@ -150,6 +167,11 @@ final class SiteNavigatorModel {
             SiteFileTree.scan(siteRoot: siteRoot)
         }.value
         if Task.isCancelled { return }
-        sections = buildNavigatorTree(pages: pages, posts: posts, fileGroups: fileGroups)
+        sections = buildNavigatorTree(
+            pages: pages,
+            posts: posts,
+            fileGroups: fileGroups,
+            websiteTitle: websiteTitle
+        )
     }
 }
