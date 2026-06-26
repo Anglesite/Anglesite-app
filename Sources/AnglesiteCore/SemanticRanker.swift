@@ -72,6 +72,61 @@ public actor SemanticRanker {
         vectorsBySite[siteID]?.count ?? 0
     }
 
+    // MARK: - Ranking
+
+    /// A document scored against a query, where `score` is cosine similarity in -1…1.
+    public struct Ranked: Sendable, Equatable {
+        public let docID: String
+        public let score: Float
+        public init(docID: String, score: Float) {
+            self.docID = docID
+            self.score = score
+        }
+    }
+
+    /// Documents most semantically similar to `toDocID`, descending, excluding the source itself.
+    public func related(siteID: String, toDocID: String, limit: Int) -> [Ranked] {
+        guard let store = vectorsBySite[siteID], let source = store[toDocID] else { return [] }
+        return rank(store: store, against: source.vector, excluding: toDocID, limit: limit)
+    }
+
+    /// Documents most semantically similar to an arbitrary query string, descending.
+    public func search(siteID: String, queryText: String, limit: Int) async -> [Ranked] {
+        guard let store = vectorsBySite[siteID],
+              let queryVector = try? await provider.embed(queryText) else { return [] }
+        return rank(store: store, against: queryVector, excluding: nil, limit: limit)
+    }
+
+    private func rank(store: [String: Stored], against query: [Float], excluding: String?, limit: Int) -> [Ranked] {
+        store.compactMap { docID, stored -> Ranked? in
+            if docID == excluding { return nil }
+            return Ranked(docID: docID, score: VectorMath.cosine(query, stored.vector))
+        }
+        .sorted { $0.score != $1.score ? $0.score > $1.score : $0.docID < $1.docID }
+        .prefix(max(0, limit))
+        .map { $0 }
+    }
+
+    /// Min-max normalizes each signal to 0…1, then returns the weighted sum per docID over the
+    /// union of keys (a docID absent from one side contributes 0 there).
+    public nonisolated static func blend(
+        lexical: [String: Double], semantic: [String: Double], semanticWeight: Double
+    ) -> [String: Double] {
+        func normalize(_ map: [String: Double]) -> [String: Double] {
+            guard let lo = map.values.min(), let hi = map.values.max(), hi > lo else {
+                return map.mapValues { _ in map.isEmpty ? 0 : 1 }
+            }
+            return map.mapValues { ($0 - lo) / (hi - lo) }
+        }
+        let lex = normalize(lexical), sem = normalize(semantic)
+        let w = min(max(semanticWeight, 0), 1)
+        var out: [String: Double] = [:]
+        for docID in Set(lex.keys).union(sem.keys) {
+            out[docID] = w * (sem[docID] ?? 0) + (1 - w) * (lex[docID] ?? 0)
+        }
+        return out
+    }
+
     private func persist(siteID: String) {
         guard let cache, let stored = vectorsBySite[siteID] else { return }
         let entries = stored.reduce(into: [String: SemanticIndexCache.Entry]()) { result, pair in
