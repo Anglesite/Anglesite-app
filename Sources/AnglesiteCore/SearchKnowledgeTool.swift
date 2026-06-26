@@ -19,10 +19,12 @@ public struct SearchKnowledgeTool: Tool, Sendable {
 
     private let index: SiteKnowledgeIndex
     private let siteID: String
+    private let ranker: SemanticRanker?
 
-    public init(index: SiteKnowledgeIndex, siteID: String) {
+    public init(index: SiteKnowledgeIndex, siteID: String, ranker: SemanticRanker? = nil) {
         self.index = index
         self.siteID = siteID
+        self.ranker = ranker
     }
 
     public func call(arguments: Arguments) async throws -> String {
@@ -30,7 +32,22 @@ public struct SearchKnowledgeTool: Tool, Sendable {
         guard !query.isEmpty else {
             return "Provide a project search query."
         }
-        let results = await index.search(siteID: siteID, query: query, options: .init(limit: 6))
+        var results = await index.search(siteID: siteID, query: query, options: .init(limit: 6))
+        if let ranker {
+            // Blend the lexical scores with on-device semantic similarity so retrieval matches
+            // meaning, not just keywords. Falls back to pure lexical order when the ranker has
+            // no vectors (no model / not yet synced).
+            let semantic = await ranker.search(siteID: siteID, queryText: query, limit: 50)
+            if !semantic.isEmpty {
+                let lexicalScores = Dictionary(results.map { ($0.document.id, $0.score) }, uniquingKeysWith: max)
+                let semanticScores = Dictionary(semantic.map { ($0.docID, Double($0.score)) }, uniquingKeysWith: max)
+                let blended = SemanticRanker.blend(lexical: lexicalScores, semantic: semanticScores, semanticWeight: 0.6)
+                results = results.sorted {
+                    let lhs = blended[$0.document.id] ?? 0, rhs = blended[$1.document.id] ?? 0
+                    return lhs != rhs ? lhs > rhs : $0.document.path < $1.document.path
+                }
+            }
+        }
         guard !results.isEmpty else { return "No matching project context." }
 
         return results.map { result in
