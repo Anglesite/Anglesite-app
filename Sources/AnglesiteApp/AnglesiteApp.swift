@@ -114,8 +114,12 @@ struct AnglesiteApp: App {
     }
 
     private func showAboutPanel() {
+        // Credits carries the build info the standard fields don't: the dev phase and the
+        // host OS. App name and version come from the bundle via .applicationName and the
+        // default .applicationVersion (CFBundleShortVersionString) — passing "Phase X" there
+        // would clobber the real version and render as "Version Phase X".
         let credits = NSAttributedString(
-            string: BuildInfo.summary,
+            string: "Phase \(BuildInfo.phase) · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)",
             attributes: [
                 .font: NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular),
                 .foregroundColor: NSColor.secondaryLabelColor
@@ -123,7 +127,6 @@ struct AnglesiteApp: App {
         )
         NSApplication.shared.orderFrontStandardAboutPanel(options: [
             .applicationName: BuildInfo.appName,
-            .applicationVersion: "Phase \(BuildInfo.phase)",
             .credits: credits
         ])
     }

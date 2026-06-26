@@ -203,25 +203,25 @@ struct SiteWindow: View {
                         }
                     }
                     .animation(.easeInOut(duration: 0.18), value: chatPresented)
+                }
+                if deploy.drawerPresented {
+                    DeployDrawerView(model: deploy, siteName: site.name)
+                        .transition(reduceMotion
+                            ? .opacity
+                            : .move(edge: .bottom).combined(with: .opacity))
+                        .shadow(radius: 8, y: -2)
+                } else if backup.drawerPresented {
+                    // Backup and deploy can't both run at once (each disables the other's
+                    // button while running), but a stale completed-deploy drawer might still
+                    // be on screen when a backup finishes. Deploy wins the z-order — its
+                    // drawer carries the more critical "your deploy URL" payload.
+                    BackupDrawerView(model: backup, siteName: site.name)
+                        .transition(reduceMotion
+                            ? .opacity
+                            : .move(edge: .bottom).combined(with: .opacity))
+                        .shadow(radius: 8, y: -2)
+                }
             }
-            if deploy.drawerPresented {
-                DeployDrawerView(model: deploy, siteName: site.name)
-                    .transition(reduceMotion
-                        ? .opacity
-                        : .move(edge: .bottom).combined(with: .opacity))
-                    .shadow(radius: 8, y: -2)
-            } else if backup.drawerPresented {
-                // Backup and deploy can't both run at once (each disables the other's
-                // button while running), but a stale completed-deploy drawer might still
-                // be on screen when a backup finishes. Deploy wins the z-order — its
-                // drawer carries the more critical "your deploy URL" payload.
-                BackupDrawerView(model: backup, siteName: site.name)
-                    .transition(reduceMotion
-                        ? .opacity
-                        : .move(edge: .bottom).combined(with: .opacity))
-                    .shadow(radius: 8, y: -2)
-            }
-        }
         .animation(.easeInOut(duration: 0.18), value: deploy.drawerPresented)
         .animation(.easeInOut(duration: 0.18), value: backup.drawerPresented)
         .navigationTitle(site.name)
