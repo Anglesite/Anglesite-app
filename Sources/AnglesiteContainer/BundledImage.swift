@@ -95,13 +95,14 @@ public enum BundledImage {
         throw BundledImageError.initfsNotProvisioned
     }
 
-    /// True only when the container can actually boot: both `kernelURL()` and `initfsLayoutURL()`
-    /// resolve without throwing. Returns false when the kernel or initfs are not yet vendored and no
-    /// env overrides are set — keeping `PreviewModel` on the host runtime until provisioning is done.
-    ///
-    /// Does NOT call `layoutURL` (which `fatalError`s when the resource bundle is absent).
+    /// True only when the container can actually boot: the app OCI image (`layoutURL()`), the
+    /// `kernelURL()`, and the `initfsLayoutURL()` all resolve without throwing. Returns false when any
+    /// of them is not yet vendored and no env override is set — keeping `PreviewModel` on the host
+    /// runtime until provisioning is complete, so `ContainerizationControl` is never selected in a
+    /// state where `start()` would fail with `.imageUnavailable`.
     public static var isProvisioned: Bool {
         do {
+            _ = try layoutURL()
             _ = try kernelURL()
             _ = try initfsLayoutURL()
             return true
