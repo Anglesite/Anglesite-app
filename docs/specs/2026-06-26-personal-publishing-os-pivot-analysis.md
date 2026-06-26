@@ -131,6 +131,35 @@ Intelligence) is reusable. What changes is **what gets built next and why**:
 - "Communities" is not on any current roadmap and would be a new epic on the scale
   of the whole containerization effort.
 
+### 4.1 Audience: individuals *and* small businesses (both own their social web)
+
+The vision's examples skew personal (Facebook profiles, travel journals, digital
+gardens), but **the ownership thesis applies just as much to small businesses — and
+this is where the pivot *re-converges* with the app's original identity** as a
+business-website builder. A small business today rents its social presence from
+Facebook Pages, Instagram, Google Business Profile, Yelp, and Nextdoor — the same
+platform-dependence the vision rejects for individuals. "Own your social web" for a
+small business means:
+
+- Its **profile** (hours, location, contact, services) is canonical on its own site
+  as `LocalBusiness` JSON-LD + an h-card — not a Google Business Profile entry.
+- Its **posts/announcements/events** publish to its own site and **POSSE** out to
+  where customers are; customers can **follow the business directly** (ActivityPub),
+  not via an algorithmic Page feed.
+- **Reviews/testimonials** arrive and are displayed/responded-to on the business's
+  own site (Webmention in; `h-review`/schema.org `Review`/`AggregateRating` out) —
+  the business owns its reputation surface instead of Yelp owning it.
+- **Bookings, contact, commerce** are first-party (already covered by the existing
+  integration-wizard framework: booking, contact, donations, stores).
+
+Crucially this reuses investment the app *already has*: the roadmap's `business-info`
+→ `LocalBusiness` JSON-LD (Bucket 4), `reputation` review-response drafts (Bucket 5),
+`testimonials` collection/moderation (Bucket 3), and the booking/contact/commerce
+integrations. So small-business social ownership is **not a separate product line** —
+it's the same typed-objects + `@dwk/workers` stack with a business-flavored set of
+object types (§5.1) and the existing business skills layered on. Treat "individual"
+and "small business / org" as two audiences of *one* product, not a fork.
+
 ---
 
 ## 5. The gaps — what must be built
@@ -140,6 +169,14 @@ Intelligence) is reusable. What changes is **what gets built next and why**:
 Vision wants ~20 first-class types (Note, Article, Photo, Album, Event, Bookmark,
 Like, Reply, Repost, RSVP, Review, Recipe, Trip, Reading, Listening, …), each with
 a purpose-built editor. Today: 3 generic types.
+
+The registry should also carry **business-flavored types** (per §4.1) so the small-
+business audience is first-class, not bolted on: **Business Profile** (hours +
+location + contact → `LocalBusiness` JSON-LD / h-card), **Announcement/Offer**,
+**Event**, **Review/Testimonial** (received + first-party, → `Review`/
+`AggregateRating` + `h-review`), **Listing/Product**, and **Menu/Service**. Most are
+the same shape as the personal types — a typed object with a schema that projects to
+mf2 + schema.org — so they cost incrementally, not as a separate track.
 
 **What it takes:**
 - A content-type registry in `AnglesiteCore` (extend `SiteContentGraph` /
@@ -480,11 +517,14 @@ not tasks, and they gate the roadmap:
    the right precedent; extend it.
 
 6. **Scope explosion / focus.** The vision lists ~10 products to replace now and
-   ~8 more later. Attempting all is fatal. The leverage point is the **personal
+   ~8 more later. Attempting all is fatal. The leverage point is the **owned
    IndieWeb site** (notes, photos, articles, replies, feeds, webmention, POSSE) —
    that single slice replaces blogs, Linktree, basic social posting, and digital
-   gardens, and *everything else builds on it*. Communities, commerce, and
-   newsletters are later layers, not v1.
+   gardens, and *everything else builds on it*. The **same slice serves the small-
+   business audience** (§4.1) once the business-flavored types (§5.1) ride along —
+   profile, announcements, reviews, events — so individuals and small businesses are
+   one focus, not two. Communities, commerce, and newsletters are later layers, not
+   v1.
 
 ---
 
@@ -502,7 +542,7 @@ conformant release.
 | Phase | Theme | Contents | Prerequisites | Vision products unlocked |
 |---|---|---|---|---|
 | **V-0** | *Finish the substrate* | Continue Claude-removal + MAS + container runtime (already in flight). No vision-specific work; just don't stall it. | — | — |
-| **V-1** | *Typed content + feeds* | Content-type registry (§5.1) for Note/Article/Photo/Album/Bookmark; per-type editors; **RSS/Atom/JSON feeds** + **microformats2** in templates (the only protocol pieces written in-app — both static). | None — Astro-native + small deps (§8). | Blog, digital garden, link collection, photo album, portfolio. |
+| **V-1** | *Typed content + feeds* | Content-type registry (§5.1) for Note/Article/Photo/Album/Bookmark **+ business types** (Profile/Announcement/Event/Review, §4.1); per-type editors; **RSS/Atom/JSON feeds** + **microformats2 / LocalBusiness JSON-LD** in templates (the only protocol pieces written in-app — both static). | None — Astro-native + small deps (§8). | Blog, digital garden, link collection, photo album, portfolio **+ small-business site (profile, hours, reviews)**. |
 | **V-2** | *Make it social (outbound)* | Provision the per-site **Cloudflare Worker** composing `@dwk/webmention` (send) + `@dwk/indieauth`; POSSE syndication to Mastodon/Bluesky (API posting + backfeed via `@dwk/webmention`); the publish queue / "invisible publish" (§5.3). | **`@dwk/workers` stable release** (webmention/indieauth packages) + **passing webmention.rocks** (§5.2). | "Publish once, syndicate everywhere"; replaces basic social posting. |
 | **V-3** | *Make it social (inbound)* | Add `@dwk/micropub` + `@dwk/webmention` (receive) + `@dwk/websub` to the Worker; received interactions rendered on the page + snapshotted to git; typed objects wired to Micropub create/update/delete. | **`@dwk/workers` stable** + **passing micropub.rocks / webmention.rocks** (§5.2); data-canonicality decision (§6.2). | Comments/likes/replies on your own site; posting from external/IndieWeb clients. |
 | **V-4** | *Federation + reader* | Add `@dwk/activitypub` (actor/inbox/outbox/followers) + `@dwk/microsub` (follow/timeline) + `@dwk/webfinger`/identity. | `@dwk/workers` activitypub/microsub conformant; V-3 backend live. | Appear natively in the Fediverse; follow others; replaces Mastodon-class following. |
