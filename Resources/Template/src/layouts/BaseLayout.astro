@@ -17,6 +17,9 @@ const { title, description } = Astro.props;
     {description && <meta name="description" content={description} />}
     <title>{title}</title>
     <link rel="stylesheet" href="/src/styles/global.css" />
+    <link rel="alternate" type="application/rss+xml" title="RSS" href="/rss.xml" />
+    <link rel="alternate" type="application/atom+xml" title="Atom" href="/atom.xml" />
+    <link rel="alternate" type="application/feed+json" title="JSON Feed" href="/feed.json" />
   </head>
   <body>
     <slot />
