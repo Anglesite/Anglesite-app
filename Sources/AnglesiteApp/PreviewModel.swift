@@ -45,9 +45,10 @@ final class PreviewModel {
     init(
         contentGraph: SiteContentGraph? = nil,
         knowledgeIndex: SiteKnowledgeIndex? = nil,
+        semanticRanker: SemanticRanker? = nil,
         runtime: (any SiteRuntime)? = nil
     ) {
-        let runtime = runtime ?? Self.makeRuntime(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex)
+        let runtime = runtime ?? Self.makeRuntime(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex, semanticRanker: semanticRanker)
         self.runtime = runtime
         self.editRouter = MCPApplyEditRouter(mcpClient: { [weak runtime] in
             // `runtime` is the actor instance; reading `mcpClient` hops onto the actor.
@@ -97,7 +98,7 @@ final class PreviewModel {
     ///
     /// `sourceRepo` is NOT passed here — `LocalContainerSiteRuntime.init` doesn't take it; it
     /// receives it at `start(siteID:siteDirectory:)` time (forwarded from `open(siteID:siteDirectory:)`).
-    static func makeRuntime(contentGraph: SiteContentGraph?, knowledgeIndex: SiteKnowledgeIndex?) -> any SiteRuntime {
+    static func makeRuntime(contentGraph: SiteContentGraph?, knowledgeIndex: SiteKnowledgeIndex?, semanticRanker: SemanticRanker?) -> any SiteRuntime {
         #if !ANGLESITE_MAS
         // Container runtime is DevID-only (MAS doesn't link AnglesiteContainer). On MAS this whole
         // branch compiles out and the host runtime below is always used.
@@ -107,11 +108,12 @@ final class PreviewModel {
                 ref: "HEAD",
                 control: ContainerizationControl(),
                 mcpClient: MCPClient(supervisor: .shared),
-                knowledgeIndex: knowledgeIndex
+                knowledgeIndex: knowledgeIndex,
+                semanticRanker: semanticRanker
             )
         }
         #endif
-        return LocalSiteRuntime(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex)
+        return LocalSiteRuntime(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex, semanticRanker: semanticRanker)
     }
 
     func open(siteID: String, siteDirectory: URL) {

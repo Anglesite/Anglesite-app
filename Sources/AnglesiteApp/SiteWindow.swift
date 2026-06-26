@@ -39,6 +39,9 @@ struct SiteWindow: View {
     private let contentGraph: SiteContentGraph
     /// App-lifetime project knowledge index, rebuilt by the preview runtime and exposed to chat.
     private let knowledgeIndex: SiteKnowledgeIndex
+    /// App-lifetime on-device semantic ranker, synced from the knowledge index by the runtime so
+    /// `SearchKnowledgeTool` ranks retrieval by meaning, not just keywords (#312).
+    private let semanticRanker: SemanticRanker
     /// Observed (not a bare optional) so the Siri AI Readiness button enables itself if `bootstrap`
     /// populates the indexer after this window was constructed — see `ContentIndexerStore`.
     private let contentIndexerStore: ContentIndexerStore
@@ -49,13 +52,15 @@ struct SiteWindow: View {
         siteID: String?,
         contentGraph: SiteContentGraph,
         knowledgeIndex: SiteKnowledgeIndex,
+        semanticRanker: SemanticRanker,
         contentIndexerStore: ContentIndexerStore
     ) {
         self.siteID = siteID
         self.contentGraph = contentGraph
         self.knowledgeIndex = knowledgeIndex
+        self.semanticRanker = semanticRanker
         self.contentIndexerStore = contentIndexerStore
-        _preview = State(initialValue: PreviewModel(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex))
+        _preview = State(initialValue: PreviewModel(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex, semanticRanker: semanticRanker))
     }
 
     @State private var site: SiteStore.Site?
@@ -783,6 +788,7 @@ struct SiteWindow: View {
                     editBridge: makeEditBridge(),
                     contentGraph: contentGraph,
                     knowledgeIndex: knowledgeIndex,
+                    semanticRanker: semanticRanker,
                     integrationService: integrationOps
                 ),
                 index: knowledgeIndex
@@ -819,6 +825,7 @@ struct SiteWindow: View {
                 editBridge: makeEditBridge(),
                 contentGraph: contentGraph,
                 knowledgeIndex: knowledgeIndex,
+                semanticRanker: semanticRanker,
                 integrationService: integrationOps
             )
         case .claude:

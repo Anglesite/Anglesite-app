@@ -10,6 +10,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private let control: any LocalContainerControl
     public let mcpClient: MCPClient
     private let knowledgeIndex: SiteKnowledgeIndex?
+    private let semanticRanker: SemanticRanker?
     private let connect: @Sendable (MCPClient, URL) async throws -> Void
 
     private var current: SiteRuntimeState = .idle
@@ -23,12 +24,14 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         control: any LocalContainerControl,
         mcpClient: MCPClient,
         knowledgeIndex: SiteKnowledgeIndex? = nil,
+        semanticRanker: SemanticRanker? = nil,
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) }
     ) {
         self.ref = ref
         self.control = control
         self.mcpClient = mcpClient
         self.knowledgeIndex = knowledgeIndex
+        self.semanticRanker = semanticRanker
         self.connect = connect
     }
 
@@ -60,6 +63,14 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
                 await knowledgeIndex?.unload(siteID: siteID)
                 return
             }
+            if let documents = await knowledgeIndex?.documents(siteID: siteID) {
+                await semanticRanker?.sync(siteID: siteID, documents: documents)
+            }
+            guard gen == generation else {
+                await knowledgeIndex?.unload(siteID: siteID)
+                await semanticRanker?.unload(siteID: siteID)
+                return
+            }
             loadedKnowledgeSiteID = siteID
             activeSiteID = siteID
             setState(.ready(siteID: siteID, url: session.previewURL))
@@ -84,6 +95,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         await mcpClient.stop()
         if let siteID = loadedKnowledgeSiteID {
             await knowledgeIndex?.unload(siteID: siteID)
+            await semanticRanker?.unload(siteID: siteID)
             loadedKnowledgeSiteID = nil
         }
         if let id = activeSiteID {

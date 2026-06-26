@@ -67,6 +67,11 @@ public actor SemanticRanker {
         persist(siteID: siteID)
     }
 
+    /// Drops all vectors for a site (mirrors `SiteKnowledgeIndex.unload` on site close).
+    public func unload(siteID: String) {
+        vectorsBySite[siteID] = nil
+    }
+
     /// Number of vectors held for a site (inspection/tests).
     public func vectorCount(siteID: String) -> Int {
         vectorsBySite[siteID]?.count ?? 0
