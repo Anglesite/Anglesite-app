@@ -185,9 +185,11 @@ the site (build-time pull and/or client-side fetch).
 receive, so what's the backend?"** The backend is `@dwk/workers`. Its stated design
 ("the data and keys live only on infrastructure the user owns — serverless edge on
 Cloudflare, or a single self-hosted process") matches the vision's ownership stance
-exactly. Note: **per the v1 scope decision, the only deploy/runtime target is
-Cloudflare Workers** (§5.5); `@dwk/server` self-hosting (Docker/Node + SQLite)
-exists in the package but is **out of scope for v1**.
+exactly. Note: **v1's deploy/runtime target is Cloudflare Workers** (§5.5, the
+generous free tier is the default host); `@dwk/server` self-hosting (Docker/Node +
+SQLite) exists in the package and is the basis for the **planned post-v1
+self-hostable container** (run on your own server or another cloud — §5.5/§6.1),
+not a v1 deliverable.
 
 **Integration work the app actually owns for this pillar:**
 - A "provision social backend" flow: create the D1/R2/KV bindings + deploy the
@@ -266,11 +268,26 @@ rather than adding it:
   but not the inbox), so it should come back as an explicit, well-scoped feature —
   not be half-supported now.
 
-The only honest trade-off to record: **v1 hard-couples a published Anglesite site
-to Cloudflare.** That sits in mild tension with the vision's "hosting providers
-become interchangeable implementation details" and "self-hosted" goals (§6.3) — but
-as a *v1 scope decision* it is sound; interchangeability is a later promise, not a
-v1 one.
+**Provider independence comes via a self-hostable container, not multi-target
+deploy (decided direction).** Cloudflare is the *primary* host — a generous free
+tier makes it the zero-friction default, and the v1 path. But the escape hatch from
+provider lock-in is that **Anglesite can also produce a container** (the site +
+the `@dwk/workers` backend, via `@dwk/server`'s Node/SQLite/filesystem emulation of
+the Cloudflare primitives) that the user runs on **their own server or another
+cloud provider**. So "interchangeable hosting" is delivered by *one portable
+artifact that runs anywhere*, rather than N per-provider deploy adapters. This is
+the stronger form of the vision's promise and it reuses existing investment: the
+containerization epic (#59/#62) already builds an OCI image and runs the site in a
+container (`LocalContainerSiteRuntime`, #69) — the self-host artifact is that image
+extended to bundle the social backend. Sequencing: Cloudflare in v1; the
+self-hostable container as a post-v1 capability (not a v1 deliverable, but the
+reason the Cloudflare coupling below is a *default*, not a *lock-in*).
+
+The honest trade-off to record: **v1's working path is Cloudflare**, so day-one
+users do connect a Cloudflare account (free tier). That is a sequencing reality,
+not an architectural lock-in — the self-hostable container (above) is the planned
+answer to the vision's "hosting providers become interchangeable" and "self-hosted"
+goals (§6.1/§6.3).
 
 ### 5.6 Communities (a second product)
 
@@ -347,11 +364,17 @@ downstream **native** apps, neither gating the Apple pivot.
 These are the places the vision is internally under-specified. They are decisions,
 not tasks, and they gate the roadmap:
 
-1. **"No cloud account required" vs. being social.** You can *author* with no
-   account, but *receiving* followers/webmentions and *deploying* require an
-   always-on host and therefore *some* account somewhere. Reconcile as: "no
-   account to **create**; one hosting connection to **publish/receive**." Say it
-   plainly in the product.
+1. **"No cloud account required" vs. being social — reconciled by the hosting
+   model (§5.5).** You can *author* with no account (local package + git, offline),
+   but *receiving* followers/webmentions and *publishing* require an always-on host.
+   The reconciliation: **Cloudflare is the primary host with a generous free tier**
+   (the zero-friction default — practically "free," and the v1 path), **and** the
+   user can instead run the **self-hostable container on their own server or another
+   cloud**, owing no account to anyone. So the truthful product statement is: "no
+   account to **create**; to **publish/receive**, use the free Cloudflare default or
+   host the container yourself." That keeps the ownership promise real (you are never
+   *forced* onto one provider) while staying honest that being social requires *a*
+   host. Say exactly this in the product — don't imply zero hosting.
 
 2. **Static-first vs. the inbox.** *Largely resolved* — the receiving backend is
    `@dwk/workers` (§5.2), and the v1 Cloudflare-only decision (§5.5) means static
@@ -363,15 +386,13 @@ not tasks, and they gate the roadmap:
    cached in the Worker's inbox store — is it in your git repo? IndieWeb practice:
    yes, snapshot it back into `Source/` so it survives backend loss).
 
-3. **"No centralized" vs. discovery, communities — and v1's Cloudflare coupling.**
-   Discovery and communities need shared infrastructure; reframe to "opt-in, open,
-   self-hostable" or accept a thin directory. Separately, **v1 is Cloudflare-only
-   (§5.5)**, which couples a published site to one provider — acceptable as a v1
-   scope decision but in tension with the vision's "interchangeable hosting" and
-   "self-hosted" goals. `@dwk/workers` keeps the *door* open (it ships a
-   self-hostable `@dwk/server`), so the coupling is a v1 choice, not a permanent
-   architectural lock-in. Say plainly: v1 = Cloudflare; interchangeability/self-host
-   = later.
+3. **"No centralized" vs. discovery & communities.** Discovery and communities need
+   shared infrastructure; reframe to "opt-in, open, self-hostable" or accept a thin
+   directory. (The hosting-provider half of this tension is handled separately in
+   §6.1/§5.5: Cloudflare default + self-hostable container = provider independence,
+   so a *published site* is not centralized even though v1's default host is. The
+   genuinely unresolved centralization question is **discovery** — finding other
+   sites/communities needs some index; keep it opt-in and open-data.)
 
 4. **Apple-only AI vs. cross-platform reach — resolved by decision (§5.8).** One
    Apple app spans **macOS + iOS + iPadOS** (shared code, per-device feature set);
