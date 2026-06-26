@@ -694,6 +694,7 @@ struct SiteWindow: View {
         }
         #if ANGLESITE_MAS
         assistantChoice = .foundationModel(.onDevice)
+        let knowledgeIndex = SiteKnowledgeIndex(siteDirectory: resolved.sourceDirectory)
         // Sandboxed App Store build: there's no `claude` CLI to shell out to, so chat is backed by
         // the on-device `FoundationModelAssistant` (#159). This is the MAS build's first chat pane.
         // The per-site `editBridge` + app-lifetime `contentGraph` attach `ApplyEditTool` +
@@ -703,11 +704,14 @@ struct SiteWindow: View {
             siteID: resolved.id,
             siteDirectory: resolved.sourceDirectory,
             configDirectory: resolved.configDirectory,
-            assistant: FoundationModelAssistant(
-                tier: .onDevice,
-                editBridge: makeEditBridge(),
-                contentGraph: contentGraph,
-                integrationService: integrationOps
+            assistant: KnowledgeAugmentedAssistant(
+                base: FoundationModelAssistant(
+                    tier: .onDevice,
+                    editBridge: makeEditBridge(),
+                    contentGraph: contentGraph,
+                    integrationService: integrationOps
+                ),
+                index: knowledgeIndex
             ),
             annotationFeed: feed,
             annotationResolver: annotationResolver,
@@ -732,6 +736,7 @@ struct SiteWindow: View {
         // construction stays here because it needs App-owned deps (the edit bridge, content graph).
         // `makeEditBridge()` is only called in the on-device arm — the Claude path does no bridge work.
         let assistant: any ConversationalAssistant
+        let knowledgeIndex = SiteKnowledgeIndex(siteDirectory: resolved.sourceDirectory)
         let choice = resolveAssistantChoice(preferFoundationModels: settings.preferFoundationModels, tier: settings.foundationModelTier)
         assistantChoice = choice
         switch choice {
@@ -745,7 +750,15 @@ struct SiteWindow: View {
         case .claude:
             assistant = ClaudeAssistant(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
         }
-        chat = ChatModel(siteID: resolved.id, siteDirectory: resolved.sourceDirectory, configDirectory: resolved.configDirectory, assistant: assistant, annotationFeed: feed, annotationResolver: annotationResolver, undoCommand: undoCommand)
+        chat = ChatModel(
+            siteID: resolved.id,
+            siteDirectory: resolved.sourceDirectory,
+            configDirectory: resolved.configDirectory,
+            assistant: KnowledgeAugmentedAssistant(base: assistant, index: knowledgeIndex),
+            annotationFeed: feed,
+            annotationResolver: annotationResolver,
+            undoCommand: undoCommand
+        )
         #endif
         // Auto alt-text (C.7 / #157): after a successful image drop, generate alt text on-device and
         // apply it to the `<img>`. Target-agnostic — the on-device vision model runs on both builds.
