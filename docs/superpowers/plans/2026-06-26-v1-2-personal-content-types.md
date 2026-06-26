@@ -394,7 +394,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Modify: `Resources/Template/src/content.config.ts`
 - Create: `Resources/Template/src/layouts/Hentry.astro`
-- Create: `Resources/Template/src/pages/{notes,articles,photos,albums,bookmarks,replies,likes}/[...slug].astro` (7 files)
+- Create: `Resources/Template/src/pages/[collection]/[...slug].astro` (1 dynamic route covering all collections)
 - Create: `Resources/Template/src/content/{notes,articles,photos,albums,bookmarks,replies,likes}/hello-*.md` (7 seed files)
 
 **Interfaces:**
@@ -517,18 +517,26 @@ const tags: string[] = Array.isArray(d.tags) ? d.tags : [];
 </BaseLayout>
 ```
 
-- [ ] **Step 3: Create the seven entry routes**
+- [ ] **Step 3: Create one dynamic entry route for all collections**
 
-Each file is identical except the collection name. `Resources/Template/src/pages/notes/[...slug].astro`:
+A single route renders every personal-type collection at `/<collection>/<slug>/`. `Resources/Template/src/pages/[collection]/[...slug].astro`:
 
 ```astro
 ---
 import { getCollection, render } from "astro:content";
 import Hentry from "../../layouts/Hentry.astro";
 
+const collections = ["notes", "articles", "photos", "albums", "bookmarks", "replies", "likes"];
+
 export async function getStaticPaths() {
-  const entries = await getCollection("notes");
-  return entries.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+  const paths = [];
+  for (const collection of collections) {
+    const entries = await getCollection(collection);
+    for (const entry of entries) {
+      paths.push({ params: { collection, slug: entry.id }, props: { entry } });
+    }
+  }
+  return paths;
 }
 
 const { entry } = Astro.props;
@@ -538,7 +546,7 @@ const { Content } = await render(entry);
 <Hentry entry={entry}><Content /></Hentry>
 ```
 
-Create the other six by copying this file to `articles/[...slug].astro`, `photos/[...slug].astro`, `albums/[...slug].astro`, `bookmarks/[...slug].astro`, `replies/[...slug].astro`, `likes/[...slug].astro` and replacing the single string `"notes"` in the `getCollection(...)` call with the matching collection name.
+This keeps the URL structure (`/notes/hello-note/`, `/likes/hello-like/`, …) the Task 5 smoke test asserts, with one file instead of seven. The `collections` array must list exactly the seven personal collections (not `blog`, which keeps its own `src/pages/blog/[...slug].astro`).
 
 - [ ] **Step 4: Create one seed entry per collection**
 
