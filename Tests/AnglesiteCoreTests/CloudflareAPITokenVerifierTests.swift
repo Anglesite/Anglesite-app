@@ -66,8 +66,22 @@ struct CloudflareAPITokenVerifierTests {
     func unparseableResponse() async {
         let verifier = CloudflareAPITokenVerifier(transport: Self.transport(verify: (200, "not json at all")))
         let result = await verifier.verify(token: "any", siteDirectory: Self.siteDir)
-        if case .failure(.unavailable) = result { } else {
+        guard case .failure(.unavailable) = result else {
             Issue.record("expected .unavailable, got \(result)")
+            return
+        }
+    }
+
+    @Test("a transient server error (5xx/429) maps to .unavailable, not .invalidToken")
+    func transientServerError() async {
+        // Cloudflare can return a `{"success":false}` body on a 503/429; that's an outage/rate-limit,
+        // not a bad token — it must not be misclassified as .invalidToken.
+        let verifier = CloudflareAPITokenVerifier(transport: Self.transport(
+            verify: (503, #"{"success":false,"errors":[{"code":10000,"message":"service unavailable"}]}"#)))
+        let result = await verifier.verify(token: "valid-but-cf-is-down", siteDirectory: Self.siteDir)
+        guard case .failure(.unavailable) = result else {
+            Issue.record("expected .unavailable, got \(result)")
+            return
         }
     }
 

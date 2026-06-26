@@ -24,10 +24,17 @@ public struct CloudflareAPITokenVerifier: TokenVerifying {
         // `siteDirectory` is unused — verification is now a pure API call (kept for the protocol so
         // callers and the MAS sandbox grant path don't change).
         let data: Data
+        let http: HTTPURLResponse
         do {
-            (data, _) = try await get("user/tokens/verify", token: token)
+            (data, http) = try await get("user/tokens/verify", token: token)
         } catch {
             return .failure(.network)
+        }
+        // Rate-limit (429) / server errors (5xx) are transient outages, not a bad token — don't blame
+        // the user's token. A genuinely invalid token comes back as 401 with `success:false`, which
+        // falls through to the envelope check below and is correctly classified as `.invalidToken`.
+        if http.statusCode == 429 || http.statusCode >= 500 {
+            return .failure(.unavailable("Cloudflare is unavailable right now (HTTP \(http.statusCode)). Try again in a moment."))
         }
         guard let envelope = try? JSONDecoder().decode(VerifyEnvelope.self, from: data) else {
             return .failure(.unavailable("Cloudflare returned an unexpected response while checking the token."))
