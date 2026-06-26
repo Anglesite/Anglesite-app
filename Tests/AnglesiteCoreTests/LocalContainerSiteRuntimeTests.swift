@@ -163,3 +163,70 @@ struct LocalContainerSiteRuntimeTests {
         #expect(seen.last == .ready(siteID: "s1", url: Self.ok.previewURL))
     }
 }
+
+// MARK: - FakeLocalContainerControl exec tests
+
+struct FakeLocalContainerControlExecTests {
+    private static let defaultResult = ContainerExecResult(
+        exitCode: 0, stdout: "built successfully", stderr: "")
+
+    private static let session = LocalContainerSession(
+        previewURL: URL(string: "http://127.0.0.1:1")!,
+        mcpURL: URL(string: "http://127.0.0.1:2")!)
+
+    @Test("exec records the call with siteID, argv, env, and cwd")
+    func execRecordsCall() async throws {
+        let fake = FakeLocalContainerControl(
+            startResult: .success(Self.session),
+            execResult: Self.defaultResult)
+
+        _ = try await fake.exec(
+            siteID: "site-abc",
+            argv: ["wrangler", "deploy"],
+            environment: ["NODE_ENV": "production"],
+            workingDirectory: "/workspace/Source",
+            onOutput: { _ in })
+
+        let calls = await fake.execCalls
+        #expect(calls.count == 1)
+        #expect(calls[0].siteID == "site-abc")
+        #expect(calls[0].argv == ["wrangler", "deploy"])
+        #expect(calls[0].env == ["NODE_ENV": "production"])
+        #expect(calls[0].cwd == "/workspace/Source")
+    }
+
+    @Test("exec returns the injected execResult")
+    func execReturnsResult() async throws {
+        let expected = ContainerExecResult(exitCode: 1, stdout: "out", stderr: "err")
+        let fake = FakeLocalContainerControl(
+            startResult: .success(Self.session),
+            execResult: expected)
+
+        let result = try await fake.exec(
+            siteID: "s",
+            argv: ["cmd"],
+            environment: [:],
+            workingDirectory: "/",
+            onOutput: { _ in })
+
+        #expect(result == expected)
+    }
+
+    @Test("exec replays execStdoutLines via onOutput in order")
+    func execReplaysStoLines() async throws {
+        let fake = FakeLocalContainerControl(
+            startResult: .success(Self.session),
+            execResult: Self.defaultResult,
+            execStdoutLines: ["line1", "line2", "line3"])
+
+        var received: [String] = []
+        _ = try await fake.exec(
+            siteID: "s",
+            argv: ["build"],
+            environment: [:],
+            workingDirectory: "/",
+            onOutput: { received.append($0) })
+
+        #expect(received == ["line1", "line2", "line3"])
+    }
+}

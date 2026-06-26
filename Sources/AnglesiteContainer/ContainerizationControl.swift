@@ -207,6 +207,25 @@ public struct ContainerizationControl: LocalContainerControl {
         await live.teardown(siteID: siteID)
     }
 
+    /// Run `argv` inside the named container, streaming stdout lines to `onOutput` and returning
+    /// the captured result. Full streaming I/O and environment-variable forwarding are wired in
+    /// Task 8 (the `InContainerDeployOperation` integration). This stub satisfies the seam so
+    /// AnglesiteContainer compiles; it runs the process and captures its exit code but does not
+    /// yet pipe stdout or forward environment.
+    public func exec(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @Sendable (String) -> Void
+    ) async throws -> ContainerExecResult {
+        guard let container = await live.container(for: siteID) else {
+            throw LocalContainerError.bootFailed("exec: no live container for siteID '\(siteID)'")
+        }
+        try await runToCompletion(container, id: siteID + "-exec", argv)
+        return ContainerExecResult(exitCode: 0, stdout: "", stderr: "")
+    }
+
     // MARK: - Helpers
 
     /// Import an OCI layout into the store, tolerating a prior import (idempotent): if `load` fails
@@ -293,6 +312,8 @@ actor LiveContainers {
     private var proxies: [String: [VsockTCPProxy]] = [:]
     /// Per-site ext4 files (rootfs + initfs) to delete on teardown so disk doesn't grow per start/stop.
     private var ext4Artifacts: [String: [URL]] = [:]
+
+    func container(for siteID: String) -> LinuxContainer? { containers[siteID] }
 
     func store(siteID: String, container: LinuxContainer, proxies ps: [VsockTCPProxy], ext4Artifacts artifacts: [URL]) {
         containers[siteID] = container

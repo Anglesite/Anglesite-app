@@ -18,6 +18,19 @@ public enum LocalContainerError: Error, Equatable {
     case cloneFailed(String)            // git clone of Source/ into the guest failed
 }
 
+/// The captured output of a guest `exec` call. No `Containerization`/`Virtualization` types cross
+/// this boundary — only `String` and `Int32`.
+public struct ContainerExecResult: Sendable, Equatable {
+    public let exitCode: Int32
+    public let stdout: String
+    public let stderr: String
+    public init(exitCode: Int32, stdout: String, stderr: String) {
+        self.exitCode = exitCode
+        self.stdout = stdout
+        self.stderr = stderr
+    }
+}
+
 /// Typed wrapper over "boot a container, hydrate it from a repo, start the guest processes, and
 /// return host-reachable endpoints." `ContainerizationControl` (in AnglesiteContainer) is the
 /// production conformer; `FakeLocalContainerControl` backs the tests. Mirrors `SandboxControlClient`.
@@ -25,4 +38,15 @@ public enum LocalContainerError: Error, Equatable {
 public protocol LocalContainerControl: Sendable {
     func start(siteID: String, sourceRepo: URL, ref: String) async throws -> LocalContainerSession
     func stop(siteID: String) async throws
+
+    /// Run `argv` inside the named container's guest environment, streaming each output line to
+    /// `onOutput` as it arrives, and returning the captured result when the process exits.
+    /// No `Containerization`/`Virtualization` types cross this seam.
+    func exec(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @Sendable (String) -> Void
+    ) async throws -> ContainerExecResult
 }
