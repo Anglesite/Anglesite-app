@@ -34,6 +34,9 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
     /// `nil` in headless/test contexts that don't care about the graph — population is then a
     /// no-op. The App Intents entity queries (A.2 #137) and Spotlight indexer (A.3) read from it.
     private let contentGraph: SiteContentGraph?
+    /// App-lifetime local RAG index for project-aware assistant retrieval (#307). Rebuilt when a
+    /// site starts and unloaded with the content graph on close.
+    private let knowledgeIndex: SiteKnowledgeIndex?
     private let logCenter: LogCenter
     private let resolveCommand: CommandResolver
     private let resolveMCPCommand: MCPCommandResolver
@@ -44,14 +47,15 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
     private var observers: [UUID: AsyncStream<SiteRuntimeState>.Continuation] = [:]
     /// Bumped on every `start(...)`; lets a slow `devServer.start` await know it was superseded.
     private var generation = 0
-    /// The siteID whose content this runtime last loaded into `contentGraph`, so `stop()` /
+    /// The siteID whose content this runtime last loaded into shared app indexes, so `stop()` /
     /// a site switch can evict exactly that site. `nil` when nothing is loaded.
-    private var loadedGraphSiteID: String?
+    private var loadedSharedIndexSiteID: String?
 
     public init(
         devServer: AstroDevServer? = nil,
         mcpClient: MCPClient? = nil,
         contentGraph: SiteContentGraph? = nil,
+        knowledgeIndex: SiteKnowledgeIndex? = nil,
         supervisor: ProcessSupervisor = .shared,
         logCenter: LogCenter = .shared,
         resolveCommand: @escaping CommandResolver = LocalSiteRuntime.resolveAstroCommand,
@@ -62,6 +66,7 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
         self.devServer = devServer ?? AstroDevServer(supervisor: supervisor, logCenter: logCenter)
         self.mcpClient = mcpClient ?? MCPClient(supervisor: supervisor, logCenter: logCenter)
         self.contentGraph = contentGraph
+        self.knowledgeIndex = knowledgeIndex
         self.logCenter = logCenter
         self.resolveCommand = resolveCommand
         self.resolveMCPCommand = resolveMCPCommand
@@ -118,7 +123,7 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
                 // Populate the content graph with a native scan of the site's `Source/` directory
                 // (Bucket 1, #275). Replaces the `list_content` MCP round-trip — same projection,
                 // no subprocess hop. An empty/unscannable site just leaves the graph empty.
-                await populateContentGraph(siteID: siteID, siteDirectory: siteDirectory, generation: gen)
+                await populateSharedIndexes(siteID: siteID, siteDirectory: siteDirectory, generation: gen)
                 guard gen == generation else { return }
                 setState(.ready(siteID: siteID, url: url))
             } catch {
@@ -149,17 +154,17 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
     private func stopSubprocesses() async {
         await devServer.stop()
         await mcpClient.stop()
-        if let siteID = loadedGraphSiteID {
+        if let siteID = loadedSharedIndexSiteID {
             await contentGraph?.unload(siteID: siteID)
-            loadedGraphSiteID = nil
+            await knowledgeIndex?.unload(siteID: siteID)
+            loadedSharedIndexSiteID = nil
         }
     }
 
-    /// Scan the site's `Source/` directory (`siteDirectory`) into `contentGraph` via the native
-    /// `ContentScanner` (Bucket 1, #275). A no-op when no graph is attached. The scan is read-only
-    /// and total — an empty or partial site simply yields fewer entries; nothing throws.
-    private func populateContentGraph(siteID: String, siteDirectory: URL, generation gen: Int) async {
-        guard let graph = contentGraph else { return }
+    /// Scan the site's `Source/` directory (`siteDirectory`) into the shared content and knowledge
+    /// indexes. The scan is read-only and total — an empty or partial site simply yields fewer
+    /// entries; nothing throws.
+    private func populateSharedIndexes(siteID: String, siteDirectory: URL, generation gen: Int) async {
         // Run the recursive filesystem scan off the actor so it doesn't block this runtime from
         // processing other messages (stop signals, state queries) for the scan's duration — the
         // old MCP path yielded the actor on every `await`, and this preserves that.
@@ -169,8 +174,18 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
         // A newer start() may have superseded us during the scan — don't pollute the shared graph
         // with a site this window is no longer showing; that start() loads its own.
         guard gen == generation else { return }
-        await graph.load(siteID: siteID, pages: listing.pages, posts: listing.posts, images: listing.images)
-        loadedGraphSiteID = siteID
+        await contentGraph?.load(siteID: siteID, pages: listing.pages, posts: listing.posts, images: listing.images)
+        guard gen == generation else {
+            await contentGraph?.unload(siteID: siteID)
+            return
+        }
+        await knowledgeIndex?.rebuild(siteID: siteID, projectRoot: siteDirectory)
+        guard gen == generation else {
+            await contentGraph?.unload(siteID: siteID)
+            await knowledgeIndex?.unload(siteID: siteID)
+            return
+        }
+        loadedSharedIndexSiteID = siteID
     }
 
     private func startMCPClient(siteID: String, siteDirectory: URL) async {

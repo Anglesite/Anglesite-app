@@ -47,4 +47,23 @@ struct NavigatorTreeTests {
         #expect(item.title == "Base.astro")
         #expect(item.target == .file(ref))
     }
+
+    @Test("package Info.plist appears as the headerless first website item")
+    func packageMetadataAppearsAsWebsiteItem() throws {
+        let info = FileRef(url: URL(fileURLWithPath: "/tmp/Site.anglesite/Info.plist"), group: .metadata, name: "Info.plist")
+        let settings = FileRef(url: URL(fileURLWithPath: "/tmp/Site.anglesite/Config/settings.plist"), group: .metadata, name: "settings.plist")
+
+        let sections = buildNavigatorTree(
+            pages: [page("/about/", title: "About")],
+            posts: [],
+            fileGroups: [.metadata: [settings, info]],
+            websiteTitle: "Acme"
+        )
+
+        let site = try #require(sections.first)
+        #expect(site.id == .metadata)
+        #expect(site.title == nil)
+        #expect(site.items.map(\.title) == ["Acme"])
+        #expect(site.items.first?.target == .file(info))
+    }
 }

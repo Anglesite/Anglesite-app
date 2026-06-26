@@ -66,9 +66,11 @@ struct KnowledgeAugmentedAssistantTests {
         )
 
         let base = CapturingConversationalAssistant()
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
         let assistant = KnowledgeAugmentedAssistant(
             base: base,
-            index: SiteKnowledgeIndex(siteDirectory: root)
+            index: index
         )
         let context = AssistantContext(siteID: "site", siteDirectory: root)
 
@@ -91,9 +93,11 @@ struct KnowledgeAugmentedAssistantTests {
         )
 
         let base = CapturingConversationalAssistant()
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
         let assistant = KnowledgeAugmentedAssistant(
             base: base,
-            index: SiteKnowledgeIndex(siteDirectory: root)
+            index: index
         )
         let prompt = "Explain lunar geology."
         for try await _ in try await assistant.generate(

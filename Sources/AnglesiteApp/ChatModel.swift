@@ -117,11 +117,7 @@ final class ChatModel {
     init(siteID: String, siteDirectory: URL, configDirectory: URL, annotationFeed: AnnotationFeed? = nil, annotationResolver: AnnotationResolver? = nil, undoCommand: UndoCommand? = nil) {
         self.siteID = siteID
         self.siteDirectory = siteDirectory
-        let claude = ClaudeAssistant(siteID: siteID, siteDirectory: siteDirectory)
-        let assistant = KnowledgeAugmentedAssistant(
-            base: claude,
-            index: SiteKnowledgeIndex(siteDirectory: siteDirectory)
-        )
+        let assistant = ClaudeAssistant(siteID: siteID, siteDirectory: siteDirectory)
         self.assistant = assistant
         self.transcript = ConversationTranscript(providerName: assistant.capabilities.providerName)
         self.history = ChatHistoryStore(configDirectory: configDirectory)

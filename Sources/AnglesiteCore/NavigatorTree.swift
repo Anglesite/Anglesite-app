@@ -17,9 +17,9 @@ public struct NavigatorItem: Sendable, Equatable, Identifiable {
 
 public struct NavigatorSection: Sendable, Equatable, Identifiable {
     public let id: FileGroup
-    public let title: String
+    public let title: String?
     public let items: [NavigatorItem]
-    public init(id: FileGroup, title: String, items: [NavigatorItem]) {
+    public init(id: FileGroup, title: String?, items: [NavigatorItem]) {
         self.id = id; self.title = title; self.items = items
     }
 }
@@ -34,16 +34,17 @@ public func postRoute(for post: SiteContentGraph.Post) -> String {
 }
 
 /// Display titles for the five groups, in canonical sidebar order.
-private let groupTitles: [(FileGroup, String)] = [
-    (.pages, "Pages"), (.posts, "Posts"),
-    (.components, "Components"), (.styles, "Styles"), (.metadata, "Metadata"),
+private let groupTitles: [(FileGroup, String?)] = [
+    (.metadata, nil), (.pages, "Pages"), (.posts, "Posts"),
+    (.components, "Components"), (.styles, "Styles"),
 ]
 
 /// Merges content-graph pages/posts with the filesystem scan into ordered, non-empty sections.
 public func buildNavigatorTree(
     pages: [SiteContentGraph.Page],
     posts: [SiteContentGraph.Post],
-    fileGroups: [FileGroup: [FileRef]]
+    fileGroups: [FileGroup: [FileRef]],
+    websiteTitle: String? = nil
 ) -> [NavigatorSection] {
     let pageItems = pages
         .sorted { $0.route < $1.route }
@@ -58,6 +59,8 @@ public func buildNavigatorTree(
         switch group {
         case .pages: items = pageItems
         case .posts: items = postItems
+        case .metadata:
+            items = siteMetadataItems(from: fileGroups[group] ?? [], websiteTitle: websiteTitle)
         default:
             items = (fileGroups[group] ?? []).map {
                 NavigatorItem(id: $0.id, title: $0.name, target: .file($0))
@@ -66,4 +69,16 @@ public func buildNavigatorTree(
         if !items.isEmpty { sections.append(NavigatorSection(id: group, title: title, items: items)) }
     }
     return sections
+}
+
+private func siteMetadataItems(from refs: [FileRef], websiteTitle: String?) -> [NavigatorItem] {
+    guard let infoPlist = refs.first(where: { $0.name == "Info.plist" }) else { return [] }
+    let title = websiteTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return [
+        NavigatorItem(
+            id: infoPlist.id,
+            title: title.flatMap { $0.isEmpty ? nil : $0 } ?? "Website",
+            target: .file(infoPlist)
+        )
+    ]
 }

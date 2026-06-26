@@ -52,7 +52,7 @@ public actor KnowledgeAugmentedAssistant: ConversationalAssistant {
     }
 
     private func enrichedPrompt(_ prompt: String, context: AssistantContext) async -> String {
-        guard let retrieved = await index.formattedContext(for: prompt) else { return prompt }
+        guard let retrieved = await index.formattedContext(siteID: context.siteID, query: prompt) else { return prompt }
         return """
         \(retrieved)
 

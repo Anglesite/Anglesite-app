@@ -9,6 +9,18 @@ private enum MainPaneMode: Equatable {
     case editor(FileRef)
 }
 
+private enum ActiveEditor {
+    case text(FileEditorModel)
+    case plist(PlistEditorModel)
+
+    var file: FileRef {
+        switch self {
+        case .text(let model): model.file
+        case .plist(let model): model.file
+        }
+    }
+}
+
 /// Root view for a single per-site window. Owns the site's `PreviewModel`,
 /// `DeployModel`, and `ChatModel` as `@State` — lifecycle is bound to the window:
 /// when the window opens we resolve the `siteID` to a `SiteStore.Site` and start
@@ -25,17 +37,25 @@ struct SiteWindow: View {
     /// The app-lifetime content graph (held by `AppDelegate`), seeded into this window's
     /// `PreviewModel` so opening the site populates the shared graph (A.8, #142).
     private let contentGraph: SiteContentGraph
+    /// App-lifetime project knowledge index, rebuilt by the preview runtime and exposed to chat.
+    private let knowledgeIndex: SiteKnowledgeIndex
     /// Observed (not a bare optional) so the Siri AI Readiness button enables itself if `bootstrap`
     /// populates the indexer after this window was constructed — see `ContentIndexerStore`.
     private let contentIndexerStore: ContentIndexerStore
 
     private let integrationOps = IntegrationOperations.live()
 
-    init(siteID: String?, contentGraph: SiteContentGraph, contentIndexerStore: ContentIndexerStore) {
+    init(
+        siteID: String?,
+        contentGraph: SiteContentGraph,
+        knowledgeIndex: SiteKnowledgeIndex,
+        contentIndexerStore: ContentIndexerStore
+    ) {
         self.siteID = siteID
         self.contentGraph = contentGraph
+        self.knowledgeIndex = knowledgeIndex
         self.contentIndexerStore = contentIndexerStore
-        _preview = State(initialValue: PreviewModel(contentGraph: contentGraph))
+        _preview = State(initialValue: PreviewModel(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex))
     }
 
     @State private var site: SiteStore.Site?
@@ -84,7 +104,7 @@ struct SiteWindow: View {
     /// The open file's editor state. Owned here (not in `MainPaneEditorView`) so navigating away can
     /// auto-save it and the Preview/Editor toggle keeps the buffer alive. Replaced when a different
     /// file opens; cleared on window close / site replay.
-    @State private var editorModel: FileEditorModel?
+    @State private var activeEditor: ActiveEditor?
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -115,7 +135,7 @@ struct SiteWindow: View {
             siriReadinessModel = nil
             // Persist any unsaved edits before dropping the old site's editor on replay (#188 reuse).
             persistEditorBufferBestEffort()
-            editorModel = nil
+            activeEditor = nil
             mainPaneMode = .preview
         }
         .onChange(of: preview.state) { _, newState in
@@ -144,7 +164,7 @@ struct SiteWindow: View {
             // auto-save-on-leave). No conflict dialog is possible during teardown, so we don't gate
             // on a flush return value — just write the buffer best-effort, off the main actor.
             persistEditorBufferBestEffort()
-            editorModel = nil
+            activeEditor = nil
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()
             scopedURL = nil
@@ -426,7 +446,7 @@ struct SiteWindow: View {
     @ViewBuilder
     private func mainPane(for site: SiteStore.Site) -> some View {
         VStack(spacing: 0) {
-            if editorModel != nil {
+            if activeEditorFile != nil {
                 Picker("", selection: Binding(
                     get: { paneSelection },
                     set: { setPaneSelection($0) }
@@ -454,8 +474,8 @@ struct SiteWindow: View {
             // Switching to Preview auto-saves the open editor (abort on an unresolved conflict).
             // The flush is async (off-main IO), so do it in a Task and only switch on success.
             Task { if await leaveCurrentEditor() { mainPaneMode = .preview } }
-        } else if value == 1, let model = editorModel {
-            mainPaneMode = .editor(model.file)
+        } else if value == 1, let file = activeEditorFile {
+            mainPaneMode = .editor(file)
         }
     }
 
@@ -464,26 +484,51 @@ struct SiteWindow: View {
     /// switch instead of clobbering the other tool's edit. Safe to call when not editing. Async
     /// because the save/check IO runs off the main actor.
     private func leaveCurrentEditor() async -> Bool {
-        guard case .editor = mainPaneMode, let model = editorModel else { return true }
-        return await model.flushBeforeLeaving()
+        guard case .editor = mainPaneMode else { return true }
+        switch activeEditor {
+        case .text(let model):
+            return await model.flushBeforeLeaving()
+        case .plist(let model):
+            return await model.flushBeforeLeaving()
+        case nil:
+            return true
+        }
     }
 
     /// Best-effort off-main save of the open editor's buffer when the editor is torn down (window
     /// close or site replay), where no conflict dialog can be shown. Consistent with the
     /// auto-save-on-leave model; last-writer-wins on the rare teardown-time external conflict.
     private func persistEditorBufferBestEffort() {
-        guard let model = editorModel, model.isDirty else { return }
-        let url = model.file.url
-        let contents = model.text
-        Task.detached(priority: .userInitiated) { try? FileDocumentIO.save(contents, to: url) }
+        switch activeEditor {
+        case .text(let model) where model.isDirty:
+            let url = model.file.url
+            let contents = model.text
+            Task.detached(priority: .userInitiated) { try? FileDocumentIO.save(contents, to: url) }
+        case .plist(let model):
+            if model.isDirty, model.validationMessage == nil {
+                let url = model.file.url
+                let entries = model.entriesForSaving()
+                Task.detached(priority: .userInitiated) { try? PlistDocumentIO.save(entries, to: url) }
+            }
+        case .text, nil:
+            break
+        }
+    }
+
+    private var activeEditorFile: FileRef? {
+        activeEditor?.file
     }
 
     @ViewBuilder
     private func mainPaneContent(for site: SiteStore.Site) -> some View {
         switch mainPaneMode {
         case .editor:
-            if let editorModel {
+            if case .text(let editorModel) = activeEditor {
                 MainPaneEditorView(model: editorModel)
+            } else if case .plist(let plistEditorModel) = activeEditor {
+                PlistEditorView(model: plistEditorModel) { title in
+                    Task { await saveWebsiteTitle(title) }
+                }
             } else {
                 previewPane(for: site)
             }
@@ -558,6 +603,7 @@ struct SiteWindow: View {
             }
             if entry.name != site?.name {
                 site?.name = entry.name
+                navigator?.updateWebsiteTitle(entry.name)
             }
         }
     }
@@ -595,13 +641,22 @@ struct SiteWindow: View {
                 }
             }
         case .file(let file):
-            if editorModel?.file.id == file.id {
+            if activeEditorFile?.id == file.id {
                 mainPaneMode = .editor(file)   // re-show the already-open file (buffer intact)
                 return
             }
             Task {
                 guard await leaveCurrentEditor() else { return }   // flush the previous file first
-                editorModel = FileEditorModel(file: file)
+                switch EditorKind.resolve(for: file) {
+                case .text:
+                    activeEditor = .text(FileEditorModel(file: file))
+                case .plist:
+                    activeEditor = .plist(PlistEditorModel(
+                        file: file,
+                        websiteTitle: site?.name ?? file.name,
+                        sourceDirectory: site?.sourceDirectory ?? file.url.deletingLastPathComponent()
+                    ))
+                }
                 mainPaneMode = .editor(file)
             }
         }
@@ -613,6 +668,20 @@ struct SiteWindow: View {
             return "/anglesite:check"
         case .foundationModel:
             return "Audit this site for issues and suggest improvements to make it deploy-ready. Review the available site content and call out concrete files or sections when relevant."
+        }
+    }
+
+    private func saveWebsiteTitle(_ title: String) async {
+        guard let id = site?.id else { return }
+        do {
+            guard let updated = try await SiteStore.shared.setDisplayName(title, for: id) else { return }
+            site = updated
+            navigator?.updateWebsiteTitle(updated.name)
+        } catch {
+            await LogCenter.shared.append(
+                source: "editor", stream: .stderr,
+                text: "Saving website title failed: \(error.localizedDescription)"
+            )
         }
     }
 
@@ -671,7 +740,12 @@ struct SiteWindow: View {
         // this creation and stop the freshly-made navigator instead.
         navigator?.stop()
         let navModel = SiteNavigatorModel(graph: contentGraph)
-        navModel.start(siteID: resolved.id, siteRoot: resolved.packageURL, sourceDirectory: resolved.sourceDirectory)
+        navModel.start(
+            siteID: resolved.id,
+            siteRoot: resolved.packageURL,
+            sourceDirectory: resolved.sourceDirectory,
+            websiteTitle: resolved.name
+        )
         navigator = navModel
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
@@ -694,7 +768,6 @@ struct SiteWindow: View {
         }
         #if ANGLESITE_MAS
         assistantChoice = .foundationModel(.onDevice)
-        let knowledgeIndex = SiteKnowledgeIndex(siteDirectory: resolved.sourceDirectory)
         // Sandboxed App Store build: there's no `claude` CLI to shell out to, so chat is backed by
         // the on-device `FoundationModelAssistant` (#159). This is the MAS build's first chat pane.
         // The per-site `editBridge` + app-lifetime `contentGraph` attach `ApplyEditTool` +
@@ -709,6 +782,7 @@ struct SiteWindow: View {
                     tier: .onDevice,
                     editBridge: makeEditBridge(),
                     contentGraph: contentGraph,
+                    knowledgeIndex: knowledgeIndex,
                     integrationService: integrationOps
                 ),
                 index: knowledgeIndex
@@ -736,7 +810,6 @@ struct SiteWindow: View {
         // construction stays here because it needs App-owned deps (the edit bridge, content graph).
         // `makeEditBridge()` is only called in the on-device arm — the Claude path does no bridge work.
         let assistant: any ConversationalAssistant
-        let knowledgeIndex = SiteKnowledgeIndex(siteDirectory: resolved.sourceDirectory)
         let choice = resolveAssistantChoice(preferFoundationModels: settings.preferFoundationModels, tier: settings.foundationModelTier)
         assistantChoice = choice
         switch choice {
@@ -745,6 +818,7 @@ struct SiteWindow: View {
                 tier: tier,
                 editBridge: makeEditBridge(),
                 contentGraph: contentGraph,
+                knowledgeIndex: knowledgeIndex,
                 integrationService: integrationOps
             )
         case .claude:

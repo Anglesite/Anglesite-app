@@ -10,7 +10,13 @@ struct SiteNavigatorView: View {
     var body: some View {
         List(selection: $model.selection) {
             ForEach(model.sections) { section in
-                Section(section.title) {
+                if let title = section.title {
+                    Section(title) {
+                        ForEach(section.items) { item in
+                            row(for: item, in: section)
+                        }
+                    }
+                } else {
                     ForEach(section.items) { item in
                         row(for: item, in: section)
                     }
@@ -89,7 +95,7 @@ struct SiteNavigatorView: View {
         case .posts: return "text.document"
         case .components: return "square.stack.3d.up"
         case .styles: return "paintbrush"
-        case .metadata: return "gearshape"
+        case .metadata: return "globe"
         }
     }
 }

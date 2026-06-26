@@ -42,8 +42,12 @@ final class PreviewModel {
     /// `contentGraph` is the app-lifetime `SiteContentGraph` (held by `AppDelegate`); it's threaded
     /// into the default `LocalSiteRuntime` so opening this site populates the shared graph (A.8,
     /// #142). Tests inject an explicit `runtime` and leave the graph `nil`.
-    init(contentGraph: SiteContentGraph? = nil, runtime: (any SiteRuntime)? = nil) {
-        let runtime = runtime ?? Self.makeRuntime(contentGraph: contentGraph)
+    init(
+        contentGraph: SiteContentGraph? = nil,
+        knowledgeIndex: SiteKnowledgeIndex? = nil,
+        runtime: (any SiteRuntime)? = nil
+    ) {
+        let runtime = runtime ?? Self.makeRuntime(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex)
         self.runtime = runtime
         self.editRouter = MCPApplyEditRouter(mcpClient: { [weak runtime] in
             // `runtime` is the actor instance; reading `mcpClient` hops onto the actor.
@@ -93,7 +97,7 @@ final class PreviewModel {
     ///
     /// `sourceRepo` is NOT passed here — `LocalContainerSiteRuntime.init` doesn't take it; it
     /// receives it at `start(siteID:siteDirectory:)` time (forwarded from `open(siteID:siteDirectory:)`).
-    static func makeRuntime(contentGraph: SiteContentGraph?) -> any SiteRuntime {
+    static func makeRuntime(contentGraph: SiteContentGraph?, knowledgeIndex: SiteKnowledgeIndex?) -> any SiteRuntime {
         #if !ANGLESITE_MAS
         // Container runtime is DevID-only (MAS doesn't link AnglesiteContainer). On MAS this whole
         // branch compiles out and the host runtime below is always used.
@@ -102,11 +106,12 @@ final class PreviewModel {
             return LocalContainerSiteRuntime(
                 ref: "HEAD",
                 control: ContainerizationControl(),
-                mcpClient: MCPClient(supervisor: .shared)
+                mcpClient: MCPClient(supervisor: .shared),
+                knowledgeIndex: knowledgeIndex
             )
         }
         #endif
-        return LocalSiteRuntime(contentGraph: contentGraph)
+        return LocalSiteRuntime(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex)
     }
 
     func open(siteID: String, siteDirectory: URL) {
