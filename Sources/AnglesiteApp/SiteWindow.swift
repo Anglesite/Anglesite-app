@@ -446,7 +446,7 @@ struct SiteWindow: View {
     @ViewBuilder
     private func mainPane(for site: SiteStore.Site) -> some View {
         VStack(spacing: 0) {
-            if activeEditorFile != nil {
+            if showsPaneModePicker {
                 Picker("", selection: Binding(
                     get: { paneSelection },
                     set: { setPaneSelection($0) }
@@ -462,6 +462,11 @@ struct SiteWindow: View {
             }
             mainPaneContent(for: site)
         }
+    }
+
+    private var showsPaneModePicker: Bool {
+        if case .text = activeEditor { return true }
+        return false
     }
 
     private var paneSelection: Int {
