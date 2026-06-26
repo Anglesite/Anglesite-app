@@ -47,6 +47,90 @@ public protocol DeployExecutor: Sendable {
     ) async -> DeployStepResult
 }
 
+// MARK: - ContainerDeployExecutor
+
+/// Runs deploy steps inside a running container via `LocalContainerControl.exec`.
+///
+/// The site is cloned to `/workspace/site` in the guest at boot time; Node 22 and the
+/// site's `node_modules` are already installed there. Each step is mapped to an in-guest
+/// argv and executed at that working directory.
+///
+/// `CLOUDFLARE_API_TOKEN` is forwarded through the `environment` dict that the caller
+/// supplies — it is never added here and never written to logs.
+public struct ContainerDeployExecutor: DeployExecutor {
+    private let control: any LocalContainerControl
+    private let siteID: String
+    private let logCenter: LogCenter
+
+    public init(
+        control: any LocalContainerControl,
+        siteID: String,
+        logCenter: LogCenter = .shared
+    ) {
+        self.control = control
+        self.siteID = siteID
+        self.logCenter = logCenter
+    }
+
+    // MARK: DeployExecutor
+
+    public func run(
+        step: DeployStep,
+        siteDirectory: URL,
+        environment: [String: String],
+        source: String
+    ) async -> DeployStepResult {
+        // `siteDirectory` is the HOST path — the guest always uses /workspace/site.
+        let argv = guestArgv(for: step)
+        // Collect lines synchronously during exec (the onOutput callback is nonisolated/sync),
+        // then batch-append them to LogCenter after exec returns (where we have await).
+        // This avoids unstructured Tasks and keeps log ordering deterministic.
+        // Never log the environment dict — CLOUDFLARE_API_TOKEN stays off disk and out of logs.
+        let collectedLines: _CollectedLines = .init()
+        let result: ContainerExecResult
+        do {
+            result = try await control.exec(
+                siteID: siteID,
+                argv: argv,
+                environment: environment,
+                workingDirectory: "/workspace/site",
+                onOutput: { line in collectedLines.append(line) }
+            )
+        } catch {
+            return DeployStepResult(exitCode: nil, output: "couldn't exec in the container: \(error)")
+        }
+        for line in collectedLines.lines {
+            await logCenter.append(source: source, stream: .stdout, text: line)
+        }
+        return DeployStepResult(exitCode: result.exitCode, output: result.stdout)
+    }
+
+    // MARK: argv mapping
+
+    private func guestArgv(for step: DeployStep) -> [String] {
+        switch step {
+        case .build:
+            return ["npm", "run", "build"]
+        case .preflight:
+            return ["npx", "tsx", "scripts/pre-deploy-check.ts", "--json"]
+        case .wrangler:
+            return ["npx", "wrangler", "deploy"]
+        }
+    }
+}
+
+// MARK: - _CollectedLines
+
+/// A Sendable accumulator for `onOutput` callbacks from `LocalContainerControl.exec`.
+///
+/// The callback is guaranteed to be called sequentially (one line at a time) from the
+/// exec implementation, so no locking is needed — but the class must be `@unchecked Sendable`
+/// because its `var lines` is mutated from inside the `@Sendable` closure.
+private final class _CollectedLines: @unchecked Sendable {
+    var lines: [String] = []
+    func append(_ line: String) { lines.append(line) }
+}
+
 // MARK: - HostDeployExecutor
 
 /// Runs deploy steps on the host using the embedded Node runtime, mirroring `DeployCommand`'s
