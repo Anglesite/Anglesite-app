@@ -31,13 +31,14 @@ struct PersonalTypeRenderSmokeTests {
             executable: node,
             arguments: ["node_modules/astro/astro.js", "build"],
             currentDirectoryURL: Self.templateDir)
-        #expect(result.exitCode == 0, "astro build failed: \(result.stdout)\n\(result.stderr)")
+        try #require(result.exitCode == 0, "astro build failed: \(result.stdout)\n\(result.stderr)")
 
         func html(_ rel: String) throws -> String {
             try String(contentsOf: dist.appendingPathComponent(rel), encoding: .utf8)
         }
-        #expect(try html("notes/hello-note/index.html").contains("h-entry"))
-        #expect(try html("notes/hello-note/index.html").contains("dt-published"))
+        let noteHTML = try html("notes/hello-note/index.html")
+        #expect(noteHTML.contains("h-entry"))
+        #expect(noteHTML.contains("dt-published"))
         #expect(try html("articles/hello-article/index.html").contains("p-name"))
         #expect(try html("photos/hello-photo/index.html").contains("u-photo"))
         #expect(try html("albums/hello-album/index.html").contains("u-photo"))

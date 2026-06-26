@@ -22,6 +22,7 @@ const tags: string[] = Array.isArray(d.tags) ? d.tags : [];
     {d.bookmarkOf && <a class="u-bookmark-of" href={d.bookmarkOf}>{d.bookmarkOf}</a>}
     {d.inReplyTo && <a class="u-in-reply-to" href={d.inReplyTo}>In reply to</a>}
     {d.likeOf && <a class="u-like-of" href={d.likeOf}>Liked this</a>}
+    {/* TODO(#349): article `summary` (registry p-summary) is not emitted here yet — only photo caption is. */}
     {d.caption && <p class="p-summary">{d.caption}</p>}
     <div class="e-content"><slot /></div>
     {iso && <time class="dt-published" datetime={iso}>{human}</time>}
