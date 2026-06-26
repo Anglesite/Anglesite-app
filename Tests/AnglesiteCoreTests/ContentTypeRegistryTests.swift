@@ -121,6 +121,40 @@ struct ContentTypeRegistryTests {
         #expect(profile.projections.microformatProperties["telephone"] == "p-tel")
     }
 
+    @Test("personalTypes include album and like in canonical order")
+    func personalTypeOrder() {
+        #expect(ContentTypeRegistry.personalTypes.map(\.id)
+            == ["note", "article", "photo", "album", "bookmark", "reply", "like"])
+    }
+
+    @Test("album is an h-entry image gallery with an imageArray field")
+    func albumDescriptor() {
+        let album = try! #require(ContentTypeRegistry().descriptor(id: "album"))
+        #expect(album.displayName == "Album")
+        #expect(album.collection == "albums")
+        #expect(album.projections.microformat == "h-entry")
+        #expect(album.projections.schemaType == "ImageGallery")
+        let images = try! #require(album.fields.first { $0.name == "images" })
+        #expect(images.kind == .imageArray)
+        #expect(images.required)
+        #expect(album.projections.microformatProperties["images"] == "u-photo")
+        #expect(album.projections.microformatProperties["title"] == "p-name")
+        #expect(album.projections.microformatProperties["publishDate"] == "dt-published")
+    }
+
+    @Test("like is an h-entry with u-like-of and no schema.org type")
+    func likeDescriptor() {
+        let like = try! #require(ContentTypeRegistry().descriptor(id: "like"))
+        #expect(like.displayName == "Like")
+        #expect(like.collection == "likes")
+        #expect(like.projections.microformat == "h-entry")
+        #expect(like.projections.schemaType == nil)
+        let likeOf = try! #require(like.fields.first { $0.name == "likeOf" })
+        #expect(likeOf.kind == .url)
+        #expect(likeOf.required)
+        #expect(like.projections.microformatProperties["likeOf"] == "u-like-of")
+    }
+
     // MARK: Catalog invariants
 
     @Test("every built-in has a unique id, a microformat, and reachable mf2 fields")
