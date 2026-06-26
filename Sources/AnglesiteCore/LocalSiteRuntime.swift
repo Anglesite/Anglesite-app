@@ -41,6 +41,11 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
     /// so assistant retrieval can rank by meaning, not just keywords (#312). Unloaded with the
     /// other shared indexes on close.
     private let semanticRanker: SemanticRanker?
+    /// Factory for the per-site filesystem watcher that keeps the knowledge index fresh while the
+    /// site is open (#307). Injectable so tests drive synthetic change batches.
+    private let makeFileWatcher: @Sendable () -> any SiteFileWatching
+    /// The active watcher for the currently-loaded site, or `nil` when none is loaded.
+    private var fileWatcher: (any SiteFileWatching)?
     private let logCenter: LogCenter
     private let resolveCommand: CommandResolver
     private let resolveMCPCommand: MCPCommandResolver
@@ -66,7 +71,8 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
         resolveCommand: @escaping CommandResolver = LocalSiteRuntime.resolveAstroCommand,
         resolveMCPCommand: @escaping MCPCommandResolver = LocalSiteRuntime.resolveBundledMCPCommand,
         restartPolicy: ProcessSupervisor.RestartPolicy = .onCrash(maxAttempts: 3, baseBackoff: 0.5),
-        readyTimeout: TimeInterval = 30
+        readyTimeout: TimeInterval = 30,
+        makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { FSEventsFileWatcher() }
     ) {
         self.devServer = devServer ?? AstroDevServer(supervisor: supervisor, logCenter: logCenter)
         self.mcpClient = mcpClient ?? MCPClient(supervisor: supervisor, logCenter: logCenter)
@@ -78,6 +84,7 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
         self.resolveMCPCommand = resolveMCPCommand
         self.restartPolicy = restartPolicy
         self.readyTimeout = readyTimeout
+        self.makeFileWatcher = makeFileWatcher
     }
 
     public var state: SiteRuntimeState { current }
@@ -160,6 +167,7 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
     private func stopSubprocesses() async {
         await devServer.stop()
         await mcpClient.stop()
+        stopFileWatcher()
         if let siteID = loadedSharedIndexSiteID {
             await contentGraph?.unload(siteID: siteID)
             await knowledgeIndex?.unload(siteID: siteID)
@@ -202,6 +210,43 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
             return
         }
         loadedSharedIndexSiteID = siteID
+        startFileWatcher(siteID: siteID, projectRoot: siteDirectory, generation: gen)
+    }
+
+    /// Begin watching the site's `Source/` directory; route changes into the knowledge index.
+    /// Best-effort: a watcher that fails to start is logged and the runtime stays `.ready`.
+    private func startFileWatcher(siteID: String, projectRoot: URL, generation gen: Int) {
+        guard knowledgeIndex != nil else { return }
+        stopFileWatcher()  // defensive: never orphan a running watcher if called while one is active
+        let watcher = makeFileWatcher()
+        do {
+            try watcher.start(root: projectRoot) { [weak self] batch in
+                Task { await self?.applyFileChanges(batch, siteID: siteID, projectRoot: projectRoot, generation: gen) }
+            }
+            fileWatcher = watcher
+        } catch {
+            Task { await logCenter.append(source: "reindex:\(siteID)", stream: .stderr,
+                                          text: "file watcher unavailable: \(error)") }
+        }
+    }
+
+    private func stopFileWatcher() {
+        fileWatcher?.stop()
+        fileWatcher = nil
+    }
+
+    /// Apply a debounced change batch to the knowledge index, unless a newer `start()`/`stop()`
+    /// has superseded the watcher that produced it.
+    private func applyFileChanges(_ batch: FileChangeBatch, siteID: String, projectRoot: URL, generation gen: Int) async {
+        guard gen == generation, let knowledgeIndex else { return }
+        await KnowledgeReindex.apply(batch, to: knowledgeIndex, siteID: siteID, projectRoot: projectRoot)
+        // A stop()/site-switch may have superseded us during the apply above; if so, drop anything
+        // we re-added for a site this runtime no longer owns — mirroring populateSharedIndexes'
+        // post-await unload discipline.
+        guard gen == generation else {
+            await knowledgeIndex.unload(siteID: siteID)
+            return
+        }
     }
 
     private func startMCPClient(siteID: String, siteDirectory: URL) async {

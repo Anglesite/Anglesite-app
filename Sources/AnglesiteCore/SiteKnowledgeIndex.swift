@@ -188,9 +188,7 @@ public actor SiteKnowledgeIndex {
         return files
     }
 
-    private static let skippedDirectoryNames: Set<String> = [
-        ".astro", ".git", ".netlify", ".vercel", "dist", "node_modules"
-    ]
+    private static let skippedDirectoryNames = SiteIndexPaths.skippedDirectoryNames
 
     private static let indexedExtensions: Set<String> = [
         "astro", "md", "mdx", "mdoc", "markdown", "html", "css",
