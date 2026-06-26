@@ -53,6 +53,10 @@ Resources/npm-cache/
 Resources/edit-overlay/
 node_modules/
 
+# Vendored arm64 OCI image (populated by scripts/vendor-container-image.sh; bundled into AnglesiteContainer)
+Resources/container-image/
+!Resources/container-image/.gitkeep
+
 # Generated Apple Help search index (rebuilt by scripts/build-help-index.sh)
 Resources/Anglesite.help/**/*.helpindex
 
