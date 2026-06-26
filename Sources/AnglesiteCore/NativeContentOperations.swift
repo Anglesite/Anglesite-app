@@ -93,6 +93,47 @@ public struct NativeContentOperations: ContentOperationsService {
         return .created(filePath: relPath, identifier: finalSlug)
     }
 
+    /// Create a typed content entry (V-1.2). Looks the type up in `registry`, derives a slug from
+    /// `title`, renders frontmatter via `ContentScaffold.renderEntry`, writes it, and commits —
+    /// the same write/commit path as `createPost`. Collection-stored types only; page-stored types
+    /// (e.g. `businessProfile`) are #345.
+    public func createTyped(
+        siteID: String,
+        typeID: String,
+        title: String,
+        registry: ContentTypeRegistry = ContentTypeRegistry(),
+        onProgress: ProgressHandler? = nil
+    ) async -> ContentCreateResult {
+        onProgress?(.createResolvingRuntime)
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        guard let descriptor = registry.descriptor(id: typeID) else {
+            return .failed(reason: "Unknown content type: \(typeID)")
+        }
+        guard let collection = descriptor.collection else {
+            return .failed(reason: "Page-stored type \(typeID) is not supported by createTyped yet")
+        }
+
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalSlug = ContentScaffold.slugify(cleanTitle.isEmpty ? descriptor.id : cleanTitle)
+        guard !finalSlug.isEmpty else { return .failed(reason: "createTyped could not derive a slug") }
+
+        let relPath = ContentScaffold.postRelativePath(collection: collection, slug: finalSlug)
+        let abs = root.appendingPathComponent(relPath)
+        if fileManager.fileExists(atPath: abs.path) {
+            return .failed(reason: "A \(collection) entry already exists at \(relPath)")
+        }
+
+        onProgress?(.createCallingPlugin)
+        let contents = ContentScaffold.renderEntry(
+            descriptor: descriptor, title: cleanTitle.isEmpty ? nil : cleanTitle, now: now())
+        do { try write(contents, to: abs) }
+        catch { return .failed(reason: "\(error)") }
+
+        onProgress?(.createFinalizing)
+        _ = await gitCommit(root, relPath, "anglesite: add \(collection) \(finalSlug)")
+        return .created(filePath: relPath, identifier: finalSlug)
+    }
+
     private func write(_ contents: String, to abs: URL) throws {
         try fileManager.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
         try contents.write(to: abs, atomically: true, encoding: .utf8)
