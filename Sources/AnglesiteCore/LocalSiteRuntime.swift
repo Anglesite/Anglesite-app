@@ -49,7 +49,7 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
     private var generation = 0
     /// The siteID whose content this runtime last loaded into shared app indexes, so `stop()` /
     /// a site switch can evict exactly that site. `nil` when nothing is loaded.
-    private var loadedGraphSiteID: String?
+    private var loadedSharedIndexSiteID: String?
 
     public init(
         devServer: AstroDevServer? = nil,
@@ -123,7 +123,7 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
                 // Populate the content graph with a native scan of the site's `Source/` directory
                 // (Bucket 1, #275). Replaces the `list_content` MCP round-trip — same projection,
                 // no subprocess hop. An empty/unscannable site just leaves the graph empty.
-                await populateContentGraph(siteID: siteID, siteDirectory: siteDirectory, generation: gen)
+                await populateSharedIndexes(siteID: siteID, siteDirectory: siteDirectory, generation: gen)
                 guard gen == generation else { return }
                 setState(.ready(siteID: siteID, url: url))
             } catch {
@@ -154,31 +154,38 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
     private func stopSubprocesses() async {
         await devServer.stop()
         await mcpClient.stop()
-        if let siteID = loadedGraphSiteID {
+        if let siteID = loadedSharedIndexSiteID {
             await contentGraph?.unload(siteID: siteID)
             await knowledgeIndex?.unload(siteID: siteID)
-            loadedGraphSiteID = nil
+            loadedSharedIndexSiteID = nil
         }
     }
 
-    /// Scan the site's `Source/` directory (`siteDirectory`) into `contentGraph` via the native
-    /// `ContentScanner` (Bucket 1, #275). A no-op when no graph is attached. The scan is read-only
-    /// and total — an empty or partial site simply yields fewer entries; nothing throws.
-    private func populateContentGraph(siteID: String, siteDirectory: URL, generation gen: Int) async {
+    /// Scan the site's `Source/` directory (`siteDirectory`) into the shared content and knowledge
+    /// indexes. The scan is read-only and total — an empty or partial site simply yields fewer
+    /// entries; nothing throws.
+    private func populateSharedIndexes(siteID: String, siteDirectory: URL, generation gen: Int) async {
         // Run the recursive filesystem scan off the actor so it doesn't block this runtime from
         // processing other messages (stop signals, state queries) for the scan's duration — the
         // old MCP path yielded the actor on every `await`, and this preserves that.
-        async let listingTask = Task.detached(priority: .utility) {
+        let listing = await Task.detached(priority: .utility) {
             ContentScanner.scan(projectRoot: siteDirectory, siteID: siteID)
         }.value
-        async let knowledgeTask: Void = knowledgeIndex?.rebuild(siteID: siteID, projectRoot: siteDirectory) ?? ()
-        let listing = await listingTask
-        await knowledgeTask
         // A newer start() may have superseded us during the scan — don't pollute the shared graph
         // with a site this window is no longer showing; that start() loads its own.
         guard gen == generation else { return }
         await contentGraph?.load(siteID: siteID, pages: listing.pages, posts: listing.posts, images: listing.images)
-        loadedGraphSiteID = siteID
+        guard gen == generation else {
+            await contentGraph?.unload(siteID: siteID)
+            return
+        }
+        await knowledgeIndex?.rebuild(siteID: siteID, projectRoot: siteDirectory)
+        guard gen == generation else {
+            await contentGraph?.unload(siteID: siteID)
+            await knowledgeIndex?.unload(siteID: siteID)
+            return
+        }
+        loadedSharedIndexSiteID = siteID
     }
 
     private func startMCPClient(siteID: String, siteDirectory: URL) async {

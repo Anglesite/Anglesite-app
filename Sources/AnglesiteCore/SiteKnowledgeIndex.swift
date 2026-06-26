@@ -50,6 +50,7 @@ public actor SiteKnowledgeIndex {
     }
 
     private var documentsBySite: [String: [String: Document]] = [:]
+    private static let maxExcerptCharacters = 8_192
 
     public init() {}
 
@@ -130,9 +131,10 @@ public actor SiteKnowledgeIndex {
         guard let size = fileSize(url), size <= 512_000 else { return nil }
         guard let source = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         let frontmatter = Frontmatter.parse(source)
-        let title = title(in: source, frontmatter: frontmatter)
-        let headings = headings(in: source)
-        let links = internalLinks(in: source)
+        let bodySource = bodyText(from: source)
+        let title = title(in: bodySource, frontmatter: frontmatter)
+        let headings = headings(in: bodySource)
+        let links = internalLinks(in: bodySource)
         return Document(
             id: "\(siteID):knowledge:\(relativePath)",
             siteID: siteID,
@@ -142,7 +144,7 @@ public actor SiteKnowledgeIndex {
             frontmatter: frontmatter,
             headings: headings,
             internalLinks: links,
-            excerptText: source,
+            excerptText: truncatedExcerpt(bodySource),
             lastModified: mtime(url)
         )
     }
@@ -254,7 +256,7 @@ public actor SiteKnowledgeIndex {
         let headings = document.headings.joined(separator: " ").lowercased()
         let frontmatter = document.frontmatter.values.map(Self.frontmatterText).joined(separator: " ").lowercased()
         let links = document.internalLinks.joined(separator: " ").lowercased()
-        let body = document.excerptText.lowercased()
+        let body = bodyText(from: document.excerptText).lowercased()
         var score = 0.0
 
         for term in terms {
@@ -282,6 +284,28 @@ public actor SiteKnowledgeIndex {
         }
     }
 
+    private static func truncatedExcerpt(_ source: String) -> String {
+        guard source.count > maxExcerptCharacters else { return source }
+        return String(source.prefix(maxExcerptCharacters))
+    }
+
+    private static func bodyText(from source: String) -> String {
+        let normalized = source.replacingOccurrences(of: "\r\n", with: "\n")
+        var lines = normalized.components(separatedBy: "\n")
+        guard lines.first?.trimmingCharacters(in: .whitespacesAndNewlines) == "---" else {
+            return normalized
+        }
+        guard let closing = lines.dropFirst().firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines) == "---"
+        }) else {
+            return normalized
+        }
+        for index in 0...closing {
+            lines[index] = ""
+        }
+        return lines.joined(separator: "\n")
+    }
+
     private static func queryTerms(_ query: String) -> [String] {
         let pieces = query.lowercased().split { !$0.isLetter && !$0.isNumber }
         var seen: Set<String> = []
@@ -294,7 +318,7 @@ public actor SiteKnowledgeIndex {
     }
 
     private static func excerpt(from source: String, terms: [String]) -> (text: String, lineRange: ClosedRange<Int>?) {
-        let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        let lines = bodyText(from: source).replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         let matchIndex = lines.firstIndex { line in
             let lowered = line.lowercased()
             return terms.contains { lowered.contains($0) }

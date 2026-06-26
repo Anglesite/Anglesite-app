@@ -81,6 +81,34 @@ struct SiteKnowledgeIndexTests {
         #expect(results.isEmpty)
     }
 
+    @Test("rebuild stores bounded excerpts instead of full source")
+    func rebuildStoresBoundedExcerpts() async {
+        let longBody = String(repeating: "a", count: 9_000)
+        let root = makeSite([
+            "src/pages/long.astro": "# Long\n\(longBody)",
+        ])
+        let index = SiteKnowledgeIndex()
+
+        await index.rebuild(siteID: "site-1", projectRoot: root)
+
+        let document = await index.documents(siteID: "site-1").first
+        #expect(document?.excerptText.count == 8_192)
+    }
+
+    @Test("search scores frontmatter separately from body text")
+    func searchDoesNotDoubleCountFrontmatter() async {
+        let root = makeSite([
+            "src/content/example.md": "---\nsummary: launchword\n---\nNo body match here.",
+        ])
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site-1", projectRoot: root)
+
+        let result = await index.search(siteID: "site-1", query: "launchword").first
+
+        #expect(result?.score == 3)
+        #expect(result?.excerpt.contains("summary: launchword") == false)
+    }
+
     @Test("unload removes only the requested site")
     func unloadRemovesOnlyRequestedSite() async {
         let rootA = makeSite(["src/pages/a.astro": "# Alpha"])

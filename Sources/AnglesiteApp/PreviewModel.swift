@@ -106,7 +106,8 @@ final class PreviewModel {
             return LocalContainerSiteRuntime(
                 ref: "HEAD",
                 control: ContainerizationControl(),
-                mcpClient: MCPClient(supervisor: .shared)
+                mcpClient: MCPClient(supervisor: .shared),
+                knowledgeIndex: knowledgeIndex
             )
         }
         #endif
