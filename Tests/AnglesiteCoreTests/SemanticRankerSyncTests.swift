@@ -5,6 +5,11 @@ import Testing
 @Suite("SemanticRanker sync")
 struct SemanticRankerSyncTests {
     /// Counts how many times embed() ran, so cache-hit behavior is observable.
+    ///
+    /// `@unchecked Sendable` with an unguarded counter is safe here *only* because
+    /// `SemanticRanker.sync`/`upsert` embed documents strictly sequentially (no `TaskGroup`), so
+    /// `embed` is never called concurrently. If that loop is ever parallelized, replace this with an
+    /// actor or a locked counter.
     final class CountingProvider: EmbeddingProvider, @unchecked Sendable {
         let dimension = 8
         private(set) var calls = 0
@@ -19,6 +24,19 @@ struct SemanticRankerSyncTests {
             id: id, siteID: "s", path: "\(id).md", kind: .page, title: title,
             frontmatter: [:], headings: [], internalLinks: [], excerptText: body,
             lastModified: Date(timeIntervalSince1970: 0))
+    }
+
+    @Test("embeddedText joins title, headings, and a 2000-char-truncated excerpt")
+    func embeddedTextFormat() {
+        let longBody = String(repeating: "x", count: 5000)
+        let document = SiteKnowledgeIndex.Document(
+            id: "d", siteID: "s", path: "d.md", kind: .page, title: "My Title",
+            frontmatter: [:], headings: ["Intro", "Details"], internalLinks: [], excerptText: longBody,
+            lastModified: Date(timeIntervalSince1970: 0))
+        let text = SemanticRanker.embeddedText(for: document)
+        #expect(text.hasPrefix("My Title\nIntro Details\n"))
+        #expect(text.contains(String(repeating: "x", count: 2000)))
+        #expect(!text.contains(String(repeating: "x", count: 2001)))
     }
 
     @Test("sync embeds each document once")

@@ -1,5 +1,6 @@
 import Foundation
 import NaturalLanguage
+import os
 
 /// Production ``EmbeddingProvider`` backed by Apple's on-device `NLContextualEmbedding` — a
 /// transformer embedding model that is higher quality and broader-language than
@@ -11,6 +12,8 @@ import NaturalLanguage
 /// loaded model embed mixed-language content reasonably; loading distinct per-script models is a
 /// further enhancement.
 public struct NLContextualEmbeddingProvider: EmbeddingProvider {
+    private static let log = Logger(subsystem: "io.dwk.anglesite", category: "NLContextualEmbeddingProvider")
+
     private let model: NLContextualEmbedding
     private let defaultLanguage: NLLanguage
     public let dimension: Int
@@ -40,7 +43,14 @@ public struct NLContextualEmbeddingProvider: EmbeddingProvider {
         var sum = [Double](repeating: 0, count: dimension)
         var count = 0
         result.enumerateTokenVectors(in: trimmed.startIndex..<trimmed.endIndex) { vector, _ in
-            guard vector.count == dimension else { return true }
+            guard vector.count == dimension else {
+                // `model.dimension` and the result's token vectors disagree — a framework/programmer
+                // error, not recoverable data. Trap in debug; in release, skip with a diagnostic
+                // rather than silently distorting the mean-pool.
+                assertionFailure("NLContextualEmbedding dimension mismatch: expected \(dimension), got \(vector.count)")
+                Self.log.error("token vector dimension mismatch: expected \(dimension), got \(vector.count)")
+                return true
+            }
             for i in 0..<dimension { sum[i] += vector[i] }
             count += 1
             return true

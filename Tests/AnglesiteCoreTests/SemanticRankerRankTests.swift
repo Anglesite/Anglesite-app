@@ -35,6 +35,18 @@ struct SemanticRankerRankTests {
         #expect(ranked.first?.docID == "a")
     }
 
+    @Test("a flat (all-equal) signal contributes 0, letting the other signal decide")
+    func blendFlatSignal() {
+        // All lexical scores equal → no discriminating signal → normalizes to 0, so semantic
+        // decides and the lexical side does not inflate every doc (the #1 review fix).
+        let result = SemanticRanker.blend(
+            lexical: ["a": 5, "b": 5],
+            semantic: ["a": 0, "b": 1],
+            semanticWeight: 0.6)
+        #expect(abs((result["a"] ?? -1) - 0.0) < 0.0001)   // 0.6*0 + 0.4*0
+        #expect(abs((result["b"] ?? -1) - 0.6) < 0.0001)   // 0.6*1 + 0.4*0
+    }
+
     @Test("blend normalizes and weights both signals")
     func blend() {
         let result = SemanticRanker.blend(

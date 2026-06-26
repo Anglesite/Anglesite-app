@@ -41,10 +41,11 @@ public actor SemanticRanker {
         let existing = vectorsBySite[siteID] ?? [:]
         var next: [String: Stored] = [:]
         for document in documents {
-            let hash = VectorMath.stableHash(Self.embeddedText(for: document))
+            let text = Self.embeddedText(for: document)
+            let hash = VectorMath.stableHash(text)
             if let prior = existing[document.id], prior.contentHash == hash {
                 next[document.id] = prior
-            } else if let vector = try? await provider.embed(Self.embeddedText(for: document)) {
+            } else if let vector = try? await provider.embed(text), Self.isUsable(vector) {
                 next[document.id] = Stored(contentHash: hash, vector: vector)
             }
         }
@@ -54,15 +55,24 @@ public actor SemanticRanker {
 
     /// Re-embeds a single document if its content changed (incremental update during a session).
     public func upsert(siteID: String, document: SiteKnowledgeIndex.Document) async {
-        let hash = VectorMath.stableHash(Self.embeddedText(for: document))
+        let text = Self.embeddedText(for: document)
+        let hash = VectorMath.stableHash(text)
         if vectorsBySite[siteID]?[document.id]?.contentHash == hash { return }
-        guard let vector = try? await provider.embed(Self.embeddedText(for: document)) else { return }
+        guard let vector = try? await provider.embed(text), Self.isUsable(vector) else { return }
         vectorsBySite[siteID, default: [:]][document.id] = Stored(contentHash: hash, vector: vector)
         persist(siteID: siteID)
     }
 
-    /// Drops a single document's vector (e.g. its file was deleted).
-    public func remove(siteID: String, docID: String) async {
+    /// A vector is only worth storing if it has non-zero magnitude — a zero vector ranks 0 against
+    /// everything (`VectorMath.cosine`), so storing it just wastes a slot. Guards against a provider
+    /// that unexpectedly returns an all-zero vector for some input.
+    private static func isUsable(_ vector: [Float]) -> Bool {
+        vector.contains { $0 != 0 }
+    }
+
+    /// Drops a single document's vector (e.g. its file was deleted). Not `async`: actor isolation
+    /// alone forces callers to `await`; the keyword would falsely imply an internal suspension point.
+    public func remove(siteID: String, docID: String) {
         vectorsBySite[siteID]?[docID] = nil
         persist(siteID: siteID)
     }
@@ -119,7 +129,9 @@ public actor SemanticRanker {
     ) -> [String: Double] {
         func normalize(_ map: [String: Double]) -> [String: Double] {
             guard let lo = map.values.min(), let hi = map.values.max(), hi > lo else {
-                return map.mapValues { _ in map.isEmpty ? 0 : 1 }
+                // All values equal (incl. all-zero) → no discriminating signal. Map to 0 so a flat
+                // signal contributes nothing to the weighted sum rather than inflating every doc.
+                return map.mapValues { _ in 0 }
             }
             return map.mapValues { ($0 - lo) / (hi - lo) }
         }
