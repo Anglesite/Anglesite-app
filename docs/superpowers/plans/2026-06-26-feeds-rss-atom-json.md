@@ -707,6 +707,13 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 **Gating:** `.enabled(if:)` on Node located **and** `Resources/Template/node_modules/astro/astro.js` present — skips (never fails) when deps aren't installed, matching `PersonalTypeRenderSmokeTests`.
 
+> **Illustrative sample — see the committed test for the real shape.** Swift Testing runs suites
+> in parallel, so this smoke and `PersonalTypeRenderSmokeTests` build the *same* `Resources/Template`
+> tree concurrently and `rm -rf dist` around it, racing. The shipped implementation wraps the build
+> **and its assertions** in `TemplateBuildSerializer.shared.serialize { … }`
+> (`Tests/AnglesiteTestSupport/TemplateBuildSerializer.swift`), and `PersonalTypeRenderSmokeTests`
+> does the same. The sample below omits that wrapper for brevity — do not copy it verbatim.
+
 - [ ] **Step 1: Write the gated smoke test**
 
 `Tests/AnglesiteCoreTests/FeedsRenderSmokeTests.swift`:
