@@ -1,0 +1,390 @@
+// Sources/AnglesiteCore/ContentTypeRegistry.swift
+import Foundation
+
+/// The registry of typed content objects (V-1.1, epic #334 / #343).
+///
+/// A content type is declared **once** as a `ContentTypeDescriptor` and projects three ways —
+/// its frontmatter schema (what the editor and Astro content collection see), its microformats2
+/// mapping (what Webmention/federation consume), and its schema.org mapping (what search
+/// rich-results consume). This is the "one schema, three projections" principle from the pivot
+/// plan: there is a single source of truth per type, and downstream consumers read from it.
+///
+/// This file is **pure value data with no I/O** — it is the vocabulary, not the machinery.
+/// Scaffolding (`ContentScaffold`), the content graph (`SiteContentGraph`), per-type editors,
+/// and template generation are layered on top in later V-1 tasks (#344–#352); each reads
+/// descriptors from here rather than hard-coding type knowledge.
+
+/// One field in a content type's frontmatter schema.
+public struct ContentTypeField: Sendable, Equatable {
+    /// The shape of a field's value. Maps to an editor control and to a Zod type at the
+    /// template layer (#351); kept deliberately small.
+    public enum Kind: String, Sendable, Equatable {
+        case string        // single-line text
+        case text          // multi-line plain text
+        case markdown      // multi-line rich body
+        case bool
+        case date          // calendar date, no time
+        case datetime      // ISO 8601 date-time with time + timezone (mf2 `dt-*` properties)
+        case url
+        case image         // a site-relative media path
+        case number
+        case stringArray   // e.g. tags
+    }
+
+    public let name: String
+    public let kind: Kind
+    public let required: Bool
+
+    public init(_ name: String, _ kind: Kind, required: Bool = false) {
+        self.name = name
+        self.kind = kind
+        self.required = required
+    }
+}
+
+/// How a content type projects to microformats2 and schema.org. Field-name keys reference
+/// `ContentTypeField.name` values on the same descriptor.
+public struct ContentTypeProjections: Sendable, Equatable {
+    /// The root microformats2 class for instances of this type (e.g. `h-entry`, `h-event`,
+    /// `h-review`, `h-card`).
+    public let microformat: String
+
+    /// Maps a frontmatter field name → its microformats2 property (e.g. `"title"` → `"p-name"`,
+    /// `"publishDate"` → `"dt-published"`, `"body"` → `"e-content"`). Fields absent from this map
+    /// carry no mf2 property.
+    public let microformatProperties: [String: String]
+
+    /// The schema.org `@type` emitted as JSON-LD (e.g. `Article`, `Event`, `Review`,
+    /// `LocalBusiness`). `nil` means this type emits no schema.org node.
+    ///
+    /// **Object-valued property contract.** Some schema.org properties expect a nested `Thing`
+    /// rather than a literal (e.g. `Review.itemReviewed`). A string-typed field mapped to such a
+    /// property is emitted by the JSON-LD layer (#347–#351) as a minimal node
+    /// `{ "@type": "Thing", "name": <value> }`. This is the settled vocabulary-level contract so
+    /// the template layer never has to guess; richer typing can be added per-field later.
+    public let schemaType: String?
+
+    public init(
+        microformat: String,
+        microformatProperties: [String: String],
+        schemaType: String?
+    ) {
+        self.microformat = microformat
+        self.microformatProperties = microformatProperties
+        self.schemaType = schemaType
+    }
+}
+
+/// Where instances of a content type live on disk, mirroring the Astro layout `ContentScaffold`
+/// already uses: route-addressed pages under `src/pages`, or slug-addressed entries in a content
+/// collection under `src/content/<collection>`.
+public enum ContentStorage: Sendable, Equatable {
+    case page
+    case collection(String)
+}
+
+/// A registered content type — pure declarative data, no behavior.
+public struct ContentTypeDescriptor: Sendable, Equatable, Identifiable {
+    /// Stable lowerCamelCase key (e.g. `note`, `article`, `businessProfile`). The registry's key
+    /// and the identity used by editors/intents; never localized.
+    public let id: String
+    /// Human-facing label (e.g. `Business Profile`).
+    public let displayName: String
+    public let storage: ContentStorage
+    public let fields: [ContentTypeField]
+    public let projections: ContentTypeProjections
+
+    public init(
+        id: String,
+        displayName: String,
+        storage: ContentStorage,
+        fields: [ContentTypeField],
+        projections: ContentTypeProjections
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.storage = storage
+        self.fields = fields
+        self.projections = projections
+    }
+
+    /// The default collection name for `.collection`-stored types; `nil` for pages.
+    public var collection: String? {
+        if case let .collection(name) = storage { return name }
+        return nil
+    }
+}
+
+/// An ordered, lookup-by-id catalog of content types. Value type so it composes cleanly into the
+/// (actor-isolated) graph and the app's environment; built-ins are registered at init and custom
+/// types can be added with `register(_:)`.
+public struct ContentTypeRegistry: Sendable, Equatable {
+    private var byID: [String: ContentTypeDescriptor]
+    private var order: [String]
+
+    /// Builds a registry from the given descriptors (default: the built-in catalog). Later
+    /// descriptors with a duplicate `id` override earlier ones while keeping first-seen order —
+    /// the same last-wins/stable-order contract as `register(_:)`.
+    public init(types: [ContentTypeDescriptor] = ContentTypeRegistry.builtIns) {
+        byID = [:]
+        order = []
+        for descriptor in types { insert(descriptor) }
+    }
+
+    private mutating func insert(_ descriptor: ContentTypeDescriptor) {
+        if byID[descriptor.id] == nil { order.append(descriptor.id) }
+        byID[descriptor.id] = descriptor
+    }
+
+    /// Registers (or replaces) a content type. Replacing keeps the type's existing position in
+    /// `all`; a new type appends.
+    public mutating func register(_ descriptor: ContentTypeDescriptor) {
+        insert(descriptor)
+    }
+
+    public func descriptor(id: String) -> ContentTypeDescriptor? {
+        byID[id]
+    }
+
+    /// All registered types in registration order.
+    public var all: [ContentTypeDescriptor] {
+        order.compactMap { byID[$0] }
+    }
+
+    public var ids: [String] { order }
+}
+
+// MARK: - Built-in catalog
+
+extension ContentTypeRegistry {
+    /// The built-in content types: the personal IndieWeb post types (#344) and the small-business
+    /// types (#345), declared as data here in V-1.1. Templates and editors for them land in their
+    /// own tasks; this is the shared vocabulary they consume.
+    public static let builtIns: [ContentTypeDescriptor] = personalTypes + businessTypes
+
+    // MARK: Personal (h-entry family)
+
+    static let personalTypes: [ContentTypeDescriptor] = [note, article, photo, bookmark, reply]
+
+    static let note = ContentTypeDescriptor(
+        id: "note",
+        displayName: "Note",
+        storage: .collection("notes"),
+        fields: [
+            ContentTypeField("body", .markdown, required: true),
+            ContentTypeField("publishDate", .datetime, required: true),
+            ContentTypeField("tags", .stringArray),
+        ],
+        projections: ContentTypeProjections(
+            microformat: "h-entry",
+            microformatProperties: [
+                "body": "e-content",
+                "publishDate": "dt-published",
+                "tags": "p-category",
+            ],
+            schemaType: "SocialMediaPosting"
+        )
+    )
+
+    static let article = ContentTypeDescriptor(
+        id: "article",
+        displayName: "Article",
+        storage: .collection("articles"),
+        fields: [
+            ContentTypeField("title", .string, required: true),
+            ContentTypeField("summary", .text),
+            ContentTypeField("body", .markdown, required: true),
+            ContentTypeField("publishDate", .datetime, required: true),
+            ContentTypeField("updated", .datetime),
+            ContentTypeField("tags", .stringArray),
+        ],
+        projections: ContentTypeProjections(
+            microformat: "h-entry",
+            microformatProperties: [
+                "title": "p-name",
+                "summary": "p-summary",
+                "body": "e-content",
+                "publishDate": "dt-published",
+                "updated": "dt-updated",
+                "tags": "p-category",
+            ],
+            schemaType: "Article"
+        )
+    )
+
+    static let photo = ContentTypeDescriptor(
+        id: "photo",
+        displayName: "Photo",
+        storage: .collection("photos"),
+        fields: [
+            ContentTypeField("image", .image, required: true),
+            ContentTypeField("caption", .text),
+            ContentTypeField("publishDate", .datetime, required: true),
+            ContentTypeField("tags", .stringArray),
+        ],
+        projections: ContentTypeProjections(
+            microformat: "h-entry",
+            microformatProperties: [
+                "image": "u-photo",
+                "caption": "p-summary",
+                "publishDate": "dt-published",
+                "tags": "p-category",
+            ],
+            schemaType: "Photograph"
+        )
+    )
+
+    static let bookmark = ContentTypeDescriptor(
+        id: "bookmark",
+        displayName: "Bookmark",
+        storage: .collection("bookmarks"),
+        fields: [
+            ContentTypeField("bookmarkOf", .url, required: true),
+            ContentTypeField("title", .string),
+            ContentTypeField("body", .markdown),
+            ContentTypeField("publishDate", .datetime, required: true),
+            ContentTypeField("tags", .stringArray),
+        ],
+        projections: ContentTypeProjections(
+            microformat: "h-entry",
+            microformatProperties: [
+                "bookmarkOf": "u-bookmark-of",
+                "title": "p-name",
+                "body": "e-content",
+                "publishDate": "dt-published",
+                "tags": "p-category",
+            ],
+            schemaType: nil
+        )
+    )
+
+    static let reply = ContentTypeDescriptor(
+        id: "reply",
+        displayName: "Reply",
+        storage: .collection("replies"),
+        fields: [
+            ContentTypeField("inReplyTo", .url, required: true),
+            ContentTypeField("body", .markdown, required: true),
+            ContentTypeField("publishDate", .datetime, required: true),
+        ],
+        projections: ContentTypeProjections(
+            microformat: "h-entry",
+            microformatProperties: [
+                "inReplyTo": "u-in-reply-to",
+                "body": "e-content",
+                "publishDate": "dt-published",
+            ],
+            schemaType: "Comment"
+        )
+    )
+
+    // MARK: Business (#345 / §4.1)
+
+    static let businessTypes: [ContentTypeDescriptor] = [businessProfile, announcement, event, review]
+
+    static let businessProfile = ContentTypeDescriptor(
+        id: "businessProfile",
+        displayName: "Business Profile",
+        storage: .page,
+        fields: [
+            ContentTypeField("name", .string, required: true),
+            ContentTypeField("description", .text),
+            ContentTypeField("telephone", .string),
+            ContentTypeField("email", .string),
+            ContentTypeField("streetAddress", .string),
+            ContentTypeField("locality", .string),
+            ContentTypeField("region", .string),
+            ContentTypeField("postalCode", .string),
+            ContentTypeField("hours", .stringArray),
+            ContentTypeField("url", .url),
+        ],
+        // `hours` is intentionally unmapped: h-card has no normative opening-hours property, so
+        // hours are carried by schema.org (`LocalBusiness.openingHours`) only, not microformats2.
+        projections: ContentTypeProjections(
+            microformat: "h-card",
+            microformatProperties: [
+                "name": "p-name",
+                "description": "p-note",
+                "telephone": "p-tel",
+                "email": "u-email",
+                "streetAddress": "p-street-address",
+                "locality": "p-locality",
+                "region": "p-region",
+                "postalCode": "p-postal-code",
+                "url": "u-url",
+            ],
+            schemaType: "LocalBusiness"
+        )
+    )
+
+    static let announcement = ContentTypeDescriptor(
+        id: "announcement",
+        displayName: "Announcement",
+        storage: .collection("announcements"),
+        fields: [
+            ContentTypeField("title", .string, required: true),
+            ContentTypeField("body", .markdown, required: true),
+            ContentTypeField("publishDate", .datetime, required: true),
+        ],
+        projections: ContentTypeProjections(
+            microformat: "h-entry",
+            microformatProperties: [
+                "title": "p-name",
+                "body": "e-content",
+                "publishDate": "dt-published",
+            ],
+            // Not schema.org `SpecialAnnouncement` — that is a COVID-era crisis type requiring
+            // crisis-specific properties. A general business announcement is editorial news.
+            schemaType: "NewsArticle"
+        )
+    )
+
+    static let event = ContentTypeDescriptor(
+        id: "event",
+        displayName: "Event",
+        storage: .collection("events"),
+        fields: [
+            ContentTypeField("name", .string, required: true),
+            ContentTypeField("body", .markdown),
+            ContentTypeField("start", .datetime, required: true),
+            ContentTypeField("end", .datetime),
+            ContentTypeField("location", .string),
+        ],
+        projections: ContentTypeProjections(
+            microformat: "h-event",
+            microformatProperties: [
+                "name": "p-name",
+                "body": "e-content",
+                "start": "dt-start",
+                "end": "dt-end",
+                "location": "p-location",
+            ],
+            schemaType: "Event"
+        )
+    )
+
+    static let review = ContentTypeDescriptor(
+        id: "review",
+        displayName: "Review",
+        storage: .collection("reviews"),
+        fields: [
+            // String name of the item; the JSON-LD layer wraps it as a `{@type: Thing, name}` node
+            // for schema.org `Review.itemReviewed` per the object-valued-property contract on
+            // `ContentTypeProjections.schemaType`.
+            ContentTypeField("itemReviewed", .string, required: true),
+            ContentTypeField("rating", .number, required: true),
+            ContentTypeField("body", .markdown),
+            ContentTypeField("publishDate", .datetime, required: true),
+        ],
+        projections: ContentTypeProjections(
+            microformat: "h-review",
+            microformatProperties: [
+                "itemReviewed": "p-item",
+                "rating": "p-rating",
+                "body": "e-content",
+                "publishDate": "dt-published",
+            ],
+            schemaType: "Review"
+        )
+    )
+}
