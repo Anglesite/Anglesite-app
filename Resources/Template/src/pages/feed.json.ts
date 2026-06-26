@@ -1,9 +1,9 @@
 import type { APIContext } from "astro";
 import { getCombinedItems } from "../lib/feed-data.ts";
-import { renderJsonFeed } from "../lib/feeds.ts";
+import { renderJsonFeed, siteFrom } from "../lib/feeds.ts";
 
 export async function GET(context: APIContext) {
-  const site = context.site!.href;
+  const site = siteFrom(context);
   return renderJsonFeed({
     title: "All posts",
     site,

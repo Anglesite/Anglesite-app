@@ -61,11 +61,29 @@ export const FEED_COLLECTIONS: Record<string, FeedCollectionConfig> = {
   },
 };
 
+/// Resolve the absolute site base URL from an Astro endpoint context, failing loudly when
+/// `site` is unset. `astro.config.ts` always provides a fallback, so in practice this never
+/// throws — but an `Invalid`/undefined site would otherwise surface as an opaque TypeError in
+/// all 27 feed routes, so we give one clear message instead.
+export function siteFrom(context: { site?: URL }): string {
+  if (!context.site) {
+    throw new Error(
+      "[feeds] Astro `site` is not configured — set SITE_URL in .site-config so feeds can emit absolute URLs.",
+    );
+  }
+  return context.site.href;
+}
+
 export function toFeedItem(collection: string, entry: FeedEntry, site: string): FeedItem {
   const cfg = FEED_COLLECTIONS[collection];
   if (!cfg) throw new Error(`No feed config for collection "${collection}"`);
   const rawDate = entry.data[cfg.dateField];
   const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
+  // An invalid/missing date would make `sortAndLimit` non-deterministic and crash
+  // `renderAtom`/`renderJsonFeed` at `date.toISOString()` (RangeError). Fail at build instead.
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`[feeds] entry "${entry.id}" has a missing or invalid ${cfg.dateField}`);
+  }
   const summary = (entry.data.summary ?? entry.data.caption ?? excerpt(entry.body, 280)) || "";
   return {
     title: cfg.deriveTitle(entry) || "Untitled",
@@ -117,6 +135,9 @@ export function renderAtom(o: {
   const updated = o.items[0]?.date ?? new Date(0);
   const entries = o.items
     .map(
+      // Known limitation: <id> uses the permalink rather than a permanent tag: IRI (RFC 4287
+      // §4.2.6). Renaming a slug therefore reads as a new entry in readers that saw the old URL.
+      // This matches most simple RSS libraries; a stable tag: URI is a future improvement.
       (i) => `  <entry>
     <title>${escapeXml(i.title)}</title>
     <link href="${escapeXml(i.link)}"/>

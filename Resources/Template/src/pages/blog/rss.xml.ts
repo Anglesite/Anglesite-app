@@ -1,11 +1,11 @@
 import type { APIContext } from "astro";
 import { getCollectionItems } from "../../lib/feed-data.ts";
-import { renderRss, FEED_COLLECTIONS } from "../../lib/feeds.ts";
+import { renderRss, FEED_COLLECTIONS, siteFrom } from "../../lib/feeds.ts";
 
 const COLLECTION = "blog";
 
 export async function GET(context: APIContext) {
-  const site = context.site!.href;
+  const site = siteFrom(context);
   return renderRss({
     title: FEED_COLLECTIONS[COLLECTION].title,
     description: `${FEED_COLLECTIONS[COLLECTION].title} feed`,

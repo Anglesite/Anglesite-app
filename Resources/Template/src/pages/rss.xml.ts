@@ -1,9 +1,9 @@
 import type { APIContext } from "astro";
 import { getCombinedItems } from "../lib/feed-data.ts";
-import { renderRss } from "../lib/feeds.ts";
+import { renderRss, siteFrom } from "../lib/feeds.ts";
 
 export async function GET(context: APIContext) {
-  const site = context.site!.href;
+  const site = siteFrom(context);
   return renderRss({
     title: "All posts",
     description: "Everything published on this site.",

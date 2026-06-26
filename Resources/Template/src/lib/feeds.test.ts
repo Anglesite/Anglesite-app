@@ -4,6 +4,7 @@ import {
   FEED_COLLECTIONS,
   toFeedItem,
   sortAndLimit,
+  siteFrom,
   renderRss,
   renderAtom,
   renderJsonFeed,
@@ -47,6 +48,22 @@ test("toFeedItem derives a title from the link host for a like", () => {
     SITE,
   );
   assert.equal(item.title, "Liked indieweb.org");
+});
+
+test("toFeedItem throws on a missing or invalid date field", () => {
+  assert.throws(
+    () => toFeedItem("notes", entry("notes", {}), SITE),
+    /missing or invalid publishDate/,
+  );
+  assert.throws(
+    () => toFeedItem("notes", entry("notes", { publishDate: "not-a-date" }), SITE),
+    /missing or invalid publishDate/,
+  );
+});
+
+test("siteFrom returns the href or throws a clear error when site is unset", () => {
+  assert.equal(siteFrom({ site: new URL("https://x.test/") }), "https://x.test/");
+  assert.throws(() => siteFrom({}), /not configured/);
 });
 
 test("sortAndLimit sorts newest first and caps", () => {
