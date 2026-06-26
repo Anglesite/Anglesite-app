@@ -81,13 +81,14 @@ public enum KnowledgeReindex {
             else { continue }
             if fileExists(url) {
                 await index.upsertFile(siteID: siteID, projectRoot: projectRoot, relativePath: relativePath)
-                guard let ranker else { continue }
-                // `upsertFile` may have dropped the path (now unreadable or a non-indexed kind); in
-                // that case there's no document to embed, so drop its vector instead.
-                if let document = await index.document(siteID: siteID, relativePath: relativePath) {
-                    await ranker.upsert(siteID: siteID, document: document)
-                } else {
-                    await ranker.remove(siteID: siteID, docID: SiteKnowledgeIndex.documentID(siteID: siteID, relativePath: relativePath))
+                if let ranker {
+                    // `upsertFile` may have dropped the path (now unreadable or a non-indexed kind);
+                    // in that case there's no document to embed, so drop its vector instead.
+                    if let document = await index.document(siteID: siteID, relativePath: relativePath) {
+                        await ranker.upsert(siteID: siteID, document: document)
+                    } else {
+                        await ranker.remove(siteID: siteID, docID: SiteKnowledgeIndex.documentID(siteID: siteID, relativePath: relativePath))
+                    }
                 }
             } else {
                 await index.removeFile(siteID: siteID, relativePath: relativePath)

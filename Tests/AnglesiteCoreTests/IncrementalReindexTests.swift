@@ -97,7 +97,9 @@ struct IncrementalReindexTests {
     // MARK: - Semantic ranker reconciliation (#383)
 
     /// Wraps the deterministic fake to count embed() calls, so re-embedding is observable.
-    /// `@unchecked Sendable` is safe because the ranker embeds strictly sequentially.
+    /// `@unchecked Sendable` is safe: `NSLock` protects `_calls` across actor hops. Sequential
+    /// embedding means the lock is never contended in practice, but the lock — not the call
+    /// order — is the soundness argument.
     final class CountingFake: EmbeddingProvider, @unchecked Sendable {
         let dimension = 8
         private let lock = NSLock()
@@ -179,6 +181,9 @@ struct IncrementalReindexTests {
         await KnowledgeReindex.apply(.init(paths: [touched], needsFullRescan: false),
                                      to: index, ranker: ranker, siteID: "s", projectRoot: root, fileExists: exists)
 
+        // SemanticRanker.upsert skips re-embedding when the document's content hash is unchanged;
+        // KnowledgeReindex itself does not dedupe by content. This verifies that guarantee holds
+        // end-to-end through the reindex path (it would break if the ranker lost its hash check).
         #expect(provider.calls == baseline)
     }
 
@@ -194,6 +199,35 @@ struct IncrementalReindexTests {
                                      to: index, ranker: ranker, siteID: "s", projectRoot: root, fileExists: exists)
 
         #expect(await ranker.vectorCount(siteID: "s") == 2)
+    }
+
+    @Test("apply drops a stale ranker vector when a present file is no longer indexable")
+    func applyRemovesRankerVectorForNonIndexableFile() async {
+        // A file exists on disk (so fileExists is true and it isn't in a skipped dir) but its kind
+        // is not indexed (.png) — `upsertFile` runs yet persists no document. Exercises the branch
+        // where the ranker still holds a vector for that path and must drop it.
+        let root = makeSite([:])
+        let pngPath = "assets/logo.png"
+        let pngURL = root.appendingPathComponent(pngPath)
+        try! FileManager.default.createDirectory(at: pngURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try! Data("not really a png".utf8).write(to: pngURL)
+
+        let index = SiteKnowledgeIndex()
+        let ranker = SemanticRanker(provider: FakeEmbeddingProvider(dimension: 8), cache: nil)
+        // Simulate a stale vector lingering for this path's doc ID (e.g. it was indexable before).
+        let staleDoc = SiteKnowledgeIndex.Document(
+            id: SiteKnowledgeIndex.documentID(siteID: "s", relativePath: pngPath),
+            siteID: "s", path: pngPath, kind: .other, title: "Logo",
+            frontmatter: [:], headings: [], internalLinks: [], excerptText: "logo",
+            lastModified: Date(timeIntervalSince1970: 0))
+        await ranker.upsert(siteID: "s", document: staleDoc)
+        #expect(await ranker.vectorCount(siteID: "s") == 1)
+
+        await KnowledgeReindex.apply(.init(paths: [pngURL], needsFullRescan: false),
+                                     to: index, ranker: ranker, siteID: "s", projectRoot: root, fileExists: exists)
+
+        #expect(await ranker.vectorCount(siteID: "s") == 0)
+        #expect(await index.document(siteID: "s", relativePath: pngPath) == nil)
     }
 
     @Test("apply with a nil ranker still updates the index (back-compat)")
