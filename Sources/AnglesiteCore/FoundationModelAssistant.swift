@@ -54,6 +54,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private let tier: FoundationModelTier
     private let editBridge: IntentEditBridge?
     private let contentGraph: SiteContentGraph?
+    private let knowledgeIndex: SiteKnowledgeIndex?
     private let integrationService: (any IntegrationOperationsService)?
     private let logger = Logger(subsystem: "io.dwk.anglesite", category: "FoundationModelAssistant")
     /// The current conversational turn's consumer-facing ``TurnRelay``, retained so ``cancel()`` can
@@ -79,11 +80,13 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         tier: FoundationModelTier = .onDevice,
         editBridge: IntentEditBridge? = nil,
         contentGraph: SiteContentGraph? = nil,
+        knowledgeIndex: SiteKnowledgeIndex? = nil,
         integrationService: (any IntegrationOperationsService)? = nil
     ) {
         self.tier = tier
         self.editBridge = editBridge
         self.contentGraph = contentGraph
+        self.knowledgeIndex = knowledgeIndex
         self.integrationService = integrationService
         if tier == .privateCloudCompute {
             // v1 has no separate PCC session; fall back to on-device with a logged warning so the
@@ -280,6 +283,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         if editBridge != nil && contentGraph != nil {
             names += [ApplyEditTool.toolName, SearchContentTool.toolName]
         }
+        if knowledgeIndex != nil {
+            names.append(SearchKnowledgeTool.toolName)
+        }
         if integrationService != nil {
             names.append(SetupIntegrationTool.toolName)
         }
@@ -331,6 +337,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
                 contextSelector: context.selectedElementSelector
             ))
             tools.append(SearchContentTool(contentGraph: contentGraph, siteID: context.siteID))
+        }
+        if let knowledgeIndex {
+            tools.append(SearchKnowledgeTool(index: knowledgeIndex, siteID: context.siteID))
         }
         if let integrationService {
             tools.append(SetupIntegrationTool(service: integrationService, siteID: context.siteID))

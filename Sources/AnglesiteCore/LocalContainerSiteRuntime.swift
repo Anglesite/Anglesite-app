@@ -9,22 +9,26 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private let ref: String
     private let control: any LocalContainerControl
     public let mcpClient: MCPClient
+    private let knowledgeIndex: SiteKnowledgeIndex?
     private let connect: @Sendable (MCPClient, URL) async throws -> Void
 
     private var current: SiteRuntimeState = .idle
     private var observers: [UUID: AsyncStream<SiteRuntimeState>.Continuation] = [:]
     private var generation = 0
     private var activeSiteID: String?
+    private var loadedKnowledgeSiteID: String?
 
     public init(
         ref: String,
         control: any LocalContainerControl,
         mcpClient: MCPClient,
+        knowledgeIndex: SiteKnowledgeIndex? = nil,
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) }
     ) {
         self.ref = ref
         self.control = control
         self.mcpClient = mcpClient
+        self.knowledgeIndex = knowledgeIndex
         self.connect = connect
     }
 
@@ -51,6 +55,12 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             guard gen == generation else { return }
             try await connect(mcpClient, session.mcpURL)
             guard gen == generation else { return }
+            await knowledgeIndex?.rebuild(siteID: siteID, projectRoot: siteDirectory)
+            guard gen == generation else {
+                await knowledgeIndex?.unload(siteID: siteID)
+                return
+            }
+            loadedKnowledgeSiteID = siteID
             activeSiteID = siteID
             setState(.ready(siteID: siteID, url: session.previewURL))
         } catch {
@@ -72,6 +82,10 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
 
     private func teardown() async {
         await mcpClient.stop()
+        if let siteID = loadedKnowledgeSiteID {
+            await knowledgeIndex?.unload(siteID: siteID)
+            loadedKnowledgeSiteID = nil
+        }
         if let id = activeSiteID {
             try? await control.stop(siteID: id)
             activeSiteID = nil

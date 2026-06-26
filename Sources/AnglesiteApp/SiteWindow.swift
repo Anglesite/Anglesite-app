@@ -37,17 +37,25 @@ struct SiteWindow: View {
     /// The app-lifetime content graph (held by `AppDelegate`), seeded into this window's
     /// `PreviewModel` so opening the site populates the shared graph (A.8, #142).
     private let contentGraph: SiteContentGraph
+    /// App-lifetime project knowledge index, rebuilt by the preview runtime and exposed to chat.
+    private let knowledgeIndex: SiteKnowledgeIndex
     /// Observed (not a bare optional) so the Siri AI Readiness button enables itself if `bootstrap`
     /// populates the indexer after this window was constructed — see `ContentIndexerStore`.
     private let contentIndexerStore: ContentIndexerStore
 
     private let integrationOps = IntegrationOperations.live()
 
-    init(siteID: String?, contentGraph: SiteContentGraph, contentIndexerStore: ContentIndexerStore) {
+    init(
+        siteID: String?,
+        contentGraph: SiteContentGraph,
+        knowledgeIndex: SiteKnowledgeIndex,
+        contentIndexerStore: ContentIndexerStore
+    ) {
         self.siteID = siteID
         self.contentGraph = contentGraph
+        self.knowledgeIndex = knowledgeIndex
         self.contentIndexerStore = contentIndexerStore
-        _preview = State(initialValue: PreviewModel(contentGraph: contentGraph))
+        _preview = State(initialValue: PreviewModel(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex))
     }
 
     @State private var site: SiteStore.Site?
@@ -773,6 +781,7 @@ struct SiteWindow: View {
                 tier: .onDevice,
                 editBridge: makeEditBridge(),
                 contentGraph: contentGraph,
+                knowledgeIndex: knowledgeIndex,
                 integrationService: integrationOps
             ),
             annotationFeed: feed,
@@ -806,6 +815,7 @@ struct SiteWindow: View {
                 tier: tier,
                 editBridge: makeEditBridge(),
                 contentGraph: contentGraph,
+                knowledgeIndex: knowledgeIndex,
                 integrationService: integrationOps
             )
         case .claude:
