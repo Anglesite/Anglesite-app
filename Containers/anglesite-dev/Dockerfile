@@ -1,7 +1,7 @@
 # Anglesite local dev-server image (arm64 / Apple Silicon). Built and exported as an OCI layout by
 # scripts/vendor-container-image.sh, then bundled into AnglesiteContainer. Bakes Node + git +
-# the vsock→TCP bridge. The MCP sidecar is layered in by a later change (TODO(#69)); it is NOT
-# baked here.
+# the vsock→TCP bridge + the app's MCP sidecar (the plugin's server/, npm ci'd for linux-arm64 so
+# sharp's native binary is correct) so a fresh container needs no in-guest install.
 
 # Build the vsock bridge.
 FROM --platform=linux/arm64 golang:1.22-bookworm AS bridge
@@ -14,5 +14,17 @@ FROM node:22-bookworm-slim@sha256:6db9be2ebb4bafb687a078ef5ba1b1dd256e8004d246a3
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=bridge /vsock-bridge /usr/local/bin/vsock-bridge
-# The MCP sidecar + entrypoint are layered in by the build script from the app's bundled plugin.
+# MCP sidecar: staged by scripts/vendor-container-image.sh from the plugin's server/ dir.
+# npm ci runs on linux/arm64 → pulls @img/sharp-linux-arm64 (the native prebuilt) from the
+# lockfile. --omit=dev drops devDependencies. We intentionally do NOT pass --omit=optional
+# because @img/sharp-linux-arm64 is marked optional in the lockfile (platform-specific prebuilt);
+# npm's platform-cpu/os filters already skip macOS-only optionals like fsevents on linux/arm64.
+COPY mcp-sidecar/ /usr/local/lib/anglesite-mcp/
+# Playwright is an unused optionalDependency of the plugin. We keep `npm ci` (reproducible; lock-exact)
+# and cannot pass --omit=optional because @img/sharp-linux-arm64 is also optional (platform prebuilt).
+# ENV prevents playwright's postinstall from downloading ~300 MB of browsers; rm strips the pkg dirs.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+RUN cd /usr/local/lib/anglesite-mcp \
+    && npm ci --omit=dev \
+    && rm -rf node_modules/playwright node_modules/playwright-core node_modules/.cache/ms-playwright
 WORKDIR /workspace
