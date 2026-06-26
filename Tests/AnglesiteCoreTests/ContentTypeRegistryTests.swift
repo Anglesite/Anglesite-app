@@ -39,10 +39,10 @@ struct ContentTypeRegistryTests {
     }
 
     @Test("re-registering an id replaces in place and keeps its position")
-    func registerReplacesInPlace() {
+    func registerReplacesInPlace() throws {
         var registry = ContentTypeRegistry()  // built-ins
         let originalOrder = registry.ids
-        let position = originalOrder.firstIndex(of: "article")
+        let position = try #require(originalOrder.firstIndex(of: "article"))
         let overridden = ContentTypeDescriptor(
             id: "article",
             displayName: "Long-form Article",
@@ -96,7 +96,9 @@ struct ContentTypeRegistryTests {
         #expect(event.projections.schemaType == "Event")
         #expect(event.projections.microformatProperties["start"] == "dt-start")
         #expect(event.projections.microformatProperties["end"] == "dt-end")
-        #expect(event.fields.first { $0.name == "start" }?.kind == .date)
+        // h-event dt-start/dt-end are datetimes (ISO 8601 with time + timezone), not bare dates.
+        #expect(event.fields.first { $0.name == "start" }?.kind == .datetime)
+        #expect(event.fields.first { $0.name == "end" }?.kind == .datetime)
     }
 
     @Test("Review projects h-review + schema.org Review with a numeric rating")
@@ -127,19 +129,19 @@ struct ContentTypeRegistryTests {
         let ids = registry.ids
         #expect(Set(ids).count == ids.count)  // ids unique
 
-        for type in registry.all {
-            #expect(!type.displayName.isEmpty)
-            #expect(type.projections.microformat.hasPrefix("h-"))
+        for descriptor in registry.all {
+            #expect(!descriptor.displayName.isEmpty)
+            #expect(descriptor.projections.microformat.hasPrefix("h-"))
             // Every field referenced by an mf2 mapping must exist on the type.
-            let fieldNames = Set(type.fields.map(\.name))
-            for mappedField in type.projections.microformatProperties.keys {
+            let fieldNames = Set(descriptor.fields.map(\.name))
+            for mappedField in descriptor.projections.microformatProperties.keys {
                 #expect(fieldNames.contains(mappedField),
-                        "\(type.id): mf2 maps unknown field '\(mappedField)'")
+                        "\(descriptor.id): mf2 maps unknown field '\(mappedField)'")
             }
             // A collection type must carry a non-empty collection name.
-            if case let .collection(name) = type.storage {
+            if case let .collection(name) = descriptor.storage {
                 #expect(!name.isEmpty)
-                #expect(type.collection == name)
+                #expect(descriptor.collection == name)
             }
         }
     }

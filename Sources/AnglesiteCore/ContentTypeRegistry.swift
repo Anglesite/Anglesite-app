@@ -23,7 +23,8 @@ public struct ContentTypeField: Sendable, Equatable {
         case text          // multi-line plain text
         case markdown      // multi-line rich body
         case bool
-        case date
+        case date          // calendar date, no time
+        case datetime      // ISO 8601 date-time with time + timezone (mf2 `dt-*` properties)
         case url
         case image         // a site-relative media path
         case number
@@ -55,6 +56,12 @@ public struct ContentTypeProjections: Sendable, Equatable {
 
     /// The schema.org `@type` emitted as JSON-LD (e.g. `Article`, `Event`, `Review`,
     /// `LocalBusiness`). `nil` means this type emits no schema.org node.
+    ///
+    /// **Object-valued property contract.** Some schema.org properties expect a nested `Thing`
+    /// rather than a literal (e.g. `Review.itemReviewed`). A string-typed field mapped to such a
+    /// property is emitted by the JSON-LD layer (#347–#351) as a minimal node
+    /// `{ "@type": "Thing", "name": <value> }`. This is the settled vocabulary-level contract so
+    /// the template layer never has to guess; richer typing can be added per-field later.
     public let schemaType: String?
 
     public init(
@@ -121,7 +128,7 @@ public struct ContentTypeRegistry: Sendable, Equatable {
     public init(types: [ContentTypeDescriptor] = ContentTypeRegistry.builtIns) {
         byID = [:]
         order = []
-        for type in types { insert(type) }
+        for descriptor in types { insert(descriptor) }
     }
 
     private mutating func insert(_ descriptor: ContentTypeDescriptor) {
@@ -165,7 +172,7 @@ extension ContentTypeRegistry {
         storage: .collection("notes"),
         fields: [
             ContentTypeField("body", .markdown, required: true),
-            ContentTypeField("publishDate", .date, required: true),
+            ContentTypeField("publishDate", .datetime, required: true),
             ContentTypeField("tags", .stringArray),
         ],
         projections: ContentTypeProjections(
@@ -187,8 +194,8 @@ extension ContentTypeRegistry {
             ContentTypeField("title", .string, required: true),
             ContentTypeField("summary", .text),
             ContentTypeField("body", .markdown, required: true),
-            ContentTypeField("publishDate", .date, required: true),
-            ContentTypeField("updated", .date),
+            ContentTypeField("publishDate", .datetime, required: true),
+            ContentTypeField("updated", .datetime),
             ContentTypeField("tags", .stringArray),
         ],
         projections: ContentTypeProjections(
@@ -212,7 +219,7 @@ extension ContentTypeRegistry {
         fields: [
             ContentTypeField("image", .image, required: true),
             ContentTypeField("caption", .text),
-            ContentTypeField("publishDate", .date, required: true),
+            ContentTypeField("publishDate", .datetime, required: true),
             ContentTypeField("tags", .stringArray),
         ],
         projections: ContentTypeProjections(
@@ -235,7 +242,7 @@ extension ContentTypeRegistry {
             ContentTypeField("bookmarkOf", .url, required: true),
             ContentTypeField("title", .string),
             ContentTypeField("body", .markdown),
-            ContentTypeField("publishDate", .date, required: true),
+            ContentTypeField("publishDate", .datetime, required: true),
             ContentTypeField("tags", .stringArray),
         ],
         projections: ContentTypeProjections(
@@ -258,7 +265,7 @@ extension ContentTypeRegistry {
         fields: [
             ContentTypeField("inReplyTo", .url, required: true),
             ContentTypeField("body", .markdown, required: true),
-            ContentTypeField("publishDate", .date, required: true),
+            ContentTypeField("publishDate", .datetime, required: true),
         ],
         projections: ContentTypeProjections(
             microformat: "h-entry",
@@ -291,10 +298,13 @@ extension ContentTypeRegistry {
             ContentTypeField("hours", .stringArray),
             ContentTypeField("url", .url),
         ],
+        // `hours` is intentionally unmapped: h-card has no normative opening-hours property, so
+        // hours are carried by schema.org (`LocalBusiness.openingHours`) only, not microformats2.
         projections: ContentTypeProjections(
             microformat: "h-card",
             microformatProperties: [
                 "name": "p-name",
+                "description": "p-note",
                 "telephone": "p-tel",
                 "email": "u-email",
                 "streetAddress": "p-street-address",
@@ -314,7 +324,7 @@ extension ContentTypeRegistry {
         fields: [
             ContentTypeField("title", .string, required: true),
             ContentTypeField("body", .markdown, required: true),
-            ContentTypeField("publishDate", .date, required: true),
+            ContentTypeField("publishDate", .datetime, required: true),
         ],
         projections: ContentTypeProjections(
             microformat: "h-entry",
@@ -323,7 +333,9 @@ extension ContentTypeRegistry {
                 "body": "e-content",
                 "publishDate": "dt-published",
             ],
-            schemaType: "SpecialAnnouncement"
+            // Not schema.org `SpecialAnnouncement` — that is a COVID-era crisis type requiring
+            // crisis-specific properties. A general business announcement is editorial news.
+            schemaType: "NewsArticle"
         )
     )
 
@@ -334,8 +346,8 @@ extension ContentTypeRegistry {
         fields: [
             ContentTypeField("name", .string, required: true),
             ContentTypeField("body", .markdown),
-            ContentTypeField("start", .date, required: true),
-            ContentTypeField("end", .date),
+            ContentTypeField("start", .datetime, required: true),
+            ContentTypeField("end", .datetime),
             ContentTypeField("location", .string),
         ],
         projections: ContentTypeProjections(
@@ -356,10 +368,13 @@ extension ContentTypeRegistry {
         displayName: "Review",
         storage: .collection("reviews"),
         fields: [
+            // String name of the item; the JSON-LD layer wraps it as a `{@type: Thing, name}` node
+            // for schema.org `Review.itemReviewed` per the object-valued-property contract on
+            // `ContentTypeProjections.schemaType`.
             ContentTypeField("itemReviewed", .string, required: true),
             ContentTypeField("rating", .number, required: true),
             ContentTypeField("body", .markdown),
-            ContentTypeField("publishDate", .date, required: true),
+            ContentTypeField("publishDate", .datetime, required: true),
         ],
         projections: ContentTypeProjections(
             microformat: "h-review",
