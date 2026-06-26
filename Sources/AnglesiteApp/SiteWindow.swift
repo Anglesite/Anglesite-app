@@ -465,8 +465,12 @@ struct SiteWindow: View {
     }
 
     private var showsPaneModePicker: Bool {
-        if case .text = activeEditor { return true }
-        return false
+        switch activeEditor {
+        case .some(.text):
+            return true
+        case .some(.plist), .none:
+            return false
+        }
     }
 
     private var paneSelection: Int {
