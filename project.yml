@@ -102,6 +102,8 @@ targets:
         product: AnglesiteBridge
       - package: Anglesite
         product: AnglesiteIntents
+      - package: Anglesite
+        product: AnglesiteContainer
       - package: Sparkle
 
   AnglesiteMAS:

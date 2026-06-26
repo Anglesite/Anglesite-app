@@ -95,6 +95,22 @@ public enum BundledImage {
         throw BundledImageError.initfsNotProvisioned
     }
 
+    /// True only when the container can actually boot: the app OCI image (`layoutURL()`), the
+    /// `kernelURL()`, and the `initfsLayoutURL()` all resolve without throwing. Returns false when any
+    /// of them is not yet vendored and no env override is set — keeping `PreviewModel` on the host
+    /// runtime until provisioning is complete, so `ContainerizationControl` is never selected in a
+    /// state where `start()` would fail with `.imageUnavailable`.
+    public static var isProvisioned: Bool {
+        do {
+            _ = try layoutURL()
+            _ = try kernelURL()
+            _ = try initfsLayoutURL()
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// A writable directory for the on-disk `ImageStore` (content store + unpacked ext4 rootfs).
     /// `ImageStore`/`EXT4Unpacker` need a writable scratch path; the read-only app bundle can't host it.
     /// Override with `ANGLESITE_CONTAINER_STORE`; defaults under the app's Application Support.
