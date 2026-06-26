@@ -1,4 +1,5 @@
 import Foundation
+import CoreServices
 
 /// Shared rules for which project paths the knowledge index cares about. Lifted out of
 /// `SiteKnowledgeIndex` so the file watcher and the index agree on what to skip.
@@ -69,6 +70,88 @@ public enum KnowledgeReindex {
             } else {
                 await index.removeFile(siteID: siteID, relativePath: relativePath)
             }
+        }
+    }
+}
+
+/// Production `SiteFileWatching` backed by the CoreServices FSEvents API. Coalescing latency
+/// (0.3s) doubles as the debounce, so no separate timer is needed. State (`stream`, `onBatch`)
+/// is guarded by `lock` because the FSEvents callback fires on `queue` while `start`/`stop` are
+/// called from the owning actor.
+public final class FSEventsFileWatcher: SiteFileWatching, @unchecked Sendable {
+    private let queue = DispatchQueue(label: "io.dwk.anglesite.fswatcher")
+    private let lock = NSLock()
+    private var stream: FSEventStreamRef?
+    private var onBatch: (@Sendable (FileChangeBatch) -> Void)?
+
+    public init() {}
+
+    public enum WatchError: Error { case streamCreationFailed }
+
+    public func start(root: URL, onBatch: @escaping @Sendable (FileChangeBatch) -> Void) throws {
+        lock.lock()
+        self.onBatch = onBatch
+        lock.unlock()
+
+        var context = FSEventStreamContext(
+            version: 0,
+            info: Unmanaged.passUnretained(self).toOpaque(),
+            retain: nil, release: nil, copyDescription: nil
+        )
+        let flags = UInt32(
+            kFSEventStreamCreateFlagFileEvents
+            | kFSEventStreamCreateFlagNoDefer
+            | kFSEventStreamCreateFlagUseCFTypes
+        )
+        let callback: FSEventStreamCallback = { _, info, count, eventPaths, eventFlags, _ in
+            guard let info else { return }
+            let watcher = Unmanaged<FSEventsFileWatcher>.fromOpaque(info).takeUnretainedValue()
+            // UseCFTypes => eventPaths is a CFArray of CFString.
+            let paths = (unsafeBitCast(eventPaths, to: NSArray.self) as? [String]) ?? []
+            var urls: [URL] = []
+            var needsRescan = false
+            let rescanMask = FSEventStreamEventFlags(
+                kFSEventStreamEventFlagMustScanSubDirs
+                | kFSEventStreamEventFlagUserDropped
+                | kFSEventStreamEventFlagKernelDropped
+                | kFSEventStreamEventFlagRootChanged
+                | kFSEventStreamEventFlagMount
+                | kFSEventStreamEventFlagUnmount
+            )
+            for i in 0..<count {
+                if eventFlags[i] & rescanMask != 0 { needsRescan = true }
+                if i < paths.count { urls.append(URL(fileURLWithPath: paths[i])) }
+            }
+            watcher.lock.lock()
+            let handler = watcher.onBatch
+            watcher.lock.unlock()
+            handler?(FileChangeBatch(paths: urls, needsFullRescan: needsRescan))
+        }
+
+        guard let stream = FSEventStreamCreate(
+            kCFAllocatorDefault, callback, &context,
+            [root.path] as CFArray,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+            0.3, flags
+        ) else {
+            lock.lock(); self.onBatch = nil; lock.unlock()
+            throw WatchError.streamCreationFailed
+        }
+        FSEventStreamSetDispatchQueue(stream, queue)
+        FSEventStreamStart(stream)
+        lock.lock(); self.stream = stream; lock.unlock()
+    }
+
+    public func stop() {
+        lock.lock()
+        let s = stream
+        stream = nil
+        onBatch = nil
+        lock.unlock()
+        if let s {
+            FSEventStreamStop(s)
+            FSEventStreamInvalidate(s)
+            FSEventStreamRelease(s)
         }
     }
 }
