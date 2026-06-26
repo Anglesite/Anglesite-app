@@ -112,6 +112,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
 
     private func startFileWatcher(siteID: String, projectRoot: URL, generation gen: Int) {
         guard knowledgeIndex != nil else { return }
+        stopFileWatcher()  // defensive: never orphan a running watcher if called while one is active
         let watcher = makeFileWatcher()
         do {
             try watcher.start(root: projectRoot) { [weak self] batch in
@@ -119,7 +120,11 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             }
             fileWatcher = watcher
         } catch {
-            // Best-effort: stale index is acceptable; the container reindexes on next open.
+            // Best-effort: stale index is acceptable; the container reindexes on next open. This
+            // runtime has no LogCenter, so surface the failure in debug builds at least.
+            #if DEBUG
+            print("LocalContainerSiteRuntime: file watcher unavailable for \(siteID): \(error)")
+            #endif
         }
     }
 

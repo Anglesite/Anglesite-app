@@ -93,4 +93,31 @@ struct IncrementalReindexTests {
 
         #expect(await index.documents(siteID: "s").contains { $0.path == "src/pages/surprise.astro" })
     }
+
+    @Test("apply deduplicates repeated paths within a single batch")
+    func applyDeduplicatesRepeatedPaths() async {
+        let root = makeSite(["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "s", projectRoot: root)
+
+        let added = root.appendingPathComponent("src/pages/about.astro")
+        try! Data("---\ntitle: About\n---\n# About".utf8).write(to: added)
+
+        // Count fileExists probes: dedup means the repeated path is reconciled once, not 3×.
+        final class Counter: @unchecked Sendable {
+            let lock = NSLock(); var n = 0
+            func bump() { lock.lock(); n += 1; lock.unlock() }
+        }
+        let counter = Counter()
+        let countingExists: @Sendable (URL) -> Bool = { url in
+            counter.bump()
+            return FileManager.default.fileExists(atPath: url.path)
+        }
+
+        await KnowledgeReindex.apply(.init(paths: [added, added, added], needsFullRescan: false),
+                                     to: index, siteID: "s", projectRoot: root, fileExists: countingExists)
+
+        #expect(counter.n == 1)
+        #expect(await index.documents(siteID: "s").contains { $0.path == "src/pages/about.astro" })
+    }
 }

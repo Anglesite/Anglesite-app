@@ -217,6 +217,7 @@ public actor LocalSiteRuntime: SiteRuntime, HeadlessRuntime {
     /// Best-effort: a watcher that fails to start is logged and the runtime stays `.ready`.
     private func startFileWatcher(siteID: String, projectRoot: URL, generation gen: Int) {
         guard knowledgeIndex != nil else { return }
+        stopFileWatcher()  // defensive: never orphan a running watcher if called while one is active
         let watcher = makeFileWatcher()
         do {
             try watcher.start(root: projectRoot) { [weak self] batch in

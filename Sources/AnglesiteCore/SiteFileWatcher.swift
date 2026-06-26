@@ -61,9 +61,14 @@ public enum KnowledgeReindex {
             await index.rebuild(siteID: siteID, projectRoot: projectRoot)
             return
         }
+        // FSEvents can list the same path multiple times in one coalesced batch (e.g. write →
+        // rename → write). Each index key only needs to be reconciled once against its current
+        // on-disk state, so collapse duplicates before touching the index actor.
+        var seen = Set<String>()
         for url in batch.paths {
             guard let relativePath = SiteIndexPaths.relativePOSIXPath(of: url, under: projectRoot),
-                  !SiteIndexPaths.isSkipped(relativePath: relativePath)
+                  !SiteIndexPaths.isSkipped(relativePath: relativePath),
+                  seen.insert(relativePath).inserted
             else { continue }
             if fileExists(url) {
                 await index.upsertFile(siteID: siteID, projectRoot: projectRoot, relativePath: relativePath)
@@ -89,14 +94,33 @@ public final class FSEventsFileWatcher: SiteFileWatching, @unchecked Sendable {
     public enum WatchError: Error { case streamCreationFailed }
 
     public func start(root: URL, onBatch: @escaping @Sendable (FileChangeBatch) -> Void) throws {
+        // Tolerate being called while a previous stream is still live: tear it down first so we
+        // never orphan an FSEventStreamRef (which would leak and silently cut off its callback).
+        stop()
+
         lock.lock()
         self.onBatch = onBatch
         lock.unlock()
 
+        // FSEvents holds its own strong reference to `self` for the stream's lifetime via the
+        // retain/release callbacks below: `info` is passed +0 and the retain callback takes the
+        // +1. That keeps `self` alive while callbacks are in flight on `queue`, closing the
+        // use-after-free window that `passUnretained` + nil callbacks would leave (a queued
+        // callback dereferencing a deallocated watcher). The reference is balanced by
+        // `FSEventStreamRelease` in `stop()`, so `stop()` MUST be called to release the watcher —
+        // every owner does on teardown.
         var context = FSEventStreamContext(
             version: 0,
             info: Unmanaged.passUnretained(self).toOpaque(),
-            retain: nil, release: nil, copyDescription: nil
+            retain: { rawSelf in
+                guard let rawSelf else { return nil }
+                return UnsafeRawPointer(Unmanaged<FSEventsFileWatcher>.fromOpaque(rawSelf).retain().toOpaque())
+            },
+            release: { rawSelf in
+                guard let rawSelf else { return }
+                Unmanaged<FSEventsFileWatcher>.fromOpaque(rawSelf).release()
+            },
+            copyDescription: nil
         )
         let flags = UInt32(
             kFSEventStreamCreateFlagFileEvents
@@ -142,18 +166,24 @@ public final class FSEventsFileWatcher: SiteFileWatching, @unchecked Sendable {
         lock.lock(); self.stream = stream; lock.unlock()
     }
 
+    /// Idempotent. Safe to call when nothing is running. Not callable from the FSEvents callback
+    /// itself (the callback dispatches a `Task` rather than re-entering), so the `queue.sync` hop
+    /// below cannot deadlock.
     public func stop() {
         lock.lock()
         let s = stream
         stream = nil
         onBatch = nil
         lock.unlock()
-        if let s {
+        guard let s else { return }
+        // Stop + invalidate on the stream's own dispatch queue, per FSEvents' threading contract.
+        // Because `queue` is serial, this also drains any in-flight callback before we invalidate,
+        // so no callback runs afterward. `FSEventStreamRelease` (which fires the release callback
+        // that drops FSEvents' strong ref to `self`) runs off-queue to avoid re-entrancy.
+        queue.sync {
             FSEventStreamStop(s)
             FSEventStreamInvalidate(s)
-            FSEventStreamRelease(s)
         }
+        FSEventStreamRelease(s)
     }
-
-    deinit { stop() }
 }
