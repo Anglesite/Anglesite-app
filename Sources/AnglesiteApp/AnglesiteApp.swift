@@ -25,12 +25,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Project-local retrieval index used by assistant tools for file-cited RAG context (#307).
     let knowledgeIndex = SiteKnowledgeIndex()
     /// On-device semantic ranker layered over `knowledgeIndex`, synced by the preview runtime so
-    /// assistant retrieval ranks by meaning, not just keywords (#312). In-memory for v0 — the
-    /// per-site `Config/` embedding cache (`SemanticIndexCache`) is a follow-up, since the shared
-    /// app-global index architecture needs per-site cache routing the runtime can derive.
-    let semanticRanker = SemanticRanker(
-        provider: NLEmbeddingProvider() ?? FakeEmbeddingProvider(),
-        cache: nil)
+    /// assistant retrieval ranks by meaning, not just keywords (#312). `nil` when no on-device
+    /// embedding model is available — the whole chain takes `SemanticRanker?`, so retrieval then
+    /// degrades to pure lexical (never the test-double fake, which would blend nonsense vectors).
+    ///
+    /// In-memory for v0: the per-site `Config/` embedding cache (`SemanticIndexCache`) and
+    /// incremental `upsert`/`remove` re-embedding are built + tested but deliberately not wired
+    /// yet — the shared app-global index architecture needs per-site cache routing the runtime
+    /// can derive, which is a follow-up.
+    let semanticRanker: SemanticRanker? = NLEmbeddingProvider().map {
+        SemanticRanker(provider: $0, cache: nil)
+    }
     let contentIndexerStore = ContentIndexerStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {

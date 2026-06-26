@@ -36,7 +36,9 @@ public struct FakeEmbeddingProvider: EmbeddingProvider {
             vector[Int(scalar.value) % dimension] += 1
         }
         let magnitude = (vector.reduce(0) { $0 + $1 * $1 }).squareRoot()
-        guard magnitude > 0 else { throw EmbeddingError.emptyText }
+        // Unreachable for non-empty trimmed input (every scalar increments a bucket), but label it
+        // accurately if it ever triggers: a zero vector is a failed embedding, not empty input.
+        guard magnitude > 0 else { throw EmbeddingError.modelUnavailable }
         return vector.map { $0 / magnitude }
     }
 }

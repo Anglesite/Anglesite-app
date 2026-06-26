@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 #if compiler(>=6.4)
 import FoundationModels
@@ -17,6 +18,8 @@ public struct SearchKnowledgeTool: Tool, Sendable {
         public var query: String
     }
 
+    private static let log = Logger(subsystem: "io.dwk.anglesite", category: "SearchKnowledgeTool")
+
     private let index: SiteKnowledgeIndex
     private let siteID: String
     private let ranker: SemanticRanker?
@@ -32,13 +35,21 @@ public struct SearchKnowledgeTool: Tool, Sendable {
         guard !query.isEmpty else {
             return "Provide a project search query."
         }
-        var results = await index.search(siteID: siteID, query: query, options: .init(limit: 6))
+        let resultLimit = 6
+        // Pull a wider lexical candidate pool than we display so semantic reranking can lift a
+        // weak-keyword-but-on-topic doc into the visible results — not merely reorder the top 6.
+        // A doc with *zero* lexical overlap still can't surface here: `results` carry the lexical
+        // excerpt + line range. True semantic-only retrieval (synthesizing excerpt-less results)
+        // is a follow-up — see the #312 design doc's Related-Pages panel (Plan B).
+        let candidatePool = ranker == nil ? resultLimit : 30
+        var results = await index.search(siteID: siteID, query: query, options: .init(limit: candidatePool))
         if let ranker {
-            // Blend the lexical scores with on-device semantic similarity so retrieval matches
-            // meaning, not just keywords. Falls back to pure lexical order when the ranker has
-            // no vectors (no model / not yet synced).
-            let semantic = await ranker.search(siteID: siteID, queryText: query, limit: 50)
-            if !semantic.isEmpty {
+            let semantic = await ranker.search(siteID: siteID, queryText: query, limit: candidatePool)
+            if semantic.isEmpty {
+                // No on-device model, or nothing synced yet: degrade to lexical — but say so, since
+                // silently dropping ranking quality would violate the project's "logs are sacred".
+                Self.log.notice("semantic ranking returned no vectors; using lexical order")
+            } else {
                 let lexicalScores = Dictionary(results.map { ($0.document.id, $0.score) }, uniquingKeysWith: max)
                 let semanticScores = Dictionary(semantic.map { ($0.docID, Double($0.score)) }, uniquingKeysWith: max)
                 let blended = SemanticRanker.blend(lexical: lexicalScores, semantic: semanticScores, semanticWeight: 0.6)
@@ -48,6 +59,7 @@ public struct SearchKnowledgeTool: Tool, Sendable {
                 }
             }
         }
+        results = Array(results.prefix(resultLimit))
         guard !results.isEmpty else { return "No matching project context." }
 
         return results.map { result in

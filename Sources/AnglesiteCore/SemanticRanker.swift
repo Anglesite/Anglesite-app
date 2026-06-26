@@ -133,6 +133,9 @@ public actor SemanticRanker {
     }
 
     private func persist(siteID: String) {
+        // Inert in v0 (production wires `cache: nil`). When the per-site cache is enabled, this
+        // synchronous encode + disk write runs on the actor and `try?`-swallows failures — move it
+        // off the actor (e.g. a detached writer) and log write errors as part of that follow-up.
         guard let cache, let stored = vectorsBySite[siteID] else { return }
         let entries = stored.reduce(into: [String: SemanticIndexCache.Entry]()) { result, pair in
             result[pair.key] = SemanticIndexCache.Entry(
