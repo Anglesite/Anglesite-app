@@ -1,0 +1,23 @@
+---
+import { getCollection, render } from "astro:content";
+import Hentry from "../../layouts/Hentry.astro";
+
+type PersonalCollection = "notes" | "articles" | "photos" | "albums" | "bookmarks" | "replies" | "likes";
+
+export async function getStaticPaths() {
+  const collections: PersonalCollection[] = ["notes", "articles", "photos", "albums", "bookmarks", "replies", "likes"];
+  const paths = [];
+  for (const collection of collections) {
+    const entries = await getCollection(collection);
+    for (const entry of entries) {
+      paths.push({ params: { collection, slug: entry.id }, props: { entry } });
+    }
+  }
+  return paths;
+}
+
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+---
+
+<Hentry entry={entry}><Content /></Hentry>

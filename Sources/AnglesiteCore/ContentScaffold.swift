@@ -75,6 +75,44 @@ public enum ContentScaffold {
         """ + "\n"
     }
 
+    /// Render a new content entry's file contents from its descriptor: a YAML frontmatter block
+    /// (one line per non-markdown field, in declaration order) followed by a placeholder body for
+    /// the type's `markdown` field, if any. Pure; mirrors `renderPost`'s ISO8601 date format.
+    public static func renderEntry(descriptor: ContentTypeDescriptor, title: String?, now: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let dateTime = formatter.string(from: now)
+
+        var lines: [String] = ["---"]
+        var bodyPlaceholder: String?
+        for field in descriptor.fields {
+            switch field.kind {
+            case .markdown:
+                bodyPlaceholder = "Write your \(descriptor.displayName.lowercased()) here."
+            case .datetime:
+                lines.append("\(field.name): \(dateTime)")
+            case .date:
+                lines.append("\(field.name): \(String(dateTime.prefix(10)))")
+            case .bool:
+                lines.append("\(field.name): false")
+            case .number:
+                lines.append("\(field.name): 0")
+            case .stringArray, .imageArray:
+                lines.append("\(field.name): []")
+            case .string, .text, .url, .image:
+                let value = (field.name == "title" || field.name == "name") ? (title ?? "") : ""
+                lines.append("\(field.name): \"\(escapeYAML(value))\"")
+            }
+        }
+        lines.append("---")
+
+        var output = lines.joined(separator: "\n") + "\n"
+        if let bodyPlaceholder {
+            output += "\n\(bodyPlaceholder)\n"
+        }
+        return output
+    }
+
     // MARK: - Escaping (order matters: `&` first)
 
     static func escapeAttr(_ s: String) -> String {
