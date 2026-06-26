@@ -33,8 +33,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// incremental `upsert`/`remove` re-embedding are built + tested but deliberately not wired
     /// yet — the shared app-global index architecture needs per-site cache routing the runtime
     /// can derive, which is a follow-up.
-    let semanticRanker: SemanticRanker? = NLEmbeddingProvider().map {
+    let semanticRanker: SemanticRanker? = AppDelegate.makeEmbeddingProvider().map {
         SemanticRanker(provider: $0, cache: nil)
+    }
+
+    /// On-device embedding provider, best-first: the multilingual transformer
+    /// (`NLContextualEmbedding`), then the lighter `NLEmbedding.sentenceEmbedding`, then `nil`
+    /// (→ pure-lexical retrieval). Never the test-double fake.
+    private static func makeEmbeddingProvider() -> (any EmbeddingProvider)? {
+        if let contextual = NLContextualEmbeddingProvider() { return contextual }
+        if let sentence = NLEmbeddingProvider() { return sentence }
+        return nil
     }
     let contentIndexerStore = ContentIndexerStore()
 
