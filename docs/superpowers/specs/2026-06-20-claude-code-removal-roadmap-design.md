@@ -148,7 +148,7 @@ Compute. Escalation is a runtime tier choice; the front-door is unchanged.
 
 - `copy-edit` (whole-site critique + rewrites)
 - `design-interview` (multi-turn brand conversation + palette/typography)
-- `social-media` (strategy + brand-voice posts), `syndicate` (per-platform variants)
+- `social-media` (strategy + brand-voice posts), `repurpose` (per-platform variants; renamed from `syndicate` to free that term for POSSE syndication — #341)
 - `reputation` (review-response drafts)
 - `animate` (motion-design direction; CSS syntax itself is deterministic)
 - `i18n` content translation
@@ -185,7 +185,7 @@ Proposed slice order (each independently shippable):
 4. **Deploy** — Bucket 3 `deploy` flow + the security gate change (§7) + Bucket 4 deploy
    summary (already done).
 5. **Theme / design** — Bucket 3 `themes` apply + Bucket 5 `design-interview` on PCC.
-6. **Content help** — Bucket 5 `copy-edit`, `social-media`, `syndicate`.
+6. **Content help** — Bucket 5 `copy-edit`, `social-media`, `repurpose`.
 7. **Cleanup** — retire Bucket 6 skills, delete `ClaudeAgent`, remove `--plugin-dir`
    wiring and the `claude` binary expectation, convert the plugin repo (§9).
 
