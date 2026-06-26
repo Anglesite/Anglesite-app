@@ -19,12 +19,15 @@ struct ContainerizationControlTests {
 
         let control = ContainerizationControl()
         let repo = try makeThrowawayAstroRepo()
+        defer { try? FileManager.default.removeItem(at: repo) }
         let session = try await control.start(siteID: "e2e", sourceRepo: repo, ref: "HEAD")
-        defer { Task { try? await control.stop(siteID: "e2e") } }
 
         // The preview URL must serve HTTP 200 within the ready window.
         let (_, resp) = try await URLSession.shared.data(from: session.previewURL)
         #expect((resp as? HTTPURLResponse)?.statusCode == 200)
+
+        // Await teardown so the VM does not outlive the test.
+        try? await control.stop(siteID: "e2e")
     }
 
     /// Create a throwaway on-disk git repo containing a minimal Astro site and an initial commit.

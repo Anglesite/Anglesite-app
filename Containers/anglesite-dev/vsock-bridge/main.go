@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -28,20 +30,46 @@ func main() {
 			log.Printf("skipping malformed arg %q: bad vport: %v", arg, err)
 			continue
 		}
+		tport, err := strconv.Atoi(parts[1])
+		if err != nil || tport < 1 || tport > 65535 {
+			log.Printf("skipping malformed arg %q: bad tport: %v", arg, err)
+			continue
+		}
 		go listen(uint32(vport), parts[1])
 	}
-	select {} // run forever
+	// No signal handling: LinuxContainer.stop() tears down the whole VM, which kills
+	// this process and all goroutines — per-process cleanup is unnecessary.
+	select {}
 }
 
 func listen(vport uint32, tcpPort string) {
 	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
-	if err != nil { panic(err) }
+	if err != nil {
+		log.Printf("vsock-bridge: socket(AF_VSOCK) vport=%d: %v", vport, err)
+		return
+	}
 	sa := &unix.SockaddrVM{CID: unix.VMADDR_CID_ANY, Port: vport}
-	if err := unix.Bind(fd, sa); err != nil { panic(err) }
-	if err := unix.Listen(fd, 16); err != nil { panic(err) }
+	if err := unix.Bind(fd, sa); err != nil {
+		log.Printf("vsock-bridge: bind vport=%d: %v", vport, err)
+		unix.Close(fd)
+		return
+	}
+	if err := unix.Listen(fd, 16); err != nil {
+		log.Printf("vsock-bridge: listen vport=%d: %v", vport, err)
+		unix.Close(fd)
+		return
+	}
 	for {
 		nfd, _, err := unix.Accept(fd)
-		if err != nil { continue }
+		if err != nil {
+			// Transient errors: retry without spinning.
+			if errors.Is(err, syscall.EINTR) || errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.ECONNABORTED) {
+				continue
+			}
+			// Permanent error (e.g. EBADF = listener closed): stop accepting on this port.
+			log.Printf("vsock-bridge: accept vport=%d: %v — listener closed", vport, err)
+			return
+		}
 		go splice(nfd, tcpPort)
 	}
 }
