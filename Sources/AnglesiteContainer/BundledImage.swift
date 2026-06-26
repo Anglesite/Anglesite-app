@@ -51,8 +51,15 @@ public enum BundledImage {
         if let override = ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_IMAGE"] {
             return URL(fileURLWithPath: override)
         }
-        if let url = resourceBundle?.url(forResource: "container-image", withExtension: nil) {
-            return url
+        // The `.copy` rule always bundles the `container-image/` dir (with its `.gitkeep`) even when
+        // the image isn't vendored, so resolving the dir is not enough — verify the OCI layout's
+        // `index.json` is actually present (mirrors `initfsLayoutURL()`), else `isProvisioned` would
+        // spuriously report ready and select the container runtime without an image.
+        if let dirURL = resourceBundle?.url(forResource: "container-image", withExtension: nil) {
+            let indexURL = dirURL.appendingPathComponent("index.json")
+            if FileManager.default.fileExists(atPath: indexURL.path) {
+                return dirURL
+            }
         }
         throw BundledImageError.imageLayoutNotProvisioned
     }
