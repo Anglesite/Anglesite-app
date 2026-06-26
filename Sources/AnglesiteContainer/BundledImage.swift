@@ -43,14 +43,18 @@ public enum BundledImage {
 
     /// The on-disk OCI layout (`oci-layout` + `index.json` + `blobs/`) for the Anglesite dev image.
     /// Override with `ANGLESITE_CONTAINER_IMAGE`.
-    public static var layoutURL: URL {
+    ///
+    /// `throws` (mirroring `kernelURL()`/`initfsLayoutURL()`) rather than `fatalError`-ing: a missing
+    /// bundle is a recoverable provisioning gap that `start()` surfaces as `imageUnavailable`, not a
+    /// crash. Resolved inside `start()` (not in `init`) so constructing the type can never trap.
+    public static func layoutURL() throws -> URL {
         if let override = ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_IMAGE"] {
             return URL(fileURLWithPath: override)
         }
-        guard let url = resourceBundle?.url(forResource: "container-image", withExtension: nil) else {
-            fatalError("AnglesiteContainer resource bundle is missing container-image/")
+        if let url = resourceBundle?.url(forResource: "container-image", withExtension: nil) {
+            return url
         }
-        return url
+        throw BundledImageError.imageLayoutNotProvisioned
     }
 
     /// The reference under which the imported app image is addressed in the on-disk `ImageStore`.
@@ -123,6 +127,8 @@ public enum BundledImage {
 }
 
 public enum BundledImageError: Error, Equatable {
+    /// The OCI app layout is not vendored and no `ANGLESITE_CONTAINER_IMAGE` override was set.
+    case imageLayoutNotProvisioned
     /// The Linux kernel binary is not vendored and no `ANGLESITE_CONTAINER_KERNEL` override was set.
     case kernelNotProvisioned
     /// The vminit initfs is not vendored and no `ANGLESITE_CONTAINER_INITFS` override was set.

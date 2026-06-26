@@ -16,10 +16,12 @@ echo "Building anglesite-dev:latest (linux/arm64)…"
 # the skopeo dependency entirely and produces the same OCI layout on disk.
 #
 # Guard: create the builder only if it doesn't already exist (idempotent).
+# Note: we do NOT call `docker buildx use` — it would mutate the developer's global active
+# builder and persist after this script exits. The `--builder anglesite-oci` flag on the
+# build command below is sufficient and side-effect-free.
 if ! docker buildx inspect anglesite-oci >/dev/null 2>&1; then
     docker buildx create --name anglesite-oci --driver docker-container
 fi
-docker buildx use anglesite-oci
 
 echo "Exporting OCI layout → $OUT"
 # Wipe any stale layout contents but preserve the committed .gitkeep placeholder so
