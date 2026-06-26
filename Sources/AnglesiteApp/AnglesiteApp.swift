@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `AnglesiteIntents.bootstrap` so it can be registered with `AppDependencyManager`;
     /// will also be threaded into `LocalSiteRuntime` in A.8 (#142).
     let contentGraph = SiteContentGraph()
+    /// Project-local retrieval index used by assistant tools for file-cited RAG context (#307).
+    let knowledgeIndex = SiteKnowledgeIndex()
     let contentIndexerStore = ContentIndexerStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -208,7 +210,12 @@ struct AnglesiteApp: App {
             // route to the launcher when restoration hands us a nil or unresolvable
             // id. If we short-circuit with `if let siteID` here the SiteWindow never
             // instantiates and an empty restored window strands the user.
-            SiteWindow(siteID: siteID, contentGraph: appDelegate.contentGraph, contentIndexerStore: appDelegate.contentIndexerStore)
+            SiteWindow(
+                siteID: siteID,
+                contentGraph: appDelegate.contentGraph,
+                knowledgeIndex: appDelegate.knowledgeIndex,
+                contentIndexerStore: appDelegate.contentIndexerStore
+            )
                 .frame(minWidth: 960, minHeight: 600)
         }
         .windowStyle(.titleBar)

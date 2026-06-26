@@ -238,6 +238,44 @@ struct SearchContentToolTests {
     }
 }
 
+@Suite("On-device tools: SearchKnowledgeTool")
+struct SearchKnowledgeToolTests {
+    private func makeSite(_ files: [String: String]) -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowledge-tool-\(UUID().uuidString)", isDirectory: true)
+        for (rel, contents) in files {
+            let url = root.appendingPathComponent(rel)
+            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try! Data(contents.utf8).write(to: url)
+        }
+        return root
+    }
+
+    @Test("formats cited project excerpts")
+    func formatsCitedProjectExcerpts() async throws {
+        let root = makeSite([
+            "src/pages/pricing.astro": "---\ntitle: Pricing\n---\n# Pricing\nTeam plans mention annual billing.",
+        ])
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site1", projectRoot: root)
+        let tool = SearchKnowledgeTool(index: index, siteID: "site1")
+
+        let out = try await tool.call(arguments: .init(query: "annual billing"))
+
+        #expect(out.contains("PAGE"))
+        #expect(out.contains("src/pages/pricing.astro"))
+        #expect(out.contains(":"))
+        #expect(out.contains("annual billing"))
+    }
+
+    @Test("empty query is rejected without dumping context")
+    func emptyQueryIsRejected() async throws {
+        let tool = SearchKnowledgeTool(index: SiteKnowledgeIndex(), siteID: "site1")
+        let out = try await tool.call(arguments: .init(query: "   "))
+        #expect(out == "Provide a project search query.")
+    }
+}
+
 @Suite("FoundationModelAssistant tool wiring")
 struct FoundationModelAssistantToolWiringTests {
 
@@ -247,7 +285,12 @@ struct FoundationModelAssistantToolWiringTests {
         let bridge = makeBridge(router)
         let graph = SiteContentGraph()
 
-        let withTools = FoundationModelAssistant(tier: .onDevice, editBridge: bridge, contentGraph: graph)
+        let withTools = FoundationModelAssistant(
+            tier: .onDevice,
+            editBridge: bridge,
+            contentGraph: graph,
+            knowledgeIndex: SiteKnowledgeIndex()
+        )
         #expect(withTools.capabilities.supportsTools == true)
 
         let withoutTools = FoundationModelAssistant(tier: .onDevice)
@@ -272,7 +315,8 @@ struct FoundationModelAssistantToolWiringTests {
         let assistant = FoundationModelAssistant(
             tier: .onDevice,
             editBridge: makeBridge(router),
-            contentGraph: SiteContentGraph()
+            contentGraph: SiteContentGraph(),
+            knowledgeIndex: SiteKnowledgeIndex()
         )
         let context = AssistantContext(siteID: "site-1", siteDirectory: URL(fileURLWithPath: "/tmp/site"))
 
@@ -284,7 +328,12 @@ struct FoundationModelAssistantToolWiringTests {
             }
         }
         // SpotlightSearchTool is unconditional; edit/search pair is conditional on both deps (C.8, #158)
-        #expect(startedToolNames == ["spotlightSearch", ApplyEditTool.toolName, SearchContentTool.toolName])
+        #expect(startedToolNames == [
+            "spotlightSearch",
+            ApplyEditTool.toolName,
+            SearchContentTool.toolName,
+            SearchKnowledgeTool.toolName,
+        ])
     }
 }
 #endif
