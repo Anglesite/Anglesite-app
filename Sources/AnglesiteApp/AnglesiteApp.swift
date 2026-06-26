@@ -113,6 +113,21 @@ struct AnglesiteApp: App {
         }
     }
 
+    private func showAboutPanel() {
+        let credits = NSAttributedString(
+            string: BuildInfo.summary,
+            attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]
+        )
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [
+            .applicationName: BuildInfo.appName,
+            .applicationVersion: "Phase \(BuildInfo.phase)",
+            .credits: credits
+        ])
+    }
+
     var body: some Scene {
         // The launcher is the first scene so it's the default window at launch (used when
         // SwiftUI has nothing to restore). It autoopens the most-recently-used site from its
@@ -141,6 +156,10 @@ struct AnglesiteApp: App {
         }
         .windowResizability(.contentSize)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Anglesite") { showAboutPanel() }
+            }
+
             CommandGroup(replacing: .newItem) {
                 Button("New Site") {
                     // Ensure the launcher exists to host the wizard sheet, then ask it to open.

@@ -192,23 +192,17 @@ struct SiteWindow: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
                         mainPane(for: site)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if chatPresented, let chat {
-                        Divider()
-                        ChatView(model: chat)
-                            .frame(width: 420)
-                            .transition(reduceMotion
-                                ? .opacity
-                                : .move(edge: .trailing).combined(with: .opacity))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        if chatPresented, let chat {
+                            Divider()
+                            ChatView(model: chat)
+                                .frame(width: 420)
+                                .transition(reduceMotion
+                                    ? .opacity
+                                    : .move(edge: .trailing).combined(with: .opacity))
+                        }
                     }
-                }
-                .animation(.easeInOut(duration: 0.18), value: chatPresented)
-                Divider()
-                Text(BuildInfo.summary)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 6)
+                    .animation(.easeInOut(duration: 0.18), value: chatPresented)
             }
             if deploy.drawerPresented {
                 DeployDrawerView(model: deploy, siteName: site.name)
