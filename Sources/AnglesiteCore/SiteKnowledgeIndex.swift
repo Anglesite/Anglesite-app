@@ -118,6 +118,26 @@ public actor SiteKnowledgeIndex {
         .map { $0 }
     }
 
+    public func formattedContext(siteID: String, query: String, limit: Int = 6) -> String? {
+        let results = search(siteID: siteID, query: query, options: .init(limit: limit))
+        guard !results.isEmpty else { return nil }
+        var lines = [
+            "Relevant project context retrieved from this Astro site:",
+            "Use this context when it is relevant. Cite file paths when answering.",
+        ]
+        for result in results {
+            let lineLabel = result.lineRange.map { range in
+                range.lowerBound == range.upperBound
+                    ? "line \(range.lowerBound)"
+                    : "lines \(range.lowerBound)-\(range.upperBound)"
+            } ?? "excerpt"
+            let title = result.document.title.map { " - \($0)" } ?? ""
+            lines.append("\n[\(result.document.path):\(lineLabel)]\(title)")
+            lines.append(result.excerpt)
+        }
+        return lines.joined(separator: "\n")
+    }
+
     private static func scan(siteID: String, projectRoot: URL) -> [Document] {
         walk(projectRoot).compactMap { abs in
             let relativePath = relativePosix(abs, from: projectRoot)

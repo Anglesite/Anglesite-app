@@ -60,6 +60,21 @@ struct SiteKnowledgeIndexTests {
         #expect(!results.map(\.document.path).contains("src/pages/about.astro"))
     }
 
+    @Test("formatted context includes citations and line numbers")
+    func formattedContextIncludesCitations() async {
+        let root = makeSite([
+            "src/content/docs/about.md": "# About\n\nOur docs explain the launch checklist.",
+        ])
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site-1", projectRoot: root)
+
+        let context = await index.formattedContext(siteID: "site-1", query: "launch checklist docs")
+
+        #expect(context?.contains("Relevant project context") == true)
+        #expect(context?.contains("[src/content/docs/about.md:") == true)
+        #expect(context?.contains("launch checklist") == true)
+    }
+
     @Test("upsert and remove update a single indexed file")
     func upsertAndRemove() async {
         let root = makeSite([
