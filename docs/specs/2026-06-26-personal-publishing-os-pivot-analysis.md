@@ -21,7 +21,7 @@ model (#242), the Astro static pipeline, the optional Apple-Intelligence brain,
 and the per-site container runtime (#69) are *exactly* the substrate this vision
 needs. None of that gets torn down.
 
-What's missing is large and falls into five buckets, in rough order of difficulty:
+What's missing falls into four buckets, in rough order of difficulty:
 
 1. **Typed content objects** (Note/Photo/Event/Reply/…) — today there are only
    Page, Post, Image. Medium lift, mostly additive.
@@ -39,18 +39,23 @@ What's missing is large and falls into five buckets, in rough order of difficult
    **`@dwk/workers` is exactly this backend** — a scale-to-zero Cloudflare Worker
    (self-hostable via `@dwk/server`), so the "make-or-break design spike" this
    document originally called for is largely *answered* by an existing component.
-4. **Migration importers** (Facebook/Instagram/Mastodon/Bluesky/WordPress/Medium).
-   Net-new; today's only "import" is Anglesite-dir → package.
-5. **Communities** — first-class groups with membership, discussion, moderation.
-   This is a second product, not a feature, and the hardest fit with static-first.
+4. **Communities** — first-class groups with membership, discussion, moderation.
+   Still a distinct product surface, but **substantially de-risked: the federation
+   substrate already exists in `@dwk/workers`** (`@dwk/activitypub` Groups +
+   `@dwk/atproto-pds`), so communities ride the same backend as personal sites
+   rather than needing a new one (§5.6).
+
+**Dropped from scope: migration/import from other social platforms** (Facebook/
+Instagram/Mastodon/WordPress/…). Too complicated for V1; cut entirely for now
+(§5.4).
 
 The honest framing: **principles ✅, foundation ✅, protocol layer ✅ (exists as
 `@dwk/workers`, unreleased), integration + social-product ❌.** The pivot is
 achievable *because* the architecture was built for it and the federation stack
 already exists as a first-party package; the remaining work is wiring that backend
-into the app's deploy/identity/content flows, the typed-object UX, importers, and
-(separately) communities. The deferred *decisions* in §6 still need answering, but
-several are now resolved by `@dwk/workers`' design.
+into the app's deploy/identity/content flows, the typed-object UX, and (separately)
+communities — which also ride `@dwk/workers`. The deferred *decisions* in §6 still
+need answering, but several are now resolved by `@dwk/workers`' design.
 
 ---
 
@@ -268,18 +273,20 @@ update feeds, send webmentions, syndicate, deploy. Today publishing is an explic
   (it's an invariant) — which means "invisible" publishing still can't bypass it;
   surface blocks as notifications rather than a modal.
 
-### 5.4 Migration / import (net-new)
+### 5.4 Migration / import — DROPPED for V1 (decided)
 
-Importers for Facebook, Instagram, Mastodon, Bluesky, WordPress, Blogger, Medium,
-RSS, Markdown. Today `PackageTransfer` only does Anglesite-dir ↔ package.
+The vision wants importers for Facebook, Instagram, Mastodon, Bluesky, WordPress,
+Blogger, Medium, etc. **This is cut from V1 entirely — too complicated.** Each silo
+export is a different, often messy and huge, format; a credible importer set is a
+large, low-leverage effort that would delay the core social pivot. Today
+`PackageTransfer` only does Anglesite-dir ↔ package, and that's all V1 needs.
 
-**What it takes:** per-source archive parsers that map silo exports → typed content
-objects (§5.1) + media into `public/` + git history. This is well-bounded,
-parallelizable work (one parser per source), ideal for the Node sidecar (the JS
-ecosystem has libraries for most of these formats). The parse/scrape is
-deterministic (Bucket 3); only optional cleanup/reformatting is AI (Bucket 5).
-A good *first* importer to prove the pipeline: Mastodon or RSS (clean,
-well-specified) before Facebook (messy, huge archives).
+When it returns post-V1, the shape is unchanged from the original plan: per-source
+archive parsers mapping exports → typed content objects (§5.1) + media + git
+history, well-bounded and parallelizable (one parser per source) in the Node
+sidecar, deterministic parse with optional AI cleanup. Start with the clean,
+well-specified sources (Mastodon, RSS) before the messy ones (Facebook). **None of
+this is V1 work.**
 
 ### 5.5 Deploy target: Cloudflare Workers only (v1 — decided)
 
@@ -324,27 +331,34 @@ not an architectural lock-in — the self-hostable container (above) is the plan
 answer to the vision's "hosting providers become interchangeable" and "self-hosted"
 goals (§6.1/§6.3).
 
-### 5.6 Communities (a second product)
+### 5.6 Communities — federation handled by `@dwk/workers` (ATProto + ActivityPub)
 
 First-class groups (neighborhood, club, family, …) with announcements, threaded
 discussion, events/calendars, member directories, galleries, and **moderation**.
 
-This is the **least aligned** pillar and the biggest single risk:
+**The hard part — the federated, multi-writer backend — is provided by
+`@dwk/workers`.** Communities are supported through its `@dwk/activitypub` (Groups
+actors: inbox/outbox, membership, S2S delivery) and `@dwk/atproto-pds` (AT Protocol
+PDS) packages, on the same Cloudflare substrate personal sites use. So a community
+is not a new server to design; it's another configuration of the existing backend —
+which **dissolves the "communities are a second product needing new infrastructure"
+risk this document originally flagged.** What's left for communities is genuinely
+*product* work, not protocol/infra invention:
 
-- Discussion + membership + moderation are inherently **multi-user, multi-writer,
-  always-on** — the antithesis of "static, single-author, local-first." A
-  community is not one person's git repo.
-- It needs identity/auth across members, real-time-ish state, spam/abuse handling,
-  and a hosting model where no one member's laptop is the server.
-- The honest options: (a) build it as a federated app on ActivityPub *Groups*
-  (ride the `@dwk/activitypub` layer from §5.2 — most on-vision, hardest); (b) a
-  shared per-community Worker + D1 backend the app provisions (pragmatic, and a
-  natural extension of the same `@dwk/workers`-on-Cloudflare substrate the personal
-  sites use); (c) defer it entirely to a later version.
-- **Recommendation:** treat communities as a *separate epic gated behind the
-  personal IndieWeb layer landing first*. Do not let it block or define the
-  personal-publishing pivot. It reuses the §5.2 backend (composed `@dwk/workers` on
-  Cloudflare) but is a distinct product with its own design spike.
+- The **moderation, membership, and directory UX** — multi-member roles, joining/
+  leaving, abuse handling — surfaced in the app.
+- Mapping community content (announcements, threads, events, galleries) onto the
+  typed content objects (§5.1) and the ActivityPub/ATProto group model.
+- Deciding the canonical-content story for *group* content vs. the single-author
+  git-repo model (§6.2 applies here too, multiplied across members).
+- Per-protocol nuance: `@dwk/atproto-pds` is marked *exploratory* in the package, so
+  ActivityPub Groups is the more mature path of the two to lead with.
+
+**Recommendation (unchanged in spirit, lower risk):** treat communities as a
+*separate epic gated behind the personal IndieWeb layer landing first* — don't let
+it block or define the personal-publishing pivot. But it is no longer the
+"build-a-whole-backend" mountain it looked like: the federation primitives ship in
+`@dwk/workers`, so the epic is UX + content-modeling over an existing substrate.
 
 ### 5.7 Discovery (net-new, and in tension with "no centralization")
 
@@ -421,13 +435,14 @@ not tasks, and they gate the roadmap:
    cached in the Worker's inbox store — is it in your git repo? IndieWeb practice:
    yes, snapshot it back into `Source/` so it survives backend loss).
 
-3. **"No centralized" vs. discovery & communities.** Discovery and communities need
-   shared infrastructure; reframe to "opt-in, open, self-hostable" or accept a thin
-   directory. (The hosting-provider half of this tension is handled separately in
-   §6.1/§5.5: Cloudflare default + self-hostable container = provider independence,
-   so a *published site* is not centralized even though v1's default host is. The
-   genuinely unresolved centralization question is **discovery** — finding other
-   sites/communities needs some index; keep it opt-in and open-data.)
+3. **"No centralized" vs. discovery.** Mostly narrowed to one thing. Communities are
+   *federated*, not centralized — they ride `@dwk/workers`' ActivityPub Groups /
+   ATProto (§5.6), so they're no part of this tension. The hosting half is handled in
+   §6.1/§5.5 (Cloudflare default + self-hostable container = provider independence).
+   The genuinely unresolved centralization question is **discovery** — finding other
+   sites/communities needs *some* index; keep it opt-in and open-data, or consume
+   existing open networks (Fediverse discovery, webrings) rather than building a new
+   directory.
 
 4. **Apple-only AI vs. cross-platform reach — resolved by decision (§5.8).** One
    Apple app spans **macOS + iOS + iPadOS** (shared code, per-device feature set);
@@ -471,16 +486,16 @@ conformant release.
 | **V-1** | *Typed content + feeds* | Content-type registry (§5.1) for Note/Article/Photo/Album/Bookmark; per-type editors; **RSS/Atom/JSON feeds** + **microformats2** in templates (the only protocol pieces written in-app — both static). | Blog, digital garden, link collection, photo album, portfolio. |
 | **V-2** | *Make it social (outbound)* | Provision the per-site **Cloudflare Worker** composing `@dwk/webmention` (send) + `@dwk/indieauth`; POSSE syndication to Mastodon/Bluesky (API posting + backfeed via `@dwk/webmention`); the publish queue / "invisible publish" (§5.3). | "Publish once, syndicate everywhere"; replaces basic social posting. |
 | **V-3** | *Make it social (inbound)* | Add `@dwk/micropub` + `@dwk/webmention` (receive) + `@dwk/websub` to the Worker; received interactions rendered on the page + snapshotted to git; typed objects wired to Micropub create/update/delete. | Comments/likes/replies on your own site; posting from external/IndieWeb clients. |
-| **V-4** | *Migration + reach* | Importers (§5.4, start Mastodon/RSS → WordPress → Facebook/Instagram). | "Leaving platforms is painless." |
-| **V-5** | *Federation + reader* | Add `@dwk/activitypub` (actor/inbox/outbox/followers) + `@dwk/microsub` (follow/timeline) + `@dwk/webfinger`/identity. | Appear natively in the Fediverse; follow others; replaces Mastodon-class following. |
-| **V-6** | *Communities + discovery* | Separate epic (§5.6/§5.7), gated on V-3/V-5 backend. Spike first. | Groups, Meetup, neighborhood/club sites. |
+| **V-4** | *Federation + reader* | Add `@dwk/activitypub` (actor/inbox/outbox/followers) + `@dwk/microsub` (follow/timeline) + `@dwk/webfinger`/identity. | Appear natively in the Fediverse; follow others; replaces Mastodon-class following. |
+| **V-5** | *Communities + discovery* | Separate epic (§5.6/§5.7) — federation backend already in `@dwk/workers` (ActivityPub Groups + ATProto); this phase is the moderation/membership/directory **UX** + content modeling. Gated on V-3/V-4 backend. Spike first. | Groups, Meetup, neighborhood/club sites. |
 
-**iOS/iPadOS** ride this same Apple codebase with a leaner feature set (natural
-around V-4, on the remote Cloudflare runtime — §5.8), not a separate effort. Out of
-v1 scope by decision (revisit later, none on the critical path): multi-provider
-deploy (§5.5), self-hosting via `@dwk/server`, and the separate native
-**Windows/Linux** apps (§5.8). Commerce, newsletters, and membership layer onto
-V-1/V-3 via the existing integration-wizard framework.
+**iOS/iPadOS** ride this same Apple codebase with a leaner feature set (natural in
+the V-3/V-4 era, on the remote Cloudflare runtime — §5.8), not a separate effort.
+**Dropped for V1 (see §5.4): migration/import from other social platforms.** Also
+out of v1 scope by decision (revisit later, none on the critical path):
+multi-provider deploy (§5.5), self-hosting via `@dwk/server`, and the separate
+native **Windows/Linux** apps (§5.8). Commerce, newsletters, and membership layer
+onto V-1/V-3 via the existing integration-wizard framework.
 
 ---
 
@@ -505,21 +520,44 @@ are:
 3. **Settle the residual data-canonicality question** (§6.2): how received
    interactions snapshot from the Worker's inbox store back into `Source/` git so
    #72 still holds. This is the one genuinely new architectural decision left.
-4. **Ship feeds + microformats + one importer + Webmention-send first** (V-1 →
-   start of V-2). The cheapest path to a credible "owns your social web" story; the
-   in-app pieces are static/deterministic and the dynamic pieces are `@dwk/*` config.
-5. **Quarantine Communities** behind its own design effort. It's the tail that
-   could wag the dog; don't let it reshape the personal-publishing core.
+4. **Ship feeds + microformats + Webmention-send first** (V-1 → start of V-2). The
+   cheapest path to a credible "owns your social web" story; the in-app pieces are
+   static/deterministic and the dynamic pieces are `@dwk/*` config. (No importers —
+   migration is dropped for V1, §5.4.)
+5. **Quarantine Communities** behind its own design effort — but note the hard part
+   (the federated backend) is already in `@dwk/workers` (§5.6), so the epic is UX +
+   content modeling, not infrastructure. Still gate it behind the personal layer.
+
+### Recommended ecosystem pieces to adopt
+
+The typed-object + feed work (V-1) leans on Astro-native primitives plus a short,
+deliberately minimal dependency list (no framework beyond Astro; each earns its
+place). Adopt:
+
+| Piece | Role | Phase |
+|---|---|---|
+| **Astro Content Collections + Zod** (native) | The typed-object spine — one Zod schema per content type; compile-time types + validation. Template already uses it. | V-1 |
+| **`@astrojs/rss`** (official) | RSS/Atom feed generation straight from collections; also feeds `@dwk/microsub`/`@dwk/websub`. | V-1 |
+| **`astro-seo-schema` + `schema-dts`** | schema.org JSON-LD per type (Recipe/Event/Review rich-results), typed. The SEO projection of each object's one schema. | V-1 |
+| **microformats2 classes** (in-template, no package) | h-entry/h-card markup — the IndieWeb projection of the same schema; what Webmention/federation consume. | V-1 |
+| **`astro:assets` `<Image>`/`<Picture>`** (native, Sharp — already bundled) | Photo/Album media handling. | V-1 |
+| **`astro-embed`** | Render the *referenced* item in Bookmark/Like/Repost/Reply objects. | V-1/V-2 |
+| **[Astro Cactus](https://github.com/chrismwilliams/astro-theme-cactus)** (reference only) | Best-documented webmention-display + mf2 layout example. Use as a pattern, **not** a backend — receiving is `@dwk/webmention`, not webmention.io. | V-2/V-3 |
+
+Design principle to hold: **define each content type's schema once** (Zod) and
+project it three ways — Astro types (editing), microformats2 (federation),
+schema.org JSON-LD (search). One source of truth per object, three consumers.
 
 **Bottom line:** the architecture team has, perhaps inadvertently, built almost the
 perfect foundation for this vision — ownership, git-canonical, static-first,
-optional-AI, per-site Cloudflare runtime — and the hardest missing piece, the
-federation/social protocol stack, **already exists as the first-party
-`@dwk/workers`**. The pivot is real and large, but it is mostly *additive and
-integrative* (wire in `@dwk/workers` + typed objects + importers) rather than a
-teardown or a from-scratch protocol build. With the Apple-app scope (macOS/iOS/
-iPadOS), Cloudflare-only deploy, and `@dwk/workers` as settled constraints, the
-residual hard problems shrink to two:
-**data canonicality of received interactions** (§6.2, a decision) and
-**communities** (§5.6, a separate product). Sequence around those and the rest is
-disciplined, incremental delivery on rails that already exist.
+optional-AI, per-site Cloudflare runtime — and the two hardest-looking pieces are
+already first-party: the federation/social protocol stack (`@dwk/workers`) *and*
+the community backend within it (ActivityPub Groups + ATProto). With migration cut
+for V1 and the Apple-app scope (macOS/iOS/iPadOS), Cloudflare-only deploy, and
+`@dwk/workers` as settled constraints, the pivot is mostly *additive and
+integrative* — wire in `@dwk/workers`, build typed objects on Astro-native
+primitives, ship feeds. The residual hard problems shrink to two: **data
+canonicality of received interactions** (§6.2, a decision) and **the communities
+UX/content model** (§5.6 — now product work over an existing backend, not new
+infrastructure). Sequence around those and the rest is disciplined, incremental
+delivery on rails that already exist.
