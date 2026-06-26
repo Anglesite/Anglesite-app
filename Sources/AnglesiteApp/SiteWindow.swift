@@ -85,6 +85,7 @@ struct SiteWindow: View {
     /// auto-save it and the Preview/Editor toggle keeps the buffer alive. Replaced when a different
     /// file opens; cleared on window close / site replay.
     @State private var editorModel: FileEditorModel?
+    @State private var plistEditorModel: PlistEditorModel?
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -116,6 +117,7 @@ struct SiteWindow: View {
             // Persist any unsaved edits before dropping the old site's editor on replay (#188 reuse).
             persistEditorBufferBestEffort()
             editorModel = nil
+            plistEditorModel = nil
             mainPaneMode = .preview
         }
         .onChange(of: preview.state) { _, newState in
@@ -145,6 +147,7 @@ struct SiteWindow: View {
             // on a flush return value — just write the buffer best-effort, off the main actor.
             persistEditorBufferBestEffort()
             editorModel = nil
+            plistEditorModel = nil
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()
             scopedURL = nil
@@ -426,7 +429,7 @@ struct SiteWindow: View {
     @ViewBuilder
     private func mainPane(for site: SiteStore.Site) -> some View {
         VStack(spacing: 0) {
-            if editorModel != nil {
+            if activeEditorFile != nil {
                 Picker("", selection: Binding(
                     get: { paneSelection },
                     set: { setPaneSelection($0) }
@@ -454,8 +457,8 @@ struct SiteWindow: View {
             // Switching to Preview auto-saves the open editor (abort on an unresolved conflict).
             // The flush is async (off-main IO), so do it in a Task and only switch on success.
             Task { if await leaveCurrentEditor() { mainPaneMode = .preview } }
-        } else if value == 1, let model = editorModel {
-            mainPaneMode = .editor(model.file)
+        } else if value == 1, let file = activeEditorFile {
+            mainPaneMode = .editor(file)
         }
     }
 
@@ -464,18 +467,41 @@ struct SiteWindow: View {
     /// switch instead of clobbering the other tool's edit. Safe to call when not editing. Async
     /// because the save/check IO runs off the main actor.
     private func leaveCurrentEditor() async -> Bool {
-        guard case .editor = mainPaneMode, let model = editorModel else { return true }
-        return await model.flushBeforeLeaving()
+        guard case .editor = mainPaneMode else { return true }
+        if let model = editorModel {
+            return await model.flushBeforeLeaving()
+        }
+        if let model = plistEditorModel {
+            return await model.flushBeforeLeaving()
+        }
+        return true
     }
 
     /// Best-effort off-main save of the open editor's buffer when the editor is torn down (window
     /// close or site replay), where no conflict dialog can be shown. Consistent with the
     /// auto-save-on-leave model; last-writer-wins on the rare teardown-time external conflict.
     private func persistEditorBufferBestEffort() {
-        guard let model = editorModel, model.isDirty else { return }
-        let url = model.file.url
-        let contents = model.text
-        Task.detached(priority: .userInitiated) { try? FileDocumentIO.save(contents, to: url) }
+        if let model = editorModel, model.isDirty {
+            let url = model.file.url
+            let contents = model.text
+            Task.detached(priority: .userInitiated) { try? FileDocumentIO.save(contents, to: url) }
+        }
+        if let model = plistEditorModel, model.isDirty, model.validationMessage == nil {
+            let url = model.file.url
+            let entries = model.entriesForSaving()
+            Task.detached(priority: .userInitiated) { try? PlistDocumentIO.save(entries, to: url) }
+        }
+        if let model = plistEditorModel, model.isAnalyticsDirty {
+            let sourceDirectory = model.sourceDirectory
+            let settings = model.analyticsSettings
+            Task.detached(priority: .userInitiated) {
+                try? WebsiteAnalyticsAsset.install(settings, siteDirectory: sourceDirectory)
+            }
+        }
+    }
+
+    private var activeEditorFile: FileRef? {
+        editorModel?.file ?? plistEditorModel?.file
     }
 
     @ViewBuilder
@@ -484,6 +510,10 @@ struct SiteWindow: View {
         case .editor:
             if let editorModel {
                 MainPaneEditorView(model: editorModel)
+            } else if let plistEditorModel {
+                PlistEditorView(model: plistEditorModel) { title in
+                    Task { await saveWebsiteTitle(title) }
+                }
             } else {
                 previewPane(for: site)
             }
@@ -558,6 +588,7 @@ struct SiteWindow: View {
             }
             if entry.name != site?.name {
                 site?.name = entry.name
+                navigator?.updateWebsiteTitle(entry.name)
             }
         }
     }
@@ -595,13 +626,24 @@ struct SiteWindow: View {
                 }
             }
         case .file(let file):
-            if editorModel?.file.id == file.id {
+            if activeEditorFile?.id == file.id {
                 mainPaneMode = .editor(file)   // re-show the already-open file (buffer intact)
                 return
             }
             Task {
                 guard await leaveCurrentEditor() else { return }   // flush the previous file first
-                editorModel = FileEditorModel(file: file)
+                switch EditorKind.resolve(for: file) {
+                case .text:
+                    editorModel = FileEditorModel(file: file)
+                    plistEditorModel = nil
+                case .plist:
+                    plistEditorModel = PlistEditorModel(
+                        file: file,
+                        websiteTitle: site?.name ?? file.name,
+                        sourceDirectory: site?.sourceDirectory ?? file.url.deletingLastPathComponent()
+                    )
+                    editorModel = nil
+                }
                 mainPaneMode = .editor(file)
             }
         }
@@ -613,6 +655,20 @@ struct SiteWindow: View {
             return "/anglesite:check"
         case .foundationModel:
             return "Audit this site for issues and suggest improvements to make it deploy-ready. Review the available site content and call out concrete files or sections when relevant."
+        }
+    }
+
+    private func saveWebsiteTitle(_ title: String) async {
+        guard let id = site?.id else { return }
+        do {
+            guard let updated = try await SiteStore.shared.setDisplayName(title, for: id) else { return }
+            site = updated
+            navigator?.updateWebsiteTitle(updated.name)
+        } catch {
+            await LogCenter.shared.append(
+                source: "editor", stream: .stderr,
+                text: "Saving website title failed: \(error.localizedDescription)"
+            )
         }
     }
 
@@ -671,7 +727,12 @@ struct SiteWindow: View {
         // this creation and stop the freshly-made navigator instead.
         navigator?.stop()
         let navModel = SiteNavigatorModel(graph: contentGraph)
-        navModel.start(siteID: resolved.id, siteRoot: resolved.packageURL, sourceDirectory: resolved.sourceDirectory)
+        navModel.start(
+            siteID: resolved.id,
+            siteRoot: resolved.packageURL,
+            sourceDirectory: resolved.sourceDirectory,
+            websiteTitle: resolved.name
+        )
         navigator = navModel
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
