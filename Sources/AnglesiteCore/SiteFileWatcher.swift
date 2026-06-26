@@ -47,18 +47,27 @@ public protocol SiteFileWatching: Sendable {
     func stop()
 }
 
-/// Translates a `FileChangeBatch` into `SiteKnowledgeIndex` mutations. Kept free-standing (not on
-/// the runtime actor) so it is unit-testable without spinning a runtime.
+/// Translates a `FileChangeBatch` into `SiteKnowledgeIndex` mutations, and (when supplied) mirrors
+/// each mutation into the `SemanticRanker` so the lexical and semantic halves stay consistent after
+/// incremental edits (#383). Kept free-standing (not on the runtime actor) so it is unit-testable
+/// without spinning a runtime.
 public enum KnowledgeReindex {
     public static func apply(
         _ batch: FileChangeBatch,
         to index: SiteKnowledgeIndex,
+        ranker: SemanticRanker? = nil,
         siteID: String,
         projectRoot: URL,
         fileExists: @Sendable (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
     ) async {
         if batch.needsFullRescan {
             await index.rebuild(siteID: siteID, projectRoot: projectRoot)
+            // A coalesced/bulk event drops per-file granularity, so re-sync the ranker against the
+            // freshly-rebuilt document set rather than guessing which vectors changed. `sync` reuses
+            // cached vectors for unchanged content, so this only re-embeds what actually moved.
+            if let ranker {
+                await ranker.sync(siteID: siteID, documents: await index.documents(siteID: siteID))
+            }
             return
         }
         // FSEvents can list the same path multiple times in one coalesced batch (e.g. write →
@@ -72,8 +81,17 @@ public enum KnowledgeReindex {
             else { continue }
             if fileExists(url) {
                 await index.upsertFile(siteID: siteID, projectRoot: projectRoot, relativePath: relativePath)
+                guard let ranker else { continue }
+                // `upsertFile` may have dropped the path (now unreadable or a non-indexed kind); in
+                // that case there's no document to embed, so drop its vector instead.
+                if let document = await index.document(siteID: siteID, relativePath: relativePath) {
+                    await ranker.upsert(siteID: siteID, document: document)
+                } else {
+                    await ranker.remove(siteID: siteID, docID: SiteKnowledgeIndex.documentID(siteID: siteID, relativePath: relativePath))
+                }
             } else {
                 await index.removeFile(siteID: siteID, relativePath: relativePath)
+                await ranker?.remove(siteID: siteID, docID: SiteKnowledgeIndex.documentID(siteID: siteID, relativePath: relativePath))
             }
         }
     }

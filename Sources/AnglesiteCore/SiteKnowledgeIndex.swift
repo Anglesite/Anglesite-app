@@ -87,6 +87,18 @@ public actor SiteKnowledgeIndex {
         documentsBySite[siteID]?[relativePath] = nil
     }
 
+    /// The currently-indexed document for a path, or `nil` if none is held. Lets incremental
+    /// consumers (the semantic ranker) read back what `upsertFile` produced without a full scan.
+    public func document(siteID: String, relativePath: String) -> Document? {
+        documentsBySite[siteID]?[relativePath]
+    }
+
+    /// The stable document ID for a path. The index owns this format; consumers that key off
+    /// document identity (e.g. ``SemanticRanker``) derive it here rather than reconstructing it.
+    public static func documentID(siteID: String, relativePath: String) -> String {
+        "\(siteID):knowledge:\(relativePath)"
+    }
+
     public func search(siteID: String, query: String, options: SearchOptions = .init()) -> [SearchResult] {
         let terms = Self.queryTerms(query)
         guard !terms.isEmpty else { return [] }
@@ -156,7 +168,7 @@ public actor SiteKnowledgeIndex {
         let headings = headings(in: bodySource)
         let links = internalLinks(in: bodySource)
         return Document(
-            id: "\(siteID):knowledge:\(relativePath)",
+            id: documentID(siteID: siteID, relativePath: relativePath),
             siteID: siteID,
             path: relativePath,
             kind: kind(for: relativePath),
