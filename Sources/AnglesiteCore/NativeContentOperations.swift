@@ -161,6 +161,10 @@ public struct NativeContentOperations: ContentOperationsService {
     /// `ContentScaffold.renderSingleton`, and writes it — refusing if the slot file already exists,
     /// which enforces one identity per site across both `businessProfile` and `personalProfile`
     /// (they share the `"profile"` slot). Same write/commit path as `createTyped`.
+    ///
+    /// TODO: add to the `ContentOperationsService` protocol when remote runtimes land
+    /// (`RemoteSandboxSiteRuntime` #66, `LocalContainerSiteRuntime` #69) — they implement the
+    /// protocol and currently have no path to create singletons.
     public func createTypedSingleton(
         siteID: String,
         typeID: String,
@@ -179,6 +183,10 @@ public struct NativeContentOperations: ContentOperationsService {
 
         let relPath = ContentScaffold.singletonRelativePath(slot: slot)
         let abs = root.appendingPathComponent(relPath)
+        // The exists-check → write below is a TOCTOU window (as it is in the sibling create*
+        // methods). Acceptable here: the app is single-user and the create path is serialized, so
+        // two concurrent calls for the same site don't occur in practice. If that assumption ever
+        // changes, make this atomic with an O_CREAT|O_EXCL create rather than this check.
         if fileManager.fileExists(atPath: abs.path) {
             return .failed(reason: "A site identity already exists at \(relPath)")
         }

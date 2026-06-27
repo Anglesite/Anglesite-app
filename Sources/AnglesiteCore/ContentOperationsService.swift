@@ -12,6 +12,8 @@ public protocol ContentOperationsService: Sendable {
     /// slug. Collection-stored types only — non-collection types (e.g. the `profile` identity singleton)
     /// report `.failed` — use `createTypedSingleton`.
     func createTyped(siteID: String, typeID: String, title: String, onProgress: ProgressHandler?) async -> ContentCreateResult
+    // TODO: add `createTypedSingleton` here when remote runtimes land (#66/#69). It lives only on the
+    // concrete `NativeContentOperations` today; protocol-typed call sites can't create singletons yet.
 }
 
 public extension ContentOperationsService {

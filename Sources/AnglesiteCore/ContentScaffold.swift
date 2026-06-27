@@ -220,9 +220,11 @@ public enum ContentScaffold {
     }
 
     /// Escape a string for use as a JSON string value. Covers `\` and `"`, the named control
-    /// escapes, and — critically — every remaining C0 control character as `\uXXXX`. The rendered
+    /// escapes, every remaining C0 control character as `\uXXXX`, and U+2028/U+2029. The rendered
     /// file is imported as a JS module, so an unescaped control char would be invalid JSON and
-    /// hard-fail the whole site build; the full C0 range is handled, not just the common few.
+    /// hard-fail the whole site build. U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR are
+    /// valid in standalone JSON but break JS parsers if the data is ever inlined into a `<script>`
+    /// (e.g. V-1.8 JSON-LD), so they are escaped pre-emptively.
     static func escapeJSON(_ s: String) -> String {
         var out = ""
         out.reserveCapacity(s.count)
@@ -235,6 +237,8 @@ public enum ContentScaffold {
             case "\t": out += "\\t"
             case "\u{08}": out += "\\b"
             case "\u{0C}": out += "\\f"
+            case "\u{2028}": out += "\\u2028"
+            case "\u{2029}": out += "\\u2029"
             case let c where c.value < 0x20:
                 out += String(format: "\\u%04x", c.value)
             default:

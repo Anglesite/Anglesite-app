@@ -164,11 +164,15 @@ struct ContentScaffoldTests {
     @Test("renderSingleton emits valid JSON even when the name carries control characters")
     func renderSingletonEscapesControlChars() throws {
         let person = try #require(ContentTypeRegistry().descriptor(id: "personalProfile"))
-        // NUL, SOH, backspace, form-feed — all below U+0020, must be \u/named-escaped.
-        let out = ContentScaffold.renderSingleton(descriptor: person, name: "A\u{0}\u{1}\u{8}\u{C}B")
+        // NUL, SOH, backspace, form-feed (C0) plus U+2028/U+2029 (the JS-in-<script> landmine).
+        let tricky = "A\u{0}\u{1}\u{8}\u{C}\u{2028}\u{2029}B"
+        let out = ContentScaffold.renderSingleton(descriptor: person, name: tricky)
+        // U+2028/U+2029 must be emitted as \u escapes, not raw, so inline-<script> embedding is safe.
+        #expect(!out.unicodeScalars.contains("\u{2028}"))
+        #expect(!out.unicodeScalars.contains("\u{2029}"))
         let data = try #require(out.data(using: .utf8))
         let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         #expect(obj?["type"] as? String == "personalProfile")
-        #expect(obj?["name"] as? String == "A\u{0}\u{1}\u{8}\u{C}B") // round-trips losslessly
+        #expect(obj?["name"] as? String == tricky) // round-trips losslessly
     }
 }

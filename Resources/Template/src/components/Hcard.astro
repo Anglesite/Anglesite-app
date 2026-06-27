@@ -9,6 +9,9 @@ const hours: string[] = Array.isArray(profile?.hours) ? profile.hours : [];
 ---
 
 {profile && (
+  // This is the site's contentinfo landmark. A theme that renders its own <footer>
+  // should coordinate with this so the page has a single landmark footer (HTML allows
+  // multiple <footer> elements, but duplicate contentinfo landmarks confuse a11y trees).
   <footer class="site-identity">
     <div class="h-card">
       {profile.name && <p class="p-name">{profile.name}</p>}
