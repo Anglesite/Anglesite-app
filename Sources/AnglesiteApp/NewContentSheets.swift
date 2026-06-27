@@ -27,12 +27,12 @@ struct NewPageSheet: View {
                                 .lineLimit(1)
                             TextField("Route", text: $route, prompt: Text(routePrompt))
                                 .labelsHidden()
+                                .multilineTextAlignment(.trailing)
                                 .textFieldStyle(.plain)
-                                .frame(minWidth: 80)
+                                .frame(width: routeFieldWidth, alignment: .trailing)
                             Text("/")
                                 .foregroundStyle(.secondary)
                         }
-                        .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
                 Section("Template") {
@@ -80,6 +80,17 @@ struct NewPageSheet: View {
 
     private var routePrompt: String {
         defaultRoute.isEmpty ? "my-new-webpage" : defaultRoute
+    }
+
+    private var routeFieldWidth: CGFloat {
+        let characterWidth: CGFloat = 9
+        let padding: CGFloat = 12
+        let measured = CGFloat(max(routeTextForSizing.count, 1)) * characterWidth + padding
+        return min(max(measured, 80), 280)
+    }
+
+    private var routeTextForSizing: String {
+        route.isEmpty ? routePrompt : route
     }
 
     private func create() {
