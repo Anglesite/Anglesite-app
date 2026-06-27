@@ -21,6 +21,7 @@ final class TypedEntryEditorModel {
     private var savedValues: TypedContentEditor.Values = .init()
     private var contents: String = ""               // last-loaded/saved file text (verbatim base)
     private var lastModified: Date?
+    private var numberDrafts: [String: String] = [:]
     private(set) var loadError: String?
     private(set) var isLoading = false
     var conflictDiskContents: String?
@@ -46,6 +47,7 @@ final class TypedEntryEditorModel {
             adopt(loaded.contents)
             lastModified = loaded.modificationDate
             loadError = nil
+            warnIfNoModificationDate(after: "load")
         } catch {
             loadError = error.localizedDescription
         }
@@ -66,6 +68,7 @@ final class TypedEntryEditorModel {
             lastModified = mtime
             contents = newContents
             savedValues = edited
+            warnIfNoModificationDate(after: "save")
             await commit()
             return true
         } catch {
@@ -128,9 +131,18 @@ final class TypedEntryEditorModel {
                 set: { self.values[name] = .date($0) })
     }
     func numberBinding(_ name: String) -> Binding<String> {
-        Binding(get: { if case .number(let n?)? = self.values[name] {
-                           return n.rounded() == n ? String(Int(n)) : String(n) }; return "" },
-                set: { self.values[name] = .number(Double($0)) })
+        Binding(
+            get: {
+                if let draft = self.numberDrafts[name] { return draft }
+                if case .number(let n?)? = self.values[name] { return Self.displayNumber(n) }
+                return ""
+            },
+            set: { raw in
+                self.numberDrafts[name] = raw
+                let trimmed = raw.trimmingCharacters(in: .whitespaces)
+                self.values[name] = .number(trimmed.isEmpty ? nil : Double(trimmed))
+            }
+        )
     }
     func listBinding(_ name: String) -> Binding<[String]> {
         Binding(get: { if case .list(let a)? = self.values[name] { return a }; return [] },
@@ -144,6 +156,28 @@ final class TypedEntryEditorModel {
         let read = TypedContentEditor.read(text, descriptor: descriptor)
         values = read
         savedValues = read
+        numberDrafts.removeAll()
+    }
+
+    /// Formats a number for the editor field: integral values render without a decimal point,
+    /// guarding the `Int(_:)` overflow trap for out-of-range magnitudes.
+    private static func displayNumber(_ n: Double) -> String {
+        if n == n.rounded(), abs(n) < 1e15 { return String(Int(n)) }
+        return String(n)
+    }
+
+    /// Surface (in the debug pane) when a file has no modification date after a successful load/save:
+    /// `FileDocumentIO.externalChange` keys on mtime, so a `nil` here silently disables external-change
+    /// detection for this file. "Logs are sacred" — make it visible rather than failing quietly.
+    private func warnIfNoModificationDate(after op: String) {
+        guard lastModified == nil else { return }
+        let path = file.url.path(percentEncoded: false)
+        Task {
+            await LogCenter.shared.append(
+                source: "editor", stream: .stderr,
+                text: "No modification date for \(path) after \(op); external-change detection is disabled for this file."
+            )
+        }
     }
 
     private func commit() async {

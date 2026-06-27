@@ -124,6 +124,7 @@ public enum TypedContentEditor {
     }
 
     private static func formatNumber(_ n: Double) -> String {
-        n.rounded() == n ? String(Int(n)) : String(n)
+        if n == n.rounded(), abs(n) < 1e15 { return String(Int(n)) }
+        return String(n)
     }
 }

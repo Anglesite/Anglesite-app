@@ -75,7 +75,7 @@ struct TypedEntryEditorView: View {
         case .text:
             VStack(alignment: .leading) {
                 Text(label).font(.caption).foregroundStyle(.secondary)
-                TextField(label, text: model.textBinding(field.name), axis: .vertical).lineLimit(2...6)
+                TextField("", text: model.textBinding(field.name), axis: .vertical).lineLimit(2...6)
             }
         case .bool:
             Toggle(label, isOn: model.boolBinding(field.name))
