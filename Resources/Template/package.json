@@ -5,18 +5,21 @@
   "scripts": {
     "dev": "astro dev",
     "prebuild": "npx tsx scripts/csp.ts",
-    "build": "astro build",
+    "build": "astro check && astro build",
     "preview": "astro preview",
     "check": "npx tsx scripts/pre-deploy-check.ts"
   },
   "dependencies": {
-    "astro": "^5.0.0",
     "@astrojs/rss": "^4.0.0",
+    "astro": "^5.0.0",
     "astro-embed": "^0.13.0",
     "astro-seo-schema": "^5.2.0"
   },
   "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "@types/node": "^26.0.1",
     "schema-dts": "^1.1.5",
-    "tsx": "^4.0.0"
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.3"
   }
 }

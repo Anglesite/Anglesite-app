@@ -28,8 +28,8 @@ const { Content } = await render(entry);
 // Per-collection layout. Only non-h-entry vocabularies need their own; everything else
 // (notes, articles, photos, albums, bookmarks, replies, likes, announcements) is h-entry → Hentry.
 const layoutByCollection: Partial<Record<EntryCollection, typeof Hentry>> = {
-  events: Hevent,
-  reviews: Hreview,
+  events: Hevent as unknown as typeof Hentry,
+  reviews: Hreview as unknown as typeof Hentry,
 };
 const Layout = layoutByCollection[entry.collection as EntryCollection] ?? Hentry;
 ---

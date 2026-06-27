@@ -1,5 +1,5 @@
 ---
-import BaseLayout from "../layouts/BaseLayout.astro";
+import BaseLayout from "../../src/layouts/BaseLayout.astro";
 import DonationButton from "../components/DonationButton.astro";
 import { readConfig } from "../../scripts/config";
 ---
@@ -8,6 +8,6 @@ import { readConfig } from "../../scripts/config";
   <DonationButton
     href={readConfig("DONATIONS_LINK")}
     label={readConfig("DONATIONS_BUTTON_TEXT")}
-    provider={readConfig("DONATIONS_PROVIDER")}
+    provider={readConfig("DONATIONS_PROVIDER") as "stripe" | "liberapay" | "github-sponsors" | undefined}
   />
 </BaseLayout>

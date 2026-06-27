@@ -1,12 +1,12 @@
 ---
-import BaseLayout from "../layouts/BaseLayout.astro";
+import BaseLayout from "../../src/layouts/BaseLayout.astro";
 import BookingWidget from "../components/BookingWidget.astro";
 import { readConfig } from "../../scripts/config";
 ---
 
 <BaseLayout title="Book a time">
   <BookingWidget
-    provider={readConfig("BOOKING_PROVIDER")}
+    provider={readConfig("BOOKING_PROVIDER") as "cal" | "calendly" | undefined}
     username={readConfig("BOOKING_USERNAME")}
     eventSlug={readConfig("BOOKING_EVENT_SLUG")}
     style="inline"
