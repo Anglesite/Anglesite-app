@@ -1,0 +1,239 @@
+/**
+ * schema.org JSON-LD projection for the routed content collections (V-1.8, #350).
+ *
+ * Each typed object already carries microformats2 classes in its layout (V-1.7); this is the
+ * machine-readable twin emitted as `<script type="application/ld+json">` for search engines.
+ * Keeping the mapping here — rather than inline in each layout — means the route, the layouts,
+ * and this projection can't drift from `content.config.ts`.
+ *
+ * Coverage mirrors the collections that exist today. `LocalBusiness` (the `businessProfile`
+ * singleton, #388) and `Recipe` (no V-1 content type) are intentionally absent — wire them in
+ * when those types land. `likes` emit no JSON-LD: a like is an interaction, not a CreativeWork
+ * with a meaningful schema.org rich-result type.
+ */
+import type {
+  WithContext,
+  Thing,
+  Article,
+  BlogPosting,
+  SocialMediaPosting,
+  ImageObject,
+  ImageGallery,
+  Event,
+  Review,
+  WebPage,
+  Comment,
+} from "schema-dts";
+import type { EntryCollection } from "./collections.ts";
+
+/** Page-level context the projection needs that isn't in the entry's frontmatter. */
+export interface SchemaContext {
+  /** Canonical absolute URL of the page being rendered (`Astro.url`). */
+  url: string;
+  /** Site origin (`Astro.site`), used to resolve root-relative asset paths to absolute URLs. */
+  site?: URL;
+}
+
+/** Flattened union of the h-entry collections' frontmatter — every field optional. */
+export interface HentryData {
+  title?: string;
+  summary?: string;
+  caption?: string;
+  publishDate?: Date;
+  updated?: Date;
+  image?: string;
+  images?: string[];
+  tags?: string[];
+  bookmarkOf?: string;
+  inReplyTo?: string;
+  likeOf?: string;
+}
+
+export interface EventData {
+  name?: string;
+  start?: Date;
+  end?: Date;
+  location?: string;
+}
+
+export interface ReviewData {
+  itemReviewed?: string;
+  rating?: number;
+  publishDate?: Date;
+}
+
+export interface BlogData {
+  title?: string;
+  description?: string;
+  pubDate?: Date;
+}
+
+function iso(d: Date | undefined): string | undefined {
+  return d ? new Date(d).toISOString() : undefined;
+}
+
+/** Resolve a possibly root-relative path against the site origin; pass full URLs through. */
+function abs(pathOrUrl: string | undefined, site: URL | undefined): string | undefined {
+  if (!pathOrUrl) return undefined;
+  try {
+    return new URL(pathOrUrl, site).href;
+  } catch {
+    return pathOrUrl;
+  }
+}
+
+/** Recursively drop `undefined` values (and emptied objects/arrays) so the JSON-LD stays tidy. */
+function clean<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map(clean).filter((v) => v !== undefined) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const c = clean(v);
+      if (c !== undefined) out[k] = c;
+    }
+    return out as T;
+  }
+  return value;
+}
+
+const CONTEXT = "https://schema.org" as const;
+
+function keywordsOf(tags: string[] | undefined): string | undefined {
+  return tags && tags.length > 0 ? tags.join(", ") : undefined;
+}
+
+/** Map an h-entry collection's frontmatter to its schema.org type, or `null` when none applies. */
+function hentrySchema(
+  collection: EntryCollection,
+  d: HentryData,
+  ctx: SchemaContext,
+): WithContext<Thing> | null {
+  const datePublished = iso(d.publishDate);
+  const keywords = keywordsOf(d.tags);
+
+  switch (collection) {
+    case "articles":
+      return clean<WithContext<Article>>({
+        "@context": CONTEXT,
+        "@type": "Article",
+        headline: d.title,
+        description: d.summary,
+        datePublished,
+        dateModified: iso(d.updated),
+        keywords,
+        url: ctx.url,
+      });
+    case "announcements":
+      return clean<WithContext<Article>>({
+        "@context": CONTEXT,
+        "@type": "Article",
+        headline: d.title,
+        datePublished,
+        url: ctx.url,
+      });
+    case "notes":
+      return clean<WithContext<SocialMediaPosting>>({
+        "@context": CONTEXT,
+        "@type": "SocialMediaPosting",
+        datePublished,
+        keywords,
+        url: ctx.url,
+      });
+    case "photos":
+      return clean<WithContext<ImageObject>>({
+        "@context": CONTEXT,
+        "@type": "ImageObject",
+        contentUrl: abs(d.image, ctx.site),
+        caption: d.caption,
+        datePublished,
+        keywords,
+        url: ctx.url,
+      });
+    case "albums":
+      return clean<WithContext<ImageGallery>>({
+        "@context": CONTEXT,
+        "@type": "ImageGallery",
+        name: d.title,
+        datePublished,
+        keywords,
+        url: ctx.url,
+        image: (d.images ?? []).map((src) => abs(src, ctx.site)).filter((s): s is string => !!s),
+      });
+    case "bookmarks":
+      return clean<WithContext<WebPage>>({
+        "@context": CONTEXT,
+        "@type": "WebPage",
+        name: d.title,
+        datePublished,
+        keywords,
+        url: ctx.url,
+        relatedLink: d.bookmarkOf,
+      });
+    case "replies":
+      return clean<WithContext<Comment>>({
+        "@context": CONTEXT,
+        "@type": "Comment",
+        datePublished,
+        url: ctx.url,
+        about: d.inReplyTo ? { "@type": "WebPage", url: d.inReplyTo } : undefined,
+      });
+    case "likes":
+      return null;
+    default:
+      return null;
+  }
+}
+
+function eventSchema(d: EventData, ctx: SchemaContext): WithContext<Event> {
+  return clean<WithContext<Event>>({
+    "@context": CONTEXT,
+    "@type": "Event",
+    name: d.name,
+    startDate: iso(d.start),
+    endDate: iso(d.end),
+    location: d.location ? { "@type": "Place", name: d.location } : undefined,
+    url: ctx.url,
+  });
+}
+
+function reviewSchema(d: ReviewData, ctx: SchemaContext): WithContext<Review> {
+  return clean<WithContext<Review>>({
+    "@context": CONTEXT,
+    "@type": "Review",
+    name: d.itemReviewed ? `Review of ${d.itemReviewed}` : undefined,
+    itemReviewed: d.itemReviewed ? { "@type": "Thing", name: d.itemReviewed } : undefined,
+    reviewRating:
+      d.rating !== undefined ? { "@type": "Rating", ratingValue: d.rating } : undefined,
+    datePublished: iso(d.publishDate),
+    url: ctx.url,
+  });
+}
+
+/**
+ * Single entry point for the routed `[collection]/[...slug]` page. `events` and `reviews` have
+ * their own frontmatter shapes; everything else is an h-entry. Returns `null` when a type has no
+ * meaningful schema.org projection (e.g. likes), so the layout can skip emitting a script.
+ */
+export function entrySchema(
+  collection: EntryCollection,
+  data: HentryData & EventData & ReviewData,
+  ctx: SchemaContext,
+): WithContext<Thing> | null {
+  if (collection === "events") return eventSchema(data, ctx);
+  if (collection === "reviews") return reviewSchema(data, ctx);
+  return hentrySchema(collection, data, ctx);
+}
+
+/** Blog posts route through their own layout with bespoke props rather than a CollectionEntry. */
+export function blogPostingSchema(d: BlogData, ctx: SchemaContext): WithContext<BlogPosting> {
+  return clean<WithContext<BlogPosting>>({
+    "@context": CONTEXT,
+    "@type": "BlogPosting",
+    headline: d.title,
+    description: d.description,
+    datePublished: iso(d.pubDate),
+    url: ctx.url,
+  });
+}
