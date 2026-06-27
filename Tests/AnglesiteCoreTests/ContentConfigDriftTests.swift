@@ -38,7 +38,7 @@ struct ContentConfigDriftTests {
           loader: glob({ pattern: "**/*.md", base: "./src/content/\(collection)" }),
           schema: z.object({
         \(schemaLines.joined(separator: "\n"))
-          }),
+          }).strict(),
         });
         """
     }
