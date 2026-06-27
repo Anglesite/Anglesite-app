@@ -143,10 +143,14 @@ public enum ContentScaffold {
             switch field.kind {
             case .markdown:
                 bodyPlaceholder = "Write your \(descriptor.displayName.lowercased()) here."
+            // Optional datetime/date fields scaffold commented-out: an emitted value is a valid
+            // truthy Date under `z.coerce.date()`, so a live default (e.g. an unset event `end`)
+            // would render a bogus `dt-end`. Commenting keeps the field as a format hint the user
+            // can uncomment. Required ones stay live (the entry is invalid without them).
             case .datetime:
-                lines.append("\(field.name): \(dateTime)")
+                lines.append("\(field.required ? "" : "# ")\(field.name): \(dateTime)")
             case .date:
-                lines.append("\(field.name): \(String(dateTime.prefix(10)))")
+                lines.append("\(field.required ? "" : "# ")\(field.name): \(String(dateTime.prefix(10)))")
             case .bool:
                 lines.append("\(field.name): false")
             case .number:

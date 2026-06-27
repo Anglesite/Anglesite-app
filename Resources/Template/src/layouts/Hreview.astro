@@ -1,0 +1,29 @@
+---
+import type { CollectionEntry } from "astro:content";
+import BaseLayout from "./BaseLayout.astro";
+
+interface Props {
+  entry: CollectionEntry<"reviews">;
+}
+
+const { entry } = Astro.props;
+const d = entry.data;
+// Compute the Date once; pin the locale so static output is deterministic across build hosts.
+const publishedDate = d.publishDate ? new Date(d.publishDate) : undefined;
+const iso = publishedDate?.toISOString();
+const human = publishedDate?.toLocaleDateString("en-US");
+// h-review needs an explicit p-name (the review's own title) distinct from p-item (the thing
+// reviewed); without it, mf2 parsers fall back to the implied name — the concatenation of all
+// text content, smashing item/rating/body together. Generate one from the reviewed item.
+const reviewName = `Review of ${d.itemReviewed}`;
+---
+
+<BaseLayout title={reviewName}>
+  <article class="h-review">
+    <h1 class="p-name">{reviewName}</h1>
+    <p>Reviewed: <span class="p-item">{d.itemReviewed}</span></p>
+    <data class="p-rating" value={d.rating}>{d.rating}</data>
+    <div class="e-content"><slot /></div>
+    {iso && <time class="dt-published" datetime={iso}>{human}</time>}
+  </article>
+</BaseLayout>

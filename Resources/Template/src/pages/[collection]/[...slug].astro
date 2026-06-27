@@ -1,11 +1,18 @@
 ---
 import { getCollection, render } from "astro:content";
 import Hentry from "../../layouts/Hentry.astro";
+import Hevent from "../../layouts/Hevent.astro";
+import Hreview from "../../layouts/Hreview.astro";
 
-type PersonalCollection = "notes" | "articles" | "photos" | "albums" | "bookmarks" | "replies" | "likes";
+type EntryCollection =
+  | "notes" | "articles" | "photos" | "albums" | "bookmarks" | "replies" | "likes"
+  | "announcements" | "events" | "reviews";
 
 export async function getStaticPaths() {
-  const collections: PersonalCollection[] = ["notes", "articles", "photos", "albums", "bookmarks", "replies", "likes"];
+  const collections: EntryCollection[] = [
+    "notes", "articles", "photos", "albums", "bookmarks", "replies", "likes",
+    "announcements", "events", "reviews",
+  ];
   const paths = [];
   for (const collection of collections) {
     const entries = await getCollection(collection);
@@ -18,6 +25,13 @@ export async function getStaticPaths() {
 
 const { entry } = Astro.props;
 const { Content } = await render(entry);
+// Per-collection layout. Only non-h-entry vocabularies need their own; everything else
+// (notes, articles, photos, albums, bookmarks, replies, likes, announcements) is h-entry → Hentry.
+const layoutByCollection: Partial<Record<EntryCollection, typeof Hentry>> = {
+  events: Hevent,
+  reviews: Hreview,
+};
+const Layout = layoutByCollection[entry.collection as EntryCollection] ?? Hentry;
 ---
 
-<Hentry entry={entry}><Content /></Hentry>
+<Layout entry={entry}><Content /></Layout>
