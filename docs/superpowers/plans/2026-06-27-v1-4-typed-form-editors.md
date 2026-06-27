@@ -50,15 +50,17 @@ Modified:
 
 **Files:**
 - Create: `Sources/AnglesiteCore/FrontmatterDocument.swift`
+- Modify: `Sources/AnglesiteCore/Frontmatter.swift` — promote the shared YAML scalar/array helpers from `private` to `internal` (`splitKeyValue`, `blockArrayItem`, `parseScalarOrArray`, `unquote`, `decodeDoubleQuoted`) so `FrontmatterDocument` reuses them instead of duplicating. Leave `frontmatterBlock`/`frontmatterPattern` and `parse` untouched.
 - Test: `Tests/AnglesiteCoreTests/FrontmatterDocumentTests.swift`
+- Test (regression): `Tests/AnglesiteCoreTests/FrontmatterTests.swift` must still pass unchanged.
 
 **Interfaces:**
+- Reuses (existing): `FrontmatterValue` (`Sources/AnglesiteCore/Frontmatter.swift`) — `enum FrontmatterValue { case string(String); case bool(Bool); case array([String]) }`. `FrontmatterDocument` does **not** define its own value enum; it stores and returns `FrontmatterValue`.
 - Produces:
   - `public struct FrontmatterDocument: Equatable, Sendable`
-  - `public enum FrontmatterDocument.Value: Equatable, Sendable { case scalar(String); case bool(Bool); case array([String]) }`
   - `public static func parse(_ source: String) -> FrontmatterDocument`
-  - `public func value(for key: String) -> Value?`
-  - `public mutating func set(_ value: Value, for key: String)` — updates an existing key in place (marking it for re-render) or appends a new key at the end.
+  - `public func value(for key: String) -> FrontmatterValue?`
+  - `public mutating func set(_ value: FrontmatterValue, for key: String)` — updates an existing key in place (marking it for re-render) or appends a new key at the end.
   - `public var body: String { get set }` — text after the closing `---` fence, verbatim; settable.
   - `public func serialized() -> String`
   - `public var keys: [String]` — frontmatter keys in source order (excludes synthetic raw segments).
@@ -93,7 +95,7 @@ struct FrontmatterDocumentTests {
     @Test("reads scalar, bool, and array values")
     func reads() {
         let doc = FrontmatterDocument.parse("---\ntitle: \"Hi\"\ndraft: true\ntags: [x, y]\n---\nB\n")
-        #expect(doc.value(for: "title") == .scalar("Hi"))
+        #expect(doc.value(for: "title") == .string("Hi"))
         #expect(doc.value(for: "draft") == .bool(true))
         #expect(doc.value(for: "tags") == .array(["x", "y"]))
         #expect(doc.value(for: "missing") == nil)
@@ -103,7 +105,7 @@ struct FrontmatterDocumentTests {
     func editPreserves() {
         let src = "---\ntitle: \"Old\"\nweirdKey: keep-me-exactly\ndraft: false\n---\n\nBody.\n"
         var doc = FrontmatterDocument.parse(src)
-        doc.set(.scalar("New"), for: "title")
+        doc.set(.string("New"), for: "title")
         let out = doc.serialized()
         #expect(out.contains("title: \"New\""))
         #expect(out.contains("weirdKey: keep-me-exactly"))   // unknown key preserved verbatim
@@ -114,9 +116,9 @@ struct FrontmatterDocumentTests {
     @Test("setting a new key appends it")
     func appendsNewKey() {
         var doc = FrontmatterDocument.parse("---\ntitle: \"T\"\n---\nB\n")
-        doc.set(.scalar("noreply@x.io"), for: "email")
+        doc.set(.string("noreply@x.io"), for: "email")
         #expect(doc.serialized().contains("email: \"noreply@x.io\""))
-        #expect(doc.value(for: "email") == .scalar("noreply@x.io"))
+        #expect(doc.value(for: "email") == .string("noreply@x.io"))
     }
 
     @Test("no-frontmatter source is all body")
@@ -160,36 +162,35 @@ Expected: FAIL — `cannot find 'FrontmatterDocument' in scope`.
 
 - [ ] **Step 3: Implement `FrontmatterDocument`**
 
+First, in `Sources/AnglesiteCore/Frontmatter.swift`, promote the shared helpers from `private static func` to `internal static func` (drop the `private` keyword) on exactly these five: `splitKeyValue`, `blockArrayItem`, `parseScalarOrArray`, `unquote`, `decodeDoubleQuoted`. Add a one-line doc note on `parseScalarOrArray` that `FrontmatterDocument` also consumes it. Leave `parse`, `frontmatterBlock`, and `frontmatterPattern` exactly as they are. The existing `FrontmatterValue` enum (`case string`/`bool`/`array`) is reused as-is — do **not** add a new value enum.
+
+Then create `FrontmatterDocument`:
+
 ```swift
 // Sources/AnglesiteCore/FrontmatterDocument.swift
 import Foundation
 
 /// A read/write model of a content file's YAML frontmatter + body.
 ///
-/// Unlike `Frontmatter.parse` (read-only, top-level keys only, drops unknown keys, collapses
-/// value types), this preserves **every** source segment — known keys, unknown keys, comments,
-/// and blank lines — in order, each with its verbatim source text. A key is re-rendered only when
-/// it is `set`. Consequences the editor relies on:
+/// Unlike `Frontmatter.parse` (read-only, drops unknown keys, no serialization), this preserves
+/// **every** source segment — known keys, unknown keys, comments, and blank lines — in order, each
+/// with its verbatim source text. A key is re-rendered only when it is `set`. Consequences the
+/// editor relies on:
 ///
 /// - An unedited `parse(...).serialized()` is the identity (modulo uniform line-ending
 ///   normalization for mixed endings).
 /// - Editing one field never disturbs untouched keys or the body.
 /// - Form-only editing can never silently drop a hand-authored key or body content.
 ///
-/// Pure value type, no I/O.
+/// Scalar/array parsing reuses `Frontmatter`'s internal helpers, and values are the existing
+/// `FrontmatterValue`. Pure value type, no I/O.
 public struct FrontmatterDocument: Equatable, Sendable {
-    public enum Value: Equatable, Sendable {
-        case scalar(String)   // logical (unquoted/decoded) string
-        case bool(Bool)
-        case array([String])
-    }
-
-    /// One ordered segment of the frontmatter block. A `key` segment is editable; a `raw` segment
-    /// (comment / blank line) is opaque and always serialized verbatim.
+    /// One ordered segment of the frontmatter block. A `key` segment is editable; a raw segment
+    /// (comment / blank / stray line) is opaque and always serialized verbatim.
     private struct Segment: Equatable {
-        var key: String?            // nil ⟹ raw passthrough segment
-        var value: Value?           // logical value for key segments
-        var verbatim: [String]?     // original source lines; nil once a key segment is mutated
+        var key: String?               // nil ⟹ raw passthrough segment
+        var value: FrontmatterValue?   // logical value for key segments
+        var verbatim: [String]?        // original source lines; nil once a key segment is mutated
     }
 
     private var segments: [Segment]
@@ -202,12 +203,12 @@ public struct FrontmatterDocument: Equatable, Sendable {
 
     public var keys: [String] { segments.compactMap(\.key) }
 
-    public func value(for key: String) -> Value? {
+    public func value(for key: String) -> FrontmatterValue? {
         guard let i = indexByKey[key] else { return nil }
         return segments[i].value
     }
 
-    public mutating func set(_ value: Value, for key: String) {
+    public mutating func set(_ value: FrontmatterValue, for key: String) {
         if let i = indexByKey[key] {
             segments[i].value = value
             segments[i].verbatim = nil   // force re-render
@@ -243,7 +244,7 @@ public struct FrontmatterDocument: Equatable, Sendable {
             return FrontmatterDocument(segments: [], indexByKey: [:], body: normalized,
                                        newline: newline, hadFrontmatter: false)
         }
-        var all = normalized.components(separatedBy: "\n")
+        let all = normalized.components(separatedBy: "\n")
         // all[0] == "---"; find the closing fence.
         var close = -1
         var i = 1
@@ -263,41 +264,34 @@ public struct FrontmatterDocument: Equatable, Sendable {
         while j < block.count {
             let line = block[j]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            // Comment / blank → raw passthrough.
-            if trimmed.isEmpty || trimmed.hasPrefix("#") {
+            // Comment / blank / stray-indent → raw passthrough.
+            let indented = (line.first == " " || line.first == "\t")
+            if trimmed.isEmpty || trimmed.hasPrefix("#") || indented {
                 segments.append(Segment(key: nil, value: nil, verbatim: [line]))
                 j += 1
                 continue
             }
-            // A top-level `key: …` line (no leading whitespace).
-            if let first = line.first, first == " " || first == "\t" {
-                segments.append(Segment(key: nil, value: nil, verbatim: [line]))  // stray indent → passthrough
-                j += 1
-                continue
-            }
-            guard let colon = line.firstIndex(of: ":") else {
+            guard let (key, rawValue) = Frontmatter.splitKeyValue(line) else {
                 segments.append(Segment(key: nil, value: nil, verbatim: [line]))
                 j += 1
                 continue
             }
-            let key = String(line[line.startIndex..<colon])
-            let rawValue = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
 
             var verbatim = [line]
-            let value: Value
+            let value: FrontmatterValue
             if rawValue.isEmpty {
                 // Possible block array on following `- item` lines.
                 var items: [String] = []
                 var k = j + 1
-                while k < block.count, let item = blockArrayItem(block[k]) {
-                    items.append(unquote(item))
+                while k < block.count, let item = Frontmatter.blockArrayItem(block[k]) {
+                    items.append(Frontmatter.unquote(item))
                     verbatim.append(block[k])
                     k += 1
                 }
-                value = items.isEmpty ? .scalar("") : .array(items)
+                value = items.isEmpty ? .string("") : .array(items)
                 j = k
             } else {
-                value = parseScalarOrArray(rawValue)
+                value = Frontmatter.parseScalarOrArray(rawValue)
                 j += 1
             }
             indexByKey[key] = segments.count
@@ -307,11 +301,11 @@ public struct FrontmatterDocument: Equatable, Sendable {
                                    newline: newline, hadFrontmatter: true)
     }
 
-    // MARK: Render (mirrors ContentScaffold conventions: double-quoted scalars, `[]` empty arrays)
+    // MARK: Render (mirrors ContentScaffold: double-quoted scalars, `[]` empty arrays, block lists)
 
-    private static func render(key: String, value: Value) -> String {
+    private static func render(key: String, value: FrontmatterValue) -> String {
         switch value {
-        case .scalar(let s):
+        case .string(let s):
             return "\(key): \"\(escape(s))\""
         case .bool(let b):
             return "\(key): \(b)"
@@ -324,57 +318,26 @@ public struct FrontmatterDocument: Equatable, Sendable {
     private static func escape(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     }
-
-    // MARK: Scalar/array parsing (matching Frontmatter.swift semantics)
-
-    private static func blockArrayItem(_ line: String) -> String? {
-        let stripped = String(line.drop(while: { $0 == " " || $0 == "\t" }))
-        guard stripped.hasPrefix("-") else { return nil }
-        let afterDash = stripped.dropFirst()
-        guard let f = afterDash.first, f == " " || f == "\t" else { return nil }
-        return String(afterDash).trimmingCharacters(in: .whitespaces)
-    }
-
-    private static func parseScalarOrArray(_ raw: String) -> Value {
-        if raw == "true" { return .bool(true) }
-        if raw == "false" { return .bool(false) }
-        if raw.hasPrefix("["), raw.hasSuffix("]") {
-            let inner = String(raw.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
-            if inner.isEmpty { return .array([]) }
-            return .array(inner.split(separator: ",", omittingEmptySubsequences: false)
-                .map { unquote($0.trimmingCharacters(in: .whitespaces)) })
-        }
-        return .scalar(unquote(raw))
-    }
-
-    private static func unquote(_ s: String) -> String {
-        guard s.count >= 2 else { return s }
-        if s.hasPrefix("\"") && s.hasSuffix("\"") {
-            let inner = String(s.dropFirst().dropLast())
-            return inner
-                .replacingOccurrences(of: "\\\"", with: "\u{1}").replacingOccurrences(of: "\\\\", with: "\u{2}")
-                .replacingOccurrences(of: "\\n", with: "\n").replacingOccurrences(of: "\\t", with: "\t")
-                .replacingOccurrences(of: "\u{1}", with: "\"").replacingOccurrences(of: "\u{2}", with: "\\")
-        }
-        if s.hasPrefix("'") && s.hasSuffix("'") {
-            return String(s.dropFirst().dropLast()).replacingOccurrences(of: "''", with: "'")
-        }
-        return s
-    }
 }
 ```
+
+Note for the implementer: `Frontmatter.splitKeyValue` returns `(key: String, value: String)?` with the value already trimmed — use it directly. `Frontmatter.parseScalarOrArray`, `.blockArrayItem`, and `.unquote` are the same helpers `Frontmatter.parse` uses, so block-array and quoting semantics stay identical across both types.
 
 - [ ] **Step 4: Run tests, verify they pass**
 
 Run: `swift test --package-path . --filter FrontmatterDocument 2>&1 | tail -20`
 Expected: PASS (8 tests). If `identity`/`commentsSurvive` fail on a trailing-newline mismatch, check the `body` rejoin handles the final `""` element — fix the off-by-one in `serialized()`'s body concatenation before moving on.
 
+Also confirm the existing `Frontmatter` suite still passes after promoting its helpers to `internal`:
+Run: `swift test --package-path . --filter Frontmatter 2>&1 | tail -20`
+Expected: both `Frontmatter` and `FrontmatterDocument` suites PASS (no regression).
+
 - [ ] **Step 5: Commit**
 
 ```bash
 cd /Users/dwk/Developer/github.com/Anglesite/Anglesite-app/.claude/worktrees/346-typed-editors
-git add Sources/AnglesiteCore/FrontmatterDocument.swift Tests/AnglesiteCoreTests/FrontmatterDocumentTests.swift
-git commit -m "$(printf 'feat(#346): FrontmatterDocument round-trip frontmatter+body model\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+git add Sources/AnglesiteCore/Frontmatter.swift Sources/AnglesiteCore/FrontmatterDocument.swift Tests/AnglesiteCoreTests/FrontmatterDocumentTests.swift
+git commit -m "$(printf 'feat(#346): FrontmatterDocument round-trip model reusing Frontmatter helpers\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
 ```
 
 ---
@@ -546,19 +509,19 @@ public enum TypedContentEditor {
 
     // MARK: Decode (frontmatter → field value)
 
-    private static func decode(_ value: FrontmatterDocument.Value, kind: ContentTypeField.Kind) -> FieldValue {
+    private static func decode(_ value: FrontmatterValue, kind: ContentTypeField.Kind) -> FieldValue {
         switch kind {
         case .string, .text, .url, .image, .markdown:
-            if case .scalar(let s) = value { return .text(s) }
+            if case .string(let s) = value { return .text(s) }
             return .text("")
         case .bool:
             if case .bool(let b) = value { return .flag(b) }
             return .flag(false)
         case .date, .datetime:
-            if case .scalar(let s) = value { return .date(parseDate(s)) }
+            if case .string(let s) = value { return .date(parseDate(s)) }
             return .date(nil)
         case .number:
-            if case .scalar(let s) = value { return .number(Double(s)) }
+            if case .string(let s) = value { return .number(Double(s)) }
             return .number(nil)
         case .stringArray, .imageArray:
             if case .array(let a) = value { return .list(a) }
@@ -568,12 +531,12 @@ public enum TypedContentEditor {
 
     // MARK: Encode (field value → frontmatter)
 
-    private static func encode(_ value: FieldValue, kind: ContentTypeField.Kind) -> FrontmatterDocument.Value? {
+    private static func encode(_ value: FieldValue, kind: ContentTypeField.Kind) -> FrontmatterValue? {
         switch value {
-        case .text(let s): return .scalar(s)
+        case .text(let s): return .string(s)
         case .flag(let b): return .bool(b)
-        case .date(let d): return .scalar(d.map { format($0, kind: kind) } ?? "")
-        case .number(let n): return .scalar(n.map { formatNumber($0) } ?? "")
+        case .date(let d): return .string(d.map { format($0, kind: kind) } ?? "")
+        case .number(let n): return .string(n.map { formatNumber($0) } ?? "")
         case .list(let a): return .array(a)
         }
     }
@@ -1414,4 +1377,4 @@ EOF
 
 **Placeholder scan:** No TBD/TODO. The only deferred-to-implementer judgement is Task 7 Step 4 (match the existing `leaveCurrentEditor` shape) — bounded with an exact grep and explicit "mirror, don't restructure" instruction. ✓
 
-**Type consistency:** `FrontmatterDocument.Value`, `TypedContentEditor.FieldValue`/`.Values`, `ContentTypeResolver.descriptor(forRelativePath:registry:)`, `TypedEntryEditorModel` init signature, and the `NativeContentOperations.GitCommit` typealias are used identically across tasks. Binding helper names (`textBinding`/`boolBinding`/`dateBinding`/`numberBinding`/`listBinding`) match between Task 5 (definition) and Task 6 (use). ✓
+**Type consistency:** `FrontmatterValue` (reused), `TypedContentEditor.FieldValue`/`.Values`, `ContentTypeResolver.descriptor(forRelativePath:registry:)`, `TypedEntryEditorModel` init signature, and the `NativeContentOperations.GitCommit` typealias are used identically across tasks. Binding helper names (`textBinding`/`boolBinding`/`dateBinding`/`numberBinding`/`listBinding`) match between Task 5 (definition) and Task 6 (use). ✓
