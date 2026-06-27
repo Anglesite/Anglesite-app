@@ -35,6 +35,12 @@ const NO_URL = `<!doctype html><html><body>
   <div class="e-content"><p>Body.</p></div>
 </article></body></html>`;
 
+const NAMELESS_NOTE = `<!doctype html><html><body>
+<article class="h-entry">
+  <a class="u-url" href="/notes/hello-note/"><time class="dt-published" datetime="2026-06-27T12:00:00.000Z">Jun 27, 2026</time></a>
+  <div class="e-content"><p>Just a quick note.</p></div>
+</article></body></html>`;
+
 // h-review with NO explicit p-name: the parser implies a name from the full text,
 // smashing item/rating/body together — the pitfall Hreview.astro documents.
 const IMPLIED_REVIEW = `<!doctype html><html><body>
@@ -53,6 +59,10 @@ test("valid h-entry passes and exposes expected properties", () => {
   assert.deepEqual(item.properties.category, ["indieweb"]);
   assert.equal(item.properties.url[0], "https://example.com/articles/my-article/");
   assert.ok(String(item.properties.published[0]).startsWith("2026-06-27"));
+});
+
+test("nameless h-entry (note) passes — p-name is optional for entries", () => {
+  assert.deepEqual(validateEntryHtml(NAMELESS_NOTE, "note"), []);
 });
 
 test("valid h-review passes with explicit name, item and rating", () => {

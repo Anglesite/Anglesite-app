@@ -49,25 +49,38 @@ export function validateEntryHtml(html: string, label: string, baseUrl = BASE_UR
   const item = roots[0];
   const type = item.type.find(isEntryType) as EntryType;
 
-  if (!has(item, "name")) problems.push(`${label}: ${type} missing p-name`);
+  // Every entry needs a permalink.
   if (!has(item, "url")) problems.push(`${label}: ${type} missing u-url`);
+
+  // Dates: events use dt-start; entries and reviews use dt-published.
   if (type === "h-event") {
     if (!has(item, "start")) problems.push(`${label}: h-event missing dt-start`);
   } else if (!has(item, "published")) {
     problems.push(`${label}: ${type} missing dt-published`);
   }
+
   if (type === "h-review" && !has(item, "rating")) {
     problems.push(`${label}: h-review missing p-rating`);
   }
 
-  // Guard the implied-name pitfall: a valid entry's p-name is the explicit title, not the
-  // concatenation of all text (which the parser implies when no explicit p-name exists).
-  const name = String(item.properties.name?.[0] ?? "");
-  const content = String(
-    (item.properties.content?.[0] as { value?: string } | undefined)?.value ?? "",
-  ).trim();
-  if (name && content && name.includes(content)) {
-    problems.push(`${label}: ${type} p-name looks implied (contains the full content) — add an explicit p-name`);
+  // p-name: required and explicit for h-review/h-event (both always carry a title).
+  // h-entry is intentionally name-OPTIONAL — notes, photos, replies and likes are
+  // legitimately nameless mf2 entries, so we neither require a name nor apply the
+  // implied-name guard to them.
+  if (type === "h-review" || type === "h-event") {
+    if (!has(item, "name")) {
+      problems.push(`${label}: ${type} missing p-name`);
+    } else {
+      // Guard the implied-name pitfall: the parsed name must be the explicit title, not
+      // the parser's concatenation of all text (implied when no explicit p-name exists).
+      const name = String(item.properties.name?.[0] ?? "");
+      const content = String(
+        (item.properties.content?.[0] as { value?: string } | undefined)?.value ?? "",
+      ).trim();
+      if (name && content && name.includes(content)) {
+        problems.push(`${label}: ${type} p-name looks implied (contains the full content) — add an explicit p-name`);
+      }
+    }
   }
 
   return problems;
