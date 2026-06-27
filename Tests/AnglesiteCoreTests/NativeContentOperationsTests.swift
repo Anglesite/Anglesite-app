@@ -121,11 +121,43 @@ struct NativeContentOperationsTests {
         #expect(result == .failed(reason: "Unknown content type: nope"))
     }
 
-    @Test("createTyped refuses page-stored types")
-    func createTypedPageStored() async {
+    @Test("createTyped rejects singleton types with a pointer to createTypedSingleton")
+    func createTypedRejectsSingleton() async {
         let (ops, _, _) = makeOps()
         let result = await ops.createTyped(siteID: "s1", typeID: "businessProfile", title: "x")
-        #expect(result == .failed(reason: "Page-stored type businessProfile is not supported by createTyped yet"))
+        #expect(result == .failed(reason: "businessProfile is not a collection type; use createTypedSingleton"))
+    }
+
+    @Test("createTypedSingleton writes the slot data file and commits")
+    func createTypedSingletonWrites() async throws {
+        let (ops, root, spy) = makeOps()
+        let result = await ops.createTypedSingleton(siteID: "s1", typeID: "businessProfile", name: "Acme")
+        #expect(result == .created(filePath: "src/data/profile.json", identifier: "profile"))
+        let written = try String(
+            contentsOf: root.appendingPathComponent("src/data/profile.json"), encoding: .utf8)
+        #expect(written.contains("\"type\": \"businessProfile\""))
+        #expect(written.contains("\"name\": \"Acme\""))
+        let calls = await spy.calls
+        #expect(calls.count == 1)
+        #expect(calls.first?.1 == "src/data/profile.json")
+        #expect(calls.first?.2 == "anglesite: add businessProfile")
+    }
+
+    @Test("createTypedSingleton enforces one identity per site across kinds")
+    func createTypedSingletonMutuallyExclusive() async {
+        let (ops, _, _) = makeOps()
+        _ = await ops.createTypedSingleton(siteID: "s1", typeID: "businessProfile", name: "Acme")
+        let second = await ops.createTypedSingleton(siteID: "s1", typeID: "personalProfile", name: "Ada")
+        #expect(second == .failed(reason: "A site identity already exists at src/data/profile.json"))
+    }
+
+    @Test("createTypedSingleton rejects collection types and unknown ids")
+    func createTypedSingletonRejectsCollection() async {
+        let (ops, _, _) = makeOps()
+        let coll = await ops.createTypedSingleton(siteID: "s1", typeID: "note", name: "x")
+        #expect(coll == .failed(reason: "note is not a singleton type"))
+        let unknown = await ops.createTypedSingleton(siteID: "s1", typeID: "nope", name: "x")
+        #expect(unknown == .failed(reason: "Unknown content type: nope"))
     }
 
     @Test("processGitCommit returns a SHA in a real repo, nil outside one")

@@ -112,9 +112,10 @@ public struct NativeContentOperations: ContentOperationsService {
 
     /// Create a typed content entry (V-1.2). Looks the type up in `registry`, derives a slug from
     /// `slug ?? title`, renders frontmatter via `ContentScaffold.renderEntry`, writes it, and commits —
-    /// the same write/commit path as `createPost`. Collection-stored types only; page-stored types
-    /// (e.g. `businessProfile`) are #345. The explicit-`slug` overload is the native path's superset
-    /// over the MCP witness (SiteWindow's per-type editor passes a caller-chosen slug).
+    /// the same write/commit path as `createPost`. Collection-stored types only; singleton-stored types
+    /// (e.g. the `profile` identity) go through `createTypedSingleton`. The explicit-`slug` overload
+    /// is the native path's superset over the MCP witness (SiteWindow's per-type editor passes a
+    /// caller-chosen slug).
     public func createTyped(
         siteID: String,
         typeID: String,
@@ -129,7 +130,7 @@ public struct NativeContentOperations: ContentOperationsService {
             return .failed(reason: "Unknown content type: \(typeID)")
         }
         guard let collection = descriptor.collection else {
-            return .failed(reason: "Page-stored type \(typeID) is not supported by createTyped yet")
+            return .failed(reason: "\(typeID) is not a collection type; use createTypedSingleton")
         }
 
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -153,6 +154,44 @@ public struct NativeContentOperations: ContentOperationsService {
         onProgress?(.createFinalizing)
         _ = await gitCommit(root, relPath, "anglesite: add \(collection) \(finalSlug)")
         return .created(filePath: relPath, identifier: finalSlug)
+    }
+
+    /// Create a per-site singleton (V-1.3 follow-up, #388) — e.g. the representative h-card.
+    /// Looks the type up, resolves its `singletonSlot`, renders the JSON data module via
+    /// `ContentScaffold.renderSingleton`, and writes it — refusing if the slot file already exists,
+    /// which enforces one identity per site across both `businessProfile` and `personalProfile`
+    /// (they share the `"profile"` slot). Same write/commit path as `createTyped`.
+    public func createTypedSingleton(
+        siteID: String,
+        typeID: String,
+        name: String,
+        registry: ContentTypeRegistry = ContentTypeRegistry(),
+        onProgress: ProgressHandler? = nil
+    ) async -> ContentCreateResult {
+        onProgress?(.createResolvingRuntime)
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        guard let descriptor = registry.descriptor(id: typeID) else {
+            return .failed(reason: "Unknown content type: \(typeID)")
+        }
+        guard let slot = descriptor.singletonSlot else {
+            return .failed(reason: "\(typeID) is not a singleton type")
+        }
+
+        let relPath = ContentScaffold.singletonRelativePath(slot: slot)
+        let abs = root.appendingPathComponent(relPath)
+        if fileManager.fileExists(atPath: abs.path) {
+            return .failed(reason: "A site identity already exists at \(relPath)")
+        }
+
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let contents = ContentScaffold.renderSingleton(
+            descriptor: descriptor, name: cleanName.isEmpty ? nil : cleanName)
+        do { try write(contents, to: abs) }
+        catch { return .failed(reason: "\(error)") }
+
+        onProgress?(.createFinalizing)
+        _ = await gitCommit(root, relPath, "anglesite: add \(descriptor.id)")
+        return .created(filePath: relPath, identifier: slot)
     }
 
     private func write(_ contents: String, to abs: URL) throws {
