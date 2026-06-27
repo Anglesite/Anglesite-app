@@ -1,0 +1,21 @@
+---
+import BaseLayout from "./BaseLayout.astro";
+
+interface Props {
+  entry: { data: Record<string, any> };
+}
+
+const { entry } = Astro.props;
+const d = entry.data;
+const iso = d.publishDate ? new Date(d.publishDate).toISOString() : undefined;
+const human = d.publishDate ? new Date(d.publishDate).toLocaleDateString() : undefined;
+---
+
+<BaseLayout title={d.itemReviewed ?? "Review"}>
+  <article class="h-review">
+    <h1 class="p-item">{d.itemReviewed}</h1>
+    <data class="p-rating" value={d.rating}>{d.rating}</data>
+    <div class="e-content"><slot /></div>
+    {iso && <time class="dt-published" datetime={iso}>{human}</time>}
+  </article>
+</BaseLayout>

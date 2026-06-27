@@ -1,0 +1,24 @@
+---
+import BaseLayout from "./BaseLayout.astro";
+
+interface Props {
+  entry: { data: Record<string, any> };
+}
+
+const { entry } = Astro.props;
+const d = entry.data;
+const startISO = d.start ? new Date(d.start).toISOString() : undefined;
+const startHuman = d.start ? new Date(d.start).toLocaleString() : undefined;
+const endISO = d.end ? new Date(d.end).toISOString() : undefined;
+const endHuman = d.end ? new Date(d.end).toLocaleString() : undefined;
+---
+
+<BaseLayout title={d.name ?? "Event"} description={d.location}>
+  <article class="h-event">
+    <h1 class="p-name">{d.name}</h1>
+    {startISO && <time class="dt-start" datetime={startISO}>{startHuman}</time>}
+    {endISO && <time class="dt-end" datetime={endISO}>{endHuman}</time>}
+    {d.location && <p class="p-location">{d.location}</p>}
+    <div class="e-content"><slot /></div>
+  </article>
+</BaseLayout>
