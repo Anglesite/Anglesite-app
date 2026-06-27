@@ -12,21 +12,25 @@ interface Props {
 }
 
 const { title, description, pubDate } = Astro.props;
+// Compute the Date once; pin the locale + UTC so static output is deterministic.
+const iso = pubDate ? new Date(pubDate).toISOString() : undefined;
+const human = pubDate
+  ? new Date(pubDate).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" })
+  : undefined;
 // anglesite:imports — integration component imports are injected here on setup
 ---
 
 <BaseLayout title={title} description={description}>
-  <article>
-    <p><a href="/blog/">← All posts</a></p>
-    <h1>{title}</h1>
-    {
-      pubDate && (
-        <time datetime={pubDate.toISOString()}>
-          {pubDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" })}
-        </time>
-      )
-    }
-    <slot />
+  <p><a href="/blog/">← All posts</a></p>
+  <article class="h-entry">
+    <h1 class="p-name">{title}</h1>
+    {description && <p class="p-summary">{description}</p>}
+    {iso && (
+      <a class="u-url" href={Astro.url.pathname}>
+        <time class="dt-published" datetime={iso}>{human}</time>
+      </a>
+    )}
+    <div class="e-content"><slot /></div>
     <!-- anglesite:comments -->
   </article>
 </BaseLayout>
