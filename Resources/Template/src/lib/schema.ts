@@ -23,6 +23,7 @@ import type {
   Review,
   WebPage,
   Comment,
+  Person,
 } from "schema-dts";
 import type { EntryCollection } from "./collections.ts";
 
@@ -32,6 +33,8 @@ export interface SchemaContext {
   url: string;
   /** Site origin (`Astro.site`), used to resolve root-relative asset paths to absolute URLs. */
   site?: URL;
+  /** Site owner's name (from `src/data/profile.json`), used as the `author` of Article/BlogPosting. */
+  authorName?: string;
 }
 
 /** Flattened union of the h-entry collections' frontmatter — every field optional. */
@@ -72,6 +75,18 @@ function iso(d: Date | undefined): string | undefined {
   return d ? new Date(d).toISOString() : undefined;
 }
 
+/**
+ * Author for Article/BlogPosting. Google treats `author` as required for the rich result, so we
+ * prefer the site owner's name (from the h-card profile) and fall back to a bare site-origin
+ * Person when no name is configured. Returns undefined only when there's nothing to point at.
+ */
+function authorOf(ctx: SchemaContext): Person | undefined {
+  if (ctx.authorName) {
+    return { "@type": "Person", name: ctx.authorName, url: ctx.site?.href };
+  }
+  return ctx.site ? { "@type": "Person", url: ctx.site.href } : undefined;
+}
+
 /** Resolve a possibly root-relative path against the site origin; pass full URLs through. */
 function abs(pathOrUrl: string | undefined, site: URL | undefined): string | undefined {
   if (!pathOrUrl) return undefined;
@@ -82,7 +97,7 @@ function abs(pathOrUrl: string | undefined, site: URL | undefined): string | und
   }
 }
 
-/** Recursively drop `undefined` values (and emptied objects/arrays) so the JSON-LD stays tidy. */
+/** Recursively drop `undefined` values and empty arrays so the JSON-LD stays tidy. */
 function clean<T>(value: T): T {
   if (Array.isArray(value)) {
     return value.map(clean).filter((v) => v !== undefined) as unknown as T;
@@ -91,7 +106,9 @@ function clean<T>(value: T): T {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       const c = clean(v);
-      if (c !== undefined) out[k] = c;
+      // Skip undefined and empty arrays (e.g. an album with no images would emit `"image":[]`).
+      if (c === undefined || (Array.isArray(c) && c.length === 0)) continue;
+      out[k] = c;
     }
     return out as T;
   }
@@ -120,6 +137,7 @@ function hentrySchema(
         "@type": "Article",
         headline: d.title,
         description: d.summary,
+        author: authorOf(ctx),
         datePublished,
         dateModified: iso(d.updated),
         keywords,
@@ -130,6 +148,7 @@ function hentrySchema(
         "@context": CONTEXT,
         "@type": "Article",
         headline: d.title,
+        author: authorOf(ctx),
         datePublished,
         url: ctx.url,
       });
@@ -233,6 +252,7 @@ export function blogPostingSchema(d: BlogData, ctx: SchemaContext): WithContext<
     "@type": "BlogPosting",
     headline: d.title,
     description: d.description,
+    author: authorOf(ctx),
     datePublished: iso(d.pubDate),
     url: ctx.url,
   });

@@ -48,6 +48,9 @@ struct JsonLdRenderSmokeTests {
             let article = try html("articles/hello-article/index.html")
             #expect(article.contains(ldScript))
             #expect(article.contains("\"@type\":\"Article\""))
+            // Google requires `author` for the Article/BlogPosting rich result; absent a
+            // configured profile.json owner, the projection emits a site-origin Person stub.
+            #expect(article.contains("\"author\""))
 
             let event = try html("events/hello-event/index.html")
             #expect(event.contains("\"@type\":\"Event\""))
@@ -57,10 +60,23 @@ struct JsonLdRenderSmokeTests {
             #expect(review.contains("\"@type\":\"Review\""))
             #expect(review.contains("\"reviewRating\""))
 
-            #expect(try html("blog/welcome-to-your-blog/index.html").contains("\"@type\":\"BlogPosting\""))
+            let blog = try html("blog/welcome-to-your-blog/index.html")
+            #expect(blog.contains("\"@type\":\"BlogPosting\""))
+            #expect(blog.contains("\"author\""))
+
             #expect(try html("photos/hello-photo/index.html").contains("\"@type\":\"ImageObject\""))
             #expect(try html("albums/hello-album/index.html").contains("\"@type\":\"ImageGallery\""))
             #expect(try html("notes/hello-note/index.html").contains("\"@type\":\"SocialMediaPosting\""))
+            #expect(try html("announcements/hello-announcement/index.html").contains("\"@type\":\"Article\""))
+
+            // Distinct field mappings worth guarding against drift from content.config.ts.
+            let bookmark = try html("bookmarks/hello-bookmark/index.html")
+            #expect(bookmark.contains("\"@type\":\"WebPage\""))
+            #expect(bookmark.contains("\"relatedLink\""))
+
+            let reply = try html("replies/hello-reply/index.html")
+            #expect(reply.contains("\"@type\":\"Comment\""))
+            #expect(reply.contains("\"about\""))
 
             // A like is an interaction, not a CreativeWork — it gets no JSON-LD.
             #expect(try !html("likes/hello-like/index.html").contains(ldScript))

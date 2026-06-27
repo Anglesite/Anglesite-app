@@ -9,8 +9,11 @@ public protocol ContentOperationsService: Sendable {
     func createPost(siteID: String, title: String, collection: String?, slug: String?, onProgress: ProgressHandler?) async -> ContentCreateResult
     /// Scaffold a typed entry (V-1.2 personal/business content types) from the content-type registry.
     /// `typeID` is a registry id (`note`, `article`, …); `title` seeds the name/title field and the
-    /// slug. Collection-stored types only — page-stored types (e.g. `businessProfile`) report `.failed`.
+    /// slug. Collection-stored types only — non-collection types (e.g. the `profile` identity singleton)
+    /// report `.failed` — use `createTypedSingleton`.
     func createTyped(siteID: String, typeID: String, title: String, onProgress: ProgressHandler?) async -> ContentCreateResult
+    // TODO: add `createTypedSingleton` here when remote runtimes land (#66/#69). It lives only on the
+    // concrete `NativeContentOperations` today; protocol-typed call sites can't create singletons yet.
 }
 
 public extension ContentOperationsService {

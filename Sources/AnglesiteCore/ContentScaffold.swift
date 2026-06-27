@@ -50,6 +50,10 @@ public enum ContentScaffold {
         "src/content/\(collection)/\(slug).md"
     }
 
+    public static func singletonRelativePath(slot: String) -> String {
+        "src/data/\(slot).json"
+    }
+
     /// `/about` → `../layouts/BaseLayout.astro`; `/a/b` → `../../layouts/BaseLayout.astro`.
     public static func layoutImport(normalizedRoute: String) -> String {
         let trimmed = normalizedRoute.hasPrefix("/") ? String(normalizedRoute.dropFirst()) : normalizedRoute
@@ -171,6 +175,32 @@ public enum ContentScaffold {
         return output
     }
 
+    /// Render a per-site singleton (e.g. the representative h-card) as a JSON data module:
+    /// `"type"` first, then one key per non-`markdown` field in descriptor order, with empty/zero
+    /// defaults and the name-like field filled from `name`. Pure; hand-rendered for deterministic
+    /// key order (unlike `JSONEncoder`). The template imports this file to render the identity.
+    public static func renderSingleton(descriptor: ContentTypeDescriptor, name: String?) -> String {
+        var entries: [String] = ["\"type\": \"\(escapeJSON(descriptor.id))\""]
+        for field in descriptor.fields {
+            let value: String
+            switch field.kind {
+            case .markdown:
+                continue // a data record has no body
+            case .bool:
+                value = "false"
+            case .number:
+                value = "0"
+            case .stringArray, .imageArray:
+                value = "[]"
+            case .string, .text, .url, .image, .date, .datetime:
+                let filled = titleLikeFieldNames.contains(field.name) ? (name ?? "") : ""
+                value = "\"\(escapeJSON(filled))\""
+            }
+            entries.append("\"\(field.name)\": \(value)")
+        }
+        return "{\n" + entries.map { "  \($0)" }.joined(separator: ",\n") + "\n}\n"
+    }
+
     // MARK: - Escaping (order matters: `&` first)
 
     static func escapeAttr(_ s: String) -> String {
@@ -187,6 +217,35 @@ public enum ContentScaffold {
     static func escapeYAML(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")
          .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    /// Escape a string for use as a JSON string value. Covers `\` and `"`, the named control
+    /// escapes, every remaining C0 control character as `\uXXXX`, and U+2028/U+2029. The rendered
+    /// file is imported as a JS module, so an unescaped control char would be invalid JSON and
+    /// hard-fail the whole site build. U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR are
+    /// valid in standalone JSON but break JS parsers if the data is ever inlined into a `<script>`
+    /// (e.g. V-1.8 JSON-LD), so they are escaped pre-emptively.
+    static func escapeJSON(_ s: String) -> String {
+        var out = ""
+        out.reserveCapacity(s.count)
+        for scalar in s.unicodeScalars {
+            switch scalar {
+            case "\\": out += "\\\\"
+            case "\"": out += "\\\""
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            case "\u{08}": out += "\\b"
+            case "\u{0C}": out += "\\f"
+            case "\u{2028}": out += "\\u2028"
+            case "\u{2029}": out += "\\u2029"
+            case let c where c.value < 0x20:
+                out += String(format: "\\u%04x", c.value)
+            default:
+                out.unicodeScalars.append(scalar)
+            }
+        }
+        return out
     }
 
     private static let titleLikeFieldNames: Set<String> = ["title", "name", "itemReviewed"]
