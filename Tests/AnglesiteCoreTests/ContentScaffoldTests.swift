@@ -69,6 +69,26 @@ struct ContentScaffoldTests {
         """)
     }
 
+    @Test("renderEntry emits business-type frontmatter from the registry descriptor")
+    func businessTypeFrontmatter() throws {
+        let registry = ContentTypeRegistry()
+        let now = Date(timeIntervalSince1970: 0) // 1970-01-01T00:00:00.000Z
+
+        let event = try #require(registry.descriptor(id: "event"))
+        let eventOut = ContentScaffold.renderEntry(descriptor: event, title: "Launch", now: now)
+        #expect(eventOut.contains("name: \"Launch\""))
+        #expect(eventOut.contains("start: 1970-01-01T00:00:00.000Z"))
+        #expect(eventOut.contains("end: 1970-01-01T00:00:00.000Z"))
+        #expect(eventOut.contains("location: \"\""))
+        #expect(eventOut.contains("Write your event here."))
+
+        let review = try #require(registry.descriptor(id: "review"))
+        let reviewOut = ContentScaffold.renderEntry(descriptor: review, title: "Widget", now: now)
+        #expect(reviewOut.contains("itemReviewed: \"\"")) // plain .string, not the name/title special case
+        #expect(reviewOut.contains("rating: 0"))
+        #expect(reviewOut.contains("publishDate: 1970-01-01T00:00:00.000Z"))
+    }
+
     @Test("renderEntry fills the title field and uses imageArray/url defaults")
     func renderEntryAlbumAndLike() {
         let registry = ContentTypeRegistry()
