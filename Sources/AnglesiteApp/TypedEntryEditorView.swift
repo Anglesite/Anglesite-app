@@ -120,36 +120,62 @@ struct TypedEntryEditorView: View {
 }
 
 /// A minimal add/remove list editor for `stringArray` / `imageArray` fields (tags, hours, album
-/// images).
+/// images). Rows carry stable UUID identity so deleting a row never re-binds a surviving row's
+/// editor to the wrong item; `rows` mirrors the bound `items` two-way, re-syncing when `items` is
+/// replaced externally (e.g. reload-from-disk).
 private struct StringListEditor: View {
     let title: String
     @Binding var items: [String]
     var pickFile: Bool
 
+    private struct Row: Identifiable, Equatable {
+        let id = UUID()
+        var value: String
+    }
+    @State private var rows: [Row] = []
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).font(.caption).foregroundStyle(.secondary)
-            ForEach(items.indices, id: \.self) { i in
+            ForEach($rows) { $row in
                 HStack {
-                    TextField("", text: Binding(get: { items[i] }, set: { items[i] = $0 }))
-                    Button(role: .destructive) { items.remove(at: i) } label: { Image(systemName: "minus.circle") }
-                        .buttonStyle(.borderless)
+                    TextField("", text: $row.value)
+                    Button(role: .destructive) { rows.removeAll { $0.id == row.id } } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless)
                 }
             }
             HStack {
-                Button { items.append("") } label: { Label("Add", systemImage: "plus.circle") }
+                Button { rows.append(Row(value: "")) } label: { Label("Add", systemImage: "plus.circle") }
                     .buttonStyle(.borderless)
                 if pickFile {
                     Button("Choose…") { chooseFile() }
                 }
             }
         }
+        .onAppear { syncRowsFromItems() }
+        // External replacement of the bound array (e.g. reload-from-disk) rebuilds the rows;
+        // the value guard prevents a feedback loop with the rows→items write below.
+        .onChange(of: items) { _, new in
+            if new != rows.map(\.value) { rows = new.map(Row.init(value:)) }
+        }
+        // User edits/additions/deletions flow back to the bound array.
+        .onChange(of: rows) { _, new in
+            let mapped = new.map(\.value)
+            if mapped != items { items = mapped }
+        }
+    }
+
+    private func syncRowsFromItems() {
+        if items != rows.map(\.value) { rows = items.map(Row.init(value:)) }
     }
 
     private func chooseFile() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
+        panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url { items.append(url.lastPathComponent) }
+        if panel.runModal() == .OK, let url = panel.url { rows.append(Row(value: url.lastPathComponent)) }
     }
 }
