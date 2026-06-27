@@ -7,12 +7,7 @@ interface Props {
   entry: CollectionEntry<HentryCollection>;
 }
 
-/**
- * Hentry renders all eight h-entry collections, each of which supplies a subset of the
- * h-entry vocabulary below — so every field is optional from this layout's vantage point.
- * The `entry` prop stays strictly typed (CollectionEntry<HentryCollection>); this is just
- * the flattened view used to read fields without per-collection narrowing.
- */
+// Flattened view of the eight-collection h-entry union — all fields optional; `entry` stays strictly typed above.
 interface HentryFields {
   title?: string;
   summary?: string;
