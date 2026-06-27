@@ -78,7 +78,7 @@ public enum Frontmatter {
 
     /// Split `key: value` where key is `[A-Za-z0-9_-]+`. Value is right-trimmed of surrounding
     /// whitespace (`\s*(.*)` in the Node regex, then `.trim()`).
-    private static func splitKeyValue(_ line: String) -> (key: String, value: String)? {
+    static func splitKeyValue(_ line: String) -> (key: String, value: String)? {
         guard let colon = line.firstIndex(of: ":") else { return nil }
         let key = String(line[line.startIndex..<colon])
         guard !key.isEmpty, key.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }) else {
@@ -89,7 +89,7 @@ public enum Frontmatter {
     }
 
     /// If `line` is a block-array item (`^\s*-\s+item`), return its trimmed item text.
-    private static func blockArrayItem(_ line: String) -> String? {
+    static func blockArrayItem(_ line: String) -> String? {
         let stripped = String(line.drop(while: { $0 == " " || $0 == "\t" }))
         guard stripped.hasPrefix("-") else { return nil }
         let afterDash = stripped.dropFirst()
@@ -98,7 +98,8 @@ public enum Frontmatter {
         return String(afterDash).trimmingCharacters(in: .whitespaces)
     }
 
-    private static func parseScalarOrArray(_ raw: String) -> FrontmatterValue {
+    /// Also consumed by `FrontmatterDocument` for consistent scalar/array parsing semantics.
+    static func parseScalarOrArray(_ raw: String) -> FrontmatterValue {
         if raw == "true" { return .bool(true) }
         if raw == "false" { return .bool(false) }
         if raw.hasPrefix("["), raw.hasSuffix("]") {
@@ -119,7 +120,7 @@ public enum Frontmatter {
     ///   `\t`→tab; unknown sequences keep both the backslash and the following character.
     /// - Single-quoted scalars: `''`→`'` (YAML single-quote doubling). No backslash processing.
     /// - Unquoted scalars: returned unchanged.
-    private static func unquote(_ s: String) -> String {
+    static func unquote(_ s: String) -> String {
         guard s.count >= 2 else { return s }
         if s.hasPrefix("\"") && s.hasSuffix("\"") {
             return decodeDoubleQuoted(String(s.dropFirst().dropLast()))
@@ -134,7 +135,7 @@ public enum Frontmatter {
     /// Single-pass YAML double-quoted escape decoder. Processes each character once so that
     /// `\\n` (two source chars) decodes to `\` + `n` (not newline), guarding the chained-replace
     /// pitfall.
-    private static func decodeDoubleQuoted(_ inner: String) -> String {
+    static func decodeDoubleQuoted(_ inner: String) -> String {
         var result = ""
         result.reserveCapacity(inner.unicodeScalars.count)
         var idx = inner.startIndex
