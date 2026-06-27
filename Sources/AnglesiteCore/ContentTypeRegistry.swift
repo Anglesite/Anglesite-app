@@ -82,6 +82,10 @@ public struct ContentTypeProjections: Sendable, Equatable {
 public enum ContentStorage: Sendable, Equatable {
     case page
     case collection(String)
+    /// One record per site, stored as a data module (not a route, not a collection). The
+    /// associated value is the shared slot name; descriptors that share a slot are mutually
+    /// exclusive (one identity file per site).
+    case singleton(String)
 }
 
 /// A registered content type — pure declarative data, no behavior.
@@ -112,6 +116,12 @@ public struct ContentTypeDescriptor: Sendable, Equatable, Identifiable {
     /// The default collection name for `.collection`-stored types; `nil` for pages.
     public var collection: String? {
         if case let .collection(name) = storage { return name }
+        return nil
+    }
+
+    /// The shared slot name for `.singleton`-stored types; `nil` otherwise.
+    public var singletonSlot: String? {
+        if case let .singleton(name) = storage { return name }
         return nil
     }
 }
@@ -161,7 +171,7 @@ extension ContentTypeRegistry {
     /// The built-in content types: the personal IndieWeb post types (#344) and the small-business
     /// types (#345), declared as data here in V-1.1. Templates and editors for them land in their
     /// own tasks; this is the shared vocabulary they consume.
-    public static let builtIns: [ContentTypeDescriptor] = personalTypes + businessTypes
+    public static let builtIns: [ContentTypeDescriptor] = personalTypes + identityTypes + businessTypes
 
     // MARK: Personal (h-entry family)
 
@@ -321,14 +331,16 @@ extension ContentTypeRegistry {
         )
     )
 
-    // MARK: Business (#345 / §4.1)
+    // MARK: Site identity (h-card singletons, #388)
 
-    static let businessTypes: [ContentTypeDescriptor] = [businessProfile, announcement, event, review]
+    /// The two representative-h-card types. They share the `"profile"` slot, so a site has at most
+    /// one identity — personal or business — enforced at scaffold time by the single slot file.
+    static let identityTypes: [ContentTypeDescriptor] = [businessProfile, personalProfile]
 
     static let businessProfile = ContentTypeDescriptor(
         id: "businessProfile",
         displayName: "Business Profile",
-        storage: .page,
+        storage: .singleton("profile"),
         fields: [
             ContentTypeField("name", .string, required: true),
             ContentTypeField("description", .text),
@@ -359,6 +371,34 @@ extension ContentTypeRegistry {
             schemaType: "LocalBusiness"
         )
     )
+
+    static let personalProfile = ContentTypeDescriptor(
+        id: "personalProfile",
+        displayName: "Personal Profile",
+        storage: .singleton("profile"),
+        fields: [
+            ContentTypeField("name", .string, required: true),
+            ContentTypeField("description", .text),
+            ContentTypeField("email", .string),
+            ContentTypeField("url", .url),
+            ContentTypeField("photo", .image),
+        ],
+        projections: ContentTypeProjections(
+            microformat: "h-card",
+            microformatProperties: [
+                "name": "p-name",
+                "description": "p-note",
+                "email": "u-email",
+                "url": "u-url",
+                "photo": "u-photo",
+            ],
+            schemaType: "Person"
+        )
+    )
+
+    // MARK: Business (collection types, #345 / §4.1)
+
+    static let businessTypes: [ContentTypeDescriptor] = [announcement, event, review]
 
     static let announcement = ContentTypeDescriptor(
         id: "announcement",

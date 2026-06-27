@@ -111,14 +111,28 @@ struct ContentTypeRegistryTests {
         #expect(review.fields.first { $0.name == "rating" }?.required == true)
     }
 
-    @Test("Business Profile is a page projecting h-card + LocalBusiness")
+    @Test("Business Profile is an h-card / LocalBusiness singleton")
     func businessProfileType() throws {
         let profile = try #require(ContentTypeRegistry().descriptor(id: "businessProfile"))
-        #expect(profile.storage == .page)
+        #expect(profile.storage == .singleton("profile"))
+        #expect(profile.singletonSlot == "profile")
         #expect(profile.collection == nil)
         #expect(profile.projections.microformat == "h-card")
         #expect(profile.projections.schemaType == "LocalBusiness")
         #expect(profile.projections.microformatProperties["telephone"] == "p-tel")
+    }
+
+    @Test("Personal Profile is an h-card / Person singleton sharing the profile slot")
+    func personalProfileType() throws {
+        let profile = try #require(ContentTypeRegistry().descriptor(id: "personalProfile"))
+        #expect(profile.storage == .singleton("profile"))
+        #expect(profile.singletonSlot == "profile")
+        #expect(profile.collection == nil)
+        #expect(profile.projections.microformat == "h-card")
+        #expect(profile.projections.schemaType == "Person")
+        #expect(profile.projections.microformatProperties["email"] == "u-email")
+        #expect(profile.fields.first?.name == "name")
+        #expect(profile.fields.first?.required == true)
     }
 
     @Test("personalTypes include album and like in canonical order")
