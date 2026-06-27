@@ -24,6 +24,9 @@ const reviewName = `Review of ${d.itemReviewed}`;
     <p>Reviewed: <span class="p-item">{d.itemReviewed}</span></p>
     <data class="p-rating" value={d.rating}>{d.rating}</data>
     <div class="e-content"><slot /></div>
-    {iso && <time class="dt-published" datetime={iso}>{human}</time>}
+    {/* The permalink (u-url) is unconditional; the dt-published time renders inside it when present. */}
+    <a class="u-url" href={Astro.url.pathname}>
+      {iso && <time class="dt-published" datetime={iso}>{human}</time>}
+    </a>
   </article>
 </BaseLayout>

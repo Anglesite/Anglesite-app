@@ -20,7 +20,10 @@ const endHuman = endDate?.toLocaleString("en-US");
 <BaseLayout title={d.name ?? "Event"} description={d.location}>
   <article class="h-event">
     <h1 class="p-name">{d.name}</h1>
-    {startISO && <time class="dt-start" datetime={startISO}>{startHuman}</time>}
+    {/* The permalink (u-url) is unconditional; the dt-start time renders inside it when present. */}
+    <a class="u-url" href={Astro.url.pathname}>
+      {startISO && <time class="dt-start" datetime={startISO}>{startHuman}</time>}
+    </a>
     {endISO && <time class="dt-end" datetime={endISO}>{endHuman}</time>}
     {d.location && <p class="p-location">{d.location}</p>}
     <div class="e-content"><slot /></div>
