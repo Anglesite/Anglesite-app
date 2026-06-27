@@ -74,6 +74,11 @@ struct ContentConfigDriftTests {
             .first { $0.contains("export const collections") }
             .map(String.init) ?? ""
 
+        // Guard the parse, so a renamed or multi-line-wrapped export reports "line not found"
+        // rather than failing with every registry collection listed as spuriously missing.
+        try #require(!exportLine.isEmpty,
+                     "`export const collections` line not found in content.config.ts — was it renamed or wrapped across lines?")
+
         let declared = Set(Self.collectionNames(inExport: exportLine))
         let expected = Set(ContentTypeRegistry.builtIns.compactMap(\.collection))
             .union(Self.nonRegistryCollections)
