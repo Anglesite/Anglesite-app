@@ -3,18 +3,11 @@ import { getCollection, render } from "astro:content";
 import Hentry from "../../layouts/Hentry.astro";
 import Hevent from "../../layouts/Hevent.astro";
 import Hreview from "../../layouts/Hreview.astro";
-
-type EntryCollection =
-  | "notes" | "articles" | "photos" | "albums" | "bookmarks" | "replies" | "likes"
-  | "announcements" | "events" | "reviews";
+import { ENTRY_COLLECTIONS } from "../../lib/collections.ts";
 
 export async function getStaticPaths() {
-  const collections: EntryCollection[] = [
-    "notes", "articles", "photos", "albums", "bookmarks", "replies", "likes",
-    "announcements", "events", "reviews",
-  ];
   const paths = [];
-  for (const collection of collections) {
+  for (const collection of ENTRY_COLLECTIONS) {
     const entries = await getCollection(collection);
     for (const entry of entries) {
       paths.push({ params: { collection, slug: entry.id }, props: { entry } });
@@ -25,13 +18,17 @@ export async function getStaticPaths() {
 
 const { entry } = Astro.props;
 const { Content } = await render(entry);
-// Per-collection layout. Only non-h-entry vocabularies need their own; everything else
-// (notes, articles, photos, albums, bookmarks, replies, likes, announcements) is h-entry → Hentry.
-const layoutByCollection: Partial<Record<EntryCollection, typeof Hentry>> = {
-  events: Hevent,
-  reviews: Hreview,
-};
-const Layout = layoutByCollection[entry.collection as EntryCollection] ?? Hentry;
+// Per-collection layout. Only non-h-entry vocabularies need their own; the `collection`
+// discriminant narrows `entry` to each layout's exact CollectionEntry type, so everything
+// else (notes, articles, photos, albums, bookmarks, replies, likes, announcements) is h-entry.
 ---
 
-<Layout entry={entry}><Content /></Layout>
+{
+  entry.collection === "events" ? (
+    <Hevent entry={entry}><Content /></Hevent>
+  ) : entry.collection === "reviews" ? (
+    <Hreview entry={entry}><Content /></Hreview>
+  ) : (
+    <Hentry entry={entry}><Content /></Hentry>
+  )
+}
