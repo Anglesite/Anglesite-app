@@ -62,4 +62,30 @@ struct TypedContentEditorTests {
         #expect(TypedContentEditor.read(out, descriptor: profile)["hours"] == .list(["Mon 9-5", "Sat closed"]))
         #expect(out.contains("type: businessProfile"))   // unknown-to-schema key preserved
     }
+
+    @Test("template about.md reads as businessProfile with marker preserved")
+    func aboutPage() {
+        let profile = ContentTypeRegistry().descriptor(id: "businessProfile")!
+        let src = """
+        ---
+        layout: ../layouts/BaseLayout.astro
+        title: "About"
+        type: businessProfile
+        name: "Your Business Name"
+        hours: []
+        url: ""
+        ---
+
+        # About
+        """ + "\n"
+        let v = TypedContentEditor.read(src, descriptor: profile)
+        #expect(v["name"] == .text("Your Business Name"))
+        var dict = [String: TypedContentEditor.FieldValue]()
+        for f in profile.fields { dict[f.name] = v[f.name] }
+        dict["name"] = .text("Acme Co")
+        let out = TypedContentEditor.write(TypedContentEditor.Values(dict), into: src, descriptor: profile)
+        #expect(out.contains("name: \"Acme Co\""))
+        #expect(out.contains("type: businessProfile"))           // marker preserved
+        #expect(out.contains("layout: ../layouts/BaseLayout.astro")) // layout preserved
+    }
 }
