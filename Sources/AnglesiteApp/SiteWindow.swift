@@ -48,6 +48,7 @@ struct SiteWindow: View {
     private let contentIndexerStore: ContentIndexerStore
 
     private let integrationOps = IntegrationOperations.live()
+    private let contentTypeRegistry = ContentTypeRegistry()
 
     init(
         siteID: String?,
@@ -100,6 +101,8 @@ struct SiteWindow: View {
     /// Non-nil ⟺ the Add Integration wizard is presented. Coupling presentation to the model
     /// (`.sheet(item:)`) prevents an empty sheet if construction somehow lags.
     @State private var integrationWizardModel: IntegrationWizardModel?
+    @State private var newPagePresented = false
+    @State private var newCollectionPresented = false
     @State private var navigator: SiteNavigatorModel?
     @State private var mainPaneMode: MainPaneMode = .preview
     /// Sidebar visibility persisted per scene (window), per the design spec. Column WIDTH is restored
@@ -146,6 +149,10 @@ struct SiteWindow: View {
             startup.ingest(state: newState)
         }
         .focusedValue(\.siteID, site?.id ?? siteID)
+        .focusedSceneValue(\.newContentActions, site == nil ? nil : NewContentActions(
+            newPage: { newPagePresented = true },
+            newCollection: { newCollectionPresented = true }
+        ))
         // `focusedSceneValue` (not `focusedValue`): publishes while this site window is the active
         // scene, regardless of where keyboard focus sits. The preview pane is a WKWebView (an AppKit
         // responder), so nothing in SwiftUI's focus system is focused and a plain `focusedValue`
@@ -434,7 +441,19 @@ struct SiteWindow: View {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Cancel") { integrationWizardModel = nil }
                         }
-                    }
+                }
+            }
+        }
+        .sheet(isPresented: $newPagePresented) {
+            NewPageSheet { title, route, template in
+                await createPage(title: title, route: route, template: template)
+            }
+        }
+        .sheet(isPresented: $newCollectionPresented) {
+            NewCollectionEntrySheet(
+                descriptors: contentTypeRegistry.all.filter { $0.collection != nil }
+            ) { title, slug, descriptor in
+                await createCollectionEntry(title: title, slug: slug, descriptor: descriptor)
             }
         }
         .annotatedAsSite(site)
@@ -685,6 +704,65 @@ struct SiteWindow: View {
                 text: "Saving website title failed: \(error.localizedDescription)"
             )
         }
+    }
+
+    private func createPage(
+        title: String,
+        route: String?,
+        template: ContentScaffold.PageTemplate
+    ) async -> ContentCreateResult {
+        guard let site else { return .siteNotFound }
+        let ops = NativeContentOperations(siteDirectory: { id in
+            await SiteStore.shared.find(id: id)?.sourceDirectory
+        })
+        let result = await ops.createPage(
+            siteID: site.id,
+            name: title,
+            route: route,
+            template: template
+        )
+        await refreshContentGraphIfCreated(result, site: site)
+        return result
+    }
+
+    private func createCollectionEntry(
+        title: String,
+        slug: String?,
+        descriptor: ContentTypeDescriptor
+    ) async -> ContentCreateResult {
+        guard let site else { return .siteNotFound }
+        let ops = NativeContentOperations(siteDirectory: { id in
+            await SiteStore.shared.find(id: id)?.sourceDirectory
+        })
+        let result = await ops.createTyped(
+            siteID: site.id,
+            typeID: descriptor.id,
+            title: title,
+            slug: slug
+        )
+        await refreshContentGraphIfCreated(result, site: site)
+        return result
+    }
+
+    private func refreshContentGraphIfCreated(
+        _ result: ContentCreateResult,
+        site: SiteStore.Site
+    ) async {
+        guard case let .created(filePath, _) = result else { return }
+        let listing = await Task.detached(priority: .userInitiated) {
+            ContentScanner.scan(projectRoot: site.sourceDirectory, siteID: site.id)
+        }.value
+        await contentGraph.load(
+            siteID: site.id,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        await knowledgeIndex.upsertFile(
+            siteID: site.id,
+            projectRoot: site.sourceDirectory,
+            relativePath: filePath
+        )
     }
 
     private func loadAndStart() async {

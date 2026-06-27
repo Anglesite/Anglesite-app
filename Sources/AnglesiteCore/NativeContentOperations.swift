@@ -30,6 +30,16 @@ public struct NativeContentOperations: ContentOperationsService {
     }
 
     public func createPage(siteID: String, name: String, route: String?, onProgress: ProgressHandler? = nil) async -> ContentCreateResult {
+        await createPage(siteID: siteID, name: name, route: route, template: .standard, onProgress: onProgress)
+    }
+
+    public func createPage(
+        siteID: String,
+        name: String,
+        route: String?,
+        template: ContentScaffold.PageTemplate,
+        onProgress: ProgressHandler? = nil
+    ) async -> ContentCreateResult {
         onProgress?(.createResolvingRuntime)
         guard let root = await siteDirectory(siteID) else { return .siteNotFound }
 
@@ -51,7 +61,8 @@ public struct NativeContentOperations: ContentOperationsService {
         onProgress?(.createCallingPlugin)
         let contents = ContentScaffold.renderPage(
             title: title,
-            layoutImport: ContentScaffold.layoutImport(normalizedRoute: normalized))
+            layoutImport: ContentScaffold.layoutImport(normalizedRoute: normalized),
+            template: template)
         do { try write(contents, to: abs) }
         catch { return .failed(reason: "\(error)") }
 
@@ -101,6 +112,7 @@ public struct NativeContentOperations: ContentOperationsService {
         siteID: String,
         typeID: String,
         title: String,
+        slug: String? = nil,
         registry: ContentTypeRegistry = ContentTypeRegistry(),
         onProgress: ProgressHandler? = nil
     ) async -> ContentCreateResult {
@@ -114,7 +126,8 @@ public struct NativeContentOperations: ContentOperationsService {
         }
 
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let finalSlug = ContentScaffold.slugify(cleanTitle.isEmpty ? descriptor.id : cleanTitle)
+        let cleanSlug = (slug ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalSlug = ContentScaffold.slugify(cleanSlug.isEmpty ? (cleanTitle.isEmpty ? descriptor.id : cleanTitle) : cleanSlug)
         guard !finalSlug.isEmpty else { return .failed(reason: "createTyped could not derive a slug") }
 
         let relPath = ContentScaffold.postRelativePath(collection: collection, slug: finalSlug)
