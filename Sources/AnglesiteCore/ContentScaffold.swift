@@ -50,6 +50,10 @@ public enum ContentScaffold {
         "src/content/\(collection)/\(slug).md"
     }
 
+    public static func singletonRelativePath(slot: String) -> String {
+        "src/data/\(slot).json"
+    }
+
     /// `/about` → `../layouts/BaseLayout.astro`; `/a/b` → `../../layouts/BaseLayout.astro`.
     public static func layoutImport(normalizedRoute: String) -> String {
         let trimmed = normalizedRoute.hasPrefix("/") ? String(normalizedRoute.dropFirst()) : normalizedRoute
@@ -171,6 +175,32 @@ public enum ContentScaffold {
         return output
     }
 
+    /// Render a per-site singleton (e.g. the representative h-card) as a JSON data module:
+    /// `"type"` first, then one key per non-`markdown` field in descriptor order, with empty/zero
+    /// defaults and the name-like field filled from `name`. Pure; hand-rendered for deterministic
+    /// key order (unlike `JSONEncoder`). The template imports this file to render the identity.
+    public static func renderSingleton(descriptor: ContentTypeDescriptor, name: String?) -> String {
+        var entries: [String] = ["\"type\": \"\(escapeJSON(descriptor.id))\""]
+        for field in descriptor.fields {
+            let value: String
+            switch field.kind {
+            case .markdown:
+                continue // a data record has no body
+            case .bool:
+                value = "false"
+            case .number:
+                value = "0"
+            case .stringArray, .imageArray:
+                value = "[]"
+            case .string, .text, .url, .image, .date, .datetime:
+                let filled = titleLikeFieldNames.contains(field.name) ? (name ?? "") : ""
+                value = "\"\(escapeJSON(filled))\""
+            }
+            entries.append("\"\(field.name)\": \(value)")
+        }
+        return "{\n" + entries.map { "  \($0)" }.joined(separator: ",\n") + "\n}\n"
+    }
+
     // MARK: - Escaping (order matters: `&` first)
 
     static func escapeAttr(_ s: String) -> String {
@@ -187,6 +217,14 @@ public enum ContentScaffold {
     static func escapeYAML(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")
          .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    static func escapeJSON(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "\"", with: "\\\"")
+         .replacingOccurrences(of: "\n", with: "\\n")
+         .replacingOccurrences(of: "\r", with: "\\r")
+         .replacingOccurrences(of: "\t", with: "\\t")
     }
 
     private static let titleLikeFieldNames: Set<String> = ["title", "name", "itemReviewed"]

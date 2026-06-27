@@ -122,4 +122,42 @@ struct ContentScaffoldTests {
         #expect(!out.contains("\ntitle:"))
         #expect(!out.contains("\ndraft:"))
     }
+
+    @Test("singletonRelativePath maps a slot to a data-module json path")
+    func singletonPath() {
+        #expect(ContentScaffold.singletonRelativePath(slot: "profile") == "src/data/profile.json")
+    }
+
+    @Test("renderSingleton emits a business profile with type, filled name, and empty defaults")
+    func renderSingletonBusiness() throws {
+        let biz = try #require(ContentTypeRegistry().descriptor(id: "businessProfile"))
+        let out = ContentScaffold.renderSingleton(descriptor: biz, name: "Acme \"Co\"")
+        #expect(out == """
+        {
+          "type": "businessProfile",
+          "name": "Acme \\"Co\\"",
+          "description": "",
+          "telephone": "",
+          "email": "",
+          "streetAddress": "",
+          "locality": "",
+          "region": "",
+          "postalCode": "",
+          "hours": [],
+          "url": ""
+        }
+        """ + "\n")
+    }
+
+    @Test("renderSingleton for a personal profile omits business-only keys")
+    func renderSingletonPersonal() throws {
+        let person = try #require(ContentTypeRegistry().descriptor(id: "personalProfile"))
+        let out = ContentScaffold.renderSingleton(descriptor: person, name: "Ada")
+        #expect(out.contains("\"type\": \"personalProfile\""))
+        #expect(out.contains("\"name\": \"Ada\""))
+        #expect(out.contains("\"photo\": \"\""))
+        #expect(!out.contains("streetAddress"))
+        #expect(!out.contains("hours"))
+        #expect(out.hasSuffix("}\n"))
+    }
 }
