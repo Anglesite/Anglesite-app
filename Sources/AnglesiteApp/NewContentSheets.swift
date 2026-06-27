@@ -18,7 +18,7 @@ struct NewPageSheet: View {
             Form {
                 Section("Page") {
                     TextField("Title", text: $title)
-                    LabeledContent("Route") {
+                    LabeledContent("URL") {
                         HStack(spacing: 0) {
                             Text(baseURLPrefix)
                                 .foregroundStyle(.secondary)
