@@ -219,12 +219,29 @@ public enum ContentScaffold {
          .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
+    /// Escape a string for use as a JSON string value. Covers `\` and `"`, the named control
+    /// escapes, and — critically — every remaining C0 control character as `\uXXXX`. The rendered
+    /// file is imported as a JS module, so an unescaped control char would be invalid JSON and
+    /// hard-fail the whole site build; the full C0 range is handled, not just the common few.
     static func escapeJSON(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\")
-         .replacingOccurrences(of: "\"", with: "\\\"")
-         .replacingOccurrences(of: "\n", with: "\\n")
-         .replacingOccurrences(of: "\r", with: "\\r")
-         .replacingOccurrences(of: "\t", with: "\\t")
+        var out = ""
+        out.reserveCapacity(s.count)
+        for scalar in s.unicodeScalars {
+            switch scalar {
+            case "\\": out += "\\\\"
+            case "\"": out += "\\\""
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            case "\u{08}": out += "\\b"
+            case "\u{0C}": out += "\\f"
+            case let c where c.value < 0x20:
+                out += String(format: "\\u%04x", c.value)
+            default:
+                out.unicodeScalars.append(scalar)
+            }
+        }
+        return out
     }
 
     private static let titleLikeFieldNames: Set<String> = ["title", "name", "itemReviewed"]

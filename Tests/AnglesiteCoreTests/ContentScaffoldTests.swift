@@ -160,4 +160,15 @@ struct ContentScaffoldTests {
         #expect(!out.contains("hours"))
         #expect(out.hasSuffix("}\n"))
     }
+
+    @Test("renderSingleton emits valid JSON even when the name carries control characters")
+    func renderSingletonEscapesControlChars() throws {
+        let person = try #require(ContentTypeRegistry().descriptor(id: "personalProfile"))
+        // NUL, SOH, backspace, form-feed — all below U+0020, must be \u/named-escaped.
+        let out = ContentScaffold.renderSingleton(descriptor: person, name: "A\u{0}\u{1}\u{8}\u{C}B")
+        let data = try #require(out.data(using: .utf8))
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        #expect(obj?["type"] as? String == "personalProfile")
+        #expect(obj?["name"] as? String == "A\u{0}\u{1}\u{8}\u{C}B") // round-trips losslessly
+    }
 }
