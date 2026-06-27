@@ -87,41 +87,63 @@ Constraints discovered:
 
 ### 2. Validation harness
 
-- Add **`microformats-parser`** as a devDependency (maintained, pure-TS mf2 parser).
-- New test file `src/layouts/microformats.test.ts`, `node:test` + `tsx` style.
-- Render each real layout to an HTML string with **`experimental_AstroContainer`**
-  (`astro/container`), passing representative sample props + slot body. Parse the
-  rendered HTML with `microformats-parser`. Assert:
-  - exactly one root item of the expected type (`h-entry` / `h-review` / `h-event`)
-  - required properties present and correctly valued:
-    - h-entry: `name`, `published`, `content` (+ `summary` for the article fixture,
-      `category` for a tagged fixture)
-    - h-review: `name`, `item`, `rating`
-    - h-event: `name`, `start`
-  - `url` property present (the new `u-url`)
-  - a sanity assertion that `name` equals the explicit title, **not** the implied-name
-    concatenation (guards the pitfall `Hreview.astro` already documents)
-- Author / site-wide-h-card assertions are written as **`it.skip(...)` placeholders**
-  with a `// #388` note, so #388 can enable them when it ships the h-card.
+**Runner decision (corrected during planning):** the Astro **Container API cannot run
+on the template's `node:test`/`tsx` runner** — `tsx` cannot compile `.astro` imports
+(`ERR_UNKNOWN_FILE_EXTENSION ".astro"`, confirmed empirically), so it would require
+adding **Vitest** + `getViteConfig`. Instead — and because **the scaffold already ships
+exactly one sample entry in every collection** — the harness validates the **true built
+output**, which both avoids a second test runner and more literally satisfies "output
+validates against an mf2 parser."
 
-If the Container API needs a request URL for `Astro.url` to resolve `u-url`
-deterministically, set it via the container render options; this is an implementation
-detail, not a design risk.
+- Add **`microformats-parser`** as a devDependency (maintained, pure-TS mf2 parser;
+  `mf2(html, { baseUrl }) → { items, rels, "rel-urls" }`).
+- **Validator module** `scripts/microformats.ts` — pure, build-independent logic:
+  - `findRoots(html, baseUrl)` → root mf2 items via `microformats-parser`.
+  - `validateEntryHtml(html, baseUrl)` → returns `string[]` of problems for one page:
+    exactly one root item; its type is one of `h-entry`/`h-review`/`h-event`; required
+    properties present (`name`, `url`, and `published` for entry/review or `start` for
+    event; review also `rating`); `name` is the explicit title, **not** the implied-name
+    concatenation (guards the pitfall `Hreview.astro` documents).
+  - `validateDist(distDir)` → walks `dist/**/*.html` under the entry collection dirs
+    (`blog`, `notes`, `articles`, `photos`, `albums`, `bookmarks`, `replies`, `likes`,
+    `announcements`, `events`, `reviews`), runs `validateEntryHtml` on each, and asserts
+    **coverage**: each of the three vocab types (`h-entry`, `h-review`, `h-event`)
+    appears at least once. Returns aggregated problems.
+- **CLI** `scripts/check-microformats.ts` — runs `validateDist("dist")`, prints
+  problems, exits non-zero on failure. Wired into the `build` script *after*
+  `astro build` so every build guards mf2 validity (mirrors the existing
+  `pre-deploy-check.ts` guard philosophy).
+- **Unit test** `scripts/microformats.test.ts` — `node:test` + `tsx`, no build, no
+  `.astro`. Feeds `validateEntryHtml` representative **HTML fixture strings**:
+  - a good `h-entry` (article) → no problems; assert parsed `name`/`summary`/`published`/
+    `url`/`content`/`category`.
+  - a good `h-review` → no problems; assert `name`/`item`/`rating`/`url` and the explicit
+    name.
+  - a good `h-event` → no problems; assert `name`/`start`/`location`/`url`.
+  - a bad fixture (missing `u-url`, or an `h-review` with no explicit `p-name` so the
+    implied name smashes item/rating/body) → non-empty problems list.
+- Author / site-wide-h-card assertions are written as **`test(... , { skip: true })`
+  placeholders** with a `// #388` note, so #388 can enable them when it ships the h-card.
+
+This separates concerns cleanly: `microformats.test.ts` proves the validator logic with
+fast fixtures (the part that needs a review gate), and the post-build CLI proves the
+**real** site output passes (the part that needs a build).
 
 ### 3. Testing & acceptance
 
-- `npx tsx --test src/layouts/microformats.test.ts` passes.
+- `npx tsx --test scripts/microformats.test.ts` passes (validator-logic unit tests).
+- `npm run build` succeeds **and** the post-build `check-microformats` CLI passes against
+  the real `dist/` produced from the scaffold's seeded content — the literal "output
+  validates against an mf2 parser" acceptance.
 - `astro check` remains clean (changes are type-neutral markup).
-- Acceptance "output validates against an mf2 parser" — met by the harness.
 - Acceptance "site-wide h-card present" — explicitly delegated to #388 (recorded on both
-  issues); the skipped assertions document the seam.
+  issues); the skipped tests document the seam.
 
 ## Out of scope (YAGNI)
 
 - Author `p-author` h-card and site-wide h-card → **#388**.
-- No `dist/` post-build mf2 guard in `pre-deploy-check.ts` (the Container-API unit test
-  covers validation without a full build; a build-time guard can be a later follow-up if
-  wanted).
+- No Vitest / Container API (would add a second test runner; the post-build dist
+  validator covers the acceptance on the existing `node:test` runner).
 - No `p-best` / `p-worst` on reviews (mf2's default 1–5 scale is correct for the bare
   `rating` number).
 - No nested `h-card` / `h-adr` for event location (text `p-location` is valid mf2).
@@ -132,5 +154,8 @@ detail, not a design risk.
 - `Resources/Template/src/layouts/Hentry.astro` (`p-summary` for article summary, `u-url`)
 - `Resources/Template/src/layouts/Hreview.astro` (`u-url`)
 - `Resources/Template/src/layouts/Hevent.astro` (`u-url`)
-- `Resources/Template/src/layouts/microformats.test.ts` (new)
-- `Resources/Template/package.json` (+ `microformats-parser` devDependency)
+- `Resources/Template/scripts/microformats.ts` (new — validator module)
+- `Resources/Template/scripts/check-microformats.ts` (new — post-build CLI)
+- `Resources/Template/scripts/microformats.test.ts` (new — validator unit tests)
+- `Resources/Template/package.json` (+ `microformats-parser` devDependency; `build`
+  script gains the post-build validator)
