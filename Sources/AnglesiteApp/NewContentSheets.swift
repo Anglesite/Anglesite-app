@@ -2,6 +2,7 @@ import SwiftUI
 import AnglesiteCore
 
 struct NewPageSheet: View {
+    let baseURLPrefix: String
     let onCreate: (String, String?, ContentScaffold.PageTemplate) async -> ContentCreateResult
 
     @Environment(\.dismiss) private var dismiss
@@ -17,7 +18,17 @@ struct NewPageSheet: View {
             Form {
                 Section("Page") {
                     TextField("Title", text: $title)
-                    TextField("Route", text: $route, prompt: Text("about/team"))
+                    LabeledContent("Route") {
+                        HStack(spacing: 0) {
+                            Text(baseURLPrefix)
+                                .foregroundStyle(.secondary)
+                            TextField("Route", text: $route, prompt: Text(routePrompt))
+                                .labelsHidden()
+                                .textFieldStyle(.plain)
+                            Text("/")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 Section("Template") {
                     Picker("Template", selection: $template) {
@@ -60,6 +71,10 @@ struct NewPageSheet: View {
 
     private var defaultRoute: String {
         ContentScaffold.slugify(title.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private var routePrompt: String {
+        defaultRoute.isEmpty ? "my-new-webpage" : defaultRoute
     }
 
     private func create() {
