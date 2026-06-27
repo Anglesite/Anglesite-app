@@ -5,6 +5,7 @@ interface Props {
 }
 
 const { title, description } = Astro.props;
+import Hcard from "../components/Hcard.astro";
 // anglesite:imports — integration component imports are injected here on setup
 ---
 
@@ -23,6 +24,7 @@ const { title, description } = Astro.props;
   </head>
   <body>
     <slot />
+    <Hcard />
     <!-- anglesite:body-end -->
   </body>
 </html>

@@ -1,0 +1,33 @@
+---
+// Site representative h-card (#388). Optional: renders only when src/data/profile.json exists.
+// The glob returns {} when the file is absent, so an unconfigured site shows no footer identity.
+// microformats2 only — the Person vs LocalBusiness schema.org @type is V-1.8.
+const mods = import.meta.glob<{ default: Record<string, any> }>("../data/profile.json", { eager: true });
+const profile = Object.values(mods)[0]?.default;
+const hasAddress = profile && (profile.streetAddress || profile.locality || profile.region || profile.postalCode);
+const hours: string[] = Array.isArray(profile?.hours) ? profile.hours : [];
+---
+
+{profile && (
+  <footer class="site-identity">
+    <div class="h-card">
+      {profile.name && <p class="p-name">{profile.name}</p>}
+      {profile.description && <p class="p-note">{profile.description}</p>}
+      {profile.photo && <img class="u-photo" src={profile.photo} alt={profile.name ?? ""} />}
+      {profile.telephone && <a class="p-tel" href={`tel:${profile.telephone}`}>{profile.telephone}</a>}
+      {profile.email && <a class="u-email" href={`mailto:${profile.email}`}>{profile.email}</a>}
+      {hasAddress && (
+        <p class="p-adr h-adr">
+          {profile.streetAddress && <span class="p-street-address">{profile.streetAddress}</span>}
+          {profile.locality && <span class="p-locality">{profile.locality}</span>}
+          {profile.region && <span class="p-region">{profile.region}</span>}
+          {profile.postalCode && <span class="p-postal-code">{profile.postalCode}</span>}
+        </p>
+      )}
+      {profile.url && <a class="u-url" href={profile.url}>{profile.url}</a>}
+      {hours.length > 0 && (
+        <ul class="hours">{hours.map((h) => <li>{h}</li>)}</ul>
+      )}
+    </div>
+  </footer>
+)}
