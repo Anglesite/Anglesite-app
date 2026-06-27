@@ -31,9 +31,16 @@ public struct ContentOperations: ContentOperationsService {
     }
 
     public func createTyped(siteID: String, typeID: String, title: String, onProgress: ProgressHandler? = nil) async -> ContentCreateResult {
-        var args: [String: JSONValue] = ["type": .string(typeID)]
+        // Cheap empty guard so an obviously-invalid type doesn't cost an MCP round-trip. An unknown
+        // but non-empty typeID is left to the plugin's `create_content` schema (a `z.enum` over the
+        // registry ids) — the native path validates the same thing locally via `ContentTypeRegistry`.
+        let cleanType = typeID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanType.isEmpty else { return .failed(reason: "createTyped requires a non-empty typeID") }
+        // Always send `title` (consistent with createPost). An empty title is valid: the plugin —
+        // like NativeContentOperations — derives the slug from the type's id and leaves the title
+        // field blank, so there's nothing to guard against here.
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !cleanTitle.isEmpty { args["title"] = .string(cleanTitle) }
+        let args: [String: JSONValue] = ["type": .string(cleanType), "title": .string(cleanTitle)]
         return await create(siteID: siteID, tool: "create_content", arguments: args, identifierKey: "slug", onProgress: onProgress)
     }
 

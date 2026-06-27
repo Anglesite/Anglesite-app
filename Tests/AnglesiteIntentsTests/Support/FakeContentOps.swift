@@ -32,6 +32,9 @@ final class FakeContentOps: ContentOperationsService, @unchecked Sendable {
         return postResult
     }
 
+    // TODO(#351): no App Intent drives createTyped yet, so `typedCalls` is recorded but unasserted.
+    // The typed-content intent entities land in #351 — its intent tests will exercise this, matching
+    // how the page/post intent tests assert pageCalls/postCalls.
     func createTyped(siteID: String, typeID: String, title: String, onProgress: ProgressHandler?) async -> ContentCreateResult {
         typedCalls.append((siteID, typeID, title))
         return typedResult

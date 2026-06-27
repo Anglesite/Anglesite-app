@@ -23,6 +23,14 @@ final class CreateContentEndToEndTests {
 
     deinit { try? FileManager.default.removeItem(at: tmpSite) }
 
+    /// Resolve the plugin's Node binary + MCP server entry point once. The `.enabled(if:)` trait
+    /// guarantees both are present, so `#require` never trips when the test body actually runs.
+    private func resolvePlugin() throws -> (node: URL, serverPath: URL) {
+        let pluginRoot = try #require(E2EPrerequisites.locateSiblingPlugin())
+        let node = try #require(E2EPrerequisites.locateNode())
+        return (node, pluginRoot.appendingPathComponent("server/index.mjs"))
+    }
+
     /// A pool whose runtime spawns the real plugin server scoped to `tmpSite` (LocalSiteRuntime
     /// passes the site directory as `ANGLESITE_PROJECT_ROOT`, so the plugin writes into our temp site).
     private func poolWithRealPlugin(node: URL, serverPath: URL) -> HeadlessRuntimePool {
@@ -42,9 +50,7 @@ final class CreateContentEndToEndTests {
         )
     )
     func createTypedNoteEndToEnd() async throws {
-        let pluginRoot = try #require(E2EPrerequisites.locateSiblingPlugin())
-        let node = try #require(E2EPrerequisites.locateNode())
-        let serverPath = pluginRoot.appendingPathComponent("server/index.mjs")
+        let (node, serverPath) = try resolvePlugin()
 
         let site = tmpSite
         let ops = ContentOperations(
@@ -73,9 +79,7 @@ final class CreateContentEndToEndTests {
         )
     )
     func createTypedPageStoredRefusedEndToEnd() async throws {
-        let pluginRoot = try #require(E2EPrerequisites.locateSiblingPlugin())
-        let node = try #require(E2EPrerequisites.locateNode())
-        let serverPath = pluginRoot.appendingPathComponent("server/index.mjs")
+        let (node, serverPath) = try resolvePlugin()
 
         let site = tmpSite
         let ops = ContentOperations(
