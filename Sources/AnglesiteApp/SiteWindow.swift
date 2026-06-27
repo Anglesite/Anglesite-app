@@ -445,7 +445,7 @@ struct SiteWindow: View {
             }
         }
         .sheet(isPresented: $newPagePresented) {
-            NewPageSheet { title, route, template in
+            NewPageSheet(site: site) { title, route, template in
                 await createPage(title: title, route: route, template: template)
             }
         }
