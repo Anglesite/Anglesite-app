@@ -2,7 +2,8 @@ import Foundation
 
 /// Production `ContentOperationsService`: resolves the site's directory, gets an MCP client from a
 /// `HeadlessRuntimePool` (spawning one headlessly when no window is open), and calls the plugin's
-/// `create_page` / `create_post` tools (A.5/#139, backed by A.4 #138 and the plugin tools #140).
+/// `create_page` / `create_post` / `create_content` tools (A.5/#139, backed by A.4 #138 and the
+/// plugin tools #140; typed scaffolding parity #377/plugin #389).
 public struct ContentOperations: ContentOperationsService {
     private let pool: HeadlessRuntimePool
     /// Maps a siteID to its on-disk directory (wired to `SiteStore` in bootstrap). `nil` → unknown site.
@@ -27,6 +28,20 @@ public struct ContentOperations: ContentOperationsService {
         if let collection, !collection.isEmpty { args["collection"] = .string(collection) }
         if let slug, !slug.isEmpty { args["slug"] = .string(slug) }
         return await create(siteID: siteID, tool: "create_post", arguments: args, identifierKey: "slug", onProgress: onProgress)
+    }
+
+    public func createTyped(siteID: String, typeID: String, title: String, onProgress: ProgressHandler? = nil) async -> ContentCreateResult {
+        // Cheap empty guard so an obviously-invalid type doesn't cost an MCP round-trip. An unknown
+        // but non-empty typeID is left to the plugin's `create_content` schema (a `z.enum` over the
+        // registry ids) — the native path validates the same thing locally via `ContentTypeRegistry`.
+        let cleanType = typeID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanType.isEmpty else { return .failed(reason: "createTyped requires a non-empty typeID") }
+        // Always send `title` (consistent with createPost). An empty title is valid: the plugin —
+        // like NativeContentOperations — derives the slug from the type's id and leaves the title
+        // field blank, so there's nothing to guard against here.
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let args: [String: JSONValue] = ["type": .string(cleanType), "title": .string(cleanTitle)]
+        return await create(siteID: siteID, tool: "create_content", arguments: args, identifierKey: "slug", onProgress: onProgress)
     }
 
     private func create(

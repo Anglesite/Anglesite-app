@@ -36,6 +36,17 @@ struct ContentOperationsTests {
             elif name == "create_post":
                 body = json.dumps({"filePath":"src/content/posts/hello.md","slug":"hello","collection":"posts","commit":None})
                 resp = {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":body}],"isError":False}}
+            elif name == "create_content":
+                args = (msg.get("params") or {}).get("arguments") or {}
+                if "title" not in args:
+                    # Mirrors the always-send-title contract: createTyped must include the key even
+                    # when the title is empty, so a missing key is a client bug, not a valid call.
+                    resp = {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":"create_content expected a title key"}],"isError":True}}
+                elif args.get("type") == "businessProfile":
+                    resp = {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":"Page-stored type businessProfile is not supported by createTyped yet"}],"isError":True}}
+                else:
+                    body = json.dumps({"filePath":"src/content/notes/hello-note.md","slug":"hello-note","collection":"notes","type":args.get("type"),"commit":None})
+                    resp = {"jsonrpc":"2.0","id":rid,"result":{"content":[{"type":"text","text":body}],"isError":False}}
             else:
                 resp = {"jsonrpc":"2.0","id":rid,"error":{"code":-32601,"message":"unknown tool"}}
         else:
@@ -94,5 +105,43 @@ struct ContentOperationsTests {
         let ops = ContentOperations(pool: poolWithFakeServer(), siteDirectory: { _ in self.dir })
         let result = await ops.createPost(siteID: "site-post", title: "Hello", collection: nil, slug: nil)
         #expect(result == .created(filePath: "src/content/posts/hello.md", identifier: "hello"))
+    }
+
+    @Test("createTyped returns siteNotFound when the site directory can't be resolved")
+    func createTypedSiteNotFound() async {
+        let ops = ContentOperations(pool: HeadlessRuntimePool(), siteDirectory: { _ in nil })
+        let result = await ops.createTyped(siteID: "s1", typeID: "note", title: "Hello")
+        #expect(result == .siteNotFound)
+    }
+
+    @Test("createTyped rejects an empty typeID before any MCP round-trip")
+    func createTypedEmptyTypeID() async {
+        // Site resolves fine; the cheap typeID guard short-circuits before the pool is touched.
+        let ops = ContentOperations(pool: HeadlessRuntimePool(), siteDirectory: { _ in self.dir })
+        let result = await ops.createTyped(siteID: "s1", typeID: "   ", title: "Hello")
+        #expect(result == .failed(reason: "createTyped requires a non-empty typeID"))
+    }
+
+    @Test("createTyped always sends the title key, even when the title is empty", .enabled(if: pythonAvailable))
+    func createTypedSendsEmptyTitle() async {
+        // The fake server errors when the `title` key is absent — so a green result proves we send
+        // it rather than omitting it (Option A; consistent with createPost).
+        let ops = ContentOperations(pool: poolWithFakeServer(), siteDirectory: { _ in self.dir })
+        let result = await ops.createTyped(siteID: "site-typed-empty", typeID: "note", title: "   ")
+        #expect(result == .created(filePath: "src/content/notes/hello-note.md", identifier: "hello-note"))
+    }
+
+    @Test("createTyped drives the pool → create_content → parse and returns the created entry", .enabled(if: pythonAvailable))
+    func createTypedThroughPool() async {
+        let ops = ContentOperations(pool: poolWithFakeServer(), siteDirectory: { _ in self.dir })
+        let result = await ops.createTyped(siteID: "site-typed", typeID: "note", title: "Hello Note")
+        #expect(result == .created(filePath: "src/content/notes/hello-note.md", identifier: "hello-note"))
+    }
+
+    @Test("createTyped surfaces the plugin's error for a page-stored type", .enabled(if: pythonAvailable))
+    func createTypedPageStoredError() async {
+        let ops = ContentOperations(pool: poolWithFakeServer(), siteDirectory: { _ in self.dir })
+        let result = await ops.createTyped(siteID: "site-typed-err", typeID: "businessProfile", title: "Acme")
+        #expect(result == .failed(reason: "Page-stored type businessProfile is not supported by createTyped yet"))
     }
 }

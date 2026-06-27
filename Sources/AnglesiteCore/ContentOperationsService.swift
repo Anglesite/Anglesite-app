@@ -7,6 +7,10 @@ import Foundation
 public protocol ContentOperationsService: Sendable {
     func createPage(siteID: String, name: String, route: String?, onProgress: ProgressHandler?) async -> ContentCreateResult
     func createPost(siteID: String, title: String, collection: String?, slug: String?, onProgress: ProgressHandler?) async -> ContentCreateResult
+    /// Scaffold a typed entry (V-1.2 personal/business content types) from the content-type registry.
+    /// `typeID` is a registry id (`note`, `article`, …); `title` seeds the name/title field and the
+    /// slug. Collection-stored types only — page-stored types (e.g. `businessProfile`) report `.failed`.
+    func createTyped(siteID: String, typeID: String, title: String, onProgress: ProgressHandler?) async -> ContentCreateResult
 }
 
 public extension ContentOperationsService {
@@ -16,11 +20,14 @@ public extension ContentOperationsService {
     func createPost(siteID: String, title: String, collection: String?, slug: String?) async -> ContentCreateResult {
         await createPost(siteID: siteID, title: title, collection: collection, slug: slug, onProgress: nil)
     }
+    func createTyped(siteID: String, typeID: String, title: String) async -> ContentCreateResult {
+        await createTyped(siteID: siteID, typeID: typeID, title: title, onProgress: nil)
+    }
 }
 
-/// Outcome of a `create_page` / `create_post` call.
+/// Outcome of a `create_page` / `create_post` / `create_content` call.
 public enum ContentCreateResult: Sendable, Equatable {
-    /// `identifier` is the route (page) or slug (post). `filePath` is relative to the site root.
+    /// `identifier` is the route (page) or slug (post / typed entry). `filePath` is relative to the site root.
     case created(filePath: String, identifier: String)
     /// The site id didn't resolve to a known site directory.
     case siteNotFound

@@ -17,8 +17,10 @@ import Foundation
 final class FakeContentOps: ContentOperationsService, @unchecked Sendable {
     var pageResult: ContentCreateResult = .created(filePath: "src/pages/x.astro", identifier: "/x")
     var postResult: ContentCreateResult = .created(filePath: "src/content/posts/x.md", identifier: "x")
+    var typedResult: ContentCreateResult = .created(filePath: "src/content/notes/x.md", identifier: "x")
     private(set) var pageCalls: [(siteID: String, name: String, route: String?)] = []
     private(set) var postCalls: [(siteID: String, title: String, collection: String?, slug: String?)] = []
+    private(set) var typedCalls: [(siteID: String, typeID: String, title: String)] = []
 
     func createPage(siteID: String, name: String, route: String?, onProgress: ProgressHandler?) async -> ContentCreateResult {
         pageCalls.append((siteID, name, route))
@@ -28,5 +30,13 @@ final class FakeContentOps: ContentOperationsService, @unchecked Sendable {
     func createPost(siteID: String, title: String, collection: String?, slug: String?, onProgress: ProgressHandler?) async -> ContentCreateResult {
         postCalls.append((siteID, title, collection, slug))
         return postResult
+    }
+
+    // TODO(#351): no App Intent drives createTyped yet, so `typedCalls` is recorded but unasserted.
+    // The typed-content intent entities land in #351 — its intent tests will exercise this, matching
+    // how the page/post intent tests assert pageCalls/postCalls.
+    func createTyped(siteID: String, typeID: String, title: String, onProgress: ProgressHandler?) async -> ContentCreateResult {
+        typedCalls.append((siteID, typeID, title))
+        return typedResult
     }
 }
