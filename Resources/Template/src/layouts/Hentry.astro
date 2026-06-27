@@ -1,13 +1,29 @@
 ---
+import type { CollectionEntry } from "astro:content";
+import type { HentryCollection } from "../lib/collections.ts";
 import BaseLayout from "./BaseLayout.astro";
 
 interface Props {
-  entry: { data: Record<string, any> };
+  entry: CollectionEntry<HentryCollection>;
+}
+
+// Flattened view of the eight-collection h-entry union — all fields optional; `entry` stays strictly typed above.
+interface HentryFields {
+  title?: string;
+  summary?: string;
+  caption?: string;
+  publishDate?: Date;
+  image?: string;
+  images?: string[];
+  tags?: string[];
+  bookmarkOf?: string;
+  inReplyTo?: string;
+  likeOf?: string;
 }
 
 const { entry } = Astro.props;
-const d = entry.data;
-const title = d.title ?? d.name;
+const d: HentryFields = entry.data;
+const title = d.title;
 const iso = d.publishDate ? new Date(d.publishDate).toISOString() : undefined;
 const human = d.publishDate ? new Date(d.publishDate).toLocaleDateString() : undefined;
 const images: string[] = Array.isArray(d.images) ? d.images : [];
