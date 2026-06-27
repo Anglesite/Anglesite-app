@@ -445,7 +445,7 @@ struct SiteWindow: View {
             }
         }
         .sheet(isPresented: $newPagePresented) {
-            NewPageSheet(baseURLPrefix: pageBaseURLPrefix(for: site)) { title, route, template in
+            NewPageSheet(site: site) { title, route, template in
                 await createPage(title: title, route: route, template: template)
             }
         }
@@ -493,19 +493,6 @@ struct SiteWindow: View {
     private var paneSelection: Int {
         if case .editor = mainPaneMode { return 1 }
         return 0
-    }
-
-    private func pageBaseURLPrefix(for site: SiteStore.Site?) -> String {
-        let fallbackHost = "example.com"
-        let config = site.flatMap {
-            try? WebsiteAnalyticsAsset.loadConfig(siteDirectory: $0.sourceDirectory)
-        } ?? ""
-        let host = WebsiteAnalyticsAsset.bestHost(from: config, fallback: fallbackHost)
-        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        let absolute = trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://")
-            ? trimmed
-            : "https://\(trimmed.isEmpty ? fallbackHost : trimmed)"
-        return absolute.hasSuffix("/") ? absolute : absolute + "/"
     }
 
     private func setPaneSelection(_ value: Int) {
