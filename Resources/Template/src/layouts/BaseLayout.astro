@@ -22,6 +22,7 @@ const { title, description } = Astro.props;
     <link rel="alternate" type="application/rss+xml" title="RSS" href="/rss.xml" />
     <link rel="alternate" type="application/atom+xml" title="Atom" href="/atom.xml" />
     <link rel="alternate" type="application/feed+json" title="JSON Feed" href="/feed.json" />
+    <slot name="head" />
   </head>
   <body>
     <slot />

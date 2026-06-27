@@ -1,6 +1,9 @@
 ---
 import type { CollectionEntry } from "astro:content";
+import { Schema } from "astro-seo-schema";
 import type { HentryCollection } from "../lib/collections.ts";
+import { entrySchema, type HentryData } from "../lib/schema.ts";
+import { ownerName } from "../lib/profile.ts";
 import BaseLayout from "./BaseLayout.astro";
 
 interface Props {
@@ -30,9 +33,19 @@ const human = d.publishDate
   : undefined;
 const images: string[] = Array.isArray(d.images) ? d.images : [];
 const tags: string[] = Array.isArray(d.tags) ? d.tags : [];
+
+// schema.org JSON-LD twin of the mf2 markup (V-1.8). `entry.collection` discriminates which
+// h-entry vocabulary this is; `entrySchema` returns null for likes (no rich-result type).
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).href;
+const jsonLd = entrySchema(entry.collection, entry.data as HentryData, {
+  url: canonical,
+  site: Astro.site,
+  authorName: ownerName(),
+});
 ---
 
 <BaseLayout title={title ?? "Post"} description={d.summary}>
+  {jsonLd && <Schema slot="head" item={jsonLd} />}
   <article class="h-entry">
     {title && <h1 class="p-name">{title}</h1>}
     {d.image && <img class="u-photo" src={d.image} alt={d.caption ?? ""} />}

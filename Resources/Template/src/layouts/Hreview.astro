@@ -1,5 +1,7 @@
 ---
 import type { CollectionEntry } from "astro:content";
+import { Schema } from "astro-seo-schema";
+import { entrySchema } from "../lib/schema.ts";
 import BaseLayout from "./BaseLayout.astro";
 
 interface Props {
@@ -16,9 +18,12 @@ const human = publishedDate?.toLocaleDateString("en-US");
 // reviewed); without it, mf2 parsers fall back to the implied name — the concatenation of all
 // text content, smashing item/rating/body together. Generate one from the reviewed item.
 const reviewName = `Review of ${d.itemReviewed}`;
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).href;
+const jsonLd = entrySchema("reviews", entry.data, { url: canonical, site: Astro.site });
 ---
 
 <BaseLayout title={reviewName}>
+  {jsonLd && <Schema slot="head" item={jsonLd} />}
   <article class="h-review">
     <h1 class="p-name">{reviewName}</h1>
     <p>Reviewed: <span class="p-item">{d.itemReviewed}</span></p>

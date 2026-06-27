@@ -1,5 +1,7 @@
 ---
 import type { CollectionEntry } from "astro:content";
+import { Schema } from "astro-seo-schema";
+import { entrySchema } from "../lib/schema.ts";
 import BaseLayout from "./BaseLayout.astro";
 
 interface Props {
@@ -8,6 +10,8 @@ interface Props {
 
 const { entry } = Astro.props;
 const d = entry.data;
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).href;
+const jsonLd = entrySchema("events", entry.data, { url: canonical, site: Astro.site });
 // Compute each Date once; pin the locale so static output is deterministic across build hosts.
 const startDate = d.start ? new Date(d.start) : undefined;
 const startISO = startDate?.toISOString();
@@ -18,6 +22,7 @@ const endHuman = endDate?.toLocaleString("en-US");
 ---
 
 <BaseLayout title={d.name ?? "Event"} description={d.location}>
+  {jsonLd && <Schema slot="head" item={jsonLd} />}
   <article class="h-event">
     <h1 class="p-name">{d.name}</h1>
     {/* The permalink (u-url) is unconditional; the dt-start time renders inside it when present. */}

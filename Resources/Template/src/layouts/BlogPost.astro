@@ -3,6 +3,9 @@
 // src/pages/blog/[...slug].astro renders through this layout; the Markdown body
 // fills the <slot/>, and the comments anchor in the <article> below is where the
 // giscus integration injects its widget when comments are set up.
+import { Schema } from "astro-seo-schema";
+import { blogPostingSchema } from "../lib/schema.ts";
+import { ownerName } from "../lib/profile.ts";
 import BaseLayout from "./BaseLayout.astro";
 
 interface Props {
@@ -17,10 +20,16 @@ const iso = pubDate ? pubDate.toISOString() : undefined;
 const human = pubDate
   ? pubDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" })
   : undefined;
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).href;
+const jsonLd = blogPostingSchema(
+  { title, description, pubDate },
+  { url: canonical, site: Astro.site, authorName: ownerName() },
+);
 // anglesite:imports — integration component imports are injected here on setup
 ---
 
 <BaseLayout title={title} description={description}>
+  <Schema slot="head" item={jsonLd} />
   <p><a href="/blog/">← All posts</a></p>
   <article class="h-entry">
     <h1 class="p-name">{title}</h1>
