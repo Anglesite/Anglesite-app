@@ -12,11 +12,13 @@ private enum MainPaneMode: Equatable {
 private enum ActiveEditor {
     case text(FileEditorModel)
     case plist(PlistEditorModel)
+    case typed(TypedEntryEditorModel)
 
     var file: FileRef {
         switch self {
         case .text(let model): model.file
         case .plist(let model): model.file
+        case .typed(let model): model.file
         }
     }
 }
@@ -485,7 +487,7 @@ struct SiteWindow: View {
         switch activeEditor {
         case .some(.text):
             return true
-        case .some(.plist), .none:
+        case .some(.plist), .some(.typed), .none:
             return false
         }
     }
@@ -516,6 +518,8 @@ struct SiteWindow: View {
             return await model.flushBeforeLeaving()
         case .plist(let model):
             return await model.flushBeforeLeaving()
+        case .typed(let model):
+            return await model.flushBeforeLeaving()
         case nil:
             return true
         }
@@ -536,7 +540,9 @@ struct SiteWindow: View {
                 let entries = model.entriesForSaving()
                 Task.detached(priority: .userInitiated) { try? PlistDocumentIO.save(entries, to: url) }
             }
-        case .text, nil:
+        case .typed(let model) where model.isDirty:
+            Task { await model.flushBeforeLeaving() }
+        case .text, .typed, nil:
             break
         }
     }
@@ -551,6 +557,8 @@ struct SiteWindow: View {
         case .editor:
             if case .text(let editorModel) = activeEditor {
                 MainPaneEditorView(model: editorModel)
+            } else if case .typed(let typedModel) = activeEditor {
+                TypedEntryEditorView(model: typedModel)
             } else if case .plist(let plistEditorModel) = activeEditor {
                 PlistEditorView(model: plistEditorModel) { title in
                     Task { await saveWebsiteTitle(title) }
@@ -673,19 +681,34 @@ struct SiteWindow: View {
             }
             Task {
                 guard await leaveCurrentEditor() else { return }   // flush the previous file first
-                switch EditorKind.resolve(for: file) {
-                case .text:
-                    activeEditor = .text(FileEditorModel(file: file))
-                case .plist:
-                    activeEditor = .plist(PlistEditorModel(
-                        file: file,
-                        websiteTitle: site?.name ?? file.name,
-                        sourceDirectory: site?.sourceDirectory ?? file.url.deletingLastPathComponent()
-                    ))
+                if let source = site?.sourceDirectory,
+                   let descriptor = ContentTypeResolver.descriptor(
+                       forRelativePath: relativeProjectPath(of: file.url, under: source)) {
+                    activeEditor = .typed(TypedEntryEditorModel(
+                        file: file, descriptor: descriptor, sourceDirectory: source))
+                } else {
+                    switch EditorKind.resolve(for: file) {
+                    case .text:
+                        activeEditor = .text(FileEditorModel(file: file))
+                    case .plist:
+                        activeEditor = .plist(PlistEditorModel(
+                            file: file,
+                            websiteTitle: site?.name ?? file.name,
+                            sourceDirectory: site?.sourceDirectory ?? file.url.deletingLastPathComponent()
+                        ))
+                    }
                 }
                 mainPaneMode = .editor(file)
             }
         }
+    }
+
+    /// Project-relative path of `url` under the site `Source/` directory, for content-type resolution.
+    private func relativeProjectPath(of url: URL, under root: URL) -> String {
+        let u = url.standardizedFileURL.path(percentEncoded: false)
+        let r = root.standardizedFileURL.path(percentEncoded: false)
+        guard u.hasPrefix(r) else { return url.lastPathComponent }
+        return String(u.dropFirst(r.count)).drop(while: { $0 == "/" }).description
     }
 
     private var healthAssistantPrompt: String {

@@ -93,13 +93,14 @@ final class TypedEntryEditorModel {
         let change = try? await Task.detached(priority: .userInitiated) {
             try FileDocumentIO.externalChange(at: url, lastKnownModificationDate: known, bufferIsDirty: dirty)
         }.value
+        guard let change else { return }
         switch change {
+        case .none:
+            break
         case .reloadable(let disk):
             adopt(disk); lastModified = await freshModificationDate()
         case .conflict(let disk):
             conflictDiskContents = disk
-        case .none, nil:
-            break
         }
     }
 
