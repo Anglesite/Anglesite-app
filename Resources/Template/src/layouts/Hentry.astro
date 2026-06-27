@@ -25,7 +25,7 @@ const { entry } = Astro.props;
 const d: HentryFields = entry.data;
 const title = d.title;
 const iso = d.publishDate ? new Date(d.publishDate).toISOString() : undefined;
-const human = d.publishDate ? new Date(d.publishDate).toLocaleDateString() : undefined;
+const human = d.publishDate ? new Date(d.publishDate).toLocaleDateString("en-US", { timeZone: "UTC" }) : undefined;
 const images: string[] = Array.isArray(d.images) ? d.images : [];
 const tags: string[] = Array.isArray(d.tags) ? d.tags : [];
 ---

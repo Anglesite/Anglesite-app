@@ -71,14 +71,19 @@ export function validateEntryHtml(html: string, label: string, baseUrl = BASE_UR
     if (!has(item, "name")) {
       problems.push(`${label}: ${type} missing p-name`);
     } else {
-      // Guard the implied-name pitfall: the parsed name must be the explicit title, not
-      // the parser's concatenation of all text (implied when no explicit p-name exists).
-      const name = String(item.properties.name?.[0] ?? "");
-      const content = String(
-        (item.properties.content?.[0] as { value?: string } | undefined)?.value ?? "",
-      ).trim();
+      // Guard the implied-name pitfall (see Hreview.astro): when an h-review/h-event has
+      // no explicit p-name, the parser IMPLIES a name from the element's full text, which
+      // includes the e-content body. A valid explicit title never contains the whole body,
+      // so a name that (after whitespace normalization) contains the content body is the
+      // signal of an implied name. Normalizing both sides keeps the substring check robust
+      // to inline markup / whitespace differences between the two parsed values.
+      const collapse = (s: string) => s.replace(/\s+/g, " ").trim();
+      const name = collapse(String(item.properties.name?.[0] ?? ""));
+      const content = collapse(
+        String((item.properties.content?.[0] as { value?: string } | undefined)?.value ?? ""),
+      );
       if (name && content && name.includes(content)) {
-        problems.push(`${label}: ${type} p-name looks implied (contains the full content) — add an explicit p-name`);
+        problems.push(`${label}: ${type} p-name looks implied (contains the content body) — add an explicit p-name`);
       }
     }
   }

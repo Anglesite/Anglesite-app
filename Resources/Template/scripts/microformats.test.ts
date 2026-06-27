@@ -51,6 +51,17 @@ const IMPLIED_REVIEW = `<!doctype html><html><body>
   <div class="e-content"><p>Solid widget.</p></div>
 </article></body></html>`;
 
+// Implied-name review whose body has inline markup + irregular whitespace — the guard must
+// still flag it after whitespace normalization (proves it is not fitted to one fixture).
+const IMPLIED_REVIEW_MARKUP = `<!doctype html><html><body>
+<article class="h-review">
+  <p>Reviewed: <span class="p-item">The Widget</span></p>
+  <data class="p-rating" value="4">4</data>
+  <a class="u-url" href="/reviews/the-widget/"><time class="dt-published" datetime="2026-06-27T12:00:00.000Z">d</time></a>
+  <div class="e-content"><p>Solid   <strong>widget</strong>,
+  truly.</p></div>
+</article></body></html>`;
+
 test("valid h-entry passes and exposes expected properties", () => {
   assert.deepEqual(validateEntryHtml(GOOD_ENTRY, "good-entry"), []);
   const [item] = findRoots(GOOD_ENTRY);
@@ -88,6 +99,11 @@ test("h-entry without u-url is flagged", () => {
 
 test("h-review with implied (non-explicit) name is flagged", () => {
   const problems = validateEntryHtml(IMPLIED_REVIEW, "implied-review");
+  assert.ok(problems.some((p) => p.includes("implied")), problems.join("; "));
+});
+
+test("implied-name h-review with inline markup/whitespace is still flagged", () => {
+  const problems = validateEntryHtml(IMPLIED_REVIEW_MARKUP, "implied-markup");
   assert.ok(problems.some((p) => p.includes("implied")), problems.join("; "));
 });
 
