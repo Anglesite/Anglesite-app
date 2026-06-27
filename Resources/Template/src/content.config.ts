@@ -11,7 +11,7 @@ const blog = defineCollection({
     pubDate: z.coerce.date(),
     description: z.string().optional(),
     draft: z.boolean().default(false),
-  }),
+  }).strict(),
 });
 
 const notes = defineCollection({
@@ -19,7 +19,7 @@ const notes = defineCollection({
   schema: z.object({
     publishDate: z.coerce.date(),
     tags: z.array(z.string()).optional(),
-  }),
+  }).strict(),
 });
 
 const articles = defineCollection({
@@ -30,7 +30,7 @@ const articles = defineCollection({
     publishDate: z.coerce.date(),
     updated: z.coerce.date().optional(),
     tags: z.array(z.string()).optional(),
-  }),
+  }).strict(),
 });
 
 const photos = defineCollection({
@@ -40,7 +40,7 @@ const photos = defineCollection({
     caption: z.string().optional(),
     publishDate: z.coerce.date(),
     tags: z.array(z.string()).optional(),
-  }),
+  }).strict(),
 });
 
 const albums = defineCollection({
@@ -50,7 +50,7 @@ const albums = defineCollection({
     images: z.array(z.string()),
     publishDate: z.coerce.date(),
     tags: z.array(z.string()).optional(),
-  }),
+  }).strict(),
 });
 
 const bookmarks = defineCollection({
@@ -60,7 +60,7 @@ const bookmarks = defineCollection({
     title: z.string().optional(),
     publishDate: z.coerce.date(),
     tags: z.array(z.string()).optional(),
-  }),
+  }).strict(),
 });
 
 const replies = defineCollection({
@@ -68,7 +68,7 @@ const replies = defineCollection({
   schema: z.object({
     inReplyTo: z.string().url(),
     publishDate: z.coerce.date(),
-  }),
+  }).strict(),
 });
 
 const likes = defineCollection({
@@ -76,7 +76,7 @@ const likes = defineCollection({
   schema: z.object({
     likeOf: z.string().url(),
     publishDate: z.coerce.date(),
-  }),
+  }).strict(),
 });
 
 const announcements = defineCollection({
@@ -84,7 +84,7 @@ const announcements = defineCollection({
   schema: z.object({
     title: z.string(),
     publishDate: z.coerce.date(),
-  }),
+  }).strict(),
 });
 
 const events = defineCollection({
@@ -94,7 +94,7 @@ const events = defineCollection({
     start: z.coerce.date(),
     end: z.coerce.date().optional(),
     location: z.string().optional(),
-  }),
+  }).strict(),
 });
 
 const reviews = defineCollection({
@@ -103,7 +103,7 @@ const reviews = defineCollection({
     itemReviewed: z.string(),
     rating: z.number(),
     publishDate: z.coerce.date(),
-  }),
+  }).strict(),
 });
 
 export const collections = { blog, notes, articles, photos, albums, bookmarks, replies, likes, announcements, events, reviews };

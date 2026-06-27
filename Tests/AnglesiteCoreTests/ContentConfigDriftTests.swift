@@ -38,9 +38,55 @@ struct ContentConfigDriftTests {
           loader: glob({ pattern: "**/*.md", base: "./src/content/\(collection)" }),
           schema: z.object({
         \(schemaLines.joined(separator: "\n"))
-          }),
+          }).strict(),
         });
         """
+    }
+
+    /// Collections intentionally present in the template but absent from the registry. `blog` is the
+    /// template's example collection and has no `ContentTypeDescriptor`.
+    static let nonRegistryCollections: Set<String> = ["blog"]
+
+    /// The collection identifiers named in the `export const collections = { … }` line. Handles both
+    /// shorthand (`notes`) and `key: value` (`notes: notes`) entries; returns names in source order.
+    static func collectionNames(inExport line: String) -> [String] {
+        guard let open = line.firstIndex(of: "{"),
+              let close = line.firstIndex(of: "}"), open < close else { return [] }
+        let inner = line[line.index(after: open)..<close]
+        return inner.split(separator: ",").compactMap { entry in
+            let name = entry.split(separator: ":").first?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return name.isEmpty ? nil : name
+        }
+    }
+
+    @Test("collectionNames parses the export line, including key: value form")
+    func parsesExportLine() {
+        let line = "export const collections = { blog, notes: notes, articles };"
+        #expect(Self.collectionNames(inExport: line) == ["blog", "notes", "articles"])
+    }
+
+    @Test("content.config.ts declares exactly the registry collections plus the allowlist")
+    func noOrphanCollections() throws {
+        let source = try String(contentsOf: Self.configFile, encoding: .utf8)
+        let exportLine = source
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .first { $0.contains("export const collections") }
+            .map(String.init) ?? ""
+
+        // Guard the parse, so a renamed or multi-line-wrapped export reports "line not found"
+        // rather than failing with every registry collection listed as spuriously missing.
+        try #require(!exportLine.isEmpty,
+                     "`export const collections` line not found in content.config.ts — was it renamed or wrapped across lines?")
+
+        let declared = Set(Self.collectionNames(inExport: exportLine))
+        let expected = Set(ContentTypeRegistry.builtIns.compactMap(\.collection))
+            .union(Self.nonRegistryCollections)
+
+        let orphans = declared.subtracting(expected).sorted()
+        let missing = expected.subtracting(declared).sorted()
+        #expect(declared == expected,
+                "content.config.ts collections drifted from registry. Orphans (in config, not registry/allowlist): \(orphans); Missing (in registry, not config): \(missing)")
     }
 
     @Test("every collection-backed registry type appears verbatim in content.config.ts")

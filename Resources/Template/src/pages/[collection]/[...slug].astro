@@ -27,9 +27,13 @@ const { entry } = Astro.props;
 const { Content } = await render(entry);
 // Per-collection layout. Only non-h-entry vocabularies need their own; everything else
 // (notes, articles, photos, albums, bookmarks, replies, likes, announcements) is h-entry → Hentry.
+// Hevent/Hreview have narrower, structurally-different Props than Hentry (each takes its own
+// CollectionEntry<…>), so they aren't assignable to `typeof Hentry`. The dispatch below always
+// hands each layout an entry from its matching collection, so the cast is sound at runtime; the
+// proper fix (a shared layout Props type) is tracked in #389 — keep this intentional, not a regression.
 const layoutByCollection: Partial<Record<EntryCollection, typeof Hentry>> = {
-  events: Hevent,
-  reviews: Hreview,
+  events: Hevent as unknown as typeof Hentry,
+  reviews: Hreview as unknown as typeof Hentry,
 };
 const Layout = layoutByCollection[entry.collection as EntryCollection] ?? Hentry;
 ---

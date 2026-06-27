@@ -37,3 +37,26 @@ export function readConfig(
   }
   return loadDefaultConfig()[key];
 }
+
+// Config values are free-form strings, but the booking/donation widgets accept a
+// closed set of provider literals. These narrow at runtime so an unrecognized
+// `.site-config` value (e.g. a typo) becomes `undefined` — which the widgets
+// render as "nothing" — instead of being cast straight through and silently
+// mismatching the widget's expected provider.
+
+export type BookingProvider = "cal" | "calendly";
+export type DonationsProvider = "stripe" | "liberapay" | "github-sponsors";
+
+export function asBookingProvider(
+  value: string | undefined,
+): BookingProvider | undefined {
+  return value === "cal" || value === "calendly" ? value : undefined;
+}
+
+export function asDonationsProvider(
+  value: string | undefined,
+): DonationsProvider | undefined {
+  return value === "stripe" || value === "liberapay" || value === "github-sponsors"
+    ? value
+    : undefined;
+}
