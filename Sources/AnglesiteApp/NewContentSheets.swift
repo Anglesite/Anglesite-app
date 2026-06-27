@@ -83,10 +83,10 @@ struct NewPageSheet: View {
     }
 
     private var routeFieldWidth: CGFloat {
-        let characterWidth: CGFloat = 9
-        let padding: CGFloat = 12
+        let characterWidth: CGFloat = 7.5
+        let padding: CGFloat = 2
         let measured = CGFloat(max(routeTextForSizing.count, 1)) * characterWidth + padding
-        return min(max(measured, 80), 280)
+        return min(max(measured, 40), 280)
     }
 
     private var routeTextForSizing: String {
