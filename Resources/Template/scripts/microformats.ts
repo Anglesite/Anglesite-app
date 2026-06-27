@@ -30,13 +30,23 @@ function has(item: Mf2Item, prop: string): boolean {
   return Array.isArray(v) && v.length > 0;
 }
 
+/** The entry-microformat types found among a page's roots (deduped). */
+function entryTypesOf(roots: Mf2Item[]): EntryType[] {
+  return [...new Set(roots.flatMap((r) => r.type).filter(isEntryType))] as EntryType[];
+}
+
 /**
  * Validate a single built entry page's microformats. Returns a list of human-readable
  * problems; an empty list means the page is valid mf2 for our purposes.
  */
 export function validateEntryHtml(html: string, label: string, baseUrl = BASE_URL): string[] {
+  return validateRoots(findRoots(html, baseUrl), label);
+}
+
+/** Validate already-parsed roots — lets callers parse once and reuse the result. */
+function validateRoots(allRoots: Mf2Item[], label: string): string[] {
   const problems: string[] = [];
-  const roots = findRoots(html, baseUrl).filter((i) => i.type.some(isEntryType));
+  const roots = allRoots.filter((i) => i.type.some(isEntryType));
 
   if (roots.length === 0) {
     problems.push(`${label}: no h-entry/h-review/h-event root item found`);
@@ -113,25 +123,29 @@ function walkHtml(dir: string): string[] {
  */
 export function validateDist(distDir: string): string[] {
   const problems: string[] = [];
-  const seen = new Set<string>();
+  const seenAny = new Set<string>(); // type appeared on some page (valid or not)
+  const seenValid = new Set<string>(); // type appeared on a page with no problems
 
   for (const sub of ENTRY_DIRS) {
     const base = join(distDir, sub);
     for (const file of walkHtml(base)) {
       const rel = file.slice(base.length + 1); // "welcome/index.html" or "index.html"
       if (!rel.includes("/")) continue; // skip the collection's own list page (index.html)
-      const html = readFileSync(file, "utf8");
       const label = file.slice(distDir.length + 1);
-      const pageProblems = validateEntryHtml(html, label);
+      const roots = findRoots(readFileSync(file, "utf8")); // parse once; reuse below
+      const types = entryTypesOf(roots);
+      for (const t of types) seenAny.add(t);
+      const pageProblems = validateRoots(roots, label);
       problems.push(...pageProblems);
-      if (pageProblems.length === 0) {
-        for (const r of findRoots(html)) for (const t of r.type) if (isEntryType(t)) seen.add(t);
-      }
+      if (pageProblems.length === 0) for (const t of types) seenValid.add(t);
     }
   }
 
+  // Only report a coverage gap when a type is entirely absent. If pages of that type
+  // exist but all failed validation, the per-page problems above already explain it —
+  // a redundant "no valid …" line reads as a separate root cause.
   for (const t of ENTRY_TYPES) {
-    if (!seen.has(t)) problems.push(`coverage: no valid ${t} page found in ${distDir}`);
+    if (!seenAny.has(t)) problems.push(`coverage: no ${t} page found in ${distDir}`);
   }
   return problems;
 }

@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Work in the worktree:** `/Users/dwk/Developer/github.com/Anglesite/Anglesite-app/.claude/worktrees/349-microformats2`. All paths below are relative to its `Resources/Template/` directory; run commands from there.
+- **Work in the worktree:** `.claude/worktrees/349-microformats2` (repo-relative). All paths below are relative to its `Resources/Template/` directory; run commands from there.
 - **Run `npm install` once** in `Resources/Template/` before starting (the worktree has no `node_modules`). It is folded into Task 1, Step 1.
 - **ES modules only** — `import/export`, explicit `.ts` extensions on local imports (matches `astro.config.ts` importing `./scripts/config.ts`).
 - **Test runner is `node:test` via `tsx`** — no Vitest, no new test runner.

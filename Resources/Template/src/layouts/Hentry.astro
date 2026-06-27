@@ -24,8 +24,10 @@ interface HentryFields {
 const { entry } = Astro.props;
 const d: HentryFields = entry.data;
 const title = d.title;
-const iso = d.publishDate ? new Date(d.publishDate).toISOString() : undefined;
-const human = d.publishDate ? new Date(d.publishDate).toLocaleDateString("en-US", { timeZone: "UTC" }) : undefined;
+const iso = d.publishDate ? d.publishDate.toISOString() : undefined;
+const human = d.publishDate
+  ? d.publishDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" })
+  : undefined;
 const images: string[] = Array.isArray(d.images) ? d.images : [];
 const tags: string[] = Array.isArray(d.tags) ? d.tags : [];
 ---
@@ -40,11 +42,11 @@ const tags: string[] = Array.isArray(d.tags) ? d.tags : [];
     {d.likeOf && <a class="u-like-of" href={d.likeOf}>Liked this</a>}
     {(d.summary ?? d.caption) && <p class="p-summary">{d.summary ?? d.caption}</p>}
     <div class="e-content"><slot /></div>
-    {iso && (
-      <a class="u-url" href={Astro.url.pathname}>
-        <time class="dt-published" datetime={iso}>{human}</time>
-      </a>
-    )}
+    {/* The permalink (u-url) is unconditional — every entry has one regardless of whether
+        it carries a visible date; the dt-published time renders inside it when present. */}
+    <a class="u-url" href={Astro.url.pathname}>
+      {iso && <time class="dt-published" datetime={iso}>{human}</time>}
+    </a>
     {tags.length > 0 && (
       <ul class="tags">
         {tags.map((t) => <li><a class="p-category" href={`/tags/${t}`}>{t}</a></li>)}
