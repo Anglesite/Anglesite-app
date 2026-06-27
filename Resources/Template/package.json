@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "astro dev",
     "prebuild": "npx tsx scripts/csp.ts",
-    "build": "astro check && astro build",
+    "build": "astro check && astro build && npx tsx scripts/check-microformats.ts",
     "preview": "astro preview",
     "check": "npx tsx scripts/pre-deploy-check.ts"
   },
