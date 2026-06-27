@@ -7,6 +7,7 @@ struct NewPageSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var route = ""
+    @State private var routeFollowsTitle = true
     @State private var template = ContentScaffold.PageTemplate.standard
     @State private var isCreating = false
     @State private var errorMessage: String?
@@ -34,6 +35,14 @@ struct NewPageSheet: View {
             .formStyle(.grouped)
             .frame(minWidth: 420, minHeight: 250)
             .navigationTitle("New Page")
+            .onChange(of: title) { _, _ in
+                if routeFollowsTitle {
+                    route = defaultRoute
+                }
+            }
+            .onChange(of: route) { _, newValue in
+                routeFollowsTitle = newValue == defaultRoute
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -47,6 +56,10 @@ struct NewPageSheet: View {
                 }
             }
         }
+    }
+
+    private var defaultRoute: String {
+        ContentScaffold.slugify(title.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private func create() {
