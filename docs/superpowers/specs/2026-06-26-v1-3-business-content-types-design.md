@@ -124,16 +124,34 @@ scaffold with **no Swift changes**. Add three seed entries mirroring V-1.2's
 
 A **pure Swift unit test** (no Node, not gated on a buildable template). It reads
 `Resources/Template/src/content.config.ts` as text and, for every
-**collection-backed** descriptor in `ContentTypeRegistry.builtIns`, asserts a
-matching `defineCollection` block exists with:
+**collection-backed** descriptor in `ContentTypeRegistry.builtIns`, **generates the
+canonical `defineCollection` block** from the descriptor and asserts that exact block
+appears **verbatim** in the file (exact-string match — whitespace is significant). It
+also asserts the collection key is present in `export const collections`.
 
-- the collection key present in `export const collections`;
-- exactly the expected set of non-`markdown` fields (no missing, no extra);
-- each field mapped to the expected Zod type;
-- correct optionality (`required == false` → `.optional()`).
+The generator is the single canonical formatter:
+
+```ts
+const <collection> = defineCollection({
+  loader: glob({ pattern: "**/*.md", base: "./src/content/<collection>" }),
+  schema: z.object({
+    <field>: <zod>,              // one line per non-markdown field, in descriptor order
+  }),
+});
+```
+
+with 2-space base indentation (matching the existing file), fields emitted in
+descriptor declaration order, and each Zod expression per the contract below.
 
 `blog` is legacy and not in the registry, so the test ignores collection keys with no
 corresponding descriptor (it asserts registry coverage, not file exhaustiveness).
+
+**Implication:** the seven personal collection blocks V-1.2 hand-wrote must already
+conform to the canonical format byte-for-byte. As part of this pass the test will
+either confirm they do or the blocks are reformatted to match (no schema change — the
+fields and types are identical, only formatting is canonicalized). This makes the
+committed `content.config.ts` schema blocks a checked-in mirror of generated output,
+while `blog`, comments, import lines, and the surrounding file remain human-authored.
 
 **Kind → Zod contract** (the documented mapping the test enforces):
 
