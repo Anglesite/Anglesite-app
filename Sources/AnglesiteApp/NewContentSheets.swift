@@ -18,16 +18,21 @@ struct NewPageSheet: View {
             Form {
                 Section("Page") {
                     TextField("Title", text: $title)
-                    LabeledContent("URL") {
+                    HStack {
+                        Text("URL")
+                        Spacer(minLength: 16)
                         HStack(spacing: 0) {
                             Text(baseURLPrefix)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
                             TextField("Route", text: $route, prompt: Text(routePrompt))
                                 .labelsHidden()
                                 .textFieldStyle(.plain)
+                                .frame(minWidth: 80)
                             Text("/")
                                 .foregroundStyle(.secondary)
                         }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
                 Section("Template") {
