@@ -79,4 +79,31 @@ const likes = defineCollection({
   }),
 });
 
-export const collections = { blog, notes, articles, photos, albums, bookmarks, replies, likes };
+const announcements = defineCollection({
+  loader: glob({ pattern: "**/*.md", base: "./src/content/announcements" }),
+  schema: z.object({
+    title: z.string(),
+    publishDate: z.coerce.date(),
+  }),
+});
+
+const events = defineCollection({
+  loader: glob({ pattern: "**/*.md", base: "./src/content/events" }),
+  schema: z.object({
+    name: z.string(),
+    start: z.coerce.date(),
+    end: z.coerce.date().optional(),
+    location: z.string().optional(),
+  }),
+});
+
+const reviews = defineCollection({
+  loader: glob({ pattern: "**/*.md", base: "./src/content/reviews" }),
+  schema: z.object({
+    itemReviewed: z.string(),
+    rating: z.number(),
+    publishDate: z.coerce.date(),
+  }),
+});
+
+export const collections = { blog, notes, articles, photos, albums, bookmarks, replies, likes, announcements, events, reviews };
