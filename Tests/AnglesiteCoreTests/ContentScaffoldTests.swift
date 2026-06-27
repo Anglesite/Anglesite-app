@@ -88,4 +88,17 @@ struct ContentScaffoldTests {
         // No markdown field on a like → no body placeholder.
         #expect(!likeOut.contains("Write your"))
     }
+
+    @Test("renderEntry only emits schema-declared display fields")
+    func renderEntryReviewUsesItemReviewedWithoutExtraKeys() {
+        let review = try! #require(ContentTypeRegistry().descriptor(id: "review"))
+        let out = ContentScaffold.renderEntry(
+            descriptor: review, title: "Tiny Cafe", now: Date(timeIntervalSince1970: 1_750_000_000))
+
+        #expect(out.contains("itemReviewed: \"Tiny Cafe\""))
+        #expect(out.contains("rating: 0"))
+        #expect(out.contains("publishDate: 2025-06-15T15:06:40.000Z"))
+        #expect(!out.contains("\ntitle:"))
+        #expect(!out.contains("\ndraft:"))
+    }
 }

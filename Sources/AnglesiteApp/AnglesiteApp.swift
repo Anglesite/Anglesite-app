@@ -130,23 +130,6 @@ struct AnglesiteApp: App {
         )
     }
 
-    /// File ▸ Open Site… — window-independent, so it runs from any focused window.
-    @MainActor
-    private func openSiteFromMenu() async {
-        do {
-            guard let site = try await SiteActions.pickAndRegisterSite() else { return }
-            openWindow(value: site.id)
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "Couldn't open that site"
-            // `SiteActions.ImportError.localizedDescription` names the package and the reason;
-            // other errors fall back to their OS-provided message rather than a raw enum dump.
-            alert.informativeText = error.localizedDescription
-            alert.alertStyle = .warning
-            alert.runModal()
-        }
-    }
-
     private func showAboutPanel() {
         // Credits carries the build info the standard fields don't: the dev phase and the
         // host OS. App name and version come from the bundle via .applicationName and the
@@ -197,19 +180,8 @@ struct AnglesiteApp: App {
                 Button("About Anglesite") { showAboutPanel() }
             }
 
-            CommandGroup(replacing: .newItem) {
-                Button("New Site") {
-                    // Ensure the launcher exists to host the wizard sheet, then ask it to open.
-                    openWindow(id: "sites")
-                    WindowRouter.shared.requestNewSite()
-                }
-                .keyboardShortcut("n")
-
-                Button("Open Site…") {
-                    Task { await openSiteFromMenu() }
-                }
-                .keyboardShortcut("o")
-
+            NewContentCommands()
+            CommandGroup(after: .newItem) {
                 Menu("Open Recent") {
                     ForEach(recent.sites) { site in
                         Button(site.name) { openWindow(value: site.id) }
