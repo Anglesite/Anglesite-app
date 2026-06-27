@@ -101,9 +101,12 @@ validates against an mf2 parser."
   - `findRoots(html, baseUrl)` → root mf2 items via `microformats-parser`.
   - `validateEntryHtml(html, baseUrl)` → returns `string[]` of problems for one page:
     exactly one root item; its type is one of `h-entry`/`h-review`/`h-event`; required
-    properties present (`name`, `url`, and `published` for entry/review or `start` for
-    event; review also `rating`); `name` is the explicit title, **not** the implied-name
-    concatenation (guards the pitfall `Hreview.astro` documents).
+    properties present — `url` (all); `published` for entry/review or `start` for event;
+    review also `rating`. **`p-name` is required and explicit only for `h-review` and
+    `h-event`** (both always carry a title); it is **optional for `h-entry`** because
+    notes, photos, replies, and likes are legitimately nameless mf2 entries. The
+    implied-name guard (`name` must be the explicit title, not the parser's concatenation —
+    the pitfall `Hreview.astro` documents) therefore applies only to `h-review`/`h-event`.
   - `validateDist(distDir)` → walks `dist/**/*.html` under the entry collection dirs
     (`blog`, `notes`, `articles`, `photos`, `albums`, `bookmarks`, `replies`, `likes`,
     `announcements`, `events`, `reviews`), runs `validateEntryHtml` on each, and asserts
