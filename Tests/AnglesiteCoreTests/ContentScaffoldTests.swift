@@ -77,8 +77,9 @@ struct ContentScaffoldTests {
         let event = try #require(registry.descriptor(id: "event"))
         let eventOut = ContentScaffold.renderEntry(descriptor: event, title: "Launch", now: now)
         #expect(eventOut.contains("name: \"Launch\""))
-        #expect(eventOut.contains("start: 1970-01-01T00:00:00.000Z"))
-        #expect(eventOut.contains("end: 1970-01-01T00:00:00.000Z"))
+        #expect(eventOut.contains("start: 1970-01-01T00:00:00.000Z")) // required → live
+        #expect(eventOut.contains("# end: 1970-01-01T00:00:00.000Z")) // optional → commented out
+        #expect(!eventOut.contains("\nend: ")) // never a live optional dt-end
         #expect(eventOut.contains("location: \"\""))
         #expect(eventOut.contains("Write your event here."))
 

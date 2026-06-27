@@ -47,6 +47,8 @@ struct BusinessTypeRenderSmokeTests {
             let review = try html("reviews/hello-review/index.html")
             #expect(review.contains("h-review"))
             #expect(review.contains("p-rating"))
+            #expect(review.contains("p-name")) // explicit review title, distinct from p-item
+            #expect(review.contains("p-item"))
         }
     }
 }

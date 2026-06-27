@@ -25,7 +25,13 @@ export async function getStaticPaths() {
 
 const { entry } = Astro.props;
 const { Content } = await render(entry);
-const Layout = entry.collection === "events" ? Hevent : entry.collection === "reviews" ? Hreview : Hentry;
+// Per-collection layout. Only non-h-entry vocabularies need their own; everything else
+// (notes, articles, photos, albums, bookmarks, replies, likes, announcements) is h-entry → Hentry.
+const layoutByCollection: Partial<Record<EntryCollection, typeof Hentry>> = {
+  events: Hevent,
+  reviews: Hreview,
+};
+const Layout = layoutByCollection[entry.collection as EntryCollection] ?? Hentry;
 ---
 
 <Layout entry={entry}><Content /></Layout>

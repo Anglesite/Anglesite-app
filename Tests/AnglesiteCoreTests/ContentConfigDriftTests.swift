@@ -51,7 +51,9 @@ struct ContentConfigDriftTests {
             .first { $0.contains("export const collections") }
             .map(String.init) ?? ""
 
-        for descriptor in ContentTypeRegistry().all {
+        // Scope to the canonical builtin vocabulary, not a registry instance: a custom type
+        // registered elsewhere must not make this guard demand a block in the committed template.
+        for descriptor in ContentTypeRegistry.builtIns {
             guard let collection = descriptor.collection,
                   let block = Self.canonicalBlock(descriptor) else { continue }
             #expect(source.contains(block),

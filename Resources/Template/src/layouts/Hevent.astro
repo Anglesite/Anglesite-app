@@ -1,16 +1,20 @@
 ---
+import type { CollectionEntry } from "astro:content";
 import BaseLayout from "./BaseLayout.astro";
 
 interface Props {
-  entry: { data: Record<string, any> };
+  entry: CollectionEntry<"events">;
 }
 
 const { entry } = Astro.props;
 const d = entry.data;
-const startISO = d.start ? new Date(d.start).toISOString() : undefined;
-const startHuman = d.start ? new Date(d.start).toLocaleString() : undefined;
-const endISO = d.end ? new Date(d.end).toISOString() : undefined;
-const endHuman = d.end ? new Date(d.end).toLocaleString() : undefined;
+// Compute each Date once; pin the locale so static output is deterministic across build hosts.
+const startDate = d.start ? new Date(d.start) : undefined;
+const startISO = startDate?.toISOString();
+const startHuman = startDate?.toLocaleString("en-US");
+const endDate = d.end ? new Date(d.end) : undefined;
+const endISO = endDate?.toISOString();
+const endHuman = endDate?.toLocaleString("en-US");
 ---
 
 <BaseLayout title={d.name ?? "Event"} description={d.location}>
