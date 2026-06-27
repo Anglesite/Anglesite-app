@@ -65,8 +65,9 @@ import Foundation
     @Test func blogPostLayoutRendersTitleAndDate() throws {
         let root = templateRoot()
         let s = try String(contentsOf: root.appendingPathComponent("src/layouts/BlogPost.astro"), encoding: .utf8)
-        // visible heading + publication date in the article body
-        #expect(s.contains("<h1>{title}</h1>"), "post should render its title as an <h1>")
+        // visible heading + publication date in the article body. The heading carries the
+        // microformats2 `p-name` (V-1.7 / #349) — the post title is the h-entry's name.
+        #expect(s.contains("<h1 class=\"p-name\">{title}</h1>"), "post should render its title as an <h1 class=\"p-name\">")
         #expect(s.contains("pubDate"), "layout should accept/render pubDate")
         #expect(s.contains("<time"), "date should use a semantic <time> element")
         // render the date in UTC so a build machine behind UTC doesn't shift it a day
