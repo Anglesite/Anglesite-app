@@ -157,7 +157,7 @@ while `blog`, comments, import lines, and the surrounding file remain human-auth
 
 | `ContentTypeField.Kind` | Zod |
 |---|---|
-| `.string`, `.text` | `z.string()` |
+| `.string`, `.text`, `.image` | `z.string()` |
 | `.url` | `z.string().url()` |
 | `.date`, `.datetime` | `z.coerce.date()` |
 | `.number` | `z.number()` |
