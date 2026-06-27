@@ -154,7 +154,7 @@ public enum ContentScaffold {
             case .stringArray, .imageArray:
                 lines.append("\(field.name): []")
             case .string, .text, .url, .image:
-                let value = (field.name == "title" || field.name == "name") ? (title ?? "") : ""
+                let value = titleLikeFieldNames.contains(field.name) ? (title ?? "") : ""
                 lines.append("\(field.name): \"\(escapeYAML(value))\"")
             }
         }
@@ -184,4 +184,6 @@ public enum ContentScaffold {
         s.replacingOccurrences(of: "\\", with: "\\\\")
          .replacingOccurrences(of: "\"", with: "\\\"")
     }
+
+    private static let titleLikeFieldNames: Set<String> = ["title", "name", "itemReviewed"]
 }

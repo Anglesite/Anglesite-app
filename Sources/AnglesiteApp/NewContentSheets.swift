@@ -2,7 +2,6 @@ import SwiftUI
 import AnglesiteCore
 
 struct NewPageSheet: View {
-    let siteName: String
     let onCreate: (String, String?, ContentScaffold.PageTemplate) async -> ContentCreateResult
 
     @Environment(\.dismiss) private var dismiss
@@ -73,7 +72,6 @@ struct NewPageSheet: View {
 }
 
 struct NewCollectionEntrySheet: View {
-    let siteName: String
     let descriptors: [ContentTypeDescriptor]
     let onCreate: (String, String?, ContentTypeDescriptor) async -> ContentCreateResult
 
@@ -85,11 +83,9 @@ struct NewCollectionEntrySheet: View {
     @State private var errorMessage: String?
 
     init(
-        siteName: String,
         descriptors: [ContentTypeDescriptor],
         onCreate: @escaping (String, String?, ContentTypeDescriptor) async -> ContentCreateResult
     ) {
-        self.siteName = siteName
         self.descriptors = descriptors
         self.onCreate = onCreate
         _selectedID = State(initialValue: descriptors.first?.id ?? "")
@@ -98,18 +94,26 @@ struct NewCollectionEntrySheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Collection Entry") {
-                    Picker("Type", selection: $selectedID) {
-                        ForEach(descriptors) { descriptor in
-                            Text(descriptor.displayName).tag(descriptor.id)
+                if descriptors.isEmpty {
+                    ContentUnavailableView(
+                        "No Collection Types",
+                        systemImage: "tray",
+                        description: Text("This site does not have any collection-backed content types.")
+                    )
+                } else {
+                    Section("Collection Entry") {
+                        Picker("Type", selection: $selectedID) {
+                            ForEach(descriptors) { descriptor in
+                                Text(descriptor.displayName).tag(descriptor.id)
+                            }
                         }
+                        TextField("Title", text: $title)
+                        TextField("Slug", text: $slug, prompt: Text("optional"))
                     }
-                    TextField("Title", text: $title)
-                    TextField("Slug", text: $slug, prompt: Text("optional"))
-                }
-                if let selectedDescriptor {
-                    Section("Destination") {
-                        LabeledContent("Collection", value: selectedDescriptor.collection ?? "")
+                    if let selectedCollection {
+                        Section("Destination") {
+                            LabeledContent("Collection", value: selectedCollection)
+                        }
                     }
                 }
                 if let errorMessage {
@@ -130,7 +134,7 @@ struct NewCollectionEntrySheet: View {
                     Button(isCreating ? "Creating…" : "Create") {
                         create()
                     }
-                    .disabled(isCreating || selectedDescriptor == nil || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(isCreating || selectedCollection == nil || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
@@ -140,8 +144,12 @@ struct NewCollectionEntrySheet: View {
         descriptors.first { $0.id == selectedID }
     }
 
+    private var selectedCollection: String? {
+        selectedDescriptor?.collection
+    }
+
     private func create() {
-        guard let descriptor = selectedDescriptor else { return }
+        guard let descriptor = selectedDescriptor, selectedCollection != nil else { return }
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanSlug = slug.trimmingCharacters(in: .whitespacesAndNewlines)
         isCreating = true

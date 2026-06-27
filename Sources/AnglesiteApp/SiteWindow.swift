@@ -48,6 +48,7 @@ struct SiteWindow: View {
     private let contentIndexerStore: ContentIndexerStore
 
     private let integrationOps = IntegrationOperations.live()
+    private let contentTypeRegistry = ContentTypeRegistry()
 
     init(
         siteID: String?,
@@ -444,14 +445,13 @@ struct SiteWindow: View {
             }
         }
         .sheet(isPresented: $newPagePresented) {
-            NewPageSheet(siteName: site.name) { title, route, template in
+            NewPageSheet { title, route, template in
                 await createPage(title: title, route: route, template: template)
             }
         }
         .sheet(isPresented: $newCollectionPresented) {
             NewCollectionEntrySheet(
-                siteName: site.name,
-                descriptors: ContentTypeRegistry().all.filter { $0.collection != nil }
+                descriptors: contentTypeRegistry.all.filter { $0.collection != nil }
             ) { title, slug, descriptor in
                 await createCollectionEntry(title: title, slug: slug, descriptor: descriptor)
             }

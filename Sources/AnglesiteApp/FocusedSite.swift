@@ -23,9 +23,11 @@ extension FocusedValues {
     }
 }
 
-/// Must be `Commands` (not `App`) — `@FocusedValue` only tracks scene focus inside a `View`/`Commands` node.
+/// Must be `Commands` (not `App`) so the focused scene values can flow into the menu state.
 struct NewContentCommands: Commands {
     @Environment(\.openWindow) private var openWindow
+    // SwiftUI exposes `.focusedSceneValue(...)` as the publishing modifier; command readers still
+    // use `@FocusedValue`. There is no `@FocusedSceneValue` property wrapper in the macOS 27 SDK.
     @FocusedValue(\.newContentActions) private var focusedActions
 
     var body: some Commands {
