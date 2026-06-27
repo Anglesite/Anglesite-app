@@ -37,11 +37,12 @@ struct NewContentCommands: Commands {
                     openWindow(id: "sites")
                     WindowRouter.shared.requestNewSite()
                 }
-                .keyboardShortcut("n")
+                .keyboardShortcut("n", modifiers: [.command, .shift])
 
                 Button("Page…") {
                     focusedActions?.newPage()
                 }
+                .keyboardShortcut("n")
                 .disabled(focusedActions == nil)
 
                 Button("Collection…") {

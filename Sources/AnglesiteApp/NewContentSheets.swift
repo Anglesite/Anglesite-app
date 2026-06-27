@@ -2,11 +2,13 @@ import SwiftUI
 import AnglesiteCore
 
 struct NewPageSheet: View {
+    let baseURLPrefix: String
     let onCreate: (String, String?, ContentScaffold.PageTemplate) async -> ContentCreateResult
 
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var route = ""
+    @State private var routeFollowsTitle = true
     @State private var template = ContentScaffold.PageTemplate.standard
     @State private var isCreating = false
     @State private var errorMessage: String?
@@ -16,7 +18,22 @@ struct NewPageSheet: View {
             Form {
                 Section("Page") {
                     TextField("Title", text: $title)
-                    TextField("Route", text: $route, prompt: Text("about/team"))
+                    HStack {
+                        Text("URL")
+                        Spacer(minLength: 16)
+                        HStack(spacing: 0) {
+                            Text(baseURLPrefix)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            TextField("Route", text: $route, prompt: Text(routePrompt))
+                                .labelsHidden()
+                                .multilineTextAlignment(.trailing)
+                                .textFieldStyle(.plain)
+                                .frame(width: routeFieldWidth, alignment: .trailing)
+                            Text("/")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 Section("Template") {
                     Picker("Template", selection: $template) {
@@ -34,6 +51,14 @@ struct NewPageSheet: View {
             .formStyle(.grouped)
             .frame(minWidth: 420, minHeight: 250)
             .navigationTitle("New Page")
+            .onChange(of: title) { _, _ in
+                if routeFollowsTitle {
+                    route = defaultRoute
+                }
+            }
+            .onChange(of: route) { _, newValue in
+                routeFollowsTitle = newValue == defaultRoute
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -47,6 +72,25 @@ struct NewPageSheet: View {
                 }
             }
         }
+    }
+
+    private var defaultRoute: String {
+        ContentScaffold.slugify(title.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private var routePrompt: String {
+        defaultRoute.isEmpty ? "my-new-webpage" : defaultRoute
+    }
+
+    private var routeFieldWidth: CGFloat {
+        let characterWidth: CGFloat = 7.5
+        let padding: CGFloat = 2
+        let measured = CGFloat(max(routeTextForSizing.count, 1)) * characterWidth + padding
+        return min(max(measured, 40), 280)
+    }
+
+    private var routeTextForSizing: String {
+        route.isEmpty ? routePrompt : route
     }
 
     private func create() {
