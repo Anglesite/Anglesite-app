@@ -84,7 +84,7 @@ struct ContentScaffoldTests {
 
         let review = try #require(registry.descriptor(id: "review"))
         let reviewOut = ContentScaffold.renderEntry(descriptor: review, title: "Widget", now: now)
-        #expect(reviewOut.contains("itemReviewed: \"\"")) // plain .string, not the name/title special case
+        #expect(reviewOut.contains("itemReviewed: \"Widget\"")) // itemReviewed is title-like (#386)
         #expect(reviewOut.contains("rating: 0"))
         #expect(reviewOut.contains("publishDate: 1970-01-01T00:00:00.000Z"))
     }
