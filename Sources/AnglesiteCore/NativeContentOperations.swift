@@ -104,15 +104,22 @@ public struct NativeContentOperations: ContentOperationsService {
         return .created(filePath: relPath, identifier: finalSlug)
     }
 
+    /// `ContentOperationsService` witness: derive the slug from `title` alone. Mirrors the plugin's
+    /// `create_content` MCP tool, which takes only `{ type, title }`.
+    public func createTyped(siteID: String, typeID: String, title: String, onProgress: ProgressHandler? = nil) async -> ContentCreateResult {
+        await createTyped(siteID: siteID, typeID: typeID, title: title, slug: nil, onProgress: onProgress)
+    }
+
     /// Create a typed content entry (V-1.2). Looks the type up in `registry`, derives a slug from
-    /// `title`, renders frontmatter via `ContentScaffold.renderEntry`, writes it, and commits —
+    /// `slug ?? title`, renders frontmatter via `ContentScaffold.renderEntry`, writes it, and commits —
     /// the same write/commit path as `createPost`. Collection-stored types only; page-stored types
-    /// (e.g. `businessProfile`) are #345.
+    /// (e.g. `businessProfile`) are #345. The explicit-`slug` overload is the native path's superset
+    /// over the MCP witness (SiteWindow's per-type editor passes a caller-chosen slug).
     public func createTyped(
         siteID: String,
         typeID: String,
         title: String,
-        slug: String? = nil,
+        slug: String?,
         registry: ContentTypeRegistry = ContentTypeRegistry(),
         onProgress: ProgressHandler? = nil
     ) async -> ContentCreateResult {
