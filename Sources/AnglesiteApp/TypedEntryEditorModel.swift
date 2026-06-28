@@ -11,7 +11,7 @@ import AnglesiteCore
 /// All disk IO runs off the main actor.
 @MainActor
 @Observable
-final class TypedEntryEditorModel {
+final class TypedEntryEditorModel: InspectorEditorModel {
     let file: FileRef
     let descriptor: ContentTypeDescriptor
     private let sourceDirectory: URL
