@@ -3,10 +3,16 @@ import Foundation
 /// A parsed frontmatter scalar/array value. Mirrors the `string | boolean | string[]` union the
 /// Node `parseFrontmatter` returns — the distinction matters to the scanner (`draft === true`
 /// wants a real boolean; `Array.isArray(tags)` wants a real array).
+///
+/// `.number` is a write-only case: `Frontmatter.parse` never produces it (a numeric scalar parses
+/// as `.string`), but the editor uses it via `FrontmatterDocument.set` so a `number`-kind field
+/// serializes **unquoted** (`rating: 4`, not `rating: "4"`). Quoting a number would make YAML read
+/// it as a string and fail a content collection's `z.number()` schema.
 public enum FrontmatterValue: Equatable, Sendable {
     case string(String)
     case bool(Bool)
     case array([String])
+    case number(Double)
 }
 
 /// Native port of `server/content-frontmatter.mjs` (Bucket 1, #275).
@@ -78,7 +84,7 @@ public enum Frontmatter {
 
     /// Split `key: value` where key is `[A-Za-z0-9_-]+`. Value is right-trimmed of surrounding
     /// whitespace (`\s*(.*)` in the Node regex, then `.trim()`).
-    private static func splitKeyValue(_ line: String) -> (key: String, value: String)? {
+    static func splitKeyValue(_ line: String) -> (key: String, value: String)? {
         guard let colon = line.firstIndex(of: ":") else { return nil }
         let key = String(line[line.startIndex..<colon])
         guard !key.isEmpty, key.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }) else {
@@ -89,7 +95,7 @@ public enum Frontmatter {
     }
 
     /// If `line` is a block-array item (`^\s*-\s+item`), return its trimmed item text.
-    private static func blockArrayItem(_ line: String) -> String? {
+    static func blockArrayItem(_ line: String) -> String? {
         let stripped = String(line.drop(while: { $0 == " " || $0 == "\t" }))
         guard stripped.hasPrefix("-") else { return nil }
         let afterDash = stripped.dropFirst()
@@ -98,7 +104,8 @@ public enum Frontmatter {
         return String(afterDash).trimmingCharacters(in: .whitespaces)
     }
 
-    private static func parseScalarOrArray(_ raw: String) -> FrontmatterValue {
+    /// Also consumed by `FrontmatterDocument` for consistent scalar/array parsing semantics.
+    static func parseScalarOrArray(_ raw: String) -> FrontmatterValue {
         if raw == "true" { return .bool(true) }
         if raw == "false" { return .bool(false) }
         if raw.hasPrefix("["), raw.hasSuffix("]") {
@@ -119,7 +126,7 @@ public enum Frontmatter {
     ///   `\t`→tab; unknown sequences keep both the backslash and the following character.
     /// - Single-quoted scalars: `''`→`'` (YAML single-quote doubling). No backslash processing.
     /// - Unquoted scalars: returned unchanged.
-    private static func unquote(_ s: String) -> String {
+    static func unquote(_ s: String) -> String {
         guard s.count >= 2 else { return s }
         if s.hasPrefix("\"") && s.hasSuffix("\"") {
             return decodeDoubleQuoted(String(s.dropFirst().dropLast()))
@@ -134,7 +141,7 @@ public enum Frontmatter {
     /// Single-pass YAML double-quoted escape decoder. Processes each character once so that
     /// `\\n` (two source chars) decodes to `\` + `n` (not newline), guarding the chained-replace
     /// pitfall.
-    private static func decodeDoubleQuoted(_ inner: String) -> String {
+    static func decodeDoubleQuoted(_ inner: String) -> String {
         var result = ""
         result.reserveCapacity(inner.unicodeScalars.count)
         var idx = inner.startIndex
@@ -147,6 +154,7 @@ public enum Frontmatter {
                     case "\"": result.append("\"")
                     case "\\": result.append("\\")
                     case "n":  result.append("\n")
+                    case "r":  result.append("\r")
                     case "t":  result.append("\t")
                     default:
                         // Unknown escape: keep backslash + char unchanged.

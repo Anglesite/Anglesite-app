@@ -112,6 +112,12 @@ struct SiteWindow: View {
     /// auto-save it and the Preview/Editor toggle keeps the buffer alive. Replaced when a different
     /// file opens; cleared on window close / site replay.
     @State private var activeEditor: ActiveEditor?
+    /// The right-hand inspector's current target (typed entry or plain page), or nil when the
+    /// selection has no editable metadata. Set by `applyNavigatorSelection`.
+    @State private var inspectorContext: InspectorContext?
+    /// Inspector visibility, persisted per window. Defaults to shown (auto-open); the toolbar toggle
+    /// flips it and the choice persists across selections.
+    @SceneStorage("siteInspector.shown") private var inspectorShown = true
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -143,6 +149,11 @@ struct SiteWindow: View {
             // Persist any unsaved edits before dropping the old site's editor on replay (#188 reuse).
             persistEditorBufferBestEffort()
             activeEditor = nil
+            // Overwrite unconditionally on teardown (save(), not flushBeforeLeaving): no conflict
+            // alert can be shown on a closing window, so a conflict-gated flush would silently drop
+            // the edits. Last-writer-wins, matching the .text/.plist teardown above.
+            if let model = inspectorContext?.model { Task { await model.save() } }
+            inspectorContext = nil
             mainPaneMode = .preview
         }
         .onChange(of: preview.state) { _, newState in
@@ -176,6 +187,11 @@ struct SiteWindow: View {
             // on a flush return value — just write the buffer best-effort, off the main actor.
             persistEditorBufferBestEffort()
             activeEditor = nil
+            // Overwrite unconditionally on teardown (save(), not flushBeforeLeaving): no conflict
+            // alert can be shown on a closing window, so a conflict-gated flush would silently drop
+            // the edits. Last-writer-wins, matching the .text/.plist teardown above.
+            if let model = inspectorContext?.model { Task { await model.save() } }
+            inspectorContext = nil
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()
             scopedURL = nil
@@ -235,9 +251,33 @@ struct SiteWindow: View {
             }
         .animation(.easeInOut(duration: 0.18), value: deploy.drawerPresented)
         .animation(.easeInOut(duration: 0.18), value: backup.drawerPresented)
+        .inspector(isPresented: Binding(
+            get: { inspectorShown && inspectorContext != nil },
+            set: { newValue in
+                // Only persist an explicit show/hide while there is something to inspect.
+                // When inspectorContext is nil the panel is auto-hidden; ignore that write so
+                // it doesn't clobber the remembered preference (the bug: inspector never returns).
+                if inspectorContext != nil { inspectorShown = newValue }
+            }
+        )) {
+            if let inspectorContext {
+                PageInspectorView(context: inspectorContext)
+                    .inspectorColumnWidth(min: 260, ideal: 300, max: 420)
+            }
+        }
         .navigationTitle(site.name)
         .navigationSubtitle(preview.readyURL?.absoluteString ?? "")
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    inspectorShown.toggle()
+                } label: {
+                    Label("Inspector", systemImage: "sidebar.right")
+                }
+                .disabled(inspectorContext == nil)
+                .help("Show or hide the page inspector")
+            }
+
             // Backup — lowest priority, first to collapse into the native overflow chevron.
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -521,6 +561,14 @@ struct SiteWindow: View {
         }
     }
 
+    /// Flush the inspector's editor before changing selection or tearing down — autosaves a dirty
+    /// buffer, returns false (and the model raises its conflict alert) on an external conflict so the
+    /// caller aborts the switch. Safe when no inspector is active.
+    private func leaveCurrentInspector() async -> Bool {
+        guard let model = inspectorContext?.model else { return true }
+        return await model.flushBeforeLeaving()
+    }
+
     /// Best-effort off-main save of the open editor's buffer when the editor is torn down (window
     /// close or site replay), where no conflict dialog can be shown. Consistent with the
     /// auto-save-on-leave model; last-writer-wins on the rare teardown-time external conflict.
@@ -658,13 +706,12 @@ struct SiteWindow: View {
         switch target {
         case .route(let route):
             Task {
-                guard await leaveCurrentEditor() else { return }   // abort if a conflict needs resolving
+                guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+                // Content entry → preview in the center; its metadata in the inspector.
+                activeEditor = nil
                 mainPaneMode = .preview
-                if route.isEmpty || route == "/" {
-                    preview.clearRoute()
-                } else {
-                    preview.navigate(toRoute: route)
-                }
+                if route.isEmpty || route == "/" { preview.clearRoute() } else { preview.navigate(toRoute: route) }
+                inspectorContext = await makeInspectorContext(forNavigatorID: id)
             }
         case .file(let file):
             if activeEditorFile?.id == file.id {
@@ -672,7 +719,8 @@ struct SiteWindow: View {
                 return
             }
             Task {
-                guard await leaveCurrentEditor() else { return }   // flush the previous file first
+                guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+                inspectorContext = nil   // files (components/styles/metadata) have no page inspector
                 switch EditorKind.resolve(for: file) {
                 case .text:
                     activeEditor = .text(FileEditorModel(file: file))
@@ -686,6 +734,37 @@ struct SiteWindow: View {
                 mainPaneMode = .editor(file)
             }
         }
+    }
+
+    /// Build the inspector context for a content navigator id: the typed descriptor form when the
+    /// file resolves to a content type, the plain title/description form for a frontmatter-bearing
+    /// markdown page, or nil (plain `.astro`/other → preview only, no inspector).
+    private func makeInspectorContext(forNavigatorID id: String) async -> InspectorContext? {
+        guard let source = site?.sourceDirectory else { return nil }
+        let relPath: String
+        let group: FileGroup
+        let displayName: String
+        if let page = await contentGraph.page(id: id) {
+            relPath = page.filePath; group = .pages; displayName = page.title ?? page.route
+        } else if let post = await contentGraph.post(id: id) {
+            relPath = post.filePath; group = .posts; displayName = post.title
+        } else {
+            return nil
+        }
+        let url = source.appendingPathComponent(relPath)
+        let file = FileRef(url: url, group: group, name: displayName)
+        if let descriptor = ContentTypeResolver.descriptor(forRelativePath: relPath) {
+            return .typed(TypedEntryEditorModel(file: file, descriptor: descriptor, sourceDirectory: source))
+        }
+        if isFrontmatterPage(relPath) {
+            return .page(PageMetadataModel(file: file, sourceDirectory: source))
+        }
+        return nil   // plain .astro / other → preview only
+    }
+
+    private func isFrontmatterPage(_ relPath: String) -> Bool {
+        let ext = (relPath as NSString).pathExtension.lowercased()
+        return ext == "md" || ext == "mdx" || ext == "markdown"
     }
 
     private var healthAssistantPrompt: String {
