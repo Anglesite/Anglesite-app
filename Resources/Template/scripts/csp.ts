@@ -61,16 +61,23 @@ export function buildCSP(configContent: string): string {
 /** Compose the full public/_headers file body. */
 export function buildHeaders(configContent: string): string {
   const csp = buildCSP(configContent);
+  // Only the exact (case-insensitive) string "true" enables preload — submission to
+  // the browser preload lists is hard to reverse, so "1"/"yes"/"on" deliberately do not.
   const hstsPreload =
     (readConfigFromString(configContent, "HSTS_PRELOAD") ?? "").trim().toLowerCase() === "true";
   const hsts = `max-age=31536000; includeSubDomains${hstsPreload ? "; preload" : ""}`;
+  // COOP: same-origin-allow-popups (not same-origin) preserves window.opener for
+  // popups the site itself opens — OAuth sign-in, Stripe/PayPal checkout — while
+  // still isolating attacker-opened windows.
+  // CORP: same-site (not same-origin) keeps cross-origin (cross-site) isolation but
+  // lets same-site subdomains load shared assets (e.g. a logo on blog.example.com).
   return `/*
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()
-  Cross-Origin-Opener-Policy: same-origin
-  Cross-Origin-Resource-Policy: same-origin
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  Cross-Origin-Resource-Policy: same-site
   Strict-Transport-Security: ${hsts}
   Content-Security-Policy: ${csp}
   Cache-Control: public, max-age=0, must-revalidate

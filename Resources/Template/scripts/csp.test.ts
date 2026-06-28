@@ -49,8 +49,8 @@ test("buildHeaders: includes security headers, CSP, and astro caching", () => {
 
 test("buildHeaders: includes cross-origin isolation headers", () => {
   const out = buildHeaders("");
-  assert.match(out, /Cross-Origin-Opener-Policy: same-origin/);
-  assert.match(out, /Cross-Origin-Resource-Policy: same-origin/);
+  assert.match(out, /Cross-Origin-Opener-Policy: same-origin-allow-popups\n/);
+  assert.match(out, /Cross-Origin-Resource-Policy: same-site\n/);
 });
 
 test("buildHeaders: HSTS present without preload by default", () => {
@@ -62,6 +62,20 @@ test("buildHeaders: HSTS present without preload by default", () => {
 test("buildHeaders: HSTS_PRELOAD=true appends preload", () => {
   const out = buildHeaders("HSTS_PRELOAD=true");
   assert.match(out, /Strict-Transport-Security: max-age=31536000; includeSubDomains; preload\n/);
+});
+
+test("buildHeaders: near-true HSTS_PRELOAD values do not enable preload", () => {
+  for (const v of ["yes", "1", "on", "TRUE "]) {
+    // "TRUE " (trailing space) trims+lowercases to "true" — so only it should opt in.
+    const out = buildHeaders(`HSTS_PRELOAD=${v}`);
+    const hasPreload = /Strict-Transport-Security:[^\n]*preload/.test(out);
+    assert.equal(hasPreload, v.trim().toLowerCase() === "true", `value=${JSON.stringify(v)}`);
+  }
+});
+
+test("buildCSP: upgrade-insecure-requests survives custom SCRIPT_ALLOW config", () => {
+  const csp = buildCSP("SCRIPT_ALLOW=js.stripe.com");
+  assert.match(csp, /upgrade-insecure-requests$/);
 });
 
 test("committed public/_headers is byte-identical to buildHeaders(\"\")", () => {
