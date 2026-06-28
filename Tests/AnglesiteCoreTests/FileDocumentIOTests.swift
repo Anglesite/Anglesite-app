@@ -59,4 +59,51 @@ struct FileDocumentIOTests {
             at: url, lastKnownModificationDate: loaded.modificationDate, bufferIsDirty: true)
         #expect(change == .conflict("b"))
     }
+
+    @Test("relativePath strips the root prefix and leading slash")
+    func relativePathUnderRoot() {
+        let root = URL(fileURLWithPath: "/sites/Foo/Source", isDirectory: true)
+        let file = URL(fileURLWithPath: "/sites/Foo/Source/src/pages/about.md")
+        #expect(FileDocumentIO.relativePath(of: file, under: root) == "src/pages/about.md")
+    }
+
+    @Test("relativePath handles a file directly in the root")
+    func relativePathAtRoot() {
+        let root = URL(fileURLWithPath: "/sites/Foo/Source", isDirectory: true)
+        let file = URL(fileURLWithPath: "/sites/Foo/Source/index.md")
+        #expect(FileDocumentIO.relativePath(of: file, under: root) == "index.md")
+    }
+
+    @Test("relativePath normalizes . and .. before comparing")
+    func relativePathNormalizes() {
+        let root = URL(fileURLWithPath: "/sites/Foo/Source", isDirectory: true)
+        let file = URL(fileURLWithPath: "/sites/Foo/Source/./src/../src/pages/post.md")
+        #expect(FileDocumentIO.relativePath(of: file, under: root) == "src/pages/post.md")
+    }
+
+    @Test("relativePath falls back to the bare filename when the file is not under root")
+    func relativePathNotUnderRoot() {
+        let root = URL(fileURLWithPath: "/sites/Foo/Source", isDirectory: true)
+        let file = URL(fileURLWithPath: "/elsewhere/stray.md")
+        #expect(FileDocumentIO.relativePath(of: file, under: root) == "stray.md")
+    }
+
+    @Test("relativePath does not match a sibling directory with a shared prefix")
+    func relativePathSiblingDir() {
+        let root = URL(fileURLWithPath: "/sites/Foo/Source", isDirectory: true)
+        let file = URL(fileURLWithPath: "/sites/Foo/SourceBackup/file.md")
+        #expect(FileDocumentIO.relativePath(of: file, under: root) == "file.md")
+    }
+
+    @Test("freshModificationDate returns the on-disk mtime, nil for a missing file")
+    func freshModificationDateReadsMtime() async throws {
+        let url = try tempFile("x"); defer { try? FileManager.default.removeItem(at: url) }
+        let mtime = await FileDocumentIO.freshModificationDate(of: url)
+        #expect(mtime != nil)
+
+        let missing = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("absent-\(UUID().uuidString).txt")
+        let none = await FileDocumentIO.freshModificationDate(of: missing)
+        #expect(none == nil)
+    }
 }

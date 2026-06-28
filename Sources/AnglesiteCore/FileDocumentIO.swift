@@ -1,9 +1,11 @@
 import Foundation
+import os
 
 /// Stateless file IO for the navigator's inline editor, plus the external-change decision.
 /// The App view owns the text buffer + dirty flag; this type only touches disk and reports
 /// what changed. Keeping it stateless makes the reconcile rules unit-testable without UI.
 public enum FileDocumentIO {
+    private static let log = Logger(subsystem: "io.dwk.anglesite", category: "FileDocumentIO")
     public struct Loaded: Sendable, Equatable {
         public let contents: String
         public let modificationDate: Date?
@@ -51,5 +53,28 @@ public enum FileDocumentIO {
 
     private static func modificationDate(of url: URL, fileManager: FileManager) throws -> Date? {
         try fileManager.attributesOfItem(atPath: url.path(percentEncoded: false))[.modificationDate] as? Date
+    }
+
+    /// Project-relative path of `url` beneath `root` (e.g. the path passed to `git add`/commit).
+    /// Compares against `root` plus a trailing slash so a sibling dir that merely shares the root's
+    /// name as a prefix (e.g. `…/SourceBackup` under root `…/Source`) is not mistaken for a child.
+    /// When `url` is not under `root` — a case the editors don't expect, since every editable file
+    /// lives inside the site's `Source/` dir — it logs a warning and falls back to the bare filename
+    /// so a misrouted commit stays scoped to one file rather than throwing.
+    public static func relativePath(of url: URL, under root: URL) -> String {
+        let u = url.standardizedFileURL.path(percentEncoded: false)
+        let r = root.standardizedFileURL.path(percentEncoded: false)
+        let rSlash = r.hasSuffix("/") ? r : r + "/"
+        if u.hasPrefix(rSlash) { return String(u.dropFirst(rSlash.count)) }
+        if u == r { return "" }  // url IS the root directory
+        log.warning("relativePath: \(u, privacy: .public) is not under root \(r, privacy: .public); falling back to filename")
+        return url.lastPathComponent
+    }
+
+    /// On-disk modification date of `url`, read off the calling actor solely from the file's
+    /// attributes (no contents loaded), returning `nil` on any IO error. Used by the editors to
+    /// refresh `lastModified` without blocking the main actor on a file read.
+    public static func freshModificationDate(of url: URL) async -> Date? {
+        try? await Task.detached(priority: .userInitiated) { try modificationDate(of: url, fileManager: .default) }.value
     }
 }
