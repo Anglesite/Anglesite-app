@@ -148,6 +148,7 @@ public enum Frontmatter {
                     case "\"": result.append("\"")
                     case "\\": result.append("\\")
                     case "n":  result.append("\n")
+                    case "r":  result.append("\r")
                     case "t":  result.append("\t")
                     default:
                         // Unknown escape: keep backslash + char unchanged.

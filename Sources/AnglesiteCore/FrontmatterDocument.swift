@@ -26,11 +26,21 @@ public struct FrontmatterDocument: Equatable, Sendable {
 
     private var segments: [Segment]
     /// Index into `segments` by key, for O(1) get/set. Only key segments are listed.
+    ///
+    /// Known limitation: if a malformed source has the **same key twice**, `indexByKey` points at
+    /// the last occurrence (so get/set address it), but both segments remain in `segments`. An
+    /// unedited round-trip still reproduces the duplicate verbatim (identity holds); editing that
+    /// key re-renders only the last segment, leaving the first with its old value. Duplicate
+    /// top-level keys are already invalid YAML, so this is accepted rather than de-duplicated.
     private var indexByKey: [String: Int]
     /// Text after the closing `---` fence, verbatim (internally newline = "\n").
     public var body: String
     private let newline: String
     private let hadFrontmatter: Bool
+    /// Whether the source had anything (a body, or just a terminal newline) after the closing
+    /// `---` fence. Distinguishes `"---\n…\n---"` (no trailing newline) from `"---\n…\n---\n"`, so
+    /// `serialized()` doesn't inject a newline the source never had.
+    private let hasBodySection: Bool
 
     public var keys: [String] { segments.compactMap(\.key) }
 
@@ -61,7 +71,7 @@ public struct FrontmatterDocument: Equatable, Sendable {
         }
         lines.append("---")
         var out = lines.joined(separator: "\n")
-        if !body.isEmpty || hadFrontmatter { out += "\n" + body }
+        if hasBodySection { out += "\n" + body }
         return out.replacingOccurrences(of: "\n", with: newline)
     }
 
@@ -73,7 +83,7 @@ public struct FrontmatterDocument: Equatable, Sendable {
 
         guard normalized.hasPrefix("---\n") else {
             return FrontmatterDocument(segments: [], indexByKey: [:], body: normalized,
-                                       newline: newline, hadFrontmatter: false)
+                                       newline: newline, hadFrontmatter: false, hasBodySection: false)
         }
         let all = normalized.components(separatedBy: "\n")
         // all[0] == "---"; find the closing fence.
@@ -82,8 +92,11 @@ public struct FrontmatterDocument: Equatable, Sendable {
         while i < all.count { if all[i] == "---" { close = i; break }; i += 1 }
         guard close >= 0 else {
             return FrontmatterDocument(segments: [], indexByKey: [:], body: normalized,
-                                       newline: newline, hadFrontmatter: false)
+                                       newline: newline, hadFrontmatter: false, hasBodySection: false)
         }
+        // Anything after the closing fence (even just a terminal newline → one trailing "") means
+        // the source had a body section to reproduce.
+        let hasBodySection = (close + 1) < all.count
         let block = Array(all[1..<close])
         // body = everything after the closing fence, rejoined (the leading separator after `---`
         // is represented by the first element being "").
@@ -129,7 +142,7 @@ public struct FrontmatterDocument: Equatable, Sendable {
             segments.append(Segment(key: key, value: value, verbatim: verbatim))
         }
         return FrontmatterDocument(segments: segments, indexByKey: indexByKey, body: body,
-                                   newline: newline, hadFrontmatter: true)
+                                   newline: newline, hadFrontmatter: true, hasBodySection: hasBodySection)
     }
 
     // MARK: Render (mirrors ContentScaffold: double-quoted scalars, `[]` empty arrays, block lists)
@@ -139,6 +152,9 @@ public struct FrontmatterDocument: Equatable, Sendable {
         case .string(let s):
             return "\(key): \"\(escape(s))\""
         case .bool(let b):
+            // Bool fields canonicalize to true/false on write. YAML also accepts yes/no/on/off/1/0,
+            // but we intentionally normalize here (matching ContentScaffold) — an edited bool loses
+            // a non-canonical original spelling. Verbatim is still preserved for *unedited* bools.
             return "\(key): \(b)"
         case .array(let items):
             if items.isEmpty { return "\(key): []" }
@@ -146,7 +162,14 @@ public struct FrontmatterDocument: Equatable, Sendable {
         }
     }
 
+    /// Escapes a scalar for a double-quoted YAML value. Order matters: backslash first, then the
+    /// quote, then control characters — a literal newline in a `text`-kind field (e.g. a pasted
+    /// multi-line description) must become `\n`, or it would break `---` fence detection on
+    /// re-parse. `Frontmatter.unquote`'s decoder reverses each of these.
     private static func escape(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "\"", with: "\\\"")
+         .replacingOccurrences(of: "\n", with: "\\n")
+         .replacingOccurrences(of: "\r", with: "\\r")
     }
 }

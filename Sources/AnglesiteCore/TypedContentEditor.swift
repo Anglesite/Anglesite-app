@@ -36,7 +36,12 @@ public enum TypedContentEditor {
     }
 
     public static func read(_ contents: String, descriptor: ContentTypeDescriptor) -> Values {
-        let doc = FrontmatterDocument.parse(contents)
+        read(from: FrontmatterDocument.parse(contents), descriptor: descriptor)
+    }
+
+    /// Reads field values from an already-parsed document. `write` reuses this to derive the current
+    /// values without re-parsing `contents` a second time.
+    private static func read(from doc: FrontmatterDocument, descriptor: ContentTypeDescriptor) -> Values {
         var out = Values()
         for field in descriptor.fields {
             if field.kind == .markdown {
@@ -54,7 +59,11 @@ public enum TypedContentEditor {
 
     public static func write(_ values: Values, into contents: String, descriptor: ContentTypeDescriptor) -> String {
         var doc = FrontmatterDocument.parse(contents)
-        let current = read(contents, descriptor: descriptor)
+        // Derive `current` from the already-parsed `doc` (no second parse). Comparison stays at the
+        // decoded `FieldValue` level on purpose: it preserves an unchanged field verbatim even when
+        // its on-disk form isn't canonical (e.g. a date-only or no-fractional-seconds `publishDate`),
+        // which a re-encoded string comparison would reformat.
+        let current = read(from: doc, descriptor: descriptor)
         for field in descriptor.fields {
             guard let newValue = values[field.name], newValue != current[field.name] else { continue }
             if field.kind == .markdown {

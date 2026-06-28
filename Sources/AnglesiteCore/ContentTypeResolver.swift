@@ -4,9 +4,13 @@ import Foundation
 /// the form editor. Collection entries are matched by their `src/content/<collection>/` directory;
 /// page-stored singletons by a fixed path map. Pure, no I/O.
 public enum ContentTypeResolver {
-    /// Canonical singleton page paths for `.page`-stored types. `businessProfile` is shipped in the
-    /// template at `src/pages/about.md` (this PR; the editor-relevant slice of #388).
-    static let pagePaths: [String: String] = ["businessProfile": "src/pages/about.md"]
+    /// Canonical singleton paths for `.page`-stored types → their type id. Keyed by path (the lookup
+    /// direction) and lowercased for case-insensitive matching on case-insensitive APFS volumes.
+    /// `businessProfile` ships in the template at `src/pages/about.md` (the editor-relevant slice of
+    /// #388). NOTE: this resolves the singleton by *path*, so renaming `about.md` drops typed-editor
+    /// access — acceptable for a fixed singleton; revisit with a `type:` frontmatter marker if pages
+    /// become user-renamable.
+    static let pageTypesByPath: [String: String] = ["src/pages/about.md": "businessProfile"]
 
     public static func descriptor(
         forRelativePath path: String,
@@ -21,10 +25,8 @@ public enum ContentTypeResolver {
             if let match = registry.all.first(where: { $0.collection == collection }) { return match }
         }
 
-        // 2. Page singleton by exact path.
-        for (id, pagePath) in pagePaths where normalized == pagePath {
-            return registry.descriptor(id: id)
-        }
+        // 2. Page singleton by exact (case-insensitive) path.
+        if let id = pageTypesByPath[normalized] { return registry.descriptor(id: id) }
         return nil
     }
 
@@ -32,6 +34,8 @@ public enum ContentTypeResolver {
         var p = path.replacingOccurrences(of: "\\", with: "/")
         while p.hasPrefix("./") { p.removeFirst(2) }
         while p.hasPrefix("/") { p.removeFirst() }
-        return p
+        // Lowercase so a case-insensitive APFS volume returning `src/pages/About.md` still resolves.
+        // Collection names and the singleton paths are all lowercase by convention.
+        return p.lowercased()
     }
 }

@@ -82,4 +82,50 @@ struct FrontmatterDocumentTests {
         let src = "---\ntitle: \"T\"\n# a comment\n\ndraft: false\n---\nB\n"
         #expect(FrontmatterDocument.parse(src).serialized() == src)
     }
+
+    @Test("frontmatter-only source with no trailing newline round-trips without injecting one")
+    func noTrailingNewlineIdentity() {
+        let src = "---\ntitle: \"T\"\n---"          // no body, no terminal newline
+        #expect(FrontmatterDocument.parse(src).serialized() == src)
+    }
+
+    @Test("frontmatter-only source with a trailing newline round-trips")
+    func trailingNewlineIdentity() {
+        let src = "---\ntitle: \"T\"\n---\n"        // terminal newline, still no body
+        #expect(FrontmatterDocument.parse(src).serialized() == src)
+    }
+
+    @Test("string value containing a double-quote round-trips")
+    func roundTripsDoubleQuote() {
+        var doc = FrontmatterDocument.parse("---\ntitle: \"x\"\n---\n")
+        doc.set(.string("a \"quoted\" b"), for: "title")
+        let out = doc.serialized()
+        #expect(FrontmatterDocument.parse(out).value(for: "title") == .string("a \"quoted\" b"))
+    }
+
+    @Test("string value containing a newline round-trips (escape)")
+    func roundTripsNewline() {
+        var doc = FrontmatterDocument.parse("---\ndescription: \"x\"\n---\n\nBody.\n")
+        doc.set(.string("line one\nline two"), for: "description")
+        let out = doc.serialized()
+        // The embedded newline must be escaped, not emitted literally (which would break the fence).
+        #expect(FrontmatterDocument.parse(out).value(for: "description") == .string("line one\nline two"))
+        #expect(out.contains("Body."))   // body intact, frontmatter still a single block
+    }
+
+    @Test("string value containing a bare colon round-trips (split on first colon only)")
+    func roundTripsBareColon() {
+        var doc = FrontmatterDocument.parse("---\nurl: \"x\"\n---\n")
+        doc.set(.string("https://example.com"), for: "url")
+        let out = doc.serialized()
+        #expect(FrontmatterDocument.parse(out).value(for: "url") == .string("https://example.com"))
+    }
+
+    @Test("duplicate top-level key survives an unedited round-trip verbatim")
+    func duplicateKeyIdentity() {
+        let src = "---\ntitle: \"A\"\ntitle: \"B\"\n---\nB\n"
+        let doc = FrontmatterDocument.parse(src)
+        #expect(doc.serialized() == src)                  // both occurrences preserved
+        #expect(doc.value(for: "title") == .string("B"))  // get addresses the last
+    }
 }

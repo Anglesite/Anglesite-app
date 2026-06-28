@@ -18,6 +18,8 @@ final class PageMetadataModel: InspectorEditorModel {
     private var savedMetadata = PageMetadata(title: "", description: "")
     private var contents = ""
     private var lastModified: Date?
+    /// Guards against a concurrent second `save()` capturing a stale `contents` base.
+    private var isSaving = false
     private(set) var loadError: String?
     private(set) var isLoading = false
     var conflictDiskContents: String?
@@ -48,7 +50,9 @@ final class PageMetadataModel: InspectorEditorModel {
 
     @discardableResult
     func save() async -> Bool {
-        guard isDirty else { return true }
+        guard isDirty, !isSaving else { return true }
+        isSaving = true
+        defer { isSaving = false }
         let newContents = PageMetadataEditor.write(metadata, into: contents)
         let url = file.url
         do {
@@ -104,11 +108,15 @@ final class PageMetadataModel: InspectorEditorModel {
         conflictDiskContents = nil
     }
 
+    // `[weak self]` — see the note in TypedEntryEditorModel: view-lifetime bindings on a model that
+    // is replaced per selection.
     func titleBinding() -> Binding<String> {
-        Binding(get: { self.metadata.title }, set: { self.metadata.title = $0 })
+        Binding(get: { [weak self] in self?.metadata.title ?? "" },
+                set: { [weak self] in self?.metadata.title = $0 })
     }
     func descriptionBinding() -> Binding<String> {
-        Binding(get: { self.metadata.description }, set: { self.metadata.description = $0 })
+        Binding(get: { [weak self] in self?.metadata.description ?? "" },
+                set: { [weak self] in self?.metadata.description = $0 })
     }
 
     private func adopt(_ text: String) {

@@ -149,7 +149,10 @@ struct SiteWindow: View {
             // Persist any unsaved edits before dropping the old site's editor on replay (#188 reuse).
             persistEditorBufferBestEffort()
             activeEditor = nil
-            if let model = inspectorContext?.model { Task { await model.flushBeforeLeaving() } }
+            // Overwrite unconditionally on teardown (save(), not flushBeforeLeaving): no conflict
+            // alert can be shown on a closing window, so a conflict-gated flush would silently drop
+            // the edits. Last-writer-wins, matching the .text/.plist teardown above.
+            if let model = inspectorContext?.model { Task { await model.save() } }
             inspectorContext = nil
             mainPaneMode = .preview
         }
@@ -184,7 +187,10 @@ struct SiteWindow: View {
             // on a flush return value — just write the buffer best-effort, off the main actor.
             persistEditorBufferBestEffort()
             activeEditor = nil
-            if let model = inspectorContext?.model { Task { await model.flushBeforeLeaving() } }
+            // Overwrite unconditionally on teardown (save(), not flushBeforeLeaving): no conflict
+            // alert can be shown on a closing window, so a conflict-gated flush would silently drop
+            // the edits. Last-writer-wins, matching the .text/.plist teardown above.
+            if let model = inspectorContext?.model { Task { await model.save() } }
             inspectorContext = nil
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()

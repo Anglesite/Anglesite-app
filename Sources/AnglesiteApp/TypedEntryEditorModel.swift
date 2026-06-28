@@ -22,6 +22,9 @@ final class TypedEntryEditorModel: InspectorEditorModel {
     private var contents: String = ""               // last-loaded/saved file text (verbatim base)
     private var lastModified: Date?
     private var numberDrafts: [String: String] = [:]
+    /// Guards against a concurrent second `save()` capturing a stale `contents` base while an
+    /// earlier save is still in flight (e.g. ⌘S mash, or a teardown flush racing a save).
+    private var isSaving = false
     private(set) var loadError: String?
     private(set) var isLoading = false
     var conflictDiskContents: String?
@@ -55,7 +58,9 @@ final class TypedEntryEditorModel: InspectorEditorModel {
 
     @discardableResult
     func save() async -> Bool {
-        guard isDirty else { return true }
+        guard isDirty, !isSaving else { return true }
+        isSaving = true
+        defer { isSaving = false }
         let descriptor = self.descriptor
         let base = contents
         let edited = values
@@ -118,35 +123,46 @@ final class TypedEntryEditorModel: InspectorEditorModel {
 
     // MARK: Bindings used by the view
 
+    // Binding closures capture `self` weakly: SwiftUI holds a binding for the view's lifetime, and
+    // the model is replaced per selection — `[weak self]` avoids keeping a stale model alive and
+    // keeps the closures safe under Swift 6's non-isolated-closure checking.
     func textBinding(_ name: String) -> Binding<String> {
-        Binding(get: { if case .text(let s)? = self.values[name] { return s }; return "" },
-                set: { self.values[name] = .text($0) })
+        Binding(get: { [weak self] in if case .text(let s)? = self?.values[name] { return s }; return "" },
+                set: { [weak self] in self?.values[name] = .text($0) })
     }
     func boolBinding(_ name: String) -> Binding<Bool> {
-        Binding(get: { if case .flag(let b)? = self.values[name] { return b }; return false },
-                set: { self.values[name] = .flag($0) })
+        Binding(get: { [weak self] in if case .flag(let b)? = self?.values[name] { return b }; return false },
+                set: { [weak self] in self?.values[name] = .flag($0) })
     }
     func dateBinding(_ name: String) -> Binding<Date> {
-        Binding(get: { if case .date(let d?)? = self.values[name] { return d }; return Date(timeIntervalSince1970: 0) },
-                set: { self.values[name] = .date($0) })
+        Binding(get: { [weak self] in if case .date(let d?)? = self?.values[name] { return d }; return Date(timeIntervalSince1970: 0) },
+                set: { [weak self] in self?.values[name] = .date($0) })
     }
     func numberBinding(_ name: String) -> Binding<String> {
         Binding(
-            get: {
+            get: { [weak self] in
+                guard let self else { return "" }
                 if let draft = self.numberDrafts[name] { return draft }
                 if case .number(let n?)? = self.values[name] { return Self.displayNumber(n) }
                 return ""
             },
-            set: { raw in
+            set: { [weak self] raw in
+                guard let self else { return }
                 self.numberDrafts[name] = raw
                 let trimmed = raw.trimmingCharacters(in: .whitespaces)
-                self.values[name] = .number(trimmed.isEmpty ? nil : Double(trimmed))
+                // Only overwrite the stored value when the draft parses (or is cleared). A mid-edit
+                // unparseable draft like "3." must not clobber a previously valid number with nil.
+                if trimmed.isEmpty {
+                    self.values[name] = .number(nil)
+                } else if let parsed = Double(trimmed) {
+                    self.values[name] = .number(parsed)
+                }
             }
         )
     }
     func listBinding(_ name: String) -> Binding<[String]> {
-        Binding(get: { if case .list(let a)? = self.values[name] { return a }; return [] },
-                set: { self.values[name] = .list($0) })
+        Binding(get: { [weak self] in if case .list(let a)? = self?.values[name] { return a }; return [] },
+                set: { [weak self] in self?.values[name] = .list($0) })
     }
 
     // MARK: Private
