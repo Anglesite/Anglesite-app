@@ -49,6 +49,7 @@ extension AppIntentsTests {
                 "open-site": .init(sideEffect: .readOnly, requiresConfirmation: false, isCancellable: false, resultShape: .none),
                 "search-content": .init(sideEffect: .readOnly, requiresConfirmation: false, isCancellable: false, resultShape: .entities("ContentMatchEntity")),
                 "site-status": .init(sideEffect: .readOnly, requiresConfirmation: false, isCancellable: false, resultShape: .none),
+                "find-content-by-type": .init(sideEffect: .readOnly, requiresConfirmation: false, isCancellable: false, resultShape: .entities("PostEntity")),
                 "preview-site": .init(sideEffect: .readOnly, requiresConfirmation: false, isCancellable: false, resultShape: .none),
                 "add-page": .init(sideEffect: .createsContent, requiresConfirmation: false, isCancellable: true, resultShape: .entity("PageEntity")),
                 "add-post": .init(sideEffect: .createsContent, requiresConfirmation: false, isCancellable: true, resultShape: .entity("PostEntity")),

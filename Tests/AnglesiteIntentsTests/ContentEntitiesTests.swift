@@ -435,6 +435,18 @@ extension AppIntentsTests {
                 #expect(r.first?.siteID == AppIntentsTests.aSite)
             }
         }
+
+        @Test("PostEntity derives contentType display name from a known collection")
+        func postEntity_contentTypeFromKnownCollection() {
+            let entity = PostEntity(AppIntentsTests.gPost(collection: "events"))
+            #expect(entity.contentType == "Event")
+        }
+
+        @Test("PostEntity falls back to the raw collection for an unknown collection")
+        func postEntity_contentTypeUnknownCollectionFallsBack() {
+            let entity = PostEntity(AppIntentsTests.gPost(collection: "blog"))
+            #expect(entity.contentType == "blog")
+        }
     }
 
     @Suite("ImageEntityQuery")

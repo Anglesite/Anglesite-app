@@ -132,6 +132,9 @@ public struct ContentTypeDescriptor: Sendable, Equatable, Identifiable {
 public struct ContentTypeRegistry: Sendable, Equatable {
     private var byID: [String: ContentTypeDescriptor]
     private var order: [String]
+    /// collection name → type id, for `.collection`-stored types only. Built at insert time
+    /// so reverse lookups are O(1) and stay in sync with `byID`.
+    private var collectionToID: [String: String]
 
     /// Builds a registry from the given descriptors (default: the built-in catalog). Later
     /// descriptors with a duplicate `id` override earlier ones while keeping first-seen order —
@@ -139,16 +142,23 @@ public struct ContentTypeRegistry: Sendable, Equatable {
     public init(types: [ContentTypeDescriptor] = ContentTypeRegistry.builtIns) {
         byID = [:]
         order = []
+        collectionToID = [:]
         for descriptor in types { insert(descriptor) }
     }
 
     private mutating func insert(_ descriptor: ContentTypeDescriptor) {
         if byID[descriptor.id] == nil { order.append(descriptor.id) }
+        // A replaced descriptor may have changed collection; drop any stale reverse entry first.
+        if let old = byID[descriptor.id]?.collection { collectionToID.removeValue(forKey: old) }
         byID[descriptor.id] = descriptor
+        if let collection = descriptor.collection { collectionToID[collection] = descriptor.id }
     }
 
     /// Registers (or replaces) a content type. Replacing keeps the type's existing position in
-    /// `all`; a new type appends.
+    /// `all`; a new type appends. If two descriptors declare the *same* collection name (under
+    /// different ids), the later registration wins the `descriptor(forCollection:)` reverse lookup —
+    /// the same last-wins contract as duplicate ids. The built-in catalog has unique collection
+    /// names, so this only matters for custom types registered via this method.
     public mutating func register(_ descriptor: ContentTypeDescriptor) {
         insert(descriptor)
     }
@@ -156,6 +166,20 @@ public struct ContentTypeRegistry: Sendable, Equatable {
     public func descriptor(id: String) -> ContentTypeDescriptor? {
         byID[id]
     }
+
+    /// Reverse of `descriptor(id:)`: the `.collection`-stored type whose collection is `collection`.
+    public func descriptor(forCollection collection: String) -> ContentTypeDescriptor? {
+        guard let id = collectionToID[collection] else { return nil }
+        return byID[id]
+    }
+
+    /// Ids of the `.collection`-stored types, in registration order. Page-stored types are excluded.
+    public var collectionBackedTypeIDs: [String] {
+        order.compactMap { byID[$0] }.filter { $0.collection != nil }.map(\.id)
+    }
+
+    /// Shared built-in registry. Lets value-type consumers resolve types without rebuilding it.
+    public static let `default` = ContentTypeRegistry()
 
     /// All registered types in registration order.
     public var all: [ContentTypeDescriptor] {

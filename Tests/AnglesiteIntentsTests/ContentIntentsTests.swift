@@ -223,9 +223,49 @@ extension AppIntentsTests {
             #expect(withInput?.id == "\(AppIntentsTests.aSite):post:hello")
             #expect(withInput?.slug == "hello")
             #expect(withInput?.collection == "blog")          // input wins
+            #expect(withInput?.contentType == "blog")         // unknown collection falls back to raw name
             let parsed = AddPostIntent.createdPost(ok, siteID: AppIntentsTests.aSite, title: "Hello", collection: nil)
             #expect(parsed?.collection == "notes")            // parsed from filePath
+            #expect(parsed?.contentType == "Note")            // registry maps "notes" → "Note"
             #expect(AddPostIntent.createdPost(.failed(reason: "x"), siteID: AppIntentsTests.aSite, title: "Hello", collection: nil) == nil)
+        }
+
+        @Test("findByType dialog: singular/plural and empty")
+        func findByTypeDialog() {
+            #expect(ContentDialogs.findByType(typeName: "Event", count: 0) == "No events found.")
+            #expect(ContentDialogs.findByType(typeName: "Event", count: 1) == "Found 1 event.")
+            #expect(ContentDialogs.findByType(typeName: "Review", count: 3) == "Found 3 reviews.")
+        }
+
+        @Test("FindContentByTypeIntent.matches filters by type's collection, sorted, scoped to site")
+        func findByTypeMatches() async {
+            let graph = SiteContentGraph()
+            await graph.load(
+                siteID: AppIntentsTests.aSite,
+                pages: [],
+                posts: [
+                    AppIntentsTests.gPost(slug: "older", title: "Older", collection: "events",
+                                          modified: AppIntentsTests.t0),
+                    AppIntentsTests.gPost(slug: "newer", title: "Newer", collection: "events",
+                                          modified: AppIntentsTests.t0.addingTimeInterval(60)),
+                    AppIntentsTests.gPost(slug: "a-review", title: "A Review", collection: "reviews"),
+                ],
+                images: []
+            )
+            // A post of the same type on another site must not leak in.
+            await graph.upsertPost(AppIntentsTests.gPost(site: AppIntentsTests.bSite, slug: "b-evt",
+                                                         collection: "events"))
+
+            let results = await FindContentByTypeIntent.matches(
+                graph: graph, siteID: AppIntentsTests.aSite, type: .event)
+            // Only this site's events, newest first.
+            #expect(results.map(\.slug) == ["newer", "older"])
+            #expect(results.allSatisfy { $0.contentType == "Event" })
+
+            // A type with posts of other types present but none of its own → empty (not all posts).
+            let none = await FindContentByTypeIntent.matches(
+                graph: graph, siteID: AppIntentsTests.aSite, type: .like)
+            #expect(none.isEmpty)
         }
     }
 }

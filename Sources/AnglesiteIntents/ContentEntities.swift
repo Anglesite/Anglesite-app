@@ -98,6 +98,7 @@ public struct PostEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public let displayName: String   // title
     @Property(title: "Slug") public var slug: String
     @Property(title: "Collection") public var collection: String
+    @Property(title: "Type") public var contentType: String
     public let isDraft: Bool
     public let tags: [String]
     @Property(title: "Site") public var siteID: String
@@ -113,6 +114,13 @@ public struct PostEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
 
     public static let defaultQuery = PostEntityQuery()
 
+    /// Typed dimension (#351): map a post's collection back to its content type's display name via
+    /// the registry; fall back to the raw collection for custom/unknown collections. Shared by both
+    /// inits (and `AddPostIntent.createdPost`) so the derivation lives in exactly one place.
+    public static func contentTypeName(forCollection collection: String) -> String {
+        ContentTypeRegistry.default.descriptor(forCollection: collection)?.displayName ?? collection
+    }
+
     public init(_ post: SiteContentGraph.Post) {
         self.id = post.id
         self.displayName = post.title
@@ -121,10 +129,12 @@ public struct PostEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
         self.slug = post.slug
         self.collection = post.collection
         self.siteID = post.siteID
+        self.contentType = Self.contentTypeName(forCollection: post.collection)
     }
 
     public init(id: String, displayName: String, slug: String, collection: String,
-                siteID: String, isDraft: Bool = true, tags: [String] = []) {
+                siteID: String, isDraft: Bool = true, tags: [String] = [],
+                contentType: String = "") {
         self.id = id
         self.displayName = displayName
         self.isDraft = isDraft
@@ -132,6 +142,9 @@ public struct PostEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
         self.slug = slug
         self.collection = collection
         self.siteID = siteID
+        // A default-param can't reference `collection`, so derive when the caller omits it — this
+        // keeps the Spotlight "Type" attribute from being indexed blank.
+        self.contentType = contentType.isEmpty ? Self.contentTypeName(forCollection: collection) : contentType
     }
 }
 

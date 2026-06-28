@@ -6,7 +6,7 @@ import Foundation
 /// Coverage anchor for the Siri AI smoke matrix (#237).
 ///
 /// `docs/specs/2026-06-20-siri-smoke-matrix.md` documents the product-level acceptance matrix —
-/// the eight supported Siri workflows, their phrases, app states, and expected outcomes. A doc
+/// the nine supported Siri workflows, their phrases, app states, and expected outcomes. A doc
 /// can silently drift from the code; this suite pins the *deterministic* claims of that doc to the
 /// shipped intent / operation registry so the matrix can't go stale unnoticed:
 ///
@@ -49,6 +49,7 @@ extension AppIntentsTests {
             Workflow(label: "Deploy with confirmation", operationID: "deploy-site", sideEffect: .publishes, confirmsAtRuntime: true),
             Workflow(label: "Search content", operationID: "search-content", sideEffect: .readOnly, confirmsAtRuntime: false),
             Workflow(label: "Site status", operationID: "site-status", sideEffect: .readOnly, confirmsAtRuntime: false),
+            Workflow(label: "Find content by type", operationID: "find-content-by-type", sideEffect: .readOnly, confirmsAtRuntime: false),
             Workflow(label: "Add page", operationID: "add-page", sideEffect: .createsContent, confirmsAtRuntime: false),
             Workflow(label: "Add post", operationID: "add-post", sideEffect: .createsContent, confirmsAtRuntime: false),
             Workflow(label: "Preview a page", operationID: "preview-site", sideEffect: .readOnly, confirmsAtRuntime: false),
