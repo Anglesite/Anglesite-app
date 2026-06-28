@@ -61,6 +61,9 @@ export function buildCSP(configContent: string): string {
 /** Compose the full public/_headers file body. */
 export function buildHeaders(configContent: string): string {
   const csp = buildCSP(configContent);
+  const hstsPreload =
+    (readConfigFromString(configContent, "HSTS_PRELOAD") ?? "").trim().toLowerCase() === "true";
+  const hsts = `max-age=31536000; includeSubDomains${hstsPreload ? "; preload" : ""}`;
   return `/*
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
@@ -68,6 +71,7 @@ export function buildHeaders(configContent: string): string {
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Resource-Policy: same-origin
+  Strict-Transport-Security: ${hsts}
   Content-Security-Policy: ${csp}
   Cache-Control: public, max-age=0, must-revalidate
 

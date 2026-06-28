@@ -53,6 +53,17 @@ test("buildHeaders: includes cross-origin isolation headers", () => {
   assert.match(out, /Cross-Origin-Resource-Policy: same-origin/);
 });
 
+test("buildHeaders: HSTS present without preload by default", () => {
+  const out = buildHeaders("");
+  assert.match(out, /Strict-Transport-Security: max-age=31536000; includeSubDomains\n/);
+  assert.ok(!/Strict-Transport-Security:[^\n]*preload/.test(out));
+});
+
+test("buildHeaders: HSTS_PRELOAD=true appends preload", () => {
+  const out = buildHeaders("HSTS_PRELOAD=true");
+  assert.match(out, /Strict-Transport-Security: max-age=31536000; includeSubDomains; preload\n/);
+});
+
 test("committed public/_headers is byte-identical to buildHeaders(\"\")", () => {
   const committed = readFileSync(
     resolve(dirname(fileURLToPath(import.meta.url)), "../public/_headers"),
