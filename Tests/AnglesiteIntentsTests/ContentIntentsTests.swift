@@ -223,8 +223,10 @@ extension AppIntentsTests {
             #expect(withInput?.id == "\(AppIntentsTests.aSite):post:hello")
             #expect(withInput?.slug == "hello")
             #expect(withInput?.collection == "blog")          // input wins
+            #expect(withInput?.contentType == "blog")         // unknown collection falls back to raw name
             let parsed = AddPostIntent.createdPost(ok, siteID: AppIntentsTests.aSite, title: "Hello", collection: nil)
             #expect(parsed?.collection == "notes")            // parsed from filePath
+            #expect(parsed?.contentType == "Note")            // registry maps "notes" → "Note"
             #expect(AddPostIntent.createdPost(.failed(reason: "x"), siteID: AppIntentsTests.aSite, title: "Hello", collection: nil) == nil)
         }
 

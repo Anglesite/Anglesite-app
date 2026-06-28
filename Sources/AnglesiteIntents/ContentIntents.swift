@@ -299,7 +299,9 @@ extension AddPostIntent {
         let coll = (collection?.isEmpty == false)
             ? collection!
             : ((filePath as NSString).deletingLastPathComponent as NSString).lastPathComponent
-        return PostEntity(id: "\(siteID):post:\(identifier)", displayName: title, slug: identifier, collection: coll, siteID: siteID)
+        return PostEntity(id: "\(siteID):post:\(identifier)", displayName: title, slug: identifier,
+                          collection: coll, siteID: siteID,
+                          contentType: ContentTypeRegistry.default.descriptor(forCollection: coll)?.displayName ?? coll)
     }
 }
 
