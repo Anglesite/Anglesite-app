@@ -18,13 +18,14 @@ MAS build, anchored to automated fixtures so it can't silently drift.
 
 This **complements, not replaces**, the Phase C test-suite audit and the D.5 manual MCP smoke.
 
-## Scope — the eight supported workflows
+## Scope — the nine supported workflows
 
-Every row maps to a shipped intent in `Sources/AnglesiteIntents` with a curated Siri phrase in
-`AnglesiteShortcuts.appShortcuts`. Phrases below are verbatim from that provider; `Anglesite`
-is `\(.applicationName)` at runtime. (`OpenSiteIntent` ships but has **no** curated phrase — it
-is an `OpenIntent` reached from Spotlight result taps / Shortcuts chaining, so it is listed
-under "open" but is exercised via the entity-resolution path, not a spoken phrase.)
+Every row maps to a shipped intent in `Sources/AnglesiteIntents`. Most have a curated Siri phrase
+in `AnglesiteShortcuts.appShortcuts`; two exceptions ship without a curated phrase and are reached
+via Shortcuts / entity matching instead: `OpenSiteIntent` (an `OpenIntent` exercised via the
+entity-resolution path) and `FindContentByTypeIntent` (reached via Shortcuts / entity match — the
+10-phrase budget is full). Phrases below are verbatim from the shortcuts provider; `Anglesite`
+is `\(.applicationName)` at runtime.
 
 | # | Workflow | Intent | Curated Siri phrase(s) | Side effect | Confirms? | Returns |
 |---|---|---|---|---|---|---|
@@ -34,6 +35,7 @@ under "open" but is exercised via the entity-resolution path, not a spoken phras
 | 4 | Deploy with confirmation | `DeploySiteIntent` | "Deploy my site with Anglesite" | publishes | **yes** | `SiteEntity` |
 | 5 | Search content | `SearchContentIntent` | "What's on my site …" / "Search my site …" | read-only | no | `[ContentMatchEntity]` |
 | 5b | Site status | `SiteStatusIntent` | "How is my site doing …" / "My site status …" | read-only | no | — (dialog) |
+| 5c | Find content by type | `FindContentByTypeIntent` | *(no phrase — Shortcuts / entity match)* | read-only | no | `[PostEntity]` |
 | 6 | Add page / post | `AddPageIntent` / `AddPostIntent` | "Add a page …" / "Add a post …" | creates content | no | `PageEntity?` / `PostEntity?` |
 | 7 | Preview a page | `PreviewSiteIntent` | "Preview my site …" / "Open my site preview …" | read-only | no | — (opens UI) |
 | 8 | Edit visible content with confirmation | `EditContentIntent` | "Edit this with Anglesite" / "Change this with Anglesite" | modifies content | **yes** † | — (dialog) |
@@ -59,6 +61,7 @@ window is key; Preview = the WKWebView preview is focused (onscreen-awareness pa
 | Deploy | Launch; prompts; **confirm** | Prompts; confirm | Confirm; runs | n/a | runs after confirm | **fails closed** ‡ |
 | Search content | Launch; prompts | Prompts | Searches frontmost | n/a | reads | reads (graph is app-owned) |
 | Site status | Launch; prompts | Prompts | Status of frontmost | n/a | reads | reads |
+| Find content by type | Launch; prompts | Prompts | Searches frontmost | n/a | reads | reads (graph is app-owned) |
 | Add page/post | Launch; prompts | Prompts | Adds to frontmost | n/a | writes | **fails closed** ‡ |
 | Preview | Launch + open preview | Opens preview | Navigates preview | re-navigates current | opens | opens |
 | Edit visible content | n/a — needs onscreen element | n/a | n/a (no selection) | resolves `element`; **confirm**; writes | writes after confirm | **fails closed** ‡ |
@@ -101,7 +104,7 @@ checked by hand against a fixture site and recorded in the PR description, never
 The same matrix applies to both targets. Differences to watch on the MAS pass:
 
 - The "MAS grant present/missing" columns only apply to `AnglesiteMAS`; on DevID (sandbox off) writes work without the bookmark.
-- Chat / Sparkle / `gh` are compiled out of MAS, but none of the eight workflows depend on them, so the matrix is identical.
+- Chat / Sparkle / `gh` are compiled out of MAS, but none of the nine workflows depend on them, so the matrix is identical.
 - Run the manual pass once per target before tagging a release.
 
 ## How to run a pass

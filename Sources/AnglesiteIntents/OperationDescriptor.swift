@@ -105,6 +105,12 @@ public enum AnglesiteOperations {
             resultShape: .none
         ),
         OperationDescriptor(
+            operationID: "find-content-by-type", displayName: "Find Content by Type",
+            intentTypeName: "FindContentByTypeIntent", sideEffect: .readOnly,
+            requiresConfirmation: false, isCancellable: false,
+            resultShape: .entities("PostEntity")
+        ),
+        OperationDescriptor(
             operationID: "preview-site", displayName: "Preview Site",
             intentTypeName: "PreviewSiteIntent", sideEffect: .readOnly,
             requiresConfirmation: false, isCancellable: false,
