@@ -22,6 +22,28 @@ struct TypedContentEditorTests {
         #expect(TypedContentEditor.read(out, descriptor: review)["rating"] == .number(4))
     }
 
+    @Test("edited date field serializes unquoted and round-trips to the same Date")
+    func dateWritesUnquoted() {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let newDate = iso.date(from: "2027-03-04T05:06:07.000Z")!
+
+        // datetime kind (review.publishDate) → full ISO, unquoted
+        let src = "---\nitemReviewed: \"Widget\"\nrating: 5\npublishDate: 2026-01-01T00:00:00.000Z\n---\n\nReview.\n"
+        var v = TypedContentEditor.read(src, descriptor: review)
+        v["publishDate"] = .date(newDate)
+        let out = TypedContentEditor.write(v, into: src, descriptor: review)
+        #expect(out.contains("publishDate: 2027-03-04T05:06:07.000Z"))     // unquoted
+        #expect(!out.contains("publishDate: \"2027-03-04T05:06:07.000Z\"")) // not a quoted string
+        #expect(TypedContentEditor.read(out, descriptor: review)["publishDate"] == .date(newDate))
+
+        // an unedited date stays byte-for-byte (verbatim), never re-rendered
+        var v2 = TypedContentEditor.read(src, descriptor: review)
+        v2["rating"] = .number(4)
+        let out2 = TypedContentEditor.write(v2, into: src, descriptor: review)
+        #expect(out2.contains("publishDate: 2026-01-01T00:00:00.000Z"))    // verbatim, still unquoted
+    }
+
     @Test("reads markdown field from body and scalars from frontmatter")
     func reads() {
         let src = "---\npublishDate: 2026-01-02T03:04:05.000Z\ntags: [a, b]\n---\n\nHello body.\n"
