@@ -26,12 +26,14 @@ const BASE: Record<string, string[]> = {
   "frame-ancestors": ["'none'"],
   "base-uri": ["'self'"],
   "form-action": ["'self'"],
+  "upgrade-insecure-requests": [],
 };
 
 /** Emission order for directives (stable, reproducible output). */
 const DIRECTIVE_ORDER = [
   "default-src", "script-src", "style-src", "img-src", "font-src",
   "connect-src", "frame-src", "object-src", "frame-ancestors", "base-uri", "form-action",
+  "upgrade-insecure-requests",
 ];
 
 /** Sorted, deduped, non-empty domains from the SCRIPT_ALLOW key. */
@@ -51,7 +53,9 @@ export function buildCSP(configContent: string): string {
       if (!directives[name].includes(d)) directives[name].push(d);
     }
   }
-  return DIRECTIVE_ORDER.map((name) => `${name} ${directives[name].join(" ")}`).join("; ");
+  return DIRECTIVE_ORDER.map((name) =>
+    directives[name].length ? `${name} ${directives[name].join(" ")}` : name,
+  ).join("; ");
 }
 
 /** Compose the full public/_headers file body. */

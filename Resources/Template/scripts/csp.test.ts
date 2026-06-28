@@ -20,7 +20,7 @@ test("buildCSP: baseline when no integrations configured", () => {
     "default-src 'self'; script-src 'self' static.cloudflareinsights.com; " +
       "style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; " +
       "connect-src 'self' cloudflareinsights.com; frame-src 'self'; object-src 'none'; " +
-      "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+      "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests",
   );
 });
 
