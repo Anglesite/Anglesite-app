@@ -101,7 +101,7 @@ final class TypedEntryEditorModel: InspectorEditorModel {
         case .none:
             break
         case .reloadable(let disk):
-            adopt(disk); lastModified = await freshModificationDate()
+            adopt(disk); lastModified = await FileDocumentIO.freshModificationDate(of: file.url)
         case .conflict(let disk):
             conflictDiskContents = disk
         }
@@ -112,7 +112,7 @@ final class TypedEntryEditorModel: InspectorEditorModel {
     func reloadFromDisk() async {
         guard let disk = conflictDiskContents else { return }
         adopt(disk)
-        lastModified = await freshModificationDate()
+        lastModified = await FileDocumentIO.freshModificationDate(of: file.url)
         conflictDiskContents = nil
     }
 
@@ -181,20 +181,8 @@ final class TypedEntryEditorModel: InspectorEditorModel {
     }
 
     private func commit() async {
-        let rel = relativePath(of: file.url, under: sourceDirectory)
+        let rel = FileDocumentIO.relativePath(of: file.url, under: sourceDirectory)
         let slug = file.url.deletingPathExtension().lastPathComponent
         _ = await gitCommit(sourceDirectory, rel, "anglesite: edit \(descriptor.id) \(slug)")
-    }
-
-    private func relativePath(of url: URL, under root: URL) -> String {
-        let u = url.standardizedFileURL.path(percentEncoded: false)
-        let r = root.standardizedFileURL.path(percentEncoded: false)
-        if u.hasPrefix(r) { return String(u.dropFirst(r.count)).drop(while: { $0 == "/" }).description }
-        return url.lastPathComponent
-    }
-
-    private func freshModificationDate() async -> Date? {
-        let url = file.url
-        return try? await Task.detached(priority: .userInitiated) { try FileDocumentIO.load(url).modificationDate }.value
     }
 }
