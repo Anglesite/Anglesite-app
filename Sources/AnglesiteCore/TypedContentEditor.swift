@@ -104,7 +104,9 @@ public enum TypedContentEditor {
         case .text(let s): return .string(s)
         case .flag(let b): return .bool(b)
         case .date(let d): return .string(d.map { format($0, kind: kind) } ?? "")
-        case .number(let n): return .string(n.map { formatNumber($0) } ?? "")
+        // Numbers serialize unquoted (FrontmatterValue.number) so they satisfy a z.number() schema;
+        // a nil (cleared) number falls back to an empty quoted scalar.
+        case .number(let n): return n.map { .number($0) } ?? .string("")
         case .list(let a): return .array(a)
         }
     }
@@ -130,10 +132,5 @@ public enum TypedContentEditor {
         df.timeZone = TimeZone(identifier: "UTC")
         df.dateFormat = "yyyy-MM-dd"
         return df.date(from: s)
-    }
-
-    private static func formatNumber(_ n: Double) -> String {
-        if n == n.rounded(), abs(n) < 1e15 { return String(Int(n)) }
-        return String(n)
     }
 }

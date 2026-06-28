@@ -311,6 +311,7 @@ public actor SiteKnowledgeIndex {
         case .string(let s): return s
         case .bool(let b): return b ? "true" : "false"
         case .array(let values): return values.joined(separator: " ")
+        case .number(let n): return n == n.rounded() && abs(n) < 1e15 ? String(Int(n)) : String(n)
         }
     }
 

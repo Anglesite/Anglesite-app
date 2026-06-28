@@ -156,6 +156,12 @@ public struct FrontmatterDocument: Equatable, Sendable {
             // but we intentionally normalize here (matching ContentScaffold) — an edited bool loses
             // a non-canonical original spelling. Verbatim is still preserved for *unedited* bools.
             return "\(key): \(b)"
+        case .number(let n):
+            // Numbers serialize unquoted so YAML reads them as numbers (a quoted "4" fails a
+            // collection's z.number() schema). Integral values drop the decimal point; the
+            // magnitude guard avoids the Int(_:) overflow trap.
+            let formatted = (n == n.rounded() && abs(n) < 1e15) ? String(Int(n)) : String(n)
+            return "\(key): \(formatted)"
         case .array(let items):
             if items.isEmpty { return "\(key): []" }
             return ([ "\(key):" ] + items.map { "  - \"\(escape($0))\"" }).joined(separator: "\n")

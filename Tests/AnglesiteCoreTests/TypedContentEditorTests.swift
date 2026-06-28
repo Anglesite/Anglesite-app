@@ -8,6 +8,19 @@ struct TypedContentEditorTests {
     private var note: ContentTypeDescriptor { ContentTypeRegistry().descriptor(id: "note")! }
     private var event: ContentTypeDescriptor { ContentTypeRegistry().descriptor(id: "event")! }
     private var reply: ContentTypeDescriptor { ContentTypeRegistry().descriptor(id: "reply")! }
+    private var review: ContentTypeDescriptor { ContentTypeRegistry().descriptor(id: "review")! }
+
+    @Test("edited number field serializes unquoted (satisfies z.number())")
+    func numberWritesUnquoted() {
+        let src = "---\nitemReviewed: \"Widget\"\nrating: 5\npublishDate: 2026-01-01T00:00:00.000Z\n---\n\nReview.\n"
+        var v = TypedContentEditor.read(src, descriptor: review)
+        v["rating"] = .number(4)
+        let out = TypedContentEditor.write(v, into: src, descriptor: review)
+        #expect(out.contains("rating: 4"))        // unquoted
+        #expect(!out.contains("rating: \"4\""))   // not a quoted string
+        // round-trips back to a number
+        #expect(TypedContentEditor.read(out, descriptor: review)["rating"] == .number(4))
+    }
 
     @Test("reads markdown field from body and scalars from frontmatter")
     func reads() {

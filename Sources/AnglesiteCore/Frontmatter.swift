@@ -3,10 +3,16 @@ import Foundation
 /// A parsed frontmatter scalar/array value. Mirrors the `string | boolean | string[]` union the
 /// Node `parseFrontmatter` returns — the distinction matters to the scanner (`draft === true`
 /// wants a real boolean; `Array.isArray(tags)` wants a real array).
+///
+/// `.number` is a write-only case: `Frontmatter.parse` never produces it (a numeric scalar parses
+/// as `.string`), but the editor uses it via `FrontmatterDocument.set` so a `number`-kind field
+/// serializes **unquoted** (`rating: 4`, not `rating: "4"`). Quoting a number would make YAML read
+/// it as a string and fail a content collection's `z.number()` schema.
 public enum FrontmatterValue: Equatable, Sendable {
     case string(String)
     case bool(Bool)
     case array([String])
+    case number(Double)
 }
 
 /// Native port of `server/content-frontmatter.mjs` (Bucket 1, #275).

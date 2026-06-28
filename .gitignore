@@ -99,3 +99,4 @@ Resources/Anglesite.help/**/*.helpindex
 
 # Playwright MCP browser-session artifacts
 .playwright-mcp/
+build-smoke/
