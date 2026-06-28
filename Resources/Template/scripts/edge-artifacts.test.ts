@@ -27,25 +27,36 @@ test("buildSecurityTxt: returns null when no contact configured", () => {
   assert.equal(buildSecurityTxt("  ", "https://example.com", NOW), null);
 });
 
+test("buildSecurityTxt: unrecognized contact (no scheme, no @) returns null", () => {
+  // Neither a URI nor an email — skip rather than emit an invalid RFC 9116 Contact.
+  assert.equal(buildSecurityTxt("example.com", "https://example.com", NOW), null);
+  assert.equal(buildSecurityTxt("+15005550006", "https://example.com", NOW), null);
+});
+
 test("buildSecurityTxt: bare email gets a mailto: scheme", () => {
   const out = buildSecurityTxt("security@example.com", "https://example.com", NOW);
+  assert.ok(out !== null);
   assert.match(out, /^Contact: mailto:security@example\.com$/m);
 });
 
 test("buildSecurityTxt: a URL or mailto contact is used as-is", () => {
   const url = buildSecurityTxt("https://example.com/report", "https://example.com", NOW);
+  assert.ok(url !== null);
   assert.match(url, /^Contact: https:\/\/example\.com\/report$/m);
   const mailto = buildSecurityTxt("mailto:s@example.com", "https://example.com", NOW);
+  assert.ok(mailto !== null);
   assert.match(mailto, /^Contact: mailto:s@example\.com$/m);
 });
 
 test("buildSecurityTxt: Expires is one year out at UTC midnight", () => {
   const out = buildSecurityTxt("security@example.com", "https://example.com", NOW);
+  assert.ok(out !== null);
   assert.match(out, /^Expires: 2027-06-28T00:00:00\.000Z$/m);
 });
 
 test("buildSecurityTxt: includes a Canonical URL and trailing newline", () => {
   const out = buildSecurityTxt("security@example.com", "https://example.com", NOW);
+  assert.ok(out !== null);
   assert.match(out, /^Canonical: https:\/\/example\.com\/\.well-known\/security\.txt$/m);
   assert.match(out, /\n$/);
 });

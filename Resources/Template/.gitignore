@@ -1,2 +1,4 @@
-# Generated at build by scripts/edge-artifacts.ts (Expires changes every build)
-public/.well-known/
+# Generated at build by scripts/edge-artifacts.ts (Expires changes every build).
+# Scoped to the one generated file so future static well-known files
+# (apple-app-site-association, assetlinks.json, …) can still be committed.
+public/.well-known/security.txt

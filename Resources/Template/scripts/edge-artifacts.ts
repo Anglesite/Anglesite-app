@@ -20,18 +20,23 @@ Disallow:
 }
 
 /**
- * RFC 9116 security.txt body, or null when no contact is configured (so we never
- * emit an invalid file with no Contact). `Expires` is one year from `now` at UTC
+ * RFC 9116 security.txt body, or null when no usable contact is configured — a
+ * blank value, or one that is neither a recognized URI (http/https/mailto/tel)
+ * nor a bare email. We skip the file rather than emit an invalid Contact field
+ * (RFC 9116 §2.5 requires a URI). `Expires` is one year from `now` at UTC
  * midnight, regenerated every build so it never lapses.
  */
 export function buildSecurityTxt(contact: string | undefined, siteUrl: string, now: Date): string | null {
   const trimmed = (contact ?? "").trim();
   if (trimmed.length === 0) return null;
-  const contactUri = /^(https?:|mailto:|tel:)/i.test(trimmed)
-    ? trimmed
-    : trimmed.includes("@")
-      ? `mailto:${trimmed}`
-      : trimmed;
+  let contactUri: string;
+  if (/^(https?:|mailto:|tel:)/i.test(trimmed)) {
+    contactUri = trimmed;
+  } else if (trimmed.includes("@")) {
+    contactUri = `mailto:${trimmed}`;
+  } else {
+    return null; // not a URI and not an email — skip rather than emit invalid RFC 9116
+  }
   const expires = new Date(
     Date.UTC(now.getUTCFullYear() + 1, now.getUTCMonth(), now.getUTCDate()),
   ).toISOString();
