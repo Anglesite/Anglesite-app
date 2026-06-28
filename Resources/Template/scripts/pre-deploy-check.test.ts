@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkHeaders, checkMixedContent, checkSRI, checkExternalLinkRel } from "./pre-deploy-check";
+import { checkHeaders, checkMixedContent, checkSRI, checkExternalLinkRel, checkArtifactPresence } from "./pre-deploy-check";
 
 const GOOD = `/*
   Content-Security-Policy: default-src 'self'; frame-src 'self' js.stripe.com
@@ -121,4 +121,26 @@ test("checkExternalLinkRel: rel with noopener among others is clean", () => {
 
 test("checkExternalLinkRel: link without target=_blank is ignored", () => {
   assert.deepEqual(checkExternalLinkRel('<a href="https://x.com">x</a>', "dist/index.html"), []);
+});
+
+test("checkArtifactPresence: both present is clean", () => {
+  const paths = ["dist/index.html", "dist/robots.txt", "dist/.well-known/security.txt"];
+  assert.deepEqual(checkArtifactPresence(paths), []);
+});
+
+test("checkArtifactPresence: missing robots.txt is a warning", () => {
+  const issues = checkArtifactPresence(["dist/index.html", "dist/.well-known/security.txt"]);
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].severity, "warning");
+  assert.match(issues[0].message, /robots\.txt/);
+});
+
+test("checkArtifactPresence: missing both yields two warnings", () => {
+  const issues = checkArtifactPresence(["dist/index.html"]);
+  assert.equal(issues.length, 2);
+});
+
+test("checkArtifactPresence: backslash paths are normalized", () => {
+  const paths = ["dist\\robots.txt", "dist\\.well-known\\security.txt"];
+  assert.deepEqual(checkArtifactPresence(paths), []);
 });

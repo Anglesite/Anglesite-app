@@ -163,6 +163,22 @@ export function checkExternalLinkRel(content: string, file: string): Issue[] {
   return issues;
 }
 
+/**
+ * Warn when expected security artifacts are absent from the built output.
+ * Generators for these land in slice C1 (#405); until then this is informational.
+ */
+export function checkArtifactPresence(relPaths: string[]): Issue[] {
+  const set = new Set(relPaths.map((p) => p.replace(/\\/g, "/")));
+  const required = ["dist/robots.txt", "dist/.well-known/security.txt"];
+  const issues: Issue[] = [];
+  for (const path of required) {
+    if (!set.has(path)) {
+      issues.push({ severity: "warning", message: `Missing security artifact: ${path.replace(/^dist\//, "")}`, file: path });
+    }
+  }
+  return issues;
+}
+
 async function scan(): Promise<Issue[]> {
   const issues: Issue[] = [];
 
@@ -181,10 +197,13 @@ async function scan(): Promise<Issue[]> {
   );
   issues.push(...checkHeaders(headersContent, configContent));
 
+  const relPaths: string[] = [];
+
   for await (const file of walk(DIST_DIR)) {
     if (!/\.(html?|js|css|json|xml|txt)$/i.test(file)) continue;
     const content = await readFile(file, "utf-8");
     const rel = relative(process.cwd(), file);
+    relPaths.push(rel);
 
     for (const { name, pattern } of PII_PATTERNS) {
       pattern.lastIndex = 0;
@@ -229,6 +248,8 @@ async function scan(): Promise<Issue[]> {
       issues.push(...checkExternalLinkRel(content, rel));
     }
   }
+
+  issues.push(...checkArtifactPresence(relPaths));
 
   return issues;
 }
