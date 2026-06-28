@@ -47,6 +47,12 @@ test("buildHeaders: includes security headers, CSP, and astro caching", () => {
   assert.match(out, /\/_astro\/\*\n  Cache-Control: public, max-age=31536000, immutable\n$/);
 });
 
+test("buildHeaders: includes cross-origin isolation headers", () => {
+  const out = buildHeaders("");
+  assert.match(out, /Cross-Origin-Opener-Policy: same-origin/);
+  assert.match(out, /Cross-Origin-Resource-Policy: same-origin/);
+});
+
 test("committed public/_headers is byte-identical to buildHeaders(\"\")", () => {
   const committed = readFileSync(
     resolve(dirname(fileURLToPath(import.meta.url)), "../public/_headers"),
