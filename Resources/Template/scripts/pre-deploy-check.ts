@@ -116,8 +116,11 @@ export function checkMixedContent(content: string, file: string): Issue[] {
 
 /**
  * External (absolute or protocol-relative) <script> and stylesheet <link> tags
- * that lack an `integrity` attribute. Heuristic tag-level regex match. One issue
- * per offending tag.
+ * with a subresource-integrity problem: either missing `integrity`, or carrying
+ * `integrity` without the `crossorigin` attribute it requires — the browser
+ * blocks the response on CORS before integrity is evaluated, so the resource
+ * silently fails to load. Heuristic tag-level regex match; multi-line tag
+ * attributes are not matched. One issue per offending tag.
  */
 export function checkSRI(content: string, file: string): Issue[] {
   const issues: Issue[] = [];
@@ -131,10 +134,13 @@ export function checkSRI(content: string, file: string): Issue[] {
       : /\bhref\s*=\s*["'](?:https?:)?\/\//i;
     if (!urlAttr.test(tag)) continue;
     if (!isScript && !/\brel\s*=\s*["'][^"']*stylesheet/i.test(tag)) continue;
+    const kind = isScript ? "script" : "stylesheet";
     if (!/\bintegrity\s*=/i.test(tag)) {
+      issues.push({ severity: "warning", message: `External ${kind} without subresource integrity (SRI)`, file });
+    } else if (!/\scrossorigin\b/i.test(tag)) {
       issues.push({
         severity: "warning",
-        message: `External ${isScript ? "script" : "stylesheet"} without subresource integrity (SRI)`,
+        message: `External ${kind} has integrity but is missing crossorigin (will fail CORS)`,
         file,
       });
     }
@@ -144,8 +150,10 @@ export function checkSRI(content: string, file: string): Issue[] {
 
 /**
  * Anchors that open a new tab (`target="_blank"`) without `rel="noopener"`,
- * which can expose `window.opener`. Advisory — modern browsers imply noopener,
- * but explicit is safer. One issue per offending anchor.
+ * which can expose `window.opener`. `rel="noreferrer"` also implies noopener
+ * (per the HTML spec and all modern browsers), so either token is accepted.
+ * Advisory — modern browsers imply noopener, but explicit is safer. One issue
+ * per offending anchor.
  */
 export function checkExternalLinkRel(content: string, file: string): Issue[] {
   const issues: Issue[] = [];
@@ -156,7 +164,7 @@ export function checkExternalLinkRel(content: string, file: string): Issue[] {
     if (!/\btarget\s*=\s*["']_blank["']/i.test(tag)) continue;
     const relMatch = tag.match(/\brel\s*=\s*["']([^"']*)["']/i);
     const rel = relMatch ? relMatch[1].toLowerCase() : "";
-    if (!/\bnoopener\b/.test(rel)) {
+    if (!/\bnoopener\b|\bnoreferrer\b/.test(rel)) {
       issues.push({ severity: "warning", message: 'Link with target="_blank" missing rel="noopener"', file });
     }
   }

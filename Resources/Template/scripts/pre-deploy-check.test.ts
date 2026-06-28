@@ -84,9 +84,15 @@ test("checkSRI: external script without integrity is a warning", () => {
   assert.match(issues[0].message, /integrity/i);
 });
 
-test("checkSRI: external script WITH integrity is clean", () => {
-  const ok = '<script src="https://cdn.x.com/a.js" integrity="sha384-abc"></script>';
+test("checkSRI: external script with integrity AND crossorigin is clean", () => {
+  const ok = '<script src="https://cdn.x.com/a.js" integrity="sha384-abc" crossorigin="anonymous"></script>';
   assert.deepEqual(checkSRI(ok, "dist/index.html"), []);
+});
+
+test("checkSRI: integrity without crossorigin is a warning (CORS would block it)", () => {
+  const issues = checkSRI('<script src="https://cdn.x.com/a.js" integrity="sha384-abc"></script>', "dist/index.html");
+  assert.equal(issues.length, 1);
+  assert.match(issues[0].message, /crossorigin/i);
 });
 
 test("checkSRI: relative script is clean", () => {
@@ -116,6 +122,11 @@ test("checkExternalLinkRel: rel=noopener is clean", () => {
 
 test("checkExternalLinkRel: rel with noopener among others is clean", () => {
   const ok = '<a href="https://x.com" target="_blank" rel="noopener noreferrer">x</a>';
+  assert.deepEqual(checkExternalLinkRel(ok, "dist/index.html"), []);
+});
+
+test("checkExternalLinkRel: rel=noreferrer alone is clean (implies noopener)", () => {
+  const ok = '<a href="https://x.com" target="_blank" rel="noreferrer">x</a>';
   assert.deepEqual(checkExternalLinkRel(ok, "dist/index.html"), []);
 });
 
