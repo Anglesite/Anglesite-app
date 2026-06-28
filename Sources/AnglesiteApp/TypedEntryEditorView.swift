@@ -2,47 +2,13 @@
 import SwiftUI
 import AnglesiteCore
 
-/// Generic, schema-driven form editor for a typed content file. One control per field `Kind`,
-/// ordered by the descriptor. State lives in `TypedEntryEditorModel` (owned by `SiteWindow`) so
-/// navigating away auto-saves and the buffer survives the Preview/Editor toggle.
-struct TypedEntryEditorView: View {
+/// The schema-driven `Form` body for a typed content entry — one control per field `Kind`, ordered
+/// by the descriptor. Hosted inside `PageInspectorView`, which supplies the load/save/conflict
+/// chrome. (Previously a full-pane editor; the chrome moved to the inspector.)
+struct TypedEntryForm: View {
     @Bindable var model: TypedEntryEditorModel
-    @Environment(\.controlActiveState) private var controlActiveState
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            Group {
-                if let loadError = model.loadError {
-                    ContentUnavailableView {
-                        Label("Can't open \(model.file.name)", systemImage: "exclamationmark.triangle")
-                    } description: { Text(loadError) } actions: {
-                        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([model.file.url]) }
-                    }
-                } else if model.isLoading {
-                    ProgressView().controlSize(.small)
-                } else {
-                    form
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .task(id: model.file.id) { await model.load() }
-        .onChange(of: controlActiveState) { _, new in
-            if new == .key { Task { await model.checkExternalChange() } }
-        }
-        .background(Button("") { Task { await model.save() } }
-            .keyboardShortcut("s", modifiers: [.command]).hidden())
-        .alert("\(model.file.name) changed on disk", isPresented: conflictBinding) {
-            Button("Keep My Changes", role: .cancel) { model.keepMyChanges() }
-            Button("Reload from Disk") { Task { await model.reloadFromDisk() } }
-        } message: {
-            Text("Another tool edited this file while you had unsaved changes.")
-        }
-    }
-
-    private var form: some View {
         Form {
             ForEach(scalarFields, id: \.name) { field in
                 control(for: field)
@@ -101,22 +67,6 @@ struct TypedEntryEditorView: View {
             model.textBinding(name).wrappedValue = url.lastPathComponent
         }
     }
-
-    private var header: some View {
-        HStack {
-            Label(model.file.name, systemImage: "doc.text").font(.headline)
-            if model.isDirty {
-                Circle().fill(.secondary).frame(width: 7, height: 7).help("Unsaved changes")
-            }
-            Spacer()
-            Button("Save") { Task { await model.save() } }.disabled(!model.isDirty)
-        }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-    }
-
-    private var conflictBinding: Binding<Bool> {
-        Binding(get: { model.conflictDiskContents != nil }, set: { _ in })
-    }
 }
 
 /// A minimal add/remove list editor for `stringArray` / `imageArray` fields (tags, hours, album
@@ -155,12 +105,9 @@ private struct StringListEditor: View {
             }
         }
         .onAppear { syncRowsFromItems() }
-        // External replacement of the bound array (e.g. reload-from-disk) rebuilds the rows;
-        // the value guard prevents a feedback loop with the rows→items write below.
         .onChange(of: items) { _, new in
             if new != rows.map(\.value) { rows = new.map(Row.init(value:)) }
         }
-        // User edits/additions/deletions flow back to the bound array.
         .onChange(of: rows) { _, new in
             let mapped = new.map(\.value)
             if mapped != items { items = mapped }
