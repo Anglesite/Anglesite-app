@@ -667,6 +667,19 @@ struct SiteWindow: View {
         case .route(let route):
             Task {
                 guard await leaveCurrentEditor() else { return }   // abort if a conflict needs resolving
+                // Typed content (notes, articles, the business profile, …) is surfaced as a route
+                // in the navigator, but opens in its form editor rather than the preview. Plain
+                // pages (no content-type match) fall through to preview navigation.
+                if let source = site?.sourceDirectory,
+                   let typed = await typedEditorForContent(navigatorID: id, source: source) {
+                    if activeEditorFile?.id == typed.file.id {
+                        mainPaneMode = .editor(typed.file)   // re-show the open buffer intact
+                        return
+                    }
+                    activeEditor = .typed(typed)
+                    mainPaneMode = .editor(typed.file)
+                    return
+                }
                 mainPaneMode = .preview
                 if route.isEmpty || route == "/" {
                     preview.clearRoute()
@@ -709,6 +722,28 @@ struct SiteWindow: View {
         let r = root.standardizedFileURL.path(percentEncoded: false)
         guard u.hasPrefix(r) else { return url.lastPathComponent }
         return String(u.dropFirst(r.count)).drop(while: { $0 == "/" }).description
+    }
+
+    /// If a navigator id is a content page/post whose file resolves to a registered content type,
+    /// build its typed form editor. Returns `nil` for plain pages (which fall back to preview).
+    private func typedEditorForContent(navigatorID id: String, source: URL) async -> TypedEntryEditorModel? {
+        let relPath: String
+        let group: FileGroup
+        let displayName: String
+        if let page = await contentGraph.page(id: id) {
+            relPath = page.filePath
+            group = .pages
+            displayName = page.title ?? page.route
+        } else if let post = await contentGraph.post(id: id) {
+            relPath = post.filePath
+            group = .posts
+            displayName = post.title
+        } else {
+            return nil
+        }
+        guard let descriptor = ContentTypeResolver.descriptor(forRelativePath: relPath) else { return nil }
+        let file = FileRef(url: source.appendingPathComponent(relPath), group: group, name: displayName)
+        return TypedEntryEditorModel(file: file, descriptor: descriptor, sourceDirectory: source)
     }
 
     private var healthAssistantPrompt: String {
