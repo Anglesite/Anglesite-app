@@ -76,9 +76,16 @@ Extend `scripts/csp.ts` `buildHeaders()`. Add to the generated `public/_headers`
 
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains`
 - `preload` directive **behind opt-in `.site-config` `HSTS_PRELOAD`** — hard to reverse, never default-on
-- `Cross-Origin-Opener-Policy: same-origin`
-- `Cross-Origin-Resource-Policy: same-origin`
+- `Cross-Origin-Opener-Policy: same-origin-allow-popups` — *not* bare `same-origin`, which severs
+  `window.opener` for popups the site itself opens (OAuth sign-in, Stripe/PayPal checkout — common
+  for this audience); `-allow-popups` keeps those working while still isolating attacker-opened windows.
+- `Cross-Origin-Resource-Policy: same-site` — *not* `same-origin`, so same-site subdomains can still
+  load shared assets (e.g. a logo on `blog.example.com`); cross-*site* isolation is retained.
 - `upgrade-insecure-requests` in the CSP
+
+Already shipped as always-on defaults (predating this work, no tradeoff for static sites; keep them):
+`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: strict-origin-when-cross-origin`, and the locked-down `Permissions-Policy`.
 
 Explicitly **not** doing: `X-XSS-Protection` stays absent (deprecated/harmful); COEP stays off
 by default (breaks embeds), opt-in only. Stretch (phase 2): nonce/hash inline scripts to drop
@@ -87,18 +94,23 @@ inline-script trust; `'unsafe-inline'` on `style-src` remains an accepted tradeo
 ### B — Pre-deploy checks (#404)
 
 Extend `scripts/pre-deploy-check.ts` (keep CSP validation + secret scanning), reusing the
-`Issue { severity, message, file }` model. Add: SRI on external `<script>`/`<link>` (warn),
-mixed-content scan (error), `target="_blank"` without `rel="noopener"` (warn), presence of
-`.well-known/security.txt` and `robots.txt` (warn), and a dependency/lockfile vuln surface (warn).
+`Issue { severity, message, file }` model. Add: SRI on external `<script>`/`<link>` (warn —
+including a separate warning for `integrity` present but `crossorigin` missing, which fails CORS),
+mixed-content scan (**warn** — advisory; layer A's `upgrade-insecure-requests` auto-upgrades these
+at runtime, so it does not block deploy), `target="_blank"` without `rel="noopener"` or
+`rel="noreferrer"` (warn; `noreferrer` implies `noopener`), presence of `.well-known/security.txt`
+and `robots.txt` (warn), and a dependency/lockfile vuln surface (warn — deferred to a follow-up).
 
 ### C1 — Repo-owned edge artifacts (#405)
 
 Generate, mirroring the `csp.ts` pattern (pure function + writer + tests):
 
-- `public/.well-known/security.txt` — `Contact:` + `Expires:` (RFC 9116), from `SECURITY_CONTACT`
+- `public/.well-known/security.txt` — `Contact:` + `Expires:` (RFC 9116), from `SECURITY_CONTACT`.
+  **`Expires` is regenerated with a fresh future date (+1 year) on every build/deploy** (the same
+  pipeline that runs `csp.ts`), so it never silently lapses — no user action and no warning path needed.
 - `public/robots.txt` — allow legitimate crawlers; AI-crawler directives gated behind C4
 
-### C2 — CloudflareClient seam + read-only audit (#406)
+### C2 — `CloudflareClient` seam + read-only audit (#406)
 
 - **`CloudflareClient`** (AnglesiteCore) — protocol abstracting the Cloudflare API; mockable in
   tests; centralizes MAS sandbox/token handling. Token in Keychain (existing `area:secrets`
@@ -118,12 +130,19 @@ Compute a change plan → preview exact diff → apply on consent → re-run the
 Dry-runnable, never silent. Changes (all preview-gated):
 
 - Enable **DNSSEC**
-- Add **CAA** records pinned to the site's CA
+- Add **CAA** records authorizing **all CAs Cloudflare's free plan can rotate between** — Let's Encrypt
+  (`letsencrypt.org`), DigiCert (`digicert.com`), and Google Trust Services (`pki.goog`) — or, more
+  precisely, read the zone's current issuer via the SSL API (`GET /zones/{id}/ssl/certificate_packs`)
+  and authorize that plus `letsencrypt.org` as fallback. **Pinning a single CA breaks cert renewal
+  silently on the next rotation**, so the rule template must enumerate all three by default.
 - **Always-Use-HTTPS** + edge **HSTS**
 - **Bot Fight Mode** on
 - For non-mail domains: **null-MX + `SPF -all` + `DMARC p=reject`** (detect mail-sending first)
 - Up to **5 curated WAF custom rules** — only durable parts: block `.env`/`.git`/dotfile paths,
-  path traversal, obvious SQLi/XSS query-string patterns
+  path traversal, obvious SQLi/XSS query-string patterns. **The dotfile rule must carve out
+  `/.well-known/`** (negative match `starts_with(http.request.uri.path, "/.well-known/")` *before*
+  the dotfile block) so it never blocks `/.well-known/security.txt` (C1) or
+  `/.well-known/acme-challenge/` (Cloudflare-managed cert issuance).
 
 Explicitly **not** included: the 2-req/10s rate limit; blanket `curl`/`wget`/`python-requests`
 blocking (breaks monitors, webhooks, RSS); outdated-browser sniffing / referrer challenges.

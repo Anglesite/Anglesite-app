@@ -10,6 +10,13 @@
 
 **Issue:** [#403](https://github.com/Anglesite/Anglesite-app/issues/403) — sub-issue A of epic [#402](https://github.com/Anglesite/Anglesite-app/issues/402). Spec: [`docs/superpowers/specs/2026-06-27-security-story-hardening-design.md`](../specs/2026-06-27-security-story-hardening-design.md) §"A — Response headers / CSP".
 
+> **Post-review update (after PR #410 review):** two settled deviations from the task text below.
+> (1) **COOP/CORP final values** are `Cross-Origin-Opener-Policy: same-origin-allow-popups` and
+> `Cross-Origin-Resource-Policy: same-site` (the Task 2 snippets show the original `same-origin`
+> values) — see the spec §A for the rationale (popup/auth flows; same-site subdomain assets).
+> (2) **Verification is JS-only** (see the Pre-push guard below): `swift test` was *not* required for
+> this template-only change.
+
 ## Global Constraints
 
 - **ES Modules only** — `import`/`export`, never CommonJS.
@@ -19,7 +26,7 @@
 - **COEP stays off** — would break third-party embeds; out of scope for this plan.
 - **Work in a git worktree** — create it via the `superpowers:using-git-worktrees` skill before starting; do not commit on the main checkout. Branch off `main` (the spec/plan PR #409 is docs-only and independent).
 - **HSTS preload is opt-in** — only emitted when `.site-config` has `HSTS_PRELOAD=true`; never in the baseline.
-- **Pre-push guard** — `grep` shows no Swift test currently asserts header content, but per project guidance run `swift test --package-path .` before pushing template changes regardless, in case a smoke test couples later.
+- **Pre-push guard** — the JS gate is authoritative for this template-only change: `npx tsx --test scripts/csp.test.ts` plus the generator round-trip (`npx tsx scripts/csp.ts && git diff --exit-code public/_headers`). `grep` shows no Swift test asserts header content, so `swift test` is **not required** here. If you do run it, set `ANGLESITE_PLUGIN_PATH` to the plugin checkout (or `--filter` out the e2e suites) — the MCP e2e tests (`AppliesEditEndToEndTests`, `MCPClientHTTPEndToEndTests`) **fail** (not skip) when the plugin checkout is absent, and `swift test` needs `DEVELOPER_DIR` set per project memory.
 
 ---
 
@@ -262,13 +269,12 @@ In `Resources/Template/public/_headers`, add the HSTS line after `Cross-Origin-R
 Run: `cd Resources/Template && npx tsx --test scripts/csp.test.ts`
 Expected: PASS — all tests pass.
 
-- [ ] **Step 7: Verify the generator round-trips and Swift tests still pass**
+- [ ] **Step 7: Verify the generator round-trips (JS-only gate)**
 
 Run: `cd Resources/Template && npx tsx scripts/csp.ts && git diff --exit-code public/_headers`
 Expected: exits 0 — running the generator regenerates a `public/_headers` identical to the committed one.
 
-Run: `swift test --package-path .`
-Expected: PASS — no template-coupled Swift smoke test regressed. (Set `DEVELOPER_DIR` per project memory if `swift test` reports a toolchain error.)
+(`swift test` is **not required** for this template-only change — see the Pre-push guard in Global Constraints for the `ANGLESITE_PLUGIN_PATH`/`DEVELOPER_DIR` caveats if you choose to run it anyway.)
 
 - [ ] **Step 8: Commit**
 
