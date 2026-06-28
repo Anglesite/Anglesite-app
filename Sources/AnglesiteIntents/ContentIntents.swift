@@ -80,6 +80,46 @@ public struct SearchContentIntent: AppIntent {
     }
 }
 
+// MARK: - Find by type
+
+/// Lists a site's content of one type (#351). The typed counterpart to `SearchContentIntent`:
+/// resolves the type's collection from the registry and filters the graph's posts by it.
+public struct FindContentByTypeIntent: AppIntent {
+    public static let title: LocalizedStringResource = "Find Content by Type"
+    public static let description = IntentDescription("List a site's content of a given type, e.g. events or reviews.")
+
+    @Parameter(title: "Site") public var site: SiteEntity
+    @Parameter(title: "Type") public var contentType: ContentTypeAppEnum
+    @Dependency private var graph: SiteContentGraph
+
+    public init() {}
+
+    public static var parameterSummary: some ParameterSummary {
+        Summary("Find \(\.$contentType) in \(\.$site)")
+    }
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<[PostEntity]> {
+        let g = ContentGraphOverride.scoped ?? graph
+        let results = await Self.matches(graph: g, siteID: site.id, type: contentType)
+        let typeName = ContentTypeAppEnum.caseDisplayRepresentations[contentType]?.title ?? "content"
+        return .result(
+            value: results,
+            dialog: IntentDialog(stringLiteral: ContentDialogs.findByType(
+                typeName: String(localized: typeName), count: results.count))
+        )
+    }
+
+    /// Filter the site's posts to the type's collection, sorted (lastModified desc, id asc) — the
+    /// same comparator the entity queries use. Static + graph-injected for unit testability.
+    static func matches(graph: SiteContentGraph, siteID: String, type: ContentTypeAppEnum) async -> [PostEntity] {
+        guard let collection = type.collection else { return [] }
+        return await graph.posts(for: siteID)
+            .filter { $0.collection == collection }
+            .sorted { $0.lastModified != $1.lastModified ? $0.lastModified > $1.lastModified : $0.id < $1.id }
+            .map(PostEntity.init)
+    }
+}
+
 // MARK: - Status
 
 public struct SiteStatusIntent: AppIntent {
@@ -274,6 +314,21 @@ extension AddPostIntent: LongRunningIntent, CancellableIntent {}
 
 public enum ContentDialogs {
     public enum CreateKind: String, Sendable { case page, post }
+
+    public static func findByType(typeName: String, count: Int) -> String {
+        let plural = pluralize(typeName, count)
+        guard count > 0 else { return "No \(plural) found." }
+        return "Found \(count) \(plural)."
+    }
+
+    /// Naive English pluralization sufficient for the built-in type display names
+    /// (Note, Article, Photo, Album, Bookmark, Reply, Like, Announcement, Event, Review).
+    private static func pluralize(_ noun: String, _ n: Int) -> String {
+        let lower = noun.lowercased()
+        if n == 1 { return lower }
+        if lower.hasSuffix("y") { return lower.dropLast() + "ies" }  // reply → replies
+        return lower + "s"
+    }
 
     public static func search(query: String, pageCount: Int, postCount: Int, imageCount: Int) -> String {
         // #234: a blank query means "no term given", not "no results" — prompt instead of echoing `Nothing matched “”.`.
