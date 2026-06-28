@@ -114,6 +114,34 @@ export function checkMixedContent(content: string, file: string): Issue[] {
   return [];
 }
 
+/**
+ * External (absolute or protocol-relative) <script> and stylesheet <link> tags
+ * that lack an `integrity` attribute. Heuristic tag-level regex match. One issue
+ * per offending tag.
+ */
+export function checkSRI(content: string, file: string): Issue[] {
+  const issues: Issue[] = [];
+  const tagPattern = /<(script|link)\b[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = tagPattern.exec(content)) !== null) {
+    const tag = m[0];
+    const isScript = m[1].toLowerCase() === "script";
+    const urlAttr = isScript
+      ? /\bsrc\s*=\s*["'](?:https?:)?\/\//i
+      : /\bhref\s*=\s*["'](?:https?:)?\/\//i;
+    if (!urlAttr.test(tag)) continue;
+    if (!isScript && !/\brel\s*=\s*["'][^"']*stylesheet/i.test(tag)) continue;
+    if (!/\bintegrity\s*=/i.test(tag)) {
+      issues.push({
+        severity: "warning",
+        message: `External ${isScript ? "script" : "stylesheet"} without subresource integrity (SRI)`,
+        file,
+      });
+    }
+  }
+  return issues;
+}
+
 async function scan(): Promise<Issue[]> {
   const issues: Issue[] = [];
 
@@ -175,6 +203,8 @@ async function scan(): Promise<Issue[]> {
           });
         }
       }
+
+      issues.push(...checkSRI(content, rel));
     }
   }
 

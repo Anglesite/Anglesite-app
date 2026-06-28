@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkHeaders, checkMixedContent } from "./pre-deploy-check";
+import { checkHeaders, checkMixedContent, checkSRI } from "./pre-deploy-check";
 
 const GOOD = `/*
   Content-Security-Policy: default-src 'self'; frame-src 'self' js.stripe.com
@@ -75,4 +75,29 @@ test("checkMixedContent: svg xmlns http URL is not flagged", () => {
 test("checkMixedContent: at most one issue per file", () => {
   const two = '<img src="http://a.com/1.png"><img src="http://b.com/2.png">';
   assert.equal(checkMixedContent(two, "dist/index.html").length, 1);
+});
+
+test("checkSRI: external script without integrity is a warning", () => {
+  const issues = checkSRI('<script src="https://cdn.x.com/a.js"></script>', "dist/index.html");
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].severity, "warning");
+  assert.match(issues[0].message, /integrity/i);
+});
+
+test("checkSRI: external script WITH integrity is clean", () => {
+  const ok = '<script src="https://cdn.x.com/a.js" integrity="sha384-abc"></script>';
+  assert.deepEqual(checkSRI(ok, "dist/index.html"), []);
+});
+
+test("checkSRI: relative script is clean", () => {
+  assert.deepEqual(checkSRI('<script src="/local.js"></script>', "dist/index.html"), []);
+});
+
+test("checkSRI: external stylesheet link without integrity is a warning", () => {
+  const issues = checkSRI('<link rel="stylesheet" href="https://cdn.x.com/a.css">', "dist/index.html");
+  assert.equal(issues.length, 1);
+});
+
+test("checkSRI: non-stylesheet link is ignored", () => {
+  assert.deepEqual(checkSRI('<link rel="preconnect" href="https://x.com">', "dist/index.html"), []);
 });
