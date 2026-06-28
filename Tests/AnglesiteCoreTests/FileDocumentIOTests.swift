@@ -88,6 +88,13 @@ struct FileDocumentIOTests {
         #expect(FileDocumentIO.relativePath(of: file, under: root) == "stray.md")
     }
 
+    @Test("relativePath does not match a sibling directory with a shared prefix")
+    func relativePathSiblingDir() {
+        let root = URL(fileURLWithPath: "/sites/Foo/Source", isDirectory: true)
+        let file = URL(fileURLWithPath: "/sites/Foo/SourceBackup/file.md")
+        #expect(FileDocumentIO.relativePath(of: file, under: root) == "file.md")
+    }
+
     @Test("freshModificationDate returns the on-disk mtime, nil for a missing file")
     func freshModificationDateReadsMtime() async throws {
         let url = try tempFile("x"); defer { try? FileManager.default.removeItem(at: url) }
