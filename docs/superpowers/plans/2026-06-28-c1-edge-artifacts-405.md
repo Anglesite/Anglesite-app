@@ -10,6 +10,19 @@
 
 **Issue:** [#405](https://github.com/Anglesite/Anglesite-app/issues/405) — sub-issue C1 of epic [#402](https://github.com/Anglesite/Anglesite-app/issues/402). Spec: [`docs/superpowers/specs/2026-06-27-security-story-hardening-design.md`](../specs/2026-06-27-security-story-hardening-design.md) §"C1 — Repo-owned edge artifacts".
 
+> **Post-review update (after PR #413 review):** the shipped implementation in
+> [#413](https://github.com/Anglesite/Anglesite-app/pull/413) corrects three things in the code blocks below — the
+> merged code is the source of truth:
+> 1. **Task 1 imports** — `edge-artifacts.ts` imports only what each task uses
+>    (`writeFileSync`/`resolve`/`fileURLToPath` in Task 1; `mkdirSync`/`readConfig` added in Task 2). `dirname` is
+>    not imported (it's only used in the test file). The Task 1 code block below over-imports.
+> 2. **`buildSecurityTxt` rejects invalid contacts** — a value that is neither a recognized URI
+>    (`http`/`https`/`mailto`/`tel`) nor a bare email returns `null` (skip the file) rather than emitting an invalid
+>    RFC 9116 `Contact`. A test covers it.
+> 3. **`.gitignore` is scoped to `public/.well-known/security.txt`** (not the whole `public/.well-known/` directory),
+>    so future static well-known files can still be committed. Tests narrow `string | null` with `assert.ok` before
+>    `assert.match`.
+
 ## Global Constraints
 
 - **ES Modules only** — `import`/`export`, never CommonJS.
