@@ -725,14 +725,6 @@ struct SiteWindow: View {
         }
     }
 
-    /// Project-relative path of `url` under the site `Source/` directory, for content-type resolution.
-    private func relativeProjectPath(of url: URL, under root: URL) -> String {
-        let u = url.standardizedFileURL.path(percentEncoded: false)
-        let r = root.standardizedFileURL.path(percentEncoded: false)
-        guard u.hasPrefix(r) else { return url.lastPathComponent }
-        return String(u.dropFirst(r.count)).drop(while: { $0 == "/" }).description
-    }
-
     /// Build the inspector context for a content navigator id: the typed descriptor form when the
     /// file resolves to a content type, the plain title/description form for a frontmatter-bearing
     /// markdown page, or nil (plain `.astro`/other → preview only, no inspector).

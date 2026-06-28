@@ -1,4 +1,3 @@
-import Foundation
 
 /// A page's editable metadata. Phase 1 covers title + description; the rendered `<title>` is
 /// composed from a site-level tokenized template (main site settings, out of scope here) with this
