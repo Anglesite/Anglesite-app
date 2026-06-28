@@ -142,6 +142,27 @@ export function checkSRI(content: string, file: string): Issue[] {
   return issues;
 }
 
+/**
+ * Anchors that open a new tab (`target="_blank"`) without `rel="noopener"`,
+ * which can expose `window.opener`. Advisory — modern browsers imply noopener,
+ * but explicit is safer. One issue per offending anchor.
+ */
+export function checkExternalLinkRel(content: string, file: string): Issue[] {
+  const issues: Issue[] = [];
+  const anchorPattern = /<a\b[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = anchorPattern.exec(content)) !== null) {
+    const tag = m[0];
+    if (!/\btarget\s*=\s*["']_blank["']/i.test(tag)) continue;
+    const relMatch = tag.match(/\brel\s*=\s*["']([^"']*)["']/i);
+    const rel = relMatch ? relMatch[1].toLowerCase() : "";
+    if (!/\bnoopener\b/.test(rel)) {
+      issues.push({ severity: "warning", message: 'Link with target="_blank" missing rel="noopener"', file });
+    }
+  }
+  return issues;
+}
+
 async function scan(): Promise<Issue[]> {
   const issues: Issue[] = [];
 
@@ -205,6 +226,7 @@ async function scan(): Promise<Issue[]> {
       }
 
       issues.push(...checkSRI(content, rel));
+      issues.push(...checkExternalLinkRel(content, rel));
     }
   }
 

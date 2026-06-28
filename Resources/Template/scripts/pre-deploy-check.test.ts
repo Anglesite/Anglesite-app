@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkHeaders, checkMixedContent, checkSRI } from "./pre-deploy-check";
+import { checkHeaders, checkMixedContent, checkSRI, checkExternalLinkRel } from "./pre-deploy-check";
 
 const GOOD = `/*
   Content-Security-Policy: default-src 'self'; frame-src 'self' js.stripe.com
@@ -100,4 +100,25 @@ test("checkSRI: external stylesheet link without integrity is a warning", () => 
 
 test("checkSRI: non-stylesheet link is ignored", () => {
   assert.deepEqual(checkSRI('<link rel="preconnect" href="https://x.com">', "dist/index.html"), []);
+});
+
+test("checkExternalLinkRel: target=_blank without rel=noopener is a warning", () => {
+  const issues = checkExternalLinkRel('<a href="https://x.com" target="_blank">x</a>', "dist/index.html");
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].severity, "warning");
+  assert.match(issues[0].message, /noopener/i);
+});
+
+test("checkExternalLinkRel: rel=noopener is clean", () => {
+  const ok = '<a href="https://x.com" target="_blank" rel="noopener">x</a>';
+  assert.deepEqual(checkExternalLinkRel(ok, "dist/index.html"), []);
+});
+
+test("checkExternalLinkRel: rel with noopener among others is clean", () => {
+  const ok = '<a href="https://x.com" target="_blank" rel="noopener noreferrer">x</a>';
+  assert.deepEqual(checkExternalLinkRel(ok, "dist/index.html"), []);
+});
+
+test("checkExternalLinkRel: link without target=_blank is ignored", () => {
+  assert.deepEqual(checkExternalLinkRel('<a href="https://x.com">x</a>', "dist/index.html"), []);
 });
