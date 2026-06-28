@@ -86,11 +86,11 @@ final class PageMetadataModel: InspectorEditorModel {
             try FileDocumentIO.externalChange(at: url, lastKnownModificationDate: known, bufferIsDirty: dirty)
         }.value
         switch change {
-        case .reloadable(let disk):
+        case .some(.reloadable(let disk)):
             adopt(disk); lastModified = await freshModificationDate()
-        case .conflict(let disk):
+        case .some(.conflict(let disk)):
             conflictDiskContents = disk
-        case .none, nil:
+        case .some(.none), nil:
             break
         }
     }

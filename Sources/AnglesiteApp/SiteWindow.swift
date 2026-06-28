@@ -12,13 +12,11 @@ private enum MainPaneMode: Equatable {
 private enum ActiveEditor {
     case text(FileEditorModel)
     case plist(PlistEditorModel)
-    case typed(TypedEntryEditorModel)
 
     var file: FileRef {
         switch self {
         case .text(let model): model.file
         case .plist(let model): model.file
-        case .typed(let model): model.file
         }
     }
 }
@@ -114,6 +112,12 @@ struct SiteWindow: View {
     /// auto-save it and the Preview/Editor toggle keeps the buffer alive. Replaced when a different
     /// file opens; cleared on window close / site replay.
     @State private var activeEditor: ActiveEditor?
+    /// The right-hand inspector's current target (typed entry or plain page), or nil when the
+    /// selection has no editable metadata. Set by `applyNavigatorSelection`.
+    @State private var inspectorContext: InspectorContext?
+    /// Inspector visibility, persisted per window. Defaults to shown (auto-open); the toolbar toggle
+    /// flips it and the choice persists across selections.
+    @SceneStorage("siteInspector.shown") private var inspectorShown = true
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -145,6 +149,8 @@ struct SiteWindow: View {
             // Persist any unsaved edits before dropping the old site's editor on replay (#188 reuse).
             persistEditorBufferBestEffort()
             activeEditor = nil
+            if let model = inspectorContext?.model { Task { await model.flushBeforeLeaving() } }
+            inspectorContext = nil
             mainPaneMode = .preview
         }
         .onChange(of: preview.state) { _, newState in
@@ -178,6 +184,8 @@ struct SiteWindow: View {
             // on a flush return value — just write the buffer best-effort, off the main actor.
             persistEditorBufferBestEffort()
             activeEditor = nil
+            if let model = inspectorContext?.model { Task { await model.flushBeforeLeaving() } }
+            inspectorContext = nil
             #if ANGLESITE_MAS
             scopedURL?.stopAccessingSecurityScopedResource()
             scopedURL = nil
@@ -237,9 +245,28 @@ struct SiteWindow: View {
             }
         .animation(.easeInOut(duration: 0.18), value: deploy.drawerPresented)
         .animation(.easeInOut(duration: 0.18), value: backup.drawerPresented)
+        .inspector(isPresented: Binding(
+            get: { inspectorShown && inspectorContext != nil },
+            set: { inspectorShown = $0 }
+        )) {
+            if let inspectorContext {
+                PageInspectorView(context: inspectorContext)
+                    .inspectorColumnWidth(min: 260, ideal: 300, max: 420)
+            }
+        }
         .navigationTitle(site.name)
         .navigationSubtitle(preview.readyURL?.absoluteString ?? "")
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    inspectorShown.toggle()
+                } label: {
+                    Label("Inspector", systemImage: "sidebar.right")
+                }
+                .disabled(inspectorContext == nil)
+                .help("Show or hide the page inspector")
+            }
+
             // Backup — lowest priority, first to collapse into the native overflow chevron.
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -487,7 +514,7 @@ struct SiteWindow: View {
         switch activeEditor {
         case .some(.text):
             return true
-        case .some(.plist), .some(.typed), .none:
+        case .some(.plist), .none:
             return false
         }
     }
@@ -518,11 +545,17 @@ struct SiteWindow: View {
             return await model.flushBeforeLeaving()
         case .plist(let model):
             return await model.flushBeforeLeaving()
-        case .typed(let model):
-            return await model.flushBeforeLeaving()
         case nil:
             return true
         }
+    }
+
+    /// Flush the inspector's editor before changing selection or tearing down — autosaves a dirty
+    /// buffer, returns false (and the model raises its conflict alert) on an external conflict so the
+    /// caller aborts the switch. Safe when no inspector is active.
+    private func leaveCurrentInspector() async -> Bool {
+        guard let model = inspectorContext?.model else { return true }
+        return await model.flushBeforeLeaving()
     }
 
     /// Best-effort off-main save of the open editor's buffer when the editor is torn down (window
@@ -540,9 +573,7 @@ struct SiteWindow: View {
                 let entries = model.entriesForSaving()
                 Task.detached(priority: .userInitiated) { try? PlistDocumentIO.save(entries, to: url) }
             }
-        case .typed(let model) where model.isDirty:
-            Task { await model.flushBeforeLeaving() }
-        case .text, .typed, nil:
+        case .text, nil:
             break
         }
     }
@@ -557,8 +588,6 @@ struct SiteWindow: View {
         case .editor:
             if case .text(let editorModel) = activeEditor {
                 MainPaneEditorView(model: editorModel)
-            } else if case .typed(let typedModel) = activeEditor {
-                TypedEntryEditorView(model: typedModel)
             } else if case .plist(let plistEditorModel) = activeEditor {
                 PlistEditorView(model: plistEditorModel) { title in
                     Task { await saveWebsiteTitle(title) }
@@ -666,26 +695,12 @@ struct SiteWindow: View {
         switch target {
         case .route(let route):
             Task {
-                guard await leaveCurrentEditor() else { return }   // abort if a conflict needs resolving
-                // Typed content (notes, articles, the business profile, …) is surfaced as a route
-                // in the navigator, but opens in its form editor rather than the preview. Plain
-                // pages (no content-type match) fall through to preview navigation.
-                if let source = site?.sourceDirectory,
-                   let typed = await typedEditorForContent(navigatorID: id, source: source) {
-                    if activeEditorFile?.id == typed.file.id {
-                        mainPaneMode = .editor(typed.file)   // re-show the open buffer intact
-                        return
-                    }
-                    activeEditor = .typed(typed)
-                    mainPaneMode = .editor(typed.file)
-                    return
-                }
+                guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+                // Content entry → preview in the center; its metadata in the inspector.
+                activeEditor = nil
                 mainPaneMode = .preview
-                if route.isEmpty || route == "/" {
-                    preview.clearRoute()
-                } else {
-                    preview.navigate(toRoute: route)
-                }
+                if route.isEmpty || route == "/" { preview.clearRoute() } else { preview.navigate(toRoute: route) }
+                inspectorContext = await makeInspectorContext(forNavigatorID: id)
             }
         case .file(let file):
             if activeEditorFile?.id == file.id {
@@ -693,23 +708,17 @@ struct SiteWindow: View {
                 return
             }
             Task {
-                guard await leaveCurrentEditor() else { return }   // flush the previous file first
-                if let source = site?.sourceDirectory,
-                   let descriptor = ContentTypeResolver.descriptor(
-                       forRelativePath: relativeProjectPath(of: file.url, under: source)) {
-                    activeEditor = .typed(TypedEntryEditorModel(
-                        file: file, descriptor: descriptor, sourceDirectory: source))
-                } else {
-                    switch EditorKind.resolve(for: file) {
-                    case .text:
-                        activeEditor = .text(FileEditorModel(file: file))
-                    case .plist:
-                        activeEditor = .plist(PlistEditorModel(
-                            file: file,
-                            websiteTitle: site?.name ?? file.name,
-                            sourceDirectory: site?.sourceDirectory ?? file.url.deletingLastPathComponent()
-                        ))
-                    }
+                guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+                inspectorContext = nil   // files (components/styles/metadata) have no page inspector
+                switch EditorKind.resolve(for: file) {
+                case .text:
+                    activeEditor = .text(FileEditorModel(file: file))
+                case .plist:
+                    activeEditor = .plist(PlistEditorModel(
+                        file: file,
+                        websiteTitle: site?.name ?? file.name,
+                        sourceDirectory: site?.sourceDirectory ?? file.url.deletingLastPathComponent()
+                    ))
                 }
                 mainPaneMode = .editor(file)
             }
@@ -724,26 +733,35 @@ struct SiteWindow: View {
         return String(u.dropFirst(r.count)).drop(while: { $0 == "/" }).description
     }
 
-    /// If a navigator id is a content page/post whose file resolves to a registered content type,
-    /// build its typed form editor. Returns `nil` for plain pages (which fall back to preview).
-    private func typedEditorForContent(navigatorID id: String, source: URL) async -> TypedEntryEditorModel? {
+    /// Build the inspector context for a content navigator id: the typed descriptor form when the
+    /// file resolves to a content type, the plain title/description form for a frontmatter-bearing
+    /// markdown page, or nil (plain `.astro`/other → preview only, no inspector).
+    private func makeInspectorContext(forNavigatorID id: String) async -> InspectorContext? {
+        guard let source = site?.sourceDirectory else { return nil }
         let relPath: String
         let group: FileGroup
         let displayName: String
         if let page = await contentGraph.page(id: id) {
-            relPath = page.filePath
-            group = .pages
-            displayName = page.title ?? page.route
+            relPath = page.filePath; group = .pages; displayName = page.title ?? page.route
         } else if let post = await contentGraph.post(id: id) {
-            relPath = post.filePath
-            group = .posts
-            displayName = post.title
+            relPath = post.filePath; group = .posts; displayName = post.title
         } else {
             return nil
         }
-        guard let descriptor = ContentTypeResolver.descriptor(forRelativePath: relPath) else { return nil }
-        let file = FileRef(url: source.appendingPathComponent(relPath), group: group, name: displayName)
-        return TypedEntryEditorModel(file: file, descriptor: descriptor, sourceDirectory: source)
+        let url = source.appendingPathComponent(relPath)
+        let file = FileRef(url: url, group: group, name: displayName)
+        if let descriptor = ContentTypeResolver.descriptor(forRelativePath: relPath) {
+            return .typed(TypedEntryEditorModel(file: file, descriptor: descriptor, sourceDirectory: source))
+        }
+        if isFrontmatterPage(relPath) {
+            return .page(PageMetadataModel(file: file, sourceDirectory: source))
+        }
+        return nil   // plain .astro / other → preview only
+    }
+
+    private func isFrontmatterPage(_ relPath: String) -> Bool {
+        let ext = (relPath as NSString).pathExtension.lowercased()
+        return ext == "md" || ext == "mdx" || ext == "markdown"
     }
 
     private var healthAssistantPrompt: String {

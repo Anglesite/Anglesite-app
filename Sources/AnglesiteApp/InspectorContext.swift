@@ -20,6 +20,7 @@ protocol InspectorEditorModel: AnyObject {
 }
 
 /// What the right-hand inspector is editing for the current selection.
+@MainActor
 enum InspectorContext: Identifiable {
     case typed(TypedEntryEditorModel)
     case page(PageMetadataModel)
