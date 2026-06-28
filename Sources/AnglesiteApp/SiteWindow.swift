@@ -247,7 +247,12 @@ struct SiteWindow: View {
         .animation(.easeInOut(duration: 0.18), value: backup.drawerPresented)
         .inspector(isPresented: Binding(
             get: { inspectorShown && inspectorContext != nil },
-            set: { inspectorShown = $0 }
+            set: { newValue in
+                // Only persist an explicit show/hide while there is something to inspect.
+                // When inspectorContext is nil the panel is auto-hidden; ignore that write so
+                // it doesn't clobber the remembered preference (the bug: inspector never returns).
+                if inspectorContext != nil { inspectorShown = newValue }
+            }
         )) {
             if let inspectorContext {
                 PageInspectorView(context: inspectorContext)
