@@ -173,7 +173,8 @@ export function checkExternalLinkRel(content: string, file: string): Issue[] {
 
 /**
  * Warn when expected security artifacts are absent from the built output.
- * Generators for these land in slice C1 (#405); until then this is informational.
+ * `scripts/edge-artifacts.ts` (C1) generates these at build: robots.txt always,
+ * security.txt only when `SECURITY_CONTACT` is set in `.site-config`.
  */
 export function checkArtifactPresence(relPaths: string[]): Issue[] {
   const set = new Set(relPaths.map((p) => p.replace(/\\/g, "/")));
