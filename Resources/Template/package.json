@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "scripts": {
     "dev": "astro dev",
-    "prebuild": "npx tsx scripts/csp.ts",
+    "prebuild": "npx tsx scripts/csp.ts && npx tsx scripts/edge-artifacts.ts",
     "build": "astro check && astro build && npx tsx scripts/check-microformats.ts",
     "preview": "astro preview",
     "check": "npx tsx scripts/pre-deploy-check.ts"
