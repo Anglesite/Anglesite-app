@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkHeaders } from "./pre-deploy-check";
+import { checkHeaders, checkMixedContent } from "./pre-deploy-check";
 
 const GOOD = `/*
   Content-Security-Policy: default-src 'self'; frame-src 'self' js.stripe.com
@@ -47,4 +47,32 @@ test("substring of an allowed domain does not satisfy coverage", () => {
   assert.equal(issues.length, 1);
   assert.equal(issues[0].severity, "error");
   assert.match(issues[0].message, /cal\.com/);
+});
+
+test("checkMixedContent: flags an insecure src", () => {
+  const issues = checkMixedContent('<img src="http://example.com/a.png">', "dist/index.html");
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].severity, "warning");
+  assert.match(issues[0].message, /mixed content/i);
+  assert.equal(issues[0].file, "dist/index.html");
+});
+
+test("checkMixedContent: flags an insecure url() in CSS", () => {
+  const issues = checkMixedContent("body { background: url(http://x.com/bg.png); }", "dist/a.css");
+  assert.equal(issues.length, 1);
+});
+
+test("checkMixedContent: https and relative refs are clean", () => {
+  const ok = '<img src="https://x.com/a.png"><script src="/local.js"></script>';
+  assert.deepEqual(checkMixedContent(ok, "dist/index.html"), []);
+});
+
+test("checkMixedContent: svg xmlns http URL is not flagged", () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
+  assert.deepEqual(checkMixedContent(svg, "dist/index.html"), []);
+});
+
+test("checkMixedContent: at most one issue per file", () => {
+  const two = '<img src="http://a.com/1.png"><img src="http://b.com/2.png">';
+  assert.equal(checkMixedContent(two, "dist/index.html").length, 1);
 });

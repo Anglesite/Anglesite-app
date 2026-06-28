@@ -98,6 +98,22 @@ export function checkHeaders(headersContent: string | null, configContent: strin
   return issues;
 }
 
+/**
+ * Insecure (http://) subresource references in built HTML/CSS. Targets resource
+ * attributes (`src`) and CSS `url(...)` only — NOT `href` — so anchor links and
+ * `xmlns="http://..."` declarations do not false-positive. Advisory: slice A's
+ * `upgrade-insecure-requests` auto-upgrades these at runtime. One issue per file.
+ */
+export function checkMixedContent(content: string, file: string): Issue[] {
+  const patterns = [/\bsrc\s*=\s*["']http:\/\//i, /url\(\s*["']?http:\/\//i];
+  for (const pattern of patterns) {
+    if (pattern.test(content)) {
+      return [{ severity: "warning", message: "Mixed content: insecure http:// resource reference", file }];
+    }
+  }
+  return [];
+}
+
 async function scan(): Promise<Issue[]> {
   const issues: Issue[] = [];
 
@@ -133,6 +149,10 @@ async function scan(): Promise<Issue[]> {
       if (pattern.test(content)) {
         issues.push({ severity: "error", message: `Possible ${name} exposed`, file: rel });
       }
+    }
+
+    if (/\.(html?|css)$/i.test(file)) {
+      issues.push(...checkMixedContent(content, rel));
     }
 
     if (/\.html?$/i.test(file)) {
