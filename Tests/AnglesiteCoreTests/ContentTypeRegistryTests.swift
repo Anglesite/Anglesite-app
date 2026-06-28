@@ -155,6 +155,28 @@ struct ContentTypeRegistryTests {
         #expect(like.projections.microformatProperties["likeOf"] == "u-like-of")
     }
 
+    // MARK: Reverse lookup
+
+    @Test("descriptor(forCollection:) maps a collection name back to its type")
+    func reverseLookupByCollection() {
+        let r = ContentTypeRegistry.default
+        #expect(r.descriptor(forCollection: "events")?.id == "event")
+        #expect(r.descriptor(forCollection: "reviews")?.id == "review")
+        #expect(r.descriptor(forCollection: "notes")?.id == "note")
+        // Unknown / custom collection has no descriptor.
+        #expect(r.descriptor(forCollection: "blog") == nil)
+        // Page-stored businessProfile has no collection, so it is never reverse-matched.
+        #expect(r.descriptor(forCollection: "") == nil)
+    }
+
+    @Test("collectionBackedTypeIDs lists exactly the .collection-stored built-ins, in order")
+    func collectionBackedIDs() {
+        #expect(ContentTypeRegistry.default.collectionBackedTypeIDs == [
+            "note", "article", "photo", "album", "bookmark", "reply", "like",
+            "announcement", "event", "review",
+        ])
+    }
+
     // MARK: Catalog invariants
 
     @Test("every built-in has a unique id, a microformat, and reachable mf2 fields")
