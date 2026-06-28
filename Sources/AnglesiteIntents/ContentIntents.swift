@@ -101,11 +101,15 @@ public struct FindContentByTypeIntent: AppIntent {
     public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<[PostEntity]> {
         let g = ContentGraphOverride.scoped ?? graph
         let results = await Self.matches(graph: g, siteID: site.id, type: contentType)
-        let typeName = ContentTypeAppEnum.caseDisplayRepresentations[contentType]?.title ?? "content"
+        // Display name from the registry (same source as the enum's representations); fall back to
+        // the type's collection name rather than a generic "content" so a future case without a
+        // representation degrades to e.g. "events" instead of "contents".
+        let typeName = ContentTypeRegistry.default.descriptor(id: contentType.rawValue)?.displayName
+            ?? contentType.rawValue
         return .result(
             value: results,
             dialog: IntentDialog(stringLiteral: ContentDialogs.findByType(
-                typeName: String(localized: typeName), count: results.count))
+                typeName: typeName, count: results.count))
         )
     }
 
@@ -299,9 +303,10 @@ extension AddPostIntent {
         let coll = (collection?.isEmpty == false)
             ? collection!
             : ((filePath as NSString).deletingLastPathComponent as NSString).lastPathComponent
+        // `contentType` is omitted: the memberwise init derives it from `coll` (#351), so the
+        // collection→type-name mapping lives only in `PostEntity.contentTypeName(forCollection:)`.
         return PostEntity(id: "\(siteID):post:\(identifier)", displayName: title, slug: identifier,
-                          collection: coll, siteID: siteID,
-                          contentType: ContentTypeRegistry.default.descriptor(forCollection: coll)?.displayName ?? coll)
+                          collection: coll, siteID: siteID)
     }
 }
 
@@ -325,6 +330,8 @@ public enum ContentDialogs {
 
     /// Naive English pluralization sufficient for the built-in type display names
     /// (Note, Article, Photo, Album, Bookmark, Reply, Like, Announcement, Event, Review).
+    /// The `y → ies` rule is only correct for consonant+y endings — do NOT call with arbitrary
+    /// display names (e.g. "Essay" → "Essaies"). New built-in types must keep this invariant.
     private static func pluralize(_ noun: String, _ n: Int) -> String {
         let lower = noun.lowercased()
         if n == 1 { return lower }

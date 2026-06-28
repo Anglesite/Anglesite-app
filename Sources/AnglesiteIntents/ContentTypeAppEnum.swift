@@ -12,13 +12,11 @@ public enum ContentTypeAppEnum: String, AppEnum, Sendable, CaseIterable {
 
     public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Content Type" }
 
-    public static var caseDisplayRepresentations: [ContentTypeAppEnum: DisplayRepresentation] {
-        [
-            .note: "Note", .article: "Article", .photo: "Photo", .album: "Album",
-            .bookmark: "Bookmark", .reply: "Reply", .like: "Like",
-            .announcement: "Announcement", .event: "Event", .review: "Review",
-        ]
-    }
+    public static let caseDisplayRepresentations: [ContentTypeAppEnum: DisplayRepresentation] = [
+        .note: "Note", .article: "Article", .photo: "Photo", .album: "Album",
+        .bookmark: "Bookmark", .reply: "Reply", .like: "Like",
+        .announcement: "Announcement", .event: "Event", .review: "Review",
+    ]
 
     /// The Astro content collection backing this type (e.g. `.event` → "events"), via the registry.
     public var collection: String? {

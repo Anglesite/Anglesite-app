@@ -11,10 +11,10 @@
 ## Global Constraints
 
 - ES modules / vanilla — N/A (Swift project).
-- **Worktree:** all work in `.claude/worktrees/351-typed-content-intents` (branch `feat/351-typed-content-intents`). `cd` there before any git/build op.
+- **Worktree:** all work in `.claude/worktrees/351-typed-content-intents` (branch `feat/351-typed-content-intents`). `cd` there before any git/build op. The absolute `/Users/dwk/…` paths in the per-step commands below are machine-specific — substitute your own worktree root.
 - **Swift toolchain:** `swift test` needs `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer` (default CommandLineTools swift is too old).
 - **No new third-party deps** — Apple frameworks only.
-- **Scope:** the ten `.collection(...)`-backed built-in types only. `businessProfile` / page singletons are OUT (→ #388). No `SiteContentGraph` / `ContentScanner` / MCP `list_content` changes. No new curated Siri `AppShortcut` phrases (10-phrase budget full).
+- **Scope:** the ten `.collection(...)`-backed built-in types only. `businessProfile` / page singletons are OUT (→ #388). No `SiteContentGraph` / `ContentScanner` / MCP `list_content` changes. No new curated Siri `AppShortcut` phrases (the last of the 10 slots is reserved for the queued Bucket-3 intents; `AnglesiteShortcuts` lists 9 today).
 - **`FindContentByTypeIntent` returns `[PostEntity]`** (homogeneous), not `ContentMatchEntity`.
 - **Test invocation:** `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --package-path . --filter <SuiteOrTest>` per commit; final task builds both Xcode schemes.
 - **Conventional commits**, footer `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.

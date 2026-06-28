@@ -261,6 +261,11 @@ extension AppIntentsTests {
             // Only this site's events, newest first.
             #expect(results.map(\.slug) == ["newer", "older"])
             #expect(results.allSatisfy { $0.contentType == "Event" })
+
+            // A type with posts of other types present but none of its own → empty (not all posts).
+            let none = await FindContentByTypeIntent.matches(
+                graph: graph, siteID: AppIntentsTests.aSite, type: .like)
+            #expect(none.isEmpty)
         }
     }
 }

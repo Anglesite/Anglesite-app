@@ -114,8 +114,10 @@ a new built-in collection type fails the test until the enum is updated.
   runtime via the `ContentGraphOverride.scoped` seam.
 - A spoken-result dialog string is added to `ContentDialogs`
   (pure/unit-testable, like the others).
-- **Not** registered as a curated `AppShortcut`: `AnglesiteShortcuts` is at its
-  10-phrase Siri budget. The intent is still discoverable in the Shortcuts app and
+- **Not** registered as a curated `AppShortcut`: `AppShortcutsProvider` allows at most
+  10 curated phrases; `AnglesiteShortcuts` already lists 9 and reserves the remaining
+  slot for the queued Bucket-3 integration intents (see the comment block in
+  `AnglesiteShortcuts.swift`). The intent is still discoverable in the Shortcuts app and
   via entity matching; voice/Spotlight matching of the typed content is carried by
   the `PostEntity.contentType` property.
 
@@ -154,4 +156,5 @@ SiteContentGraph.Post (collection)            ← unchanged; already populated
 - `businessProfile` / page-singleton entity surfacing → follows #388.
 - Per-type `AppEntity` types.
 - `SiteContentGraph` / `ContentScanner` / MCP `list_content` changes.
-- New curated Siri phrases (10-phrase budget is full).
+- New curated Siri phrases (the last of the 10 `AppShortcut` slots is reserved for the
+  queued Bucket-3 intents; `AnglesiteShortcuts` lists 9 today).
