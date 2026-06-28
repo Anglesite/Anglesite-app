@@ -86,6 +86,10 @@ public enum TypedContentEditor {
             if case .bool(let b) = value { return .flag(b) }
             return .flag(false)
         case .date, .datetime:
+            // `FrontmatterValue.date` is write-only — `Frontmatter.parse` only ever yields a date
+            // scalar as `.string`, so matching `.string` here is exhaustive in practice. If that
+            // invariant is ever relaxed, add a `.date` arm: the `.date(nil)` fallback would
+            // otherwise silently drop a valid date.
             if case .string(let s) = value { return .date(parseDate(s)) }
             return .date(nil)
         case .number:

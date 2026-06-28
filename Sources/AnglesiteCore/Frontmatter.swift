@@ -16,6 +16,10 @@ public enum FrontmatterValue: Equatable, Sendable {
     case bool(Bool)
     case array([String])
     case number(Double)
+    /// A preformatted date scalar emitted **unquoted**. `s` must be a safe bare YAML scalar — no
+    /// newlines, no `: ` (colon-space) sequences — because `FrontmatterDocument.render` emits it
+    /// verbatim, unescaped. It is always produced by `TypedContentEditor.format()`
+    /// (`ISO8601DateFormatter` output or its 10-char date-only prefix), which satisfies that.
     case date(String)
 }
 
