@@ -7,7 +7,7 @@
  * docs/superpowers/specs/2026-06-27-security-story-hardening-design.md §C1.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readConfig } from "./config";
 
@@ -19,10 +19,44 @@ Disallow:
 `;
 }
 
+/**
+ * RFC 9116 security.txt body, or null when no contact is configured (so we never
+ * emit an invalid file with no Contact). `Expires` is one year from `now` at UTC
+ * midnight, regenerated every build so it never lapses.
+ */
+export function buildSecurityTxt(contact: string | undefined, siteUrl: string, now: Date): string | null {
+  const trimmed = (contact ?? "").trim();
+  if (trimmed.length === 0) return null;
+  const contactUri = /^(https?:|mailto:|tel:)/i.test(trimmed)
+    ? trimmed
+    : trimmed.includes("@")
+      ? `mailto:${trimmed}`
+      : trimmed;
+  const expires = new Date(
+    Date.UTC(now.getUTCFullYear() + 1, now.getUTCMonth(), now.getUTCDate()),
+  ).toISOString();
+  const canonical = `${siteUrl.replace(/\/+$/, "")}/.well-known/security.txt`;
+  return `Contact: ${contactUri}
+Expires: ${expires}
+Canonical: ${canonical}
+`;
+}
+
 function main(): void {
   const publicDir = resolve(process.cwd(), "public");
   writeFileSync(resolve(publicDir, "robots.txt"), buildRobotsTxt(), "utf-8");
   console.log("Wrote public/robots.txt");
+
+  const siteUrl = readConfig("SITE_URL") ?? "https://example.com";
+  const securityTxt = buildSecurityTxt(readConfig("SECURITY_CONTACT"), siteUrl, new Date());
+  if (securityTxt !== null) {
+    const wellKnown = resolve(publicDir, ".well-known");
+    mkdirSync(wellKnown, { recursive: true });
+    writeFileSync(resolve(wellKnown, "security.txt"), securityTxt, "utf-8");
+    console.log("Wrote public/.well-known/security.txt");
+  } else {
+    console.log("Skipped security.txt (no SECURITY_CONTACT in .site-config)");
+  }
 }
 
 // Run only when invoked directly (e.g. `npx tsx scripts/edge-artifacts.ts`), never on import.
