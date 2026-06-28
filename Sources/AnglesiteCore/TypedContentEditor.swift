@@ -86,6 +86,10 @@ public enum TypedContentEditor {
             if case .bool(let b) = value { return .flag(b) }
             return .flag(false)
         case .date, .datetime:
+            // `FrontmatterValue.date` is write-only — `Frontmatter.parse` only ever yields a date
+            // scalar as `.string`, so matching `.string` here is exhaustive in practice. If that
+            // invariant is ever relaxed, add a `.date` arm: the `.date(nil)` fallback would
+            // otherwise silently drop a valid date.
             if case .string(let s) = value { return .date(parseDate(s)) }
             return .date(nil)
         case .number:
@@ -103,7 +107,10 @@ public enum TypedContentEditor {
         switch value {
         case .text(let s): return .string(s)
         case .flag(let b): return .bool(b)
-        case .date(let d): return .string(d.map { format($0, kind: kind) } ?? "")
+        // Dates serialize unquoted (FrontmatterValue.date) so they satisfy a non-coercing date
+        // schema and stay consistent with ContentScaffold; a nil (cleared) date falls back to an
+        // empty quoted scalar.
+        case .date(let d): return d.map { .date(format($0, kind: kind)) } ?? .string("")
         // Numbers serialize unquoted (FrontmatterValue.number) so they satisfy a z.number() schema;
         // a nil (cleared) number falls back to an empty quoted scalar.
         case .number(let n): return n.map { .number($0) } ?? .string("")

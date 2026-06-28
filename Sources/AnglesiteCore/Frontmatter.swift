@@ -4,15 +4,23 @@ import Foundation
 /// Node `parseFrontmatter` returns — the distinction matters to the scanner (`draft === true`
 /// wants a real boolean; `Array.isArray(tags)` wants a real array).
 ///
-/// `.number` is a write-only case: `Frontmatter.parse` never produces it (a numeric scalar parses
-/// as `.string`), but the editor uses it via `FrontmatterDocument.set` so a `number`-kind field
-/// serializes **unquoted** (`rating: 4`, not `rating: "4"`). Quoting a number would make YAML read
-/// it as a string and fail a content collection's `z.number()` schema.
+/// `.number` and `.date` are write-only cases: `Frontmatter.parse` never produces them (a numeric
+/// or date scalar parses as `.string`), but the editor uses them via `FrontmatterDocument.set` so
+/// those fields serialize **unquoted** — `rating: 4` (not `rating: "4"`) and
+/// `publishDate: 2026-01-01T00:00:00.000Z` (not `…: "…"`). Quoting would make YAML read the value
+/// as a string and fail a content collection's `z.number()`/non-coercing date schema. `.date`
+/// carries an already-formatted scalar (the editor decides date-only vs. full ISO by field kind),
+/// emitted verbatim, matching `ContentScaffold`'s unquoted dates.
 public enum FrontmatterValue: Equatable, Sendable {
     case string(String)
     case bool(Bool)
     case array([String])
     case number(Double)
+    /// A preformatted date scalar emitted **unquoted**. `s` must be a safe bare YAML scalar — no
+    /// newlines, no `: ` (colon-space) sequences — because `FrontmatterDocument.render` emits it
+    /// verbatim, unescaped. It is always produced by `TypedContentEditor.format()`
+    /// (`ISO8601DateFormatter` output or its 10-char date-only prefix), which satisfies that.
+    case date(String)
 }
 
 /// Native port of `server/content-frontmatter.mjs` (Bucket 1, #275).

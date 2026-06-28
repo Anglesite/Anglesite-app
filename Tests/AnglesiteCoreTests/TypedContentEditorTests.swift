@@ -22,6 +22,51 @@ struct TypedContentEditorTests {
         #expect(TypedContentEditor.read(out, descriptor: review)["rating"] == .number(4))
     }
 
+    @Test("edited date field serializes unquoted and round-trips to the same Date")
+    func dateWritesUnquoted() {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let newDate = iso.date(from: "2027-03-04T05:06:07.000Z")!
+
+        // datetime kind (review.publishDate) → full ISO, unquoted
+        let src = "---\nitemReviewed: \"Widget\"\nrating: 5\npublishDate: 2026-01-01T00:00:00.000Z\n---\n\nReview.\n"
+        var v = TypedContentEditor.read(src, descriptor: review)
+        v["publishDate"] = .date(newDate)
+        let out = TypedContentEditor.write(v, into: src, descriptor: review)
+        #expect(out.contains("publishDate: 2027-03-04T05:06:07.000Z"))     // unquoted
+        #expect(!out.contains("publishDate: \"2027-03-04T05:06:07.000Z\"")) // not a quoted string
+        #expect(TypedContentEditor.read(out, descriptor: review)["publishDate"] == .date(newDate))
+
+        // an unedited date stays byte-for-byte (verbatim), never re-rendered
+        var v2 = TypedContentEditor.read(src, descriptor: review)
+        v2["rating"] = .number(4)
+        let out2 = TypedContentEditor.write(v2, into: src, descriptor: review)
+        #expect(out2.contains("publishDate: 2026-01-01T00:00:00.000Z"))    // verbatim, still unquoted
+    }
+
+    @Test("edited date-only (.date kind) field serializes as a bare yyyy-MM-dd scalar")
+    func dateOnlyWritesUnquoted() {
+        // No built-in type uses .date kind, so exercise the `kind == .date` branch in format() with
+        // a custom descriptor.
+        let dated = ContentTypeDescriptor(
+            id: "dated", displayName: "Dated", storage: .collection("dated"),
+            fields: [ContentTypeField("start", .date, required: true), ContentTypeField("body", .markdown)],
+            projections: ContentTypeProjections(microformat: "h-entry", microformatProperties: [:], schemaType: nil))
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let newDate = iso.date(from: "2027-03-04T00:00:00.000Z")!   // midnight UTC ⟷ yyyy-MM-dd
+
+        let src = "---\nstart: 2026-01-01\n---\n\nEntry.\n"
+        var v = TypedContentEditor.read(src, descriptor: dated)
+        v["start"] = .date(newDate)
+        let out = TypedContentEditor.write(v, into: src, descriptor: dated)
+        #expect(out.contains("start: 2027-03-04"))       // bare date, unquoted
+        #expect(!out.contains("start: 2027-03-04T"))      // not the full datetime
+        #expect(!out.contains("start: \"2027-03-04\""))   // not a quoted string
+        #expect(TypedContentEditor.read(out, descriptor: dated)["start"] == .date(newDate))
+    }
+
     @Test("reads markdown field from body and scalars from frontmatter")
     func reads() {
         let src = "---\npublishDate: 2026-01-02T03:04:05.000Z\ntags: [a, b]\n---\n\nHello body.\n"

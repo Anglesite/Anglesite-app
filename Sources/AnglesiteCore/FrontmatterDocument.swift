@@ -162,6 +162,10 @@ public struct FrontmatterDocument: Equatable, Sendable {
             // magnitude guard avoids the Int(_:) overflow trap.
             let formatted = (n == n.rounded() && abs(n) < 1e15) ? String(Int(n)) : String(n)
             return "\(key): \(formatted)"
+        case .date(let s):
+            // Already-formatted date scalar, emitted unquoted (matching ContentScaffold) so YAML
+            // reads it as a date — a quoted scalar fails a non-coercing date schema.
+            return "\(key): \(s)"
         case .array(let items):
             if items.isEmpty { return "\(key): []" }
             return ([ "\(key):" ] + items.map { "  - \"\(escape($0))\"" }).joined(separator: "\n")
