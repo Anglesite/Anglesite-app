@@ -29,16 +29,6 @@ struct DeployExecutorSelectionTests {
             execResult: ContainerExecResult(exitCode: 0, stdout: scanOK, stderr: ""),
             execStdoutLines: []
         )
-        // ContainerDeployExecutor calls control.exec for every step.
-        // Build: exit 0 / Preflight: exit 0 + scan JSON / Wrangler: exit 0 + URL
-        let fakeWithURL = FakeLocalContainerControl(
-            startResult: .failure(.virtualizationUnavailable),
-            execResult: ContainerExecResult(exitCode: 0, stdout: wranglerOut, stderr: ""),
-            execStdoutLines: []
-        )
-        // For a multi-step flow we need different outputs per step; use the per-step override on
-        // the executor rather than the control (the control always returns the same execResult).
-        // Simplest approach: run with a single-step check — just assert exec was called at all.
         let executor = ContainerDeployExecutor(
             control: fake,
             siteID: "site-1",
@@ -48,10 +38,9 @@ struct DeployExecutorSelectionTests {
             tokenSource: { "tok" },
             executor: executor
         )
-        // Run only a partial flow: `build` exits 0, `preflight` returns the scan JSON with exit 0,
-        // but the execResult is the same for every call, so the wrangler step also gets scanOK
-        // (not a URL). That's fine — we're testing executor selection, not the full deploy flow.
-        // Use a custom step-aware fake that returns appropriate payloads per step.
+        // The fake returns the same execResult for every step, so this asserts routing (exec is
+        // reached on the container control), not the full flow — step ordering is covered by
+        // `allStepsRouteViaContainer`.
         _ = await cmd.deploy(siteID: "site-1", siteDirectory: tmpDir)
         let calls = await fake.execCalls
         // The container executor must have forwarded at least the build step through exec().
