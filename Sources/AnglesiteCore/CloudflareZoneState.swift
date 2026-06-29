@@ -27,9 +27,26 @@ public struct CloudflareZoneState: Sendable, Equatable {
     public var spfRecords: [String]
     /// TXT records at `_dmarc.<zone>` whose content starts with `v=DMARC1`.
     public var dmarcRecords: [String]
+    /// Whether Bot Fight Mode is enabled (free-plan bot management).
+    public var botFightMode: Bool
+    /// Custom WAF rules in the `http_request_firewall_custom` phase.
+    public var wafCustomRules: [WAFCustomRule]
+
+    /// A single custom WAF rule from the zone's firewall ruleset.
+    public struct WAFCustomRule: Sendable, Equatable {
+        public var description: String
+        public var expression: String
+        public var action: String
+        public init(description: String, expression: String, action: String) {
+            self.description = description
+            self.expression = expression
+            self.action = action
+        }
+    }
 
     public init(dnssecActive: Bool, sslMode: String, alwaysUseHTTPS: Bool, hsts: HSTS?,
-                caaRecords: [String], mxRecords: [String], spfRecords: [String], dmarcRecords: [String]) {
+                caaRecords: [String], mxRecords: [String], spfRecords: [String], dmarcRecords: [String],
+                botFightMode: Bool = false, wafCustomRules: [WAFCustomRule] = []) {
         self.dnssecActive = dnssecActive
         self.sslMode = sslMode
         self.alwaysUseHTTPS = alwaysUseHTTPS
@@ -38,5 +55,7 @@ public struct CloudflareZoneState: Sendable, Equatable {
         self.mxRecords = mxRecords
         self.spfRecords = spfRecords
         self.dmarcRecords = dmarcRecords
+        self.botFightMode = botFightMode
+        self.wafCustomRules = wafCustomRules
     }
 }

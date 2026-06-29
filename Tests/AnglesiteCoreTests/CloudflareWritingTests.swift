@@ -1,0 +1,102 @@
+import Testing
+import Foundation
+@testable import AnglesiteCore
+
+struct CloudflareWritingTests {
+    private let zoneID = "zone123"
+    private let token = "test-token"
+
+    @Test("enableDNSSEC sends PUT to /zones/{id}/dnssec")
+    func enableDNSSEC() async throws {
+        let spy = TransportSpy()
+        let client = HTTPCloudflareClient(transport: spyTransport([:], spy: spy))
+        try await client.enableDNSSEC(zoneID: zoneID, apiToken: token)
+        let req = try #require(spy.requests.first)
+        #expect(req.httpMethod == "PUT")
+        #expect(req.url?.path.contains("/dnssec") == true)
+        let body = try #require(req.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        #expect(body["status"] as? String == "active")
+    }
+
+    @Test("setAlwaysUseHTTPS sends PUT with correct value")
+    func setAlwaysUseHTTPS() async throws {
+        let spy = TransportSpy()
+        let client = HTTPCloudflareClient(transport: spyTransport([:], spy: spy))
+        try await client.setAlwaysUseHTTPS(zoneID: zoneID, enabled: true, apiToken: token)
+        let req = try #require(spy.requests.first)
+        #expect(req.httpMethod == "PUT" || req.httpMethod == "PATCH")
+        #expect(req.url?.path.contains("/settings/always_use_https") == true)
+        let body = try #require(req.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        #expect(body["value"] as? String == "on")
+    }
+
+    @Test("setHSTS sends PUT with nested STS object")
+    func setHSTS() async throws {
+        let spy = TransportSpy()
+        let client = HTTPCloudflareClient(transport: spyTransport([:], spy: spy))
+        try await client.setHSTS(zoneID: zoneID, maxAge: 31_536_000,
+                                  includeSubdomains: true, preload: false, apiToken: token)
+        let req = try #require(spy.requests.first)
+        #expect(req.httpMethod == "PUT" || req.httpMethod == "PATCH")
+        #expect(req.url?.path.contains("/settings/security_header") == true)
+        #expect(req.httpBody != nil)
+    }
+
+    @Test("addDNSRecord sends POST with correct type/name/content")
+    func addDNSRecord() async throws {
+        let spy = TransportSpy()
+        let client = HTTPCloudflareClient(transport: spyTransport([:], spy: spy))
+        let payload = DNSRecordPayload(type: "TXT", name: "example.com", content: "v=spf1 -all")
+        try await client.addDNSRecord(zoneID: zoneID, record: payload, apiToken: token)
+        let req = try #require(spy.requests.first)
+        #expect(req.httpMethod == "POST")
+        #expect(req.url?.path.contains("/dns_records") == true)
+        let body = try #require(req.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        #expect(body["type"] as? String == "TXT")
+        #expect(body["name"] as? String == "example.com")
+        #expect(body["content"] as? String == "v=spf1 -all")
+    }
+
+    @Test("setBotFightMode sends PATCH to /bot_management with fight_mode")
+    func setBotFightMode() async throws {
+        let spy = TransportSpy()
+        let client = HTTPCloudflareClient(transport: spyTransport([:], spy: spy))
+        try await client.setBotFightMode(zoneID: zoneID, enabled: true, apiToken: token)
+        let req = try #require(spy.requests.first)
+        #expect(req.httpMethod == "PATCH")
+        #expect(req.url?.path.contains("/bot_management") == true)
+        #expect(req.url?.path.contains("/settings/") == false)
+        let body = try #require(req.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        #expect(body["fight_mode"] as? Bool == true)
+    }
+
+    @Test("createWAFCustomRule sends POST to rulesets endpoint")
+    func createWAFCustomRule() async throws {
+        let spy = TransportSpy()
+        let rulesetJSON = """
+        {"success":true,"errors":[],"messages":[],"result":[{"id":"rs1","phase":"http_request_firewall_custom"}]}
+        """
+        let client = HTTPCloudflareClient(transport: spyTransport(["/rulesets": (200, rulesetJSON)], spy: spy))
+        let rule = WAFRulePayload(description: "Block dotfiles", expression: "(x)", action: "block")
+        try await client.createWAFCustomRule(zoneID: zoneID, rule: rule, apiToken: token)
+        let postReqs = spy.requests.filter { $0.httpMethod == "POST" }
+        #expect(!postReqs.isEmpty)
+    }
+
+    @Test("write methods include Authorization header")
+    func authorizationHeader() async throws {
+        let spy = TransportSpy()
+        let client = HTTPCloudflareClient(transport: spyTransport([:], spy: spy))
+        try await client.enableDNSSEC(zoneID: zoneID, apiToken: token)
+        let req = try #require(spy.requests.first)
+        #expect(req.value(forHTTPHeaderField: "Authorization") == "Bearer \(token)")
+    }
+
+    @Test("a 403 on a write surfaces as .unauthorized")
+    func writeUnauthorized() async {
+        let client = HTTPCloudflareClient(transport: fakeTransport(["/dnssec": (403, "{\"success\":false}")]))
+        await #expect(throws: CloudflareError.unauthorized) {
+            try await client.enableDNSSEC(zoneID: zoneID, apiToken: "bad")
+        }
+    }
+}
