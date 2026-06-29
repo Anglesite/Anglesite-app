@@ -59,7 +59,12 @@ public struct HTTPCloudflareClient: CloudflareReading {
         let (data, http) = try await transport(request)
         if http.statusCode == 401 || http.statusCode == 403 { throw CloudflareError.unauthorized }
         guard (200..<300).contains(http.statusCode) else { throw CloudflareError.http(status: http.statusCode) }
-        let env = try JSONDecoder().decode(CFEnvelope<T>.self, from: data)
+        let env: CFEnvelope<T>
+        do {
+            env = try JSONDecoder().decode(CFEnvelope<T>.self, from: data)
+        } catch {
+            throw CloudflareError.malformedResponse
+        }
         guard env.success, let result = env.result else {
             throw CloudflareError.api(message: env.errors?.first?.message ?? "request failed")
         }
@@ -69,7 +74,7 @@ public struct HTTPCloudflareClient: CloudflareReading {
     public func resolveZoneID(domain: String, apiToken: String) async throws -> String? {
         let escaped = domain.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? domain
         let zones = try await get("/zones?name=\(escaped)&status=active", apiToken: apiToken, as: [CFZone].self)
-        return zones.first(where: { $0.name == domain })?.id
+        return zones.first(where: { $0.name.lowercased() == domain.lowercased() })?.id
     }
 
     public func zoneState(zoneID: String, apiToken: String) async throws -> CloudflareZoneState {

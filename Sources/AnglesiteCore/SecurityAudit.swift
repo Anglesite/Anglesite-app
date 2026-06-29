@@ -1,5 +1,3 @@
-import Foundation
-
 /// Pure evaluator: grades a `CloudflareZoneState` into security findings. Read-only,
 /// no I/O — it never fixes anything. Findings reuse the shared `AuditReport.Finding`
 /// model (`category: .security`).

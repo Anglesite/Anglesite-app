@@ -47,6 +47,24 @@ func resolveZoneIDMissing() async throws {
     #expect(id == nil)
 }
 
+@Test("resolveZoneID matches case-insensitively on the zone name")
+func resolveZoneIDCaseInsensitive() async throws {
+    let json = """
+    {"success":true,"errors":[],"messages":[],"result":[{"id":"zone123","name":"example.com","status":"active"}]}
+    """
+    let client = HTTPCloudflareClient(transport: fakeTransport(["/zones?": (200, json)]))
+    let id = try await client.resolveZoneID(domain: "Example.COM", apiToken: "t")
+    #expect(id == "zone123")
+}
+
+@Test("a malformed JSON body surfaces as .malformedResponse")
+func malformedBodyMaps() async {
+    let client = HTTPCloudflareClient(transport: fakeTransport(["/zones?": (200, "not json")]))
+    await #expect(throws: CloudflareError.malformedResponse) {
+        _ = try await client.resolveZoneID(domain: "example.com", apiToken: "t")
+    }
+}
+
 @Test("a 403 surfaces as .unauthorized")
 func unauthorizedMaps() async {
     let client = HTTPCloudflareClient(transport: fakeTransport(["/zones?": (403, "{\"success\":false}")]))
