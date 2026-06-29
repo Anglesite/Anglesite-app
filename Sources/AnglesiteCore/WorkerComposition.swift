@@ -36,7 +36,7 @@ public enum WorkerComposition {
 
         var needsR2: Bool {
             switch self {
-            case .micropub, .webmention:
+            case .micropub:
                 return true
             default:
                 return false
