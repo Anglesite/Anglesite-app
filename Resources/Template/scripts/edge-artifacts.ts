@@ -11,7 +11,8 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readConfig } from "./config";
 
-const aiCrawlers = [
+// Maintained from https://darkvisitors.com/agents — check periodically for new entries.
+export const aiCrawlers = [
   "GPTBot",
   "ChatGPT-User",
   "Google-Extended",
