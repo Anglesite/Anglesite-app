@@ -207,11 +207,17 @@ public struct ContainerizationControl: LocalContainerControl {
         await live.teardown(siteID: siteID)
     }
 
-    /// Run `argv` inside the named container, streaming stdout lines to `onOutput` and returning
-    /// the captured result. Full streaming I/O and environment-variable forwarding are wired in
-    /// Task 8 (the `InContainerDeployOperation` integration). This stub satisfies the seam so
-    /// AnglesiteContainer compiles; it runs the process and captures its exit code but does not
-    /// yet pipe stdout or forward environment.
+    /// Run `argv` inside the named container as a one-shot guest exec, forwarding `environment`
+    /// and `workingDirectory`, streaming each stdout line to `onOutput` as it arrives, capturing
+    /// the full stdout + stderr, and returning the real guest exit code (it does NOT throw on a
+    /// non-zero exit — the caller maps the code). Mirrors `runToCompletion`'s lifecycle
+    /// (`exec` -> `start` -> `wait` -> `delete`) but installs capturing/streaming `Writer`s.
+    ///
+    /// Env/cwd are set via the real 0.34 `LinuxProcessConfiguration` fields — `arguments`,
+    /// `environmentVariables`, `workingDirectory` (`LinuxProcessConfiguration.swift:366-370`) — so
+    /// there is no shell wrapping and therefore no shell-metacharacter injection surface: each
+    /// `K=V` pair and each argv element is passed literally to the guest agent (no `sh -lc`, no
+    /// `env` binary). The default `PATH` is preserved so the resolver still finds `git`/`node`/etc.
     public func exec(
         siteID: String,
         argv: [String],
@@ -222,8 +228,42 @@ public struct ContainerizationControl: LocalContainerControl {
         guard let container = await live.container(for: siteID) else {
             throw LocalContainerError.bootFailed("exec: no live container for siteID '\(siteID)'")
         }
-        try await runToCompletion(container, id: siteID + "-exec", argv)
-        return ContainerExecResult(exitCode: 0, stdout: "", stderr: "")
+
+        // The seam's `onOutput` is non-escaping, but the `Writer` we install must close over it.
+        // `withoutActuallyEscaping` is sound here: every `write`/`flush` invocation that calls
+        // `onOutput` happens *before* `proc.wait()` returns — `wait()` drains the IO streams
+        // (`LinuxProcess.waitIoComplete`, LinuxProcess.swift:372) and `flush()` runs synchronously
+        // right after — so the escaping copy never outlives this function call.
+        return try await withoutActuallyEscaping(onOutput) { onOutput in
+            // Streaming line-splitter for stdout (forwards each completed line to `onOutput` and
+            // accumulates the raw text); a plain accumulator for stderr.
+            let stdoutSink = LineStreamingWriter(onLine: onOutput)
+            let stderrSink = AccumulatingWriter()
+
+            let proc = try await container.exec(siteID + "-exec") { config in
+                config.arguments = argv
+                // Preserve the default PATH (so argv[0] resolves) and append the caller's env as
+                // literal `K=V` argv-style entries — no shell parsing, no escaping bugs, no injection.
+                config.environmentVariables =
+                    ["PATH=\(LinuxProcessConfiguration.defaultPath)"]
+                    + environment.map { "\($0.key)=\($0.value)" }
+                config.workingDirectory = workingDirectory
+                config.stdout = stdoutSink
+                config.stderr = stderrSink
+            }
+            try await proc.start()
+            let status = try await proc.wait()
+            try? await proc.delete()
+
+            // `wait()` returns only after the IO streams have drained, so the sinks hold the full
+            // output here. Flush any trailing partial (unterminated) stdout line.
+            stdoutSink.flush()
+            return ContainerExecResult(
+                exitCode: status.exitCode,
+                stdout: stdoutSink.text,
+                stderr: stderrSink.text
+            )
+        }
     }
 
     // MARK: - Helpers
@@ -331,5 +371,61 @@ actor LiveContainers {
             try? FileManager.default.removeItem(at: url)
         }
         ext4Artifacts[siteID] = nil
+    }
+}
+
+/// A Containerization `Writer` that accumulates the raw guest stream into a UTF-8 string.
+/// Used for stderr capture in `exec`. The library invokes `write` from a single `FileHandle`
+/// readability handler, so the buffer is not touched concurrently (`@unchecked Sendable`, mirroring
+/// the upstream `BufferWriter` test helper in `ContainerTests.swift:83`).
+final class AccumulatingWriter: @unchecked Sendable, Writer {
+    private var buffer = Data()
+
+    var text: String { String(decoding: buffer, as: UTF8.self) }
+
+    func write(_ data: Data) throws {
+        buffer.append(data)
+    }
+
+    func close() throws {}
+}
+
+/// A Containerization `Writer` that splits the guest stream into newline-delimited lines, forwarding
+/// each completed line to `onLine` as it arrives (live streaming) while also accumulating the full
+/// raw text. Bytes are buffered until a `\n` is seen so a chunk that splits mid-line doesn't emit a
+/// partial line; `flush()` (called after `wait()`) emits any trailing unterminated line.
+///
+/// Single-handler invocation (one `FileHandle` readability handler) means no concurrent access, so
+/// `@unchecked Sendable` is safe here exactly as for the upstream test `BufferWriter`.
+final class LineStreamingWriter: @unchecked Sendable, Writer {
+    private let onLine: @Sendable (String) -> Void
+    private var pending = Data()   // bytes after the last emitted newline
+    private var full = Data()      // entire raw stream, for `text`
+
+    init(onLine: @escaping @Sendable (String) -> Void) {
+        self.onLine = onLine
+    }
+
+    var text: String { String(decoding: full, as: UTF8.self) }
+
+    func write(_ data: Data) throws {
+        guard !data.isEmpty else { return }
+        full.append(data)
+        pending.append(data)
+        let newline = UInt8(ascii: "\n")
+        while let idx = pending.firstIndex(of: newline) {
+            let lineData = pending[pending.startIndex..<idx]
+            onLine(String(decoding: lineData, as: UTF8.self))
+            pending = Data(pending[pending.index(after: idx)...])
+        }
+    }
+
+    func close() throws {}
+
+    /// Emit any buffered bytes that were never newline-terminated as a final line.
+    func flush() {
+        guard !pending.isEmpty else { return }
+        onLine(String(decoding: pending, as: UTF8.self))
+        pending.removeAll()
     }
 }
