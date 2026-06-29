@@ -33,6 +33,11 @@ public enum SecurityAudit {
                 "An HSTS max-age under one year weakens downgrade protection.",
                 "Raise HSTS max-age to at least 31536000 (one year).")
         }
+        if !state.botFightMode {
+            add(.info, "Bot Fight Mode is off",
+                "Without Bot Fight Mode, automated threats are not challenged at the edge.",
+                "Enable Bot Fight Mode to challenge bots before they reach the site.")
+        }
         if state.caaRecords.isEmpty {
             add(.info, "No CAA records",
                 "Any certificate authority can issue certificates for this domain.",

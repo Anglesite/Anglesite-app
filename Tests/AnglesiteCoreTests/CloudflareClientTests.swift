@@ -29,6 +29,39 @@ func fakeTransport(_ routes: [String: (Int, String)]) -> CloudflareTransport {
     }
 }
 
+/// Thread-safe spy that records requests for write-method assertions.
+final class TransportSpy: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _requests: [URLRequest] = []
+
+    var requests: [URLRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _requests
+    }
+
+    func record(_ request: URLRequest) {
+        lock.lock()
+        defer { lock.unlock() }
+        _requests.append(request)
+    }
+}
+
+/// A method-aware fake transport with optional spy for capturing requests.
+func spyTransport(_ routes: [String: (Int, String)], spy: TransportSpy? = nil) -> CloudflareTransport {
+    return { request in
+        spy?.record(request)
+        let url = request.url!.absoluteString
+        for (needle, pair) in routes where url.contains(needle) {
+            let resp = HTTPURLResponse(url: request.url!, statusCode: pair.0,
+                                       httpVersion: nil, headerFields: nil)!
+            return (Data(pair.1.utf8), resp)
+        }
+        let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        return (Data("{\"success\":true,\"errors\":[],\"result\":{}}".utf8), resp)
+    }
+}
+
 @Test("resolveZoneID returns the id of the matching active zone")
 func resolveZoneIDFound() async throws {
     let json = """
@@ -73,7 +106,7 @@ func unauthorizedMaps() async {
     }
 }
 
-@Test("zoneState assembles DNSSEC, settings, and DNS records")
+@Test("zoneState assembles DNSSEC, settings, DNS records, bot mode, and WAF rules")
 func zoneStateAssembles() async throws {
     let env = { (r: String) in "{\"success\":true,\"errors\":[],\"messages\":[],\"result\":\(r)}" }
     let routes: [String: (Int, String)] = [
@@ -82,6 +115,8 @@ func zoneStateAssembles() async throws {
         "/settings/always_use_https": (200, env("{\"id\":\"always_use_https\",\"value\":\"on\"}")),
         "/settings/security_header": (200, env("{\"id\":\"security_header\",\"value\":{\"strict_transport_security\":{\"enabled\":true,\"max_age\":31536000,\"include_subdomains\":true,\"preload\":false}}}")),
         "/dns_records": (200, env("[{\"type\":\"CAA\",\"name\":\"example.com\",\"content\":\"0 issue \\\"letsencrypt.org\\\"\"},{\"type\":\"TXT\",\"name\":\"example.com\",\"content\":\"v=spf1 -all\"},{\"type\":\"TXT\",\"name\":\"_dmarc.example.com\",\"content\":\"v=DMARC1; p=reject\"}]")),
+        "/settings/bot_management": (200, env("{\"fight_mode\":true}")),
+        "/rulesets": (200, env("[{\"id\":\"rs1\",\"phase\":\"http_request_firewall_custom\",\"rules\":[{\"description\":\"Block dotfiles\",\"expression\":\"(x)\",\"action\":\"block\"}]}]")),
     ]
     let client = HTTPCloudflareClient(transport: fakeTransport(routes))
     let s = try await client.zoneState(zoneID: "z", apiToken: "t")
@@ -93,9 +128,12 @@ func zoneStateAssembles() async throws {
     #expect(s.spfRecords == ["v=spf1 -all"])
     #expect(s.dmarcRecords == ["v=DMARC1; p=reject"])
     #expect(s.mxRecords.isEmpty)
+    #expect(s.botFightMode)
+    #expect(s.wafCustomRules.count == 1)
+    #expect(s.wafCustomRules.first?.description == "Block dotfiles")
 }
 
-@Test("HSTS disabled yields nil hsts")
+@Test("HSTS disabled yields nil hsts; bot/WAF gracefully default on error")
 func zoneStateHSTSDisabled() async throws {
     let env = { (r: String) in "{\"success\":true,\"errors\":[],\"messages\":[],\"result\":\(r)}" }
     let routes: [String: (Int, String)] = [
@@ -110,4 +148,6 @@ func zoneStateHSTSDisabled() async throws {
     #expect(!s.dnssecActive)
     #expect(s.hsts == nil)
     #expect(s.caaRecords.isEmpty)
+    #expect(!s.botFightMode)
+    #expect(s.wafCustomRules.isEmpty)
 }

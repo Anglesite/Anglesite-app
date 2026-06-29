@@ -7,7 +7,8 @@ struct SecurityAuditTests {
             dnssecActive: true, sslMode: "strict", alwaysUseHTTPS: true,
             hsts: .init(maxAge: 31_536_000, includeSubdomains: true, preload: false),
             caaRecords: ["0 issue \"letsencrypt.org\""], mxRecords: [],
-            spfRecords: ["v=spf1 -all"], dmarcRecords: ["v=DMARC1; p=reject"])
+            spfRecords: ["v=spf1 -all"], dmarcRecords: ["v=DMARC1; p=reject"],
+            botFightMode: true)
     }
 
     @Test("a fully hardened non-mail zone yields no findings")
@@ -57,6 +58,13 @@ struct SecurityAuditTests {
         var s = clean(); s.spfRecords = []; s.dmarcRecords = []
         let f = SecurityAudit.evaluate(s, expectsMail: true)
         #expect(!f.contains { $0.title.contains("SPF") })
+    }
+
+    @Test("Bot Fight Mode off is an info finding")
+    func botFightModeInfo() {
+        var s = clean(); s.botFightMode = false
+        let f = SecurityAudit.evaluate(s, expectsMail: false)
+        #expect(f.contains { $0.severity == .info && $0.title.contains("Bot Fight Mode") })
     }
 
     @Test("every finding is in the security category")
