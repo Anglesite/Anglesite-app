@@ -35,10 +35,10 @@ actor FakeLocalContainerControl: LocalContainerControl {
         argv: [String],
         environment: [String: String],
         workingDirectory: String,
-        onOutput: @Sendable (String) -> Void
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> ContainerExecResult {
         execCalls.append((siteID: siteID, argv: argv, env: environment, cwd: workingDirectory))
-        for line in execStdoutLines { onOutput(line) }
+        for line in execStdoutLines { onOutput(line, .stdout) }
         return execResult
     }
 }
@@ -78,7 +78,7 @@ actor GatedFakeLocalContainerControl: LocalContainerControl {
         argv: [String],
         environment: [String: String],
         workingDirectory: String,
-        onOutput: @Sendable (String) -> Void
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> ContainerExecResult {
         ContainerExecResult(exitCode: 0, stdout: "", stderr: "")
     }

@@ -225,6 +225,34 @@ struct ContainerDeployExecutorTests {
         #expect(result.output.contains("couldn't exec in the container"))
     }
 
+    // MARK: - cancellation does not hang and surfaces termination
+
+    @Test("a cancelled exec resolves (does not hang) and surfaces termination, not an exec error")
+    func cancelledExecTerminates() async {
+        // The fake's `exec` parks until the running Task is cancelled (then throws CancellationError),
+        // mirroring a real long-running guest process that the deploy cancels mid-flight. The deploy
+        // task must resolve promptly with a nil exitCode + empty output (the "terminated" signal),
+        // NOT hang and NOT bury cancellation under a "couldn't exec" string.
+        let fake = CancelParkingFakeContainerControl()
+        let executor = ContainerDeployExecutor(control: fake, siteID: "s", logCenter: LogCenter())
+
+        let task = Task {
+            await executor.run(
+                step: .wrangler,
+                siteDirectory: URL(fileURLWithPath: "/host"),
+                environment: ["CLOUDFLARE_API_TOKEN": "tok"],
+                source: "deploy:s"
+            )
+        }
+        // Let `exec` reach its park point, then cancel.
+        await fake.waitUntilParked()
+        task.cancel()
+
+        let result = await task.value
+        #expect(result.exitCode == nil)
+        #expect(result.output.isEmpty, "cancellation must not surface a generic exec-error string")
+    }
+
     // MARK: - siteID forwarded to exec
 
     @Test("siteID is forwarded to exec")
@@ -260,8 +288,47 @@ private actor ThrowingFakeLocalContainerControl: LocalContainerControl {
         argv: [String],
         environment: [String: String],
         workingDirectory: String,
-        onOutput: @Sendable (String) -> Void
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> ContainerExecResult {
         throw ExecError.boom
+    }
+}
+
+// MARK: - CancelParkingFakeContainerControl
+
+/// A `LocalContainerControl` whose `exec` suspends until the calling Task is cancelled, then throws
+/// `CancellationError` — modelling a long-running guest process that the deploy aborts mid-flight.
+/// `waitUntilParked()` lets the test rendezvous with the park point before cancelling, so the test
+/// is deterministic (no sleeps) and proves the deploy resolves rather than hanging.
+private actor CancelParkingFakeContainerControl: LocalContainerControl {
+    private var parkedContinuation: CheckedContinuation<Void, Never>?
+
+    /// Resolves once `exec` has reached its suspension point.
+    func waitUntilParked() async {
+        await withCheckedContinuation { cont in parkedContinuation = cont }
+    }
+
+    func start(siteID: String, sourceRepo: URL, ref: String) async throws -> LocalContainerSession {
+        throw LocalContainerError.virtualizationUnavailable
+    }
+    func stop(siteID: String) async throws {}
+
+    func exec(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> ContainerExecResult {
+        // Signal we've parked, then sleep "forever" — `Task.sleep` throws `CancellationError` the
+        // instant the Task is cancelled, which is exactly the abort path we want to exercise.
+        signalParked()
+        try await Task.sleep(for: .seconds(3600))
+        return ContainerExecResult(exitCode: 0, stdout: "", stderr: "")
+    }
+
+    private func signalParked() {
+        parkedContinuation?.resume()
+        parkedContinuation = nil
     }
 }

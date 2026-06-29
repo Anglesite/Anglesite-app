@@ -228,55 +228,76 @@ public struct ContainerizationControl: LocalContainerControl {
         argv: [String],
         environment: [String: String],
         workingDirectory: String,
-        onOutput: @Sendable (String) -> Void
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> ContainerExecResult {
         guard let container = await live.container(for: siteID) else {
             throw LocalContainerError.bootFailed("exec: no live container for siteID '\(siteID)'")
         }
 
-        // The seam's `onOutput` is non-escaping, but the `Writer` we install must close over it.
-        // `withoutActuallyEscaping` is sound here: every `write`/`flush` invocation that calls
-        // `onOutput` happens *before* `proc.wait()` returns — `wait()` drains the IO streams
-        // (`LinuxProcess.waitIoComplete`, LinuxProcess.swift:372) and `flush()` runs synchronously
-        // right after — so the escaping copy never outlives this function call.
-        return try await withoutActuallyEscaping(onOutput) { onOutput in
-            // Streaming line-splitter for BOTH stdout and stderr — forward each completed line to
-            // `onOutput` live (so the deploy drawer shows progress, incl. wrangler's stderr) while
-            // accumulating each stream's raw text separately (the caller parses stdout for the URL).
-            let stdoutSink = LineStreamingWriter(onLine: onOutput)
-            let stderrSink = LineStreamingWriter(onLine: onOutput)
+        // `onOutput` is `@escaping` (the seam declares it so): the `Writer` sinks below close over it
+        // and may legitimately fire it after this function returns (e.g. a kill-triggered final line
+        // on cancellation). No `withoutActuallyEscaping` — that wrapper would be UNSOUND here.
+        //
+        // Two line-splitters, one per stream, each tagging its lines with the stream it owns so the
+        // caller can label wrangler's stderr progress correctly (and parse stdout for the URL).
+        let stdoutSink = LineStreamingWriter(stream: .stdout, onLine: onOutput)
+        let stderrSink = LineStreamingWriter(stream: .stderr, onLine: onOutput)
 
-            let proc = try await container.exec(siteID + "-exec") { config in
-                config.arguments = argv
-                // Preserve the default PATH (so argv[0] resolves) and append the caller's env as
-                // literal `K=V` argv-style entries — no shell parsing, no escaping bugs, no injection.
-                config.environmentVariables =
-                    ["PATH=\(LinuxProcessConfiguration.defaultPath)"]
-                    + environment.map { "\($0.key)=\($0.value)" }
-                config.workingDirectory = workingDirectory
-                config.stdout = stdoutSink
-                config.stderr = stderrSink
-            }
-            try await proc.start()
-            // Honor task cancellation for parity with the host deploy path (which SIGTERMs a
-            // cancelled deploy): if the deploy task is cancelled mid-`wait()`, signal the guest
-            // process so a hung/long `npm install` / `wrangler deploy` can actually be aborted.
-            let status = try await withTaskCancellationHandler {
-                try await proc.wait()
-            } onCancel: {
-                Task { try? await proc.kill(.term) }
-            }
-            try? await proc.delete()
+        // Unique exec id per call so build/preflight/wrangler don't collide on the same vended
+        // process name. The label maps each step's argv to a distinct, readable suffix; a short
+        // uniquifier guarantees distinctness even if two calls share a label (e.g. two `npx` steps).
+        let label = Self.execLabel(for: argv)
+        let proc = try await container.exec("\(siteID)-exec-\(label)-\(UUID().uuidString.prefix(8))") { config in
+            config.arguments = argv
+            // Preserve the default PATH (so argv[0] resolves) and append the caller's env as
+            // literal `K=V` argv-style entries — no shell parsing, no escaping bugs, no injection.
+            config.environmentVariables =
+                ["PATH=\(LinuxProcessConfiguration.defaultPath)"]
+                + environment.map { "\($0.key)=\($0.value)" }
+            config.workingDirectory = workingDirectory
+            config.stdout = stdoutSink
+            config.stderr = stderrSink
+        }
+        try await proc.start()
+        // Honor task cancellation for parity with the host deploy path (which SIGTERMs a
+        // cancelled deploy): if the deploy task is cancelled mid-`wait()`, signal the guest
+        // process so a hung/long `npm install` / `wrangler deploy` can actually be aborted.
+        let status = try await withTaskCancellationHandler {
+            try await proc.wait()
+        } onCancel: {
+            // Fire-and-forget SIGTERM. This may land AFTER `proc.delete()` runs below (the cancel
+            // handler and the main flow race once `wait()` resumes). That's tolerated: `kill` and
+            // `delete` are independent async ops on `LinuxProcess` with no shared guard —
+            // `LinuxProcess.kill` (LinuxProcess.swift:307-321) just calls `agent.signalProcess` and
+            // *throws* a wrapped `ContainerizationError` if the process is already gone, and our
+            // `try?` swallows that throw. Best-effort by construction — we never need the kill to
+            // succeed once the process has exited or been deleted.
+            Task { try? await proc.kill(.term) }
+        }
+        try? await proc.delete()
 
-            // `wait()` returns only after the IO streams have drained, so the sinks hold the full
-            // output here. Flush any trailing partial (unterminated) line on each stream.
-            stdoutSink.flush()
-            stderrSink.flush()
-            return ContainerExecResult(
-                exitCode: status.exitCode,
-                stdout: stdoutSink.text,
-                stderr: stderrSink.text
-            )
+        // `wait()` returns only after the IO streams have drained, so the sinks hold the full
+        // output here. Flush any trailing partial (unterminated) line on each stream.
+        stdoutSink.flush()
+        stderrSink.flush()
+        return ContainerExecResult(
+            exitCode: status.exitCode,
+            stdout: stdoutSink.text,
+            stderr: stderrSink.text
+        )
+    }
+
+    /// Maps a step's argv to a short, distinct, readable exec-id label. `npm run build` → `build`,
+    /// `npx tsx …pre-deploy-check…` → `preflight`, `npx wrangler deploy` → `wrangler`; anything else
+    /// falls back to argv[0]. Both `npx` steps would otherwise collapse to the same prefix.
+    private static func execLabel(for argv: [String]) -> String {
+        switch argv.first {
+        case "npm": return "build"
+        case "npx":
+            if argv.contains("wrangler") { return "wrangler" }
+            if argv.contains(where: { $0.contains("pre-deploy-check") }) { return "preflight" }
+            return "npx"
+        default: return argv.first ?? "cmd"
         }
     }
 
@@ -396,11 +417,13 @@ actor LiveContainers {
 /// Single-handler invocation (one `FileHandle` readability handler) means no concurrent access, so
 /// `@unchecked Sendable` is safe here exactly as for the upstream test `BufferWriter`.
 final class LineStreamingWriter: @unchecked Sendable, Writer {
-    private let onLine: @Sendable (String) -> Void
+    private let stream: LogCenter.Stream
+    private let onLine: @Sendable (String, LogCenter.Stream) -> Void
     private var pending = Data()   // bytes after the last emitted newline
     private var full = Data()      // entire raw stream, for `text`
 
-    init(onLine: @escaping @Sendable (String) -> Void) {
+    init(stream: LogCenter.Stream, onLine: @escaping @Sendable (String, LogCenter.Stream) -> Void) {
+        self.stream = stream
         self.onLine = onLine
     }
 
@@ -413,7 +436,7 @@ final class LineStreamingWriter: @unchecked Sendable, Writer {
         let newline = UInt8(ascii: "\n")
         while let idx = pending.firstIndex(of: newline) {
             let lineData = pending[pending.startIndex..<idx]
-            onLine(String(decoding: lineData, as: UTF8.self))
+            onLine(String(decoding: lineData, as: UTF8.self), stream)
             pending = Data(pending[pending.index(after: idx)...])
         }
     }
@@ -423,7 +446,7 @@ final class LineStreamingWriter: @unchecked Sendable, Writer {
     /// Emit any buffered bytes that were never newline-terminated as a final line.
     func flush() {
         guard !pending.isEmpty else { return }
-        onLine(String(decoding: pending, as: UTF8.self))
+        onLine(String(decoding: pending, as: UTF8.self), stream)
         pending.removeAll()
     }
 }

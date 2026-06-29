@@ -38,14 +38,14 @@ struct DeployExecutorSelectionTests {
             tokenSource: { "tok" },
             executor: executor
         )
-        // The fake returns the same execResult for every step, so this asserts routing (exec is
-        // reached on the container control), not the full flow — step ordering is covered by
-        // `allStepsRouteViaContainer`.
+        // The fake returns exit-0 + valid scan JSON for every step, so the full
+        // build→preflight→wrangler flow reaches all three exec() calls (wrangler then fails on the
+        // missing URL, but only AFTER routing). Asserting `== 3` proves every step routes through
+        // the container; step-argv ordering is covered by `allStepsRouteViaContainer`.
         _ = await cmd.deploy(siteID: "site-1", siteDirectory: tmpDir)
         let calls = await fake.execCalls
-        // The container executor must have forwarded at least the build step through exec().
-        #expect(calls.count >= 1, "container control.exec() must be called at least once when container executor is used")
-        #expect(calls[0].siteID == "site-1")
+        #expect(calls.count == 3, "all three deploy steps must route through container control.exec()")
+        #expect(calls.allSatisfy { $0.siteID == "site-1" })
     }
 
     @Test("when container control is supplied, exec siteID matches the deploy siteID")
@@ -197,7 +197,7 @@ private actor StepAwareFakeContainerControl: LocalContainerControl {
         argv: [String],
         environment: [String: String],
         workingDirectory: String,
-        onOutput: @Sendable (String) -> Void
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> ContainerExecResult {
         calls.append((siteID: siteID, argv: argv))
         let n = callCount

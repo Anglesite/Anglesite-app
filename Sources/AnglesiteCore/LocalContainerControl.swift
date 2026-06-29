@@ -40,13 +40,19 @@ public protocol LocalContainerControl: Sendable {
     func stop(siteID: String) async throws
 
     /// Run `argv` inside the named container's guest environment, streaming each output line to
-    /// `onOutput` as it arrives, and returning the captured result when the process exits.
-    /// No `Containerization`/`Virtualization` types cross this seam.
+    /// `onOutput` (tagged with the stream it came from — `.stdout`/`.stderr`) as it arrives, and
+    /// returning the captured result when the process exits. No `Containerization`/`Virtualization`
+    /// types cross this seam.
+    ///
+    /// `onOutput` is `@escaping`: the production conformer hands it to the guest process's `Writer`
+    /// sinks, which can legitimately fire it *after* `exec` returns (e.g. a kill-triggered final
+    /// line on cancellation). The signature is honest about that — callers must not assume the
+    /// closure is dead once `exec` resolves.
     func exec(
         siteID: String,
         argv: [String],
         environment: [String: String],
         workingDirectory: String,
-        onOutput: @Sendable (String) -> Void
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> ContainerExecResult
 }

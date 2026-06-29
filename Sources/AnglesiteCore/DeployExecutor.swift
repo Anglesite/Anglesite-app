@@ -82,19 +82,25 @@ public struct ContainerDeployExecutor: DeployExecutor {
     ) async -> DeployStepResult {
         // `siteDirectory` is the HOST path — the guest always uses /workspace/site.
         let argv = guestArgv(for: step)
-        // Stream guest output to LogCenter LIVE (matching the host path): the sync `onOutput`
-        // callback yields each line into an AsyncStream (`yield` is nonisolated + Sendable, so it's
-        // safe from the @Sendable closure), and a structured `async let` drains it concurrently,
-        // appending to the actor-isolated LogCenter. The `continuation.finish()` + `await drained`
-        // before returning guarantees no trailing line is lost — the same contract
-        // `InProcessBackend` uses for the host streaming.
+        // Stream guest output to LogCenter LIVE (matching the host path): the `@escaping @Sendable`
+        // `onOutput` callback yields each (line, stream) into an AsyncStream (`yield` is nonisolated
+        // + Sendable, so it's safe from the closure even when fired after `exec` returns), and a
+        // DETACHED task drains it, appending to the actor-isolated LogCenter under the line's own
+        // stream (so wrangler's stderr progress is labelled `.stderr`, not mislabelled `.stdout`).
+        //
+        // The drain is `Task.detached`, NOT `async let`: a structured child is cancelled the instant
+        // this task is cancelled — *before* it consumes the buffered lines — which would silently
+        // drop the kill-triggered final log lines. A detached task is independent of structured
+        // cancellation, so it drains exactly what was yielded. We `continuation.finish()` then
+        // `await drain.value` on EVERY exit path, so no line leaks and the drain always completes.
         // Never log the environment dict — CLOUDFLARE_API_TOKEN stays off disk and out of logs.
-        let (lines, continuation) = AsyncStream<String>.makeStream(bufferingPolicy: .unbounded)
-        async let drained: Void = {
-            for await line in lines {
-                await logCenter.append(source: source, stream: .stdout, text: line)
+        let (lines, continuation) = AsyncStream<(String, LogCenter.Stream)>.makeStream(bufferingPolicy: .unbounded)
+        let logCenter = self.logCenter
+        let drain = Task.detached(priority: .utility) {
+            for await (line, stream) in lines {
+                await logCenter.append(source: source, stream: stream, text: line)
             }
-        }()
+        }
         let result: ContainerExecResult
         do {
             result = try await control.exec(
@@ -102,15 +108,35 @@ public struct ContainerDeployExecutor: DeployExecutor {
                 argv: argv,
                 environment: Self.guestEnvironment(from: environment),
                 workingDirectory: "/workspace/site",
-                onOutput: { line in continuation.yield(line) }
+                onOutput: { line, stream in continuation.yield((line, stream)) }
             )
-        } catch {
+        } catch is CancellationError {
+            // A cancelled deploy: drain whatever the kill-triggered output produced, then surface a
+            // termination (nil exitCode, empty output). `DeployCommand` checks `Task.isCancelled`
+            // and renders "terminated" — we must NOT bury cancellation under a generic exec-error
+            // string. (The `DeployExecutor` seam is non-throwing, so we signal termination via the
+            // nil/empty result rather than re-throwing; `Task.isCancelled` carries the intent.)
             continuation.finish()
-            await drained
+            _ = await drain.value
+            return DeployStepResult(exitCode: nil, output: "")
+        } catch let error as LocalContainerError {
+            continuation.finish()
+            _ = await drain.value
+            // A dead/never-booted container surfaces as `.bootFailed`; give the user an actionable
+            // message instead of the raw error (the Deploy-button gating half lives app-side).
+            if case .bootFailed = error {
+                return DeployStepResult(
+                    exitCode: nil,
+                    output: "Container isn't running — open/start the site's preview first.")
+            }
+            return DeployStepResult(exitCode: nil, output: "couldn't exec in the container: \(error)")
+        } catch let error {
+            continuation.finish()
+            _ = await drain.value
             return DeployStepResult(exitCode: nil, output: "couldn't exec in the container: \(error)")
         }
         continuation.finish()
-        await drained
+        _ = await drain.value
         return DeployStepResult(exitCode: result.exitCode, output: result.stdout)
     }
 

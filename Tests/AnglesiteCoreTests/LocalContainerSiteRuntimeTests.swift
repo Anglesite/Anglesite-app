@@ -185,7 +185,7 @@ struct FakeLocalContainerControlExecTests {
             argv: ["wrangler", "deploy"],
             environment: ["NODE_ENV": "production"],
             workingDirectory: "/workspace/Source",
-            onOutput: { _ in })
+            onOutput: { _, _ in })
 
         let calls = await fake.execCalls
         #expect(calls.count == 1)
@@ -207,7 +207,7 @@ struct FakeLocalContainerControlExecTests {
             argv: ["cmd"],
             environment: [:],
             workingDirectory: "/",
-            onOutput: { _ in })
+            onOutput: { _, _ in })
 
         #expect(result == expected)
     }
@@ -219,14 +219,32 @@ struct FakeLocalContainerControlExecTests {
             execResult: Self.defaultResult,
             execStdoutLines: ["line1", "line2", "line3"])
 
-        var received: [String] = []
+        // `onOutput` is `@escaping @Sendable`; collect through a thread-safe box and assert the
+        // fake replays each line tagged `.stdout`.
+        let collector = LineCollector()
         _ = try await fake.exec(
             siteID: "s",
             argv: ["build"],
             environment: [:],
             workingDirectory: "/",
-            onOutput: { received.append($0) })
+            onOutput: { line, stream in collector.append(line, stream) })
 
-        #expect(received == ["line1", "line2", "line3"])
+        #expect(collector.lines == ["line1", "line2", "line3"])
+        #expect(collector.streams.allSatisfy { $0 == .stdout })
     }
+}
+
+/// Thread-safe sink for `onOutput` lines in tests (the seam's closure is `@escaping @Sendable`).
+private final class LineCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _lines: [String] = []
+    private var _streams: [LogCenter.Stream] = []
+
+    func append(_ line: String, _ stream: LogCenter.Stream) {
+        lock.lock(); defer { lock.unlock() }
+        _lines.append(line)
+        _streams.append(stream)
+    }
+    var lines: [String] { lock.lock(); defer { lock.unlock() }; return _lines }
+    var streams: [LogCenter.Stream] { lock.lock(); defer { lock.unlock() }; return _streams }
 }
