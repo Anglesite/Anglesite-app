@@ -54,3 +54,42 @@ func unauthorizedMaps() async {
         _ = try await client.resolveZoneID(domain: "example.com", apiToken: "bad")
     }
 }
+
+@Test("zoneState assembles DNSSEC, settings, and DNS records")
+func zoneStateAssembles() async throws {
+    let env = { (r: String) in "{\"success\":true,\"errors\":[],\"messages\":[],\"result\":\(r)}" }
+    let routes: [String: (Int, String)] = [
+        "/dnssec": (200, env("{\"status\":\"active\"}")),
+        "/settings/ssl": (200, env("{\"id\":\"ssl\",\"value\":\"strict\"}")),
+        "/settings/always_use_https": (200, env("{\"id\":\"always_use_https\",\"value\":\"on\"}")),
+        "/settings/security_header": (200, env("{\"id\":\"security_header\",\"value\":{\"strict_transport_security\":{\"enabled\":true,\"max_age\":31536000,\"include_subdomains\":true,\"preload\":false}}}")),
+        "/dns_records": (200, env("[{\"type\":\"CAA\",\"name\":\"example.com\",\"content\":\"0 issue \\\"letsencrypt.org\\\"\"},{\"type\":\"TXT\",\"name\":\"example.com\",\"content\":\"v=spf1 -all\"},{\"type\":\"TXT\",\"name\":\"_dmarc.example.com\",\"content\":\"v=DMARC1; p=reject\"}]")),
+    ]
+    let client = HTTPCloudflareClient(transport: fakeTransport(routes))
+    let s = try await client.zoneState(zoneID: "z", apiToken: "t")
+    #expect(s.dnssecActive)
+    #expect(s.sslMode == "strict")
+    #expect(s.alwaysUseHTTPS)
+    #expect(s.hsts == CloudflareZoneState.HSTS(maxAge: 31536000, includeSubdomains: true, preload: false))
+    #expect(s.caaRecords == ["0 issue \"letsencrypt.org\""])
+    #expect(s.spfRecords == ["v=spf1 -all"])
+    #expect(s.dmarcRecords == ["v=DMARC1; p=reject"])
+    #expect(s.mxRecords.isEmpty)
+}
+
+@Test("HSTS disabled yields nil hsts")
+func zoneStateHSTSDisabled() async throws {
+    let env = { (r: String) in "{\"success\":true,\"errors\":[],\"messages\":[],\"result\":\(r)}" }
+    let routes: [String: (Int, String)] = [
+        "/dnssec": (200, env("{\"status\":\"disabled\"}")),
+        "/settings/ssl": (200, env("{\"id\":\"ssl\",\"value\":\"full\"}")),
+        "/settings/always_use_https": (200, env("{\"id\":\"always_use_https\",\"value\":\"off\"}")),
+        "/settings/security_header": (200, env("{\"id\":\"security_header\",\"value\":{\"strict_transport_security\":{\"enabled\":false}}}")),
+        "/dns_records": (200, env("[]")),
+    ]
+    let client = HTTPCloudflareClient(transport: fakeTransport(routes))
+    let s = try await client.zoneState(zoneID: "z", apiToken: "t")
+    #expect(!s.dnssecActive)
+    #expect(s.hsts == nil)
+    #expect(s.caaRecords.isEmpty)
+}

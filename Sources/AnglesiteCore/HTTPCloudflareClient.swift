@@ -14,6 +14,26 @@ private struct CFZone: Decodable, Sendable {
     let status: String
 }
 
+private struct CFDNSSEC: Decodable, Sendable { let status: String }
+private struct CFStringSetting: Decodable, Sendable { let value: String }
+private struct CFSecurityHeader: Decodable, Sendable {
+    struct Value: Decodable, Sendable {
+        struct STS: Decodable, Sendable {
+            let enabled: Bool
+            let max_age: Int?
+            let include_subdomains: Bool?
+            let preload: Bool?
+        }
+        let strict_transport_security: STS
+    }
+    let value: Value
+}
+private struct CFDNSRecord: Decodable, Sendable {
+    let type: String
+    let name: String
+    let content: String
+}
+
 /// Read-only Cloudflare v4 client. All methods are GETs.
 public struct HTTPCloudflareClient: CloudflareReading {
     private static let base = "https://api.cloudflare.com/client/v4"
@@ -52,8 +72,33 @@ public struct HTTPCloudflareClient: CloudflareReading {
         return zones.first(where: { $0.name == domain })?.id
     }
 
-    // Implemented in Task 3.
     public func zoneState(zoneID: String, apiToken: String) async throws -> CloudflareZoneState {
-        fatalError("zoneState not yet implemented — Task 3")
+        let dnssec = try await get("/zones/\(zoneID)/dnssec", apiToken: apiToken, as: CFDNSSEC.self)
+        let ssl = try await get("/zones/\(zoneID)/settings/ssl", apiToken: apiToken, as: CFStringSetting.self)
+        let https = try await get("/zones/\(zoneID)/settings/always_use_https", apiToken: apiToken, as: CFStringSetting.self)
+        let header = try await get("/zones/\(zoneID)/settings/security_header", apiToken: apiToken, as: CFSecurityHeader.self)
+        let records = try await get("/zones/\(zoneID)/dns_records?per_page=100", apiToken: apiToken, as: [CFDNSRecord].self)
+
+        let sts = header.value.strict_transport_security
+        let hsts: CloudflareZoneState.HSTS? = sts.enabled
+            ? .init(maxAge: sts.max_age ?? 0, includeSubdomains: sts.include_subdomains ?? false, preload: sts.preload ?? false)
+            : nil
+
+        func contents(ofType t: String) -> [String] {
+            records.filter { $0.type.uppercased() == t }.map(\.content)
+        }
+        let txt = records.filter { $0.type.uppercased() == "TXT" }
+        let spf = txt.filter { $0.content.lowercased().hasPrefix("v=spf1") }.map(\.content)
+        let dmarc = txt.filter { $0.name.lowercased().hasPrefix("_dmarc.") && $0.content.lowercased().hasPrefix("v=dmarc1") }.map(\.content)
+
+        return CloudflareZoneState(
+            dnssecActive: dnssec.status.lowercased() == "active",
+            sslMode: ssl.value,
+            alwaysUseHTTPS: https.value.lowercased() == "on",
+            hsts: hsts,
+            caaRecords: contents(ofType: "CAA"),
+            mxRecords: contents(ofType: "MX"),
+            spfRecords: spf,
+            dmarcRecords: dmarc)
     }
 }
