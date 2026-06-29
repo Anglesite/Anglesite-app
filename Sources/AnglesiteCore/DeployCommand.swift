@@ -244,6 +244,8 @@ public actor DeployCommand {
         "PATH", "HOME", "USER", "LOGNAME", "SHELL",
         // Temp directories — Node/npm/Astro write to these
         "TMPDIR", "TEMP", "TMP",
+        // CI — Astro, Vite, and many post-install scripts check this to suppress interactive prompts
+        "CI",
         // Locale — affects sorting, date formatting in build output
         "LANG", "LC_ALL", "LC_COLLATE", "LC_CTYPE", "LC_MESSAGES", "LC_MONETARY",
         "LC_NUMERIC", "LC_TIME",
@@ -258,19 +260,27 @@ public actor DeployCommand {
         "TERM", "COLORTERM", "COLUMNS",
     ]
 
-    /// Returns a curated subset of the current process environment safe for host-path build and
-    /// preflight steps. Strips unrelated secrets (`AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`, …)
-    /// that the developer's shell may carry. `CLOUDFLARE_API_TOKEN` is explicitly excluded here;
-    /// `deploy()` adds it only to the `.wrangler` step's environment.
-    static func hostDeployEnvironment() -> [String: String] {
-        var result: [String: String] = [:]
-        let env = ProcessInfo.processInfo.environment
-        for (key, value) in env {
-            if hostEnvAllowlist.contains(key) {
-                result[key] = value
-            }
+    /// Key prefixes that Astro/Vite projects use for build-time environment variables. These are
+    /// standard conventions for variables inlined into client-side output (`PUBLIC_*`) or consumed
+    /// by Vite's pipeline (`VITE_*`). Users set them in their shell and expect them to flow through
+    /// to `astro build`. `ASTRO_` covers Astro's own config overrides (e.g. `ASTRO_TELEMETRY_DISABLED`).
+    private static let hostEnvPrefixes: [String] = ["PUBLIC_", "VITE_", "ASTRO_"]
+
+    /// Returns a curated subset of the given environment safe for host-path build and preflight
+    /// steps. Strips unrelated secrets (`AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`, …) that the
+    /// developer's shell may carry. `CLOUDFLARE_API_TOKEN` is explicitly excluded here; `deploy()`
+    /// adds it only to the `.wrangler` step's environment.
+    ///
+    /// The `env` parameter defaults to the current process environment; tests inject a literal
+    /// dictionary instead (avoiding `setenv`/`unsetenv` races and the `ProcessInfo` launch-time
+    /// snapshot issue).
+    static func hostDeployEnvironment(
+        _ env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        env.filter { key, _ in
+            hostEnvAllowlist.contains(key) ||
+            hostEnvPrefixes.contains(where: { key.hasPrefix($0) })
         }
-        return result
     }
 
     // MARK: Default seams
