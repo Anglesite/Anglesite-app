@@ -132,7 +132,7 @@ final class MockCloudflareWriter: CloudflareWriting, @unchecked Sendable {
     private func record(_ call: String) throws {
         lock.lock()
         defer { lock.unlock() }
-        if call == failOn { throw CloudflareError.apiError(errors: ["mock failure"]) }
+        if call == failOn { throw CloudflareError.api(message: "mock failure") }
         _calls.append(call)
     }
 
