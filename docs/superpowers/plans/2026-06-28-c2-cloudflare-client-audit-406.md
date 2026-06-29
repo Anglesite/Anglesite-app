@@ -20,7 +20,7 @@ This plan is the **CI-testable core** of C2. Two pieces of the spec's C2 are del
 ## Global Constraints
 
 - **Swift 6, ES-equivalent module style** — `public` API in `AnglesiteCore`; `Sendable` everywhere; no third-party dependencies (Foundation `URLSession` only).
-- **Read-only** — every method is a GET. No write/PATCH/POST/PUT/DELETE anywhere in this plan. The documented token scope is read-only: Zone Read, DNS Read, Zone Settings Read.
+- **Read-only** — every method is a GET. No write/PATCH/POST/PUT/DELETE anywhere in this plan. The documented token scope for audit is read-only: Zone Read, DNS Read, Zone Settings Read. (C3 adds write scope: Zone DNS Edit, Zone Settings Edit, WAF Edit.)
 - **No Keychain, no SwiftUI in `AnglesiteCore`** — the API token is passed in as a `String` parameter (the caller reads `KeychainStore().readCloudflareToken()`; that wiring is the deferred UI plan). Mirror `CloudflareAPITokenVerifier`, which also takes the token as a parameter.
 - **Mirror existing patterns exactly:**
   - Seam: `public typealias Transport = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)` with `static let defaultTransport` using `URLSession.shared.data(for:)` — copied from `Sources/AnglesiteCore/CloudflareAPITokenVerifier.swift`.

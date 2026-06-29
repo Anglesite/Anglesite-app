@@ -90,6 +90,7 @@ struct SiteWindow: View {
     // the panel UI is target-agnostic.
     @State private var chat: ChatModel?
     @State private var chatPresented = false
+    @State private var harden = HardenModel()
     @State private var health = HealthModel(runner: DefaultHealthCheckRunner())
     /// Drives the determinate startup progress bar shown in `mainPane` while the dev server boots.
     @State private var startup = StartupProgressModel()
@@ -292,6 +293,24 @@ struct SiteWindow: View {
             }
             .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
 
+            // Harden — low priority, collapses alongside Audit/Backup.
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    harden.harden()
+                } label: {
+                    if harden.isRunning {
+                        Label("Hardening…", systemImage: "shield.lefthalf.filled")
+                    } else {
+                        Label("Harden", systemImage: "shield.lefthalf.filled")
+                    }
+                }
+                .disabled(harden.isRunning || !site.isValid)
+                .help(site.isValid
+                      ? "Preview and apply Cloudflare security hardening for this site"
+                      : "Site is missing required files")
+            }
+            .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
+
             // Audit — low priority, collapses before Chat.
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -438,6 +457,9 @@ struct SiteWindow: View {
                 siteName: site.name,
                 onRunAgain: { audit.audit(siteID: site.id, siteDirectory: site.sourceDirectory) }
             )
+        }
+        .sheet(isPresented: $harden.sheetPresented) {
+            HardenSheetView(model: harden)
         }
         #if !ANGLESITE_MAS
         .sheet(isPresented: $publish.sheetPresented) {
