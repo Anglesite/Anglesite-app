@@ -16,6 +16,7 @@ public actor HTTPTransport: MCPTransport {
     private let endpoint: URL
     private let protocolVersion: String
     private let urlSession: URLSession
+    private let bearerToken: SessionToken?
 
     private var sessionID: String?
     private let stream: AsyncStream<JSONValue>
@@ -23,10 +24,12 @@ public actor HTTPTransport: MCPTransport {
 
     public init(
         endpoint: URL,
+        bearerToken: SessionToken? = nil,
         protocolVersion: String = "2024-11-05",
         urlSession: URLSession = .shared
     ) {
         self.endpoint = endpoint
+        self.bearerToken = bearerToken
         self.protocolVersion = protocolVersion
         self.urlSession = urlSession
         (self.stream, self.continuation) = AsyncStream<JSONValue>.makeStream(bufferingPolicy: .unbounded)
@@ -41,6 +44,7 @@ public actor HTTPTransport: MCPTransport {
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue(protocolVersion, forHTTPHeaderField: "MCP-Protocol-Version")
         if let sessionID { request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id") }
+        if let bearerToken { request.setValue("Bearer \(bearerToken.value)", forHTTPHeaderField: "Authorization") }
         request.httpBody = try JSONSerialization.data(withJSONObject: message.rawValue, options: [])
 
         // Use `bytes(for:)`, NOT `data(for:)`: a `text/event-stream` response is treated by
@@ -112,6 +116,7 @@ public actor HTTPTransport: MCPTransport {
             var request = URLRequest(url: endpoint)
             request.httpMethod = "DELETE"
             request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id")
+            if let bearerToken { request.setValue("Bearer \(bearerToken.value)", forHTTPHeaderField: "Authorization") }
             _ = try? await urlSession.data(for: request)
         }
         sessionID = nil

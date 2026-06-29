@@ -10,7 +10,7 @@ public actor RemoteSandboxSiteRuntime: SiteRuntime {
     private let control: any SandboxControlClient
     public let mcpClient: MCPClient
     private let mintToken: @Sendable () -> SessionToken
-    private let connect: @Sendable (MCPClient, URL) async throws -> Void
+    private let connect: @Sendable (MCPClient, URL, SessionToken) async throws -> Void
 
     private var current: SiteRuntimeState = .idle
     private var observers: [UUID: AsyncStream<SiteRuntimeState>.Continuation] = [:]
@@ -23,11 +23,9 @@ public actor RemoteSandboxSiteRuntime: SiteRuntime {
         control: any SandboxControlClient,
         mcpClient: MCPClient,
         mintToken: @escaping @Sendable () -> SessionToken = { SessionToken.mint() },
-        // Default carries no bearer token. The in-container MCP sidecar bearer check + a
-        // token-carrying connect closure are deferred to the iOS onboarding sub-plan (see
-        // design 2026-06-23 §5 and the plan's Deferred sub-plans); this tokenless default
-        // must NOT be wired into production.
-        connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) }
+        connect: @escaping @Sendable (MCPClient, URL, SessionToken) async throws -> Void = { c, u, token in
+            try await c.connect(httpEndpoint: u, bearerToken: token)
+        }
     ) {
         self.gitRemote = gitRemote
         self.gitRef = gitRef
@@ -56,10 +54,11 @@ public actor RemoteSandboxSiteRuntime: SiteRuntime {
         let gen = generation
         setState(.starting(siteID: siteID))
         do {
+            let token = mintToken()
             let session = try await control.start(
-                siteID: siteID, gitRemote: gitRemote, gitRef: gitRef, token: mintToken())
+                siteID: siteID, gitRemote: gitRemote, gitRef: gitRef, token: token)
             guard gen == generation else { return }
-            try await connect(mcpClient, session.mcpURL)
+            try await connect(mcpClient, session.mcpURL, token)
             guard gen == generation else { return }
             activeSiteID = siteID
             setState(.ready(siteID: siteID, url: session.previewURL))

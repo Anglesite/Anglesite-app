@@ -5,7 +5,7 @@ import Foundation
 struct RemoteSandboxSiteRuntimeTests {
     private func makeRuntime(
         _ result: Result<SandboxSession, SandboxControlError>,
-        connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { _, _ in }
+        connect: @escaping @Sendable (MCPClient, URL, SessionToken) async throws -> Void = { _, _, _ in }
     ) -> (RemoteSandboxSiteRuntime, FakeSandboxControlClient) {
         let fake = FakeSandboxControlClient(startResult: result)
         let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
@@ -33,9 +33,17 @@ struct RemoteSandboxSiteRuntimeTests {
     @Test("start connects the MCP client to the mcp tunnel URL")
     func startConnectsMCP() async {
         let box = ConnectedURLBox()
-        let (rt, _) = makeRuntime(.success(Self.ok), connect: { _, url in await box.set(url) })
+        let (rt, _) = makeRuntime(.success(Self.ok), connect: { _, url, _ in await box.set(url) })
         await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
         #expect(await box.url == Self.ok.mcpURL)
+    }
+
+    @Test("start passes the minted token to the connect closure")
+    func startPassesTokenToConnect() async {
+        let tokenBox = ConnectedTokenBox()
+        let (rt, _) = makeRuntime(.success(Self.ok), connect: { _, _, token in await tokenBox.set(token) })
+        await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+        #expect(await tokenBox.token == SessionToken(value: "fixedtoken"))
     }
 
     @Test("control failure settles to .failed")
@@ -82,7 +90,7 @@ struct RemoteSandboxSiteRuntimeTests {
             control: gated,
             mcpClient: mcp,
             mintToken: { SessionToken(value: "fixedtoken") },
-            connect: { _, _ in })
+            connect: { _, _, _ in })
 
         // Begin start() in a background Task — it will park inside control.start().
         let startTask = Task { await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused")) }
@@ -153,7 +161,7 @@ struct RemoteSandboxSiteRuntimeTests {
             control: gated,
             mcpClient: mcp,
             mintToken: { SessionToken(value: "fixedtoken") },
-            connect: { _, _ in })
+            connect: { _, _, _ in })
 
         // Attach the observer BEFORE start().
         let stream = await rt.observe()
@@ -187,6 +195,9 @@ struct RemoteSandboxSiteRuntimeTests {
 
 /// Test-only sink so the injected `connect` closure can record the URL it was handed.
 actor ConnectedURLBox { private(set) var url: URL?; func set(_ u: URL) { url = u } }
+
+/// Test-only sink so the injected `connect` closure can record the token it was handed.
+actor ConnectedTokenBox { private(set) var token: SessionToken?; func set(_ t: SessionToken) { token = t } }
 
 /// Actor-isolated collector for `SiteRuntimeState` sequences (avoids Sendable warnings).
 actor StateCollector {

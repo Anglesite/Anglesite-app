@@ -160,12 +160,13 @@ public actor MCPClient {
     /// the initialize handshake. Mirrors `start(...)` but for the HTTP transport.
     public func connect(
         httpEndpoint: URL,
+        bearerToken: SessionToken? = nil,
         urlSession: URLSession = .shared,
         initializeTimeout: TimeInterval = 10,
         clientName: String = "Anglesite",
         clientVersion: String = "0.1.0"
     ) async throws {
-        let t = HTTPTransport(endpoint: httpEndpoint, urlSession: urlSession)
+        let t = HTTPTransport(endpoint: httpEndpoint, bearerToken: bearerToken, urlSession: urlSession)
         try await startWithTransport(t, initializeTimeout: initializeTimeout, clientName: clientName, clientVersion: clientVersion)
     }
 
