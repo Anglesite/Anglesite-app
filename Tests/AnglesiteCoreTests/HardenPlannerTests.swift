@@ -11,7 +11,7 @@ struct HardenPlannerTests {
                 "0 issue \"digicert.com\"",
                 "0 issue \"pki.goog\"",
             ],
-            mxRecords: [], spfRecords: ["v=spf1 -all"],
+            mxRecords: ["0 ."], spfRecords: ["v=spf1 -all"],
             dmarcRecords: ["v=DMARC1; p=reject"],
             botFightMode: true,
             wafCustomRules: HardenPlanner.curatedWAFRules.map {

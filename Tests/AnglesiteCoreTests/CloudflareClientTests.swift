@@ -16,10 +16,12 @@ struct CloudflareClientTests {
 }
 
 /// A fake transport that routes by URL substring to canned (Data, HTTPURLResponse).
+/// Routes are matched longest-needle-first so more specific paths win over prefixes.
 func fakeTransport(_ routes: [String: (Int, String)]) -> CloudflareTransport {
+    let sorted = routes.sorted { $0.key.count > $1.key.count }
     return { request in
         let url = request.url!.absoluteString
-        for (needle, pair) in routes where url.contains(needle) {
+        for (needle, pair) in sorted where url.contains(needle) {
             let resp = HTTPURLResponse(url: request.url!, statusCode: pair.0,
                                        httpVersion: nil, headerFields: nil)!
             return (Data(pair.1.utf8), resp)
@@ -48,11 +50,13 @@ final class TransportSpy: @unchecked Sendable {
 }
 
 /// A method-aware fake transport with optional spy for capturing requests.
+/// Routes are matched longest-needle-first so more specific paths win over prefixes.
 func spyTransport(_ routes: [String: (Int, String)], spy: TransportSpy? = nil) -> CloudflareTransport {
+    let sorted = routes.sorted { $0.key.count > $1.key.count }
     return { request in
         spy?.record(request)
         let url = request.url!.absoluteString
-        for (needle, pair) in routes where url.contains(needle) {
+        for (needle, pair) in sorted where url.contains(needle) {
             let resp = HTTPURLResponse(url: request.url!, statusCode: pair.0,
                                        httpVersion: nil, headerFields: nil)!
             return (Data(pair.1.utf8), resp)
@@ -116,7 +120,8 @@ func zoneStateAssembles() async throws {
         "/settings/security_header": (200, env("{\"id\":\"security_header\",\"value\":{\"strict_transport_security\":{\"enabled\":true,\"max_age\":31536000,\"include_subdomains\":true,\"preload\":false}}}")),
         "/dns_records": (200, env("[{\"type\":\"CAA\",\"name\":\"example.com\",\"content\":\"0 issue \\\"letsencrypt.org\\\"\"},{\"type\":\"TXT\",\"name\":\"example.com\",\"content\":\"v=spf1 -all\"},{\"type\":\"TXT\",\"name\":\"_dmarc.example.com\",\"content\":\"v=DMARC1; p=reject\"}]")),
         "/settings/bot_management": (200, env("{\"fight_mode\":true}")),
-        "/rulesets": (200, env("[{\"id\":\"rs1\",\"phase\":\"http_request_firewall_custom\",\"rules\":[{\"description\":\"Block dotfiles\",\"expression\":\"(x)\",\"action\":\"block\"}]}]")),
+        "/rulesets/rs1": (200, env("{\"id\":\"rs1\",\"phase\":\"http_request_firewall_custom\",\"rules\":[{\"description\":\"Block dotfiles\",\"expression\":\"(x)\",\"action\":\"block\"}]}")),
+        "/rulesets": (200, env("[{\"id\":\"rs1\",\"phase\":\"http_request_firewall_custom\"}]")),
     ]
     let client = HTTPCloudflareClient(transport: fakeTransport(routes))
     let s = try await client.zoneState(zoneID: "z", apiToken: "t")
