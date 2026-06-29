@@ -114,4 +114,28 @@ struct HardenPlannerTests {
         #expect(!plan.items.contains(.addSPFRejectAll))
         #expect(plan.items.contains(.addNullMX))
     }
+
+    @Test("SPF with ~all (softfail) still triggers addSPFRejectAll")
+    func softfailSPFTriggersHarden() {
+        var s = bare()
+        s.spfRecords = ["v=spf1 ~all"]
+        let plan = HardenPlanner.plan(from: s, domain: "example.com")
+        #expect(plan.items.contains(.addSPFRejectAll))
+    }
+
+    @Test("DMARC with sp=reject but no p=reject still triggers addDMARCReject")
+    func dmarcSubdomainPolicyNotConfused() {
+        var s = bare()
+        s.dmarcRecords = ["v=DMARC1; sp=reject"]
+        let plan = HardenPlanner.plan(from: s, domain: "example.com")
+        #expect(plan.items.contains(.addDMARCReject))
+    }
+
+    @Test("DMARC with p=reject is recognized regardless of position")
+    func dmarcPolicyRecognized() {
+        var s = bare()
+        s.dmarcRecords = ["v=DMARC1; sp=none; p=reject; rua=mailto:x@example.com"]
+        let plan = HardenPlanner.plan(from: s, domain: "example.com")
+        #expect(!plan.items.contains(.addDMARCReject))
+    }
 }

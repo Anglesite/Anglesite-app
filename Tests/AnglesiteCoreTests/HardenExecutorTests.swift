@@ -16,7 +16,7 @@ struct HardenExecutorTests {
         let (exec, writer, _) = makeExecutor()
         let result = await exec.execute(
             plan: HardenPlan(items: []),
-            zoneID: "z", domain: "example.com", apiToken: "t", expectsMail: false)
+            zoneID: "z", domain: "example.com", apiToken: "t")
         #expect(result.appliedCount == 0)
         #expect(result.failedItems.isEmpty)
         #expect(writer.calls.isEmpty)
@@ -38,7 +38,7 @@ struct HardenExecutorTests {
             .addWAFRule(description: "Block dotfiles", expression: "(x)", action: "block"),
         ])
         let result = await exec.execute(
-            plan: plan, zoneID: "z", domain: "example.com", apiToken: "t", expectsMail: false)
+            plan: plan, zoneID: "z", domain: "example.com", apiToken: "t")
         #expect(result.appliedCount == 9)
         #expect(result.failedItems.isEmpty)
         #expect(writer.calls.contains("enableDNSSEC"))
@@ -46,7 +46,7 @@ struct HardenExecutorTests {
         #expect(writer.calls.contains("setAlwaysUseHTTPS"))
         #expect(writer.calls.contains("setHSTS"))
         #expect(writer.calls.contains("setBotFightMode"))
-        #expect(writer.calls.contains { $0.hasPrefix("addDNSRecord:MX") })
+        #expect(writer.calls.contains("addDNSRecord:MX:."))
         #expect(writer.calls.contains("addDNSRecord:TXT:v=spf1 -all"))
         #expect(writer.calls.contains("addDNSRecord:TXT:v=DMARC1; p=reject"))
         #expect(writer.calls.contains("createWAFCustomRule"))
@@ -63,7 +63,7 @@ struct HardenExecutorTests {
             .enableBotFightMode,
         ])
         let result = await exec.execute(
-            plan: plan, zoneID: "z", domain: "example.com", apiToken: "t", expectsMail: false)
+            plan: plan, zoneID: "z", domain: "example.com", apiToken: "t")
         #expect(result.appliedCount == 2)
         #expect(result.failedItems.count == 1)
         #expect(result.failedItems[0].item == .enableDNSSEC)
@@ -71,7 +71,7 @@ struct HardenExecutorTests {
 
     @Test("post-audit findings are populated from re-read state")
     func postAuditFindings() async {
-        var state = CloudflareZoneState(
+        let state = CloudflareZoneState(
             dnssecActive: false, sslMode: "flexible", alwaysUseHTTPS: false,
             hsts: nil, caaRecords: [], mxRecords: [],
             spfRecords: [], dmarcRecords: [])
@@ -79,21 +79,22 @@ struct HardenExecutorTests {
         let exec = HardenExecutor(reader: reader, writer: MockCloudflareWriter())
         let result = await exec.execute(
             plan: HardenPlan(items: []),
-            zoneID: "z", domain: "example.com", apiToken: "t", expectsMail: false)
+            zoneID: "z", domain: "example.com", apiToken: "t")
         #expect(!result.postAuditFindings.isEmpty)
         #expect(result.postAuditFindings.contains { $0.title.contains("DNSSEC") })
     }
 
-    @Test("reader failure yields empty post-audit findings")
+    @Test("reader failure yields empty post-audit findings and populates auditError")
     func readerFailureYieldsEmptyFindings() async {
         let reader = MockCloudflareReader()
         reader.shouldFail = true
         let exec = HardenExecutor(reader: reader, writer: MockCloudflareWriter())
         let result = await exec.execute(
             plan: HardenPlan(items: [.enableDNSSEC]),
-            zoneID: "z", domain: "example.com", apiToken: "t", expectsMail: false)
+            zoneID: "z", domain: "example.com", apiToken: "t")
         #expect(result.appliedCount == 1)
         #expect(result.postAuditFindings.isEmpty)
+        #expect(result.auditError != nil)
     }
 }
 

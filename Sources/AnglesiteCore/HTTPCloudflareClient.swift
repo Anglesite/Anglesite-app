@@ -109,7 +109,7 @@ public struct HTTPCloudflareClient: CloudflareReading {
             botFight = false
         }
 
-        let wafRules = await fetchWAFCustomRules(zoneID: zoneID, apiToken: apiToken)
+        let wafRules = try await fetchWAFCustomRules(zoneID: zoneID, apiToken: apiToken)
 
         let sts = header.value.strict_transport_security
         let hsts: CloudflareZoneState.HSTS? = sts.enabled
@@ -136,18 +136,14 @@ public struct HTTPCloudflareClient: CloudflareReading {
             wafCustomRules: wafRules)
     }
 
-    private func fetchWAFCustomRules(zoneID: String, apiToken: String) async -> [CloudflareZoneState.WAFCustomRule] {
-        do {
-            let rulesets = try await get("/zones/\(zoneID)/rulesets", apiToken: apiToken, as: [CFRuleset].self)
-            guard let custom = rulesets.first(where: { $0.phase == "http_request_firewall_custom" }) else {
-                return []
-            }
-            let full = try await get("/zones/\(zoneID)/rulesets/\(custom.id)", apiToken: apiToken, as: CFRuleset.self)
-            return (full.rules ?? []).map {
-                .init(description: $0.description ?? "", expression: $0.expression, action: $0.action)
-            }
-        } catch {
+    private func fetchWAFCustomRules(zoneID: String, apiToken: String) async throws -> [CloudflareZoneState.WAFCustomRule] {
+        let rulesets = try await get("/zones/\(zoneID)/rulesets", apiToken: apiToken, as: [CFRuleset].self)
+        guard let custom = rulesets.first(where: { $0.phase == "http_request_firewall_custom" }) else {
             return []
+        }
+        let full = try await get("/zones/\(zoneID)/rulesets/\(custom.id)", apiToken: apiToken, as: CFRuleset.self)
+        return (full.rules ?? []).map {
+            .init(description: $0.description ?? "", expression: $0.expression, action: $0.action)
         }
     }
 
@@ -219,38 +215,28 @@ extension HTTPCloudflareClient: CloudflareWriting {
     }
 
     public func setBotFightMode(zoneID: String, enabled: Bool, apiToken: String) async throws {
-        try await mutate(method: "PUT", "/zones/\(zoneID)/settings/bot_management",
-                         body: ["value": enabled ? "on" : "off"], apiToken: apiToken)
+        try await mutate(method: "PATCH", "/zones/\(zoneID)/bot_management",
+                         body: ["fight_mode": enabled], apiToken: apiToken)
     }
 
     public func createWAFCustomRule(zoneID: String, rule: WAFRulePayload, apiToken: String) async throws {
         let rulesets = try await get("/zones/\(zoneID)/rulesets", apiToken: apiToken, as: [CFRuleset].self)
         let existing = rulesets.first(where: { $0.phase == "http_request_firewall_custom" })
 
-        struct RuleBody: Encodable, Sendable {
-            let description: String
-            let expression: String
-            let action: String
-        }
-        let ruleBody = RuleBody(description: rule.description, expression: rule.expression, action: rule.action)
-
         if let rs = existing {
-            struct RulesAppend: Encodable, Sendable {
-                let rules: [RuleBody]
-            }
             try await mutate(method: "POST", "/zones/\(zoneID)/rulesets/\(rs.id)/rules",
-                             body: ruleBody, apiToken: apiToken)
+                             body: rule, apiToken: apiToken)
         } else {
             struct NewRuleset: Encodable, Sendable {
                 let name: String
                 let kind: String
                 let phase: String
-                let rules: [RuleBody]
+                let rules: [WAFRulePayload]
             }
             try await mutate(method: "POST", "/zones/\(zoneID)/rulesets",
                              body: NewRuleset(name: "Anglesite security rules",
                                               kind: "zone", phase: "http_request_firewall_custom",
-                                              rules: [ruleBody]),
+                                              rules: [rule]),
                              apiToken: apiToken)
         }
     }

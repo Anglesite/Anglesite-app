@@ -22,12 +22,14 @@ public struct HardenExecutor: Sendable {
         public let appliedCount: Int
         public let failedItems: [ItemFailure]
         public let postAuditFindings: [AuditReport.Finding]
+        public let auditError: String?
 
         public init(appliedCount: Int, failedItems: [ItemFailure],
-                    postAuditFindings: [AuditReport.Finding]) {
+                    postAuditFindings: [AuditReport.Finding], auditError: String? = nil) {
             self.appliedCount = appliedCount
             self.failedItems = failedItems
             self.postAuditFindings = postAuditFindings
+            self.auditError = auditError
         }
     }
 
@@ -35,8 +37,7 @@ public struct HardenExecutor: Sendable {
         plan: HardenPlan,
         zoneID: String,
         domain: String,
-        apiToken: String,
-        expectsMail: Bool
+        apiToken: String
     ) async -> Result {
         var applied = 0
         var failures: [ItemFailure] = []
@@ -51,14 +52,19 @@ public struct HardenExecutor: Sendable {
         }
 
         let findings: [AuditReport.Finding]
+        var auditErr: String?
         do {
             let freshState = try await reader.zoneState(zoneID: zoneID, apiToken: apiToken)
+            let expectsMail = !freshState.mxRecords.isEmpty
+                && !freshState.mxRecords.allSatisfy({ $0.trimmingCharacters(in: .whitespaces) == "." || $0.hasPrefix("0 .") })
             findings = SecurityAudit.evaluate(freshState, expectsMail: expectsMail)
         } catch {
             findings = []
+            auditErr = "\(error)"
         }
 
-        return Result(appliedCount: applied, failedItems: failures, postAuditFindings: findings)
+        return Result(appliedCount: applied, failedItems: failures,
+                      postAuditFindings: findings, auditError: auditErr)
     }
 
     private func apply(_ item: HardenPlanItem, zoneID: String, domain: String,
@@ -82,7 +88,7 @@ public struct HardenExecutor: Sendable {
         case .addNullMX:
             try await writer.addDNSRecord(
                 zoneID: zoneID,
-                record: DNSRecordPayload(type: "MX", name: domain, content: "0 ."),
+                record: DNSRecordPayload(type: "MX", name: domain, content: ".", priority: 0),
                 apiToken: apiToken)
         case .addSPFRejectAll:
             try await writer.addDNSRecord(

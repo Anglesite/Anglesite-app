@@ -138,7 +138,7 @@ func zoneStateAssembles() async throws {
     #expect(s.wafCustomRules.first?.description == "Block dotfiles")
 }
 
-@Test("HSTS disabled yields nil hsts; bot/WAF gracefully default on error")
+@Test("HSTS disabled yields nil hsts; bot fight mode gracefully defaults on error")
 func zoneStateHSTSDisabled() async throws {
     let env = { (r: String) in "{\"success\":true,\"errors\":[],\"messages\":[],\"result\":\(r)}" }
     let routes: [String: (Int, String)] = [
@@ -147,6 +147,7 @@ func zoneStateHSTSDisabled() async throws {
         "/settings/always_use_https": (200, env("{\"id\":\"always_use_https\",\"value\":\"off\"}")),
         "/settings/security_header": (200, env("{\"id\":\"security_header\",\"value\":{\"strict_transport_security\":{\"enabled\":false}}}")),
         "/dns_records": (200, env("[]")),
+        "/rulesets": (200, env("[]")),
     ]
     let client = HTTPCloudflareClient(transport: fakeTransport(routes))
     let s = try await client.zoneState(zoneID: "z", apiToken: "t")

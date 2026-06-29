@@ -18,17 +18,19 @@ public struct DNSRecordPayload: Sendable, Equatable, Encodable {
     public let name: String
     public let content: String
     public let ttl: Int
+    public let priority: Int?
 
-    public init(type: String, name: String, content: String, ttl: Int = 1) {
+    public init(type: String, name: String, content: String, ttl: Int = 1, priority: Int? = nil) {
         self.type = type
         self.name = name
         self.content = content
         self.ttl = ttl
+        self.priority = priority
     }
 }
 
 /// Payload for creating a custom WAF rule via the Cloudflare API.
-public struct WAFRulePayload: Sendable, Equatable {
+public struct WAFRulePayload: Sendable, Equatable, Encodable {
     public let description: String
     public let expression: String
     public let action: String

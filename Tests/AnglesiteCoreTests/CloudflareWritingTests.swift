@@ -57,14 +57,17 @@ struct CloudflareWritingTests {
         #expect(body["content"] as? String == "v=spf1 -all")
     }
 
-    @Test("setBotFightMode sends PUT to bot_management")
+    @Test("setBotFightMode sends PATCH to /bot_management with fight_mode")
     func setBotFightMode() async throws {
         let spy = TransportSpy()
         let client = HTTPCloudflareClient(transport: spyTransport([:], spy: spy))
         try await client.setBotFightMode(zoneID: zoneID, enabled: true, apiToken: token)
         let req = try #require(spy.requests.first)
-        #expect(req.httpMethod == "PUT")
-        #expect(req.url?.path.contains("/settings/bot_management") == true)
+        #expect(req.httpMethod == "PATCH")
+        #expect(req.url?.path.contains("/bot_management") == true)
+        #expect(req.url?.path.contains("/settings/") == false)
+        let body = try #require(req.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        #expect(body["fight_mode"] as? Bool == true)
     }
 
     @Test("createWAFCustomRule sends POST to rulesets endpoint")

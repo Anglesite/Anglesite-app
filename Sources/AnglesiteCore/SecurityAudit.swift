@@ -44,12 +44,12 @@ public enum SecurityAudit {
                 "Add CAA records authorizing only your CA(s) to limit mis-issuance.")
         }
         if !expectsMail {
-            if !state.spfRecords.contains(where: { $0.lowercased().contains("-all") }) {
+            if state.spfRecords.isEmpty || !state.spfRecords.contains(where: { $0.lowercased().hasSuffix(" -all") }) {
                 add(.warning, "No strict SPF record",
                     "A domain that does not send mail should publish SPF \"v=spf1 -all\" to block spoofing.",
                     "Publish a TXT record: v=spf1 -all")
             }
-            if !state.dmarcRecords.contains(where: { $0.lowercased().contains("p=reject") }) {
+            if !state.dmarcRecords.contains(where: { dmarcHasPolicy($0, policy: "reject") }) {
                 add(.warning, "No DMARC reject policy",
                     "Without DMARC p=reject, spoofed mail claiming to be from this domain is not blocked.",
                     "Publish _dmarc TXT: v=DMARC1; p=reject")

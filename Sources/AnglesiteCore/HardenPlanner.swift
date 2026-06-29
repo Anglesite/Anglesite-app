@@ -24,7 +24,7 @@ public enum HardenPlanner {
         ),
         (
             "Block path traversal attempts",
-            "(http.request.uri.path contains \"..\")",
+            "(http.request.uri.path contains \"/..\")",
             "block"
         ),
         (
@@ -34,7 +34,7 @@ public enum HardenPlanner {
             (http.request.uri.query contains "OR 1=1") or \
             (http.request.uri.query contains "'; DROP")
             """,
-            "managed_challenge"
+            "block"
         ),
         (
             "Block XSS patterns in query strings",
@@ -43,7 +43,7 @@ public enum HardenPlanner {
             (http.request.uri.query contains "javascript:") or \
             (http.request.uri.query contains "onerror=")
             """,
-            "managed_challenge"
+            "block"
         ),
     ]
 
@@ -76,10 +76,13 @@ public enum HardenPlanner {
         // Email hardening only for domains that don't send mail.
         if state.mxRecords.isEmpty {
             items.append(.addNullMX)
-            if !state.spfRecords.contains(where: { $0.lowercased().contains("-all") }) {
+            if state.spfRecords.isEmpty || !state.spfRecords.contains(where: { $0.lowercased().hasSuffix(" -all") }) {
                 items.append(.addSPFRejectAll)
             }
-            if !state.dmarcRecords.contains(where: { $0.lowercased().contains("p=reject") }) {
+            let hasDMARCReject = state.dmarcRecords.contains { record in
+                dmarcHasPolicy(record, policy: "reject")
+            }
+            if !hasDMARCReject {
                 items.append(.addDMARCReject)
             }
         }
@@ -94,4 +97,21 @@ public enum HardenPlanner {
 
         return HardenPlan(items: items)
     }
+}
+
+/// Checks whether a DMARC record contains `p=<policy>` (not `sp=<policy>`).
+func dmarcHasPolicy(_ record: String, policy: String) -> Bool {
+    let lower = record.lowercased()
+    let target = policy.lowercased()
+    var search = lower.startIndex
+    while let range = lower.range(of: "p=", range: search..<lower.endIndex) {
+        if range.lowerBound == lower.startIndex
+            || lower[lower.index(before: range.lowerBound)] == ";"
+            || lower[lower.index(before: range.lowerBound)] == " " {
+            let value = lower[range.upperBound...]
+            if value.hasPrefix(target) { return true }
+        }
+        search = range.upperBound
+    }
+    return false
 }
