@@ -114,7 +114,8 @@ Generate, mirroring the `csp.ts` pattern (pure function + writer + tests):
 
 - **`CloudflareClient`** (AnglesiteCore) — protocol abstracting the Cloudflare API; mockable in
   tests; centralizes MAS sandbox/token handling. Token in Keychain (existing `area:secrets`
-  pattern), minimal **read** scope (Zone DNS read, Zone settings read, WAF read), documented.
+  pattern). Token scope: **read** (Zone Read, DNS Read, Zone Settings Read) for audit;
+  **write** (Zone DNS Edit, Zone Settings Edit, WAF Edit) for the C3 Harden action.
   Read methods: DNSSEC status, CAA, SSL/Always-HTTPS/HSTS edge settings, MX/SPF/DMARC, Bot
   Fight Mode, custom-rule list.
 - **`SecurityAudit`** (pure, testable) — input: built `dist/` + account-state snapshot → graded

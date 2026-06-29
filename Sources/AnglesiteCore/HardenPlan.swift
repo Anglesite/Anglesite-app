@@ -14,7 +14,7 @@ public struct HardenPlan: Sendable, Equatable {
 }
 
 /// A single hardening change to apply to a Cloudflare zone.
-public enum HardenPlanItem: Sendable, Equatable, CustomStringConvertible {
+public enum HardenPlanItem: Sendable, Hashable, CustomStringConvertible {
     case enableDNSSEC
     case addCAARecord(ca: String)
     case enableAlwaysUseHTTPS
