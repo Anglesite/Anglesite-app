@@ -3,34 +3,336 @@ import Foundation
 @testable import AnglesiteCore
 
 struct DeployCommandTests {
-    /// A real, existing directory — the supervisor `cd`s into the site dir before spawning, so a
+    /// A real, existing directory — the host executor `cd`s into the site dir before spawning, so a
     /// nonexistent path would fail `process.run()` before our fixture script even runs.
     private let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
 
-    private func makeCommand(
-        resolve: @escaping DeployCommand.CommandResolver,
-        token: @escaping DeployCommand.TokenSource,
-        preflight: @escaping DeployCommand.PreflightChecker = { _ in .passed(warnings: []) },
-        build: @escaping DeployCommand.CommandResolver = { _ in .run(executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: []) }
-    ) -> (DeployCommand, ProcessSupervisor, LogCenter) {
-        let supervisor = ProcessSupervisor()
+    // MARK: Fake executor
+
+    /// A `DeployExecutor` that returns canned `DeployStepResult`s per step, records the
+    /// environment it was handed per step, and counts how many times each step ran. Lets the
+    /// flow tests drive build→preflight→wrangler without a subprocess.
+    private final class FakeExecutor: DeployExecutor, @unchecked Sendable {
+        struct Call: Sendable { let step: DeployStep; let environment: [String: String]; let source: String }
+
+        private let lock = NSLock()
+        private var byStep: [String: DeployStepResult] = [:]
+        private(set) var calls: [Call] = []
+        /// Optional hook fired (inside `run`) when a given step runs — used to assert a step is
+        /// NOT reached (the parallel to the old `confirmation(expectedCount: 0)` resolver guards).
+        private var onRun: [String: @Sendable () -> Void] = [:]
+
+        init() {}
+
+        private func key(_ step: DeployStep) -> String {
+            switch step {
+            case .build: return "build"
+            case .preflight: return "preflight"
+            case .wrangler: return "wrangler"
+            }
+        }
+
+        @discardableResult
+        func set(_ step: DeployStep, exitCode: Int32?, output: String) -> FakeExecutor {
+            lock.lock(); byStep[key(step)] = DeployStepResult(exitCode: exitCode, output: output); lock.unlock()
+            return self
+        }
+
+        @discardableResult
+        func onRun(_ step: DeployStep, _ body: @escaping @Sendable () -> Void) -> FakeExecutor {
+            lock.lock(); onRun[key(step)] = body; lock.unlock()
+            return self
+        }
+
+        func ran(_ step: DeployStep) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return calls.contains { key($0.step) == key(step) }
+        }
+
+        func environment(for step: DeployStep) -> [String: String]? {
+            lock.lock(); defer { lock.unlock() }
+            return calls.first { key($0.step) == key(step) }?.environment
+        }
+
+        func run(step: DeployStep, siteDirectory: URL, environment: [String: String], source: String) async -> DeployStepResult {
+            lock.lock()
+            calls.append(Call(step: step, environment: environment, source: source))
+            let hook = onRun[key(step)]
+            let result = byStep[key(step)] ?? DeployStepResult(exitCode: 0, output: "")
+            lock.unlock()
+            hook?()
+            return result
+        }
+    }
+
+    /// Build the JSON payload the plugin's `pre-deploy-check.ts --json` emits.
+    private func scanJSON(ok: Bool) -> String {
+        ok ? #"{"ok":true,"failures":[],"warnings":[]}"#
+           : #"{"ok":false,"failures":[{"category":"pii-email","file":"dist/index.html","detail":"email","remediation":"wrap it"}],"warnings":[]}"#
+    }
+
+    // MARK: Full flow through the fake executor
+
+    @Test("Drives build → preflight → wrangler and succeeds with the extracted URL")
+    func fullFlowSucceeds() async {
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "building…")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published angle-app (1.23 sec)\n  https://angle-app.example.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "s", siteDirectory: tmpDir)
+        guard case .succeeded(let url, let duration) = result else {
+            Issue.record("expected .succeeded, got \(result)"); return
+        }
+        #expect(url == URL(string: "https://angle-app.example.workers.dev")!)
+        #expect(duration >= 0)
+        #expect(exec.ran(.build) && exec.ran(.preflight) && exec.ran(.wrangler))
+    }
+
+    @Test("Environment contract: build/preflight get no token, wrangler gets CLOUDFLARE_API_TOKEN")
+    func environmentContractPerStep() async {
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "secret-tok" }, executor: exec)
+        _ = await cmd.deploy(siteID: "s", siteDirectory: tmpDir)
+        #expect(exec.environment(for: .build)?["CLOUDFLARE_API_TOKEN"] == nil)
+        #expect(exec.environment(for: .preflight)?["CLOUDFLARE_API_TOKEN"] == nil)
+        #expect(exec.environment(for: .wrangler)?["CLOUDFLARE_API_TOKEN"] == "secret-tok")
+    }
+
+    // MARK: Pre-spawn refusal (no work wasted)
+
+    @Test("Refuses before any step when token source returns nil")
+    func refusesBeforeStepsWhenTokenNil() async {
+        let exec = FakeExecutor().onRun(.build, { Issue.record("build must not run when token is missing") })
+        let cmd = DeployCommand(tokenSource: { nil }, executor: exec)
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .failed(let reason, let exit) = result else {
+            Issue.record("expected .failed, got \(result)"); return
+        }
+        #expect(reason.contains("CLOUDFLARE_API_TOKEN"))
+        #expect(exit == nil)
+        #expect(!exec.ran(.build))
+    }
+
+    @Test("Refuses before any step when token source returns empty string")
+    func refusesBeforeStepsWhenTokenEmpty() async {
+        let exec = FakeExecutor()
+        let cmd = DeployCommand(tokenSource: { "" }, executor: exec)
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .failed(let reason, _) = result else {
+            Issue.record("expected .failed, got \(result)"); return
+        }
+        #expect(reason.contains("CLOUDFLARE_API_TOKEN"))
+        #expect(!exec.ran(.build))
+    }
+
+    // MARK: Build step
+
+    @Test("Fails when build exits non-zero, and does not run preflight or wrangler")
+    func failsWhenBuildExitsNonZero() async {
+        let exec = FakeExecutor().set(.build, exitCode: 2, output: "astro: type error")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .failed(let reason, let exit) = result else {
+            Issue.record("expected .failed, got \(result)"); return
+        }
+        #expect(exit == 2)
+        #expect(reason.contains("build") && reason.contains("2"))
+        #expect(!exec.ran(.preflight) && !exec.ran(.wrangler))
+    }
+
+    @Test("Fails with the executor's reason when build is unavailable (nil exit)")
+    func failsWhenBuildUnavailable() async {
+        let exec = FakeExecutor().set(.build, exitCode: nil, output: "vendored npm not found — rebuild the app")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .failed(let reason, _) = result else {
+            Issue.record("expected .failed, got \(result)"); return
+        }
+        #expect(reason.contains("vendored npm"))
+    }
+
+    // MARK: Preflight step
+
+    @Test("Returns blocked and does not run wrangler when preflight JSON blocks")
+    func blockedPreflightShortCircuits() async {
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: false))
+            .onRun(.wrangler, { Issue.record("wrangler must not run when preflight blocks") })
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .blocked(let failures, _) = result else {
+            Issue.record("expected .blocked, got \(result)"); return
+        }
+        #expect(failures.count == 1)
+        #expect(failures[0].category == .piiEmail)
+        #expect(failures[0].file == "dist/index.html")
+        #expect(!exec.ran(.wrangler))
+    }
+
+    @Test("Fails when preflight output is not parseable JSON (and does not run wrangler)")
+    func failsWhenPreflightErrors() async {
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 1, output: "Error: tsx not installed")
+            .onRun(.wrangler, { Issue.record("wrangler must not run when preflight errored") })
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .failed(let reason, _) = result else {
+            Issue.record("expected .failed, got \(result)"); return
+        }
+        #expect(reason.lowercased().contains("pre-deploy scan"))
+        #expect(!exec.ran(.wrangler))
+    }
+
+    @Test("Fires onPreflight with the resolved outcome")
+    func firesOnPreflight() async {
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: #"{"ok":true,"failures":[],"warnings":[{"category":"missing-og-image","detail":"no og image","remediation":"add one"}]}"#)
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let observed = Mutex<PreDeployCheck.Outcome?>(nil)
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        _ = await cmd.deploy(siteID: "t", siteDirectory: tmpDir, onPreflight: { observed.set($0) })
+        guard case .passed(let warnings) = observed.get() else {
+            Issue.record("expected .passed outcome observed"); return
+        }
+        #expect(warnings.first?.category == .missingOgImage)
+    }
+
+    // MARK: Wrangler failure surfacing
+
+    @Test("Fails when wrangler exits non-zero")
+    func failsWhenWranglerExitsNonZero() async {
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 10, output: "Error: authentication failed")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .failed(let reason, let exit) = result else {
+            Issue.record("expected .failed, got \(result)"); return
+        }
+        #expect(exit == 10)
+        #expect(reason.contains("10"))
+    }
+
+    @Test("Fails semantically when wrangler exits 0 but no published URL")
+    func failsWhenZeroExitButNoURL() async {
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Did some thing.\nNo anchor here.")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .failed(let reason, let exit) = result else {
+            Issue.record("expected .failed, got \(result)"); return
+        }
+        #expect(exit == 0)
+        #expect(reason.lowercased().contains("url"))
+    }
+
+    @Test("Ignores URLs before the published anchor")
+    func ignoresURLsBeforeAnchor() async {
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "See https://developers.cloudflare.com/workers for help.\nPublished angle-app (1.23 sec)\n  https://angle-app.example.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .succeeded(let url, _) = result else {
+            Issue.record("expected .succeeded, got \(result)"); return
+        }
+        #expect(url.host == "angle-app.example.workers.dev")
+    }
+
+    // MARK: Scan report parsing helper
+
+    @Test("parseScanReport maps ok/blocked/error correctly")
+    func parseScanReport() {
+        if case .passed(let w) = DeployCommand.parseScanReport(output: scanJSON(ok: true), exitCode: 0) {
+            #expect(w.isEmpty)
+        } else { Issue.record("expected .passed") }
+
+        if case .blocked(let f, _) = DeployCommand.parseScanReport(output: scanJSON(ok: false), exitCode: 0) {
+            #expect(f.first?.category == .piiEmail)
+        } else { Issue.record("expected .blocked") }
+
+        if case .error(let reason) = DeployCommand.parseScanReport(output: "not json", exitCode: 1) {
+            #expect(reason.contains("exit 1"))
+        } else { Issue.record("expected .error for non-JSON exit 1") }
+
+        if case .error(let reason) = DeployCommand.parseScanReport(output: "not json", exitCode: 0) {
+            #expect(reason.contains("no JSON"))
+        } else { Issue.record("expected .error for non-JSON exit 0") }
+    }
+
+    // MARK: Host-executor parity (real subprocess via HostDeployExecutor)
+
+    /// One end-to-end test that runs the REAL `HostDeployExecutor` against `/bin/sh` fixtures so the
+    /// host spawn/snapshot/parse path stays covered. Per-step resolvers are injected so no vendored
+    /// Node bundle is required.
+    @Test("Host executor parity: real build + preflight + wrangler sh fixtures → succeeded")
+    func hostExecutorParity() async {
         let center = LogCenter()
-        let cmd = DeployCommand(
-            supervisor: supervisor,
+        let exec = HostDeployExecutor(
+            supervisor: ProcessSupervisor(),
             logCenter: center,
-            resolveCommand: resolve,
-            resolveBuildCommand: build,
-            tokenSource: token,
-            preflight: preflight
+            resolveCommand: { step in
+                { _ in
+                    switch step {
+                    case .build:
+                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo building; exit 0"])
+                    case .preflight:
+                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"ok":true,"failures":[],"warnings":[]}'; exit 0"#])
+                    case .wrangler:
+                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo 'Published angle-app (1.23 sec)'; echo '  https://angle-app.example.workers.dev'; exit 0"])
+                    }
+                }
+            }
         )
-        return (cmd, supervisor, center)
+        let cmd = DeployCommand(tokenSource: { "fake-token" }, executor: exec)
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .succeeded(let url, _) = result else {
+            Issue.record("expected .succeeded, got \(result)"); return
+        }
+        #expect(url == URL(string: "https://angle-app.example.workers.dev")!)
+        // Build output reached LogCenter under the build source.
+        let lines = await center.snapshot()
+        #expect(lines.contains { $0.source == "deploy:mysite:build" && $0.text == "building" })
     }
 
-    private func shFixture(_ script: String, _ args: String...) -> DeployCommand.LaunchPlan {
-        .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script] + args)
+    @Test("Host executor parity: wrangler step sees CLOUDFLARE_API_TOKEN in its environment")
+    func hostExecutorPassesToken() async {
+        let center = LogCenter()
+        let exec = HostDeployExecutor(
+            supervisor: ProcessSupervisor(),
+            logCenter: center,
+            resolveCommand: { step in
+                { _ in
+                    switch step {
+                    case .build:
+                        return .run(executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: [])
+                    case .preflight:
+                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"ok":true,"failures":[],"warnings":[]}'"#])
+                    case .wrangler:
+                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo \"TOKEN=$CLOUDFLARE_API_TOKEN\"; echo 'Published x (0.1 sec)'; echo '  https://x.workers.dev'"])
+                    }
+                }
+            }
+        )
+        let cmd = DeployCommand(tokenSource: { "secret-token-abc" }, executor: exec)
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
+        let lines = await center.snapshot()
+        #expect(lines.first(where: { $0.text.contains("TOKEN=") })?.text == "TOKEN=secret-token-abc")
     }
 
-    // MARK: Cancellation
+    // MARK: Cancellation (real HostDeployExecutor → SIGTERM)
 
     /// Poll `center` for a marker line up to `timeout`. Returns true once it appears.
     private func waitForMarker(_ marker: String, in center: LogCenter, timeout: Duration = .seconds(3)) async -> Bool {
@@ -42,341 +344,44 @@ struct DeployCommandTests {
         return false
     }
 
-    /// Budget for observing an asynchronous side-effect (a subprocess marker reaching `LogCenter`).
-    /// Generous on purpose: cancellation resumes `waitForExit` with `.terminated` *immediately*, so
-    /// `task.value` returns before the kill even happens. The marker only lands after a chain of
-    /// fire-and-forget tasks + libdispatch + actor hops (cancel → `Task{terminate}` → SIGTERM → the
-    /// fixture's trap echo → pipe drain → `LogCenter.append`). The line is never dropped — `finalize`
-    /// in InProcessBackend awaits the drain before settling — but under 294 Swift Tests running in
-    /// parallel on a loaded CI runner the cooperative pool can starve those tasks for several seconds
-    /// (this is what made the suite flake at the old 10s budget). Normal completion is ~100ms, so a
-    /// 30s ceiling still surfaces a genuine hang quickly while no longer false-positiving under load.
+    /// Generous budget — see the original note: cancellation resumes `waitForExit` immediately, so
+    /// the marker only lands after a chain of fire-and-forget tasks under parallel-test load.
     private static let markerObservationTimeout: Duration = .seconds(30)
 
     @Test("Cancelling the task actually SIGTERMs the in-flight wrangler subprocess")
     func cancellationTerminatesWrangler() async {
         // Token + build (/usr/bin/true) + preflight pass quickly, then wrangler blocks. Cancelling
-        // the deploy must kill wrangler (not orphan it mid-publish): `.failed(terminated)` AND the
-        // process reports the SIGTERM trap. The fixture sets the trap, then echoes __STARTED__ so
-        // we cancel exactly once wrangler is running (no fixed-delay race — `__STARTED__` is unique
-        // to wrangler since the build step is silent /usr/bin/true).
-        let (cmd, _, center) = makeCommand(
-            resolve: { _ in self.shFixture("trap 'echo __SIGTERM__; exit 143' TERM; echo __STARTED__; sleep 20; echo __COMPLETED__") },
-            token: { "tok" }
+        // the deploy must kill wrangler: `.failed(terminated)` AND the process reports the SIGTERM
+        // trap. The fixture sets the trap, then echoes __STARTED__ so we cancel exactly once
+        // wrangler is running.
+        let center = LogCenter()
+        let exec = HostDeployExecutor(
+            supervisor: ProcessSupervisor(),
+            logCenter: center,
+            resolveCommand: { step in
+                { _ in
+                    switch step {
+                    case .build:
+                        return .run(executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: [])
+                    case .preflight:
+                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"ok":true,"failures":[],"warnings":[]}'"#])
+                    case .wrangler:
+                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "trap 'echo __SIGTERM__; exit 143' TERM; echo __STARTED__; sleep 20; echo __COMPLETED__"])
+                    }
+                }
+            }
         )
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
         let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let task = Task { await cmd.deploy(siteID: "site", siteDirectory: dir) }
         #expect(await waitForMarker("__STARTED__", in: center, timeout: Self.markerObservationTimeout), "wrangler never started")
         task.cancel()
         let result = await task.value
         guard case .failed(let reason, _) = result else {
-            Issue.record("expected .failed(terminated), got \(result)")
-            return
+            Issue.record("expected .failed(terminated), got \(result)"); return
         }
         #expect(reason.contains("terminated"))
         #expect(await waitForMarker("__SIGTERM__", in: center, timeout: Self.markerObservationTimeout), "wrangler subprocess was not actually SIGTERM'd")
-    }
-
-    // MARK: Pre-spawn refusal (no work wasted)
-
-    @Test("Refuses before spawn when token source returns nil") func refusesBeforeSpawnWhenTokenSourceReturnsNil() async {
-        // The resolver must never be consulted when the token is missing.
-        await confirmation("resolver should not be consulted when token is missing", expectedCount: 0) { resolverCalled in
-            let (cmd, _, _) = makeCommand(
-                resolve: { _ in
-                    resolverCalled()
-                    return self.shFixture("exit 0")
-                },
-                token: { nil }
-            )
-            let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-            guard case .failed(let reason, let exit) = result else {
-                Issue.record("expected .failed, got \(result)")
-                return
-            }
-            #expect(reason.contains("CLOUDFLARE_API_TOKEN"), "reason should name the env var the caller should set: \(reason)")
-            #expect(exit == nil)
-        }
-    }
-
-    @Test("Refuses before spawn when token source returns empty string") func refusesBeforeSpawnWhenTokenSourceReturnsEmptyString() async {
-        let (cmd, _, _) = makeCommand(
-            resolve: { _ in self.shFixture("exit 0") },
-            token: { "" }
-        )
-        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-        guard case .failed(let reason, _) = result else {
-            Issue.record("expected .failed, got \(result)")
-            return
-        }
-        #expect(reason.contains("CLOUDFLARE_API_TOKEN"), "\(reason)")
-    }
-
-    @Test("Fails when resolver reports unavailable") func failsWhenResolverReportsUnavailable() async {
-        let (cmd, _, _) = makeCommand(
-            resolve: { _ in .unavailable(reason: "wrangler not installed — run `npm install`") },
-            token: { "fake-token" }
-        )
-        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-        guard case .failed(let reason, let exit) = result else {
-            Issue.record("expected .failed, got \(result)")
-            return
-        }
-        #expect(reason == "wrangler not installed — run `npm install`")
-        #expect(exit == nil)
-    }
-
-    // MARK: Happy path — URL extraction
-
-    @Test("Succeeds and extracts URL from published line") func succeedsAndExtractsURLFromPublishedLine() async {
-        // Synthetic wrangler output: a blank line, the `Published ...` summary, indented URL, exit 0.
-        let script = """
-        echo ''
-        echo '⛅️ wrangler 3.50.0'
-        echo 'Total Upload: 4.20 KiB'
-        echo 'Published angle-app (1.23 sec)'
-        echo '  https://angle-app.example.workers.dev'
-        echo '  Current Deployment ID: abc-123'
-        exit 0
-        """
-        let (cmd, _, _) = makeCommand(
-            resolve: { _ in self.shFixture(script) },
-            token: { "fake-token" }
-        )
-        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-        guard case .succeeded(let url, let duration) = result else {
-            Issue.record("expected .succeeded, got \(result)")
-            return
-        }
-        #expect(url == URL(string: "https://angle-app.example.workers.dev")!)
-        #expect(duration >= 0)
-    }
-
-    @Test("Ignores URLs that appear before the published anchor") func ignoresURLsThatAppearBeforeThePublishedAnchor() async {
-        // A help-text URL in wrangler's output must NOT be reported as the deployed URL.
-        let script = """
-        echo 'See https://developers.cloudflare.com/workers for help.'
-        echo 'Published angle-app (1.23 sec)'
-        echo '  https://angle-app.example.workers.dev'
-        exit 0
-        """
-        let (cmd, _, _) = makeCommand(
-            resolve: { _ in self.shFixture(script) },
-            token: { "fake-token" }
-        )
-        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-        guard case .succeeded(let url, _) = result else {
-            Issue.record("expected .succeeded, got \(result)")
-            return
-        }
-        #expect(url.host == "angle-app.example.workers.dev")
-    }
-
-    // MARK: Failure surfacing
-
-    @Test("Fails when wrangler exits non-zero") func failsWhenWranglerExitsNonZero() async {
-        let script = """
-        echo 'Error: authentication failed' 1>&2
-        exit 10
-        """
-        let (cmd, _, _) = makeCommand(
-            resolve: { _ in self.shFixture(script) },
-            token: { "fake-token" }
-        )
-        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-        guard case .failed(let reason, let exit) = result else {
-            Issue.record("expected .failed, got \(result)")
-            return
-        }
-        #expect(exit == 10)
-        #expect(reason.contains("10"), "reason should mention the exit code: \(reason)")
-    }
-
-    @Test("Fails semantically when zero exit but no published URL") func failsSemanticallyWhenZeroExitButNoPublishedURL() async {
-        // A wrangler bug or unexpected output shape: process exits 0 but our anchor never matched.
-        // We surface this as a clear failure rather than silently returning a bogus URL.
-        let script = """
-        echo 'Did some thing.'
-        echo 'No anchor here.'
-        exit 0
-        """
-        let (cmd, _, _) = makeCommand(
-            resolve: { _ in self.shFixture(script) },
-            token: { "fake-token" }
-        )
-        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-        guard case .failed(let reason, let exit) = result else {
-            Issue.record("expected .failed, got \(result)")
-            return
-        }
-        #expect(exit == 0)
-        #expect(reason.lowercased().contains("url"), "reason should explain the URL was missing: \(reason)")
-    }
-
-    // MARK: Token propagation
-
-    @Test("Passes Cloudflare token as environment variable to subprocess") func passesCloudflareTokenAsEnvironmentVariableToSubprocess() async {
-        // Fixture echoes the value of $CLOUDFLARE_API_TOKEN, then prints a fake Published URL so
-        // the deploy reaches `.succeeded`. We can then read what was echoed via the LogCenter.
-        let script = """
-        echo "TOKEN_SEEN_BY_WRANGLER=$CLOUDFLARE_API_TOKEN"
-        echo 'Published angle-app (0.42 sec)'
-        echo '  https://t.example.workers.dev'
-        exit 0
-        """
-        let (cmd, _, center) = makeCommand(
-            resolve: { _ in self.shFixture(script) },
-            token: { "secret-token-abc" }
-        )
-        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-        guard case .succeeded = result else {
-            Issue.record("expected .succeeded, got \(result)")
-            return
-        }
-        let lines = await center.snapshot()
-        let tokenLine = lines.first(where: { $0.text.contains("TOKEN_SEEN_BY_WRANGLER=") })
-        #expect(tokenLine?.text == "TOKEN_SEEN_BY_WRANGLER=secret-token-abc")
-    }
-
-    // MARK: Build step
-
-    @Test("Fails when build exits non-zero") func failsWhenBuildExitsNonZero() async {
-        // preflight and wrangler must not run when build fails.
-        await confirmation("neither preflight nor wrangler runs when build fails", expectedCount: 0) { neitherCalled in
-            let (cmd, _, _) = makeCommand(
-                resolve: { _ in
-                    neitherCalled()
-                    return self.shFixture("exit 0")
-                },
-                token: { "fake-token" },
-                preflight: { _ in
-                    neitherCalled()
-                    return .passed(warnings: [])
-                },
-                build: { _ in
-                    self.shFixture("echo 'astro: oops, type error' 1>&2; exit 2")
-                }
-            )
-            let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-            guard case .failed(let reason, let exit) = result else {
-                Issue.record("expected .failed, got \(result)")
-                return
-            }
-            #expect(exit == 2)
-            #expect(reason.contains("build") && reason.contains("2"), "reason should name the build and the exit code: \(reason)")
-        }
-    }
-
-    @Test("Fails when build resolver reports unavailable") func failsWhenBuildResolverReportsUnavailable() async {
-        let (cmd, _, _) = makeCommand(
-            resolve: { _ in self.shFixture("exit 0") },
-            token: { "fake-token" },
-            build: { _ in .unavailable(reason: "vendored npm not found — rebuild the app") }
-        )
-        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-        guard case .failed(let reason, _) = result else {
-            Issue.record("expected .failed, got \(result)")
-            return
-        }
-        #expect(reason.contains("vendored npm"), "\(reason)")
-    }
-
-    @Test("Build output appears in LogCenter under build source") func buildOutputAppearsInLogCenterUnderBuildSource() async {
-        let (cmd, _, center) = makeCommand(
-            resolve: { _ in
-                self.shFixture("echo 'Published angle-app (0.42 sec)'; echo '  https://t.example.workers.dev'; exit 0")
-            },
-            token: { "fake-token" },
-            build: { _ in self.shFixture("echo 'building dist…'; exit 0") }
-        )
-        _ = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-        let lines = await center.snapshot()
-        #expect(
-            lines.contains { $0.source == "deploy:mysite:build" && $0.text == "building dist…" },
-            "build line should appear under deploy:<site>:build source"
-        )
-    }
-
-    // MARK: Pre-deploy preflight
-
-    @Test("Returns blocked and does not spawn wrangler when preflight blocks") func returnsBlockedAndDoesNotSpawnWranglerWhenPreflightBlocks() async {
-        let blockedOutcome = PreDeployCheck.Outcome.blocked(
-            failures: [
-                .init(
-                    category: .piiEmail,
-                    file: "dist/index.html",
-                    detail: "Possible email address: jane@yourbusiness.com",
-                    remediation: "Wrap the address in a `mailto:` link or add it to PII_EMAIL_ALLOW in .site-config."
-                )
-            ],
-            warnings: []
-        )
-        // wrangler must not run when the pre-deploy scan blocks the deploy.
-        await confirmation("wrangler must not run when the pre-deploy scan blocks the deploy", expectedCount: 0) { wranglerSpawned in
-            let (cmd, _, _) = makeCommand(
-                resolve: { _ in
-                    wranglerSpawned()
-                    return self.shFixture("exit 0")
-                },
-                token: { "fake-token" },
-                preflight: { _ in blockedOutcome }
-            )
-
-            let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-
-            guard case .blocked(let failures, _) = result else {
-                Issue.record("expected .blocked, got \(result)")
-                return
-            }
-            #expect(failures.count == 1)
-            #expect(failures[0].category == .piiEmail)
-            #expect(failures[0].file == "dist/index.html")
-        }
-    }
-
-    @Test("Fails when preflight errors") func failsWhenPreflightErrors() async {
-        // wrangler must not run when preflight could not run at all.
-        await confirmation("wrangler must not run when preflight could not run at all", expectedCount: 0) { wranglerSpawned in
-            let (cmd, _, _) = makeCommand(
-                resolve: { _ in
-                    wranglerSpawned()
-                    return self.shFixture("exit 0")
-                },
-                token: { "fake-token" },
-                preflight: { _ in .error(reason: "tsx not installed in this site") }
-            )
-
-            let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
-
-            guard case .failed(let reason, _) = result else {
-                Issue.record("expected .failed, got \(result)")
-                return
-            }
-            #expect(reason.contains("tsx"), "reason should surface the preflight error: \(reason)")
-        }
-    }
-
-    // MARK: onPreflight callback
-
-    @Test("Deploy fires onPreflight with resolved outcome") func deployFiresOnPreflightWithResolvedOutcome() async {
-        let expectedOutcome = PreDeployCheck.Outcome.passed(warnings: [
-            .init(category: .missingOgImage, detail: "no og image", remediation: "add one")
-        ])
-        let observed = Mutex<PreDeployCheck.Outcome?>(nil)
-
-        let (cmd, _, _) = makeCommand(
-            resolve: { _ in self.shFixture("exit 0") },
-            token: { "fake-token" },
-            preflight: { _ in expectedOutcome }
-        )
-
-        _ = await cmd.deploy(
-            siteID: "test",
-            siteDirectory: tmpDir,
-            onPreflight: { outcome in observed.set(outcome) }
-        )
-
-        #expect(observed.get() == expectedOutcome)
     }
 }
 

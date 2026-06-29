@@ -8,18 +8,27 @@ struct DeployCommandProgressTests {
     @Test("a blocked deploy still emits building then preflight milestones")
     func milestonesUpToBlock() async {
         let recorder = ProgressRecorder()
-        // Build resolves to `/usr/bin/true` (exit 0); preflight returns .blocked so we stop early
-        // without needing wrangler.
-        let cmd = DeployCommand(
-            resolveCommand: { _ in .unavailable(reason: "no wrangler in test") },
-            resolveBuildCommand: { _ in .run(executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: []) },
-            tokenSource: { "token" },
-            preflight: { _ in .blocked(failures: [], warnings: []) }
-        )
+        // Build succeeds (exit 0); preflight JSON blocks so we stop early without reaching wrangler.
+        let exec = BlockingPreflightExecutor()
+        let cmd = DeployCommand(tokenSource: { "token" }, executor: exec)
         _ = await cmd.deploy(siteID: "s", siteDirectory: URL(fileURLWithPath: NSTemporaryDirectory()),
                              onProgress: { recorder.record($0) })
         let phases = recorder.phases()
         #expect(phases.prefix(2) == ["building", "preflightScan"])
+    }
+}
+
+/// Fake executor: build passes, preflight emits a `ok:false` blocking report, wrangler never runs.
+private struct BlockingPreflightExecutor: DeployExecutor {
+    func run(step: DeployStep, siteDirectory: URL, environment: [String: String], source: String) async -> DeployStepResult {
+        switch step {
+        case .build:
+            return DeployStepResult(exitCode: 0, output: "")
+        case .preflight:
+            return DeployStepResult(exitCode: 0, output: #"{"ok":false,"failures":[],"warnings":[]}"#)
+        case .wrangler:
+            return DeployStepResult(exitCode: 0, output: "")
+        }
     }
 }
 
