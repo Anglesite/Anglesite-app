@@ -208,16 +208,21 @@ public struct ContainerizationControl: LocalContainerControl {
     }
 
     /// Run `argv` inside the named container as a one-shot guest exec, forwarding `environment`
-    /// and `workingDirectory`, streaming each stdout line to `onOutput` as it arrives, capturing
-    /// the full stdout + stderr, and returning the real guest exit code (it does NOT throw on a
-    /// non-zero exit — the caller maps the code). Mirrors `runToCompletion`'s lifecycle
-    /// (`exec` -> `start` -> `wait` -> `delete`) but installs capturing/streaming `Writer`s.
+    /// and `workingDirectory`, streaming each stdout AND stderr line to `onOutput` as it arrives
+    /// (many tools, incl. `wrangler`, write progress to stderr), capturing the full stdout + stderr,
+    /// and returning the real guest exit code (it does NOT throw on a non-zero exit — the caller maps
+    /// the code). Honors task cancellation: a cancelled deploy SIGTERMs the guest process, mirroring
+    /// the host path. Mirrors `runToCompletion`'s lifecycle (`exec` -> `start` -> `wait` -> `delete`)
+    /// but installs capturing/streaming `Writer`s.
     ///
     /// Env/cwd are set via the real 0.34 `LinuxProcessConfiguration` fields — `arguments`,
     /// `environmentVariables`, `workingDirectory` (`LinuxProcessConfiguration.swift:366-370`) — so
     /// there is no shell wrapping and therefore no shell-metacharacter injection surface: each
     /// `K=V` pair and each argv element is passed literally to the guest agent (no `sh -lc`, no
-    /// `env` binary). The default `PATH` is preserved so the resolver still finds `git`/`node`/etc.
+    /// `env` binary). NOTE: `LinuxContainer.exec` builds a FRESH config, so the image-baked env is
+    /// NOT inherited — only the default `PATH` (which covers `/usr/local/bin` for `node:22`, so
+    /// `node`/`npm`/`npx`/`wrangler` resolve) plus the caller's `environment` are set. Anything the
+    /// deploy toolchain needs beyond PATH must be passed in `environment`.
     public func exec(
         siteID: String,
         argv: [String],
@@ -235,10 +240,11 @@ public struct ContainerizationControl: LocalContainerControl {
         // (`LinuxProcess.waitIoComplete`, LinuxProcess.swift:372) and `flush()` runs synchronously
         // right after — so the escaping copy never outlives this function call.
         return try await withoutActuallyEscaping(onOutput) { onOutput in
-            // Streaming line-splitter for stdout (forwards each completed line to `onOutput` and
-            // accumulates the raw text); a plain accumulator for stderr.
+            // Streaming line-splitter for BOTH stdout and stderr — forward each completed line to
+            // `onOutput` live (so the deploy drawer shows progress, incl. wrangler's stderr) while
+            // accumulating each stream's raw text separately (the caller parses stdout for the URL).
             let stdoutSink = LineStreamingWriter(onLine: onOutput)
-            let stderrSink = AccumulatingWriter()
+            let stderrSink = LineStreamingWriter(onLine: onOutput)
 
             let proc = try await container.exec(siteID + "-exec") { config in
                 config.arguments = argv
@@ -252,12 +258,20 @@ public struct ContainerizationControl: LocalContainerControl {
                 config.stderr = stderrSink
             }
             try await proc.start()
-            let status = try await proc.wait()
+            // Honor task cancellation for parity with the host deploy path (which SIGTERMs a
+            // cancelled deploy): if the deploy task is cancelled mid-`wait()`, signal the guest
+            // process so a hung/long `npm install` / `wrangler deploy` can actually be aborted.
+            let status = try await withTaskCancellationHandler {
+                try await proc.wait()
+            } onCancel: {
+                Task { try? await proc.kill(.term) }
+            }
             try? await proc.delete()
 
             // `wait()` returns only after the IO streams have drained, so the sinks hold the full
-            // output here. Flush any trailing partial (unterminated) stdout line.
+            // output here. Flush any trailing partial (unterminated) line on each stream.
             stdoutSink.flush()
+            stderrSink.flush()
             return ContainerExecResult(
                 exitCode: status.exitCode,
                 stdout: stdoutSink.text,
@@ -372,22 +386,6 @@ actor LiveContainers {
         }
         ext4Artifacts[siteID] = nil
     }
-}
-
-/// A Containerization `Writer` that accumulates the raw guest stream into a UTF-8 string.
-/// Used for stderr capture in `exec`. The library invokes `write` from a single `FileHandle`
-/// readability handler, so the buffer is not touched concurrently (`@unchecked Sendable`, mirroring
-/// the upstream `BufferWriter` test helper in `ContainerTests.swift:83`).
-final class AccumulatingWriter: @unchecked Sendable, Writer {
-    private var buffer = Data()
-
-    var text: String { String(decoding: buffer, as: UTF8.self) }
-
-    func write(_ data: Data) throws {
-        buffer.append(data)
-    }
-
-    func close() throws {}
 }
 
 /// A Containerization `Writer` that splits the guest stream into newline-delimited lines, forwarding
