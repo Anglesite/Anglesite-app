@@ -5,11 +5,12 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildRobotsTxt, buildSecurityTxt } from "./edge-artifacts";
 
-test("buildRobotsTxt: allows all crawlers and ends with a newline", () => {
+test("buildRobotsTxt: allows all crawlers by default and ends with a newline", () => {
   const out = buildRobotsTxt();
   assert.match(out, /^User-agent: \*$/m);
   assert.match(out, /^Disallow:\s*$/m);
   assert.match(out, /\n$/);
+  assert.doesNotMatch(out, /GPTBot/);
 });
 
 test("committed public/robots.txt is byte-identical to buildRobotsTxt()", () => {
@@ -18,6 +19,21 @@ test("committed public/robots.txt is byte-identical to buildRobotsTxt()", () => 
     "utf-8",
   );
   assert.equal(buildRobotsTxt(), committed);
+});
+
+test("buildRobotsTxt(blockAI=true): blocks known AI crawlers", () => {
+  const out = buildRobotsTxt(true);
+  assert.match(out, /^User-agent: \*$/m, "still has the allow-all baseline");
+  for (const bot of ["GPTBot", "ClaudeBot", "anthropic-ai", "Google-Extended", "PerplexityBot", "CCBot"]) {
+    assert.match(out, new RegExp(`^User-agent: ${bot}$`, "m"), `blocks ${bot}`);
+    const section = out.slice(out.indexOf(`User-agent: ${bot}`));
+    assert.match(section, /^Disallow: \/$/m, `${bot} has Disallow: /`);
+  }
+});
+
+test("buildRobotsTxt(blockAI=true): includes BLOCK_AI comment", () => {
+  const out = buildRobotsTxt(true);
+  assert.match(out, /BLOCK_AI/);
 });
 
 const NOW = new Date("2026-06-28T12:00:00Z");
