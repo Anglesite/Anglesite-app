@@ -4,8 +4,6 @@ import AnglesiteCore
 struct HardenSheetView: View {
     @Bindable var model: HardenModel
 
-    @Environment(\.dismiss) private var dismiss
-
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -88,8 +86,8 @@ struct HardenSheetView: View {
             let findings = result.postAuditFindings.count
             if findings == 0 { return "Post-apply audit: no remaining issues." }
             return "Post-apply audit: \(findings) remaining finding\(findings == 1 ? "" : "s")."
-        case .failed(let reason):
-            return reason
+        case .failed:
+            return nil
         default:
             return nil
         }
@@ -168,7 +166,7 @@ struct HardenSheetView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(plan.items.enumerated()), id: \.offset) { _, item in
+                    ForEach(plan.items, id: \.self) { item in
                         planItemRow(item)
                     }
 
@@ -199,7 +197,7 @@ struct HardenSheetView: View {
             Text("Explicitly not included")
                 .font(.subheadline.weight(.semibold))
                 .padding(.top, 8)
-            ForEach(exclusions, id: \.self) { text in
+            ForEach(Self.exclusions, id: \.self) { text in
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "xmark.circle")
                         .foregroundStyle(.secondary)
@@ -211,13 +209,11 @@ struct HardenSheetView: View {
         }
     }
 
-    private var exclusions: [String] {
-        [
+    private static let exclusions: [String] = [
             "Rate limiting (broken on free plan)",
             "Blanket user-agent blocking (breaks monitors, webhooks, RSS)",
-            "Outdated-browser sniffing / referrer-based challenges",
-        ]
-    }
+        "Outdated-browser sniffing / referrer-based challenges",
+    ]
 
     @ViewBuilder
     private func resultView(_ result: HardenModel.HardenResult) -> some View {
@@ -234,7 +230,7 @@ struct HardenSheetView: View {
                 if !result.failedItems.isEmpty {
                     Section {
                         Text("Failed").font(.subheadline.weight(.semibold))
-                        ForEach(Array(result.failedItems.enumerated()), id: \.offset) { _, item in
+                        ForEach(Array(result.failedItems.enumerated()), id: \.element.description) { _, item in
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.description).font(.callout.weight(.medium))
                                 Text(item.error).font(.caption).foregroundStyle(.red)
@@ -304,7 +300,7 @@ struct HardenSheetView: View {
                 .buttonStyle(.borderedProminent)
             case .failed:
                 Button("Try again") {
-                    model.harden()
+                    model.retryFromFailed()
                 }
             default:
                 EmptyView()
@@ -312,7 +308,6 @@ struct HardenSheetView: View {
             Spacer()
             Button("Close") {
                 model.dismissSheet()
-                dismiss()
             }
             .keyboardShortcut(.cancelAction)
         }

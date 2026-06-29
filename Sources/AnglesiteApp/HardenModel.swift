@@ -51,10 +51,16 @@ final class HardenModel {
         }
     }
 
-    func harden() {
+    func openSheet() {
         guard !isRunning else { return }
         phase = .idle
         domainInput = ""
+        sheetPresented = true
+    }
+
+    func retryFromFailed() {
+        guard !isRunning else { return }
+        phase = .idle
         sheetPresented = true
     }
 
@@ -63,6 +69,7 @@ final class HardenModel {
         guard !domain.isEmpty else { return }
         guard !isRunning else { return }
 
+        inFlight?.cancel()
         inFlight = Task { @MainActor [weak self] in
             await self?.runResolveAndPlan(domain: domain)
         }
@@ -72,14 +79,17 @@ final class HardenModel {
         guard case .preview(let plan, let domain, let zoneID) = phase else { return }
         guard !plan.isEmpty else { return }
 
+        inFlight?.cancel()
         inFlight = Task { @MainActor [weak self] in
             await self?.runApply(plan: plan, domain: domain, zoneID: zoneID)
         }
     }
 
     func dismissSheet() {
+        inFlight?.cancel()
+        inFlight = nil
         sheetPresented = false
-        if !isRunning { phase = .idle }
+        phase = .idle
     }
 
     // MARK: - Private
@@ -88,7 +98,7 @@ final class HardenModel {
         if let env = ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"], !env.isEmpty {
             return env
         }
-        return (try? keychain.readCloudflareToken()) ?? nil
+        return try? keychain.readCloudflareToken()
     }
 
     private func runResolveAndPlan(domain: String) async {

@@ -296,7 +296,7 @@ struct SiteWindow: View {
             // Harden — low priority, collapses alongside Audit/Backup.
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    harden.harden()
+                    harden.openSheet()
                 } label: {
                     if harden.isRunning {
                         Label("Hardening…", systemImage: "shield.lefthalf.filled")
