@@ -2,22 +2,28 @@ import Foundation
 
 /// One-shot orchestrator for `wrangler deploy`.
 ///
-/// A deploy is a single foreground action with three real steps and one resolver step:
+/// A deploy is a single foreground action with a pre-spawn token gate and three real steps,
+/// each run through the injected `DeployExecutor` seam (default `HostDeployExecutor`, which
+/// preserves the embedded-Node host behavior; `ContainerDeployExecutor` runs the same steps
+/// in a guest):
 ///   1. Resolve / read the Cloudflare API token (pre-spawn; no token → `.failed`).
-///   2. Run `npm run build` so `dist/` is fresh (streamed to `LogCenter` via `supervisor.launch`).
-///   3. Run the bundled plugin's pre-deploy scan; `.blocked` short-circuits with no override
-///      (per CLAUDE.md, the app cannot bypass plugin security hooks).
-///   4. Run `wrangler deploy` (also streamed to `LogCenter`); parse the deployed URL out of the
-///      success block on exit 0.
+///   2. `executor.run(step: .build, …)` so `dist/` is fresh.
+///   3. `executor.run(step: .preflight, …)` — the bundled plugin's pre-deploy scan; its captured
+///      stdout is parsed into a `PreDeployCheck.Outcome`. `.blocked` short-circuits with no
+///      override (per CLAUDE.md, the app cannot bypass plugin security hooks).
+///   4. `executor.run(step: .wrangler, …)` — parse the deployed URL out of the captured output.
 ///
-/// Both subprocesses go through `ProcessSupervisor.launch(...)`, not `.run(...)`, so their stdout
-/// and stderr flow into `LogCenter` line-by-line as wrangler produces them. The deploy drawer
-/// (#22) and Debug pane both consume this stream while the deploy is in flight; the URL extractor
-/// re-reads the captured stdout via a `LogCenter` subscription opened before launch.
+/// On the host path the executor streams each step's stdout+stderr into `LogCenter` line-by-line
+/// (under the caller-supplied source) and returns the accumulated stdout in `DeployStepResult.output`,
+/// so the URL/scan parsing here re-reads the captured stdout rather than re-snapshotting `LogCenter`.
 ///
-/// Note: the supervisor's pipe pump dispatches each line via an untracked `Task { await
-/// logCenter.append(...) }`, so the subscription needs a brief grace period after `waitForExit`
-/// before it's safe to cancel — see the call site for details.
+/// **Environment contract** (matches today's host behavior):
+///   - `.build` and `.preflight` get `ProcessInfo.processInfo.environment` *without* the token.
+///   - `.wrangler` gets that environment *plus* `CLOUDFLARE_API_TOKEN`.
+///
+/// **Cancellation**: cancelling the deploy task propagates through `executor.run` (the host
+/// executor wraps its `waitForExit` in a cancellation handler that SIGTERMs the in-flight
+/// subprocess), so a cancelled build/wrangler is actually killed rather than orphaned.
 public actor DeployCommand {
     public enum Result: Sendable, Equatable {
         case succeeded(url: URL, duration: TimeInterval)
@@ -51,27 +57,15 @@ public actor DeployCommand {
     /// cases where deploy() returns .failed afterwards.
     public typealias PreflightObserver = @Sendable (PreDeployCheck.Outcome) -> Void
 
-    private let supervisor: ProcessSupervisor
-    private let logCenter: LogCenter
-    private let resolveCommand: CommandResolver
-    private let resolveBuildCommand: CommandResolver
-    private let tokenSource: TokenSource
-    private let preflight: PreflightChecker
+    public nonisolated let tokenSource: TokenSource
+    private let executor: any DeployExecutor
 
     public init(
-        supervisor: ProcessSupervisor = .shared,
-        logCenter: LogCenter = .shared,
-        resolveCommand: @escaping CommandResolver = DeployCommand.resolveWranglerCommand,
-        resolveBuildCommand: @escaping CommandResolver = DeployCommand.resolveBuildCommand,
         tokenSource: @escaping TokenSource = DeployCommand.keychainTokenSource,
-        preflight: @escaping PreflightChecker = DeployCommand.defaultPreflight
+        executor: any DeployExecutor = HostDeployExecutor()
     ) {
-        self.supervisor = supervisor
-        self.logCenter = logCenter
-        self.resolveCommand = resolveCommand
-        self.resolveBuildCommand = resolveBuildCommand
         self.tokenSource = tokenSource
-        self.preflight = preflight
+        self.executor = executor
     }
 
     /// Run a deploy for `siteID`. Returns once wrangler has exited (or before, if pre-spawn
@@ -95,22 +89,44 @@ public actor DeployCommand {
             return .failed(reason: "no CLOUDFLARE_API_TOKEN — add it in Settings → Advanced → Credentials, or set the env var", exitCode: nil)
         }
 
-        // Build dist/ before the scan needs it. Streams to LogCenter via launch().
+        // Environment for the non-secret steps: the process env WITHOUT the token. The build and
+        // preflight steps rely on the executor's default Node-on-PATH env; the token is added only
+        // for the wrangler step below.
+        let baseEnvironment = ProcessInfo.processInfo.environment
+
+        // Build dist/ before the scan needs it. Streams to LogCenter via the executor.
         onProgress?(.deployBuilding)
-        switch await runBuild(siteID: siteID, siteDirectory: siteDirectory) {
-        case .success:
-            break
-        case .failure(let result):
-            return result
+        let buildResult = await executor.run(
+            step: .build,
+            siteDirectory: siteDirectory,
+            environment: baseEnvironment,
+            source: "deploy:\(siteID):build"
+        )
+        guard buildResult.exitCode == 0 else {
+            if let code = buildResult.exitCode {
+                return .failed(reason: "npm run build failed (exit \(code))", exitCode: code)
+            }
+            // nil exit code → unavailable resolver, spawn failure, or termination (cancellation).
+            if Task.isCancelled {
+                return .failed(reason: "build was terminated", exitCode: nil)
+            }
+            // The executor put the reason (unavailable/spawn) in `output`.
+            return .failed(reason: buildResult.output.isEmpty ? "build was terminated" : buildResult.output, exitCode: nil)
         }
 
-        // Pre-deploy scan runs after the build (so dist/ exists) and before wrangler is
-        // resolved. If the bundled plugin's checks find PII, exposed tokens, unauthorized
-        // third-party scripts, or Keystatic admin routes in dist/, the deploy is blocked —
-        // per the durable rule in CLAUDE.md, the app cannot bypass plugin security hooks;
-        // the UI sheet for `.blocked` has no override.
+        // Pre-deploy scan runs after the build (so dist/ exists) and before wrangler. If the
+        // bundled plugin's checks find PII, exposed tokens, unauthorized third-party scripts, or
+        // Keystatic admin routes in dist/, the deploy is blocked — per the durable rule in
+        // CLAUDE.md, the app cannot bypass plugin security hooks; the UI sheet for `.blocked` has
+        // no override.
         onProgress?(.deployPreflight)
-        let preflightOutcome = await preflight(siteDirectory)
+        let preflightResult = await executor.run(
+            step: .preflight,
+            siteDirectory: siteDirectory,
+            environment: baseEnvironment,
+            source: "deploy:\(siteID):preflight"
+        )
+        let preflightOutcome = Self.parseScanReport(output: preflightResult.output, exitCode: preflightResult.exitCode)
         onPreflight?(preflightOutcome)
         switch preflightOutcome {
         case .passed:
@@ -121,123 +137,70 @@ public actor DeployCommand {
             return .failed(reason: "pre-deploy scan could not run: \(reason)", exitCode: nil)
         }
 
-        let plan = resolveCommand(siteDirectory)
-        let executable: URL
-        let arguments: [String]
-        switch plan {
-        case .unavailable(let reason):
-            return .failed(reason: reason, exitCode: nil)
-        case .run(let exe, let args):
-            executable = exe
-            arguments = args
-        }
-
-        let source = "deploy:\(siteID)"
-        var environment = ProcessInfo.processInfo.environment
-        environment["CLOUDFLARE_API_TOKEN"] = token
+        // Wrangler step: process env PLUS the Cloudflare token.
+        var wranglerEnvironment = baseEnvironment
+        wranglerEnvironment["CLOUDFLARE_API_TOKEN"] = token
 
         let started = Date()
         onProgress?(.deployDeploying)
-        let handle: ProcessSupervisor.Handle
-        do {
-            handle = try await supervisor.launch(
-                source: source,
-                executable: executable,
-                arguments: arguments,
-                environment: environment,
-                currentDirectoryURL: siteDirectory,
-                logCenter: logCenter
-            )
-        } catch {
-            return .failed(reason: "couldn't spawn wrangler: \(error)", exitCode: nil)
-        }
-
-        let reason = await withTaskCancellationHandler {
-            await supervisor.waitForExit(handle)
-        } onCancel: {
-            // The deploy was cancelled (e.g. a Shortcuts/Siri CancellableIntent). The backend
-            // resumes our wait as `.terminated`, but the OS process would otherwise keep running —
-            // actually SIGTERM it so the build/wrangler doesn't finish (and, for wrangler, doesn't
-            // keep publishing to production) after we've reported cancellation.
-            Task { await supervisor.terminate(handle) }
-        }
+        let wranglerResult = await executor.run(
+            step: .wrangler,
+            siteDirectory: siteDirectory,
+            environment: wranglerEnvironment,
+            source: "deploy:\(siteID)"
+        )
         let duration = Date().timeIntervalSince(started)
 
-        // `waitForExit` only resumes after the supervisor's per-pipe drain Tasks have
-        // finished — every byte wrangler wrote to stdout/stderr is in `LogCenter` by
-        // the time we get here, so the snapshot can't miss the `Published` line.
         if !Task.isCancelled { onProgress?(.deployFinalizing) }
-        let snapshot = await logCenter.snapshot()
-        let stdout = snapshot
-            .filter { $0.source == source && $0.stream == .stdout }
-            .map(\.text)
-            .joined(separator: "\n")
 
-        switch reason {
-        case .exited(let code):
-            if code == 0 {
-                if let url = Self.extractDeployedURL(from: stdout) {
-                    return .succeeded(url: url, duration: duration)
-                }
-                return .failed(reason: "wrangler exited cleanly but no deployed URL was found in its output", exitCode: 0)
+        guard let code = wranglerResult.exitCode else {
+            // nil exit code → unavailable resolver, spawn failure, or termination (e.g. cancellation).
+            // The cancellation path must say "terminated" (the cancellation test asserts on it);
+            // for the unavailable/spawn-failure cases the executor surfaces the reason in `output`.
+            if Task.isCancelled {
+                return .failed(reason: "wrangler was terminated", exitCode: nil)
             }
-            return .failed(reason: "wrangler exited with code \(code)", exitCode: code)
-        case .terminated:
-            return .failed(reason: "wrangler was terminated", exitCode: nil)
-        case .retriesExhausted(let lastCode):
-            return .failed(reason: "wrangler retries exhausted (exit \(lastCode))", exitCode: lastCode)
+            return .failed(reason: wranglerResult.output.isEmpty ? "wrangler was terminated" : wranglerResult.output, exitCode: nil)
         }
+        if code == 0 {
+            if let url = Self.extractDeployedURL(from: wranglerResult.output) {
+                return .succeeded(url: url, duration: duration)
+            }
+            return .failed(reason: "wrangler exited cleanly but no deployed URL was found in its output", exitCode: 0)
+        }
+        return .failed(reason: "wrangler exited with code \(code)", exitCode: code)
     }
 
-    // MARK: Build step
+    // MARK: Scan report parsing
 
-    private enum BuildOutcome { case success; case failure(Result) }
-
-    private func runBuild(siteID: String, siteDirectory: URL) async -> BuildOutcome {
-        let plan = resolveBuildCommand(siteDirectory)
-        let executable: URL
-        let arguments: [String]
-        switch plan {
-        case .unavailable(let reason):
-            return .failure(.failed(reason: reason, exitCode: nil))
-        case .run(let exe, let args):
-            executable = exe
-            arguments = args
+    /// Parses the captured stdout of the pre-deploy scan (`scripts/pre-deploy-check.ts --json`)
+    /// into a `PreDeployCheck.Outcome`. Mirrors the JSON contract owned by the plugin; a
+    /// non-decodable payload maps to `.error` with an exit-code-aware remediation (this is the
+    /// decoding that previously lived inside `PreDeployCheck.check` / `defaultPreflight`).
+    public static func parseScanReport(output: String, exitCode: Int32?) -> PreDeployCheck.Outcome {
+        struct RawReport: Decodable {
+            let ok: Bool
+            let failures: [PreDeployCheck.ScanFailure]
+            let warnings: [PreDeployCheck.ScanWarning]
         }
 
-        let source = "deploy:\(siteID):build"
-        let handle: ProcessSupervisor.Handle
+        let report: RawReport
         do {
-            handle = try await supervisor.launch(
-                source: source,
-                executable: executable,
-                arguments: arguments,
-                currentDirectoryURL: siteDirectory,
-                logCenter: logCenter
-            )
+            report = try JSONDecoder().decode(RawReport.self, from: Data(output.utf8))
         } catch {
-            return .failure(.failed(reason: "couldn't spawn build: \(error)", exitCode: nil))
+            // No parseable JSON — the script most likely errored out (missing dist/, missing tsx,
+            // or an outdated script that predates `--json`). Exit 0 with no JSON is distinct from a
+            // non-zero exit so the remediation can be specific.
+            let exit = exitCode ?? -1
+            return .error(reason: exit == 0
+                ? "pre-deploy scan emitted no JSON (exit 0) — is the site's scripts/pre-deploy-check.ts up to date?"
+                : "pre-deploy scan failed (exit \(exit)) — run `npm run build` and try again, or run `/anglesite:update` if the script is outdated")
         }
 
-        let reason = await withTaskCancellationHandler {
-            await supervisor.waitForExit(handle)
-        } onCancel: {
-            // The deploy was cancelled (e.g. a Shortcuts/Siri CancellableIntent). The backend
-            // resumes our wait as `.terminated`, but the OS process would otherwise keep running —
-            // actually SIGTERM it so the build/wrangler doesn't finish (and, for wrangler, doesn't
-            // keep publishing to production) after we've reported cancellation.
-            Task { await supervisor.terminate(handle) }
+        if report.ok {
+            return .passed(warnings: report.warnings)
         }
-        switch reason {
-        case .exited(let code) where code == 0:
-            return .success
-        case .exited(let code):
-            return .failure(.failed(reason: "npm run build failed (exit \(code))", exitCode: code))
-        case .terminated:
-            return .failure(.failed(reason: "build was terminated", exitCode: nil))
-        case .retriesExhausted(let lastCode):
-            return .failure(.failed(reason: "build retries exhausted (exit \(lastCode))", exitCode: lastCode))
-        }
+        return .blocked(failures: report.failures, warnings: report.warnings)
     }
 
     // MARK: URL extraction
@@ -294,6 +257,9 @@ public actor DeployCommand {
     /// plugin's template, so every Anglesite site already has it; outdated sites that
     /// predate the `--json` mode surface as `.error` outcomes, which `deploy` maps to
     /// `.failed` with a "run `/anglesite:update`" remediation.
+    ///
+    /// Retained for non-deploy consumers (`DefaultHealthCheckRunner`) and parity; the deploy flow
+    /// itself now runs preflight through the `DeployExecutor` seam and parses with `parseScanReport`.
     public static let defaultPreflight: PreflightChecker = { siteDirectory in
         let check = PreDeployCheck(invoke: { siteDir in
             let scriptPath = siteDir.appendingPathComponent("scripts/pre-deploy-check.ts").path

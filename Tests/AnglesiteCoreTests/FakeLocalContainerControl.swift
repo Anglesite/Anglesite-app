@@ -6,8 +6,21 @@ actor FakeLocalContainerControl: LocalContainerControl {
     private(set) var stopped: [String] = []
     private(set) var startedRepos: [(siteID: String, repo: URL, ref: String)] = []
 
-    init(startResult: Result<LocalContainerSession, LocalContainerError>) {
+    /// Canned result returned by `exec`. Defaults to a successful empty run.
+    var execResult: ContainerExecResult
+    /// Lines replayed to `onOutput` in order before `exec` returns.
+    var execStdoutLines: [String]
+    /// All `exec` invocations recorded for assertion.
+    private(set) var execCalls: [(siteID: String, argv: [String], env: [String: String], cwd: String)] = []
+
+    init(
+        startResult: Result<LocalContainerSession, LocalContainerError>,
+        execResult: ContainerExecResult = ContainerExecResult(exitCode: 0, stdout: "", stderr: ""),
+        execStdoutLines: [String] = []
+    ) {
         self.startResult = startResult
+        self.execResult = execResult
+        self.execStdoutLines = execStdoutLines
     }
 
     func start(siteID: String, sourceRepo: URL, ref: String) async throws -> LocalContainerSession {
@@ -16,6 +29,18 @@ actor FakeLocalContainerControl: LocalContainerControl {
     }
 
     func stop(siteID: String) async throws { stopped.append(siteID) }
+
+    func exec(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> ContainerExecResult {
+        execCalls.append((siteID: siteID, argv: argv, env: environment, cwd: workingDirectory))
+        for line in execStdoutLines { onOutput(line, .stdout) }
+        return execResult
+    }
 }
 
 /// A `LocalContainerControl` whose `start` suspends until `release()` is called — for
@@ -47,4 +72,14 @@ actor GatedFakeLocalContainerControl: LocalContainerControl {
         return try result.get()
     }
     func stop(siteID: String) async throws { stopped.append(siteID) }
+
+    func exec(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> ContainerExecResult {
+        ContainerExecResult(exitCode: 0, stdout: "", stderr: "")
+    }
 }

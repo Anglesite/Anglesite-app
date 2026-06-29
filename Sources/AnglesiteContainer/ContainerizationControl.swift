@@ -207,6 +207,100 @@ public struct ContainerizationControl: LocalContainerControl {
         await live.teardown(siteID: siteID)
     }
 
+    /// Run `argv` inside the named container as a one-shot guest exec, forwarding `environment`
+    /// and `workingDirectory`, streaming each stdout AND stderr line to `onOutput` as it arrives
+    /// (many tools, incl. `wrangler`, write progress to stderr), capturing the full stdout + stderr,
+    /// and returning the real guest exit code (it does NOT throw on a non-zero exit — the caller maps
+    /// the code). Honors task cancellation: a cancelled deploy SIGTERMs the guest process, mirroring
+    /// the host path. Mirrors `runToCompletion`'s lifecycle (`exec` -> `start` -> `wait` -> `delete`)
+    /// but installs capturing/streaming `Writer`s.
+    ///
+    /// Env/cwd are set via the real 0.34 `LinuxProcessConfiguration` fields — `arguments`,
+    /// `environmentVariables`, `workingDirectory` (`LinuxProcessConfiguration.swift:366-370`) — so
+    /// there is no shell wrapping and therefore no shell-metacharacter injection surface: each
+    /// `K=V` pair and each argv element is passed literally to the guest agent (no `sh -lc`, no
+    /// `env` binary). NOTE: `LinuxContainer.exec` builds a FRESH config, so the image-baked env is
+    /// NOT inherited — only the default `PATH` (which covers `/usr/local/bin` for `node:22`, so
+    /// `node`/`npm`/`npx`/`wrangler` resolve) plus the caller's `environment` are set. Anything the
+    /// deploy toolchain needs beyond PATH must be passed in `environment`.
+    public func exec(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> ContainerExecResult {
+        guard let container = await live.container(for: siteID) else {
+            throw LocalContainerError.bootFailed("exec: no live container for siteID '\(siteID)'")
+        }
+
+        // `onOutput` is `@escaping` (the seam declares it so): the `Writer` sinks below close over it
+        // and may legitimately fire it after this function returns (e.g. a kill-triggered final line
+        // on cancellation). No `withoutActuallyEscaping` — that wrapper would be UNSOUND here.
+        //
+        // Two line-splitters, one per stream, each tagging its lines with the stream it owns so the
+        // caller can label wrangler's stderr progress correctly (and parse stdout for the URL).
+        let stdoutSink = LineStreamingWriter(stream: .stdout, onLine: onOutput)
+        let stderrSink = LineStreamingWriter(stream: .stderr, onLine: onOutput)
+
+        // Unique exec id per call so build/preflight/wrangler don't collide on the same vended
+        // process name. The label maps each step's argv to a distinct, readable suffix; a short
+        // uniquifier guarantees distinctness even if two calls share a label (e.g. two `npx` steps).
+        let label = Self.execLabel(for: argv)
+        let proc = try await container.exec("\(siteID)-exec-\(label)-\(UUID().uuidString.prefix(8))") { config in
+            config.arguments = argv
+            // Preserve the default PATH (so argv[0] resolves) and append the caller's env as
+            // literal `K=V` argv-style entries — no shell parsing, no escaping bugs, no injection.
+            config.environmentVariables =
+                ["PATH=\(LinuxProcessConfiguration.defaultPath)"]
+                + environment.map { "\($0.key)=\($0.value)" }
+            config.workingDirectory = workingDirectory
+            config.stdout = stdoutSink
+            config.stderr = stderrSink
+        }
+        try await proc.start()
+        // Honor task cancellation for parity with the host deploy path (which SIGTERMs a
+        // cancelled deploy): if the deploy task is cancelled mid-`wait()`, signal the guest
+        // process so a hung/long `npm install` / `wrangler deploy` can actually be aborted.
+        let status = try await withTaskCancellationHandler {
+            try await proc.wait()
+        } onCancel: {
+            // Fire-and-forget SIGTERM. This may land AFTER `proc.delete()` runs below (the cancel
+            // handler and the main flow race once `wait()` resumes). That's tolerated: `kill` and
+            // `delete` are independent async ops on `LinuxProcess` with no shared guard —
+            // `LinuxProcess.kill` (LinuxProcess.swift:307-321) just calls `agent.signalProcess` and
+            // *throws* a wrapped `ContainerizationError` if the process is already gone, and our
+            // `try?` swallows that throw. Best-effort by construction — we never need the kill to
+            // succeed once the process has exited or been deleted.
+            Task { try? await proc.kill(.term) }
+        }
+        try? await proc.delete()
+
+        // `wait()` returns only after the IO streams have drained, so the sinks hold the full
+        // output here. Flush any trailing partial (unterminated) line on each stream.
+        stdoutSink.flush()
+        stderrSink.flush()
+        return ContainerExecResult(
+            exitCode: status.exitCode,
+            stdout: stdoutSink.text,
+            stderr: stderrSink.text
+        )
+    }
+
+    /// Maps a step's argv to a short, distinct, readable exec-id label. `npm run build` → `build`,
+    /// `npx tsx …pre-deploy-check…` → `preflight`, `npx wrangler deploy` → `wrangler`; anything else
+    /// falls back to argv[0]. Both `npx` steps would otherwise collapse to the same prefix.
+    private static func execLabel(for argv: [String]) -> String {
+        switch argv.first {
+        case "npm": return "build"
+        case "npx":
+            if argv.contains("wrangler") { return "wrangler" }
+            if argv.contains(where: { $0.contains("pre-deploy-check") }) { return "preflight" }
+            return "npx"
+        default: return argv.first ?? "cmd"
+        }
+    }
+
     // MARK: - Helpers
 
     /// Import an OCI layout into the store, tolerating a prior import (idempotent): if `load` fails
@@ -294,6 +388,8 @@ actor LiveContainers {
     /// Per-site ext4 files (rootfs + initfs) to delete on teardown so disk doesn't grow per start/stop.
     private var ext4Artifacts: [String: [URL]] = [:]
 
+    func container(for siteID: String) -> LinuxContainer? { containers[siteID] }
+
     func store(siteID: String, container: LinuxContainer, proxies ps: [VsockTCPProxy], ext4Artifacts artifacts: [URL]) {
         containers[siteID] = container
         proxies[siteID] = ps
@@ -310,5 +406,47 @@ actor LiveContainers {
             try? FileManager.default.removeItem(at: url)
         }
         ext4Artifacts[siteID] = nil
+    }
+}
+
+/// A Containerization `Writer` that splits the guest stream into newline-delimited lines, forwarding
+/// each completed line to `onLine` as it arrives (live streaming) while also accumulating the full
+/// raw text. Bytes are buffered until a `\n` is seen so a chunk that splits mid-line doesn't emit a
+/// partial line; `flush()` (called after `wait()`) emits any trailing unterminated line.
+///
+/// Single-handler invocation (one `FileHandle` readability handler) means no concurrent access, so
+/// `@unchecked Sendable` is safe here exactly as for the upstream test `BufferWriter`.
+final class LineStreamingWriter: @unchecked Sendable, Writer {
+    private let stream: LogCenter.Stream
+    private let onLine: @Sendable (String, LogCenter.Stream) -> Void
+    private var pending = Data()   // bytes after the last emitted newline
+    private var full = Data()      // entire raw stream, for `text`
+
+    init(stream: LogCenter.Stream, onLine: @escaping @Sendable (String, LogCenter.Stream) -> Void) {
+        self.stream = stream
+        self.onLine = onLine
+    }
+
+    var text: String { String(decoding: full, as: UTF8.self) }
+
+    func write(_ data: Data) throws {
+        guard !data.isEmpty else { return }
+        full.append(data)
+        pending.append(data)
+        let newline = UInt8(ascii: "\n")
+        while let idx = pending.firstIndex(of: newline) {
+            let lineData = pending[pending.startIndex..<idx]
+            onLine(String(decoding: lineData, as: UTF8.self), stream)
+            pending = Data(pending[pending.index(after: idx)...])
+        }
+    }
+
+    func close() throws {}
+
+    /// Emit any buffered bytes that were never newline-terminated as a final line.
+    func flush() {
+        guard !pending.isEmpty else { return }
+        onLine(String(decoding: pending, as: UTF8.self), stream)
+        pending.removeAll()
     }
 }

@@ -175,4 +175,34 @@ final class PreviewModel {
     func mcpClient() async -> MCPClient? {
         await runtime.mcpClient
     }
+
+    /// Returns the active container control and site ID when the runtime is a
+    /// `LocalContainerSiteRuntime` that has successfully started a container.
+    ///
+    /// Returns `nil`:
+    ///   - on MAS (container runtime is not linked; `runtime` is always a `LocalSiteRuntime`)
+    ///   - on DevID when the container capability gate chose the host runtime
+    ///   - when the runtime is a container runtime but `start()` hasn't completed yet
+    ///
+    /// Uses only `AnglesiteCore` types (`LocalContainerControl`, `LocalContainerSiteRuntime`)
+    /// — no `AnglesiteContainer` import needed, so this compiles on both targets.
+    ///
+    /// Reads both fields in a single actor hop via `containerSnapshot()` to avoid a
+    /// theoretical TOCTOU window between two separate `await` reads.
+    func activeContainerControl() async -> (siteID: String, control: any LocalContainerControl)? {
+        guard let containerRuntime = runtime as? LocalContainerSiteRuntime else { return nil }
+        guard let snapshot = await containerRuntime.containerSnapshot() else { return nil }
+        return (siteID: snapshot.siteID, control: snapshot.control)
+    }
+
+    /// True when the preview runtime is ready — used to gate the Deploy button so a user
+    /// deploying before the container (or dev server) is up sees a coherent error rather than
+    /// a silent `ContainerDeployExecutor` "container isn't running" failure.
+    ///
+    /// On the host path the runtime becomes `.ready` almost immediately (the dev server
+    /// starts in the background), so this gate is mostly relevant for the container path.
+    var canDeploy: Bool {
+        if case .ready = state { return true }
+        return false
+    }
 }

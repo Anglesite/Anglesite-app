@@ -378,15 +378,27 @@ struct SiteWindow: View {
             // Declared LAST so it renders at the trailing edge (macOS primary-action position).
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    deploy.deploy(siteID: site.id, siteDirectory: site.sourceDirectory)
+                    // Resolve the container control asynchronously before dispatching:
+                    // `activeContainerControl()` hops to the container runtime actor and
+                    // returns the control + siteID if a container is running, else nil.
+                    // `deploy.deploy(...)` is synchronous (schedules its own Task), so we
+                    // wrap only the async resolution here.
+                    let siteID = site.id
+                    let siteDirectory = site.sourceDirectory
+                    Task { @MainActor in
+                        let cc = await preview.activeContainerControl()
+                        deploy.deploy(siteID: siteID, siteDirectory: siteDirectory, containerControl: cc)
+                    }
                 } label: {
                     Label("Deploy", systemImage: "paperplane.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(deploy.isRunning || backup.isRunning || audit.isRunning || !site.isValid)
-                .help(site.isValid
+                .disabled(deploy.isRunning || backup.isRunning || audit.isRunning || !site.isValid || !preview.canDeploy)
+                .help(site.isValid && preview.canDeploy
                       ? "Build, scan, and run wrangler deploy on this site"
-                      : "Site is missing required files")
+                      : site.isValid
+                        ? "Open the preview first to start the runtime before deploying"
+                        : "Site is missing required files")
             }
             .visibilityPriority(.high)
 
