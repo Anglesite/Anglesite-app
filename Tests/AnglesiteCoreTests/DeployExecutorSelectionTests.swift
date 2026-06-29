@@ -172,6 +172,39 @@ struct LocalContainerSiteRuntimeControlExposureTests {
         let siteID = await rt.containerActiveSiteID
         #expect(siteID == nil)
     }
+
+    // MARK: - containerSnapshot() — single-hop accessor
+
+    @Test("containerSnapshot returns nil before start()")
+    func snapshotNilBeforeStart() async {
+        let fake = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let rt = LocalContainerSiteRuntime(ref: "HEAD", control: fake, mcpClient: mcp, connect: { _, _ in })
+        let snap = await rt.containerSnapshot()
+        #expect(snap == nil)
+    }
+
+    @Test("containerSnapshot returns control and siteID after start() succeeds")
+    func snapshotPresentAfterStart() async {
+        let fake = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let rt = LocalContainerSiteRuntime(ref: "HEAD", control: fake, mcpClient: mcp, connect: { _, _ in })
+        await rt.start(siteID: "snap-site", siteDirectory: URL(fileURLWithPath: "/unused"))
+        let snap = await rt.containerSnapshot()
+        #expect(snap != nil)
+        #expect(snap?.siteID == "snap-site")
+    }
+
+    @Test("containerSnapshot returns nil after stop()")
+    func snapshotNilAfterStop() async {
+        let fake = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let rt = LocalContainerSiteRuntime(ref: "HEAD", control: fake, mcpClient: mcp, connect: { _, _ in })
+        await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+        await rt.stop()
+        let snap = await rt.containerSnapshot()
+        #expect(snap == nil)
+    }
 }
 
 // MARK: - StepAwareFakeContainerControl

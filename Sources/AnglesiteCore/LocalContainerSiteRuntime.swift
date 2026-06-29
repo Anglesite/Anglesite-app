@@ -48,6 +48,17 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     /// Parallel to `containerControl` — callers need both to build a `ContainerDeployExecutor`.
     public var containerActiveSiteID: String? { activeSiteID }
 
+    /// Returns the control and active site ID atomically in a single actor hop, so the
+    /// caller (e.g. `PreviewModel.activeContainerControl()`) cannot observe a torn state
+    /// where one field is set and the other is not.
+    ///
+    /// Returns `nil` when no container is started (i.e. `activeSiteID` is nil — before
+    /// `start()` completes successfully and after `stop()`).
+    public func containerSnapshot() -> (control: any LocalContainerControl, siteID: String)? {
+        guard let id = activeSiteID else { return nil }
+        return (control: control, siteID: id)
+    }
+
     public func observe() -> AsyncStream<SiteRuntimeState> {
         let (stream, continuation) = AsyncStream<SiteRuntimeState>.makeStream(bufferingPolicy: .unbounded)
         let id = UUID()

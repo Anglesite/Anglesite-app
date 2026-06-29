@@ -221,7 +221,7 @@ final class DeployModel {
         let activeCommand: DeployCommand
         if let cc = containerControl {
             activeCommand = DeployCommand(
-                tokenSource: DeployCommand.keychainTokenSource,
+                tokenSource: command.tokenSource,
                 executor: ContainerDeployExecutor(
                     control: cc.control,
                     siteID: cc.siteID,

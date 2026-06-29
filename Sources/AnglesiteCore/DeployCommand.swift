@@ -57,7 +57,7 @@ public actor DeployCommand {
     /// cases where deploy() returns .failed afterwards.
     public typealias PreflightObserver = @Sendable (PreDeployCheck.Outcome) -> Void
 
-    private let tokenSource: TokenSource
+    public nonisolated let tokenSource: TokenSource
     private let executor: any DeployExecutor
 
     public init(

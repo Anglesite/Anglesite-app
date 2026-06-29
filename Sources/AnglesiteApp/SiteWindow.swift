@@ -348,10 +348,12 @@ struct SiteWindow: View {
                     Label("Deploy", systemImage: "paperplane.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(deploy.isRunning || backup.isRunning || audit.isRunning || !site.isValid)
-                .help(site.isValid
+                .disabled(deploy.isRunning || backup.isRunning || audit.isRunning || !site.isValid || !preview.canDeploy)
+                .help(site.isValid && preview.canDeploy
                       ? "Build, scan, and run wrangler deploy on this site"
-                      : "Site is missing required files")
+                      : site.isValid
+                        ? "Open the preview first to start the runtime before deploying"
+                        : "Site is missing required files")
             }
             .visibilityPriority(.high)
 
