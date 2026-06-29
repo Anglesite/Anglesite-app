@@ -65,7 +65,13 @@ final class DeployModel {
     private let summarizer: any DeployFailureSummarizing
     private var inFlight: Task<Void, Never>?
     /// Site to retry once the user pastes a token. `nil` outside the prompt flow.
-    private var pendingDeploy: (siteID: String, siteDirectory: URL)?
+    /// Carries the container control (if any) so the parked-then-retried deploy
+    /// uses the same executor as the original dispatch.
+    private var pendingDeploy: (
+        siteID: String,
+        siteDirectory: URL,
+        containerControl: (siteID: String, control: any LocalContainerControl)?
+    )?
 
     init(
         command: DeployCommand = DeployCommand(),
@@ -93,20 +99,29 @@ final class DeployModel {
 
     /// Kicks off a deploy. No-op if one is already running.
     ///
+    /// When `containerControl` is non-nil the deploy runs inside the already-started container
+    /// via `ContainerDeployExecutor`; otherwise it runs on the host via `HostDeployExecutor`
+    /// (today's default behavior). The container control is threaded through the pending-deploy
+    /// flow so a token-prompt retry uses the same executor as the original dispatch.
+    ///
     /// First checks whether a Cloudflare token is available (env > Keychain). If neither has one,
     /// the token-prompt sheet is presented and the deploy is parked until the user pastes and
     /// verifies a token via `verifyAndSaveToken(_:)` — at which point the parked site is dispatched
     /// without the user having to click Deploy again.
-    func deploy(siteID: String, siteDirectory: URL) {
+    func deploy(
+        siteID: String,
+        siteDirectory: URL,
+        containerControl: (siteID: String, control: any LocalContainerControl)? = nil
+    ) {
         guard !isRunning else { return }
         if !hasUsableToken() {
-            pendingDeploy = (siteID, siteDirectory)
+            pendingDeploy = (siteID, siteDirectory, containerControl)
             tokenVerification = .idle
             tokenPromptPresented = true
             return
         }
         inFlight = Task { @MainActor [weak self] in
-            await self?.runDeploy(siteID: siteID, siteDirectory: siteDirectory)
+            await self?.runDeploy(siteID: siteID, siteDirectory: siteDirectory, containerControl: containerControl)
         }
     }
 
@@ -141,7 +156,7 @@ final class DeployModel {
             pendingDeploy = nil
             tokenPromptPresented = false
             tokenVerification = .idle
-            deploy(siteID: pending.siteID, siteDirectory: pending.siteDirectory)
+            deploy(siteID: pending.siteID, siteDirectory: pending.siteDirectory, containerControl: pending.containerControl)
         case .stay(let message):
             tokenVerification = .failed(message: message)
         case .abort:
@@ -176,7 +191,11 @@ final class DeployModel {
         return false
     }
 
-    private func runDeploy(siteID: String, siteDirectory: URL) async {
+    private func runDeploy(
+        siteID: String,
+        siteDirectory: URL,
+        containerControl: (siteID: String, control: any LocalContainerControl)? = nil
+    ) async {
         phase = .running(siteID: siteID, since: Date())
         logLines = []
         currentMilestone = nil
@@ -195,7 +214,25 @@ final class DeployModel {
             }
         }
 
-        let result = await command.deploy(
+        // Select the executor: in-container when the runtime is a started container;
+        // host (embedded Node) otherwise. The token source always comes from the
+        // injected `command` so the test-injection path (a fully pre-built
+        // `DeployCommand`) continues to work unmodified.
+        let activeCommand: DeployCommand
+        if let cc = containerControl {
+            activeCommand = DeployCommand(
+                tokenSource: DeployCommand.keychainTokenSource,
+                executor: ContainerDeployExecutor(
+                    control: cc.control,
+                    siteID: cc.siteID,
+                    logCenter: logCenter
+                )
+            )
+        } else {
+            activeCommand = command
+        }
+
+        let result = await activeCommand.deploy(
             siteID: siteID,
             siteDirectory: siteDirectory,
             onPreflight: { [weak self] outcome in
