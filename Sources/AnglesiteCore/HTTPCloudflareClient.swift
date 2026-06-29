@@ -8,6 +8,9 @@ private struct CFEnvelope<T: Decodable & Sendable>: Decodable, Sendable {
     let errors: [APIError]?
 }
 
+/// Placeholder for write responses where we only check `success`.
+private struct CFEmpty: Decodable, Sendable {}
+
 private struct CFZone: Decodable, Sendable {
     let id: String
     let name: String
@@ -165,10 +168,9 @@ public struct HTTPCloudflareClient: CloudflareReading {
         let (data, http) = try await transport(request)
         if http.statusCode == 401 || http.statusCode == 403 { throw CloudflareError.unauthorized }
         guard (200..<300).contains(http.statusCode) else { throw CloudflareError.http(status: http.statusCode) }
-        struct Empty: Decodable {}
-        let env: CFEnvelope<Empty>
+        let env: CFEnvelope<CFEmpty>
         do {
-            env = try JSONDecoder().decode(CFEnvelope<Empty>.self, from: data)
+            env = try JSONDecoder().decode(CFEnvelope<CFEmpty>.self, from: data)
         } catch {
             throw CloudflareError.malformedResponse
         }
