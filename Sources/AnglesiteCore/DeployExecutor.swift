@@ -82,11 +82,19 @@ public struct ContainerDeployExecutor: DeployExecutor {
     ) async -> DeployStepResult {
         // `siteDirectory` is the HOST path — the guest always uses /workspace/site.
         let argv = guestArgv(for: step)
-        // Collect lines synchronously during exec (the onOutput callback is nonisolated/sync),
-        // then batch-append them to LogCenter after exec returns (where we have await).
-        // This avoids unstructured Tasks and keeps log ordering deterministic.
+        // Stream guest output to LogCenter LIVE (matching the host path): the sync `onOutput`
+        // callback yields each line into an AsyncStream (`yield` is nonisolated + Sendable, so it's
+        // safe from the @Sendable closure), and a structured `async let` drains it concurrently,
+        // appending to the actor-isolated LogCenter. The `continuation.finish()` + `await drained`
+        // before returning guarantees no trailing line is lost — the same contract
+        // `InProcessBackend` uses for the host streaming.
         // Never log the environment dict — CLOUDFLARE_API_TOKEN stays off disk and out of logs.
-        let collectedLines: _CollectedLines = .init()
+        let (lines, continuation) = AsyncStream<String>.makeStream(bufferingPolicy: .unbounded)
+        async let drained: Void = {
+            for await line in lines {
+                await logCenter.append(source: source, stream: .stdout, text: line)
+            }
+        }()
         let result: ContainerExecResult
         do {
             result = try await control.exec(
@@ -94,14 +102,15 @@ public struct ContainerDeployExecutor: DeployExecutor {
                 argv: argv,
                 environment: environment,
                 workingDirectory: "/workspace/site",
-                onOutput: { line in collectedLines.append(line) }
+                onOutput: { line in continuation.yield(line) }
             )
         } catch {
+            continuation.finish()
+            await drained
             return DeployStepResult(exitCode: nil, output: "couldn't exec in the container: \(error)")
         }
-        for line in collectedLines.lines {
-            await logCenter.append(source: source, stream: .stdout, text: line)
-        }
+        continuation.finish()
+        await drained
         return DeployStepResult(exitCode: result.exitCode, output: result.stdout)
     }
 
@@ -117,18 +126,6 @@ public struct ContainerDeployExecutor: DeployExecutor {
             return ["npx", "wrangler", "deploy"]
         }
     }
-}
-
-// MARK: - _CollectedLines
-
-/// A Sendable accumulator for `onOutput` callbacks from `LocalContainerControl.exec`.
-///
-/// The callback is guaranteed to be called sequentially (one line at a time) from the
-/// exec implementation, so no locking is needed — but the class must be `@unchecked Sendable`
-/// because its `var lines` is mutated from inside the `@Sendable` closure.
-private final class _CollectedLines: @unchecked Sendable {
-    var lines: [String] = []
-    func append(_ line: String) { lines.append(line) }
 }
 
 // MARK: - HostDeployExecutor
