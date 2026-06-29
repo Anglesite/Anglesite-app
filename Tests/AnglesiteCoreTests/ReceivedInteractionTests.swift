@@ -7,7 +7,7 @@ import Foundation
 struct ReceivedInteractionTests {
     @Test("round-trips through JSON encoding")
     func jsonRoundTrip() throws {
-        let interaction = ReceivedInteraction(
+        let interaction = try ReceivedInteraction(
             id: "wm-abc123",
             type: .webmention,
             source: URL(string: "https://other.example/post/42")!,
@@ -44,8 +44,8 @@ struct ReceivedInteractionTests {
     }
 
     @Test("gitPath produces the expected file path")
-    func gitPath() {
-        let interaction = ReceivedInteraction(
+    func gitPath() throws {
+        let interaction = try ReceivedInteraction(
             id: "wm-abc123",
             type: .webmention,
             source: URL(string: "https://example.com")!,
@@ -58,5 +58,23 @@ struct ReceivedInteractionTests {
             verificationStatus: .verified
         )
         #expect(interaction.gitPath == "data/interactions/wm-abc123.json")
+    }
+
+    @Test("rejects IDs containing path-traversal sequences")
+    func rejectsPathTraversal() {
+        #expect(throws: ReceivedInteraction.ValidationError.self) {
+            try ReceivedInteraction(
+                id: "../../etc/passwd",
+                type: .webmention,
+                source: URL(string: "https://example.com")!,
+                target: URL(string: "https://my.site/post")!,
+                interactionType: .mention,
+                author: nil,
+                content: nil,
+                published: Date(),
+                verified: Date(),
+                verificationStatus: .verified
+            )
+        }
     }
 }

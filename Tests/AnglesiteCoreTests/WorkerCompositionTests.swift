@@ -5,8 +5,8 @@ import Testing
 @Suite("WorkerComposition")
 struct WorkerCompositionTests {
     @Test("generates wrangler.toml with static assets and no social features")
-    func staticOnly() {
-        let toml = WorkerComposition.generateWranglerToml(
+    func staticOnly() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
             features: []
         )
@@ -17,8 +17,8 @@ struct WorkerCompositionTests {
     }
 
     @Test("generates wrangler.toml with webmention + indieauth (D1 yes, R2 no)")
-    func withSocialFeatures() {
-        let toml = WorkerComposition.generateWranglerToml(
+    func withSocialFeatures() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
             features: [.webmention, .indieauth]
         )
@@ -30,8 +30,8 @@ struct WorkerCompositionTests {
     }
 
     @Test("generates wrangler.toml with V-2 features (D1 yes, R2 no — micropub is V-3)")
-    func v2Features() {
-        let toml = WorkerComposition.generateWranglerToml(
+    func v2Features() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
             features: WorkerComposition.Feature.v2
         )
@@ -40,14 +40,24 @@ struct WorkerCompositionTests {
     }
 
     @Test("generates wrangler.toml with V-3 features (D1 + R2 — micropub needs media)")
-    func v3Features() {
-        let toml = WorkerComposition.generateWranglerToml(
+    func v3Features() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
             features: WorkerComposition.Feature.v3
         )
         #expect(toml.contains("[[d1_databases]]"))
         #expect(toml.contains("[[r2_buckets]]"))
         #expect(toml.contains("binding = \"MEDIA\""))
+    }
+
+    @Test("rejects site names containing TOML-unsafe characters")
+    func rejectsInvalidSiteName() {
+        #expect(throws: WorkerComposition.ConfigError.self) {
+            try WorkerComposition.generateWranglerToml(
+                siteName: "my\"site\ninjected",
+                features: []
+            )
+        }
     }
 
     @Test("feature sets are correctly defined per phase")

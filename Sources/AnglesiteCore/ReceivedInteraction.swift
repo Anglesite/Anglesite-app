@@ -6,6 +6,11 @@ import Foundation
 /// This is the data contract between the Worker (D1 → JSON serialization) and the Astro template
 /// (glob loader → render). One file per interaction at `Source/data/interactions/{id}.json`.
 /// See `docs/specs/2026-06-29-c3-received-interaction-canonicality.md` for the full design.
+///
+/// **Sanitisation contract:** `id` is validated at construction time — only `[A-Za-z0-9_-]+`
+/// is accepted — to prevent path-traversal through `gitPath`. `content` is stored as-is from
+/// the Worker; the Astro template must sanitise it before rendering as HTML (e.g. use
+/// `set:text` not `set:html`, or run through a sanitiser first).
 public struct ReceivedInteraction: Codable, Sendable, Equatable, Identifiable {
     /// Protocol source of the interaction.
     public enum ProtocolType: String, Codable, Sendable, Equatable {
@@ -64,6 +69,7 @@ public struct ReceivedInteraction: Codable, Sendable, Equatable, Identifiable {
     /// Frozen point-in-time snapshot of the sender's identity (optional).
     public let author: Author?
     /// Text/HTML content of the interaction (optional, may be truncated to ~500 chars).
+    /// Stored as-is from the Worker — callers must sanitise before rendering as raw HTML.
     public let content: String?
     /// When the source published the interaction (ISO 8601).
     public let published: Date
@@ -77,6 +83,10 @@ public struct ReceivedInteraction: Codable, Sendable, Equatable, Identifiable {
     /// For example: `"data/interactions/wm-abc123.json"`
     public var gitPath: String { "data/interactions/\(id).json" }
 
+    public enum ValidationError: Error, Sendable {
+        case invalidID(String)
+    }
+
     public init(
         id: String,
         type: ProtocolType,
@@ -88,7 +98,10 @@ public struct ReceivedInteraction: Codable, Sendable, Equatable, Identifiable {
         published: Date,
         verified: Date,
         verificationStatus: VerificationStatus
-    ) {
+    ) throws {
+        guard id.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else {
+            throw ValidationError.invalidID(id)
+        }
         self.id = id
         self.type = type
         self.source = source

@@ -23,7 +23,7 @@ public enum WorkerComposition {
         /// V-3 features: V-2 + inbound social (micropub + websub).
         public static let v3: [Feature] = [.webmention, .indieauth, .micropub, .websub]
         /// V-4 features: V-3 + federation (activitypub + microsub + webfinger).
-        public static let v4: [Feature] = Feature.allCases.map { $0 }
+        public static let v4: [Feature] = Array(Feature.allCases)
 
         var needsD1: Bool {
             switch self {
@@ -44,16 +44,28 @@ public enum WorkerComposition {
         }
     }
 
+    public enum ConfigError: Error, Sendable {
+        case invalidSiteName(String)
+    }
+
+    private static let validNamePattern = #/^[A-Za-z0-9_-]+$/#
+
     /// Generates a wrangler.toml for a site with the given features enabled.
     ///
     /// - Parameters:
     ///   - siteName: The Worker name (used as the Cloudflare Workers project name).
+    ///     Must match `[A-Za-z0-9_-]+`.
     ///   - features: Which `@dwk/*` social endpoints to compose. Empty = static-only deploy.
     /// - Returns: A complete wrangler.toml string.
+    /// - Throws: ``ConfigError/invalidSiteName(_:)`` if `siteName` contains
+    ///   characters outside `[A-Za-z0-9_-]`.
     public static func generateWranglerToml(
         siteName: String,
         features: [Feature]
-    ) -> String {
+    ) throws -> String {
+        guard siteName.wholeMatch(of: validNamePattern) != nil else {
+            throw ConfigError.invalidSiteName(siteName)
+        }
         var lines: [String] = []
         lines.append("name = \"\(siteName)\"")
         lines.append("compatibility_date = \"2025-01-01\"")

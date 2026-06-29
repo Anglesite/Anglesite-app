@@ -78,6 +78,7 @@ struct WorkersConformanceTests {
         let v3Gate = status.gateStatus(for: .v3)
         #expect(v3Gate.ready.contains("@dwk/webmention"))
         #expect(v3Gate.blocked.contains("@dwk/micropub"))
+        #expect(v3Gate.blocked.contains("@dwk/websub"))
         #expect(!v3Gate.isUnblocked)
     }
 

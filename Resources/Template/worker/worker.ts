@@ -34,7 +34,10 @@ export default {
   async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {
     // No social features enabled yet — fall through to static assets.
     // The ASSETS binding is provided by wrangler's [assets] config.
-    const assets = env.ASSETS as { fetch: typeof fetch };
+    const assets = env.ASSETS as { fetch: typeof fetch } | undefined;
+    if (!assets) {
+      return new Response("No assets binding configured", { status: 500 });
+    }
     return assets.fetch(request);
   },
 };
