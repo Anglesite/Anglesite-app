@@ -41,7 +41,7 @@ struct WorkersConformanceTests {
         #expect(!micropub.areAllSuitesPassing)
     }
 
-    @Test("gateStatus reports which V-2 packages are ready")
+    @Test("gateStatus reports V-2 ready when webmention + indieauth pass, V-3 blocked when micropub pending")
     func gateStatus() throws {
         let json = """
         {
@@ -69,11 +69,16 @@ struct WorkersConformanceTests {
         """.data(using: .utf8)!
 
         let status = try WorkersConformanceReader.parse(json)
+
         let v2Gate = status.gateStatus(for: .v2)
         #expect(v2Gate.ready.contains("@dwk/webmention"))
         #expect(v2Gate.ready.contains("@dwk/indieauth"))
-        #expect(v2Gate.blocked.contains("@dwk/micropub"))
-        #expect(!v2Gate.isUnblocked)
+        #expect(v2Gate.isUnblocked)
+
+        let v3Gate = status.gateStatus(for: .v3)
+        #expect(v3Gate.ready.contains("@dwk/webmention"))
+        #expect(v3Gate.blocked.contains("@dwk/micropub"))
+        #expect(!v3Gate.isUnblocked)
     }
 
     @Test("empty suites dict counts as passing (no external suite to run)")

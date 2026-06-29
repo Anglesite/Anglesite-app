@@ -45,8 +45,8 @@ public struct WorkersConformanceStatus: Sendable, Equatable {
     }
 
     static let phaseRequirements: [Phase: [String]] = [
-        .v2: ["@dwk/webmention", "@dwk/indieauth", "@dwk/micropub"],
-        .v3: ["@dwk/webmention", "@dwk/websub"],
+        .v2: ["@dwk/webmention", "@dwk/indieauth"],
+        .v3: ["@dwk/micropub", "@dwk/webmention", "@dwk/websub"],
         .v4: ["@dwk/activitypub", "@dwk/microsub", "@dwk/webfinger"],
     ]
 
