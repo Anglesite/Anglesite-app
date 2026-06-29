@@ -102,6 +102,31 @@ struct ContainerDeployExecutorTests {
         #expect(calls[0].env["CLOUDFLARE_API_TOKEN"] == "supersecret")
     }
 
+    @Test("host-only env (PATH/HOME/Apple vars) is NOT forwarded into the Linux guest")
+    func curatesHostEnvOutOfGuest() async {
+        // DeployCommand passes the full host (macOS) environment; the guest must not receive it —
+        // a macOS PATH would shadow the guest's Linux PATH and break node/wrangler resolution, and
+        // HOME/__CF* are host-only noise. Only deploy-relevant vars (the token) should cross.
+        let fake = fakePassing()
+        let executor = makeExecutor(fake: fake)
+        _ = await executor.run(
+            step: .wrangler,
+            siteDirectory: URL(fileURLWithPath: "/host/irrelevant"),
+            environment: [
+                "CLOUDFLARE_API_TOKEN": "tok",
+                "PATH": "/opt/homebrew/bin:/usr/bin",
+                "HOME": "/Users/dev",
+                "__CFBundleIdentifier": "com.apple.dt.Xcode"
+            ],
+            source: "deploy:site-abc"
+        )
+        let env = await fake.execCalls[0].env
+        #expect(env["CLOUDFLARE_API_TOKEN"] == "tok")
+        #expect(env["PATH"] == nil)
+        #expect(env["HOME"] == nil)
+        #expect(env["__CFBundleIdentifier"] == nil)
+    }
+
     @Test("token does not appear in log output")
     func tokenNotLogged() async {
         let logCenter = LogCenter()

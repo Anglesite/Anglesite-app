@@ -100,7 +100,7 @@ public struct ContainerDeployExecutor: DeployExecutor {
             result = try await control.exec(
                 siteID: siteID,
                 argv: argv,
-                environment: environment,
+                environment: Self.guestEnvironment(from: environment),
                 workingDirectory: "/workspace/site",
                 onOutput: { line in continuation.yield(line) }
             )
@@ -112,6 +112,18 @@ public struct ContainerDeployExecutor: DeployExecutor {
         continuation.finish()
         await drained
         return DeployStepResult(exitCode: result.exitCode, output: result.stdout)
+    }
+
+    /// `DeployCommand` hands every step the full HOST (macOS) environment; almost none of it is valid
+    /// in the Linux guest. We must NOT forward it wholesale: the host `PATH` (`/opt/homebrew/bin:…`)
+    /// would shadow the guest's Linux PATH and break `node`/`npm`/`wrangler` resolution, and
+    /// `HOME`/`TMPDIR`/`XPC_*`/`__CF*` are host-only noise. The guest provides its own PATH/HOME; the
+    /// only host-originated value the deploy needs across the boundary is the Cloudflare token. Keep
+    /// this allowlist tight — add a key only when a deploy step demonstrably needs it in-guest.
+    private static let guestEnvAllowlist: Set<String> = ["CLOUDFLARE_API_TOKEN"]
+
+    private static func guestEnvironment(from hostEnvironment: [String: String]) -> [String: String] {
+        hostEnvironment.filter { guestEnvAllowlist.contains($0.key) }
     }
 
     // MARK: argv mapping
