@@ -102,6 +102,61 @@ struct DeployCommandTests {
         #expect(exec.environment(for: .wrangler)?["CLOUDFLARE_API_TOKEN"] == "secret-tok")
     }
 
+    // MARK: Host environment curation
+
+    @Test("hostDeployEnvironment retains PATH and HOME")
+    func hostEnvRetainsEssentials() {
+        let env = DeployCommand.hostDeployEnvironment()
+        #expect(env["PATH"] != nil, "PATH must be retained for Node/npm/Astro resolution")
+        #expect(env["HOME"] != nil, "HOME must be retained for npm cache and config paths")
+    }
+
+    @Test("hostDeployEnvironment excludes unrelated secrets")
+    func hostEnvExcludesSecrets() {
+        let planted: [(String, String)] = [
+            ("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"),
+            ("GITHUB_TOKEN", "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
+            ("NPM_TOKEN", "npm_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
+            ("DATABASE_URL", "postgres://user:pass@host/db"),
+        ]
+        // Plant secrets in the current process environment for this test.
+        for (key, value) in planted { setenv(key, value, 1) }
+        defer { for (key, _) in planted { unsetenv(key) } }
+
+        let env = DeployCommand.hostDeployEnvironment()
+        for (key, _) in planted {
+            #expect(env[key] == nil, "\(key) must not leak into build/preflight environment")
+        }
+    }
+
+    @Test("hostDeployEnvironment excludes CLOUDFLARE_API_TOKEN")
+    func hostEnvExcludesCloudflareToken() {
+        setenv("CLOUDFLARE_API_TOKEN", "test-cf-token", 1)
+        defer { unsetenv("CLOUDFLARE_API_TOKEN") }
+
+        let env = DeployCommand.hostDeployEnvironment()
+        #expect(env["CLOUDFLARE_API_TOKEN"] == nil,
+                "CLOUDFLARE_API_TOKEN must not reach build/preflight — it's added only to the wrangler step")
+    }
+
+    @Test("Build/preflight steps receive curated environment excluding planted secrets")
+    func buildPreflightExcludePlantedSecrets() async {
+        setenv("AWS_SECRET_ACCESS_KEY", "planted-secret", 1)
+        defer { unsetenv("AWS_SECRET_ACCESS_KEY") }
+
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        _ = await cmd.deploy(siteID: "s", siteDirectory: tmpDir)
+
+        #expect(exec.environment(for: .build)?["AWS_SECRET_ACCESS_KEY"] == nil)
+        #expect(exec.environment(for: .preflight)?["AWS_SECRET_ACCESS_KEY"] == nil)
+        #expect(exec.environment(for: .build)?["PATH"] != nil)
+        #expect(exec.environment(for: .preflight)?["PATH"] != nil)
+    }
+
     // MARK: Pre-spawn refusal (no work wasted)
 
     @Test("Refuses before any step when token source returns nil")
