@@ -17,9 +17,10 @@ import Foundation
 /// (under the caller-supplied source) and returns the accumulated stdout in `DeployStepResult.output`,
 /// so the URL/scan parsing here re-reads the captured stdout rather than re-snapshotting `LogCenter`.
 ///
-/// **Environment contract** (matches today's host behavior):
-///   - `.build` and `.preflight` get `ProcessInfo.processInfo.environment` *without* the token.
-///   - `.wrangler` gets that environment *plus* `CLOUDFLARE_API_TOKEN`.
+/// **Environment contract:**
+///   - `.build` and `.preflight` get a curated subset of the host environment (see
+///     `hostDeployEnvironment()`) — safe shell/locale/proxy/Node vars only, no unrelated secrets.
+///   - `.wrangler` gets that curated environment *plus* `CLOUDFLARE_API_TOKEN`.
 ///
 /// **Cancellation**: cancelling the deploy task propagates through `executor.run` (the host
 /// executor wraps its `waitForExit` in a cancellation handler that SIGTERMs the in-flight
@@ -89,10 +90,10 @@ public actor DeployCommand {
             return .failed(reason: "no CLOUDFLARE_API_TOKEN — add it in Settings → Advanced → Credentials, or set the env var", exitCode: nil)
         }
 
-        // Environment for the non-secret steps: the process env WITHOUT the token. The build and
-        // preflight steps rely on the executor's default Node-on-PATH env; the token is added only
+        // Curated environment for the non-secret steps: a safe subset of the host process env,
+        // stripping unrelated secrets the developer's shell may carry. The token is added only
         // for the wrangler step below.
-        let baseEnvironment = ProcessInfo.processInfo.environment
+        let baseEnvironment = Self.hostDeployEnvironment()
 
         // Build dist/ before the scan needs it. Streams to LogCenter via the executor.
         onProgress?(.deployBuilding)
@@ -230,6 +231,56 @@ public actor DeployCommand {
             }
         }
         return nil
+    }
+
+    // MARK: Host environment curation
+
+    /// Keys that a host-path build or preflight step legitimately needs. The allowlist is
+    /// intentionally conservative — add a key only when a build script demonstrably requires it.
+    /// Mirrors the tight `guestEnvAllowlist` in `ContainerDeployExecutor`, adapted for the host
+    /// where Node/npm/Astro rely on the user's shell plumbing.
+    private static let hostEnvAllowlist: Set<String> = [
+        // Shell / process fundamentals
+        "PATH", "HOME", "USER", "LOGNAME", "SHELL",
+        // Temp directories — Node/npm/Astro write to these
+        "TMPDIR", "TEMP", "TMP",
+        // CI — Astro, Vite, and many post-install scripts check this to suppress interactive prompts
+        "CI",
+        // Locale — affects sorting, date formatting in build output
+        "LANG", "LC_ALL", "LC_COLLATE", "LC_CTYPE", "LC_MESSAGES", "LC_MONETARY",
+        "LC_NUMERIC", "LC_TIME",
+        // Proxy — corporate/VPN environments need these for npm registry + API fetches
+        "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+        "http_proxy", "https_proxy", "no_proxy",
+        // Node-specific
+        "NODE_ENV", "NODE_OPTIONS", "NODE_PATH", "NODE_EXTRA_CA_CERTS", "NPM_CONFIG_CACHE",
+        // XDG — npm/pnpm/yarn respect these for cache and config paths
+        "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+        // Terminal — some build tools check these for color/width
+        "TERM", "COLORTERM", "COLUMNS",
+    ]
+
+    /// Key prefixes that Astro/Vite projects use for build-time environment variables. These are
+    /// standard conventions for variables inlined into client-side output (`PUBLIC_*`) or consumed
+    /// by Vite's pipeline (`VITE_*`). Users set them in their shell and expect them to flow through
+    /// to `astro build`. `ASTRO_` covers Astro's own config overrides (e.g. `ASTRO_TELEMETRY_DISABLED`).
+    private static let hostEnvPrefixes: [String] = ["PUBLIC_", "VITE_", "ASTRO_"]
+
+    /// Returns a curated subset of the given environment safe for host-path build and preflight
+    /// steps. Strips unrelated secrets (`AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`, …) that the
+    /// developer's shell may carry. `CLOUDFLARE_API_TOKEN` is explicitly excluded here; `deploy()`
+    /// adds it only to the `.wrangler` step's environment.
+    ///
+    /// The `env` parameter defaults to the current process environment; tests inject a literal
+    /// dictionary instead (avoiding `setenv`/`unsetenv` races and the `ProcessInfo` launch-time
+    /// snapshot issue).
+    static func hostDeployEnvironment(
+        _ env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        env.filter { key, _ in
+            hostEnvAllowlist.contains(key) ||
+            hostEnvPrefixes.contains(where: { key.hasPrefix($0) })
+        }
     }
 
     // MARK: Default seams

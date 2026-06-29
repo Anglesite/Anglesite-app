@@ -102,6 +102,68 @@ struct DeployCommandTests {
         #expect(exec.environment(for: .wrangler)?["CLOUDFLARE_API_TOKEN"] == "secret-tok")
     }
 
+    // MARK: Host environment curation
+
+    @Test("hostDeployEnvironment retains PATH, HOME, and CI")
+    func hostEnvRetainsEssentials() {
+        let env = DeployCommand.hostDeployEnvironment([
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/Users/dev",
+            "CI": "true",
+            "UNRELATED_SECRET": "leaked",
+        ])
+        #expect(env["PATH"] == "/usr/bin:/bin")
+        #expect(env["HOME"] == "/Users/dev")
+        #expect(env["CI"] == "true")
+        #expect(env["UNRELATED_SECRET"] == nil)
+    }
+
+    @Test("hostDeployEnvironment excludes unrelated secrets")
+    func hostEnvExcludesSecrets() {
+        let env = DeployCommand.hostDeployEnvironment([
+            "PATH": "/usr/bin",
+            "HOME": "/tmp",
+            "AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            "GITHUB_TOKEN": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "NPM_TOKEN": "npm_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "DATABASE_URL": "postgres://user:pass@host/db",
+        ])
+        #expect(env["AWS_SECRET_ACCESS_KEY"] == nil, "AWS key must not leak into build/preflight")
+        #expect(env["GITHUB_TOKEN"] == nil, "GitHub token must not leak into build/preflight")
+        #expect(env["NPM_TOKEN"] == nil, "npm token must not leak into build/preflight")
+        #expect(env["DATABASE_URL"] == nil, "database URL must not leak into build/preflight")
+        #expect(env["PATH"] == "/usr/bin", "PATH must be retained")
+        #expect(env["HOME"] == "/tmp", "HOME must be retained")
+    }
+
+    @Test("hostDeployEnvironment excludes CLOUDFLARE_API_TOKEN")
+    func hostEnvExcludesCloudflareToken() {
+        let env = DeployCommand.hostDeployEnvironment([
+            "PATH": "/usr/bin",
+            "CLOUDFLARE_API_TOKEN": "cf-secret-token",
+        ])
+        #expect(env["CLOUDFLARE_API_TOKEN"] == nil,
+                "CLOUDFLARE_API_TOKEN must not reach build/preflight — it's added only to the wrangler step")
+        #expect(env["PATH"] == "/usr/bin")
+    }
+
+    @Test("hostDeployEnvironment passes through PUBLIC_*, VITE_*, and ASTRO_* prefixed vars")
+    func hostEnvPassesThroughBuildPrefixes() {
+        let env = DeployCommand.hostDeployEnvironment([
+            "PATH": "/usr/bin",
+            "PUBLIC_API_URL": "https://api.example.com",
+            "PUBLIC_SITE_NAME": "My Site",
+            "VITE_APP_TITLE": "Title",
+            "ASTRO_TELEMETRY_DISABLED": "1",
+            "SECRET_KEY": "should-be-stripped",
+        ])
+        #expect(env["PUBLIC_API_URL"] == "https://api.example.com")
+        #expect(env["PUBLIC_SITE_NAME"] == "My Site")
+        #expect(env["VITE_APP_TITLE"] == "Title")
+        #expect(env["ASTRO_TELEMETRY_DISABLED"] == "1")
+        #expect(env["SECRET_KEY"] == nil)
+    }
+
     // MARK: Pre-spawn refusal (no work wasted)
 
     @Test("Refuses before any step when token source returns nil")
