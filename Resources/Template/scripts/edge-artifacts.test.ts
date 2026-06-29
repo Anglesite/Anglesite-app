@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildRobotsTxt, buildSecurityTxt } from "./edge-artifacts";
+import { buildRobotsTxt, buildSecurityTxt, aiCrawlers } from "./edge-artifacts";
 
-test("buildRobotsTxt: allows all crawlers and ends with a newline", () => {
+test("buildRobotsTxt: allows all crawlers by default and ends with a newline", () => {
   const out = buildRobotsTxt();
   assert.match(out, /^User-agent: \*$/m);
   assert.match(out, /^Disallow:\s*$/m);
   assert.match(out, /\n$/);
+  assert.doesNotMatch(out, /GPTBot/);
 });
 
 test("committed public/robots.txt is byte-identical to buildRobotsTxt()", () => {
@@ -18,6 +19,19 @@ test("committed public/robots.txt is byte-identical to buildRobotsTxt()", () => 
     "utf-8",
   );
   assert.equal(buildRobotsTxt(), committed);
+});
+
+test("buildRobotsTxt(blockAI=true): blocks every crawler in aiCrawlers", () => {
+  const out = buildRobotsTxt(true);
+  assert.match(out, /^User-agent: \*$/m, "still has the allow-all baseline");
+  for (const bot of aiCrawlers) {
+    assert.match(out, new RegExp(`User-agent: ${bot}\\nDisallow: /`), `${bot} has Disallow: /`);
+  }
+});
+
+test("buildRobotsTxt(blockAI=true): includes BLOCK_AI comment", () => {
+  const out = buildRobotsTxt(true);
+  assert.match(out, /# AI crawler \/ training bot directives \(BLOCK_AI=true in \.site-config\)/);
 });
 
 const NOW = new Date("2026-06-28T12:00:00Z");

@@ -45,8 +45,16 @@ rsync -a \
     --exclude='.DS_Store' \
     "$TEMPLATE_ROOT/" "$TARGET/"
 
-# Stamp the scaffolded site with the Anglesite version.
+# Stamp the scaffolded site with the Anglesite version and document config keys.
 VERSION="1.0.0"
-echo "ANGLESITE_VERSION=$VERSION" > "$TARGET/.site-config"
+cat > "$TARGET/.site-config" <<SITECONFIG
+ANGLESITE_VERSION=$VERSION
+# SITE_URL=https://example.com        — site domain (used in feeds, sitemap, security.txt)
+# SECURITY_CONTACT=security@example.com — RFC 9116 security.txt contact (email or URI)
+# HSTS_PRELOAD=true                    — opt-in HSTS preload submission (hard to reverse)
+# SCRIPT_ALLOW=example.com             — additional CSP script-src domains (comma-separated)
+# BLOCK_AI=true                        — block AI training crawlers via robots.txt (off by default;
+#                                        trades away AI-search discoverability)
+SITECONFIG
 
 echo "==> Scaffolded Anglesite site in $TARGET"
