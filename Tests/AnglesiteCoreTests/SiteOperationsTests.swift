@@ -130,9 +130,10 @@ struct SiteOperationsTests {
         #expect(dialog == "Deploy failed: network down")
     }
 
-    @Test("social Worker provisioning runs through SiteOperations and slugifies the worker name")
+    @Test("social worker provisioning runs through SiteOperations and slugifies the worker name")
     func socialWorkerProvisionOperation() async throws {
         let package = try temporaryPackage()
+        defer { try? FileManager.default.removeItem(at: package) }
         let site = makeSite(name: "Blue Bottle Cafe", packageURL: package)
         let recorder = SocialWorkerRecorder()
         let ops = SiteOperations(factory: SocialWorkerFactory(recorder: recorder), store: throwawayStore())
@@ -153,7 +154,39 @@ struct SiteOperationsTests {
         ])
     }
 
-    @Test("social Worker provisioning dialog reports success and resources")
+    @Test("social worker provisioning maps missing folder grants to failed results")
+    func socialWorkerProvisionNoGrant() async {
+        let site = makeSite()
+        let ops = SiteOperations(
+            factory: SocialWorkerFactory(recorder: SocialWorkerRecorder()),
+            store: throwawayStore(),
+            socialWorkerAccess: { _, _, _ in
+                throw SiteAccess.AccessError.noGrant("Portfolio has no folder grant.")
+            }
+        )
+
+        let result = await ops.provisionSocialWorker(site: site)
+
+        #expect(result == .failed(reason: "Portfolio has no folder grant.", exitCode: nil, resources: .init()))
+    }
+
+    @Test("social worker provisioning maps unexpected access errors to failed results")
+    func socialWorkerProvisionGenericAccessError() async {
+        let site = makeSite()
+        let ops = SiteOperations(
+            factory: SocialWorkerFactory(recorder: SocialWorkerRecorder()),
+            store: throwawayStore(),
+            socialWorkerAccess: { _, _, _ in
+                throw TestAccessError()
+            }
+        )
+
+        let result = await ops.provisionSocialWorker(site: site)
+
+        #expect(result == .failed(reason: "could not resolve site access", exitCode: nil, resources: .init()))
+    }
+
+    @Test("social worker provisioning dialog reports success and resources")
     func socialWorkerProvisionSuccessDialog() {
         let result = SocialWorkerProvisionCommand.Result.succeeded(
             url: URL(string: "https://site.example.workers.dev")!,
@@ -166,7 +199,7 @@ struct SiteOperationsTests {
         )
     }
 
-    @Test("social Worker provisioning blocked dialog preserves security gate wording")
+    @Test("social worker provisioning blocked dialog preserves security gate wording")
     func socialWorkerProvisionBlockedDialog() {
         let failure = PreDeployCheck.ScanFailure(
             category: .exposedToken,
@@ -185,7 +218,7 @@ struct SiteOperationsTests {
         #expect(!dialog.lowercased().contains("override"))
     }
 
-    @Test("social Worker provisioning failure dialog includes partial resources")
+    @Test("social worker provisioning failure dialog includes partial resources")
     func socialWorkerProvisionFailureDialog() {
         let result = SocialWorkerProvisionCommand.Result.failed(
             reason: "KV failed",
@@ -240,6 +273,10 @@ private struct DeployCall: Sendable, Equatable {
     let token: String
     let siteID: String
     let siteDirectory: URL
+}
+
+private struct TestAccessError: LocalizedError, Sendable {
+    var errorDescription: String? { "could not resolve site access" }
 }
 
 private struct SocialWorkerFactory: CommandFactory {

@@ -7,12 +7,30 @@ import Foundation
 /// A missing security-scoped grant (MAS) or a not-found site is mapped onto each command's
 /// own `.failed` case so callers handle exactly one Result type per operation.
 public struct SiteOperations: Sendable {
+    typealias SocialWorkerAccess = @Sendable (
+        _ site: SiteStore.Site,
+        _ store: SiteStore,
+        _ body: @Sendable @escaping (URL) async -> SocialWorkerProvisionCommand.Result
+    ) async throws -> SocialWorkerProvisionCommand.Result
+
     private let factory: CommandFactory
     private let store: SiteStore
+    private let socialWorkerAccess: SocialWorkerAccess
 
     public init(factory: CommandFactory = LiveCommandFactory(), store: SiteStore = .shared) {
+        self.init(
+            factory: factory,
+            store: store,
+            socialWorkerAccess: { site, store, body in
+                try await SiteAccess.withScopedAccess(to: site, in: store, body)
+            }
+        )
+    }
+
+    init(factory: CommandFactory, store: SiteStore, socialWorkerAccess: @escaping SocialWorkerAccess) {
         self.factory = factory
         self.store = store
+        self.socialWorkerAccess = socialWorkerAccess
     }
 
     /// Resolve a site id (as carried by `SiteEntity`) to the registry's `Site`.
@@ -60,7 +78,7 @@ public struct SiteOperations: Sendable {
 
     public func provisionSocialWorker(site: SiteStore.Site) async -> SocialWorkerProvisionCommand.Result {
         do {
-            return try await SiteAccess.withScopedAccess(to: site, in: store) { url in
+            return try await socialWorkerAccess(site, store) { url in
                 await factory.socialWorkerProvision().provision(
                     siteID: site.id,
                     siteDirectory: url,

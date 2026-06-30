@@ -18,7 +18,7 @@ final class FakeOperations: SiteOperationsService, @unchecked Sendable {
     var deployResult: DeployCommand.Result = .failed(reason: "unstubbed deploy", exitCode: nil)
     var backupResult: BackupCommand.Result = .failed(reason: "unstubbed backup", exitCode: nil)
     var auditResult: AuditCommand.Result = .failed(reason: "unstubbed audit", exitCode: nil, logTail: [])
-    var socialWorkerProvisionResult: SocialWorkerProvisionCommand.Result = .failed(reason: "unstubbed social Worker provisioning", exitCode: nil, resources: .init())
+    var socialWorkerProvisionResult: SocialWorkerProvisionCommand.Result = .failed(reason: "unstubbed social worker provisioning", exitCode: nil, resources: .init())
 
     private(set) var siteCalls: [String] = []
     private(set) var deployCalls: [SiteStore.Site] = []
