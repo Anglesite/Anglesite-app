@@ -5,8 +5,8 @@ import Foundation
 ///
 /// Today's deploy is static-only (`wrangler deploy` with `[assets]`). The social layer (V-2+)
 /// adds a Worker script that mounts `@dwk/indieauth`, `@dwk/webmention`, etc. under path
-/// prefixes. This type generates the configuration; actual CF resource provisioning (D1/R2
-/// creation) is a V-2.1 task (#353).
+/// prefixes. This type generates the configuration; `SocialWorkerProvisionCommand` fills the
+/// Cloudflare resource identifiers once provisioning has created the backing stores.
 public enum WorkerComposition {
     /// A social feature that can be composed into the per-site Worker.
     public enum Feature: String, CaseIterable, Sendable {
@@ -34,6 +34,15 @@ public enum WorkerComposition {
             }
         }
 
+        var needsKV: Bool {
+            switch self {
+            case .webmention, .micropub, .indieauth, .websub, .microsub, .activitypub:
+                return true
+            case .webfinger:
+                return false
+            }
+        }
+
         var needsR2: Bool {
             switch self {
             case .micropub:
@@ -48,7 +57,21 @@ public enum WorkerComposition {
         case invalidSiteName(String)
     }
 
-    private static let validNamePattern = #/^[A-Za-z0-9_-]+$/#
+    private static let validNameCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+    )
+
+    public struct ProvisionedResources: Sendable, Equatable {
+        public var d1DatabaseID: String?
+        public var kvNamespaceID: String?
+        public var r2BucketName: String?
+
+        public init(d1DatabaseID: String? = nil, kvNamespaceID: String? = nil, r2BucketName: String? = nil) {
+            self.d1DatabaseID = d1DatabaseID
+            self.kvNamespaceID = kvNamespaceID
+            self.r2BucketName = r2BucketName
+        }
+    }
 
     /// Generates a wrangler.toml for a site with the given features enabled.
     ///
@@ -61,9 +84,10 @@ public enum WorkerComposition {
     ///   characters outside `[A-Za-z0-9_-]`.
     public static func generateWranglerToml(
         siteName: String,
-        features: [Feature]
+        features: [Feature],
+        resources: ProvisionedResources = .init()
     ) throws -> String {
-        guard siteName.wholeMatch(of: validNamePattern) != nil else {
+        guard isValidSiteName(siteName) else {
             throw ConfigError.invalidSiteName(siteName)
         }
         var lines: [String] = []
@@ -83,17 +107,37 @@ public enum WorkerComposition {
             lines.append("[[d1_databases]]")
             lines.append("binding = \"DB\"")
             lines.append("database_name = \"\(siteName)-social\"")
-            lines.append("database_id = \"\"  # filled by provisioning")
+            if let id = resources.d1DatabaseID, !id.isEmpty {
+                lines.append("database_id = \"\(id)\"")
+            } else {
+                lines.append("database_id = \"\"  # filled by provisioning")
+            }
+        }
+
+        if features.contains(where: { $0.needsKV }) {
+            lines.append("")
+            lines.append("[[kv_namespaces]]")
+            lines.append("binding = \"SOCIAL_KV\"")
+            if let id = resources.kvNamespaceID, !id.isEmpty {
+                lines.append("id = \"\(id)\"")
+            } else {
+                lines.append("id = \"\"  # filled by provisioning")
+            }
         }
 
         if features.contains(where: { $0.needsR2 }) {
             lines.append("")
             lines.append("[[r2_buckets]]")
             lines.append("binding = \"MEDIA\"")
-            lines.append("bucket_name = \"\(siteName)-media\"")
+            lines.append("bucket_name = \"\(resources.r2BucketName ?? "\(siteName)-media")\"")
         }
 
         lines.append("")
         return lines.joined(separator: "\n")
+    }
+
+    static func isValidSiteName(_ siteName: String) -> Bool {
+        guard !siteName.isEmpty else { return false }
+        return siteName.unicodeScalars.allSatisfy { validNameCharacters.contains($0) }
     }
 }

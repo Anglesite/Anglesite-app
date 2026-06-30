@@ -16,7 +16,7 @@ struct WorkerCompositionTests {
         #expect(!toml.contains("[[d1_databases]]"))
     }
 
-    @Test("generates wrangler.toml with webmention + indieauth (D1 yes, R2 no)")
+    @Test("generates wrangler.toml with webmention + indieauth (D1 + KV yes, R2 no)")
     func withSocialFeatures() throws {
         let toml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
@@ -26,6 +26,8 @@ struct WorkerCompositionTests {
         #expect(toml.contains("[assets]"))
         #expect(toml.contains("[[d1_databases]]"))
         #expect(toml.contains("binding = \"DB\""))
+        #expect(toml.contains("[[kv_namespaces]]"))
+        #expect(toml.contains("binding = \"SOCIAL_KV\""))
         #expect(!toml.contains("[[r2_buckets]]"))
     }
 
@@ -36,6 +38,7 @@ struct WorkerCompositionTests {
             features: WorkerComposition.Feature.v2
         )
         #expect(toml.contains("[[d1_databases]]"))
+        #expect(toml.contains("[[kv_namespaces]]"))
         #expect(!toml.contains("[[r2_buckets]]"))
     }
 
@@ -46,8 +49,22 @@ struct WorkerCompositionTests {
             features: WorkerComposition.Feature.v3
         )
         #expect(toml.contains("[[d1_databases]]"))
+        #expect(toml.contains("[[kv_namespaces]]"))
         #expect(toml.contains("[[r2_buckets]]"))
         #expect(toml.contains("binding = \"MEDIA\""))
+    }
+
+    @Test("writes provisioned Cloudflare resource ids into wrangler.toml")
+    func provisionedResources() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site",
+            features: WorkerComposition.Feature.v3,
+            resources: .init(d1DatabaseID: "d1-id", kvNamespaceID: "kv-id", r2BucketName: "custom-media")
+        )
+
+        #expect(toml.contains("database_id = \"d1-id\""))
+        #expect(toml.contains("id = \"kv-id\""))
+        #expect(toml.contains("bucket_name = \"custom-media\""))
     }
 
     @Test("rejects site names containing TOML-unsafe characters")
