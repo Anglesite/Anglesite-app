@@ -56,6 +56,7 @@ struct SiteWindow: View {
         contentGraph: SiteContentGraph,
         knowledgeIndex: SiteKnowledgeIndex,
         semanticRanker: SemanticRanker?,
+        runtimeFactory: any SiteRuntimeFactory,
         contentIndexerStore: ContentIndexerStore
     ) {
         self.siteID = siteID
@@ -63,7 +64,12 @@ struct SiteWindow: View {
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
         self.contentIndexerStore = contentIndexerStore
-        _preview = State(initialValue: PreviewModel(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex, semanticRanker: semanticRanker))
+        _preview = State(initialValue: PreviewModel(
+            contentGraph: contentGraph,
+            knowledgeIndex: knowledgeIndex,
+            semanticRanker: semanticRanker,
+            runtimeFactory: runtimeFactory
+        ))
         _graphExplorer = State(initialValue: SiteGraphExplorerModel(graph: contentGraph))
         _relatedPages = State(initialValue: RelatedPagesModel(index: knowledgeIndex, ranker: semanticRanker))
     }

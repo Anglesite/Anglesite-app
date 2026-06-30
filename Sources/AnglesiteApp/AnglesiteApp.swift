@@ -243,6 +243,7 @@ struct AnglesiteApp: App {
                 contentGraph: appDelegate.contentGraph,
                 knowledgeIndex: appDelegate.knowledgeIndex,
                 semanticRanker: appDelegate.semanticRanker,
+                runtimeFactory: LiveSiteRuntimeFactory(),
                 contentIndexerStore: appDelegate.contentIndexerStore
             )
                 .frame(minWidth: 960, minHeight: 600)
