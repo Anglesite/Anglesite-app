@@ -77,9 +77,6 @@ public enum SiteGraphExplorer {
     private static let sourceExtensions: Set<String> = [
         ".astro", ".md", ".mdx", ".markdown", ".js", ".jsx", ".ts", ".tsx", ".css"
     ]
-    private static let assetExtensions: Set<String> = [
-        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".avif"
-    ]
     private static let dynamicImportRegex = try! NSRegularExpression(
         pattern: #"import\(\s*['"]([^'"]+)['"]\s*\)"#
     )
@@ -139,6 +136,11 @@ public enum SiteGraphExplorer {
             ))
         }
         for post in posts {
+            let edge = SiteGraphEdge(
+                sourceID: "\(siteID):collection:\(post.collection)",
+                targetID: post.id,
+                kind: .contains
+            )
             addNode(SiteGraphNode(
                 id: post.id,
                 kind: .contentEntry,
@@ -147,11 +149,7 @@ public enum SiteGraphExplorer {
                 filePath: post.filePath,
                 route: postRoute(for: post)
             ))
-            edgesByID[SiteGraphEdge(
-                sourceID: "\(siteID):collection:\(post.collection)",
-                targetID: post.id,
-                kind: .contains
-            ).id] = SiteGraphEdge(sourceID: "\(siteID):collection:\(post.collection)", targetID: post.id, kind: .contains)
+            edgesByID[edge.id] = edge
         }
 
         for image in images {
@@ -169,11 +167,10 @@ public enum SiteGraphExplorer {
             let relativePath = relativePosix(file, from: projectRoot)
             guard sourceExtensions.contains(fileExtension(file)) else { continue }
             guard nodesByID[nodeIDByRelativePath[relativePath] ?? ""] == nil else { continue }
-            let kind = kind(for: relativePath)
-            guard kind != nil else { continue }
+            guard let kind = kind(for: relativePath) else { continue }
             addNode(SiteGraphNode(
                 id: "\(siteID):file:\(relativePath)",
-                kind: kind!,
+                kind: kind,
                 title: file.lastPathComponent,
                 detail: relativePath,
                 filePath: relativePath,
@@ -223,11 +220,15 @@ public enum SiteGraphExplorer {
         }
         return SiteGraphExplorerSnapshot(
             nodes: nodes.sorted { lhs, rhs in
-                if lhs.kind.rawValue == rhs.kind.rawValue { return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending }
-                return lhs.kind.rawValue < rhs.kind.rawValue
+                if lhs.kind == rhs.kind { return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending }
+                return kindRank(lhs.kind) < kindRank(rhs.kind)
             },
             edges: edgesByID.values.sorted { $0.id < $1.id }
         )
+    }
+
+    private static func kindRank(_ kind: SiteGraphNodeKind) -> Int {
+        SiteGraphNodeKind.allCases.firstIndex(of: kind) ?? Int.max
     }
 
     private static func kind(for relativePath: String) -> SiteGraphNodeKind? {

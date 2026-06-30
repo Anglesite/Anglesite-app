@@ -26,6 +26,7 @@ struct SiteGraphExplorerTests {
             "src/content/posts/hello.md": "---\ntitle: Hello\n---\nBody",
             "public/images/unused.png": "PNG",
         ])
+        defer { try? FileManager.default.removeItem(at: root) }
         let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
         let graph = SiteGraphExplorer.build(
             projectRoot: root,
@@ -50,6 +51,7 @@ struct SiteGraphExplorerTests {
             "src/layouts/Base.astro": "---\nimport Nav from '../components/Nav.astro';\n---\n<Nav />",
             "src/components/Nav.astro": "<nav />",
         ])
+        defer { try? FileManager.default.removeItem(at: root) }
         let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
         let graph = SiteGraphExplorer.build(
             projectRoot: root,
@@ -76,6 +78,7 @@ struct SiteGraphExplorerTests {
         let root = makeSite([
             "src/content/posts/hello.md": "---\ntitle: Hello\n---\nBody",
         ])
+        defer { try? FileManager.default.removeItem(at: root) }
         let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
         let graph = SiteGraphExplorer.build(
             projectRoot: root,
@@ -98,6 +101,7 @@ struct SiteGraphExplorerTests {
             "public/images/hero.png": "PNG",
             "public/images/unused.png": "PNG",
         ])
+        defer { try? FileManager.default.removeItem(at: root) }
         let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
         let graph = SiteGraphExplorer.build(
             projectRoot: root,
@@ -114,5 +118,69 @@ struct SiteGraphExplorerTests {
             $0.sourceID == page.id && $0.targetID == hero.id && $0.kind == .referencesAsset
         })
         #expect(unused.referencedByCount == 0)
+    }
+
+    @Test("@ alias imports resolve to src-relative nodes")
+    func aliasImports() throws {
+        let root = makeSite([
+            "src/pages/index.astro": "---\nimport Nav from '@/components/Nav.astro';\n---\n<Nav />",
+            "src/components/Nav.astro": "<nav />",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        let page = try #require(graph.nodes.first { $0.kind == .page })
+        let component = try #require(graph.nodes.first { $0.kind == .component })
+
+        #expect(graph.edges.contains {
+            $0.sourceID == page.id && $0.targetID == component.id && $0.kind == .imports
+        })
+    }
+
+    @Test("dynamic imports create dependency edges")
+    func dynamicImports() throws {
+        let root = makeSite([
+            "src/pages/index.astro": "<script>const Card = await import('../components/Card.astro')</script>",
+            "src/components/Card.astro": "<article />",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        let page = try #require(graph.nodes.first { $0.kind == .page })
+        let component = try #require(graph.nodes.first { $0.kind == .component })
+
+        #expect(graph.edges.contains {
+            $0.sourceID == page.id && $0.targetID == component.id && $0.kind == .imports
+        })
+    }
+
+    @Test("src styles files become style nodes")
+    func styleNodes() {
+        let root = makeSite([
+            "src/styles/global.css": "body { color: black; }",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+
+        #expect(graph.nodes.contains { $0.kind == .style && $0.filePath == "src/styles/global.css" })
     }
 }

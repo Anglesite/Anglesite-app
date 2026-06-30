@@ -14,7 +14,6 @@ struct SiteGraphExplorerView: View {
                     nodes: model.filteredNodes,
                     edges: model.filteredEdges,
                     selectedNodeID: model.selectedNodeID,
-                    node: model.node(id:),
                     onSelect: { model.selectedNodeID = $0 }
                 )
             }
@@ -68,7 +67,6 @@ private struct SiteGraphCanvas: View {
     let nodes: [SiteGraphNode]
     let edges: [SiteGraphEdge]
     let selectedNodeID: String?
-    let node: (String) -> SiteGraphNode?
     let onSelect: (String) -> Void
 
     var body: some View {

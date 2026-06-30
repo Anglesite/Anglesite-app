@@ -42,12 +42,12 @@ final class SiteGraphExplorerModel {
 
     var selectedIncoming: [SiteGraphEdge] {
         guard let selectedNodeID else { return [] }
-        return snapshot.edges.filter { $0.targetID == selectedNodeID }
+        return filteredEdges.filter { $0.targetID == selectedNodeID }
     }
 
     var selectedOutgoing: [SiteGraphEdge] {
         guard let selectedNodeID else { return [] }
-        return snapshot.edges.filter { $0.sourceID == selectedNodeID }
+        return filteredEdges.filter { $0.sourceID == selectedNodeID }
     }
 
     func start(siteID: String, sourceDirectory: URL) {

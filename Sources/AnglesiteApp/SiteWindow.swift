@@ -780,15 +780,19 @@ struct SiteWindow: View {
     @MainActor
     private func openGraphNode(_ node: SiteGraphNode, site: SiteStore.Site) {
         guard let filePath = node.filePath else { return }
-        if node.kind == .asset {
+        let group: FileGroup
+        switch node.kind {
+        case .page:
+            group = .pages
+        case .collection, .contentEntry:
+            group = .posts
+        case .layout, .component:
+            group = .components
+        case .style:
+            group = .styles
+        case .asset:
             NSWorkspace.shared.activateFileViewerSelecting([site.sourceDirectory.appendingPathComponent(filePath)])
             return
-        }
-        let group: FileGroup = switch node.kind {
-        case .page: .pages
-        case .collection, .contentEntry: .posts
-        case .layout, .component: .components
-        case .asset, .style: .styles
         }
         let url = site.sourceDirectory.appendingPathComponent(filePath)
         openFile(FileRef(url: url, group: group, name: node.title))
