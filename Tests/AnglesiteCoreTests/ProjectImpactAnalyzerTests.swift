@@ -94,6 +94,53 @@ import Callout from '../../components/Callout.astro'
         #expect(report?.contentCollections == ["posts"])
     }
 
+    @Test("static re-export dynamic and CSS imports are all resolved")
+    func importForms() async {
+        let root = makeSite([
+            "src/components/Shared.astro": "<p>Shared</p>",
+            "src/pages/static.astro": "import Shared from '../components/Shared.astro'",
+            "src/pages/reexport.astro": "export { default as Shared } from '../components/Shared.astro'",
+            "src/pages/dynamic.astro": "const Shared = await import('../components/Shared.astro')",
+            "src/pages/css.astro": #"""
+---
+import '../styles/site.css'
+---
+"""#,
+            "src/styles/site.css": #"@import "../components/Shared.astro";"#
+        ])
+
+        let report = await ProjectImpactAnalyzer.analyze(
+            projectRoot: root,
+            siteID: siteID,
+            changedPath: "src/components/Shared.astro"
+        )
+
+        #expect(report?.directImporters == [
+            "src/pages/dynamic.astro",
+            "src/pages/reexport.astro",
+            "src/pages/static.astro",
+            "src/styles/site.css",
+        ])
+        #expect(Set(report?.affectedPages.map(\.route) ?? []) == ["/css", "/dynamic", "/reexport", "/static"])
+    }
+
+    @Test("analysis bails out when source file count exceeds the bound")
+    func sourceFileLimit() async {
+        var files: [String: String] = ["src/components/Shared.astro": "<p>Shared</p>"]
+        for i in 0..<501 {
+            files["src/pages/page-\(i).astro"] = "<p>\(i)</p>"
+        }
+        let root = makeSite(files)
+
+        let report = await ProjectImpactAnalyzer.analyze(
+            projectRoot: root,
+            siteID: siteID,
+            changedPath: "src/components/Shared.astro"
+        )
+
+        #expect(report == nil)
+    }
+
     @Test("confirmation summary names page count and affected routes")
     func confirmationSummary() async {
         let root = makeSite([
@@ -112,5 +159,21 @@ import Callout from '../../components/Callout.astro'
         #expect(summary?.contains("may affect 2 pages") == true)
         #expect(summary?.contains("/") == true)
         #expect(summary?.contains("/contact") == true)
+    }
+
+    @Test("confirmation summary starts with a complete sentence when no pages are affected")
+    func confirmationSummaryWithoutPages() {
+        let report = ProjectImpactAnalyzer.Report(
+            targetPath: "src/utils/colors.ts",
+            affectedPages: [],
+            directImporters: ["src/utils/theme.ts", "src/utils/tokens.ts"],
+            layoutImporters: [],
+            referencedImages: [],
+            contentCollections: []
+        )
+
+        let summary = ProjectImpactAnalyzer.confirmationSummary(for: report)
+
+        #expect(summary?.hasPrefix("This change is imported by 2 files.") == true)
     }
 }

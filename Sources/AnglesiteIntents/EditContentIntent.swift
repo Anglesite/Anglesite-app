@@ -231,7 +231,8 @@ extension ContentDialogs {
             base = "Set \(edit.styleProperty ?? "style") to \(clip(edit.styleValue ?? "")) on \(pagePath)?"
         }
         guard let impactSummary, !impactSummary.isEmpty else { return base }
-        return "\(base) \(impactSummary)"
+        let question = base.hasSuffix("?") ? String(base.dropLast()) : base
+        return "\(question). \(impactSummary) Confirm?"
     }
 
     /// Dispatch on the reply status. Single entry point the intent's `perform()` uses.

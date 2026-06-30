@@ -40,5 +40,7 @@ struct EditConfirmationDialogTests {
         )
         #expect(s.contains("Change the text"))
         #expect(s.contains("This change may affect 3 pages."))
+        #expect(!s.contains("/about/? This change"))
+        #expect(s.hasSuffix("Confirm?"))
     }
 }

@@ -1,5 +1,22 @@
 import Foundation
 
+private final class ProjectImpactContinuationBox<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Never>?
+
+    init(_ continuation: CheckedContinuation<T, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume(_ value: T) {
+        lock.lock()
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(returning: value)
+    }
+}
+
 /// Best-effort, read-only impact analysis for a proposed project edit.
 ///
 /// This intentionally does not try to be a full Astro compiler. It builds a conservative
@@ -52,10 +69,13 @@ public enum ProjectImpactAnalyzer {
             self.filePath = filePath
         }
 
-        public var displayName: String { title?.isEmpty == false ? title! : route }
+        public var displayName: String {
+            if let title, !title.isEmpty { return title }
+            return route
+        }
     }
 
-    private struct SourceFile {
+    private struct SourceFile: Sendable {
         let path: String
         let url: URL
         let text: String
@@ -73,14 +93,18 @@ public enum ProjectImpactAnalyzer {
         "css", "json"
     ]
 
+    private static let maxSourceFileCount = 500
+    private static let analysisTimeoutNanoseconds: UInt64 = 2_000_000_000
+
     private static let importRegexes: [NSRegularExpression] = [
-        try! NSRegularExpression(pattern: #"\bimport\s+(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]"#),
-        try! NSRegularExpression(pattern: #"\bexport\s+[^'"]+\s+from\s+['"]([^'"]+)['"]"#),
-        try! NSRegularExpression(pattern: #"\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)"#),
-        try! NSRegularExpression(pattern: #"@import\s+(?:url\()?['"]?([^'")\s]+)"#)
+        makeRegex("static import", #"\bimport\s+(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]"#),
+        makeRegex("re-export", #"\bexport\s+[^'"]+\s+from\s+['"]([^'"]+)['"]"#),
+        makeRegex("dynamic import", #"\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)"#),
+        makeRegex("css import", #"@import\s+(?:url\()?['"]?([^'")\s]+)"#)
     ]
-    private static let imageReferenceRegex = try! NSRegularExpression(
-        pattern: #"(?:"|')(/images/[^"']+\.(?:jpg|jpeg|png|webp|gif|svg|avif))(?:"|')"#,
+    private static let imageReferenceRegex = makeRegex(
+        "image reference",
+        #"(?:"|')(/images/[^"']+\.(?:jpg|jpeg|png|webp|gif|svg|avif))(?:"|')"#,
         options: [.caseInsensitive]
     )
 
@@ -91,7 +115,7 @@ public enum ProjectImpactAnalyzer {
         graph: SiteContentGraph? = nil
     ) async -> Report? {
         let root = projectRoot.standardizedFileURL
-        let files = sourceFiles(in: root)
+        guard let files = await sourceFiles(in: root) else { return nil }
         let knownPaths = Set(files.map(\.path))
         var pages: [SiteContentGraph.Page] = []
         var posts: [SiteContentGraph.Post] = []
@@ -112,9 +136,12 @@ public enum ProjectImpactAnalyzer {
             return nil
         }
 
-        let importsByFile = Dictionary(uniqueKeysWithValues: files.map { file in
-            (file.path, resolvedImports(in: file, root: root, knownPaths: knownPaths))
-        })
+        let importsByFile = Dictionary(
+            files.map { file in
+                (file.path, resolvedImports(in: file, root: root, knownPaths: knownPaths))
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
         let directImporters = importsByFile
             .filter { $0.value.contains(target) }
             .map(\.key)
@@ -160,8 +187,14 @@ public enum ProjectImpactAnalyzer {
             parts.append("This change may affect 1 page")
         } else if report.affectedPageCount > 1 {
             parts.append("This change may affect \(report.affectedPageCount) pages")
+        } else if !report.directImporters.isEmpty {
+            parts.append("This change is imported by \(report.directImporters.count) file\(report.directImporters.count == 1 ? "" : "s")")
+        } else if !report.referencedImages.isEmpty {
+            parts.append("This change references \(report.referencedImages.count) image\(report.referencedImages.count == 1 ? "" : "s")")
+        } else if !report.contentCollections.isEmpty {
+            parts.append("This change is included in \(report.contentCollections.count) content collection\(report.contentCollections.count == 1 ? "" : "s")")
         }
-        if !report.directImporters.isEmpty {
+        if report.affectedPageCount > 0, !report.directImporters.isEmpty {
             parts.append("imported by \(report.directImporters.count) file\(report.directImporters.count == 1 ? "" : "s")")
         }
         if !report.layoutImporters.isEmpty {
@@ -187,18 +220,46 @@ public enum ProjectImpactAnalyzer {
         return summary
     }
 
-    private static func sourceFiles(in root: URL) -> [SourceFile] {
-        walk(root)
+    private static func sourceFiles(in root: URL) async -> [SourceFile]? {
+        await withCheckedContinuation { continuation in
+            let box = ProjectImpactContinuationBox(continuation)
+            Task.detached(priority: .utility) {
+                box.resume(Self.sourceFilesSync(in: root, maxFiles: Self.maxSourceFileCount))
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: analysisTimeoutNanoseconds)
+                box.resume(nil)
+            }
+        }
+    }
+
+    private static func sourceFilesSync(in root: URL, maxFiles: Int) -> [SourceFile]? {
+        let urls = walk(root)
             .filter { sourceExtensions.contains($0.pathExtension.lowercased()) }
+        guard urls.count <= maxFiles else { return nil }
+        return urls
             .compactMap { url in
+                if Task.isCancelled { return nil }
                 guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
                 return SourceFile(path: relativePosix(url, from: root), url: url, text: text)
             }
             .sorted { $0.path < $1.path }
     }
 
+    private static func makeRegex(
+        _ name: String,
+        _ pattern: String,
+        options: NSRegularExpression.Options = []
+    ) -> NSRegularExpression {
+        do {
+            return try NSRegularExpression(pattern: pattern, options: options)
+        } catch {
+            preconditionFailure("Invalid ProjectImpactAnalyzer \(name) regex: \(error)")
+        }
+    }
+
     private static func walk(_ dir: URL) -> [URL] {
-        let skippedDirectories = Set([".git", ".astro", "node_modules", "dist", ".vercel", ".netlify"])
+        let skippedDirectories = Set(["node_modules", "dist"])
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
@@ -282,7 +343,7 @@ public enum ProjectImpactAnalyzer {
         if targetIsImage {
             return knownImages.contains(target) ? [target] : []
         }
-        let fileByPath = Dictionary(uniqueKeysWithValues: files.map { ($0.path, $0) })
+        let fileByPath = Dictionary(files.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         let refs = affectedFiles.compactMap { fileByPath[$0]?.text }.flatMap(imageReferencePaths)
         return Array(Set(refs)).sorted()
     }
