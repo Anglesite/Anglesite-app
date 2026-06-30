@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import AnglesiteCore
+@testable import AnglesiteSiteModel
 
 /// Locks the core promise of the UUID-identity redesign (#242): a package's `siteID` is stored
 /// in its `Info.plist`, not derived from its path, so moving/renaming the package keeps identity.

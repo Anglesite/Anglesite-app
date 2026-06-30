@@ -1,4 +1,5 @@
 import Foundation
+import AnglesiteSiteModel
 
 /// Runs the deterministic new-site pipeline and emits progress. No Claude. Every subprocess
 /// goes through the injected `CommandRunner` (production: `ProcessSupervisor.shared.run`).

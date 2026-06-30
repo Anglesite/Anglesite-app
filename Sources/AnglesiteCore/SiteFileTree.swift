@@ -1,4 +1,5 @@
 import Foundation
+import AnglesiteSiteModel
 
 /// Curated, group-oriented view of a site's filesystem-backed parts for the Site Navigator.
 /// Pages/Posts are sourced from `SiteContentGraph`, not here — this scanner covers only the

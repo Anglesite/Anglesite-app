@@ -1,0 +1,4 @@
+import AnglesiteSiteModel
+
+public typealias AnglesitePackage = AnglesiteSiteModel.AnglesitePackage
+public typealias ProjectValidator = AnglesiteSiteModel.ProjectValidator

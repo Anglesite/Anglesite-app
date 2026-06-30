@@ -32,7 +32,13 @@ let includeContainer = ProcessInfo.processInfo.environment["ANGLESITE_SKIP_CONTA
 // we drop them so `swift test` still passes. Tracking removal in #128.
 var packageTargets: [Target] = [
     .target(
+        name: "AnglesiteSiteModel",
+        path: "Sources/AnglesiteSiteModel",
+        swiftSettings: strictConcurrency
+    ),
+    .target(
         name: "AnglesiteCore",
+        dependencies: ["AnglesiteSiteModel"],
         path: "Sources/AnglesiteCore",
         swiftSettings: strictConcurrency
     ),
@@ -58,8 +64,14 @@ var packageTargets: [Target] = [
         swiftSettings: strictConcurrency
     ),
     .testTarget(
+        name: "AnglesiteSiteModelTests",
+        dependencies: ["AnglesiteSiteModel"],
+        path: "Tests/AnglesiteSiteModelTests",
+        swiftSettings: strictConcurrency
+    ),
+    .testTarget(
         name: "AnglesiteCoreTests",
-        dependencies: ["AnglesiteCore", "AnglesiteTestSupport"],
+        dependencies: ["AnglesiteCore", "AnglesiteSiteModel", "AnglesiteTestSupport"],
         path: "Tests/AnglesiteCoreTests",
         swiftSettings: strictConcurrency
     ),
@@ -122,6 +134,7 @@ if includeContainer && ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_
 }
 
 var packageProducts: [Product] = [
+    .library(name: "AnglesiteSiteModel", targets: ["AnglesiteSiteModel"]),
     .library(name: "AnglesiteCore", targets: ["AnglesiteCore"]),
     .library(name: "AnglesiteBridge", targets: ["AnglesiteBridge"]),
     .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"])
