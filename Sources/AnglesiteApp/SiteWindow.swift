@@ -7,6 +7,7 @@ import AnglesiteIntents
 private enum MainPaneMode: Equatable {
     case preview
     case editor(FileRef)
+    case graph
 }
 
 private enum ActiveEditor {
@@ -63,6 +64,7 @@ struct SiteWindow: View {
         self.semanticRanker = semanticRanker
         self.contentIndexerStore = contentIndexerStore
         _preview = State(initialValue: PreviewModel(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex, semanticRanker: semanticRanker))
+        _graphExplorer = State(initialValue: SiteGraphExplorerModel(graph: contentGraph))
     }
 
     @State private var site: SiteStore.Site?
@@ -105,6 +107,7 @@ struct SiteWindow: View {
     @State private var newPagePresented = false
     @State private var newCollectionPresented = false
     @State private var navigator: SiteNavigatorModel?
+    @State private var graphExplorer: SiteGraphExplorerModel
     @State private var mainPaneMode: MainPaneMode = .preview
     /// Sidebar visibility persisted per scene (window), per the design spec. Column WIDTH is restored
     /// automatically by `NavigationSplitView`'s own scene state, so only explicit visibility is wired.
@@ -183,6 +186,7 @@ struct SiteWindow: View {
             chat = nil
             navigator?.stop()
             navigator = nil
+            graphExplorer.stop()
             // Window closing: persist unsaved edits unconditionally (consistent with
             // auto-save-on-leave). No conflict dialog is possible during teardown, so we don't gate
             // on a flush return value — just write the buffer best-effort, off the main actor.
@@ -269,6 +273,20 @@ struct SiteWindow: View {
         .navigationTitle(site.name)
         .navigationSubtitle(preview.readyURL?.absoluteString ?? "")
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task {
+                        if await leaveCurrentEditor(), await leaveCurrentInspector() {
+                            inspectorContext = nil
+                            mainPaneMode = .graph
+                        }
+                    }
+                } label: {
+                    Label("Site Graph", systemImage: "point.3.connected.trianglepath.dotted")
+                }
+                .help("Explore pages, layouts, components, collections, and assets")
+            }
+
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     inspectorShown.toggle()
@@ -543,11 +561,12 @@ struct SiteWindow: View {
                     set: { setPaneSelection($0) }
                 )) {
                     Text("Preview").tag(0)
-                    Text("Editor").tag(1)
+                    if activeEditorFile != nil { Text("Editor").tag(1) }
+                    Text("Graph").tag(2)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 180)
+                .frame(width: activeEditorFile == nil ? 220 : 270)
                 .padding(6)
                 Divider()
             }
@@ -556,16 +575,12 @@ struct SiteWindow: View {
     }
 
     private var showsPaneModePicker: Bool {
-        switch activeEditor {
-        case .some(.text):
-            return true
-        case .some(.plist), .none:
-            return false
-        }
+        true
     }
 
     private var paneSelection: Int {
         if case .editor = mainPaneMode { return 1 }
+        if case .graph = mainPaneMode { return 2 }
         return 0
     }
 
@@ -576,6 +591,12 @@ struct SiteWindow: View {
             Task { if await leaveCurrentEditor() { mainPaneMode = .preview } }
         } else if value == 1, let file = activeEditorFile {
             mainPaneMode = .editor(file)
+        } else if value == 2 {
+            Task {
+                guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+                inspectorContext = nil
+                mainPaneMode = .graph
+            }
         }
     }
 
@@ -639,6 +660,10 @@ struct SiteWindow: View {
                 }
             } else {
                 previewPane(for: site)
+            }
+        case .graph:
+            SiteGraphExplorerView(model: graphExplorer) { node in
+                openGraphNode(node, site: site)
             }
         case .preview:
             previewPane(for: site)
@@ -748,25 +773,47 @@ struct SiteWindow: View {
                 inspectorContext = await makeInspectorContext(forNavigatorID: id)
             }
         case .file(let file):
-            if activeEditorFile?.id == file.id {
-                mainPaneMode = .editor(file)   // re-show the already-open file (buffer intact)
-                return
+            openFile(file)
+        }
+    }
+
+    @MainActor
+    private func openGraphNode(_ node: SiteGraphNode, site: SiteStore.Site) {
+        guard let filePath = node.filePath else { return }
+        if node.kind == .asset {
+            NSWorkspace.shared.activateFileViewerSelecting([site.sourceDirectory.appendingPathComponent(filePath)])
+            return
+        }
+        let group: FileGroup = switch node.kind {
+        case .page: .pages
+        case .collection, .contentEntry: .posts
+        case .layout, .component: .components
+        case .asset, .style: .styles
+        }
+        let url = site.sourceDirectory.appendingPathComponent(filePath)
+        openFile(FileRef(url: url, group: group, name: node.title))
+    }
+
+    @MainActor
+    private func openFile(_ file: FileRef) {
+        if activeEditorFile?.id == file.id {
+            mainPaneMode = .editor(file)
+            return
+        }
+        Task {
+            guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+            inspectorContext = nil
+            switch EditorKind.resolve(for: file) {
+            case .text:
+                activeEditor = .text(FileEditorModel(file: file))
+            case .plist:
+                activeEditor = .plist(PlistEditorModel(
+                    file: file,
+                    websiteTitle: site?.name ?? file.name,
+                    sourceDirectory: site?.sourceDirectory ?? file.url.deletingLastPathComponent()
+                ))
             }
-            Task {
-                guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
-                inspectorContext = nil   // files (components/styles/metadata) have no page inspector
-                switch EditorKind.resolve(for: file) {
-                case .text:
-                    activeEditor = .text(FileEditorModel(file: file))
-                case .plist:
-                    activeEditor = .plist(PlistEditorModel(
-                        file: file,
-                        websiteTitle: site?.name ?? file.name,
-                        sourceDirectory: site?.sourceDirectory ?? file.url.deletingLastPathComponent()
-                    ))
-                }
-                mainPaneMode = .editor(file)
-            }
+            mainPaneMode = .editor(file)
         }
     }
 
@@ -940,6 +987,7 @@ struct SiteWindow: View {
             websiteTitle: resolved.name
         )
         navigator = navModel
+        graphExplorer.start(siteID: resolved.id, sourceDirectory: resolved.sourceDirectory)
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
         applyPendingNavigation(for: resolved.id)
