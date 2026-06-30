@@ -92,7 +92,9 @@ final class ChatModel {
     // MARK: Dependencies
 
     private let siteID: String
-    let siteDirectory: URL
+    private let siteDirectory: URL
+    /// The site's source directory, exposed read-only for CitationRowView's click-to-open.
+    var siteDirectoryURL: URL { siteDirectory }
     private let assistant: any ConversationalAssistant
     private let history: ChatHistoryStore
     /// Sticky-note source. Wired to the per-site `SiteRuntime.mcpClient` in production so

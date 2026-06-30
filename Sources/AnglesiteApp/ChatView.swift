@@ -217,6 +217,7 @@ struct ChatView: View {
         let prompt = draft
         let options = activeKinds.map { SiteKnowledgeIndex.SearchOptions(kinds: $0) } ?? .init()
         model.send(prompt, searchOptions: options)
+        // Clear input only after a successful start (model.isStreaming flipped to true).
         if !model.isStreaming { return }
         draft = ""
         inputFocused = true
@@ -254,7 +255,7 @@ private struct MessageRow: View {
             AnnotationRowView(message: message, model: model)
         } else if message.role == .citation {
             if let meta = message.citationMetadata {
-                CitationRowView(citations: meta.citations, siteDirectory: model.siteDirectory)
+                CitationRowView(citations: meta.citations, siteDirectory: model.siteDirectoryURL)
             }
         } else {
             HStack {
@@ -341,7 +342,8 @@ private struct MessageRow: View {
         case .assistant: return "Assistant said: \(message.content)"
         case .error:     return "Error: \(message.content)"
         case .system:    return "System: \(message.content)"
-        case .edit, .annotation, .citation: return message.content  // rendered by their own rows
+        case .edit, .annotation: return message.content
+        case .citation: return "Retrieved context"
         }
     }
 

@@ -23,14 +23,14 @@ public actor KnowledgeAugmentedAssistant: ConversationalAssistant {
         let baseStream = try await base.converse(prompt: enriched, context: context)
         guard !citations.isEmpty else { return baseStream }
         return AsyncStream { continuation in
-            let citationItems = citations
-            Task {
-                continuation.yield(.citations(citationItems))
+            let task = Task {
+                continuation.yield(.citations(citations))
                 for await event in baseStream {
                     continuation.yield(event)
                 }
                 continuation.finish()
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 

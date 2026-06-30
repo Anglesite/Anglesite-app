@@ -80,8 +80,16 @@ private struct CitationChip: View {
 private struct FlowLayout: Layout {
     var spacing: CGFloat
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let rows = computeRows(proposal: proposal, subviews: subviews)
+    struct Cache {
+        var sizes: [CGSize]
+    }
+
+    func makeCache(subviews: Subviews) -> Cache {
+        Cache(sizes: subviews.map { $0.sizeThatFits(.unspecified) })
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        let rows = computeRows(proposal: proposal, sizes: cache.sizes)
         guard !rows.isEmpty else { return .zero }
         let height = rows.reduce(CGFloat(0)) { sum, row in
             sum + row.height + (sum > 0 ? spacing : 0)
@@ -90,14 +98,14 @@ private struct FlowLayout: Layout {
         return CGSize(width: width, height: height)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let rows = computeRows(proposal: proposal, subviews: subviews)
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        let rows = computeRows(proposal: proposal, sizes: cache.sizes)
         var y = bounds.minY
         var subviewIndex = 0
         for row in rows {
             var x = bounds.minX
             for _ in 0..<row.count {
-                let size = subviews[subviewIndex].sizeThatFits(.unspecified)
+                let size = cache.sizes[subviewIndex]
                 subviews[subviewIndex].place(at: CGPoint(x: x, y: y), proposal: .unspecified)
                 x += size.width + spacing
                 subviewIndex += 1
@@ -112,12 +120,11 @@ private struct FlowLayout: Layout {
         var height: CGFloat
     }
 
-    private func computeRows(proposal: ProposedViewSize, subviews: Subviews) -> [Row] {
+    private func computeRows(proposal: ProposedViewSize, sizes: [CGSize]) -> [Row] {
         let maxWidth = proposal.width ?? .infinity
         var rows: [Row] = []
         var currentRow = Row(count: 0, width: 0, height: 0)
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+        for size in sizes {
             let newWidth = currentRow.width + (currentRow.count > 0 ? spacing : 0) + size.width
             if currentRow.count > 0 && newWidth > maxWidth {
                 rows.append(currentRow)
