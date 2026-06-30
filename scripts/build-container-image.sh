@@ -66,6 +66,13 @@ TEMPLATE_DIR="$REPO_ROOT/Resources/Template"
 
 command -v docker >/dev/null 2>&1 || { echo "docker not found on PATH" >&2; exit 1; }
 
+# Use a docker-container buildx builder explicitly so multi-platform builds don't depend on the
+# developer's globally active builder. Do not call `docker buildx use`; that would leave global
+# Docker state changed after this script exits.
+if ! docker buildx inspect anglesite-oci >/dev/null 2>&1; then
+    docker buildx create --name anglesite-oci --driver docker-container
+fi
+
 # ---- Stage a clean build context ----------------------------------------------
 CTX=$(mktemp -d)
 trap 'rm -rf "$CTX"' EXIT
@@ -98,6 +105,7 @@ OUTPUT="--load"
 [[ $PUSH -eq 1 ]] && OUTPUT="--push"
 
 BUILD_ARGS=(
+    --builder anglesite-oci
     --platform "$PLATFORM"
     --build-arg "NODE_VERSION=$NODE_VERSION"
     --tag "$IMAGE_REF"

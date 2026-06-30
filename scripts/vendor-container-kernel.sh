@@ -70,7 +70,7 @@ echo "Kernel copied → $KERNEL_OUT/vmlinux"
 
 # Basic sanity: must be non-trivially large (the Kata arm64 VM-optimized kernel is ~14 MB —
 # smaller than a general-purpose kernel; the 1 MiB floor below just catches truncation/zero-byte).
-KERNEL_SIZE=$(stat -f%z "$KERNEL_OUT/vmlinux" 2>/dev/null || stat -c%s "$KERNEL_OUT/vmlinux")
+KERNEL_SIZE=$(stat -f%z "$KERNEL_OUT/vmlinux" 2>/dev/null || stat -c%s "$KERNEL_OUT/vmlinux" || echo 0)
 if [[ "$KERNEL_SIZE" -lt 1048576 ]]; then
     echo "ERROR: vmlinux is suspiciously small (${KERNEL_SIZE} bytes) — extraction may have failed" >&2
     exit 1
@@ -108,30 +108,42 @@ echo "Untarring OCI layout → ${INITFS_OUT}"
 tar -xf "$INITFS_ARCHIVE" -C "$INITFS_OUT"
 rm -f "$INITFS_ARCHIVE"
 
-# Verify the OCI layout is structurally valid.
-for f in oci-layout index.json blobs/sha256; do
-    if [[ ! -e "$INITFS_OUT/$f" ]]; then
-        echo "ERROR: OCI layout missing required entry: $f" >&2
-        # Fall back to skopeo if available. NOTE: this recovery path is only hit if the buildx
-        # OCI export above fails to produce a valid layout. The `oci:dir:tag` form skopeo writes
-        # is a tagged single-entry index; it has not been exercised against the Containerization
-        # initfs loader, so if you ever land here, verify the produced layout boots before relying on it.
-        if command -v skopeo >/dev/null 2>&1; then
-            echo "Falling back to skopeo…"
-            find "$INITFS_OUT" -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
-            skopeo copy \
-                --override-os linux \
-                --override-arch arm64 \
-                "docker://${VMINIT_IMAGE}" \
-                "oci:${INITFS_OUT}:vminit"
-            echo "skopeo copy succeeded."
-        else
-            echo "ERROR: skopeo not available. Install via 'brew install skopeo' and re-run." >&2
-            exit 1
-        fi
-        break
+REQUIRED_INITFS_ENTRIES=(oci-layout index.json blobs/sha256)
+missing_initfs_entry() {
+    local f
+    for f in "${REQUIRED_INITFS_ENTRIES[@]}"; do
+        [[ -e "$INITFS_OUT/$f" ]] || { echo "$f"; return 0; }
+    done
+    return 1
+}
+
+# Verify the OCI layout is structurally valid. If buildx fails to emit a complete layout, fall back
+# to skopeo once, then always re-validate so failures name the missing entry clearly.
+if missing="$(missing_initfs_entry)"; then
+    echo "ERROR: OCI layout missing required entry: $missing" >&2
+    # Fall back to skopeo if available. NOTE: this recovery path is only hit if the buildx
+    # OCI export above fails to produce a valid layout. The `oci:dir:tag` form skopeo writes
+    # is a tagged single-entry index; it has not been exercised against the Containerization
+    # initfs loader, so if you ever land here, verify the produced layout boots before relying on it.
+    if command -v skopeo >/dev/null 2>&1; then
+        echo "Falling back to skopeo…"
+        find "$INITFS_OUT" -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
+        skopeo copy \
+            --override-os linux \
+            --override-arch arm64 \
+            "docker://${VMINIT_IMAGE}" \
+            "oci:${INITFS_OUT}:vminit"
+        echo "skopeo copy succeeded."
+    else
+        echo "ERROR: skopeo not available. Install via 'brew install skopeo' and re-run." >&2
+        exit 1
     fi
-done
+fi
+
+if missing="$(missing_initfs_entry)"; then
+    echo "ERROR: OCI layout still missing required entry after fallback: $missing" >&2
+    exit 1
+fi
 
 # Final verification.
 echo ""
