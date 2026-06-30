@@ -49,7 +49,14 @@ public enum AnglesiteIntents {
         // Slice 2). Replaces the MCP-routed ContentOperations; the Node create_page/create_post
         // tools are retired in the roadmap's cleanup slice.
         AppDependencyManager.shared.add { () -> any ContentOperationsService in
-            NativeContentOperations(siteDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory })
+            let siteDirectory: ContentCreationWorkflow.SiteDirectoryResolver = { id in
+                await SiteStore.shared.find(id: id)?.sourceDirectory
+            }
+            return ContentCreationWorkflow(
+                operations: NativeContentOperations(siteDirectory: siteDirectory),
+                contentGraph: contentGraph,
+                siteDirectory: siteDirectory
+            )
         }
         AppDependencyManager.shared.add { () -> any IntegrationOperationsService in
             IntegrationOperations.live()
