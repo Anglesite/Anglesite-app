@@ -58,6 +58,22 @@ public struct SiteOperations: Sendable {
         }
     }
 
+    public func provisionSocialWorker(site: SiteStore.Site) async -> SocialWorkerProvisionCommand.Result {
+        do {
+            return try await SiteAccess.withScopedAccess(to: site, in: store) { url in
+                await factory.socialWorkerProvision().provision(
+                    siteID: site.id,
+                    siteDirectory: url,
+                    siteName: SiteSlug.derive(from: site.name)
+                )
+            }
+        } catch let SiteAccess.AccessError.noGrant(message) {
+            return .failed(reason: message, exitCode: nil, resources: .init())
+        } catch {
+            return .failed(reason: error.localizedDescription, exitCode: nil, resources: .init())
+        }
+    }
+
     // MARK: Dialog mapping (pure)
 
     public static func dialog(forDeploy result: DeployCommand.Result) -> String {
@@ -96,9 +112,31 @@ public struct SiteOperations: Sendable {
         }
     }
 
+    public static func dialog(forSocialWorkerProvision result: SocialWorkerProvisionCommand.Result) -> String {
+        switch result {
+        case .succeeded(let url, let resources, _):
+            return "Social Worker provisioned at \(url.absoluteString).\(resourceSuffix(resources))"
+        case .blocked(let failures, _, let resources):
+            let count = failures.count
+            let noun = count == 1 ? "issue" : "issues"
+            return "Social Worker provisioning blocked by the pre-deploy security scan (\(count) \(noun)).\(resourceSuffix(resources))"
+        case .failed(let reason, _, let resources):
+            return "Social Worker provisioning failed: \(reason).\(resourceSuffix(resources))"
+        }
+    }
+
     /// Friendly dialog for a Siri/Shortcuts cancellation, mapped from `Task.isCancelled` at the
     /// intent boundary (the command actor SIGTERMs the underlying subprocess on cancel).
     public static func canceledDialog(operation: String, siteName: String) -> String {
         "Canceled the \(operation) of \(siteName)."
+    }
+
+    private static func resourceSuffix(_ resources: WorkerComposition.ProvisionedResources) -> String {
+        var labels: [String] = []
+        if resources.d1DatabaseID != nil { labels.append("D1") }
+        if resources.kvNamespaceID != nil { labels.append("KV") }
+        if resources.r2BucketName != nil { labels.append("R2") }
+        guard !labels.isEmpty else { return "" }
+        return " Provisioned resources: \(labels.joined(separator: ", "))."
     }
 }

@@ -11,6 +11,7 @@ public protocol SiteOperationsService: Sendable {
     func deploy(site: SiteStore.Site, onProgress: ProgressHandler?) async -> DeployCommand.Result
     func backup(site: SiteStore.Site, onProgress: ProgressHandler?) async -> BackupCommand.Result
     func audit(site: SiteStore.Site, onProgress: ProgressHandler?) async -> AuditCommand.Result
+    func provisionSocialWorker(site: SiteStore.Site) async -> SocialWorkerProvisionCommand.Result
 }
 
 public extension SiteOperationsService {

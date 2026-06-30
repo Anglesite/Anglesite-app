@@ -12,6 +12,9 @@ struct SiteOperationsTests {
     private struct FakeFactory: CommandFactory {
         func deploy() -> DeployCommand { DeployCommand() }
         func audit() -> AuditCommand { AuditCommand() }
+        func socialWorkerProvision() -> SocialWorkerProvisionCommand {
+            SocialWorkerProvisionCommand(tokenSource: { nil })
+        }
         func backup() -> BackupCommand {
             BackupCommand(
                 runner: { _, args in
@@ -46,6 +49,26 @@ struct SiteOperationsTests {
             isValid: true,
             missingSentinels: []
         )
+    }
+
+    private func makeSite(name: String, packageURL: URL) -> SiteStore.Site {
+        SiteStore.Site(
+            id: "s1",
+            name: name,
+            packageURL: packageURL,
+            isValid: true,
+            missingSentinels: []
+        )
+    }
+
+    private func temporaryPackage() throws -> URL {
+        let package = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SiteOperationsTests-\(UUID().uuidString).anglesite", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: package.appendingPathComponent("Source", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        return package
     }
 
     private func finding(_ severity: AuditReport.Finding.Severity) -> AuditReport.Finding {
@@ -107,6 +130,74 @@ struct SiteOperationsTests {
         #expect(dialog == "Deploy failed: network down")
     }
 
+    @Test("social Worker provisioning runs through SiteOperations and slugifies the worker name")
+    func socialWorkerProvisionOperation() async throws {
+        let package = try temporaryPackage()
+        let site = makeSite(name: "Blue Bottle Cafe", packageURL: package)
+        let recorder = SocialWorkerRecorder()
+        let ops = SiteOperations(factory: SocialWorkerFactory(recorder: recorder), store: throwawayStore())
+
+        let result = await ops.provisionSocialWorker(site: site)
+
+        guard case .succeeded(let url, _, _) = result else {
+            Issue.record("expected success, got \(result)")
+            return
+        }
+        #expect(url == URL(string: "https://blue-bottle-cafe.example.workers.dev"))
+        #expect(await recorder.arguments == [
+            ["d1", "create", "blue-bottle-cafe-social", "--json"],
+            ["kv", "namespace", "create", "blue-bottle-cafe-social", "--json"],
+        ])
+        #expect(await recorder.deployCalls == [
+            .init(token: "token", siteID: "s1", siteDirectory: package.appendingPathComponent("Source", isDirectory: true))
+        ])
+    }
+
+    @Test("social Worker provisioning dialog reports success and resources")
+    func socialWorkerProvisionSuccessDialog() {
+        let result = SocialWorkerProvisionCommand.Result.succeeded(
+            url: URL(string: "https://site.example.workers.dev")!,
+            resources: .init(d1DatabaseID: "d1", kvNamespaceID: "kv"),
+            duration: 1
+        )
+        #expect(
+            SiteOperations.dialog(forSocialWorkerProvision: result)
+                == "Social Worker provisioned at https://site.example.workers.dev. Provisioned resources: D1, KV."
+        )
+    }
+
+    @Test("social Worker provisioning blocked dialog preserves security gate wording")
+    func socialWorkerProvisionBlockedDialog() {
+        let failure = PreDeployCheck.ScanFailure(
+            category: .exposedToken,
+            file: "dist/index.html",
+            detail: "API key committed",
+            remediation: "Remove it"
+        )
+        let result = SocialWorkerProvisionCommand.Result.blocked(
+            failures: [failure],
+            warnings: [],
+            resources: .init(d1DatabaseID: "d1", kvNamespaceID: "kv", r2BucketName: "media")
+        )
+        let dialog = SiteOperations.dialog(forSocialWorkerProvision: result)
+        #expect(dialog == "Social Worker provisioning blocked by the pre-deploy security scan (1 issue). Provisioned resources: D1, KV, R2.")
+        #expect(!dialog.lowercased().contains("force"))
+        #expect(!dialog.lowercased().contains("override"))
+    }
+
+    @Test("social Worker provisioning failure dialog includes partial resources")
+    func socialWorkerProvisionFailureDialog() {
+        let result = SocialWorkerProvisionCommand.Result.failed(
+            reason: "KV failed",
+            exitCode: 1,
+            resources: .init(d1DatabaseID: "d1")
+        )
+        #expect(
+            SiteOperations.dialog(forSocialWorkerProvision: result)
+                == "Social Worker provisioning failed: KV failed. Provisioned resources: D1."
+        )
+    }
+
     @Test("backup failure dialog surfaces the reason")
     func backupFailureDialog() {
         let dialog = SiteOperations.dialog(forBackup: .failed(reason: "push rejected", exitCode: 1))
@@ -117,5 +208,51 @@ struct SiteOperationsTests {
     func auditFailureDialog() {
         let dialog = SiteOperations.dialog(forAudit: .failed(reason: "config missing", exitCode: 1, logTail: []))
         #expect(dialog == "Audit failed: config missing")
+    }
+}
+
+private actor SocialWorkerRecorder {
+    private var seenArguments: [[String]] = []
+    private var seenDeployCalls: [DeployCall] = []
+
+    var arguments: [[String]] { seenArguments }
+    var deployCalls: [DeployCall] { seenDeployCalls }
+
+    func run(arguments: [String]) -> ProcessSupervisor.RunResult {
+        seenArguments.append(arguments)
+        switch arguments.first {
+        case "d1":
+            return .init(stdout: #"{"uuid":"d1-id"}"#, stderr: "", exitCode: 0)
+        case "kv":
+            return .init(stdout: #"{"id":"kv-id"}"#, stderr: "", exitCode: 0)
+        default:
+            return .init(stdout: "unexpected arguments \(arguments)", stderr: "", exitCode: 127)
+        }
+    }
+
+    func deploy(token: String, siteID: String, siteDirectory: URL) -> DeployCommand.Result {
+        seenDeployCalls.append(.init(token: token, siteID: siteID, siteDirectory: siteDirectory))
+        return .succeeded(url: URL(string: "https://blue-bottle-cafe.example.workers.dev")!, duration: 1)
+    }
+}
+
+private struct DeployCall: Sendable, Equatable {
+    let token: String
+    let siteID: String
+    let siteDirectory: URL
+}
+
+private struct SocialWorkerFactory: CommandFactory {
+    let recorder: SocialWorkerRecorder
+
+    func deploy() -> DeployCommand { DeployCommand() }
+    func backup() -> BackupCommand { BackupCommand(runner: { _, _ in .init(stdout: "", stderr: "", exitCode: 1) }, streamer: { _, _, _ in (1, "") }) }
+    func audit() -> AuditCommand { AuditCommand(resolveBuildCommand: { _ in .unavailable(reason: "noop") }, runners: []) }
+    func socialWorkerProvision() -> SocialWorkerProvisionCommand {
+        SocialWorkerProvisionCommand(
+            tokenSource: { "token" },
+            runner: { _, arguments, _, _ in await recorder.run(arguments: arguments) },
+            deployer: { token, siteID, siteDirectory in await recorder.deploy(token: token, siteID: siteID, siteDirectory: siteDirectory) }
+        )
     }
 }
