@@ -93,7 +93,7 @@ struct SiteWindow: View {
     // the panel UI is target-agnostic.
     @State private var chat: ChatModel?
     @State private var chatPresented = false
-    @State private var relatedPages: RelatedPagesModel?
+    @State private var relatedPages: RelatedPagesModel
     @State private var relatedPagesPresented = false
     @State private var harden = HardenModel()
     @State private var health = HealthModel(runner: DefaultHealthCheckRunner())
@@ -236,7 +236,7 @@ struct SiteWindow: View {
                                     ? .opacity
                                     : .move(edge: .trailing).combined(with: .opacity))
                         }
-                        if relatedPagesPresented, let relatedPages {
+                        if relatedPagesPresented {
                             Divider()
                             RelatedPagesPanel(model: relatedPages)
                                 .frame(width: 320)
@@ -806,7 +806,7 @@ struct SiteWindow: View {
                         filePath = nil
                     }
                     if let path = filePath {
-                        await relatedPages?.load(siteID: siteID, path: path)
+                        await relatedPages.load(siteID: siteID, path: path)
                     }
                 }
             }

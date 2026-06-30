@@ -7,7 +7,7 @@ import AnglesiteCore
 @Observable
 final class RelatedPagesModel {
     private(set) var suggestions: [LinkGraph.LinkSuggestion] = []
-    private(set) var orphanHints: [SiteKnowledgeIndex.Document] = []
+    private(set) var isOrphan = false
     private(set) var reciprocalHints: [LinkGraph.ReciprocalGap] = []
     private(set) var isLoading = false
 
@@ -31,6 +31,8 @@ final class RelatedPagesModel {
         defer { isLoading = false }
 
         let documents = await index.documents(siteID: siteID)
+        guard currentPath == path else { return }
+
         let docID = SiteKnowledgeIndex.documentID(siteID: siteID, relativePath: path)
 
         // Semantic suggestions
@@ -40,15 +42,21 @@ final class RelatedPagesModel {
         } else {
             related = []
         }
+        guard currentPath == path else { return }
 
         let allSuggestions = LinkGraph.suggestLinks(
             forDocumentAt: path, in: documents, rankedRelated: related, limit: 12)
 
         suggestions = allSuggestions.filter { !ignored.contains($0.path) }
 
-        // Link-graph hints scoped to the current page
-        let analysis = LinkGraph.analyze(documents: documents)
-        orphanHints = analysis.orphanPages.filter { $0.path == path }
+        // Hop off main actor for graph analysis
+        let docs = documents
+        let analysis = await Task.detached(priority: .utility) {
+            LinkGraph.analyze(documents: docs)
+        }.value
+        guard currentPath == path else { return }
+
+        isOrphan = analysis.orphanPages.contains { $0.path == path }
         reciprocalHints = analysis.reciprocalGaps.filter { $0.sourcePath == path }
     }
 
@@ -60,7 +68,7 @@ final class RelatedPagesModel {
     func clear() {
         currentPath = nil
         suggestions = []
-        orphanHints = []
+        isOrphan = false
         reciprocalHints = []
     }
 }

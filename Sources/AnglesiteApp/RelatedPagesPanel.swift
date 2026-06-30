@@ -3,7 +3,7 @@ import SwiftUI
 import AnglesiteCore
 
 struct RelatedPagesPanel: View {
-    let model: RelatedPagesModel
+    @Bindable var model: RelatedPagesModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,7 +13,7 @@ struct RelatedPagesPanel: View {
                 ProgressView()
                     .controlSize(.small)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if model.suggestions.isEmpty && model.orphanHints.isEmpty && model.reciprocalHints.isEmpty {
+            } else if model.suggestions.isEmpty && !model.isOrphan && model.reciprocalHints.isEmpty {
                 ContentUnavailableView {
                     Label("No Suggestions", systemImage: "link")
                 } description: {
@@ -28,7 +28,7 @@ struct RelatedPagesPanel: View {
                         if !model.reciprocalHints.isEmpty {
                             reciprocalSection
                         }
-                        if !model.orphanHints.isEmpty {
+                        if model.isOrphan {
                             orphanSection
                         }
                     }
@@ -53,7 +53,7 @@ struct RelatedPagesPanel: View {
             Text("Suggested Links")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
-            ForEach(model.suggestions, id: \.path) { suggestion in
+            ForEach(model.suggestions) { suggestion in
                 SuggestionRow(suggestion: suggestion) {
                     model.ignore(suggestion)
                 }
@@ -66,7 +66,7 @@ struct RelatedPagesPanel: View {
             Text("Missing Reciprocal Links")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
-            ForEach(model.reciprocalHints, id: \.targetPath) { gap in
+            ForEach(model.reciprocalHints) { gap in
                 Label {
                     Text("Add a link back to **\(gap.targetPath)**")
                         .font(.callout)
@@ -94,7 +94,7 @@ struct RelatedPagesPanel: View {
 
 private struct SuggestionRow: View {
     let suggestion: LinkGraph.LinkSuggestion
-    let onIgnore: () -> Void
+    let onIgnore: @MainActor () -> Void
 
     var body: some View {
         HStack {

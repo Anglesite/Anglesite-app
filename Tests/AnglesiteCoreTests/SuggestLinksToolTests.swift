@@ -77,5 +77,36 @@ struct SuggestLinksToolTests {
         )
         #expect(suggestions.isEmpty)
     }
+
+    @Test("call returns message for empty path")
+    func callEmptyPath() async throws {
+        let index = SiteKnowledgeIndex()
+        let tool = SuggestLinksTool(index: index, siteID: "s")
+        let out = try await tool.call(arguments: .init(path: "  "))
+        #expect(out.contains("Provide a file path"))
+    }
+
+    @Test("call returns message for unknown document")
+    func callUnknownDoc() async throws {
+        let index = SiteKnowledgeIndex()
+        let tool = SuggestLinksTool(index: index, siteID: "s")
+        let out = try await tool.call(arguments: .init(path: "src/pages/nope.astro"))
+        #expect(out.contains("No indexed document"))
+    }
+
+    @Test("call returns unavailable message when no ranker is provided")
+    func callNoRanker() async throws {
+        let index = SiteKnowledgeIndex()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("suggest-tool-\(UUID().uuidString)", isDirectory: true)
+        let pagesDir = root.appendingPathComponent("src/pages", isDirectory: true)
+        try FileManager.default.createDirectory(at: pagesDir, withIntermediateDirectories: true)
+        try Data("---\ntitle: About\n---\nAbout us.".utf8).write(to: pagesDir.appendingPathComponent("about.astro"))
+        await index.rebuild(siteID: "s", projectRoot: root)
+
+        let tool = SuggestLinksTool(index: index, siteID: "s", ranker: nil)
+        let out = try await tool.call(arguments: .init(path: "src/pages/about.astro"))
+        #expect(out.contains("Semantic ranking is unavailable"))
+    }
 }
 #endif

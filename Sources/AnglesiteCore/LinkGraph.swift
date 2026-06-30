@@ -3,8 +3,10 @@ import Foundation
 /// Pure link-graph analysis over ``SiteKnowledgeIndex`` documents. No embeddings, no actors —
 /// reads ``Document.internalLinks`` to surface structural linking issues.
 public enum LinkGraph {
-    /// A missing reciprocal link: `sourcePath` is linked to by `targetPath` but does not link back.
-    public struct ReciprocalGap: Sendable, Equatable {
+    /// A missing reciprocal link: `sourcePath` is the page that should add a link,
+    /// `targetPath` is the page it should link back to.
+    public struct ReciprocalGap: Sendable, Equatable, Identifiable {
+        public var id: String { "\(sourcePath)→\(targetPath)" }
         public let sourcePath: String
         public let targetPath: String
     }
@@ -43,8 +45,8 @@ public enum LinkGraph {
         for doc in contentDocs {
             var targets = Set<String>()
             for link in doc.internalLinks {
-                let normalized = normalizeRoute(link)
-                if let targetPath = routeToPath[normalized], targetPath != doc.path {
+                if let normalized = normalizeRoute(link),
+                   let targetPath = routeToPath[normalized], targetPath != doc.path {
                     targets.insert(targetPath)
                 }
             }
@@ -88,12 +90,14 @@ public enum LinkGraph {
     /// Used by `SuggestLinksTool` to filter out already-linked targets.
     public static func existingTargets(
         for document: SiteKnowledgeIndex.Document,
-        in documents: [SiteKnowledgeIndex.Document]
+        in documents: [SiteKnowledgeIndex.Document],
+        routeIndex: [String: String]? = nil
     ) -> Set<String> {
-        let routeToPath = buildRouteIndex(documents)
+        let routeToPath = routeIndex ?? buildRouteIndex(documents)
         var targets = Set<String>()
         for link in document.internalLinks {
-            if let path = routeToPath[normalizeRoute(link)] {
+            if let normalized = normalizeRoute(link),
+               let path = routeToPath[normalized] {
                 targets.insert(path)
             }
         }
@@ -102,7 +106,7 @@ public enum LinkGraph {
 
     // MARK: - Internal helpers
 
-    static func isLinkableKind(_ kind: SiteKnowledgeIndex.Document.Kind) -> Bool {
+    private static func isLinkableKind(_ kind: SiteKnowledgeIndex.Document.Kind) -> Bool {
         kind == .page || kind == .post || kind == .content
     }
 
@@ -138,6 +142,10 @@ public enum LinkGraph {
     }
 
     /// `src/content/posts/hello.md` → `/posts/hello`.
+    /// NOTE: This is a heuristic — Astro content-collection routes are determined by the
+    /// `[...slug].astro` file path, not the `src/content/` tree. If the slug page lives at
+    /// e.g. `src/pages/blog/[...slug].astro`, the served URL is `/blog/hello`, not `/posts/hello`.
+    /// A future improvement should resolve routes via ContentGraph's actual served URLs.
     private static func routeFromContentPath(_ path: String) -> String {
         var r = path
         if r.hasPrefix("src/content/") { r.removeFirst("src/content/".count) }
@@ -146,7 +154,8 @@ public enum LinkGraph {
     }
 
     /// A suggested internal link target with its semantic confidence score.
-    public struct LinkSuggestion: Sendable, Equatable {
+    public struct LinkSuggestion: Sendable, Equatable, Identifiable {
+        public var id: String { path }
         public let path: String
         public let title: String?
         public let route: String
@@ -164,7 +173,8 @@ public enum LinkGraph {
         limit: Int = 8
     ) -> [LinkSuggestion] {
         guard let source = documents.first(where: { $0.path == path }) else { return [] }
-        let alreadyLinked = existingTargets(for: source, in: documents)
+        let index = buildRouteIndex(documents)
+        let alreadyLinked = existingTargets(for: source, in: documents, routeIndex: index)
         let docsByID = Dictionary(documents.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
 
         let eligible = rankedRelated.compactMap { ranked -> (SiteKnowledgeIndex.Document, Float)? in
@@ -176,13 +186,16 @@ public enum LinkGraph {
             else { return nil }
             return (target, ranked.score)
         }
-        guard !eligible.isEmpty else { return [] }
 
-        let scores = eligible.map(\.1)
-        let lo = scores.min()!, hi = scores.max()!
+        let top = Array(eligible.prefix(max(0, limit)))
+        guard !top.isEmpty else { return [] }
+
+        let scores = top.map(\.1)
+        let lo = scores.min() ?? 0
+        let hi = scores.max() ?? 1
         let range = hi - lo
 
-        return eligible.prefix(max(0, limit)).map { target, score in
+        return top.map { target, score in
             let normalized = range > 0 ? (score - lo) / range : 1.0
             let route = target.path.hasPrefix("src/pages/")
                 ? routeFromPagePath(target.path)
@@ -192,7 +205,9 @@ public enum LinkGraph {
     }
 
     /// Normalizes a link href for lookup: strips trailing slash, fragment, query.
-    static func normalizeRoute(_ href: String) -> String {
+    /// Returns `nil` for relative paths (`./`, `../`) that can't be resolved without
+    /// the source file's directory context.
+    static func normalizeRoute(_ href: String) -> String? {
         var r = href
         // Strip fragment and query
         if let hash = r.firstIndex(of: "#") { r = String(r[r.startIndex..<hash]) }
@@ -202,7 +217,7 @@ public enum LinkGraph {
         // Handle relative paths: only absolute routes are matched.
         // Relative `./` and `../` links are dropped (they'd need the source file's
         // directory context to resolve, which is a follow-up enhancement).
-        if r.hasPrefix("./") || r.hasPrefix("../") { return "" }
+        if r.hasPrefix("./") || r.hasPrefix("../") { return nil }
         return r
     }
 }

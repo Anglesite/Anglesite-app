@@ -32,7 +32,12 @@ public struct FindLinkOpportunitiesTool: Tool, Sendable {
     }
 
     /// Visible for testing — formats a `LinkAnalysis` into a human-readable report.
-    static func formatReport(_ analysis: LinkGraph.LinkAnalysis) -> String {
+    internal static func formatReport(_ analysis: LinkGraph.LinkAnalysis) -> String {
+        let overLinked = analysis.overLinkedPages(threshold: 15)
+        if analysis.orphanPages.isEmpty && analysis.reciprocalGaps.isEmpty && overLinked.isEmpty {
+            return "Internal linking looks healthy — no orphan pages, no missing reciprocal links, no over-linked pages. ✓"
+        }
+
         var sections: [String] = []
 
         // Orphan pages
@@ -65,7 +70,6 @@ public struct FindLinkOpportunitiesTool: Tool, Sendable {
         }
 
         // Over-linked
-        let overLinked = analysis.overLinkedPages(threshold: 15)
         if !overLinked.isEmpty {
             var lines = ["Over-linked pages (>15 outbound links):"]
             for doc in overLinked.prefix(10) {
@@ -73,10 +77,6 @@ public struct FindLinkOpportunitiesTool: Tool, Sendable {
                 lines.append("  • \(doc.path) — \(count) outbound links")
             }
             sections.append(lines.joined(separator: "\n"))
-        }
-
-        if analysis.orphanPages.isEmpty && analysis.reciprocalGaps.isEmpty && overLinked.isEmpty {
-            return "Internal linking looks healthy — no orphan pages, no missing reciprocal links, no over-linked pages. ✓"
         }
 
         return sections.joined(separator: "\n\n")
