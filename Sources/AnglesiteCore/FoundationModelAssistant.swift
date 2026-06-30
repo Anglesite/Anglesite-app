@@ -268,6 +268,8 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         }
         if knowledgeIndex != nil {
             names.append(SearchKnowledgeTool.toolName)
+            names.append(SuggestLinksTool.toolName)
+            names.append(FindLinkOpportunitiesTool.toolName)
         }
         if integrationService != nil {
             names.append(SetupIntegrationTool.toolName)
@@ -323,6 +325,8 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         }
         if let knowledgeIndex {
             tools.append(SearchKnowledgeTool(index: knowledgeIndex, siteID: context.siteID, ranker: semanticRanker))
+            tools.append(SuggestLinksTool(index: knowledgeIndex, siteID: context.siteID, ranker: semanticRanker))
+            tools.append(FindLinkOpportunitiesTool(index: knowledgeIndex, siteID: context.siteID))
         }
         if let integrationService {
             tools.append(SetupIntegrationTool(service: integrationService, siteID: context.siteID))
