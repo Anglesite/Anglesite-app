@@ -25,6 +25,9 @@ public enum AssistantEvent: Sendable, Equatable {
     case cancelled
     /// The backing process/session exited with this OS code (`0` is clean).
     case backendExited(code: Int32)
+    /// Files retrieved as RAG context for this turn. The chat panel surfaces these as clickable
+    /// citation chips below the assistant's response.
+    case citations([RetrievedCitation])
 }
 
 /// Token/cost telemetry for one completed turn.

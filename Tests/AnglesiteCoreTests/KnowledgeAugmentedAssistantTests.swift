@@ -82,6 +82,61 @@ struct KnowledgeAugmentedAssistantTests {
         #expect(prompt?.contains("User request:\nFind every place this CTA appears.") == true)
     }
 
+    @Test("converse emits .citations event before the base stream")
+    func converseEmitsCitationsEvent() async throws {
+        let root = try makeSite()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "export const CTA = 'Book a consultation';\n".write(
+            to: root.appendingPathComponent("src/components/CTA.astro"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let base = CapturingConversationalAssistant()
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
+        let assistant = KnowledgeAugmentedAssistant(base: base, index: index)
+        let context = AssistantContext(siteID: "site", siteDirectory: root)
+
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(prompt: "CTA", context: context) {
+            events.append(event)
+        }
+
+        guard case .citations(let citations) = events.first else {
+            Issue.record("Expected first event to be .citations, got \(events.first.debugDescription)")
+            return
+        }
+        #expect(citations.count >= 1)
+        #expect(citations.first?.path == "src/components/CTA.astro")
+        #expect(citations.first?.kind == .component)
+    }
+
+    @Test("converse with no matching results skips .citations event")
+    func converseNoMatchSkipsCitations() async throws {
+        let root = try makeSite()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "# About\n".write(
+            to: root.appendingPathComponent("src/pages/about.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let base = CapturingConversationalAssistant()
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
+        let assistant = KnowledgeAugmentedAssistant(base: base, index: index)
+        let context = AssistantContext(siteID: "site", siteDirectory: root)
+
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(prompt: "Explain quantum entanglement", context: context) {
+            events.append(event)
+        }
+
+        let hasCitations = events.contains { if case .citations = $0 { return true } else { return false } }
+        #expect(!hasCitations)
+    }
+
     @Test("generate leaves unrelated prompts untouched")
     func generateLeavesUnmatchedPromptUntouched() async throws {
         let root = try makeSite()

@@ -1,0 +1,134 @@
+import SwiftUI
+import AnglesiteCore
+
+/// Renders retrieved RAG citations as a horizontal strip of clickable chips below an assistant
+/// response. Each chip shows a kind badge and the file's last path component; clicking opens
+/// the file in the default editor.
+struct CitationRowView: View {
+    let citations: [RetrievedCitation]
+    let siteDirectory: URL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Sources")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            FlowLayout(spacing: 6) {
+                ForEach(citations) { citation in
+                    CitationChip(citation: citation) {
+                        let url = siteDirectory.appendingPathComponent(citation.path)
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Retrieved context from \(citations.count) file\(citations.count == 1 ? "" : "s")")
+    }
+}
+
+private struct CitationChip: View {
+    let citation: RetrievedCitation
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(citation.kind.rawValue.uppercased())
+                    .font(.system(.caption2, design: .rounded, weight: .semibold))
+                    .foregroundStyle(kindColor)
+                Text(fileName)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(citation.path)
+        .accessibilityLabel("\(citation.kind.rawValue) \(fileName)")
+        .accessibilityHint("Opens \(citation.path) in the default editor")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var fileName: String {
+        (citation.path as NSString).lastPathComponent
+    }
+
+    private var kindColor: Color {
+        switch citation.kind {
+        case .page: return .blue
+        case .post: return .purple
+        case .component: return .orange
+        case .layout: return .teal
+        case .content: return .indigo
+        case .config: return .gray
+        case .style: return .pink
+        case .script: return .yellow
+        case .other: return .secondary
+        }
+    }
+}
+
+/// A simple wrapping flow layout for citation chips. Uses a horizontal layout that wraps to
+/// the next line when chips exceed the available width.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = computeRows(proposal: proposal, subviews: subviews)
+        guard !rows.isEmpty else { return .zero }
+        let height = rows.reduce(CGFloat(0)) { sum, row in
+            sum + row.height + (sum > 0 ? spacing : 0)
+        }
+        let width = rows.map(\.width).max() ?? 0
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = computeRows(proposal: proposal, subviews: subviews)
+        var y = bounds.minY
+        var subviewIndex = 0
+        for row in rows {
+            var x = bounds.minX
+            for _ in 0..<row.count {
+                let size = subviews[subviewIndex].sizeThatFits(.unspecified)
+                subviews[subviewIndex].place(at: CGPoint(x: x, y: y), proposal: .unspecified)
+                x += size.width + spacing
+                subviewIndex += 1
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row {
+        var count: Int
+        var width: CGFloat
+        var height: CGFloat
+    }
+
+    private func computeRows(proposal: ProposedViewSize, subviews: Subviews) -> [Row] {
+        let maxWidth = proposal.width ?? .infinity
+        var rows: [Row] = []
+        var currentRow = Row(count: 0, width: 0, height: 0)
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let newWidth = currentRow.width + (currentRow.count > 0 ? spacing : 0) + size.width
+            if currentRow.count > 0 && newWidth > maxWidth {
+                rows.append(currentRow)
+                currentRow = Row(count: 1, width: size.width, height: size.height)
+            } else {
+                currentRow.count += 1
+                currentRow.width = newWidth
+                currentRow.height = max(currentRow.height, size.height)
+            }
+        }
+        if currentRow.count > 0 { rows.append(currentRow) }
+        return rows
+    }
+}

@@ -300,6 +300,37 @@ struct ConversationTranscriptAppendTests {
         #expect(t.messages.first?.role == .user)
     }
 
+    @Test(".citations event appends a .citation row with metadata")
+    func citationsEventAppendsCitationRow() {
+        var t = ConversationTranscript()
+        t.beginTurn(userPrompt: "tell me about the CTA")
+        let citations = [
+            RetrievedCitation(
+                id: "src/components/CTA.astro:1-5",
+                path: "src/components/CTA.astro",
+                kind: .component,
+                title: "CTA",
+                lineRange: 1...5,
+                score: 0.9
+            ),
+        ]
+        t.apply(.citations(citations))
+        let citationRow = t.messages.first { $0.role == .citation }
+        #expect(citationRow != nil)
+        #expect(citationRow?.citationMetadata?.citations.count == 1)
+        #expect(citationRow?.citationMetadata?.citations.first?.path == "src/components/CTA.astro")
+        #expect(citationRow?.content == "")
+    }
+
+    @Test(".citations with empty array is a no-op")
+    func citationsEmptyArrayIsNoOp() {
+        var t = ConversationTranscript()
+        t.beginTurn(userPrompt: "hi")
+        let before = t.messages.count
+        t.apply(.citations([]))
+        #expect(t.messages.count == before)
+    }
+
     @Test("inserting a row before the in-flight assistant keeps deltas on the assistant")
     func insertBeforeInFlightKeepsDeltasOnAssistant() {
         var t = ConversationTranscript()

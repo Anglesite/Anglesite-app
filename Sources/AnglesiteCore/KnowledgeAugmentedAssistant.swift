@@ -19,12 +19,23 @@ public actor KnowledgeAugmentedAssistant: ConversationalAssistant {
     }
 
     public func converse(prompt: String, context: AssistantContext) async throws -> AsyncStream<AssistantEvent> {
-        let enriched = await enrichedPrompt(prompt, context: context)
-        return try await base.converse(prompt: enriched, context: context)
+        let (enriched, citations) = await enrichedContext(prompt, context: context)
+        let baseStream = try await base.converse(prompt: enriched, context: context)
+        guard !citations.isEmpty else { return baseStream }
+        return AsyncStream { continuation in
+            let citationItems = citations
+            Task {
+                continuation.yield(.citations(citationItems))
+                for await event in baseStream {
+                    continuation.yield(event)
+                }
+                continuation.finish()
+            }
+        }
     }
 
     public func generate(prompt: String, context: AssistantContext) async throws -> AsyncThrowingStream<String, Error> {
-        let enriched = await enrichedPrompt(prompt, context: context)
+        let (enriched, _) = await enrichedContext(prompt, context: context)
         return try await base.generate(prompt: enriched, context: context)
     }
 
@@ -34,7 +45,7 @@ public actor KnowledgeAugmentedAssistant: ConversationalAssistant {
         context: AssistantContext,
         resultType: T.Type
     ) async throws -> T {
-        let enriched = await enrichedPrompt(prompt, context: context)
+        let (enriched, _) = await enrichedContext(prompt, context: context)
         return try await base.generateStructured(
             prompt: enriched,
             context: context,
@@ -51,13 +62,38 @@ public actor KnowledgeAugmentedAssistant: ConversationalAssistant {
         await base.resetSession()
     }
 
-    private func enrichedPrompt(_ prompt: String, context: AssistantContext) async -> String {
-        guard let retrieved = await index.formattedContext(siteID: context.siteID, query: prompt) else { return prompt }
-        return """
-        \(retrieved)
+    private func enrichedContext(_ prompt: String, context: AssistantContext) async -> (prompt: String, citations: [RetrievedCitation]) {
+        let results = await index.search(
+            siteID: context.siteID,
+            query: prompt,
+            options: context.searchOptions
+        )
+        guard !results.isEmpty else { return (prompt, []) }
+        let formatted = Self.formatContext(results)
+        let enriched = """
+        \(formatted)
 
         User request:
         \(prompt)
         """
+        return (enriched, results.map(RetrievedCitation.init))
+    }
+
+    private static func formatContext(_ results: [SiteKnowledgeIndex.SearchResult]) -> String {
+        var lines = [
+            "Relevant project context retrieved from this Astro site:",
+            "Use this context when it is relevant. Cite file paths when answering.",
+        ]
+        for result in results {
+            let lineLabel = result.lineRange.map { range in
+                range.lowerBound == range.upperBound
+                    ? "line \(range.lowerBound)"
+                    : "lines \(range.lowerBound)-\(range.upperBound)"
+            } ?? "excerpt"
+            let title = result.document.title.map { " - \($0)" } ?? ""
+            lines.append("\n[\(result.document.path):\(lineLabel)]\(title)")
+            lines.append(result.excerpt)
+        }
+        return lines.joined(separator: "\n")
     }
 }

@@ -64,6 +64,9 @@ public struct AssistantContext: Sendable {
     public let selectedElementSelector: JSONValue?
     /// Prior turns, oldest first.
     public let conversationHistory: [AssistantMessage]
+    /// Optional kind filter for RAG retrieval. When non-nil, only documents matching these kinds
+    /// are considered during the pre-prompt enrichment search.
+    public let searchOptions: SiteKnowledgeIndex.SearchOptions
 
     public init(
         siteID: String,
@@ -71,7 +74,8 @@ public struct AssistantContext: Sendable {
         currentPageRoute: String? = nil,
         currentPageContent: String? = nil,
         selectedElementSelector: JSONValue? = nil,
-        conversationHistory: [AssistantMessage] = []
+        conversationHistory: [AssistantMessage] = [],
+        searchOptions: SiteKnowledgeIndex.SearchOptions = .init()
     ) {
         self.siteID = siteID
         self.siteDirectory = siteDirectory
@@ -79,6 +83,7 @@ public struct AssistantContext: Sendable {
         self.currentPageContent = currentPageContent
         self.selectedElementSelector = selectedElementSelector
         self.conversationHistory = conversationHistory
+        self.searchOptions = searchOptions
     }
 }
 

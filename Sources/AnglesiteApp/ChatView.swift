@@ -19,6 +19,7 @@ struct ChatView: View {
     /// Binds the prompt input. Lives in the view (not the model) because it's pure transient
     /// UI state; the model only sees the final string when the user hits Send.
     @State private var draft: String = ""
+    @State private var activeKinds: Set<SiteKnowledgeIndex.Document.Kind>?
     @FocusState private var inputFocused: Bool
     var body: some View {
         VStack(spacing: 0) {
@@ -144,6 +145,7 @@ struct ChatView: View {
 
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 8) {
+            kindFilterMenu
             TextField("Ask the assistant…", text: $draft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...6)
@@ -173,11 +175,49 @@ struct ChatView: View {
         .padding(.vertical, 10)
     }
 
+    private var kindFilterMenu: some View {
+        Menu {
+            ForEach(SiteKnowledgeIndex.Document.Kind.allCases, id: \.self) { kind in
+                Toggle(kind.rawValue.capitalized, isOn: kindBinding(for: kind))
+            }
+            Divider()
+            Button("Clear filter") { activeKinds = nil }
+                .disabled(activeKinds == nil)
+        } label: {
+            Image(systemName: activeKinds != nil
+                  ? "line.3.horizontal.decrease.circle.fill"
+                  : "line.3.horizontal.decrease.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(activeKinds.map { "Filtering: \($0.map { $0.rawValue }.sorted().joined(separator: ", "))" }
+              ?? "Filter retrieval by content type")
+        .accessibilityLabel("Content type filter")
+        .accessibilityValue(activeKinds.map { "\($0.count) selected" } ?? "All types")
+    }
+
+    private func kindBinding(for kind: SiteKnowledgeIndex.Document.Kind) -> Binding<Bool> {
+        Binding(
+            get: { activeKinds?.contains(kind) ?? false },
+            set: { isOn in
+                if isOn {
+                    var kinds = activeKinds ?? []
+                    kinds.insert(kind)
+                    activeKinds = kinds
+                } else {
+                    activeKinds?.remove(kind)
+                    if activeKinds?.isEmpty == true { activeKinds = nil }
+                }
+            }
+        )
+    }
+
     private func submitIfReady() {
         let prompt = draft
-        model.send(prompt)
+        let options = activeKinds.map { SiteKnowledgeIndex.SearchOptions(kinds: $0) } ?? .init()
+        model.send(prompt, searchOptions: options)
         if !model.isStreaming { return }
-        // Clear input only after a successful start (model.isStreaming flipped to true).
         draft = ""
         inputFocused = true
     }
@@ -212,6 +252,10 @@ private struct MessageRow: View {
             editRow
         } else if message.role == .annotation {
             AnnotationRowView(message: message, model: model)
+        } else if message.role == .citation {
+            if let meta = message.citationMetadata {
+                CitationRowView(citations: meta.citations, siteDirectory: model.siteDirectory)
+            }
         } else {
             HStack {
                 if message.role == .user { Spacer(minLength: 32) }
@@ -297,7 +341,7 @@ private struct MessageRow: View {
         case .assistant: return "Assistant said: \(message.content)"
         case .error:     return "Error: \(message.content)"
         case .system:    return "System: \(message.content)"
-        case .edit, .annotation: return message.content  // rendered by their own rows
+        case .edit, .annotation, .citation: return message.content  // rendered by their own rows
         }
     }
 
@@ -316,6 +360,7 @@ private struct MessageRow: View {
         case .error: return Color.red.opacity(0.15)
         case .edit: return Color.secondary.opacity(0.06)  // editRow handles .edit rendering; this is unreachable
         case .annotation: return Color.secondary.opacity(0.12)
+        case .citation: return Color.secondary.opacity(0.06)  // citationRow handles rendering; unreachable
         }
     }
 

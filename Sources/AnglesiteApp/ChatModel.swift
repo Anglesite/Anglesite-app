@@ -92,7 +92,7 @@ final class ChatModel {
     // MARK: Dependencies
 
     private let siteID: String
-    private let siteDirectory: URL
+    let siteDirectory: URL
     private let assistant: any ConversationalAssistant
     private let history: ChatHistoryStore
     /// Sticky-note source. Wired to the per-site `SiteRuntime.mcpClient` in production so
@@ -200,7 +200,7 @@ final class ChatModel {
 
     /// Sends a user prompt to the agent and consumes the resulting event stream. No-op while
     /// a turn is in flight.
-    func send(_ prompt: String) {
+    func send(_ prompt: String, searchOptions: SiteKnowledgeIndex.SearchOptions = .init()) {
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isStreaming else { return }
 
@@ -213,7 +213,7 @@ final class ChatModel {
 
         isStreaming = true
         streamTask = Task { @MainActor [weak self] in
-            await self?.consumeAssistantStream(prompt: trimmed)
+            await self?.consumeAssistantStream(prompt: trimmed, searchOptions: searchOptions)
         }
     }
 
@@ -303,10 +303,10 @@ final class ChatModel {
 
     // MARK: Event consumption
 
-    private func consumeAssistantStream(prompt: String) async {
+    private func consumeAssistantStream(prompt: String, searchOptions: SiteKnowledgeIndex.SearchOptions = .init()) async {
         let stream: AsyncStream<AssistantEvent>
         do {
-            let context = AssistantContext(siteID: siteID, siteDirectory: siteDirectory)
+            let context = AssistantContext(siteID: siteID, siteDirectory: siteDirectory, searchOptions: searchOptions)
             stream = try await assistant.converse(prompt: prompt, context: context)
         } catch {
             transcript.endTurn()
@@ -350,15 +350,17 @@ final class ChatModel {
     // MARK: Helpers
 
     private func persist(_ message: Message) {
+        // Citations are ephemeral per-session (re-computed on each turn), like annotations.
+        guard message.role != .citation else { return }
         let role: ChatHistoryStore.Role = {
             switch message.role {
             case .user: return .user
             case .assistant: return .assistant
-            // `.system`/`.error`/`.annotation` are never routed through `persist` — they're
-            // appended directly. Annotations in particular are reloaded fresh from MCP each
-            // session via `loadAnnotations()`, so they're intentionally non-persisted. This
-            // arm only keeps the switch exhaustive.
-            case .system, .error, .annotation: return .assistant
+            // `.system`/`.error`/`.annotation`/`.citation` are never routed through `persist` —
+            // they're appended directly or guarded above. Annotations are reloaded fresh from
+            // MCP each session via `loadAnnotations()`, and citations are re-computed per turn.
+            // This arm only keeps the switch exhaustive.
+            case .system, .error, .annotation, .citation: return .assistant
             case .edit: return .edit
             }
         }()
