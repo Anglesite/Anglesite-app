@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import WebKit
 @testable import AnglesiteBridge
+import AnglesiteCore
 
 /// `@MainActor` because `WebViewBridge.makeOverlayUserScript` builds a `WKUserScript`, and WebKit
 /// types must be created on the main thread. XCTest ran these on the main thread implicitly; Swift
@@ -51,6 +52,20 @@ struct WebViewBridgeTests {
     func localDevConfigurationEnablesWritingTools() {
         let config = WebViewBridge.localDevConfiguration()
         #expect(config.writingToolsBehavior == .complete)
+    }
+
+    @Test("injectSessionToken sets an HttpOnly Secure cookie for the domain (#67)")
+    func injectSessionTokenSetsCookie() async throws {
+        let store = WKWebsiteDataStore.nonPersistent()
+        let token = SessionToken(value: "deadbeef" + String(repeating: "0", count: 56))
+        await WebViewBridge.injectSessionToken(into: store.httpCookieStore, token: token, for: "preview.trycloudflare.com")
+        let cookies = await store.httpCookieStore.allCookies()
+        let cookie = try #require(cookies.first { $0.name == WebViewBridge.sessionTokenCookieName })
+        #expect(cookie.value == token.value)
+        #expect(cookie.domain == "preview.trycloudflare.com")
+        #expect(cookie.isSecure)
+        #expect(cookie.isHTTPOnly)
+        #expect(cookie.path == "/")
     }
 
     @Test("applyPreviewDefaults makes the web view inspectable in all build configurations")

@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "references": [
+    { "path": "./tsconfig.worker.json" },
+    { "path": "./tsconfig.guest.json" }
+  ],
+  "files": []
+}

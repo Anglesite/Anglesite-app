@@ -1,0 +1,34 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "anglesite-control-worker",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      // The Dockerfile lives in the Anglesite template repo (NOT this dir).
+      // During Deploy-to-Cloudflare, Cloudflare builds and pushes this image.
+      // For local wrangler dev, set CONTAINER_IMAGE env var to a pre-built digest.
+      "image": "ghcr.io/anglesite/anglesite-devserver:latest",
+      "instance_type": "standard-2",
+      "max_instances": 10
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [{ "class_name": "Sandbox", "name": "Sandbox" }]
+  },
+
+  "migrations": [{ "new_sqlite_classes": ["Sandbox"], "tag": "v1" }],
+
+  "vars": {
+    "SITE_DIR": "/workspace",
+    "ASTRO_PORT": "4321",
+    "PROXY_PORT": "8080",
+    "MCP_PORT": "4399"
+  }
+  // CONTROL_API_SECRET → wrangler secret put CONTROL_API_SECRET
+}

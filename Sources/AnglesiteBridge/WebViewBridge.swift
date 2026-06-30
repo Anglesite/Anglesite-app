@@ -1,5 +1,6 @@
 import Foundation
 import WebKit
+import AnglesiteCore
 
 /// Bridges the WKWebView preview to the native edit pipeline.
 ///
@@ -62,6 +63,33 @@ public enum WebViewBridge {
     @MainActor
     public static func applyPreviewDefaults(to webView: WKWebView) {
         webView.isInspectable = true
+    }
+
+    /// The cookie name the in-container auth-proxy expects (design 2026-06-23 §4).
+    public static let sessionTokenCookieName = "session_token"
+
+    /// Injects the session token as an HttpOnly, Secure cookie into a `WKHTTPCookieStore` so the
+    /// `WKWebView` carries it on every request (including WebSocket upgrades for HMR) to the
+    /// tunneled auth-proxy. Call this before loading the preview URL.
+    @MainActor
+    public static func injectSessionToken(
+        into cookieStore: WKHTTPCookieStore,
+        token: SessionToken,
+        for domain: String
+    ) async {
+        let properties: [HTTPCookiePropertyKey: Any] = [
+            .name: sessionTokenCookieName,
+            .value: token.value,
+            .domain: domain,
+            .path: "/",
+            .secure: "TRUE",
+            HTTPCookiePropertyKey("HttpOnly"): true,
+        ]
+        guard let cookie = HTTPCookie(properties: properties) else {
+            assertionFailure("Failed to create session token cookie for domain \(domain)")
+            return
+        }
+        await cookieStore.setCookie(cookie)
     }
 
     /// Opt the preview into the full inline Writing Tools experience (#91).

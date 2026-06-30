@@ -9,8 +9,9 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var queue: [Response] = []
     nonisolated(unsafe) static var lastRequestBodies: [Data] = []
     nonisolated(unsafe) static var lastSessionHeaders: [String?] = []
+    nonisolated(unsafe) static var lastAuthHeaders: [String?] = []
 
-    static func reset() { queue = []; lastRequestBodies = []; lastSessionHeaders = [] }
+    static func reset() { queue = []; lastRequestBodies = []; lastSessionHeaders = []; lastAuthHeaders = [] }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -25,6 +26,7 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
             Self.lastRequestBodies.append(request.httpBody ?? Data())
         }
         Self.lastSessionHeaders.append(request.value(forHTTPHeaderField: "Mcp-Session-Id"))
+        Self.lastAuthHeaders.append(request.value(forHTTPHeaderField: "Authorization"))
 
         let r = Self.queue.isEmpty
             ? Response(status: 500, headers: [:], body: Data())
@@ -39,11 +41,11 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
 
 @Suite(.serialized)
 struct HTTPTransportTests {
-    private func makeTransport() -> (HTTPTransport, URLSession) {
+    private func makeTransport(bearerToken: SessionToken? = nil) -> (HTTPTransport, URLSession) {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
         let session = URLSession(configuration: config)
-        let t = HTTPTransport(endpoint: URL(string: "http://127.0.0.1:4399/mcp")!, urlSession: session)
+        let t = HTTPTransport(endpoint: URL(string: "http://127.0.0.1:4399/mcp")!, bearerToken: bearerToken, urlSession: session)
         return (t, session)
     }
 
@@ -101,6 +103,35 @@ struct HTTPTransportTests {
         var iterator = t.inbound().makeAsyncIterator()
         let next = await iterator.next()
         #expect(next == nil)
+    }
+
+    @Test("Authorization header sent when bearerToken is set") func authHeaderWithToken() async throws {
+        StubURLProtocol.reset()
+        StubURLProtocol.queue.append(.init(
+            status: 200,
+            headers: ["Content-Type": "application/json"],
+            body: #"{"jsonrpc":"2.0","id":1,"result":{}}"#.data(using: .utf8)!
+        ))
+        let token = SessionToken(value: "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab")
+        let (t, _) = makeTransport(bearerToken: token)
+        try await t.open()
+        try await t.send(.object(["jsonrpc": .string("2.0"), "id": .int(1), "method": .string("initialize")]))
+        #expect(StubURLProtocol.lastAuthHeaders == ["Bearer \(token.value)"])
+        await t.close()
+    }
+
+    @Test("No Authorization header when bearerToken is nil") func noAuthHeaderWithoutToken() async throws {
+        StubURLProtocol.reset()
+        StubURLProtocol.queue.append(.init(
+            status: 200,
+            headers: ["Content-Type": "application/json"],
+            body: #"{"jsonrpc":"2.0","id":1,"result":{}}"#.data(using: .utf8)!
+        ))
+        let (t, _) = makeTransport()
+        try await t.open()
+        try await t.send(.object(["jsonrpc": .string("2.0"), "id": .int(1), "method": .string("initialize")]))
+        #expect(StubURLProtocol.lastAuthHeaders == [nil])
+        await t.close()
     }
 
     @Test("MCPClient.connect handshakes and lists tools over HTTP") func clientOverHTTP() async throws {
