@@ -49,6 +49,7 @@ struct SiteWindow: View {
     private let contentIndexerStore: ContentIndexerStore
 
     private let integrationOps = IntegrationOperations.live()
+    private let contentCreation: ContentCreationWorkflow
     private let contentTypeRegistry = ContentTypeRegistry()
 
     init(
@@ -64,6 +65,11 @@ struct SiteWindow: View {
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
         self.contentIndexerStore = contentIndexerStore
+        self.contentCreation = ContentCreationWorkflow.native(
+            contentGraph: contentGraph,
+            knowledgeIndex: knowledgeIndex,
+            siteDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory }
+        )
         _preview = State(initialValue: PreviewModel(
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
@@ -913,17 +919,12 @@ struct SiteWindow: View {
         template: ContentScaffold.PageTemplate
     ) async -> ContentCreateResult {
         guard let site else { return .siteNotFound }
-        let ops = NativeContentOperations(siteDirectory: { id in
-            await SiteStore.shared.find(id: id)?.sourceDirectory
-        })
-        let result = await ops.createPage(
+        return await contentCreation.createPage(
             siteID: site.id,
-            name: title,
+            title: title,
             route: route,
             template: template
         )
-        await refreshContentGraphIfCreated(result, site: site)
-        return result
     }
 
     private func createCollectionEntry(
@@ -932,37 +933,11 @@ struct SiteWindow: View {
         descriptor: ContentTypeDescriptor
     ) async -> ContentCreateResult {
         guard let site else { return .siteNotFound }
-        let ops = NativeContentOperations(siteDirectory: { id in
-            await SiteStore.shared.find(id: id)?.sourceDirectory
-        })
-        let result = await ops.createTyped(
+        return await contentCreation.createTyped(
             siteID: site.id,
             typeID: descriptor.id,
             title: title,
             slug: slug
-        )
-        await refreshContentGraphIfCreated(result, site: site)
-        return result
-    }
-
-    private func refreshContentGraphIfCreated(
-        _ result: ContentCreateResult,
-        site: SiteStore.Site
-    ) async {
-        guard case let .created(filePath, _) = result else { return }
-        let listing = await Task.detached(priority: .userInitiated) {
-            ContentScanner.scan(projectRoot: site.sourceDirectory, siteID: site.id)
-        }.value
-        await contentGraph.load(
-            siteID: site.id,
-            pages: listing.pages,
-            posts: listing.posts,
-            images: listing.images
-        )
-        await knowledgeIndex.upsertFile(
-            siteID: site.id,
-            projectRoot: site.sourceDirectory,
-            relativePath: filePath
         )
     }
 
