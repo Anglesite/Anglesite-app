@@ -15,13 +15,17 @@ import AnglesiteCore
 final class FileEditorModel {
     let file: FileRef
     var text: String = ""
-    private(set) var savedText: String = ""
-    private(set) var lastModified: Date?
+    private var fileSession = EditableFileSession()
+    var savedText: String { fileSession.savedContents }
+    var lastModified: Date? { fileSession.lastModified }
     private(set) var loadError: String?
     private(set) var isLoading = false
     /// Non-nil ⟺ the on-disk file changed under a dirty buffer and the user must choose
     /// Keep/Reload. Drives the conflict alert in `MainPaneEditorView`.
-    var conflictDiskContents: String?
+    var conflictDiskContents: String? {
+        get { fileSession.conflictDiskContents }
+        set { fileSession.conflictDiskContents = newValue }
+    }
 
     /// True only when there are unsaved edits AND the file loaded cleanly and isn't mid-load. The
     /// `loadError == nil` term means an errored file is never "dirty", so callers (e.g. the Save
@@ -38,12 +42,7 @@ final class FileEditorModel {
         defer { isLoading = false }
         let url = file.url
         do {
-            let loaded = try await Task.detached(priority: .userInitiated) {
-                try FileDocumentIO.load(url)
-            }.value
-            text = loaded.contents
-            savedText = loaded.contents
-            lastModified = loaded.modificationDate
+            text = try await fileSession.load(from: url)
             loadError = nil
             warnIfNoModificationDate(after: "load")
         } catch {
@@ -58,11 +57,7 @@ final class FileEditorModel {
         let url = file.url
         let contents = text
         do {
-            let mtime = try await Task.detached(priority: .userInitiated) {
-                try FileDocumentIO.save(contents, to: url)
-            }.value
-            lastModified = mtime
-            savedText = contents
+            try await fileSession.save(contents, to: url)
             warnIfNoModificationDate(after: "save")
             return true
         } catch {
@@ -76,13 +71,7 @@ final class FileEditorModel {
     /// rather than clobbering the other tool's edit. Returns true when it is safe to leave.
     func flushBeforeLeaving() async -> Bool {
         guard isDirty else { return true }
-        let url = file.url
-        let known = lastModified
-        let change = try? await Task.detached(priority: .userInitiated) {
-            try FileDocumentIO.externalChange(at: url, lastKnownModificationDate: known, bufferIsDirty: true)
-        }.value
-        if case .conflict(let disk)? = change {
-            conflictDiskContents = disk
+        guard await fileSession.canFlushBeforeLeaving(file: file.url, bufferIsDirty: true) else {
             return false
         }
         return await save()
@@ -91,39 +80,24 @@ final class FileEditorModel {
     /// Re-check the file when the window regains focus — chat/overlay/CLI may have written it.
     func checkExternalChange() async {
         guard loadError == nil else { return }
-        let url = file.url
-        let known = lastModified
         let dirty = isDirty
-        let change = try? await Task.detached(priority: .userInitiated) {
-            try FileDocumentIO.externalChange(at: url, lastKnownModificationDate: known, bufferIsDirty: dirty)
-        }.value
+        let change = await fileSession.externalChange(at: file.url, bufferIsDirty: dirty)
         guard let change else { return }
         switch change {
         case .none:
             break
         case .reloadable(let disk):
-            text = disk; savedText = disk
-            lastModified = await freshModificationDate()
+            text = disk
         case .conflict(let disk):
             conflictDiskContents = disk
         }
     }
 
-    func keepMyChanges() { conflictDiskContents = nil }
+    func keepMyChanges() { fileSession.keepMyChanges() }
 
     func reloadFromDisk() async {
-        guard let disk = conflictDiskContents else { return }
+        guard let disk = await fileSession.reloadFromConflict(file: file.url) else { return }
         text = disk
-        savedText = disk
-        lastModified = await freshModificationDate()
-        conflictDiskContents = nil
-    }
-
-    private func freshModificationDate() async -> Date? {
-        let url = file.url
-        return try? await Task.detached(priority: .userInitiated) {
-            try FileDocumentIO.load(url).modificationDate
-        }.value
     }
 
     /// Surface (in the debug pane) when a file has no modification date after a successful load/save:
@@ -135,7 +109,7 @@ final class FileEditorModel {
         Task {
             await LogCenter.shared.append(
                 source: "editor", stream: .stderr,
-                text: "No modification date for \(path) after \(op); external-change detection is disabled for this file."
+                text: EditableFileSession.missingModificationDateWarning(after: op, path: path)
             )
         }
     }

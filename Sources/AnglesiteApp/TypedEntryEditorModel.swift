@@ -19,15 +19,18 @@ final class TypedEntryEditorModel: InspectorEditorModel {
 
     var values: TypedContentEditor.Values = .init()
     private var savedValues: TypedContentEditor.Values = .init()
-    private var contents: String = ""               // last-loaded/saved file text (verbatim base)
-    private var lastModified: Date?
+    private var fileSession = EditableFileSession()
+    private var contents: String { fileSession.savedContents } // last-loaded/saved file text (verbatim base)
     private var numberDrafts: [String: String] = [:]
     /// Guards against a concurrent second `save()` capturing a stale `contents` base while an
     /// earlier save is still in flight (e.g. ⌘S mash, or a teardown flush racing a save).
     private var isSaving = false
     private(set) var loadError: String?
     private(set) var isLoading = false
-    var conflictDiskContents: String?
+    var conflictDiskContents: String? {
+        get { fileSession.conflictDiskContents }
+        set { fileSession.conflictDiskContents = newValue }
+    }
 
     var isDirty: Bool { values != savedValues && loadError == nil && !isLoading }
 
@@ -46,9 +49,7 @@ final class TypedEntryEditorModel: InspectorEditorModel {
         defer { isLoading = false }
         let url = file.url
         do {
-            let loaded = try await Task.detached(priority: .userInitiated) { try FileDocumentIO.load(url) }.value
-            adopt(loaded.contents)
-            lastModified = loaded.modificationDate
+            adopt(try await fileSession.load(from: url))
             loadError = nil
             warnIfNoModificationDate(after: "load")
         } catch {
@@ -67,11 +68,7 @@ final class TypedEntryEditorModel: InspectorEditorModel {
         let newContents = TypedContentEditor.write(edited, into: base, descriptor: descriptor)
         let url = file.url
         do {
-            let mtime = try await Task.detached(priority: .userInitiated) {
-                try FileDocumentIO.save(newContents, to: url)
-            }.value
-            lastModified = mtime
-            contents = newContents
+            try await fileSession.save(newContents, to: url)
             savedValues = edited
             warnIfNoModificationDate(after: "save")
             await commit()
@@ -84,41 +81,30 @@ final class TypedEntryEditorModel: InspectorEditorModel {
 
     func flushBeforeLeaving() async -> Bool {
         guard isDirty else { return true }
-        let url = file.url
-        let known = lastModified
-        let change = try? await Task.detached(priority: .userInitiated) {
-            try FileDocumentIO.externalChange(at: url, lastKnownModificationDate: known, bufferIsDirty: true)
-        }.value
-        if case .conflict(let disk)? = change { conflictDiskContents = disk; return false }
+        guard await fileSession.canFlushBeforeLeaving(file: file.url, bufferIsDirty: true) else { return false }
         return await save()
     }
 
     func checkExternalChange() async {
         guard loadError == nil else { return }
-        let url = file.url
-        let known = lastModified
         let dirty = isDirty
-        let change = try? await Task.detached(priority: .userInitiated) {
-            try FileDocumentIO.externalChange(at: url, lastKnownModificationDate: known, bufferIsDirty: dirty)
-        }.value
+        let change = await fileSession.externalChange(at: file.url, bufferIsDirty: dirty)
         guard let change else { return }
         switch change {
         case .none:
             break
         case .reloadable(let disk):
-            adopt(disk); lastModified = await freshModificationDate()
+            adopt(disk)
         case .conflict(let disk):
             conflictDiskContents = disk
         }
     }
 
-    func keepMyChanges() { conflictDiskContents = nil }
+    func keepMyChanges() { fileSession.keepMyChanges() }
 
     func reloadFromDisk() async {
-        guard let disk = conflictDiskContents else { return }
+        guard let disk = await fileSession.reloadFromConflict(file: file.url) else { return }
         adopt(disk)
-        lastModified = await freshModificationDate()
-        conflictDiskContents = nil
     }
 
     // MARK: Bindings used by the view
@@ -168,7 +154,6 @@ final class TypedEntryEditorModel: InspectorEditorModel {
     // MARK: Private
 
     private func adopt(_ text: String) {
-        contents = text
         let read = TypedContentEditor.read(text, descriptor: descriptor)
         values = read
         savedValues = read
@@ -186,12 +171,12 @@ final class TypedEntryEditorModel: InspectorEditorModel {
     /// `FileDocumentIO.externalChange` keys on mtime, so a `nil` here silently disables external-change
     /// detection for this file. "Logs are sacred" — make it visible rather than failing quietly.
     private func warnIfNoModificationDate(after op: String) {
-        guard lastModified == nil else { return }
+        guard fileSession.lastModified == nil else { return }
         let path = file.url.path(percentEncoded: false)
         Task {
             await LogCenter.shared.append(
                 source: "editor", stream: .stderr,
-                text: "No modification date for \(path) after \(op); external-change detection is disabled for this file."
+                text: EditableFileSession.missingModificationDateWarning(after: op, path: path)
             )
         }
     }
@@ -209,8 +194,4 @@ final class TypedEntryEditorModel: InspectorEditorModel {
         return url.lastPathComponent
     }
 
-    private func freshModificationDate() async -> Date? {
-        let url = file.url
-        return try? await Task.detached(priority: .userInitiated) { try FileDocumentIO.load(url).modificationDate }.value
-    }
 }

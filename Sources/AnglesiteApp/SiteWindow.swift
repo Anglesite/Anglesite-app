@@ -654,9 +654,7 @@ struct SiteWindow: View {
     private func persistEditorBufferBestEffort() {
         switch activeEditor {
         case .text(let model) where model.isDirty:
-            let url = model.file.url
-            let contents = model.text
-            Task.detached(priority: .userInitiated) { try? FileDocumentIO.save(contents, to: url) }
+            EditableFileSession.saveBestEffort(model.text, to: model.file.url)
         case .plist(let model):
             if model.isDirty, model.validationMessage == nil {
                 let url = model.file.url
