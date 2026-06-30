@@ -57,6 +57,10 @@ public enum WorkerComposition {
         case invalidSiteName(String)
     }
 
+    private static let validNameCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+    )
+
     public struct ProvisionedResources: Sendable, Equatable {
         public var d1DatabaseID: String?
         public var kvNamespaceID: String?
@@ -132,13 +136,8 @@ public enum WorkerComposition {
         return lines.joined(separator: "\n")
     }
 
-    private static func isValidSiteName(_ siteName: String) -> Bool {
+    static func isValidSiteName(_ siteName: String) -> Bool {
         guard !siteName.isEmpty else { return false }
-        return siteName.unicodeScalars.allSatisfy { scalar in
-            scalar.value == 45 || scalar.value == 95 ||
-                (48...57).contains(scalar.value) ||
-                (65...90).contains(scalar.value) ||
-                (97...122).contains(scalar.value)
-        }
+        return siteName.unicodeScalars.allSatisfy { validNameCharacters.contains($0) }
     }
 }

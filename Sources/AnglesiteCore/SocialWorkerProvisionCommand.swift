@@ -1,16 +1,19 @@
 import Foundation
 
-/// Provisions and deploys the per-site Cloudflare Worker used by the V-2 social layer.
+/// Provisions the per-site Cloudflare Worker resources used by the V-2 social layer, then
+/// publishes through ``DeployCommand`` so build and pre-deploy security checks stay in path.
 ///
 /// This is the app-side integration seam for `@dwk/workers`: it creates the backing Cloudflare
-/// resources with wrangler, writes a concrete `wrangler.toml`, then deploys the composed Worker.
+/// resources with wrangler, writes a concrete `wrangler.toml`, then asks the existing deploy
+/// pipeline to build, scan, and deploy the composed Worker.
 /// The Worker source itself stays in the template's `worker/worker.ts`; when the upstream
 /// `@dwk/*` packages are stable, that file is the only protocol-specific piece that needs to
 /// grow imports and route handlers.
 public actor SocialWorkerProvisionCommand {
     public enum Result: Sendable, Equatable {
         case succeeded(url: URL, resources: WorkerComposition.ProvisionedResources, duration: TimeInterval)
-        case failed(reason: String, exitCode: Int32?)
+        case blocked(failures: [PreDeployCheck.ScanFailure], warnings: [PreDeployCheck.ScanWarning], resources: WorkerComposition.ProvisionedResources)
+        case failed(reason: String, exitCode: Int32?, resources: WorkerComposition.ProvisionedResources)
     }
 
     public typealias TokenSource = DeployCommand.TokenSource
@@ -20,16 +23,24 @@ public actor SocialWorkerProvisionCommand {
         _ environment: [String: String],
         _ source: String
     ) async throws -> ProcessSupervisor.RunResult
+    public typealias Deployer = @Sendable (
+        _ token: String,
+        _ siteID: String,
+        _ siteDirectory: URL
+    ) async -> DeployCommand.Result
 
     public nonisolated let tokenSource: TokenSource
     private let runner: CommandRunner
+    private let deployer: Deployer
 
     public init(
         tokenSource: @escaping TokenSource = DeployCommand.keychainTokenSource,
-        runner: @escaping CommandRunner = SocialWorkerProvisionCommand.defaultRunner
+        runner: @escaping CommandRunner = SocialWorkerProvisionCommand.defaultRunner,
+        deployer: @escaping Deployer = SocialWorkerProvisionCommand.defaultDeployer
     ) {
         self.tokenSource = tokenSource
         self.runner = runner
+        self.deployer = deployer
     }
 
     public func provision(
@@ -42,16 +53,18 @@ public actor SocialWorkerProvisionCommand {
         do {
             token = try await tokenSource()
         } catch {
-            return .failed(reason: "couldn't read Cloudflare API token: \(error)", exitCode: nil)
+            return .failed(reason: "couldn't read Cloudflare API token: \(error)", exitCode: nil, resources: .init())
         }
         guard let token, !token.isEmpty else {
-            return .failed(reason: "no CLOUDFLARE_API_TOKEN — add it in Settings → Advanced → Credentials, or set the env var", exitCode: nil)
+            return .failed(
+                reason: "no CLOUDFLARE_API_TOKEN — add it in Settings → Advanced → Credentials, or set the env var",
+                exitCode: nil,
+                resources: .init()
+            )
         }
 
-        do {
-            _ = try WorkerComposition.generateWranglerToml(siteName: siteName, features: features)
-        } catch {
-            return .failed(reason: "invalid Worker name: \(siteName)", exitCode: nil)
+        guard WorkerComposition.isValidSiteName(siteName) else {
+            return .failed(reason: "invalid Worker name: \(siteName)", exitCode: nil, resources: .init())
         }
 
         var environment = DeployCommand.hostDeployEnvironment()
@@ -59,50 +72,130 @@ public actor SocialWorkerProvisionCommand {
         let source = "worker-provision:\(siteID)"
         let started = Date()
 
-        var resources = WorkerComposition.ProvisionedResources()
+        var resources = Self.readPersistedResources(from: siteDirectory)
 
         if features.contains(where: { $0.needsD1 }) {
-            let name = "\(siteName)-social"
-            let result = await runWrangler(
-                siteDirectory: siteDirectory,
-                arguments: ["d1", "create", name, "--json"],
-                environment: environment,
-                source: source
-            )
-            guard case .success(let output) = result else { return result.failure! }
-            guard let id = Self.extractResourceID(from: output) else {
-                return .failed(reason: "wrangler created D1 database \(name) but no database id was found", exitCode: 0)
+            if resources.d1DatabaseID == nil {
+                let name = "\(siteName)-social"
+                let result = await runWrangler(
+                    siteDirectory: siteDirectory,
+                    arguments: ["d1", "create", name, "--json"],
+                    environment: environment,
+                    source: source,
+                    resources: resources
+                )
+                let output: String
+                switch result {
+                case .success(let value):
+                    output = value
+                case .failure(let failure):
+                    return failure
+                }
+                guard let id = Self.extractResourceID(from: output) else {
+                    return .failed(reason: "wrangler created D1 database \(name) but no database id was found", exitCode: 0, resources: resources)
+                }
+                resources.d1DatabaseID = id
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, resources: resources) {
+                    return failure
+                }
             }
-            resources.d1DatabaseID = id
         }
 
         if features.contains(where: { $0.needsKV }) {
-            let name = "\(siteName)-social"
-            let result = await runWrangler(
-                siteDirectory: siteDirectory,
-                arguments: ["kv", "namespace", "create", name, "--json"],
-                environment: environment,
-                source: source
-            )
-            guard case .success(let output) = result else { return result.failure! }
-            guard let id = Self.extractResourceID(from: output) else {
-                return .failed(reason: "wrangler created KV namespace \(name) but no namespace id was found", exitCode: 0)
+            if resources.kvNamespaceID == nil {
+                let name = "\(siteName)-social"
+                let result = await runWrangler(
+                    siteDirectory: siteDirectory,
+                    arguments: ["kv", "namespace", "create", name, "--json"],
+                    environment: environment,
+                    source: source,
+                    resources: resources
+                )
+                let output: String
+                switch result {
+                case .success(let value):
+                    output = value
+                case .failure(let failure):
+                    return failure
+                }
+                guard let id = Self.extractResourceID(from: output) else {
+                    return .failed(reason: "wrangler created KV namespace \(name) but no namespace id was found", exitCode: 0, resources: resources)
+                }
+                resources.kvNamespaceID = id
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, resources: resources) {
+                    return failure
+                }
             }
-            resources.kvNamespaceID = id
         }
 
         if features.contains(where: { $0.needsR2 }) {
-            let name = "\(siteName)-media"
-            let result = await runWrangler(
-                siteDirectory: siteDirectory,
-                arguments: ["r2", "bucket", "create", name],
-                environment: environment,
-                source: source
-            )
-            guard case .success = result else { return result.failure! }
-            resources.r2BucketName = name
+            if resources.r2BucketName == nil {
+                let name = "\(siteName)-media"
+                let result = await runWrangler(
+                    siteDirectory: siteDirectory,
+                    arguments: ["r2", "bucket", "create", name],
+                    environment: environment,
+                    source: source,
+                    resources: resources
+                )
+                if case .failure(let failure) = result {
+                    return failure
+                }
+                resources.r2BucketName = name
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, resources: resources) {
+                    return failure
+                }
+            }
         }
 
+        if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, resources: resources) {
+            return failure
+        }
+
+        switch await deployer(token, siteID, siteDirectory) {
+        case .succeeded(let url, _):
+            return .succeeded(url: url, resources: resources, duration: Date().timeIntervalSince(started))
+        case .blocked(let failures, let warnings):
+            return .blocked(failures: failures, warnings: warnings, resources: resources)
+        case .failed(let reason, let exitCode):
+            return .failed(reason: reason, exitCode: exitCode, resources: resources)
+        }
+    }
+
+    private enum StepResult {
+        case success(String)
+        case failure(Result)
+    }
+
+    private func runWrangler(
+        siteDirectory: URL,
+        arguments: [String],
+        environment: [String: String],
+        source: String,
+        resources: WorkerComposition.ProvisionedResources
+    ) async -> StepResult {
+        do {
+            let result = try await runner(siteDirectory, arguments, environment, source)
+            let output = result.stdout.isEmpty ? result.stderr : result.stdout
+            guard result.exitCode == 0 else {
+                return .failure(.failed(
+                    reason: output.isEmpty ? "wrangler exited with code \(result.exitCode)" : output,
+                    exitCode: result.exitCode,
+                    resources: resources
+                ))
+            }
+            return .success(output)
+        } catch {
+            return .failure(.failed(reason: "wrangler could not run: \(error)", exitCode: nil, resources: resources))
+        }
+    }
+
+    private func persistConfig(
+        siteDirectory: URL,
+        siteName: String,
+        features: [WorkerComposition.Feature],
+        resources: WorkerComposition.ProvisionedResources
+    ) -> Result? {
         do {
             let toml = try WorkerComposition.generateWranglerToml(
                 siteName: siteName,
@@ -114,52 +207,25 @@ public actor SocialWorkerProvisionCommand {
                 atomically: true,
                 encoding: .utf8
             )
+            return nil
         } catch {
-            return .failed(reason: "couldn't write wrangler.toml: \(error)", exitCode: nil)
+            return .failed(reason: "couldn't write wrangler.toml: \(error)", exitCode: nil, resources: resources)
         }
+    }
 
-        let deploy = await runWrangler(
-            siteDirectory: siteDirectory,
-            arguments: ["deploy"],
-            environment: environment,
-            source: source
+    static func readPersistedResources(from siteDirectory: URL) -> WorkerComposition.ProvisionedResources {
+        let url = siteDirectory.appendingPathComponent("wrangler.toml")
+        guard let toml = try? String(contentsOf: url, encoding: .utf8) else {
+            return .init()
+        }
+        return .init(
+            d1DatabaseID: extractTomlString(named: "database_id", from: toml),
+            kvNamespaceID: extractTomlString(named: "id", from: toml),
+            r2BucketName: extractTomlString(named: "bucket_name", from: toml)
         )
-        guard case .success(let output) = deploy else { return deploy.failure! }
-        guard let url = DeployCommand.extractDeployedURL(from: output) else {
-            return .failed(reason: "wrangler exited cleanly but no deployed URL was found in its output", exitCode: 0)
-        }
-
-        return .succeeded(url: url, resources: resources, duration: Date().timeIntervalSince(started))
     }
 
-    private enum StepResult {
-        case success(String)
-        case failure(Result)
-
-        var failure: Result? {
-            if case .failure(let result) = self { result } else { nil }
-        }
-    }
-
-    private func runWrangler(
-        siteDirectory: URL,
-        arguments: [String],
-        environment: [String: String],
-        source: String
-    ) async -> StepResult {
-        do {
-            let result = try await runner(siteDirectory, arguments, environment, source)
-            let output = result.stdout.isEmpty ? result.stderr : result.stdout
-            guard result.exitCode == 0 else {
-                return .failure(.failed(reason: output.isEmpty ? "wrangler exited with code \(result.exitCode)" : output, exitCode: result.exitCode))
-            }
-            return .success(output)
-        } catch {
-            return .failure(.failed(reason: "wrangler could not run: \(error)", exitCode: nil))
-        }
-    }
-
-    public static func extractResourceID(from output: String) -> String? {
+    static func extractResourceID(from output: String) -> String? {
         if let data = output.data(using: .utf8),
            let json = try? JSONSerialization.jsonObject(with: data),
            let id = findID(in: json) {
@@ -173,6 +239,19 @@ public actor SocialWorkerProvisionCommand {
             return String(output[range])
         }
         return nil
+    }
+
+    private static func extractTomlString(named key: String, from toml: String) -> String? {
+        let escaped = NSRegularExpression.escapedPattern(for: key)
+        let pattern = #"(?m)^\s*#(KEY)\s*=\s*"([^"]+)""#.replacingOccurrences(of: "#(KEY)", with: escaped)
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: toml, range: NSRange(toml.startIndex..., in: toml)),
+              match.numberOfRanges > 1,
+              let range = Range(match.range(at: 1), in: toml) else {
+            return nil
+        }
+        let value = String(toml[range])
+        return value.isEmpty ? nil : value
     }
 
     private static func findID(in value: Any) -> String? {
@@ -227,6 +306,10 @@ public actor SocialWorkerProvisionCommand {
         await append(result.stdout, source: source, stream: .stdout)
         await append(result.stderr, source: source, stream: .stderr)
         return result
+    }
+
+    public static let defaultDeployer: Deployer = { token, siteID, siteDirectory in
+        await DeployCommand(tokenSource: { token }).deploy(siteID: siteID, siteDirectory: siteDirectory)
     }
 
     private static func append(_ text: String, source: String, stream: LogCenter.Stream) async {
