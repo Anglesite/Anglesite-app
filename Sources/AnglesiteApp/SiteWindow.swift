@@ -735,13 +735,6 @@ struct SiteWindow: View {
 
     // MARK: - Lifecycle
 
-    /// Per-site edit bridge for the on-device assistant's `ApplyEditTool` (#193). Resolves the live
-    /// router from `EditRouterRegistry` lazily per call, so `setEditObserver`'s re-registration is
-    /// always visible — mirroring `AnglesiteIntents.bootstrap`.
-    private func makeEditBridge() -> IntentEditBridge {
-        IntentEditBridge(routerProvider: { id in await EditRouterRegistry.shared.router(for: id) })
-    }
-
     /// React to registry changes for this window's site (#188, #266). Subscribes to the store's
     /// broadcast only after `site` is resolved. On the first snapshot that no longer contains this
     /// site's id — an explicit `remove(id:)` from the launcher, or a `refresh()` that prunes a stale
@@ -1033,84 +1026,24 @@ struct SiteWindow: View {
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
         applyPendingNavigation(for: resolved.id)
-        // The annotation feed, undo command, and edit observer feed the chat panel. They're all
-        // MCP-based (the edit overlay applies edits via MCP on both targets), so they're wired the
-        // same way regardless of which assistant backs the chat.
         let mcpClient: @Sendable () async -> MCPClient? = { [preview] in
             await preview.mcpClient()
         }
-        // Annotations are read/resolved by the native `AnnotationStore` over
-        // `Source/annotations.json` (#275) — no MCP hop. `undo_edit` stays MCP-backed (Bucket 2).
-        let sourceDirectory = resolved.sourceDirectory
-        let feed = AnnotationFeedFactory.native(directory: sourceDirectory)
-        let undoCommand = UndoCommand(mcpClient: mcpClient)
-        // Resolve directly against the on-disk store — `AnnotationStore.resolve` throws if the id
-        // is unknown, surfacing as a chat error the same way the MCP path did.
-        let annotationResolver: ChatModel.AnnotationResolver = { id in
-            try AnnotationStore.resolve(in: sourceDirectory, id: id)
-        }
-        // Chat is backed by the on-device `FoundationModelAssistant` (#159).
-        // The per-site `editBridge` + app-lifetime `contentGraph` attach `ApplyEditTool` +
-        // `SearchContentTool`, so the on-device path advertises `supportsTools` and runs a local
-        // agentic loop with no network (#193).
-        chat = ChatModel(
+        let assistantSession = SiteAssistantSessionFactory.makeSession(
             siteID: resolved.id,
-            siteDirectory: resolved.sourceDirectory,
+            sourceDirectory: resolved.sourceDirectory,
             configDirectory: resolved.configDirectory,
-            assistant: KnowledgeAugmentedAssistant(
-                base: FoundationModelAssistant(
-                    tier: .onDevice,
-                    editBridge: makeEditBridge(),
-                    contentGraph: contentGraph,
-                    knowledgeIndex: knowledgeIndex,
-                    semanticRanker: semanticRanker,
-                    integrationService: integrationOps
-                ),
-                index: knowledgeIndex
-            ),
-            annotationFeed: feed,
-            annotationResolver: annotationResolver,
-            undoCommand: undoCommand
+            mcpClient: mcpClient,
+            contentGraph: contentGraph,
+            knowledgeIndex: knowledgeIndex,
+            semanticRanker: semanticRanker,
+            integrationService: integrationOps
         )
-        // Auto alt-text (C.7 / #157): after a successful image drop, generate alt text on-device and
-        // apply it to the `<img>`. Target-agnostic — the on-device vision model runs on both builds.
-        // The follow-up edit routes through its own (post-process-free) apply_edit router so it can't
-        // recurse. Best-effort and opt-out via Settings.
-        let altTextGenerator = AltTextGenerator(
-            siteID: resolved.id,
-            siteDirectory: resolved.sourceDirectory,
-            isEnabled: { AppSettings.shared.autoGenerateAltText },
-            produce: { imageURL, context in
-                try await FoundationModelAssistant(tier: .onDevice).generateStructured(
-                    prompt: "Generate concise, descriptive alt text for this image as it would appear on a website. If the image is purely decorative, mark it decorative and use empty alt text.",
-                    imageURL: imageURL,
-                    context: context,
-                    resultType: GeneratedAltText.self
-                )
-            },
-            apply: { edit in
-                // Surface a failed apply (MCP down, plugin error) — otherwise the drop would succeed
-                // with no alt text and nothing in the debug pane explaining why. Generation failures
-                // are handled separately via `log`.
-                let reply = await MCPApplyEditRouter(mcpClient: mcpClient).apply(edit)
-                if reply.status == .failed {
-                    await LogCenter.shared.append(
-                        source: "alt-text:\(resolved.id)", stream: .stderr,
-                        text: "applying generated alt text failed: \(reply.message ?? "unknown error")"
-                    )
-                }
-            },
-            log: { message in
-                Task { await LogCenter.shared.append(source: "alt-text:\(resolved.id)", stream: .stderr, text: message) }
-            }
+        chat = assistantSession.chat
+        preview.setEditObserver(
+            assistantSession.editObserver,
+            postProcess: assistantSession.editPostProcessor
         )
-        preview.setEditObserver({ [weak chat] reply in
-            Task { @MainActor in
-                chat?.recordEdit(reply)
-            }
-        }, postProcess: { reply, message in
-            await altTextGenerator.postProcess(reply: reply, message: message)
-        })
         deploy.onScanComplete = { [health] outcome in
             health.ingestDeployOutcome(outcome)
         }
