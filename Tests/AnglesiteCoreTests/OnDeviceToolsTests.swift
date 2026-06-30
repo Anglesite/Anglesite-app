@@ -333,6 +333,8 @@ struct FoundationModelAssistantToolWiringTests {
             ApplyEditTool.toolName,
             SearchContentTool.toolName,
             SearchKnowledgeTool.toolName,
+            SuggestLinksTool.toolName,
+            FindLinkOpportunitiesTool.toolName,
         ])
     }
 
