@@ -6,7 +6,7 @@ import Foundation
 /// these rows can be unit-tested in `AnglesiteCore` without the App shell (#161). `ChatModel`
 /// re-exports this as `ChatModel.Message` via a typealias, so its SwiftUI views are unaffected.
 public struct ChatMessage: Identifiable, Equatable, Sendable {
-    public enum Role: Equatable, Sendable { case user, assistant, system, error, edit, annotation }
+    public enum Role: Equatable, Sendable { case user, assistant, system, error, edit, annotation, citation }
 
     public let id: UUID
     public let role: Role
@@ -17,6 +17,8 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
     public var editMetadata: ChatEditMetadata?
     /// Only set on `role: .annotation` rows. Carries the backing annotation id.
     public var annotationMetadata: ChatAnnotationMetadata?
+    /// Only set on `role: .citation` rows. Carries the retrieved files for this turn.
+    public var citationMetadata: ChatCitationMetadata?
 
     public init(
         id: UUID = UUID(),
@@ -25,7 +27,8 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         toolCalls: [ChatToolCall] = [],
         timestamp: Date = Date(),
         editMetadata: ChatEditMetadata? = nil,
-        annotationMetadata: ChatAnnotationMetadata? = nil
+        annotationMetadata: ChatAnnotationMetadata? = nil,
+        citationMetadata: ChatCitationMetadata? = nil
     ) {
         self.id = id
         self.role = role
@@ -34,6 +37,7 @@ public struct ChatMessage: Identifiable, Equatable, Sendable {
         self.timestamp = timestamp
         self.editMetadata = editMetadata
         self.annotationMetadata = annotationMetadata
+        self.citationMetadata = citationMetadata
     }
 }
 
@@ -68,6 +72,11 @@ public struct ChatEditMetadata: Equatable, Sendable {
 public struct ChatAnnotationMetadata: Equatable, Sendable {
     public let annotationID: String
     public init(annotationID: String) { self.annotationID = annotationID }
+}
+
+public struct ChatCitationMetadata: Equatable, Sendable {
+    public let citations: [RetrievedCitation]
+    public init(citations: [RetrievedCitation]) { self.citations = citations }
 }
 
 /// The provider-agnostic reducer that turns a stream of ``AssistantEvent`` values into chat rows.
@@ -203,6 +212,14 @@ public struct ConversationTranscript: Equatable, Sendable {
                 lastError = note
                 messages.append(ChatMessage(role: .error, content: note))
             }
+
+        case .citations(let items):
+            guard !items.isEmpty else { break }
+            messages.append(ChatMessage(
+                role: .citation,
+                content: "",
+                citationMetadata: ChatCitationMetadata(citations: items)
+            ))
         }
     }
 
