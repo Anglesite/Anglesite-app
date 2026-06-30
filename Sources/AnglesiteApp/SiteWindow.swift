@@ -65,6 +65,7 @@ struct SiteWindow: View {
         self.contentIndexerStore = contentIndexerStore
         _preview = State(initialValue: PreviewModel(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex, semanticRanker: semanticRanker))
         _graphExplorer = State(initialValue: SiteGraphExplorerModel(graph: contentGraph))
+        _relatedPages = State(initialValue: RelatedPagesModel(index: knowledgeIndex, ranker: semanticRanker))
     }
 
     @State private var site: SiteStore.Site?
@@ -92,6 +93,8 @@ struct SiteWindow: View {
     // the panel UI is target-agnostic.
     @State private var chat: ChatModel?
     @State private var chatPresented = false
+    @State private var relatedPages: RelatedPagesModel?
+    @State private var relatedPagesPresented = false
     @State private var harden = HardenModel()
     @State private var health = HealthModel(runner: DefaultHealthCheckRunner())
     /// Drives the determinate startup progress bar shown in `mainPane` while the dev server boots.
@@ -233,8 +236,17 @@ struct SiteWindow: View {
                                     ? .opacity
                                     : .move(edge: .trailing).combined(with: .opacity))
                         }
+                        if relatedPagesPresented, let relatedPages {
+                            Divider()
+                            RelatedPagesPanel(model: relatedPages)
+                                .frame(width: 320)
+                                .transition(reduceMotion
+                                    ? .opacity
+                                    : .move(edge: .trailing).combined(with: .opacity))
+                        }
                     }
                     .animation(.easeInOut(duration: 0.18), value: chatPresented)
+                    .animation(.easeInOut(duration: 0.18), value: relatedPagesPresented)
                 }
                 if deploy.drawerPresented {
                     DeployDrawerView(model: deploy, siteName: site.name)
@@ -358,6 +370,18 @@ struct SiteWindow: View {
                 }
                 .help(chatPresented ? "Hide chat panel" : "Show chat panel")
                 .keyboardShortcut("k", modifiers: [.command])
+            }
+            // .visibilityPriority(.automatic) is the default — left implicit.
+
+            // Related Pages — default priority, shown alongside Chat.
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    relatedPagesPresented.toggle()
+                } label: {
+                    Label("Related Pages", systemImage: relatedPagesPresented
+                          ? "link.badge.plus" : "link")
+                }
+                .help(relatedPagesPresented ? "Hide related pages" : "Show related pages")
             }
             // .visibilityPriority(.automatic) is the default — left implicit.
 
@@ -771,6 +795,20 @@ struct SiteWindow: View {
                 mainPaneMode = .preview
                 if route.isEmpty || route == "/" { preview.clearRoute() } else { preview.navigate(toRoute: route) }
                 inspectorContext = await makeInspectorContext(forNavigatorID: id)
+                // Load related-page suggestions for the newly selected page.
+                if let siteID = site?.id {
+                    let filePath: String?
+                    if let page = await contentGraph.page(id: id) {
+                        filePath = page.filePath
+                    } else if let post = await contentGraph.post(id: id) {
+                        filePath = post.filePath
+                    } else {
+                        filePath = nil
+                    }
+                    if let path = filePath {
+                        Task { await relatedPages?.load(siteID: siteID, path: path) }
+                    }
+                }
             }
         case .file(let file):
             openFile(file)
