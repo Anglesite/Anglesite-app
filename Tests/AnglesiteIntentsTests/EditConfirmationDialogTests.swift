@@ -27,4 +27,20 @@ struct EditConfirmationDialogTests {
         #expect(s.contains("…"))
         #expect(s.count < 400)
     }
+
+    @Test("impact summary is appended to confirmation")
+    func impactSummary() {
+        let e = InterpretedEdit(kind: .text, newText: "new", attributeName: nil, attributeValue: nil, styleProperty: nil, styleValue: nil, summary: "s")
+        let s = ContentDialogs.editConfirmation(
+            edit: e,
+            pagePath: "/about/",
+            before: "old",
+            after: "new",
+            impactSummary: "This change may affect 3 pages."
+        )
+        #expect(s.contains("Change the text"))
+        #expect(s.contains("This change may affect 3 pages."))
+        #expect(!s.contains("/about/? This change"))
+        #expect(s.hasSuffix("Confirm?"))
+    }
 }

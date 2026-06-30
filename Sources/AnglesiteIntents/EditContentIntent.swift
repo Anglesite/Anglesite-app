@@ -25,6 +25,7 @@ public struct EditContentIntent: AppIntent {
     ) public var instruction: String
     @Dependency private var bridge: IntentEditBridge
     @Dependency private var interpreter: any EditInterpreting
+    @Dependency private var graph: SiteContentGraph
 
     public init() {}
 
@@ -98,13 +99,27 @@ public struct EditContentIntent: AppIntent {
             }
             // .confirm falls through to apply
         } else {
+            let impactSummary: String?
+            if let siteDirectory {
+                let g = ContentGraphOverride.scoped ?? graph
+                let report = await ProjectImpactAnalyzer.analyze(
+                    projectRoot: siteDirectory,
+                    siteID: element.siteID,
+                    changedPath: element.pagePath,
+                    graph: g
+                )
+                impactSummary = ProjectImpactAnalyzer.confirmationSummary(for: report)
+            } else {
+                impactSummary = nil
+            }
             // Production: real Siri confirmation dialog showing a before/after diff.
             try await requestConfirmation(dialog: IntentDialog(stringLiteral:
                 ContentDialogs.editConfirmation(
                     edit: interpreted,
                     pagePath: element.pagePath,
                     before: preview.before,
-                    after: preview.after
+                    after: preview.after,
+                    impactSummary: impactSummary
                 )
             ))
         }
@@ -193,20 +208,31 @@ extension ContentDialogs {
 
     /// Before/after confirmation summary (#251). Spoken-friendly per kind; long fragments are
     /// truncated so Siri doesn't read paragraphs. Sourced from the plugin dry-run preview.
-    public static func editConfirmation(edit: InterpretedEdit, pagePath: String, before: String?, after: String?) -> String {
+    public static func editConfirmation(
+        edit: InterpretedEdit,
+        pagePath: String,
+        before: String?,
+        after: String?,
+        impactSummary: String? = nil
+    ) -> String {
         func clip(_ s: String, _ n: Int = 60) -> String { s.count <= n ? s : String(s.prefix(n)) + "\u{2026}" }
+        let base: String
         switch edit.kind {
         case .text:
             if let b = before, let a = after {
-                return "Change the text from \"\(clip(b))\" to \"\(clip(a))\" on \(pagePath)?"
+                base = "Change the text from \"\(clip(b))\" to \"\(clip(a))\" on \(pagePath)?"
+            } else {
+                base = "Change the text to \"\(clip(edit.newText ?? ""))\" on \(pagePath)?"
             }
-            return "Change the text to \"\(clip(edit.newText ?? ""))\" on \(pagePath)?"
         case .attribute:
             let name = edit.attributeName ?? "attribute"
-            return "Change \(name) to \"\(clip(edit.attributeValue ?? ""))\" on \(pagePath)?"
+            base = "Change \(name) to \"\(clip(edit.attributeValue ?? ""))\" on \(pagePath)?"
         case .style:
-            return "Set \(edit.styleProperty ?? "style") to \(clip(edit.styleValue ?? "")) on \(pagePath)?"
+            base = "Set \(edit.styleProperty ?? "style") to \(clip(edit.styleValue ?? "")) on \(pagePath)?"
         }
+        guard let impactSummary, !impactSummary.isEmpty else { return base }
+        let question = base.hasSuffix("?") ? String(base.dropLast()) : base
+        return "\(question). \(impactSummary) Confirm?"
     }
 
     /// Dispatch on the reply status. Single entry point the intent's `perform()` uses.
