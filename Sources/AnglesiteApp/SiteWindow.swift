@@ -806,7 +806,7 @@ struct SiteWindow: View {
                         filePath = nil
                     }
                     if let path = filePath {
-                        Task { await relatedPages?.load(siteID: siteID, path: path) }
+                        await relatedPages?.load(siteID: siteID, path: path)
                     }
                 }
             }

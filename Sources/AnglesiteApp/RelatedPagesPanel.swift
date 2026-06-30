@@ -3,7 +3,7 @@ import SwiftUI
 import AnglesiteCore
 
 struct RelatedPagesPanel: View {
-    @Bindable var model: RelatedPagesModel
+    let model: RelatedPagesModel
 
     var body: some View {
         VStack(spacing: 0) {

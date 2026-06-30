@@ -1,6 +1,5 @@
 // Sources/AnglesiteCore/FindLinkOpportunitiesTool.swift
 import Foundation
-import os
 
 #if compiler(>=6.4)
 import FoundationModels

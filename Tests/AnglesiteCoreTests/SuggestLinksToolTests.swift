@@ -19,18 +19,6 @@ struct SuggestLinksToolTests {
             lastModified: Date(timeIntervalSince1970: 0))
     }
 
-    private func setup(_ docs: [SiteKnowledgeIndex.Document]) async -> (SiteKnowledgeIndex, SemanticRanker) {
-        let index = SiteKnowledgeIndex()
-        // Manually load documents by rebuilding from a temp directory isn't practical;
-        // use upsertFile indirectly by populating via rebuild. Instead, test through the
-        // tool's output format since we can't inject documents directly.
-        // For unit tests, we test LinkGraph + SemanticRanker separately and do an
-        // integration-style test here with a real temp directory.
-        let ranker = SemanticRanker(provider: FakeEmbeddingProvider(dimension: 8), cache: nil)
-        await ranker.sync(siteID: "s", documents: docs)
-        return (index, ranker)
-    }
-
     @Test("suggests semantically related pages not already linked")
     func suggestsRelatedUnlinked() async {
         let docs = [
