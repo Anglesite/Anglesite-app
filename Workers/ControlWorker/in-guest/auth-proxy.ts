@@ -55,7 +55,7 @@ server.on("upgrade", (req, socket, head) => {
     headers: req.headers,
   });
   upstream.on("upgrade", (upRes, upSocket, upHead) => {
-    if (socket.destroyed) return;
+    if (socket.destroyed) { upSocket.destroy(); return; }
     socket.write(
       `HTTP/1.1 101 Switching Protocols\r\n${Object.entries(upRes.headers)
         .map(([k, v]) => `${k}: ${v}`)

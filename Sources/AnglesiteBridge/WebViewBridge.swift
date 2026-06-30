@@ -85,9 +85,11 @@ public enum WebViewBridge {
             .secure: "TRUE",
             HTTPCookiePropertyKey("HttpOnly"): true,
         ]
-        if let cookie = HTTPCookie(properties: properties) {
-            await cookieStore.setCookie(cookie)
+        guard let cookie = HTTPCookie(properties: properties) else {
+            assertionFailure("Failed to create session token cookie for domain \(domain)")
+            return
         }
+        await cookieStore.setCookie(cookie)
     }
 
     /// Opt the preview into the full inline Writing Tools experience (#91).

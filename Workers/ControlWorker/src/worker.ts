@@ -49,23 +49,24 @@ export default {
         const sandbox = getSandbox(env.Sandbox, siteID);
 
         const clean = await sandbox.exec(
-          `rm -rf ${SITE_DIR}/* ${SITE_DIR}/.[!.]*`,
+          `rm -rf '${SITE_DIR}'/* '${SITE_DIR}'/.[!.]*`,
         );
         if (!clean.success)
           return json({ error: "workspace cleanup failed", exitCode: clean.exitCode }, 500);
 
         const clone = await sandbox.exec(
-          `git clone --branch ${gitRef} --depth 1 ${gitRemote} ${SITE_DIR}`,
+          `git clone --branch '${gitRef}' --depth 1 '${gitRemote}' '${SITE_DIR}'`,
         );
         if (!clone.success)
           return json({ error: "clone failed", exitCode: clone.exitCode }, 500);
 
-        const hydrate = await sandbox.exec(`hydrate.sh ${SITE_DIR}`, {
+        const hydrate = await sandbox.exec(`hydrate.sh '${SITE_DIR}'`, {
           cwd: SITE_DIR,
         });
         if (!hydrate.success)
           return json({ error: "hydrate failed", exitCode: hydrate.exitCode }, 500);
 
+        // startProcess is fire-and-forget — launch failures surface through the readiness probe below
         await sandbox.startProcess("start-dev-server.sh", {
           cwd: SITE_DIR,
           env: { SITE_DIR, PORT: ASTRO_PORT, SESSION_TOKEN: token },
@@ -87,7 +88,7 @@ export default {
         let ready = false;
         for (let i = 0; i < 60; i++) {
           const probe = await sandbox.exec(
-            `curl -sf -o /dev/null http://localhost:${ASTRO_PORT}/`,
+            `curl -sf -o /dev/null 'http://localhost:${ASTRO_PORT}/'`,
           );
           if (probe.success) {
             ready = true;
@@ -132,7 +133,8 @@ export default {
 
       return json({ error: "not found" }, 404);
     } catch (e) {
-      return json({ error: String(e) }, 500);
+      console.error("worker unhandled error", e);
+      return json({ error: "internal error" }, 500);
     }
   },
 };
