@@ -85,11 +85,12 @@ echo ""
 echo "=== Vendoring vminit initfs (${VMINIT_IMAGE}) ==="
 
 # Guard: create the anglesite-oci buildx builder only if it doesn't already exist (idempotent).
+# Do not make it the global active builder; pass --builder on the build below so this script does
+# not leave the developer's Docker environment changed after it exits.
 if ! docker buildx inspect anglesite-oci >/dev/null 2>&1; then
     echo "Creating docker-container builder 'anglesite-oci'…"
     docker buildx create --name anglesite-oci --driver docker-container
 fi
-docker buildx use anglesite-oci
 
 # Wipe stale layout but preserve .gitkeep.
 find "$INITFS_OUT" -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
