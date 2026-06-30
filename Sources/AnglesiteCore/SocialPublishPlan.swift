@@ -42,14 +42,24 @@ public enum SocialPublishPlan {
     }
 
     private static let entryExtensions: Set<String> = ["md", "mdx", "mdoc", "markdown"]
-    private static let outboundURLPattern = try! NSRegularExpression(
-        pattern: #"https?://[^\s<>"'\)\]\}]+"#,
-        options: [.caseInsensitive]
-    )
+    private static let outboundURLPattern: NSRegularExpression = {
+        do {
+            return try NSRegularExpression(
+                pattern: #"https?://[^\s<>"'\)\]\}]+"#,
+                options: [.caseInsensitive]
+            )
+        } catch {
+            fatalError("Invalid outbound social URL regex: \(error)")
+        }
+    }()
     private static let trailingPunctuation = CharacterSet(charactersIn: ".,;:!?")
 
     /// Builds the outbound-social plan for a site's Astro project root (`Source/`).
-    public static func build(projectRoot: URL, siteBase: URL) throws -> Plan {
+    public static func build(
+        projectRoot: URL,
+        siteBase: URL,
+        referenceDate: Date = Date()
+    ) throws -> Plan {
         guard let baseHost = siteBase.host, siteBase.scheme == "http" || siteBase.scheme == "https" else {
             throw PlanningError.invalidSiteBase(siteBase.absoluteString)
         }
@@ -59,7 +69,7 @@ public enum SocialPublishPlan {
         let entries = files.compactMap { file -> Entry? in
             guard let source = try? String(contentsOf: file, encoding: .utf8) else { return nil }
             let frontmatter = Frontmatter.parse(source)
-            if frontmatter["draft"] == .bool(true) { return nil }
+            if isDraft(frontmatter["draft"]) || isFutureDated(frontmatter, after: referenceDate) { return nil }
 
             let relPath = relativePosix(file, from: projectRoot)
             guard let canonical = canonicalURL(for: relPath, frontmatter: frontmatter, siteBase: siteBase) else {
@@ -88,8 +98,10 @@ public enum SocialPublishPlan {
         let parts = relPath.split(separator: "/").map(String.init)
         guard parts.count >= 4, parts[0] == "src", parts[1] == "content" else { return nil }
         let collection = parts[2]
-        let fileName = parts.last ?? ""
-        let fallbackSlug = basenameWithoutExtension(fileName)
+        let collectionRelParts = Array(parts.dropFirst(3))
+        guard let lastPart = collectionRelParts.last else { return nil }
+        let fallbackSlug = (collectionRelParts.dropLast() + [basenameWithoutExtension(lastPart)])
+            .joined(separator: "/")
         let slug = string(frontmatter["slug"]) ?? fallbackSlug
         return URL(string: "/\(collection)/\(slug)/", relativeTo: siteBase)?.absoluteURL
     }
@@ -107,10 +119,11 @@ public enum SocialPublishPlan {
             }
         }
 
-        let range = NSRange(source.startIndex..<source.endIndex, in: source)
-        for match in outboundURLPattern.matches(in: source, range: range) {
-            guard let r = Range(match.range, in: source) else { continue }
-            let raw = String(source[r]).trimmingCharacters(in: trailingPunctuation)
+        let body = FrontmatterDocument.parse(source).body
+        let range = NSRange(body.startIndex..<body.endIndex, in: body)
+        for match in outboundURLPattern.matches(in: body, range: range) {
+            guard let r = Range(match.range, in: body) else { continue }
+            let raw = String(body[r]).trimmingCharacters(in: trailingPunctuation)
             if let url = URL(string: raw) {
                 candidates.append(url)
             }
@@ -132,8 +145,7 @@ public enum SocialPublishPlan {
             default: return []
             }
         }
-        return Array(Set(values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }))
-            .sorted()
+        return uniqueStrings(values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
     }
 
     private static func unique(_ urls: [URL]) -> [URL] {
@@ -146,6 +158,51 @@ public enum SocialPublishPlan {
             }
         }
         return out.sorted { $0.absoluteString < $1.absoluteString }
+    }
+
+    private static func uniqueStrings(_ values: [String]) -> [String] {
+        var seen: Set<String> = []
+        var out: [String] = []
+        for value in values {
+            if seen.insert(value).inserted {
+                out.append(value)
+            }
+        }
+        return out
+    }
+
+    private static func isDraft(_ value: FrontmatterValue?) -> Bool {
+        switch value {
+        case .bool(true):
+            return true
+        case .string(let raw):
+            return ["true", "yes", "1"].contains(raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        default:
+            return false
+        }
+    }
+
+    private static func isFutureDated(_ frontmatter: [String: FrontmatterValue], after referenceDate: Date) -> Bool {
+        guard let publishDate = parseDate(string(frontmatter["publishDate"]) ?? string(frontmatter["date"])) else {
+            return false
+        }
+        return publishDate > referenceDate
+    }
+
+    private static func parseDate(_ raw: String?) -> Date? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let date = ISO8601DateFormatter().date(from: raw) {
+            return date
+        }
+        let parts = raw.split(separator: "-")
+        guard parts.count == 3,
+              let year = Int(parts[0]),
+              let month = Int(parts[1]),
+              let day = Int(parts[2])
+        else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        return calendar.date(from: DateComponents(year: year, month: month, day: day))
     }
 
     private static func string(_ value: FrontmatterValue?) -> String? {
