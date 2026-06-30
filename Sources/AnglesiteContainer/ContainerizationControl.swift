@@ -38,8 +38,8 @@ public struct ContainerizationControl: LocalContainerControl {
     }
 
     public func start(siteID: String, sourceRepo: URL, ref: String) async throws -> LocalContainerSession {
-        // 0. Resolve the writable image store + boot artifacts. Kernel/initfs are not yet vendored —
-        //    BundledImage surfaces that as a typed error rather than a silent mis-boot (see its TODOs).
+        // 0. Resolve the writable image store + boot artifacts. Missing artifacts are typed
+        //    provisioning errors, surfaced as `imageUnavailable` instead of a silent mis-boot.
         let storeURL: URL
         let imageLayoutURL: URL
         let kernelURL: URL

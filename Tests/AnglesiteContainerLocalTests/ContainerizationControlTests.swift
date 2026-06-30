@@ -9,7 +9,7 @@ import AnglesiteCore
 /// Package.swift only when `ANGLESITE_CONTAINER_TESTS=1`), and every test *body* additionally
 /// requires `ANGLESITE_CONTAINER_E2E=1` so it is skipped unless explicitly run on an entitled
 /// Apple-Silicon Mac with the vendored boot artifacts present (image + kernel + initfs — see
-/// BundledImage; the kernel/initfs are not yet vendored, so set the ANGLESITE_CONTAINER_* overrides).
+/// BundledImage; set the ANGLESITE_CONTAINER_* overrides only when testing custom local artifacts).
 struct ContainerizationControlTests {
     private var enabled: Bool { ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_E2E"] == "1" }
 

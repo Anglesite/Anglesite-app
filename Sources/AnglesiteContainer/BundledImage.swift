@@ -6,11 +6,10 @@ private final class BundleToken {}
 /// Resolves the vendored boot artifacts that ship inside AnglesiteContainer's resource bundle.
 ///
 /// The arm64 OCI app layout (`Resources/container-image/`, copied in via Package.swift, vendored by
-/// `scripts/vendor-container-image.sh`) is the one artifact Task 6 actually produces. Booting a
-/// `LinuxContainer` with Apple Containerization 0.34 additionally requires a **Linux kernel binary**
-/// and a **vminit initfs** (the guest-agent root filesystem) — neither of which is vendored yet.
-/// Those two are resolved here through env overrides with a bundled fallback so the boot path is
-/// fully wired; the fallback URLs are marked as provisioning gaps (see `kernelURL` / `initfsLayoutURL`).
+/// `scripts/vendor-container-image.sh`) is paired with the boot artifacts produced by
+/// `scripts/vendor-container-kernel.sh`: a **Linux kernel binary** and a **vminit initfs** OCI
+/// layout. Each artifact can also be overridden with an env var for local bring-up, but the bundled
+/// resource path is the normal provisioning path.
 ///
 /// Settings/dev overrides (mirroring `TemplateRuntime`'s dev override) let a developer point each
 /// artifact at a freshly-built copy without rebuilding the app.
@@ -112,7 +111,7 @@ public enum BundledImage {
 
     /// True only when the container can actually boot: the app OCI image (`layoutURL()`), the
     /// `kernelURL()`, and the `initfsLayoutURL()` all resolve without throwing. Returns false when any
-    /// of them is not yet vendored and no env override is set — keeping `PreviewModel` on the host
+    /// of them is absent and no env override is set — keeping `PreviewModel` on the host
     /// runtime until provisioning is complete, so `ContainerizationControl` is never selected in a
     /// state where `start()` would fail with `.imageUnavailable`.
     public static var isProvisioned: Bool {
