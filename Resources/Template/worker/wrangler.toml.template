@@ -2,8 +2,9 @@
 # Static-only sites omit the `main` entry and deploy dist/ directly.
 # Social features (V-2+) set `main = "worker/worker.ts"` and add bindings below.
 #
-# Do not edit the [[d1_databases]] / [[r2_buckets]] blocks manually — Anglesite's
-# provisioning flow (#353) fills the database_id and bucket_name from the CF API.
+# Do not edit the [[d1_databases]] / [[kv_namespaces]] / [[r2_buckets]] blocks
+# manually — Anglesite's provisioning flow (#353) fills the resource ids from
+# the CF API.
 
 name = "{{SITE_NAME}}"
 compatibility_date = "2025-01-01"
@@ -17,6 +18,10 @@ directory = "dist"
 # binding = "DB"
 # database_name = "{{SITE_NAME}}-social"
 # database_id = ""
+#
+# [[kv_namespaces]]
+# binding = "SOCIAL_KV"
+# id = ""
 #
 # [[r2_buckets]]
 # binding = "MEDIA"
