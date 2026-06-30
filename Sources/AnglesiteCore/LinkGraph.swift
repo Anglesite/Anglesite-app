@@ -102,7 +102,7 @@ public enum LinkGraph {
 
     // MARK: - Internal helpers
 
-    private static func isLinkableKind(_ kind: SiteKnowledgeIndex.Document.Kind) -> Bool {
+    static func isLinkableKind(_ kind: SiteKnowledgeIndex.Document.Kind) -> Bool {
         kind == .page || kind == .post || kind == .content
     }
 
@@ -143,6 +143,52 @@ public enum LinkGraph {
         if r.hasPrefix("src/content/") { r.removeFirst("src/content/".count) }
         if let dot = r.lastIndex(of: ".") { r = String(r[r.startIndex..<dot]) }
         return "/" + r
+    }
+
+    /// A suggested internal link target with its semantic confidence score.
+    public struct LinkSuggestion: Sendable, Equatable {
+        public let path: String
+        public let title: String?
+        public let route: String
+        /// Normalized confidence in 0…1 (min-max over the candidate set).
+        public let confidence: Float
+    }
+
+    /// Returns suggested link targets for a document, ranked by semantic similarity,
+    /// excluding pages the document already links to and itself. Confidence is min-max
+    /// normalized over the candidate set into 0…1.
+    public static func suggestLinks(
+        forDocumentAt path: String,
+        in documents: [SiteKnowledgeIndex.Document],
+        rankedRelated: [SemanticRanker.Ranked],
+        limit: Int = 8
+    ) -> [LinkSuggestion] {
+        guard let source = documents.first(where: { $0.path == path }) else { return [] }
+        let alreadyLinked = existingTargets(for: source, in: documents)
+        let docsByID = Dictionary(documents.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+
+        let eligible = rankedRelated.compactMap { ranked -> (SiteKnowledgeIndex.Document, Float)? in
+            guard let target = docsByID[ranked.docID],
+                  target.path != path,
+                  !alreadyLinked.contains(target.path),
+                  isLinkableKind(target.kind),
+                  ranked.score > 0.1
+            else { return nil }
+            return (target, ranked.score)
+        }
+        guard !eligible.isEmpty else { return [] }
+
+        let scores = eligible.map(\.1)
+        let lo = scores.min()!, hi = scores.max()!
+        let range = hi - lo
+
+        return eligible.prefix(max(0, limit)).map { target, score in
+            let normalized = range > 0 ? (score - lo) / range : 1.0
+            let route = target.path.hasPrefix("src/pages/")
+                ? routeFromPagePath(target.path)
+                : routeFromContentPath(target.path)
+            return LinkSuggestion(path: target.path, title: target.title, route: route, confidence: normalized)
+        }
     }
 
     /// Normalizes a link href for lookup: strips trailing slash, fragment, query.
