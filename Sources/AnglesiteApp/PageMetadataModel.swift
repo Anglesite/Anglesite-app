@@ -16,13 +16,16 @@ final class PageMetadataModel: InspectorEditorModel {
 
     var metadata = PageMetadata(title: "", description: "")
     private var savedMetadata = PageMetadata(title: "", description: "")
-    private var contents = ""
-    private var lastModified: Date?
+    private var fileSession = EditableFileSession()
+    private var contents: String { fileSession.savedContents }
     /// Guards against a concurrent second `save()` capturing a stale `contents` base.
     private var isSaving = false
     private(set) var loadError: String?
     private(set) var isLoading = false
-    var conflictDiskContents: String?
+    var conflictDiskContents: String? {
+        get { fileSession.conflictDiskContents }
+        set { fileSession.conflictDiskContents = newValue }
+    }
 
     var isDirty: Bool { metadata != savedMetadata && loadError == nil && !isLoading }
 
@@ -39,10 +42,12 @@ final class PageMetadataModel: InspectorEditorModel {
         defer { isLoading = false }
         let url = file.url
         do {
-            let loaded = try await Task.detached(priority: .userInitiated) { try FileDocumentIO.load(url) }.value
-            adopt(loaded.contents)
-            lastModified = loaded.modificationDate
+            var session = fileSession
+            let loaded = try await session.load(from: url)
+            fileSession = session
+            adopt(loaded)
             loadError = nil
+            warnIfNoModificationDate(after: "load")
         } catch {
             loadError = error.localizedDescription
         }
@@ -56,12 +61,11 @@ final class PageMetadataModel: InspectorEditorModel {
         let newContents = PageMetadataEditor.write(metadata, into: contents)
         let url = file.url
         do {
-            let mtime = try await Task.detached(priority: .userInitiated) {
-                try FileDocumentIO.save(newContents, to: url)
-            }.value
-            lastModified = mtime
-            contents = newContents
+            var session = fileSession
+            try await session.save(newContents, to: url)
+            fileSession = session
             savedMetadata = metadata
+            warnIfNoModificationDate(after: "save")
             await commit()
             return true
         } catch {
@@ -72,26 +76,22 @@ final class PageMetadataModel: InspectorEditorModel {
 
     func flushBeforeLeaving() async -> Bool {
         guard isDirty else { return true }
-        let url = file.url
-        let known = lastModified
-        let change = try? await Task.detached(priority: .userInitiated) {
-            try FileDocumentIO.externalChange(at: url, lastKnownModificationDate: known, bufferIsDirty: true)
-        }.value
-        if case .conflict(let disk)? = change { conflictDiskContents = disk; return false }
+        var session = fileSession
+        let canFlush = await session.canFlushBeforeLeaving(file: file.url, bufferIsDirty: true)
+        fileSession = session
+        guard canFlush else { return false }
         return await save()
     }
 
     func checkExternalChange() async {
         guard loadError == nil else { return }
-        let url = file.url
-        let known = lastModified
         let dirty = isDirty
-        let change = try? await Task.detached(priority: .userInitiated) {
-            try FileDocumentIO.externalChange(at: url, lastKnownModificationDate: known, bufferIsDirty: dirty)
-        }.value
+        var session = fileSession
+        let change = await session.externalChange(at: file.url, bufferIsDirty: dirty)
+        fileSession = session
         switch change {
         case .some(.reloadable(let disk)):
-            adopt(disk); lastModified = await freshModificationDate()
+            adopt(disk)
         case .some(.conflict(let disk)):
             conflictDiskContents = disk
         case .some(.none), nil:
@@ -99,13 +99,13 @@ final class PageMetadataModel: InspectorEditorModel {
         }
     }
 
-    func keepMyChanges() { conflictDiskContents = nil }
+    func keepMyChanges() { fileSession.keepMyChanges() }
 
     func reloadFromDisk() async {
-        guard let disk = conflictDiskContents else { return }
+        var session = fileSession
+        guard let disk = await session.reloadFromConflict(file: file.url) else { return }
+        fileSession = session
         adopt(disk)
-        lastModified = await freshModificationDate()
-        conflictDiskContents = nil
     }
 
     // `[weak self]` — see the note in TypedEntryEditorModel: view-lifetime bindings on a model that
@@ -120,10 +120,20 @@ final class PageMetadataModel: InspectorEditorModel {
     }
 
     private func adopt(_ text: String) {
-        contents = text
         let read = PageMetadataEditor.read(text)
         metadata = read
         savedMetadata = read
+    }
+
+    private func warnIfNoModificationDate(after op: String) {
+        guard fileSession.lastModified == nil else { return }
+        let path = file.url.path(percentEncoded: false)
+        Task {
+            await LogCenter.shared.append(
+                source: "editor", stream: .stderr,
+                text: EditableFileSession.missingModificationDateWarning(after: op, path: path)
+            )
+        }
     }
 
     private func commit() async {
@@ -139,8 +149,4 @@ final class PageMetadataModel: InspectorEditorModel {
         return url.lastPathComponent
     }
 
-    private func freshModificationDate() async -> Date? {
-        let url = file.url
-        return try? await Task.detached(priority: .userInitiated) { try FileDocumentIO.load(url).modificationDate }.value
-    }
 }
