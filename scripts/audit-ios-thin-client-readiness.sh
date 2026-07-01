@@ -76,10 +76,10 @@ else
     blocker "No iOS bundle metadata" "project.yml/Resources do not define an iOS Info.plist"
 fi
 
-if pattern_exists "Sources/AnglesiteBridge/WebViewBridge.swift" "#available\\(macOS"; then
-    blocker "Bridge has macOS-only availability" "Sources/AnglesiteBridge/WebViewBridge.swift"
+if pattern_exists "Sources/AnglesiteBridge/WebViewBridge.swift" "writingToolsBehavior" && ! pattern_exists "Sources/AnglesiteBridge/WebViewBridge.swift" "#if os\\(macOS\\)"; then
+    blocker "Bridge Writing Tools behavior is not platform-gated" "Sources/AnglesiteBridge/WebViewBridge.swift"
 else
-    ready "Bridge availability is not hard-coded to macOS"
+    ready "Bridge Writing Tools behavior is macOS-gated"
 fi
 
 if pattern_exists "Sources/AnglesiteBridge/WebViewBridge.swift" "NSViewRepresentable"; then
