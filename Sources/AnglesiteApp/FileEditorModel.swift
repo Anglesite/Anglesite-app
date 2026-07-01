@@ -106,7 +106,10 @@ final class FileEditorModel {
 
     func reloadFromDisk() async {
         var session = fileSession
-        guard let disk = await session.reloadFromConflict(file: file.url) else { return }
+        guard let disk = await session.reloadFromConflict(file: file.url) else {
+            fileSession = session
+            return
+        }
         fileSession = session
         text = disk
     }
