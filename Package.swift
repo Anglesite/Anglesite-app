@@ -49,6 +49,12 @@ var packageTargets: [Target] = [
         swiftSettings: strictConcurrency
     ),
     .target(
+        name: "AnglesiteIOS",
+        dependencies: ["AnglesiteBridge"],
+        path: "Sources/AnglesiteIOS",
+        swiftSettings: strictConcurrency
+    ),
+    .target(
         name: "AnglesiteIntents",
         dependencies: ["AnglesiteCore"],
         path: "Sources/AnglesiteIntents",
@@ -137,6 +143,7 @@ var packageProducts: [Product] = [
     .library(name: "AnglesiteSiteModel", targets: ["AnglesiteSiteModel"]),
     .library(name: "AnglesiteCore", targets: ["AnglesiteCore"]),
     .library(name: "AnglesiteBridge", targets: ["AnglesiteBridge"]),
+    .library(name: "AnglesiteIOS", targets: ["AnglesiteIOS"]),
     .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"])
 ]
 

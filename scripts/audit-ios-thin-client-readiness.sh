@@ -102,10 +102,10 @@ else
     blocker "No iOS app target" "project.yml has only macOS targets"
 fi
 
-if path_exists "Sources/AnglesiteIOS"; then
-    ready "iOS shell source directory exists"
+if path_exists "Sources/AnglesiteIOS" && pattern_exists "Package.swift" "name: \"AnglesiteIOS\""; then
+    ready "iOS shell source target exists"
 else
-    blocker "No iOS shell sources" "Sources/AnglesiteIOS is absent"
+    blocker "No iOS shell sources" "Sources/AnglesiteIOS and Package.swift lack an AnglesiteIOS target"
 fi
 
 if path_exists "Resources/Info-iOS.plist" || pattern_exists "project.yml" "INFOPLIST_FILE:.*iOS"; then
