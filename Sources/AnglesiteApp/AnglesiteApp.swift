@@ -4,8 +4,8 @@ import AnglesiteCore
 import AnglesiteBridge
 import AnglesiteIntents
 
-/// Owns process-level lifecycle that SwiftUI's `App` value type can't: prime the npm cache on
-/// launch, and drain every supervised child on quit so nothing outlives the app.
+/// Owns process-level lifecycle that SwiftUI's `App` value type can't: drain every supervised
+/// child on quit so nothing outlives the app.
 /// Holds the app-lifetime `ContentSpotlightIndexer` once `bootstrap` finishes populating it.
 /// `@Observable` so a `SiteWindow` constructed *before* bootstrap completes still reacts when the
 /// indexer arrives (enabling its Siri AI Readiness button) — passing the bare optional through the
@@ -19,8 +19,7 @@ final class ContentIndexerStore {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Single shared `SiteContentGraph` for the app's lifetime. Passed into
-    /// `AnglesiteIntents.bootstrap` so it can be registered with `AppDependencyManager`;
-    /// will also be threaded into `LocalSiteRuntime` in A.8 (#142).
+    /// `AnglesiteIntents.bootstrap` so it can be registered with `AppDependencyManager`.
     let contentGraph = SiteContentGraph()
     /// Project-local retrieval index used by assistant tools for file-cited RAG context (#307).
     let knowledgeIndex = SiteKnowledgeIndex()
@@ -74,16 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // and stays current. Idempotent; safe on the main actor.
         Task { @MainActor in RecentSitesModel.shared.start() }
 
-        // Extract the bundled npm cache into Application Support so the first site `npm install`
-        // is offline-fast. No-op when nothing's bundled or it's already current; logged either way.
-        Task {
-            do {
-                let outcome = try await NodeModulesCache.shared.prime()
-                await LogCenter.shared.append(source: "npm-cache", stream: .stdout, text: "prime: \(outcome)")
-            } catch {
-                await LogCenter.shared.append(source: "npm-cache", stream: .stderr, text: "prime failed: \(error)")
-            }
-        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

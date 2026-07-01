@@ -2,14 +2,14 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
-/// #307: `LocalContainerSiteRuntime` wires the filesystem watcher the same way `LocalSiteRuntime`
+/// #307: `LocalContainerSiteRuntime` wires the filesystem watcher the same way the retired host runtime
 /// does, but the call sites differ — `startFileWatcher` runs inline in `start()` (not via
 /// `populateSharedIndexes`), teardown order differs, and start failures are swallowed (no
 /// `LogCenter`). This suite confirms the container path is correctly wired: the watcher starts on
 /// the site's `Source/` directory after the open-time rebuild, a delivered batch reaches the
 /// shared knowledge index, and the watcher is stopped on teardown.
 ///
-/// Reuses `ControllableWatcher` (from `LocalSiteRuntimeReindexTests`) and `FakeLocalContainerControl`.
+/// Reuses `ControllableWatcher` and `FakeLocalContainerControl`.
 struct LocalContainerSiteRuntimeReindexTests {
     private static let ok = LocalContainerSession(
         previewURL: URL(string: "http://127.0.0.1:51001")!,

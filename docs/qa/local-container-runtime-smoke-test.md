@@ -148,13 +148,15 @@ Expected:
 
 - The preview runtime is `LocalContainerSiteRuntime`.
 - The debug pane includes `runtime/stdout selected LocalContainerSiteRuntime`.
-- There is no fallback to `LocalSiteRuntime` once artifacts and entitlement are available.
-- If artifacts or entitlement are deliberately removed, the app falls back to `LocalSiteRuntime` without crashing.
-- Fallback logs include `runtime/stdout selected LocalSiteRuntime; local container unavailable: ...`
+- There is no fallback to a host subprocess runtime once artifacts and entitlement are available.
+- If artifacts or entitlement are deliberately removed, the app fails preview startup with the
+  unavailable runtime message instead of starting host Node.
+- Fallback logs include `runtime/stdout no host runtime fallback; local container unavailable: ...`
   with the failed host gate and/or missing artifact named (`container image`, `Linux kernel`, or
   `vminit initfs`).
 
-Fail if the container runtime is selected when artifacts are missing, or if fallback breaks preview startup.
+Fail if the container runtime is selected when artifacts are missing, or if a host subprocess runtime
+starts preview.
 
 ### 4. Boot VM And Clone Site
 
@@ -238,11 +240,11 @@ Run one negative-control pass:
 
 Expected:
 
-- The app uses `LocalSiteRuntime`.
-- Preview still works using the host subprocess runtime.
-- The user sees no container provisioning failure unless the container path was actually selected.
+- The app uses `UnavailableSiteRuntime`.
+- Preview does not start through host Node.
+- The user sees a clear container runtime unavailable failure.
 
-Fail if a normal dev build becomes unusable because the container artifacts are absent.
+Fail if a normal dev build starts a host subprocess runtime because the container artifacts are absent.
 
 ## Evidence To Record On #69
 

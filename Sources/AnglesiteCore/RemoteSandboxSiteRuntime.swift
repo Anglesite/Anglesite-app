@@ -1,8 +1,7 @@
 import Foundation
 
-/// `SiteRuntime` over a Cloudflare Sandbox (iOS-only; see design 2026-06-23). Mirrors
-/// `LocalSiteRuntime`'s state machine but drives a `SandboxControlClient` instead of a local
-/// subprocess: mint a token, start the session, connect the MCP client to the returned MCP tunnel,
+/// `SiteRuntime` over a Cloudflare Sandbox (iOS-only; see design 2026-06-23). Drives a
+/// `SandboxControlClient`: mint a token, start the session, connect the MCP client to the returned MCP tunnel,
 /// settle to `.ready`/`.failed`. Spawns nothing locally.
 public actor RemoteSandboxSiteRuntime: SiteRuntime {
     private let gitRemote: URL

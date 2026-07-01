@@ -2,10 +2,10 @@ import Foundation
 
 /// A site runtime that can serve MCP tool calls without a dev-server / UI surface — the seam the
 /// `HeadlessRuntimePool` manages so intent-driven edits work when no site window is open. The
-/// production conformer is `LocalSiteRuntime` (its `startHeadlessMCP` spawns only the MCP client).
+/// production conformer must be a container-backed runtime; the host Node fallback is retired.
 public protocol HeadlessRuntime: Sendable {
     /// The per-site MCP client, used to build an `EditRouter` / call `create_page` etc. `nonisolated`
-    /// so callers reach it without an actor hop (`LocalSiteRuntime.mcpClient` is a `let`).
+    /// so callers reach it without an actor hop.
     nonisolated var mcpClient: MCPClient { get }
     /// Spawn the MCP server for this site. Returns whether the client is running afterward.
     func startHeadlessMCP(siteID: String, siteDirectory: URL) async -> Bool
@@ -16,10 +16,9 @@ public protocol HeadlessRuntime: Sendable {
 /// Pools ephemeral `HeadlessRuntime`s keyed by siteID for intent-driven edits made while no site
 /// window is open (a headless Siri / Shortcuts invocation). Spawning Node per edit is expensive,
 /// so a runtime is cached for `ttl` seconds and its expiry is pushed out on every use — rapid
-/// successive edits to the same site reuse one MCP server. Expired runtimes are torn down
-/// (no zombie Node), matching `LocalSiteRuntime.stop()`.
+/// successive edits to the same site reuse one MCP server. Expired runtimes are torn down.
 ///
-/// `now`/`makeRuntime` are injectable so lifecycle is testable without a real clock or Node.
+/// `now`/`makeRuntime` are injectable so lifecycle is testable without a real clock or container.
 public actor HeadlessRuntimePool {
     public typealias RuntimeFactory = @Sendable () -> any HeadlessRuntime
 
@@ -40,7 +39,9 @@ public actor HeadlessRuntimePool {
     public init(
         ttl: TimeInterval = 60,
         now: @escaping @Sendable () -> Date = { Date() },
-        makeRuntime: @escaping RuntimeFactory = { LocalSiteRuntime() }
+        makeRuntime: @escaping RuntimeFactory = {
+            UnavailableHeadlessRuntime(reason: "Headless MCP requires the container runtime after host Node retirement.")
+        }
     ) {
         self.ttl = ttl
         self.now = now
@@ -108,5 +109,24 @@ public actor HeadlessRuntimePool {
         guard !expired.isEmpty else { return }
         for key in expired.keys { entries.removeValue(forKey: key) }
         for entry in expired.values { await entry.runtime.stop() }
+    }
+}
+
+public actor UnavailableHeadlessRuntime: HeadlessRuntime {
+    public let mcpClient: MCPClient
+    private let reason: String
+
+    public init(reason: String, mcpClient: MCPClient = MCPClient(supervisor: .shared)) {
+        self.reason = reason
+        self.mcpClient = mcpClient
+    }
+
+    public func startHeadlessMCP(siteID: String, siteDirectory: URL) async -> Bool {
+        await LogCenter.shared.append(source: "headless:\(siteID)", stream: .stderr, text: reason)
+        return false
+    }
+
+    public func stop() async {
+        await mcpClient.stop()
     }
 }

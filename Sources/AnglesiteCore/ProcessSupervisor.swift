@@ -1,6 +1,6 @@
 import Foundation
 
-/// Spawns and supervises subprocesses (Astro dev server, MCP server, ad-hoc Node smoke tests).
+/// Spawns and supervises subprocesses (git, gh, container tooling, and other non-Node helpers).
 ///
 /// All subprocess spawning in the app goes through this actor. Direct `Process()` use from views or
 /// other modules is not allowed — it would bypass log streaming and shutdown handling.
@@ -39,7 +39,7 @@ public actor ProcessSupervisor {
 
     private let backend: SupervisorBackend
 
-    /// Environment for spawns that don't pass one — puts the bundled Node on `PATH` so node-by-name lifecycle scripts don't exit 127 (#229); `nil` when Node isn't bundled. Injectable for tests.
+    /// Environment for spawns that don't pass one. Injectable for tests.
     private let defaultEnvironment: @Sendable () -> [String: String]?
 
     /// Source-compat re-exports. These used to be nested types; they now live at the protocol layer
@@ -56,19 +56,17 @@ public actor ProcessSupervisor {
     }
 
     /// Convenience for the app and tests: the default in-process backend. The app is sandboxed and
-    /// spawns Node/Astro/wrangler directly, holding a per-`SiteWindow` security-scoped grant so
-    /// spawned children inherit folder access (verified in the Task 6.7 spike; the originally
-    /// planned XPC helper was removed because a separate process can't inherit the app's scoped
-    /// grant).
+    /// still uses subprocesses for non-Node helper tools, holding a per-`SiteWindow`
+    /// security-scoped grant so spawned children inherit folder access.
     public init() {
         _ = Self.ignoreSIGPIPE
         self.backend = InProcessBackend()
-        self.defaultEnvironment = { NodeRuntime.environmentWithNodeOnPath }
+        self.defaultEnvironment = { nil }
     }
 
     /// Inject a backend explicitly (tests, future MAS wiring); `defaultEnvironment` applies to spawns that don't pass one.
     public init(backend: SupervisorBackend,
-                defaultEnvironment: @escaping @Sendable () -> [String: String]? = { NodeRuntime.environmentWithNodeOnPath }) {
+                defaultEnvironment: @escaping @Sendable () -> [String: String]? = { nil }) {
         _ = Self.ignoreSIGPIPE
         self.backend = backend
         self.defaultEnvironment = defaultEnvironment

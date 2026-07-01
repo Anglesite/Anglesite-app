@@ -3,7 +3,7 @@ import Foundation
 /// Central, in-memory fan-out for subprocess log lines.
 ///
 /// Every long-running process launched through `ProcessSupervisor.launch(...)` streams its
-/// stdout/stderr lines into a `LogCenter`. Consumers — the Debug pane, `AstroDevServer`'s ready
+/// stdout/stderr lines into a `LogCenter`. Consumers — the Debug pane, runtime readiness
 /// regex, the MCP client's framing — subscribe via `subscribe()` and receive an `AsyncStream`
 /// of every subsequent line. Recent history is retained in a bounded ring buffer so a newly
 /// opened Debug pane can show the immediate past.
