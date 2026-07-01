@@ -48,7 +48,11 @@ public enum BundledImage {
     /// crash. Resolved inside `start()` (not in `init`) so constructing the type can never trap.
     public static func layoutURL() throws -> URL {
         if let override = ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_IMAGE"] {
-            return URL(fileURLWithPath: override)
+            let url = URL(fileURLWithPath: override)
+            if FileManager.default.fileExists(atPath: url.appendingPathComponent("index.json").path) {
+                return url
+            }
+            throw BundledImageError.imageLayoutNotProvisioned
         }
         // The `.copy` rule always bundles the `container-image/` dir (with its `.gitkeep`) even when
         // the image isn't vendored, so resolving the dir is not enough — verify the OCI layout's
@@ -78,7 +82,11 @@ public enum BundledImage {
     /// Override with `ANGLESITE_CONTAINER_KERNEL` to point at a freshly-built kernel for local dev.
     public static func kernelURL() throws -> URL {
         if let override = ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_KERNEL"] {
-            return URL(fileURLWithPath: override)
+            let url = URL(fileURLWithPath: override)
+            if FileManager.default.fileExists(atPath: url.path) {
+                return url
+            }
+            throw BundledImageError.kernelNotProvisioned
         }
         if let dirURL = resourceBundle?.url(forResource: "container-kernel", withExtension: nil) {
             let kernelURL = dirURL.appendingPathComponent("vmlinux")
@@ -98,7 +106,11 @@ public enum BundledImage {
     /// Override with `ANGLESITE_CONTAINER_INITFS` to point at a different layout for local dev.
     public static func initfsLayoutURL() throws -> URL {
         if let override = ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_INITFS"] {
-            return URL(fileURLWithPath: override)
+            let url = URL(fileURLWithPath: override)
+            if FileManager.default.fileExists(atPath: url.appendingPathComponent("index.json").path) {
+                return url
+            }
+            throw BundledImageError.initfsNotProvisioned
         }
         if let dirURL = resourceBundle?.url(forResource: "container-initfs", withExtension: nil) {
             let indexURL = dirURL.appendingPathComponent("index.json")
@@ -115,13 +127,22 @@ public enum BundledImage {
     /// runtime until provisioning is complete, so `ContainerizationControl` is never selected in a
     /// state where `start()` would fail with `.imageUnavailable`.
     public static var isProvisioned: Bool {
+        provisioningReport.isProvisioned
+    }
+
+    public static var provisioningReport: BundledImageProvisioningReport {
+        BundledImageProvisioningReport(
+            image: artifactStatus { try layoutURL() },
+            kernel: artifactStatus { try kernelURL() },
+            initfs: artifactStatus { try initfsLayoutURL() }
+        )
+    }
+
+    private static func artifactStatus(_ resolve: () throws -> URL) -> BundledImageArtifactStatus {
         do {
-            _ = try layoutURL()
-            _ = try kernelURL()
-            _ = try initfsLayoutURL()
-            return true
+            return .provisioned(path: try resolve().path)
         } catch {
-            return false
+            return .missing(reason: "\(error)")
         }
     }
 
@@ -148,4 +169,36 @@ public enum BundledImageError: Error, Equatable {
     case kernelNotProvisioned
     /// The vminit initfs is not vendored and no `ANGLESITE_CONTAINER_INITFS` override was set.
     case initfsNotProvisioned
+}
+
+public struct BundledImageProvisioningReport: Sendable, Equatable {
+    public let image: BundledImageArtifactStatus
+    public let kernel: BundledImageArtifactStatus
+    public let initfs: BundledImageArtifactStatus
+
+    public var isProvisioned: Bool {
+        image.isProvisioned && kernel.isProvisioned && initfs.isProvisioned
+    }
+
+    public var missingDescriptions: [String] {
+        [
+            image.missingDescription(label: "container image"),
+            kernel.missingDescription(label: "Linux kernel"),
+            initfs.missingDescription(label: "vminit initfs")
+        ].compactMap { $0 }
+    }
+}
+
+public enum BundledImageArtifactStatus: Sendable, Equatable {
+    case provisioned(path: String)
+    case missing(reason: String)
+
+    public var isProvisioned: Bool {
+        if case .provisioned = self { true } else { false }
+    }
+
+    fileprivate func missingDescription(label: String) -> String? {
+        guard case .missing(let reason) = self else { return nil }
+        return "\(label): \(reason)"
+    }
 }
