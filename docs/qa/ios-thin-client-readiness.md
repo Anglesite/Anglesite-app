@@ -19,10 +19,9 @@ scripts/audit-ios-thin-client-readiness.sh
 Expected today:
 
 - The command exits 0.
-- It lists the remote-runtime pieces already present.
+- It lists the remote-runtime and bridge pieces already present.
 - It lists the remaining blockers, including package/project platform declarations, the missing iOS
-  shell, AppKit-shaped bridge wrappers, FSEvents/security-scoped/Core host runtime surfaces, and
-  AppKit-bound intents code.
+  shell, FSEvents/security-scoped/Core host runtime surfaces, and AppKit-bound intents code.
 
 ## Readiness Gate
 

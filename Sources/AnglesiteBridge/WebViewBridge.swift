@@ -109,15 +109,14 @@ public enum WebViewBridge {
     /// before the web view is created), not a `WKWebView` instance property — `WKWebView` only
     /// exposes the read-only `isWritingToolsActive`. `.complete` selects the full inline experience;
     /// the WebKit default is `.limited` (a panel-only fallback), so this opt-in is required to get
-    /// the inline popover. Gated on macOS 15.0+ since `writingToolsBehavior` (and Writing Tools
-    /// itself) ships there; the app's deployment target is higher, but the guard keeps
-    /// `AnglesiteBridge` (which declares a lower SPM floor and builds on CI's older runners) honest.
-    /// On a Mac without Apple Intelligence this is a safe no-op: WebKit simply never offers the
-    /// affordance.
+    /// the inline popover. The setting is macOS-only for Anglesite's current WebKit usage, so the
+    /// shared bridge gates it at compile time and leaves the future iOS `UIViewRepresentable`
+    /// preview on WebKit's platform default. On a Mac without Apple Intelligence this is a safe
+    /// no-op: WebKit simply never offers the affordance.
     @MainActor
     public static func enableWritingTools(on configuration: WKWebViewConfiguration) {
-        if #available(macOS 15.0, *) {
-            configuration.writingToolsBehavior = .complete
-        }
+        #if os(macOS)
+        configuration.writingToolsBehavior = .complete
+        #endif
     }
 }

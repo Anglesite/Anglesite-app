@@ -52,6 +52,44 @@ pattern_exists() {
     [[ -e "$path" ]] && rg -q "$pattern" "$path"
 }
 
+writing_tools_assignment_is_mac_gated() {
+    local path="$1"
+    [[ -e "$path" ]] || return 1
+    awk '
+        /public static func enableWritingTools/ {
+            inFunction = 1
+            braceDepth = 0
+            sawAssignment = 0
+            gatedAssignment = 0
+            ungatedAssignment = 0
+        }
+        inFunction {
+            for (i = 1; i <= length($0); i++) {
+                char = substr($0, i, 1)
+                if (char == "{") { braceDepth++ }
+                if (char == "}") { braceDepth-- }
+            }
+            if ($0 ~ /^[[:space:]]*#if[[:space:]]+os\(macOS\)/) { macGuard = 1 }
+            if ($0 ~ /writingToolsBehavior[[:space:]]*=/) {
+                sawAssignment = 1
+                if (macGuard == 1) {
+                    gatedAssignment = 1
+                } else {
+                    ungatedAssignment = 1
+                }
+            }
+            if ($0 ~ /^[[:space:]]*#endif/) { macGuard = 0 }
+            if (braceDepth == 0) {
+                inFunction = 0
+                macGuard = 0
+            }
+        }
+        END {
+            exit (sawAssignment == 1 && gatedAssignment == 1 && ungatedAssignment == 0) ? 0 : 1
+        }
+    ' "$path"
+}
+
 if pattern_exists "Package.swift" "\\.iOS\\("; then
     ready "Swift package declares an iOS platform"
 else
@@ -76,10 +114,10 @@ else
     blocker "No iOS bundle metadata" "project.yml/Resources do not define an iOS Info.plist"
 fi
 
-if pattern_exists "Sources/AnglesiteBridge/WebViewBridge.swift" "#available\\(macOS"; then
-    blocker "Bridge has macOS-only availability" "Sources/AnglesiteBridge/WebViewBridge.swift"
+if writing_tools_assignment_is_mac_gated "Sources/AnglesiteBridge/WebViewBridge.swift"; then
+    ready "Bridge Writing Tools behavior is macOS-gated"
 else
-    ready "Bridge availability is not hard-coded to macOS"
+    blocker "Bridge Writing Tools behavior is not platform-gated" "Sources/AnglesiteBridge/WebViewBridge.swift"
 fi
 
 if pattern_exists "Sources/AnglesiteBridge/WebViewBridge.swift" "NSViewRepresentable"; then
