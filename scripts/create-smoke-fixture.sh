@@ -3,26 +3,14 @@
 # Creates a smoke-test Anglesite site at ~/Sites/anglesite-smoke/, populated
 # from the in-repo template (Resources/Template/) with `node_modules` installed.
 #
-# Use this fixture to manually verify the dev-server lifecycle end-to-end:
-# PreviewModel → AstroDevServer → ProcessSupervisor → window-close teardown.
-# The template alone (without node_modules) leaves the preview in `.failed`
-# and never exercises the subprocess code path.
+# Use this fixture to manually verify the sandboxed App Store app end-to-end.
+# A real-signed build is produced so the run exercises the App Sandbox, hardened
+# runtime Node re-sign, and local Apple Containerization capability gates.
 #
 # Idempotent: re-running mirrors any template changes and runs `npm install`
 # incrementally.
 
 set -euo pipefail
-
-# --mas: also build the sandboxed Mac App Store target, real-signed (Apple Development),
-# so the run exercises the App Sandbox + hardened-runtime Node re-sign — the load-bearing
-# Phase 10.1 Task 11 validation. Without it, this preps the DevID fixture only.
-MAS=0
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --mas) MAS=1; shift ;;
-        *) echo "unknown arg: $1" >&2; exit 2 ;;
-    esac
-done
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
@@ -64,29 +52,7 @@ cd "$FIXTURE_DIR"
 echo "==> $NPM install --no-audit --no-fund --prefer-offline"
 "$NPM" install --no-audit --no-fund --prefer-offline
 
-if [[ $MAS -eq 0 ]]; then
-cat <<EOF
-
-✓ Smoke fixture ready: $FIXTURE_DIR
-
-  Verify the dev-server lifecycle (Developer ID build):
-    1. Launch Anglesite (or use 'open Anglesite.xcodeproj' + ⌘R from Xcode).
-    2. Open Folder… → pick anglesite-smoke (or it'll appear in the launcher
-       since ~/Sites/anglesite-smoke is under the default sitesRoot).
-    3. Preview should reach .ready and a node child should be parented by
-       the app: ps -A -o pid,ppid,comm | awk '\$2 == <anglesite-pid>'
-    4. Close the SiteWindow — the node child should be reaped within a few
-       seconds (ProcessSupervisor.shutdownAll path).
-    5. Click the gray health-badge dot left of the Chat button → popover opens
-       titled "Health unknown". Click "Recheck" → spinner appears, settles to
-       a green/yellow/red dot depending on what the scan finds. The popover
-       summary should match what /anglesite:check reports for the same site.
-    6. Quit the app — no orphan node processes should remain.
-EOF
-    exit 0
-fi
-
-# ----- MAS variant: real-signed sandbox validation (Task 11) -----
+# ----- Real-signed sandbox validation -----
 # A real Apple Development identity is required — the App Sandbox + hardened-runtime
 # Node JIT entitlements are NOT enforced under ad-hoc signing, so an ad-hoc run would
 # pass for the wrong reasons. Bail early with guidance if no identity is present.
@@ -124,8 +90,8 @@ else
     echo "         'brew install xcodegen' if the build fails to find recent Sources/ files" >&2
 fi
 
-DERIVED="$REPO_ROOT/build/mas-smoke"
-echo "==> building AnglesiteMAS (real-signed: Apple Development, team $DEV_TEAM) into $DERIVED"
+DERIVED="$REPO_ROOT/build/smoke"
+echo "==> building Anglesite (real-signed: Apple Development, team $DEV_TEAM) into $DERIVED"
 # Automatic provisioning + -allowProvisioningUpdates so Xcode mints/downloads the team's
 # "Mac Development" profile. This FAILS LOUDLY if the team's Apple ID isn't in Xcode →
 # Settings → Accounts — which is correct: the alternative (CODE_SIGN_IDENTITY="-") signs
@@ -138,25 +104,25 @@ mkdir -p "$DERIVED"
 # `set -o pipefail` the pipeline reports xcodebuild's exit, not tee's. (Don't append a
 # `| grep` here: a matched "error:" would make grep exit 0 and mask the failure.)
 if ! xcodebuild -project "$REPO_ROOT/Anglesite.xcodeproj" \
-    -scheme AnglesiteMAS -configuration Debug \
+    -scheme Anglesite -configuration Debug \
     -derivedDataPath "$DERIVED" \
     CODE_SIGN_STYLE=Automatic CODE_SIGN_IDENTITY="Apple Development" \
     DEVELOPMENT_TEAM="$DEV_TEAM" -allowProvisioningUpdates \
     build 2>&1 | tee "$BUILD_LOG"; then
-    echo "error: AnglesiteMAS build/sign failed. Relevant lines:" >&2
+    echo "error: Anglesite build/sign failed. Relevant lines:" >&2
     grep -iE "error:|No Account for Team|No signing certificate|provisioning" "$BUILD_LOG" | tail -10 >&2
     echo "       If you see 'No Account for Team \"$DEV_TEAM\"', add that Apple ID in" >&2
     echo "       Xcode → Settings → Accounts, then re-run. Full log: $BUILD_LOG" >&2
     exit 1
 fi
 
-APP="$DERIVED/Build/Products/Debug/AnglesiteMAS.app"
+APP="$DERIVED/Build/Products/Debug/Anglesite.app"
 NODE="$APP/Contents/Resources/node-runtime/bin/node"
 
 # Guard: a *successful* build can still be AD-HOC (TeamIdentifier=not set) if signing
 # silently fell back. That does NOT satisfy Task 11 — fail rather than mislead.
 if codesign -dv --verbose=4 "$APP" 2>&1 | grep -q "TeamIdentifier=not set"; then
-    echo "error: AnglesiteMAS signed AD-HOC (TeamIdentifier not set) — Task 11 needs a real" >&2
+    echo "error: Anglesite signed AD-HOC (TeamIdentifier not set) — the smoke needs a real" >&2
     echo "       Team signature. Add team $DEV_TEAM's Apple ID in Xcode → Settings → Accounts" >&2
     echo "       so automatic provisioning signs with the real cert, then re-run." >&2
     exit 1
@@ -168,15 +134,15 @@ codesign -d --entitlements :- "$NODE" 2>/dev/null | plutil -p - 2>/dev/null | gr
 
 cat <<EOF
 
-✓ MAS smoke fixture ready: $FIXTURE_DIR
-✓ Real-signed MAS app built: $APP
+✓ Smoke fixture ready: $FIXTURE_DIR
+✓ Real-signed App Store app built: $APP
 
   This is the load-bearing Phase 10.1 validation — it must run INTERACTIVELY
   under the real signature (the sandbox/JIT entitlements aren't enforced ad-hoc).
 
   Launch the built app from a normal location (signed sandboxed apps refuse to
   run from /private/tmp):
-    cp -R "$APP" ~/Applications/ && open -n ~/Applications/AnglesiteMAS.app
+    cp -R "$APP" ~/Applications/ && open -n ~/Applications/Anglesite.app
 
   Then exercise the WRITE-HEAVY loop and watch for sandbox denials
   (log stream --predicate 'eventMessage CONTAINS "deny"' --style compact):
@@ -195,8 +161,8 @@ cat <<EOF
        under hardened runtime → the entitlement is doing its job. If the drop fails
        with a code-signing/library-validation error in the log, record it.
     5. Close the window → node child reaped. Quit → no orphan node.
-    6. Chat button must be ABSENT (compiled out of MAS); Settings → no GitHub
-       Connect row, no 'Check for Updates…' menu item.
+    6. Chat button must be ABSENT (compiled out of App Store); Settings → no GitHub
+       Connect row, and updates are handled by the App Store.
 
   Capture PASS/FAIL per step (esp. #3 wrangler-spawn and #4 sharp) in a notes
   file; this is the evidence that settles cs.disable-library-validation and the

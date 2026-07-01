@@ -67,15 +67,14 @@ The access path and index path are relative to the `en.lproj` folder.
 | `pages/deploying.html` | Deploy drawer, the pre-deploy-check gate, blocked-deploy sheet |
 | `pages/accounts.html` | GitHub sign-in, Cloudflare token, Keychain storage |
 | `pages/settings.html` | Settings window options |
-| `pages/updates.html` | "Check for Updates…" (direct-download build) / App Store updates (MAS build) |
+| `pages/updates.html` | App Store updates |
 | `pages/debug-pane.html` | Debug pane & logs (`⌥⌘D`) |
 | `pages/keyboard-shortcuts.html` | `⌘\``, `⌥⌘D`, Help, etc. |
 | `pages/troubleshooting.html` | Preview won't load, deploy blocked, Node/cache issues |
 
 Every page includes a short intro, numbered task steps, cross-links to related pages,
-and a `<meta name="description">` for index quality. The `updates` page notes the
-DevID-vs-MAS difference (the Sparkle "Check for Updates…" item is compiled
-`#if !ANGLESITE_MAS`; the MAS build updates through the App Store).
+and a `<meta name="description">` for index quality. The `updates` page notes that
+the app updates through the App Store.
 
 ## Styling (`shrd/help.css`)
 

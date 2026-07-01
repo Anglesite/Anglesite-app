@@ -99,13 +99,13 @@ checked by hand against a fixture site and recorded in the PR description, never
 - **MAS sandbox grant present/missing** — the security-scoped bookmark behavior needs a real sandboxed `AnglesiteMAS.app` launch (blocked on hosted CI per CLAUDE.md), so the "fail closed" column is a manual MAS pass.
 - **Deploy's live Siri confirmation prompt** — `requestConfirmation` needs intentsd / a registered app, absent under `swift test`. CI pins only the registry declaration; verify the actual "Deploy … to production?" prompt (and that declining aborts) by hand. The *edit* confirmation gate is the one with a behavioral CI test, via the `ConfirmationOverride` seam.
 
-## DevID vs MAS
+## App Store Target
 
-The same matrix applies to both targets. Differences to watch on the MAS pass:
+The same matrix applies to the sandboxed app target. Differences to watch:
 
-- The "MAS grant present/missing" columns only apply to `AnglesiteMAS`; on DevID (sandbox off) writes work without the bookmark.
-- Chat / Sparkle / `gh` are compiled out of MAS, but none of the nine workflows depend on them, so the matrix is identical.
-- Run the manual pass once per target before tagging a release.
+- The "MAS grant present/missing" columns only apply to sandboxed package access.
+- Chat and `gh` are compiled out of MAS, but none of the nine workflows depend on them, so the matrix is identical.
+- Run the manual pass before tagging a release.
 
 ## How to run a pass
 

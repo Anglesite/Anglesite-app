@@ -178,7 +178,6 @@ For target `Anglesite` (change after line 99):
         product: AnglesiteBridge
       - package: Anglesite
         product: AnglesiteIntents
-      - package: Sparkle
 ```
 
 For target `AnglesiteMAS` (change after line 181):

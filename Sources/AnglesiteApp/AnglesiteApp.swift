@@ -104,11 +104,6 @@ struct AnglesiteApp: App {
     /// Live mirror of the site registry for the File ▸ Open Recent submenu. Held as `@State`
     /// so SwiftUI re-evaluates `.commands` when its `sites` change. Started in AppDelegate.
     @State private var recent = RecentSitesModel.shared
-    #if !ANGLESITE_MAS
-    /// Sparkle updater, held for the app's lifetime so its automatic-check timer keeps firing.
-    /// MAS builds update through the App Store and have no Sparkle dependency (Phase 10.1).
-    @StateObject private var updater = Updater()
-    #endif
 
     /// Computed once at launch: Debug builds always show the Debug-pane menu item; Release builds
     /// only when the user opted in (Settings) or held ⌥ while launching. A settings change takes
@@ -204,15 +199,6 @@ struct AnglesiteApp: App {
                     }
                 }
             }
-            // "Check for Updates…" lives in the standard slot Mac users expect — directly
-            // under "About Anglesite" in the application menu. `CommandGroup(after: .appInfo)`
-            // puts it there.
-            #if !ANGLESITE_MAS
-            CommandGroup(after: .appInfo) {
-                Button("Check for Updates…") { updater.checkForUpdates() }
-                    .disabled(!updater.canCheckForUpdates)
-            }
-            #endif
             // Export is its own Commands type so @FocusedValue tracks scene focus (see ExportSiteCommands).
             ExportSiteCommands()
             // "Show Web Inspector" in the View menu — its own Commands type for the same focus reason.

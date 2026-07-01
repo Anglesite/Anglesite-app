@@ -5,11 +5,9 @@ import Foundation
 /// All subprocess spawning in the app goes through this actor. Direct `Process()` use from views or
 /// other modules is not allowed — it would bypass log streaming and shutdown handling.
 ///
-/// As of Phase 10.1 this is a thin **facade** over a `SupervisorBackend`. The actual spawn and
-/// supervision implementation lives in the backend:
-///   - `InProcessBackend` (DevID): wraps `Process()` directly, no sandbox.
-///   - (MAS uses the same `InProcessBackend`; the app is sandboxed and spawns directly, holding a
-///     per-window security-scoped grant — see `init()`.)
+/// This is a thin **facade** over a `SupervisorBackend`. The actual spawn and supervision
+/// implementation lives in `InProcessBackend`; the app is sandboxed and spawns directly while
+/// holding a per-window security-scoped grant for site packages.
 ///
 /// The public API below is unchanged from the pre-split supervisor; every caller and test keeps
 /// working. Each method builds a `SpawnSpec` and delegates to `self.backend`. `Handle.id` and the
@@ -57,11 +55,11 @@ public actor ProcessSupervisor {
         SpawnedProcessHandle(id: handle.id, pid: 0)
     }
 
-    /// Convenience for the app and tests: the default in-process backend. Both DevID and MAS use
-    /// `InProcessBackend` — the MAS app is sandboxed and spawns Node/Astro/wrangler directly,
-    /// holding a per-`SiteWindow` security-scoped grant so spawned children inherit folder access
-    /// (verified in the Task 6.7 spike; the originally-planned XPC helper was removed because a
-    /// separate process can't inherit the app's scoped grant).
+    /// Convenience for the app and tests: the default in-process backend. The app is sandboxed and
+    /// spawns Node/Astro/wrangler directly, holding a per-`SiteWindow` security-scoped grant so
+    /// spawned children inherit folder access (verified in the Task 6.7 spike; the originally
+    /// planned XPC helper was removed because a separate process can't inherit the app's scoped
+    /// grant).
     public init() {
         _ = Self.ignoreSIGPIPE
         self.backend = InProcessBackend()

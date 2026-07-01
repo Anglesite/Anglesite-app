@@ -1,11 +1,29 @@
-# Anglesite dev-server container image
+# Cloudflare Sandbox Image Pipeline
 
-The **one OCI image, two substrates** that issue [#62](https://github.com/Anglesite/Anglesite-app/issues/62) calls for. The Astro dev server and the plugin's MCP server run **inside this Linux container**, never in the host app process, so the dev server behaves identically everywhere:
+This lowercase `container/` directory is **not** the active macOS runtime image
+source.
 
-| Substrate | Platform | How it gets the image |
-|---|---|---|
-| **Apple Containerization** (local) | `Anglesite` DevID build · macOS 26+ · Apple Silicon | pulls the canonical image **by digest** |
-| **Cloudflare Sandbox** (remote) | `AnglesiteMAS` · Intel · macOS < 26 · iOS | extends the canonical image via [`Dockerfile.cloudflare`](Dockerfile.cloudflare) (#61) |
+The active Apple Containerization image lives in
+[`../Containers/anglesite-dev/`](../Containers/anglesite-dev/) and is vendored
+into the app bundle by [`../scripts/vendor-container-image.sh`](../scripts/vendor-container-image.sh).
+Docker/buildx is used there only to manufacture an OCI root filesystem; macOS
+runtime execution is Apple's Containerization framework, not Docker.
+
+This directory is retained for the Cloudflare Sandbox / remote-runtime image
+pipeline from issue [#62](https://github.com/Anglesite/Anglesite-app/issues/62):
+a canonical dev-server image plus the Cloudflare-specific wrapper
+[`Dockerfile.cloudflare`](Dockerfile.cloudflare). It is future-facing for
+`RemoteSandboxSiteRuntime` / iOS and spike work, not the source of
+`Resources/container-image/`.
+
+Original design intent: one behavior-defining OCI image, with substrate-specific
+packaging where needed. The Astro dev server and the plugin's MCP server run
+inside the Linux container so the dev server behaves consistently:
+
+| Substrate | Current source |
+|---|---|
+| **Apple Containerization** (local macOS) | `../Containers/anglesite-dev/`, vendored into the app bundle |
+| **Cloudflare Sandbox** (remote / iOS) | this directory, extended via [`Dockerfile.cloudflare`](Dockerfile.cloudflare) |
 
 This realizes the [design doc](../docs/specs/2026-05-30-cloudflare-sandbox-dev-server-design.md) §0 ("platform-split, one container image") and answers follow-up **Q-D** (image distribution).
 
@@ -17,7 +35,9 @@ This realizes the [design doc](../docs/specs/2026-05-30-cloudflare-sandbox-dev-s
 - **The plugin's MCP server runtime** — `server/*.mjs` plus its production deps, baked at `/opt/anglesite/plugin` (`ANGLESITE_MCP_ENTRY`). The plugin is the source of truth for the MCP server (`CLAUDE.md`).
 - **`tini`** as PID 1 for signal/zombie reaping.
 
-Built for **`linux/arm64`** (local Apple Silicon + Cloudflare).
+Defaults to **`linux/arm64`** for historical/local builds. Cloudflare Sandbox is
+currently **`linux/amd64`**, so build with `PLATFORM=linux/amd64` or push a
+multi-arch manifest when exercising this remote path.
 
 ## Pre-baked dependencies (skip `npm ci` on cold start)
 
@@ -34,7 +54,8 @@ On start, [`hydrate.sh`](hydrate.sh) installs the cloned site's deps the fastest
 ## Build
 
 ```sh
-# Build + load locally (arm64). Reads Node version + plugin source automatically.
+# Build + load the Cloudflare/shared image locally. This is not the app-bundled
+# macOS image; use ../scripts/vendor-container-image.sh for that.
 scripts/build-container-image.sh
 
 # Build + push to the registry by digest, and print the digest to pin.
@@ -61,10 +82,10 @@ The default CMD ([`start-dev-server.sh`](start-dev-server.sh)) runs `astro dev` 
 
 ## Distribution decision (Q-D)
 
-**Build once, push by digest; both substrates consume the same digest.**
+**Build and push by digest for the Cloudflare remote path.**
 
-- The canonical image is built for `linux/arm64` and pushed to a registry (default GHCR). For reproducibility, pin the **base image by digest** and consume the **resulting image by digest** — not by floating tag.
-- **Apple Containerization** pulls that exact digest locally — no second build, no drift.
-- **Cloudflare Sandbox** can't run the canonical image entirely unmodified: the Sandbox SDK needs its standalone `/sandbox` init binary in the image. [`Dockerfile.cloudflare`](Dockerfile.cloudflare) `FROM`s the canonical image (by digest) and adds **only** that binary, so the toolchain layers stay byte-identical to what Apple Containerization runs. Cloudflare builds/pushes this thin wrapper to its own registry at `wrangler deploy`; the exact `/sandbox` source pin is finalized by the Cloudflare spike (#61).
+- The Cloudflare/shared image is pushed to a registry (default GHCR). For reproducibility, pin the **base image by digest** and consume the **resulting image by digest** — not by floating tag.
+- **Apple Containerization** no longer consumes this lowercase path in the app. It uses the vendored OCI layout produced from `../Containers/anglesite-dev/`.
+- **Cloudflare Sandbox** can't run the base image entirely unmodified: the Sandbox SDK needs its standalone init binary in the image. [`Dockerfile.cloudflare`](Dockerfile.cloudflare) `FROM`s the base image (by digest) and adds **only** that binary. Cloudflare builds/pushes this thin wrapper to its own registry at `wrangler deploy`; the exact init source pin is finalized by the Cloudflare spike (#61).
 
-This keeps the *behavior-defining* layers (Node, git, Astro toolchain, plugin MCP runtime, baked deps) identical across substrates while accommodating each substrate's init requirements.
+This keeps the *behavior-defining* layers (Node, git, Astro toolchain, plugin MCP runtime, baked deps) reusable for the remote substrate while keeping the active macOS image source unambiguous.

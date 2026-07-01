@@ -1,17 +1,21 @@
 # syntax=docker/dockerfile:1
 #
-# Canonical Anglesite dev-server image — issue #62 (design doc Q-D).
+# Cloudflare/shared Anglesite dev-server image — issue #62 (design doc Q-D).
 #
-# ONE image, TWO substrates. The Astro dev server and the plugin's MCP server
-# run inside this Linux container, never in the host app process, so the dev
-# server behaves identically everywhere:
+# This lowercase container/ image is NOT the app-bundled macOS image source.
+# The active Apple Containerization image lives in Containers/anglesite-dev/ and
+# is exported into Resources/container-image/ by scripts/vendor-container-image.sh.
 #
-#   • Apple Containerization (local, DevID Macs)  — pulls this image by digest.
-#   • Cloudflare Sandbox     (remote, MAS / iOS)  — see container/Dockerfile.cloudflare.
+# This Dockerfile remains for the Cloudflare Sandbox / remote-runtime pipeline:
+# the Astro dev server and the plugin's MCP server run inside this Linux
+# container so the remote runtime can match the local runtime's behavior.
 #
-# Built for linux/arm64 (local Apple Silicon + Cloudflare). Node is pinned to
-# scripts/node-version.txt and passed in as NODE_VERSION by
-# scripts/build-container-image.sh.
+#   • Apple Containerization (macOS) — Containers/anglesite-dev/ bundled as OCI.
+#   • Cloudflare Sandbox (remote/iOS) — see container/Dockerfile.cloudflare.
+#
+# Defaults to linux/arm64 in scripts/build-container-image.sh, but Cloudflare
+# Sandbox currently needs linux/amd64. Node is pinned to scripts/node-version.txt
+# and passed in as NODE_VERSION by scripts/build-container-image.sh.
 
 ARG NODE_VERSION=24.15.0
 FROM node:${NODE_VERSION}-bookworm-slim

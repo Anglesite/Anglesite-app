@@ -156,13 +156,11 @@ final class PreviewModel {
     /// Returns the active container control and site ID when the runtime is a
     /// `LocalContainerSiteRuntime` that has successfully started a container.
     ///
-    /// Returns `nil`:
-    ///   - on MAS (container runtime is not linked; `runtime` is always a `LocalSiteRuntime`)
-    ///   - on DevID when the container capability gate chose the host runtime
-    ///   - when the runtime is a container runtime but `start()` hasn't completed yet
+    /// Returns `nil` when the capability gate chose the host runtime or when the container runtime
+    /// has not completed `start()` yet.
     ///
     /// Uses only `AnglesiteCore` types (`LocalContainerControl`, `LocalContainerSiteRuntime`)
-    /// — no `AnglesiteContainer` import needed, so this compiles on both targets.
+    /// — no `AnglesiteContainer` import needed here.
     ///
     /// Reads both fields in a single actor hop via `containerSnapshot()` to avoid a
     /// theoretical TOCTOU window between two separate `await` reads.

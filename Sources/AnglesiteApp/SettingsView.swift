@@ -199,9 +199,9 @@ private struct CloudflareTokenRow: View {
     }
 }
 
-// The gh-backed GitHub panel ships in the Developer ID build only. The MAS build has no `gh`
-// (and a sandboxed app can't rely on it); it uses the user's existing git credentials instead
-// — see the #else branch in the Credentials section above.
+// The gh-backed GitHub panel is compiled out of the App Store build. A sandboxed app can't rely
+// on a user-installed `gh`; it uses the user's existing git credentials instead — see the #else
+// branch in the Credentials section above.
 #if !ANGLESITE_MAS
 /// "Connect GitHub" row. The app never sees the GitHub token — `gh` stores it in its own
 /// credential store. This row just launches the `gh auth login` device-code flow and

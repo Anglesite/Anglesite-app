@@ -50,9 +50,9 @@ final class TypedEntryEditorModel: InspectorEditorModel {
         let url = file.url
         do {
             var session = fileSession
-            let text = try await session.load(from: url)
+            let loaded = try await session.load(from: url)
             fileSession = session
-            adopt(text)
+            adopt(loaded)
             loadError = nil
             warnIfNoModificationDate(after: "load")
         } catch {

@@ -13,12 +13,11 @@
 #      phase — XcodeGen exits 0, but the dropped files are then absent from that target's
 #      Sources build phase (this script fails, naming the target and files).
 #
-# Membership is checked per target (via the target's PBXSourcesBuildPhase), not by mere
-# presence of a file reference — because both the Anglesite and AnglesiteMAS targets share
-# Sources/AnglesiteApp, a file dropped from one but kept by the other would otherwise slip by.
-# Files are compared by their path *relative to* Sources/AnglesiteApp (reconstructed from the
-# PBX group hierarchy), not by bare basename, so two same-named files in different subdirs
-# (e.g. Views/Settings.swift vs Overlays/Settings.swift) are distinguished.
+# Membership is checked per application target (via the target's PBXSourcesBuildPhase), not by mere
+# presence of a file reference. Files are compared by their path *relative to*
+# Sources/AnglesiteApp (reconstructed from the PBX group hierarchy), not by bare basename, so two
+# same-named files in different subdirs (e.g. Views/Settings.swift vs Overlays/Settings.swift) are
+# distinguished.
 #
 # It deliberately does NOT run a full `xcodebuild` of the app: the app target needs the
 # macOS 27 SDK (Xcode 27), which CI runners don't yet ship (see #128). XcodeGen only needs

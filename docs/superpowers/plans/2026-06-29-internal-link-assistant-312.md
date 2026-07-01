@@ -14,7 +14,7 @@ The spec calls for Insert to route through the apply-edit pipeline (constructing
 
 ## Global Constraints
 
-- macOS 27+ deployment target; no third-party dependencies beyond Sparkle
+- macOS 27+ deployment target; no third-party dependencies
 - Foundation Models tools gated with `#if compiler(>=6.4)`
 - Tests use Swift Testing (`@Suite`/`@Test`), not XCTest
 - `FakeEmbeddingProvider` for all ranker tests (no on-device model on CI)

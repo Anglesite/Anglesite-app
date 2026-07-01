@@ -328,7 +328,7 @@ Expected: `** BUILD SUCCEEDED **`.
 Run: `xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debug build 2>&1 | tail -10`
 Expected: `** BUILD SUCCEEDED **`.
 
-> The annotation modifier is target-agnostic — `AnglesiteIntents` already builds in MAS (it's how #129's Spotlight indexer ships there). If MAS fails with a symbol that DevID accepted, it's a `#if !ANGLESITE_MAS` collision; recheck Task 2 and 3 for accidental `chat`/`Sparkle`-adjacent imports.
+> The annotation modifier is target-agnostic — `AnglesiteIntents` already builds in MAS (it's how #129's Spotlight indexer ships there). If MAS fails with a symbol that DevID accepted, it's a `#if !ANGLESITE_MAS` collision; recheck Task 2 and 3 for accidental chat or direct-download-adjacent imports.
 
 - [ ] **Step 3: Run the full SwiftPM test suite**
 

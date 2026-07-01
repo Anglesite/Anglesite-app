@@ -1,5 +1,5 @@
-// Developer ID build only — drives the `gh auth login` device-code flow, which the sandboxed
-// MAS build omits (no bundled `gh`). See SettingsView's GitHubAuthRow.
+// Compiled out of the App Store build — drives the `gh auth login` device-code flow for
+// non-sandboxed/local experiments only. See SettingsView's GitHubAuthRow.
 #if !ANGLESITE_MAS
 import SwiftUI
 import AppKit

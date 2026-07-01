@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# Build the arm64 Anglesite dev image and export it as an OCI layout into Resources/container-image/.
-# Mirrors scripts/vendor-node.sh: produces a gitignored, bundled app resource. Requires Docker (or
-# a compatible buildx) with linux/arm64 support, run on an Apple-Silicon Mac.
+# Build the active macOS Apple Containerization image and export it as an OCI layout into
+# Resources/container-image/.
+#
+# Docker/buildx is only the image builder. At runtime Anglesite imports this OCI layout and
+# boots it with Apple's Containerization framework; Docker is not used by the app.
+#
+# Mirrors scripts/vendor-node.sh: produces a gitignored, bundled app resource. Requires Docker
+# (or a compatible buildx) with linux/arm64 support, run on an Apple-Silicon Mac.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CTX="$ROOT/Containers/anglesite-dev"
