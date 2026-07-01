@@ -49,7 +49,10 @@ final class TypedEntryEditorModel: InspectorEditorModel {
         defer { isLoading = false }
         let url = file.url
         do {
-            adopt(try await fileSession.load(from: url))
+            var session = fileSession
+            let loaded = try await session.load(from: url)
+            fileSession = session
+            adopt(loaded)
             loadError = nil
             warnIfNoModificationDate(after: "load")
         } catch {
@@ -68,7 +71,9 @@ final class TypedEntryEditorModel: InspectorEditorModel {
         let newContents = TypedContentEditor.write(edited, into: base, descriptor: descriptor)
         let url = file.url
         do {
-            try await fileSession.save(newContents, to: url)
+            var session = fileSession
+            try await session.save(newContents, to: url)
+            fileSession = session
             savedValues = edited
             warnIfNoModificationDate(after: "save")
             await commit()
@@ -81,14 +86,19 @@ final class TypedEntryEditorModel: InspectorEditorModel {
 
     func flushBeforeLeaving() async -> Bool {
         guard isDirty else { return true }
-        guard await fileSession.canFlushBeforeLeaving(file: file.url, bufferIsDirty: true) else { return false }
+        var session = fileSession
+        let canFlush = await session.canFlushBeforeLeaving(file: file.url, bufferIsDirty: true)
+        fileSession = session
+        guard canFlush else { return false }
         return await save()
     }
 
     func checkExternalChange() async {
         guard loadError == nil else { return }
         let dirty = isDirty
-        let change = await fileSession.externalChange(at: file.url, bufferIsDirty: dirty)
+        var session = fileSession
+        let change = await session.externalChange(at: file.url, bufferIsDirty: dirty)
+        fileSession = session
         guard let change else { return }
         switch change {
         case .none:
@@ -103,7 +113,9 @@ final class TypedEntryEditorModel: InspectorEditorModel {
     func keepMyChanges() { fileSession.keepMyChanges() }
 
     func reloadFromDisk() async {
-        guard let disk = await fileSession.reloadFromConflict(file: file.url) else { return }
+        var session = fileSession
+        guard let disk = await session.reloadFromConflict(file: file.url) else { return }
+        fileSession = session
         adopt(disk)
     }
 

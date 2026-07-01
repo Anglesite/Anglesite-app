@@ -42,7 +42,9 @@ final class FileEditorModel {
         defer { isLoading = false }
         let url = file.url
         do {
-            text = try await fileSession.load(from: url)
+            var session = fileSession
+            text = try await session.load(from: url)
+            fileSession = session
             loadError = nil
             warnIfNoModificationDate(after: "load")
         } catch {
@@ -57,7 +59,9 @@ final class FileEditorModel {
         let url = file.url
         let contents = text
         do {
-            try await fileSession.save(contents, to: url)
+            var session = fileSession
+            try await session.save(contents, to: url)
+            fileSession = session
             warnIfNoModificationDate(after: "save")
             return true
         } catch {
@@ -71,7 +75,10 @@ final class FileEditorModel {
     /// rather than clobbering the other tool's edit. Returns true when it is safe to leave.
     func flushBeforeLeaving() async -> Bool {
         guard isDirty else { return true }
-        guard await fileSession.canFlushBeforeLeaving(file: file.url, bufferIsDirty: true) else {
+        var session = fileSession
+        let canFlush = await session.canFlushBeforeLeaving(file: file.url, bufferIsDirty: true)
+        fileSession = session
+        guard canFlush else {
             return false
         }
         return await save()
@@ -81,7 +88,9 @@ final class FileEditorModel {
     func checkExternalChange() async {
         guard loadError == nil else { return }
         let dirty = isDirty
-        let change = await fileSession.externalChange(at: file.url, bufferIsDirty: dirty)
+        var session = fileSession
+        let change = await session.externalChange(at: file.url, bufferIsDirty: dirty)
+        fileSession = session
         guard let change else { return }
         switch change {
         case .none:
@@ -96,7 +105,9 @@ final class FileEditorModel {
     func keepMyChanges() { fileSession.keepMyChanges() }
 
     func reloadFromDisk() async {
-        guard let disk = await fileSession.reloadFromConflict(file: file.url) else { return }
+        var session = fileSession
+        guard let disk = await session.reloadFromConflict(file: file.url) else { return }
+        fileSession = session
         text = disk
     }
 
