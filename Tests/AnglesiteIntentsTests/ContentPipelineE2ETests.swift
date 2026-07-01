@@ -9,7 +9,7 @@ import Foundation
 /// `ContentListingTests`, `ContentEntitiesTests`, and `ContentSpotlightIndexerTests`; this stitches
 /// them together. Pure in-memory and always-on (no node/python): the real parser runs on a real
 /// `list_content`-shaped payload, but no subprocess is spawned (the MCP round-trip is covered by
-/// `LocalSiteRuntimeGraphTests`).
+/// the content graph runtime tests).
 extension AppIntentsTests {
     @Suite("ContentPipelineE2E", .serialized)
     struct ContentPipelineE2ETests {

@@ -33,6 +33,26 @@ struct AstroHTMLValidatorTests {
         #expect(message?.contains("Astro dependencies are missing") == true)
     }
 
+    @Test("default validator reports container requirement when Astro deps exist")
+    func defaultValidatorReportsContainerRequirement() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(
+            at: root.appendingPathComponent("node_modules/@astrojs/compiler", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try "{}".write(
+            to: root.appendingPathComponent("node_modules/@astrojs/compiler/package.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        defer { try? fm.removeItem(at: root) }
+
+        let message = await AstroHTMLValidator().validationMessage(for: "<script></script>", siteDirectory: root)
+
+        #expect(message == "Custom analytics HTML validation must run in the container runtime; host Node has been retired.")
+    }
+
     @Test("runner failure is returned as invalid custom analytics HTML")
     func runnerFailure() async throws {
         let fm = FileManager.default

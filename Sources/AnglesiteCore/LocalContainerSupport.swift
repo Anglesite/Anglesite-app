@@ -1,7 +1,7 @@
 /// Decides whether `LocalContainerSiteRuntime` can run on this build/host. The entitlement is the
 /// real gate (it's unforgeable — an un-entitled build is SIGKILL'd by `amfid` at launch, see the
 /// #60 spike), so no feature flag is needed: a build without it simply reports `false` and the app
-/// falls back to `LocalSiteRuntime` / `RemoteSandboxSiteRuntime`.
+/// falls back to `UnavailableSiteRuntime` / `RemoteSandboxSiteRuntime`.
 public enum LocalContainerSupport {
     public enum Availability: Sendable, Equatable {
         case available

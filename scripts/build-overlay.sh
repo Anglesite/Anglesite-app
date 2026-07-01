@@ -7,7 +7,7 @@
 # (esbuild → one IIFE), and drops the result where the Xcode "Copy Bundle Resources" phase
 # can pick it up.
 #
-# Best-effort like the other vendor scripts: if Node isn't available or the install fails,
+# Best-effort like the other build scripts: if Node isn't available or the install fails,
 # warn and exit 0 so the Xcode build keeps going; `WebViewBridge.localDevConfiguration` logs
 # the absence at runtime and the preview still loads (just without the overlay).
 
@@ -27,19 +27,11 @@ if [[ ! -d "$OVERLAY_DIR" ]]; then
     exit 0
 fi
 
-# Pick an npm: prefer the vendored Node so the build is reproducible across machines.
-# Also prepend the chosen npm's directory to PATH — npm itself uses the vendored Node, but
-# any tool it spawns (esbuild has `#!/usr/bin/env node`) resolves `node` against PATH, and
-# under Xcode's stripped PATH (`/usr/bin:/bin:...`) that lookup fails. Putting the vendored
-# bin on PATH first makes the whole pipeline self-contained.
 NPM=""
-if [[ -x "$REPO_ROOT/Resources/node-runtime/bin/npm" ]]; then
-    NPM="$REPO_ROOT/Resources/node-runtime/bin/npm"
-    export PATH="$REPO_ROOT/Resources/node-runtime/bin:$PATH"
-elif command -v npm >/dev/null 2>&1; then
+if command -v npm >/dev/null 2>&1; then
     NPM="$(command -v npm)"
 else
-    echo "warning: no npm found (neither vendored nor on PATH). Skipping overlay build." >&2
+    echo "warning: no npm found on PATH. Skipping overlay build." >&2
     exit 0
 fi
 

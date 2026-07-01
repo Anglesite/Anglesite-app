@@ -1,7 +1,6 @@
 import Foundation
 
-/// The lifecycle state of one site's live preview, independent of *where* it runs (host subprocess
-/// today via `LocalSiteRuntime`; a Cloudflare Sandbox or local Apple-Containerization VM later).
+/// The lifecycle state of one site's live preview, independent of where it runs.
 public enum SiteRuntimeState: Sendable, Equatable {
     case idle
     case starting(siteID: String)
@@ -19,12 +18,10 @@ public enum SiteRuntimeState: Sendable, Equatable {
 /// `.failed`; `observe()` streams every `SiteRuntimeState` transition; `mcpClient` is the per-site
 /// MCP connection the edit pipeline and annotation feed route through.
 ///
-/// Refines `Actor`: every conformer owns mutable lifecycle state (subprocess handles today, a
-/// remote session later), so isolation is intrinsic — and a class-bound existential keeps the
+/// Refines `Actor`: every conformer owns mutable lifecycle state, so isolation is intrinsic — and a class-bound existential keeps the
 /// `[weak]` capture `PreviewModel` uses for its edit router valid.
 ///
-/// `mcpClient` is the concrete stdio `MCPClient` for now. When #64 lands an HTTP/WS transport this
-/// getter becomes the substrate-agnostic seam (an endpoint-backed client for the container paths).
+/// `mcpClient` is the substrate-agnostic MCP seam for the running container endpoint.
 public protocol SiteRuntime: Actor {
     func start(siteID: String, siteDirectory: URL) async
     func stop() async

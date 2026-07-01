@@ -99,10 +99,10 @@ final class DeployModel {
 
     /// Kicks off a deploy. No-op if one is already running.
     ///
-    /// When `containerControl` is non-nil the deploy runs inside the already-started container
-    /// via `ContainerDeployExecutor`; otherwise it runs on the host via `HostDeployExecutor`
-    /// (today's default behavior). The container control is threaded through the pending-deploy
-    /// flow so a token-prompt retry uses the same executor as the original dispatch.
+    /// When `containerControl` is non-nil the deploy runs inside the already-started container via
+    /// `ContainerDeployExecutor`; otherwise the default executor reports that the container runtime
+    /// is required. The container control is threaded through the pending-deploy flow so a
+    /// token-prompt retry uses the same executor as the original dispatch.
     ///
     /// First checks whether a Cloudflare token is available (env > Keychain). If neither has one,
     /// the token-prompt sheet is presented and the deploy is parked until the user pastes and
@@ -215,7 +215,7 @@ final class DeployModel {
         }
 
         // Select the executor: in-container when the runtime is a started container;
-        // host (embedded Node) otherwise. The token source always comes from the
+        // explicit unavailable result otherwise. The token source always comes from the
         // injected `command` so the test-injection path (a fully pre-built
         // `DeployCommand`) continues to work unmodified.
         let activeCommand: DeployCommand

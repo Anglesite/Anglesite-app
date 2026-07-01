@@ -49,6 +49,6 @@ FSEvents, AppKit-only, or security-scoped package code.
 - Output of `scripts/audit-ios-thin-client-readiness.sh --expect-ready`.
 - The new iOS scheme build command and result.
 - Confirmation that preview uses `WKWebView` through `UIViewRepresentable`.
-- Confirmation that runtime selection is remote-only and never reaches `LocalSiteRuntime`,
-  `ProcessSupervisor`, `NodeRuntime`, or `LocalContainerSiteRuntime`.
+- Confirmation that runtime selection is remote-only and never reaches generic subprocess
+  supervision or `LocalContainerSiteRuntime`.
 - Confirmation that the Cloudflare Worker URL/API token path uses iOS Keychain storage.

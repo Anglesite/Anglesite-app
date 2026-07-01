@@ -4,7 +4,7 @@ import Foundation
 /// by the MCP server's `list_content` response and kept in sync via file-watch events.
 ///
 /// The filesystem is the source of truth — this is a read cache, not a database. The graph
-/// holds no I/O surface, so it has no persistence: cold start is empty, and `LocalSiteRuntime`
+/// holds no I/O surface, so it has no persistence: cold start is empty, and the active runtime
 /// (#142, A.8) repopulates per site open.
 ///
 /// **Change handler.** Single-subscriber by design. Fires on real mutations only:
