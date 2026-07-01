@@ -59,9 +59,9 @@ struct ContentOperationsTests {
     /// distinct siteIDs). Production sites have distinct ids, so this is a test-only concern.
     private func poolWithFakeServer() -> HeadlessRuntimePool {
         HeadlessRuntimePool(makeRuntime: {
-            LocalSiteRuntime(
-                supervisor: ProcessSupervisor(),
-                resolveMCPCommand: { .run(executable: Self.pythonURL, arguments: ["-u", "-c", Self.createScript]) }
+            ProcessBackedHeadlessRuntime(
+                executable: Self.pythonURL,
+                arguments: ["-u", "-c", Self.createScript]
             )
         })
     }

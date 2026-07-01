@@ -11,7 +11,7 @@ public struct AstroHTMLValidator: CustomAnalyticsHTMLValidating, Sendable {
     private let run: CommandRunner
 
     public init(
-        nodeExecutable: @escaping @Sendable () -> URL? = { NodeRuntime.bundledExecutableURL },
+        nodeExecutable: @escaping @Sendable () -> URL? = { nil },
         run: @escaping CommandRunner = { executable, arguments, cwd in
             try await ProcessSupervisor.shared.run(
                 executable: executable,
@@ -33,7 +33,7 @@ public struct AstroHTMLValidator: CustomAnalyticsHTMLValidating, Sendable {
             return "Custom analytics HTML couldn't be validated because Astro dependencies are missing. Run npm install in this site and try again."
         }
         guard let node = nodeExecutable() else {
-            return "Custom analytics HTML couldn't be validated because the embedded Node runtime isn't available. Rebuild Anglesite and try again."
+            return "Custom analytics HTML validation must run in the container runtime; host Node has been retired."
         }
 
         let workDirectory = fileManager.temporaryDirectory

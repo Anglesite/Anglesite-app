@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Scans a site's `Source/` directory — `src/pages/`, the article-like collections under
 /// `src/content/`, and `public/images/` — into a `ContentListing`, replacing the `list_content`
-/// MCP round-trip in `LocalSiteRuntime.populateContentGraph()`. The scan is read-only; the
+/// MCP round-trip in a container-backed runtime. The scan is read-only; the
 /// filesystem is the source of truth.
 ///
 /// Unlike the Node tool (whose JSON payload is site-agnostic and stamped by `ContentListing.parse`),

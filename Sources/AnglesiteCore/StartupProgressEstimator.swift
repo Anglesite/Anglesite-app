@@ -116,11 +116,11 @@ public struct StartupProgressEstimator: Sendable, Equatable {
         }
     }
 
-    /// Drive building/connecting anchors off the site's `astro` stdout. The caller is responsible
-    /// for filtering to the `astro:<siteID>` stdout stream before calling.
+    /// Drive building/connecting anchors off the site's dev-server stdout. The caller is responsible
+    /// for filtering to that site's runtime stream before calling.
     public mutating func ingest(logText: String, at now: TimeInterval) {
         guard isActive else { return }
-        if AstroDevServer.parseReadyURL(logText) != nil {
+        if Self.parseReadyURL(logText) != nil {
             enter(.connecting, at: now)
         } else {
             enter(.building, at: now)
@@ -160,5 +160,18 @@ public struct StartupProgressEstimator: Sendable, Equatable {
         phaseEnteredAt = now
         phase = newPhase
         fraction = max(fraction, newPhase.fillRange.start)
+    }
+
+    private static func parseReadyURL(_ text: String) -> URL? {
+        let cleaned = text.replacingOccurrences(
+            of: #"\u{001B}\[[0-9;]*[A-Za-z]"#,
+            with: "",
+            options: .regularExpression
+        )
+        guard let range = cleaned.range(of: #"https?://[^\s\)]+"#, options: .regularExpression) else {
+            return nil
+        }
+        let candidate = String(cleaned[range]).trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
+        return URL(string: candidate)
     }
 }

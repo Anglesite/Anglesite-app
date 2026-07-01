@@ -17,8 +17,9 @@ struct LiveSiteRuntimeFactory: SiteRuntimeFactory {
     }
 
     /// Pick the runtime by capability (no feature flag): a local Apple-Containerization VM when the
-    /// build is entitled + the kernel/initfs are provisioned; otherwise the existing host-subprocess
-    /// runtime.
+    /// build is entitled + the kernel/initfs are provisioned. The old host-subprocess fallback is
+    /// intentionally gone (#70); when the container path is unavailable this returns an explicit
+    /// failed runtime so validation cannot accidentally pass through embedded Node.
     ///
     /// `sourceRepo` is not passed here. Container runtimes receive it at
     /// `start(siteID:siteDirectory:)` time.
@@ -42,7 +43,7 @@ struct LiveSiteRuntimeFactory: SiteRuntimeFactory {
             )
         }
         logRuntimeSelection(Self.fallbackReason(support: support, provisioning: provisioning))
-        return LocalSiteRuntime(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex, semanticRanker: semanticRanker)
+        return UnavailableSiteRuntime(reason: Self.unavailableMessage(support: support, provisioning: provisioning))
     }
 
     private static func fallbackReason(
@@ -54,7 +55,15 @@ struct LiveSiteRuntimeFactory: SiteRuntimeFactory {
             reasons.append(contentsOf: supportReasons.map(\.description))
         }
         reasons.append(contentsOf: provisioning.missingDescriptions)
-        return "selected LocalSiteRuntime; local container unavailable: \(reasons.joined(separator: "; "))"
+        return "no host runtime fallback; local container unavailable: \(reasons.joined(separator: "; "))"
+    }
+
+    private static func unavailableMessage(
+        support: LocalContainerSupport.Availability,
+        provisioning: BundledImageProvisioningReport
+    ) -> String {
+        let reason = fallbackReason(support: support, provisioning: provisioning)
+        return "Local container runtime is required, but it is not available yet (\(reason))."
     }
 
     private func logRuntimeSelection(_ text: String) {

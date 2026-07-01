@@ -10,7 +10,7 @@ import AnglesiteTestSupport
 ///
 /// Skipped (via `.enabled(if:)`) when the sibling plugin checkout, its `node_modules`, or a Node
 /// binary aren't present — CI provides them via `ANGLESITE_PLUGIN_PATH`; local dev relies on the
-/// `../anglesite` sibling layout. Serialized: spawns a real Node subprocess.
+/// `../anglesite` sibling layout. Serialized: spawns a test-only Node subprocess.
 @Suite(.serialized)
 final class CreateContentEndToEndTests {
     private let tmpSite: URL
@@ -31,13 +31,12 @@ final class CreateContentEndToEndTests {
         return (node, pluginRoot.appendingPathComponent("server/index.mjs"))
     }
 
-    /// A pool whose runtime spawns the real plugin server scoped to `tmpSite` (LocalSiteRuntime
-    /// passes the site directory as `ANGLESITE_PROJECT_ROOT`, so the plugin writes into our temp site).
+    /// A pool whose runtime spawns the real plugin server scoped to `tmpSite`.
     private func poolWithRealPlugin(node: URL, serverPath: URL) -> HeadlessRuntimePool {
         HeadlessRuntimePool(makeRuntime: {
-            LocalSiteRuntime(
-                supervisor: ProcessSupervisor(),
-                resolveMCPCommand: { .run(executable: node, arguments: [serverPath.path]) }
+            ProcessBackedHeadlessRuntime(
+                executable: node,
+                arguments: [serverPath.path]
             )
         })
     }

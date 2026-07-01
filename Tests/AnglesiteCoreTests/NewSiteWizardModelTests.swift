@@ -74,8 +74,7 @@ final class NewSiteWizardModelTests: XCTestCase {
     // MARK: Build warnings (#229)
 
     /// A scaffolder whose `scaffold.sh` writes the template files the appliers expect, so the only
-    /// non-fatal warning comes from the install step (`NodeRuntime.bundledExecutableURL` is nil
-    /// under `swift test`, so the real pipeline emits "Bundled Node not found; skipped install.").
+    /// non-fatal warning comes from the retired host install step.
     private func warningScaffolder(root: URL) -> SiteScaffolder {
         SiteScaffolder(
             sitesRoot: root,
