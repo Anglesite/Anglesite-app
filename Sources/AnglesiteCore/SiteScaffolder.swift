@@ -120,19 +120,8 @@ public actor SiteScaffolder {
             }
         }
 
-        // 5. npm install (cwd = Source/, non-fatal — site still opens with the deps-not-installed preview state)
+        // 5. Dependency install is handled by the selected runtime after scaffold.
         emit(.installing)
-        if let node = NodeRuntime.bundledExecutableURL {
-            let npm = node.deletingLastPathComponent().appendingPathComponent("npm")
-            do {
-                let r = try await run(node, [npm.path] + NodeModulesCache.shared.npmInstallArguments(), siteDir)
-                if r.exitCode != 0 {
-                    emit(.warning(step: "installing", message: "Dependencies didn't install — you can retry from the site window.\n\(r.stderr)"))
-                }
-            } catch { emit(.warning(step: "installing", message: humanize(error))) }
-        } else {
-            emit(.warning(step: "installing", message: "Bundled Node not found; skipped install."))
-        }
 
         // 6. Register the package
         emit(.registering)

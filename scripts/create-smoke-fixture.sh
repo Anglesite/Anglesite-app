@@ -5,7 +5,7 @@
 #
 # Use this fixture to manually verify the sandboxed App Store app end-to-end.
 # A real-signed build is produced so the run exercises the App Sandbox, hardened
-# runtime Node re-sign, and local Apple Containerization capability gates.
+# runtime signing, and local Apple Containerization capability gates.
 #
 # Idempotent: re-running mirrors any template changes and runs `npm install`
 # incrementally.
@@ -36,26 +36,17 @@ rsync -a \
     --exclude='.wrangler/' \
     "$TEMPLATE_SRC/" "$FIXTURE_DIR/"
 
-# Prefer the vendored Node runtime when available — that's what the running
-# app uses, so it's the most accurate smoke environment. Fall back to PATH npm
-# when the vendor step hasn't been run yet.
-if [[ -x "$REPO_ROOT/Resources/node-runtime/bin/npm" ]]; then
-    NPM="$REPO_ROOT/Resources/node-runtime/bin/npm"
-    PATH="$REPO_ROOT/Resources/node-runtime/bin:$PATH"
-    echo "==> using vendored node runtime"
-else
-    NPM=npm
-    echo "==> using PATH npm (run scripts/vendor-node.sh for the vendored runtime)"
-fi
+NPM=npm
+echo "==> using PATH npm"
 
 cd "$FIXTURE_DIR"
 echo "==> $NPM install --no-audit --no-fund --prefer-offline"
 "$NPM" install --no-audit --no-fund --prefer-offline
 
 # ----- Real-signed sandbox validation -----
-# A real Apple Development identity is required — the App Sandbox + hardened-runtime
-# Node JIT entitlements are NOT enforced under ad-hoc signing, so an ad-hoc run would
-# pass for the wrong reasons. Bail early with guidance if no identity is present.
+# A real Apple Development identity is required — the App Sandbox entitlements are NOT
+# enforced under ad-hoc signing, so an ad-hoc run would pass for the wrong reasons.
+# Bail early with guidance if no identity is present.
 if ! security find-identity -v -p codesigning | grep -q "Apple Development"; then
     echo "error: no 'Apple Development' signing identity found." >&2
     echo "       Task 11 needs a real cert (Xcode → Settings → Accounts → add Apple ID)." >&2
@@ -117,7 +108,6 @@ if ! xcodebuild -project "$REPO_ROOT/Anglesite.xcodeproj" \
 fi
 
 APP="$DERIVED/Build/Products/Debug/Anglesite.app"
-NODE="$APP/Contents/Resources/node-runtime/bin/node"
 
 # Guard: a *successful* build can still be AD-HOC (TeamIdentifier=not set) if signing
 # silently fell back. That does NOT satisfy Task 11 — fail rather than mislead.
@@ -128,9 +118,8 @@ if codesign -dv --verbose=4 "$APP" 2>&1 | grep -q "TeamIdentifier=not set"; then
     exit 1
 fi
 
-echo "==> verifying the bundled Node is real-signed with our team + JIT/sandbox entitlements"
-codesign -dv --verbose=4 "$NODE" 2>&1 | grep -E "Authority=Apple Development|TeamIdentifier|flags=" || true
-codesign -d --entitlements :- "$NODE" 2>/dev/null | plutil -p - 2>/dev/null | grep -E "app-sandbox|allow-jit|inherit|disable-library-validation" || true
+echo "==> verifying the app is real-signed with our team"
+codesign -dv --verbose=4 "$APP" 2>&1 | grep -E "Authority=Apple Development|TeamIdentifier|flags=" || true
 
 cat <<EOF
 
@@ -153,22 +142,19 @@ cat <<EOF
        The save-panel Powerbox grant is the per-site security-scoped grant on the
        package (do NOT pre-inject a bookmark — a foreign process's scoped bookmark
        won't resolve in the app; cf. spike 6.5). It persists for next launch.
-    2. Preview should reach .ready — Astro dev writes .astro/ and serves :4321.
-       A node child must be parented by the app (ps -o pid,ppid,comm).
-    3. Deploy button → 'npm run build' must write dist/ inside the granted
-       package's Source/, then the pre-deploy scan runs. (A real 'wrangler deploy'
-       needs a Cloudflare token; reaching the wrangler spawn is the in-sandbox
-       signal.)
-    4. Drag an image onto an <img> in the preview → bytes write to
-       public/images/ and sharp runs. THIS is where cs.disable-library-validation
-       is exercised: if the optimized variants appear, sharp's native addon loaded
-       under hardened runtime → the entitlement is doing its job. If the drop fails
-       with a code-signing/library-validation error in the log, record it.
-    5. Close the window → node child reaped. Quit → no orphan node.
+    2. Preview should be served by the selected container runtime, not by a host
+       subprocess. The debug log must not mention LocalSiteRuntime.
+    3. Deploy button → build/preflight/deploy must run inside the container runtime
+       against the granted package's Source/, then the pre-deploy scan runs, or the
+       app must clearly report that container validation is unavailable. (A real
+       'wrangler deploy' needs a Cloudflare token; reaching the wrangler spawn is
+       the in-sandbox signal.)
+    4. Drag an image onto an <img> in the preview → bytes write to public/images/
+       through the container-backed edit path. Record any sandbox denial.
+    5. Close the window → runtime children reaped. Quit → no orphan runtime process.
     6. Chat button must be ABSENT (compiled out of App Store); Settings → no GitHub
        Connect row, and updates are handled by the App Store.
 
-  Capture PASS/FAIL per step (esp. #3 wrangler-spawn and #4 sharp) in a notes
-  file; this is the evidence that settles cs.disable-library-validation and the
-  in-sandbox write path.
+  Capture PASS/FAIL per step (esp. #2 runtime selection and #3 container deploy path)
+  in a notes file; this is the validation evidence required before #70 merges.
 EOF

@@ -5,8 +5,8 @@
 # Docker/buildx is only the image builder. At runtime Anglesite imports this OCI layout and
 # boots it with Apple's Containerization framework; Docker is not used by the app.
 #
-# Mirrors scripts/vendor-node.sh: produces a gitignored, bundled app resource. Requires Docker
-# (or a compatible buildx) with linux/arm64 support, run on an Apple-Silicon Mac.
+# Produces a gitignored, bundled app resource. Requires Docker (or a compatible buildx)
+# with linux/arm64 support, run on an Apple-Silicon Mac.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CTX="$ROOT/Containers/anglesite-dev"

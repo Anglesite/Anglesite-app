@@ -118,6 +118,20 @@ struct DeployExecutorTests {
         #expect(result.output.contains("pass"))
     }
 
+    @Test("HostDeployExecutor defaults fail every step explicitly after host Node retirement")
+    func defaultResolverUnavailable() async {
+        let dir = tmpDir
+
+        #expect(HostDeployExecutor.defaultResolver(.build)(dir) == .unavailable(reason: "site build must run in the container runtime; host Node has been retired"))
+        #expect(HostDeployExecutor.defaultResolver(.preflight)(dir) == .unavailable(reason: "pre-deploy check must run in the container runtime; host Node has been retired"))
+        #expect(HostDeployExecutor.defaultResolver(.wrangler)(dir) == .unavailable(reason: "wrangler deploy must run in the container runtime; host Node has been retired"))
+
+        let executor = HostDeployExecutor(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let result = await executor.run(step: .preflight, siteDirectory: dir, environment: [:], source: "test:default")
+        #expect(result.exitCode == nil)
+        #expect(result.output == "pre-deploy check must run in the container runtime; host Node has been retired")
+    }
+
     // MARK: - DeployStepResult equatability
 
     @Test("DeployStepResult is Equatable")

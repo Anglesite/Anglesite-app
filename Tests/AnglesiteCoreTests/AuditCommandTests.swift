@@ -34,6 +34,14 @@ struct AuditCommandTests {
         .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script])
     }
 
+    @Test("default build resolver fails explicitly after host Node retirement")
+    func defaultBuildResolverUnavailable() {
+        #expect(
+            AuditCommand.resolveBuildCommand(tmpDir)
+                == .unavailable(reason: "audit build must run in the container runtime; host Node has been retired")
+        )
+    }
+
     // MARK: Cancellation
 
     /// Poll `center` for a marker line up to `timeout`. Returns true once it appears.

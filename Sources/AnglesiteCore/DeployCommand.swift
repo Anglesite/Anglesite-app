@@ -3,9 +3,8 @@ import Foundation
 /// One-shot orchestrator for `wrangler deploy`.
 ///
 /// A deploy is a single foreground action with a pre-spawn token gate and three real steps,
-/// each run through the injected `DeployExecutor` seam (default `HostDeployExecutor`, which
-/// preserves the embedded-Node host behavior; `ContainerDeployExecutor` runs the same steps
-/// in a guest):
+/// each run through the injected `DeployExecutor` seam. Container runtimes run the steps in a
+/// guest; the default process-backed executor fails explicitly after embedded Node retirement.
 ///   1. Resolve / read the Cloudflare API token (pre-spawn; no token → `.failed`).
 ///   2. `executor.run(step: .build, …)` so `dist/` is fresh.
 ///   3. `executor.run(step: .preflight, …)` — the bundled plugin's pre-deploy scan; its captured
@@ -13,9 +12,9 @@ import Foundation
 ///      override (per CLAUDE.md, the app cannot bypass plugin security hooks).
 ///   4. `executor.run(step: .wrangler, …)` — parse the deployed URL out of the captured output.
 ///
-/// On the host path the executor streams each step's stdout+stderr into `LogCenter` line-by-line
-/// (under the caller-supplied source) and returns the accumulated stdout in `DeployStepResult.output`,
-/// so the URL/scan parsing here re-reads the captured stdout rather than re-snapshotting `LogCenter`.
+/// The executor streams each step's stdout+stderr into `LogCenter` line-by-line (under the
+/// caller-supplied source) and returns the accumulated stdout in `DeployStepResult.output`, so the
+/// URL/scan parsing here re-reads the captured stdout rather than re-snapshotting `LogCenter`.
 ///
 /// **Environment contract:**
 ///   - `.build` and `.preflight` get a curated subset of the host environment (see
@@ -303,56 +302,19 @@ public actor DeployCommand {
         return try KeychainStore().readCloudflareToken()
     }
 
-    /// Default `PreflightChecker`: invokes the site's own `scripts/pre-deploy-check.ts
-    /// --json` via `npx tsx` and parses the result. The script is part of the bundled
-    /// plugin's template, so every Anglesite site already has it; outdated sites that
-    /// predate the `--json` mode surface as `.error` outcomes, which `deploy` maps to
-    /// `.failed` with a "run `/anglesite:update`" remediation.
-    ///
-    /// Retained for non-deploy consumers (`DefaultHealthCheckRunner`) and parity; the deploy flow
-    /// itself now runs preflight through the `DeployExecutor` seam and parses with `parseScanReport`.
+    /// Default `PreflightChecker`: host-side preflight was retired with embedded Node. Container
+    /// runtimes must provide the executable preflight path.
     public static let defaultPreflight: PreflightChecker = { siteDirectory in
-        let check = PreDeployCheck(invoke: { siteDir in
-            let scriptPath = siteDir.appendingPathComponent("scripts/pre-deploy-check.ts").path
-            // Routed through ProcessSupervisor so the spawn goes through the one supervised path
-            // (and, under the MAS sandbox, inherits the app-held per-site folder grant).
-            let result = try await ProcessSupervisor.shared.run(
-                executable: URL(fileURLWithPath: "/usr/bin/env"),
-                arguments: ["npx", "tsx", scriptPath, "--json"],
-                currentDirectoryURL: siteDir
-            )
-            return (stdout: result.stdout, exitCode: result.exitCode)
-        })
-        return await check.check(siteID: "deploy", siteDirectory: siteDirectory)
+        .error(reason: "pre-deploy check must run in the container runtime; host Node has been retired")
     }
 
-    /// Default `CommandResolver`: run the site's own `wrangler` (`node_modules/.bin/wrangler
-    /// deploy`) with the vendored Node. Reports `.unavailable` when prerequisites are missing.
+    /// Default `CommandResolver`: host-side wrangler deploy was retired with embedded Node.
     public static let resolveWranglerCommand: CommandResolver = { siteDirectory in
-        let wranglerBin = siteDirectory
-            .appendingPathComponent("node_modules", isDirectory: true)
-            .appendingPathComponent(".bin", isDirectory: true)
-            .appendingPathComponent("wrangler")
-        guard FileManager.default.isExecutableFile(atPath: wranglerBin.path) else {
-            return .unavailable(reason: "wrangler not installed — run `npm install` in this site")
-        }
-        guard let node = NodeRuntime.bundledExecutableURL else {
-            return .unavailable(reason: "the embedded Node runtime isn't bundled (rebuild the app)")
-        }
-        return .run(executable: node, arguments: [wranglerBin.path, "deploy"])
+        .unavailable(reason: "wrangler deploy must run in the container runtime; host Node has been retired")
     }
 
-    /// Default `BuildCommandResolver`: run `npm run build` from the vendored npm. Reports
-    /// `.unavailable` if the vendored Node runtime is missing (rebuild the app).
+    /// Default `BuildCommandResolver`: host-side site build was retired with embedded Node.
     public static let resolveBuildCommand: CommandResolver = { siteDirectory in
-        guard let node = NodeRuntime.bundledExecutableURL else {
-            return .unavailable(reason: "the embedded Node runtime isn't bundled (rebuild the app)")
-        }
-        // The vendored npm sits alongside node: <node-runtime>/bin/{node,npm}.
-        let npm = node.deletingLastPathComponent().appendingPathComponent("npm")
-        guard FileManager.default.isExecutableFile(atPath: npm.path) else {
-            return .unavailable(reason: "vendored npm not found — rebuild the app")
-        }
-        return .run(executable: node, arguments: [npm.path, "run", "build"])
+        .unavailable(reason: "site build must run in the container runtime; host Node has been retired")
     }
 }

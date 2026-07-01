@@ -73,9 +73,8 @@ final class NewSiteWizardModelTests: XCTestCase {
 
     // MARK: Build warnings (#229)
 
-    /// A scaffolder whose `scaffold.sh` writes the template files the appliers expect, so the only
-    /// non-fatal warning comes from the install step (`NodeRuntime.bundledExecutableURL` is nil
-    /// under `swift test`, so the real pipeline emits "Bundled Node not found; skipped install.").
+    /// A scaffolder whose `scaffold.sh` writes the template files the appliers expect, then emits a
+    /// non-fatal `git init` warning.
     private func warningScaffolder(root: URL) -> SiteScaffolder {
         SiteScaffolder(
             sitesRoot: root,
@@ -93,7 +92,7 @@ final class NewSiteWizardModelTests: XCTestCase {
                 }
                 return ProcessSupervisor.RunResult(stdout: "", stderr: "", exitCode: 0)
             },
-            gitInit: { _ in },
+            gitInit: { _ in throw CocoaError(.fileWriteUnknown) },
             register: { pkg in SiteStore.Site(id: pkg.url.path, name: pkg.url.lastPathComponent, packageURL: pkg.url, isValid: true, missingSentinels: []) }
         )
     }
@@ -105,7 +104,7 @@ final class NewSiteWizardModelTests: XCTestCase {
         XCTAssertFalse(m.didCompleteCleanly)
     }
 
-    func testBuildWithInstallWarningSurfacesWarningAndBlocksCleanCompletion() async throws {
+    func testBuildWithWarningSurfacesWarningAndBlocksCleanCompletion() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let m = NewSiteWizardModel(catalog: catalog(), slugTaken: { _ in false })
         m.draft.name = "Warn Site"
@@ -116,7 +115,7 @@ final class NewSiteWizardModelTests: XCTestCase {
         XCTAssertTrue(m.hasWarnings)              // …but with a non-fatal warning
         // Assert on the stable step identifier, not the (rephrasable) message text.
         XCTAssertTrue(m.progress.contains {
-            if case .warning(let step, _) = $0 { return step == "installing" } else { return false }
+            if case .warning(let step, _) = $0 { return step == "copyingTemplate" } else { return false }
         })
         XCTAssertFalse(m.didCompleteCleanly)      // so the wizard must NOT auto-open
     }

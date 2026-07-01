@@ -278,34 +278,11 @@ public actor SocialWorkerProvisionCommand {
     }
 
     public static let defaultRunner: CommandRunner = { siteDirectory, arguments, environment, source in
-        let wranglerBin = siteDirectory
-            .appendingPathComponent("node_modules", isDirectory: true)
-            .appendingPathComponent(".bin", isDirectory: true)
-            .appendingPathComponent("wrangler")
-        guard FileManager.default.isExecutableFile(atPath: wranglerBin.path) else {
-            return ProcessSupervisor.RunResult(
-                stdout: "wrangler not installed — run `npm install` in this site",
-                stderr: "",
-                exitCode: 127
-            )
-        }
-        guard let node = NodeRuntime.bundledExecutableURL else {
-            return ProcessSupervisor.RunResult(
-                stdout: "the embedded Node runtime isn't bundled (rebuild the app)",
-                stderr: "",
-                exitCode: 127
-            )
-        }
-
-        let result = try await ProcessSupervisor.shared.run(
-            executable: node,
-            arguments: [wranglerBin.path] + arguments,
-            environment: environment,
-            currentDirectoryURL: siteDirectory
+        ProcessSupervisor.RunResult(
+            stdout: "social worker provisioning must run in the container runtime; host Node has been retired",
+            stderr: "",
+            exitCode: 127
         )
-        await append(result.stdout, source: source, stream: .stdout)
-        await append(result.stderr, source: source, stream: .stderr)
-        return result
     }
 
     public static let defaultDeployer: Deployer = { token, siteID, siteDirectory in

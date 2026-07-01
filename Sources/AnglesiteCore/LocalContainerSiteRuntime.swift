@@ -1,8 +1,7 @@
 import Foundation
 
 /// `SiteRuntime` over a local Apple-Containerization VM (macOS 26+/Apple Silicon; see design
-/// 2026-06-25). Mirrors `LocalSiteRuntime`'s state machine but drives a `LocalContainerControl`
-/// instead of a local subprocess: boot the container, hydrate it from the site's `Source/` git
+/// 2026-06-25). Drives a `LocalContainerControl`: boot the container, hydrate it from the site's `Source/` git
 /// repo, connect the MCP client to the returned MCP endpoint, settle to `.ready`/`.failed`.
 /// Spawns nothing in-process.
 public actor LocalContainerSiteRuntime: SiteRuntime {

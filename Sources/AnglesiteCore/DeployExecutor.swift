@@ -33,8 +33,9 @@ public struct DeployStepResult: Sendable, Equatable {
 
 /// Abstraction over the execution substrate for one deploy step.
 ///
-/// `HostDeployExecutor` is the concrete implementation for the embedded-Node (host) path.
-/// A future `ContainerDeployExecutor` will implement this for the in-container path.
+/// `HostDeployExecutor` is retained as the generic process-backed executor for tests and injected
+/// tooling. Its production defaults fail explicitly after host Node retirement; deploys should use
+/// `ContainerDeployExecutor` once a container control is available.
 ///
 /// The `source` parameter is the `LogCenter` source tag (e.g. `"deploy:<id>:build"`,
 /// `"deploy:<id>"`). Callers supply it so the right log row receives the output.
@@ -168,17 +169,14 @@ public struct ContainerDeployExecutor: DeployExecutor {
 
 // MARK: - HostDeployExecutor
 
-/// Runs deploy steps on the host using the embedded Node runtime, mirroring `DeployCommand`'s
-/// existing inline spawn logic.
+/// Runs deploy steps through `ProcessSupervisor` when a caller injects explicit commands.
 ///
 /// Injecting a custom `resolveCommand` lets tests drive arbitrary shell fixtures without
-/// requiring the vendored Node bundle to be present (same pattern as `DeployCommand`'s
-/// `CommandResolver`/`PreflightChecker` injection).
+/// requiring a container to be present (same pattern as `DeployCommand`'s `CommandResolver`
+/// injection).
 ///
-/// Normally (i.e. not in tests) the default resolver chooses the host command per step:
-///   - `.build`    → `node npm run build`  (vendored npm)
-///   - `.preflight`→ `/usr/bin/env npx tsx scripts/pre-deploy-check.ts --json`
-///   - `.wrangler` → `node node_modules/.bin/wrangler deploy`
+/// Normally (i.e. not in tests) the default resolver returns explicit unavailability for every
+/// deploy step. This prevents silent host subprocess fallback after embedded Node retirement.
 ///
 /// Output is streamed line-by-line to `logCenter` under `source` *and* accumulated into
 /// `DeployStepResult.output` so callers can parse the deployed URL or scan JSON.
@@ -285,15 +283,9 @@ public struct HostDeployExecutor: DeployExecutor {
         }
     }
 
-    /// Resolves the preflight command: `/usr/bin/env npx tsx scripts/pre-deploy-check.ts --json`.
-    /// Mirrors the inline resolve inside `DeployCommand.defaultPreflight`.
+    /// Host-side preflight is retired with embedded Node. Container runtimes must provide the
+    /// executable preflight path.
     public static let preflightResolver: DeployCommand.CommandResolver = { siteDirectory in
-        let scriptPath = siteDirectory
-            .appendingPathComponent("scripts/pre-deploy-check.ts")
-            .path
-        return .run(
-            executable: URL(fileURLWithPath: "/usr/bin/env"),
-            arguments: ["npx", "tsx", scriptPath, "--json"]
-        )
+        .unavailable(reason: "pre-deploy check must run in the container runtime; host Node has been retired")
     }
 }
