@@ -1,4 +1,5 @@
 import Foundation
+import AnglesiteSiteModel
 
 /// Recents registry for `.anglesite` packages opened in this app.
 ///

@@ -35,6 +35,7 @@ final class SiteWindowModel {
     private let semanticRanker: SemanticRanker?
     private let contentIndexerStore: ContentIndexerStore
     private let integrationOps = IntegrationOperations.live()
+    private let contentCreation: ContentCreationWorkflow
     @ObservationIgnored
     private var dismissSiteWindow: (() -> Void)?
 
@@ -106,6 +107,11 @@ final class SiteWindowModel {
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
             runtimeFactory: runtimeFactory
+        )
+        self.contentCreation = ContentCreationWorkflow.native(
+            contentGraph: contentGraph,
+            knowledgeIndex: knowledgeIndex,
+            siteDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory }
         )
         self.graphExplorer = SiteGraphExplorerModel(graph: contentGraph)
         self.relatedPages = RelatedPagesModel(index: knowledgeIndex, ranker: semanticRanker)
@@ -420,17 +426,12 @@ final class SiteWindowModel {
         template: ContentScaffold.PageTemplate
     ) async -> ContentCreateResult {
         guard let site else { return .siteNotFound }
-        let ops = NativeContentOperations(siteDirectory: { id in
-            await SiteStore.shared.find(id: id)?.sourceDirectory
-        })
-        let result = await ops.createPage(
+        return await contentCreation.createPage(
             siteID: site.id,
-            name: title,
+            title: title,
             route: route,
             template: template
         )
-        await refreshContentGraphIfCreated(result, site: site)
-        return result
     }
 
     func createCollectionEntry(
@@ -439,41 +440,15 @@ final class SiteWindowModel {
         descriptor: ContentTypeDescriptor
     ) async -> ContentCreateResult {
         guard let site else { return .siteNotFound }
-        let ops = NativeContentOperations(siteDirectory: { id in
-            await SiteStore.shared.find(id: id)?.sourceDirectory
-        })
-        let result = await ops.createTyped(
+        return await contentCreation.createTyped(
             siteID: site.id,
             typeID: descriptor.id,
             title: title,
             slug: slug
         )
-        await refreshContentGraphIfCreated(result, site: site)
-        return result
     }
 
-    private func refreshContentGraphIfCreated(
-        _ result: ContentCreateResult,
-        site: SiteStore.Site
-    ) async {
-        guard case let .created(filePath, _) = result else { return }
-        let listing = await Task.detached(priority: .userInitiated) {
-            ContentScanner.scan(projectRoot: site.sourceDirectory, siteID: site.id)
-        }.value
-        await contentGraph.load(
-            siteID: site.id,
-            pages: listing.pages,
-            posts: listing.posts,
-            images: listing.images
-        )
-        await knowledgeIndex.upsertFile(
-            siteID: site.id,
-            projectRoot: site.sourceDirectory,
-            relativePath: filePath
-        )
-    }
-
-    func loadAndStart(siteID: String?, openSitesWindow: () -> Void, dismissSiteWindow: () -> Void) async {
+    func loadAndStart(siteID: String?, openSitesWindow: () -> Void, dismissSiteWindow: @escaping () -> Void) async {
         self.dismissSiteWindow = dismissSiteWindow
         // SwiftUI's NSPersistentUIManager will happily restore a WindowGroup with a
         // nil payload, or one whose value no longer matches a known site (sites.json

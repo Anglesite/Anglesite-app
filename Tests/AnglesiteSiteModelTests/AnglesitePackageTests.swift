@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import AnglesiteCore
+@testable import AnglesiteSiteModel
 
 /// Tests for `AnglesitePackage` (#242, P1): the `.anglesite` package on-disk format —
 /// layout URLs and the `Info.plist` marker round-trip.

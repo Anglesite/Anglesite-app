@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import AnglesiteCore
+@testable import AnglesiteSiteModel
 
 /// A `final class` (not a `struct`) so `deinit` can remove the temp directory, mirroring the
 /// former `tearDownWithError`.
