@@ -1,15 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Template for `xcodebuild -exportArchive` of the AnglesiteMAS (Mac App Store) target.
-  Consumed by scripts/release-mas.sh, which substitutes __TEAM_ID__ and
+  Template for `xcodebuild -exportArchive` of the Anglesite Mac App Store target.
+  Consumed by scripts/release.sh, which substitutes __TEAM_ID__ and
   __PROVISIONING_PROFILE__ from the environment and writes the result to
   build/exportOptions-appstore.plist (gitignored).
 
-  Counterpart to scripts/exportOptions.plist (the Developer ID / Sparkle export). The
-  difference that matters: method `app-store-connect` produces a Mac Installer
-  Distribution-signed .pkg ready for App Store Connect, vs. `developer-id` which
-  produces a notarizable, self-distributed .app.
+  method `app-store-connect` produces a Mac Installer Distribution-signed .pkg
+  ready for App Store Connect.
 -->
 <plist version="1.0">
 <dict>
@@ -20,7 +18,7 @@
     <key>signingStyle</key>
     <string>manual</string>
     <!-- Signs the outer installer package. The .app inside is signed Apple Distribution
-         (project.yml AnglesiteMAS Release CODE_SIGN_IDENTITY); the .pkg wrapper needs the
+         (project.yml Anglesite Release CODE_SIGN_IDENTITY); the .pkg wrapper needs the
          Mac Installer Distribution cert. -->
     <key>installerSigningCertificate</key>
     <string>Mac Installer Distribution</string>

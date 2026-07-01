@@ -172,7 +172,7 @@ window open (covered by `SiteAccess`).
   `AnglesiteMAS`.
 - Only the `SiteAccess` MAS branch and (if used) any MAS-specific routing detail sit behind
   `#if ANGLESITE_MAS`.
-- No chat/LLM/Sparkle coupling — nothing here is excluded from MAS.
+- No chat/LLM/update-framework coupling — nothing here is excluded from MAS.
 
 ## Acceptance criteria (rolled up from #88/#89/#90)
 

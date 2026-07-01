@@ -50,7 +50,7 @@ Wall-clock from the clean-build run (`time xcodebuild ... clean build` for each 
 | `swift test --package-path .` | ~22 s |
 | **Total** | **~48 s** |
 
-The combined-build figure is faster than two full from-scratch builds because Xcode reuses module artifacts across schemes inside the same DerivedData directory — both schemes link the same `AnglesiteCore`/`AnglesiteBridge`/`Sparkle` products. Wiping DerivedData entirely would roughly double the build phase.
+The combined-build figure is faster than two full from-scratch builds because Xcode reuses module artifacts across schemes inside the same DerivedData directory. Wiping DerivedData entirely would roughly double the build phase.
 
 Per-phase split between the two schemes isn't separately captured here — they live in the same xcodebuild log (`/tmp/xcode27-verification-v2.log` on the verification machine) but bash's `time` keyword output didn't survive the subshell redirect. Acceptable for this baseline; rerun with `/usr/bin/time -p` if a per-scheme number is wanted later.
 

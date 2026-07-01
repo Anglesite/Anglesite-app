@@ -25,7 +25,7 @@ When in doubt, the plugin is the source of truth for skills, hooks, and the MCP 
 - **Swift / SwiftUI** — app shell. Targets macOS 27+.
 - **Plain SwiftUI + actors** for v0. No TCA, no third-party state libraries.
 - **WKWebView** — live preview of the Astro dev server.
-- **Embedded Node** — vendored at build time. Both targets re-sign it via a `scripts/resign-node.sh` post-build phase with the app's identity + hardened runtime: the MAS target uses `node-runtime.entitlements` (sandbox/inherit + JIT), the DevID target uses `node-runtime-devid.entitlements` (same minus the sandbox keys). The DevID re-sign + bundle-seal verification is done (#4 — `codesign --verify --deep --strict` passes); only the real Developer-ID-cert notarize run remains deferred (#1, gated on the signing cert + `TEAM_ID`).
+- **Embedded Node** — vendored at build time. The single App Store app target re-signs it via `scripts/resign-node.sh` with the app's identity + hardened-runtime sandbox/JIT entitlements from `Resources/node-runtime.entitlements`.
 - **MCP** — talks to the plugin's server over stdio (local subprocess) or HTTP/Streamable transport (for container-backed runtimes). `MCPClient` abstracts the transport behind an `MCPTransport` seam; `SiteRuntime` (protocol) abstracts the execution substrate so `PreviewModel` doesn't know whether a site runs in-process or in a container.
 
 ## Site identity — the `.anglesite` package
@@ -41,14 +41,13 @@ A site is a self-contained `.anglesite` **package** (#242) — a directory with 
 
 Operationally: **File ▸ Import** copies a plain Anglesite directory into a new package (migrating any legacy `.anglesite/` into `Config/`); **File ▸ Export** copies `Source/` back out. New sites scaffold into `Source/` (with `git init`); the dev server, deploy, and `pre-deploy-check` all run with cwd = `Source/`. On MAS, one security-scoped bookmark per package covers both `Source/` and `Config/`. `~/Sites/` is now just the default save location for new/imported packages — not a discovery root (there is no legacy `sites.json` migration, so Import is the upgrade path for pre-package sites).
 
-## Two build targets
+## Build target
 
 | Scheme | Bundle id | Distribution | Sandbox |
 |---|---|---|---|
-| `Anglesite` (DevID) | `io.dwk.anglesite.devid` | Developer ID (deprioritized — local dev loop) | off |
-| `AnglesiteMAS` | `io.dwk.anglesite` | Mac App Store | App Sandbox |
+| `Anglesite` | `io.dwk.anglesite` | Mac App Store | App Sandbox |
 
-Both share the `Sources/AnglesiteApp` code and the same `InProcessBackend` spawn path. MAS-only differences are gated with `#if ANGLESITE_MAS` (set via `SWIFT_ACTIVE_COMPILATION_CONDITIONS` on the MAS *app target* only — **not** on the `AnglesiteCore`/`AnglesiteBridge` SPM package, so a guard in those packages is a no-op). The MAS build is sandboxed and holds a per-`SiteWindow` security-scoped bookmark grant so directly-spawned children inherit folder access. Chat is available on both targets through Foundation Models; Sparkle and the `gh` Settings panel are compiled out of MAS.
+`Anglesite` is the only app target. It sets `ANGLESITE_MAS` via `SWIFT_ACTIVE_COMPILATION_CONDITIONS`, is sandboxed, holds a per-`SiteWindow` security-scoped bookmark grant, and links `AnglesiteContainer` for the local Apple Containerization runtime. Direct-download distribution is retired.
 
 ## Module layout
 
@@ -65,12 +64,12 @@ Resources/
 ├── plugin/            (gitignored) Plugin MCP server + skills, populated by scripts/copy-plugin.sh
 │                      (template excluded — lives in Resources/Template/ instead)
 ├── Anglesite.help/    Apple Help Book (HTML pages; hiutil index built by scripts/build-help-index.sh)
-└── *.entitlements     Per-target sandbox/signing entitlements (incl. node-runtime.entitlements for the MAS Node re-sign)
+└── *.entitlements     App sandbox/signing entitlements plus node-runtime.entitlements for the Node re-sign
 ```
 
 ## Editing guidelines
 
-- **No frameworks beyond Apple's** for v0 (Sparkle is the only third-party Swift dep, and only at v0.5).
+- **No frameworks beyond Apple's** unless explicitly approved.
 - **Process spawning is centralized** in `AnglesiteCore/ProcessSupervisor` — never call `Process()` from a view.
 - **Logs are sacred** — every spawned subprocess streams stdout+stderr into the debug pane. Do not silently `>/dev/null`.
 - **The app cannot bypass plugin security hooks** — `pre-deploy-check.sh` runs before every deploy, and the app surfaces failures rather than allowing override.
@@ -96,8 +95,6 @@ open Anglesite.xcodeproj
 # fresh clone or in a new worktree, run `xcodegen generate` first.
 # ⌘B in Xcode, or:
 xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build
-# Sandboxed App Store target:
-xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debug build
 ```
 
 Tests: `swift test --package-path .` runs the SwiftPM test targets (`AnglesiteSiteModelTests`, `AnglesiteCoreTests`, `AnglesiteBridgeTests`, and, on Swift 6.4+/Xcode 27, `AnglesiteIntentsTests`). `AnglesiteContainerLocalTests` is opt-in with `ANGLESITE_CONTAINER_TESTS=1`; its end-to-end cases also require `ANGLESITE_CONTAINER_E2E=1`. Most suites are Swift Testing (#74), with the remaining XCTest holdouts in `AnglesiteCoreTests`. The MCP / apply-edit e2e tests (`AppliesEditEndToEndTests`, `MCPClientHTTPEndToEndTests`) need the sibling plugin checkout + node; when absent they **fail** rather than skip (they `throw` a `SkipReason` error, which Swift Testing — unlike XCTest's `XCTSkip` — records as an issue), so set `ANGLESITE_PLUGIN_PATH` to the plugin checkout to run them. If `swift build`/`swift test` seems to hang with no output, a stale SwiftPM process is likely holding the `.build` lock — check `pgrep -fl swift-test` and kill the orphan rather than assuming a bad test.
@@ -106,9 +103,9 @@ Note: `swift test` runs on CI's older runners even though `Package.swift` declar
 
 ## Plan
 
-`gh issue list` is the source of truth for what to work on, with [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. The inline issue numbers below are illustrative and may be stale (many are already closed) — confirm against gh before picking up work. Current phase: **Phase 10** — v2 polish (tracking: #34). Phases 0–9 are complete. Within Phase 10, the **Apple Help Book** has shipped and the **sandboxed Mac App Store build (Phase 10.1)** is most of the way there: the `AnglesiteMAS` target, the app-held per-site security-scoped grant (Task 7), the bundled-Node re-sign (Task N), routing all `Process()` through `ProcessSupervisor` (Task 8), enabling Foundation Models chat while compiling Sparkle/`gh` out of MAS, and the MAS release script/docs are all present and build clean. **Remaining (Phase 10.1):** real-signed write-heavy MAS smoke (Task 11 — also confirms whether `cs.disable-library-validation` on the bundled Node is actually needed for sharp/native addons), first real App Store validation/upload (Task 12), and closeout (Task 13). Still-open follow-ups: Sparkle manual key/appcast setup; app icon (#55 — `scripts/generate-app-icon.swift` renders the `</>` brand mark as a teal/blue squircle at all 10 macOS sizes; shipped and no longer a blank Xcode placeholder, but re-run with a professionally designed 1024px PNG if real artwork arrives); notarization for the DevID track — the embedded-Node re-sign is now wired on both targets (#4 done via `scripts/resign-node.sh` post-build phases), but the real Developer-ID signing + notarize/staple dry run (#1) and the notarized clean-Mac spawn smoke (#5) still need the signing cert + `TEAM_ID` (scripts ready: `scripts/notarize-dry-run.sh`). (The shared-output-path issue is fixed: the MAS target builds `AnglesiteMAS.app`, display name still "Anglesite".)
+`gh issue list` is the source of truth for what to work on, with [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. The inline issue numbers below are illustrative and may be stale (many are already closed) — confirm against gh before picking up work. Current phase: **Phase 10** — v2 polish (tracking: #34). Phases 0–9 are complete. Within Phase 10, the **Apple Help Book** has shipped and the app is now a single sandboxed Mac App Store target. Remaining release work is real-signed write-heavy smoke, the restricted virtualization entitlement/provisioning approval, and App Store submission.
 
-**Containerization epic (#59):** The `SiteRuntime` protocol (#65) and HTTP/Streamable MCP transport (#64) are landed and shipping. `LocalContainerSiteRuntime` (#69) has landed for DevID and is selected only when the local container capability gate passes (`com.apple.security.virtualization` entitlement + vendored image/kernel/initfs); otherwise the app falls back to the host subprocess runtime. The MAS target currently compiles the container product out and uses the host subprocess runtime, while the MAS virtualization entitlement request remains open. `RemoteSandboxSiteRuntime` (#66) has its AnglesiteCore client layer, but the Cloudflare Worker control plane remains open; it is the remote/iOS path. The Cloudflare Sandbox throwaway spike (#61 — shared OCI image built) is still open. See [`docs/build-plan.md`](docs/build-plan.md) for the live checklist.
+**Containerization epic (#59):** The `SiteRuntime` protocol (#65) and HTTP/Streamable MCP transport (#64) are landed and shipping. Apple Containerization is the macOS runtime direction: `LocalContainerSiteRuntime` imports the app-bundled OCI layout, boots it with Apple's Containerization framework, and exposes preview/MCP over vsock proxies. Docker/buildx is only an image-build tool for producing that OCI root filesystem; the app does not run Docker. The active macOS image source is `Containers/anglesite-dev/`, vendored by `scripts/vendor-container-image.sh` into `Resources/container-image/`. The lowercase `container/` directory is the Cloudflare Sandbox / remote-runtime image pipeline for `RemoteSandboxSiteRuntime` and iOS work, not the app-bundled macOS image. Local-container selection is gated at runtime on the restricted virtualization entitlement and provisioned image/kernel/initfs resources.
 
 **macOS 27 / Siri AI:** the platform wave is underway. Spotlight/App Intents indexing, View Annotations, Foundation Models chat, structured task UI, and the Xcode 27 migration have landed; system-wide MCP, App Intents Testing, SwiftUI 27 toolbar adoption, and other follow-ups remain open in [`docs/build-plan.md`](docs/build-plan.md). Ongoing work is tracked under the Siri AI phases (A–D, ~#132–135) and their sub-issues — check `gh issue list` for the live set.
 

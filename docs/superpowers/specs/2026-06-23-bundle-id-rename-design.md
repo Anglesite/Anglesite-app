@@ -15,7 +15,7 @@ The app currently ships under `dev.anglesite.app` (DevID) and `dev.anglesite.app
    key on the current machine. An App ID cannot be re-homed across teams, so a new
    ID under the personal namespace is required to mint a development provisioning
    profile — the exact blocker that stops #81's real-signed smoke from signing.
-2. **MAS is the only channel.** The Developer ID / Sparkle track is deprioritized;
+2. **MAS is the only channel.** The direct-download track is deprioritized;
    the App Store build is the flagship, so it earns the canonical ID.
 
 > **Decision reversal note.** `docs/build-plan.md:164` recorded (2026-06-09) that the

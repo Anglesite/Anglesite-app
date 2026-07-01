@@ -2,22 +2,22 @@ import Foundation
 
 /// Grants folder access around a single unit of work for a site, then releases it.
 ///
-/// - DevID (non-sandboxed): passes `site.sourceDirectory` straight through so callers
-///   operate in the Astro project tree (the working directory for deploy/backup/audit).
-/// - MAS (`ANGLESITE_MAS`): resolves the site's persisted security-scoped bookmark
+/// - App target (`ANGLESITE_MAS`): resolves the site's persisted security-scoped bookmark
 ///   (recorded against `packageURL`; one grant covers both `Source/` and `Config/`),
 ///   holds the grant for the duration of `body`, then stops. Mirrors `SiteWindow.acquireGrant`
 ///   but short-lived, so background App Intents work with no window open. Throws
 ///   `AccessError.noGrant` if the site has no usable bookmark.
+/// - Package tests / non-app callers without `ANGLESITE_MAS`: pass `site.sourceDirectory`
+///   straight through.
 public enum SiteAccess {
     public enum AccessError: Error, Sendable, Equatable {
-        /// No security-scoped bookmark for this site (MAS only). Carries a user-facing message.
+        /// No security-scoped bookmark for this site. Carries a user-facing message.
         case noGrant(String)
     }
 
     /// Run `body` with read/write access to the site's source directory. The `URL` passed to
     /// `body` is `site.sourceDirectory` — the Astro project tree that every subprocess
-    /// (deploy, backup, audit) uses as its working directory. On MAS the bookmark resolves
+    /// (deploy, backup, audit) uses as its working directory. In the app target the bookmark resolves
     /// to `packageURL`; the scope covers the whole package, so `Source/` (= `sourceDirectory`)
     /// is accessible under it.
     public static func withScopedAccess<T: Sendable>(

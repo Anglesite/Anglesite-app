@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 #
-# Build the shared Anglesite dev-server OCI image (issue #62).
+# Build the Cloudflare/shared Anglesite dev-server OCI image (issue #62).
 #
-# ONE image, TWO substrates: Apple Containerization (local) and Cloudflare Sandbox
-# (remote) run the SAME linux/arm64 image so the dev server behaves identically
-# everywhere. Node is pinned to scripts/node-version.txt; git, the Astro/site
-# toolchain, and the plugin's MCP server runtime are baked in; the template's
-# dependency closure is pre-installed so cold starts skip npm ci (design §5b).
+# This script uses the lowercase container/ build context. It is not the active
+# macOS app-bundled image path; use scripts/vendor-container-image.sh for the
+# Apple Containerization image that becomes Resources/container-image/.
+#
+# This path remains for the Cloudflare Sandbox / remote-runtime image pipeline.
+# Node is pinned to scripts/node-version.txt; git, the Astro/site toolchain, and
+# the plugin's MCP server runtime are baked in; the template's dependency closure
+# is pre-installed so cold starts skip npm ci (design §5b).
 #
 # Usage:
 #   scripts/build-container-image.sh            # build + load locally (arm64)
@@ -20,11 +23,11 @@
 #                        comma list "linux/amd64,linux/arm64" for a multi-arch manifest.
 #   ANGLESITE_PLUGIN_SRC plugin checkout (default: ../anglesite sibling, like copy-plugin.sh)
 #
-# Distribution (decision Q-D): the canonical image is pushed to a registry BY DIGEST.
-# Apple Containerization runs arm64 (local, Apple Silicon); Cloudflare Containers run
-# amd64 (remote) — so "one image, two substrates" is one Dockerfile built per-arch (or
-# multi-arch) and pinned by digest. The Cloudflare substrate layers its sandbox init on
-# top via container/Dockerfile.cloudflare (#61). See container/README.md.
+# Distribution (decision Q-D): the Cloudflare/shared image is pushed to a registry
+# BY DIGEST. Cloudflare Containers run amd64 (remote); the substrate layers its
+# sandbox init on top via container/Dockerfile.cloudflare (#61). The macOS Apple
+# Containerization image is produced separately by scripts/vendor-container-image.sh
+# from Containers/anglesite-dev/ and bundled into the app.
 #
 # NOTE: a multi-arch (comma) PLATFORM only works with --push — buildx cannot --load a
 # multi-platform manifest into the local Docker image store. Asking for both errors out.

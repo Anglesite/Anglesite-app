@@ -626,9 +626,8 @@ Title "Settings". Open Settings with <kbd>⌘,</kbd>. Describe the settings surf
 - [ ] **Step 5: Write `updates.html`**
 
 Title "Updating Anglesite". Facts:
-- **If you downloaded Anglesite directly** — use **Anglesite ▸ Check for Updates…** (Sparkle). Note it appears just under "About Anglesite".
-- **If you got Anglesite from the Mac App Store** — updates come through the App Store; the in-app "Check for Updates…" item is not present in that build.
-- (Reflects the `#if !ANGLESITE_MAS` gating of the Sparkle menu item in `AnglesiteApp.swift`.)
+- Updates come through the App Store.
+- Anglesite uses App Store updates rather than an in-app updater.
 - `See also`: `settings.html`, `troubleshooting.html`.
 
 - [ ] **Step 6: Write `debug-pane.html`**

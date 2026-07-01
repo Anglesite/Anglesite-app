@@ -27,8 +27,8 @@ public actor SiteStore {
         public var isValid: Bool
         public var missingSentinels: [String]
         public var lastSeen: Date
-        /// Security-scoped bookmark for `packageURL` (MAS). `nil` on DevID. One grant covers
-        /// the whole package, so Source/ and Config/ are both reachable under it.
+        /// Security-scoped bookmark for `packageURL`. One grant covers the whole package, so
+        /// Source/ and Config/ are both reachable under it.
         public var bookmarkData: Data?
 
         /// The Astro project tree — every subprocess (scaffold, dev server, build, deploy,
@@ -155,7 +155,7 @@ public actor SiteStore {
 
     /// Recompute each entry's filesystem-derived `isValid` / `missingSentinels`. On MAS the package
     /// lives behind a security-scoped grant, so resolve and start the per-site bookmark for the
-    /// duration of the check; on DevID there is no bookmark and the read just works. Returns `true`
+    /// duration of the check; in package tests there may be no bookmark and the read just works. Returns `true`
     /// if any entry's verdict changed (so the caller can persist the correction).
     private static func revalidate(_ sites: inout [Site], fileManager: FileManager) -> Bool {
         var changed = false

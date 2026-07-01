@@ -249,7 +249,7 @@ care whether the URL is a local container IP or a Cloudflare tunnel. That part i
 Even with a remote dev server, today's `AnglesiteApp` won't `#if os(iOS)` into
 existence — it's AppKit-bound (`NSViewRepresentable`, `NSWindow`-style scenes,
 `Process`, Keychain `kSecAttrAccessible…ThisDeviceOnly`, security-scoped bookmarks,
-Sparkle, `gh`). An iOS target is a **new thin client**:
+`gh`). An iOS target is a **new thin client**:
 
 - SwiftUI + **`WKWebView` via `UIViewRepresentable`** pointed at the preview URL
   (reuse `AnglesiteBridge`'s JS overlay + `AnglesiteScriptHandler` — those are

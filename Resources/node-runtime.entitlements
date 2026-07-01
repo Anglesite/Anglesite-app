@@ -4,7 +4,7 @@
 <dict>
     <!--
       Entitlements for the bundled Node binary in the sandboxed Mac App Store build.
-      Applied by scripts/resign-node.sh as a post-build phase on the AnglesiteMAS target.
+      Applied by scripts/resign-node.sh as a post-build phase on the Anglesite target.
 
       Under the MAS app's hardened runtime, the embedded `node` must carry these or V8 OOMs
       at launch ("Failed to reserve virtual memory for CodeRange") — proven empirically in the

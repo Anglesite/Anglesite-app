@@ -7,7 +7,7 @@
 # this the embedded V8 OOMs at launch under the MAS app's hardened runtime, and the binary's
 # team wouldn't match the app (breaking the bundle seal / App Store acceptance).
 #
-# Runs as a post-build phase on the AnglesiteMAS target (after resources are copied into the
+# Runs as a post-build phase on the Anglesite target (after resources are copied into the
 # .app, before Xcode's implicit final code-sign seals the bundle). Also callable standalone
 # from the release pipeline.
 #
