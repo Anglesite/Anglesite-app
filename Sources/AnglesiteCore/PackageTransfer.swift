@@ -1,4 +1,5 @@
 import Foundation
+import AnglesiteSiteModel
 
 /// Copies between plain Anglesite directories and `.anglesite` packages (spec §5).
 ///
