@@ -4,13 +4,13 @@ import type { Env } from "../src/sandbox-env.js";
 const mockExec = vi.fn();
 const mockStartProcess = vi.fn();
 const mockTunnelsGet = vi.fn();
-const mockTunnelsDrop = vi.fn();
+const mockTunnelsDestroy = vi.fn();
 
 vi.mock("@cloudflare/sandbox", () => ({
   getSandbox: () => ({
     exec: mockExec,
     startProcess: mockStartProcess,
-    tunnels: { get: mockTunnelsGet, drop: mockTunnelsDrop },
+    tunnels: { get: mockTunnelsGet, destroy: mockTunnelsDestroy },
   }),
   Sandbox: class {},
 }));
@@ -169,7 +169,7 @@ describe("POST /start", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.previewURL).toBe("https://preview.trycloudflare.com");
-    expect(body.mcpURL).toBe("https://mcp.trycloudflare.com");
+    expect(body.mcpURL).toBe("https://mcp.trycloudflare.com/mcp");
   });
 
   it("passes quoted shell args to sandbox.exec", async () => {
@@ -206,6 +206,32 @@ describe("POST /start", () => {
   });
 });
 
+describe("POST /status", () => {
+  it("returns 400 for invalid body", async () => {
+    const req = authedRequest("/status", { siteID: "bad chars!!" });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(400);
+  });
+
+  it("probes preview and MCP readiness", async () => {
+    mockExec
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({ success: false });
+    const req = authedRequest("/status", { siteID: "my-site-123" });
+    const res = await worker.fetch(req, makeEnv());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({
+      siteID: "my-site-123",
+      previewReady: true,
+      mcpReady: false,
+    });
+    expect(mockExec).toHaveBeenCalledTimes(2);
+    expect(mockExec.mock.calls[0][0]).toContain("localhost:8080");
+    expect(mockExec.mock.calls[1][0]).toContain("localhost:4399/mcp");
+  });
+});
+
 describe("POST /stop", () => {
   it("returns 400 for invalid body", async () => {
     const req = authedRequest("/stop", { siteID: "bad chars!!" });
@@ -214,13 +240,13 @@ describe("POST /stop", () => {
   });
 
   it("drops tunnels and returns stopped on success", async () => {
-    mockTunnelsDrop.mockResolvedValue(undefined);
+    mockTunnelsDestroy.mockResolvedValue(undefined);
     const req = authedRequest("/stop", { siteID: "my-site-123" });
     const res = await worker.fetch(req, makeEnv());
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.stopped).toBe(true);
-    expect(mockTunnelsDrop).toHaveBeenCalledTimes(2);
+    expect(mockTunnelsDestroy).toHaveBeenCalledTimes(2);
   });
 });
 

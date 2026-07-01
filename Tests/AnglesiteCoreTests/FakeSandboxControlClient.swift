@@ -3,16 +3,27 @@ import Foundation
 
 actor FakeSandboxControlClient: SandboxControlClient {
     var startResult: Result<SandboxSession, SandboxControlError>
+    var statusResult: Result<SandboxStatus, SandboxControlError>
     private(set) var stopped: [String] = []
     private(set) var startedToken: SessionToken?
 
-    init(startResult: Result<SandboxSession, SandboxControlError>) {
+    init(
+        startResult: Result<SandboxSession, SandboxControlError>,
+        statusResult: Result<SandboxStatus, SandboxControlError> = .success(
+            SandboxStatus(siteID: "site-1", previewReady: true, mcpReady: true)
+        )
+    ) {
         self.startResult = startResult
+        self.statusResult = statusResult
     }
 
     func start(siteID: String, gitRemote: URL, gitRef: String, token: SessionToken) async throws -> SandboxSession {
         startedToken = token
         return try startResult.get()
+    }
+
+    func status(siteID: String) async throws -> SandboxStatus {
+        try statusResult.get()
     }
 
     func stop(siteID: String) async throws { stopped.append(siteID) }
@@ -56,6 +67,10 @@ actor GatedFakeSandboxControlClient: SandboxControlClient {
             gateContinuation = cont
         }
         return try result.get()
+    }
+
+    func status(siteID: String) async throws -> SandboxStatus {
+        SandboxStatus(siteID: siteID, previewReady: true, mcpReady: true)
     }
 
     func stop(siteID: String) async throws { stopped.append(siteID) }

@@ -1,4 +1,4 @@
-import type { StartBody, StopBody } from "./types.js";
+import type { StartBody, StatusBody, StopBody } from "./types.js";
 
 const REPO_RE = /^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(?:\.git)?$/;
 const REF_RE = /^[A-Za-z0-9._\-/]+$/;
@@ -40,6 +40,14 @@ export function validateStartBody(
 }
 
 export function validateStopBody(body: unknown): StopBody | ValidationError {
+  return validateSiteBody(body);
+}
+
+export function validateStatusBody(body: unknown): StatusBody | ValidationError {
+  return validateSiteBody(body);
+}
+
+function validateSiteBody(body: unknown): StopBody | ValidationError {
   if (typeof body !== "object" || body === null)
     return { field: "body", message: "must be a JSON object" };
   const b = body as Record<string, unknown>;
