@@ -50,7 +50,7 @@ var packageTargets: [Target] = [
     ),
     .target(
         name: "AnglesiteIOS",
-        dependencies: ["AnglesiteBridge"],
+        dependencies: [],
         path: "Sources/AnglesiteIOS",
         swiftSettings: strictConcurrency
     ),
