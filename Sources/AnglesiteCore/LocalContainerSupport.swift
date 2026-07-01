@@ -3,12 +3,54 @@
 /// #60 spike), so no feature flag is needed: a build without it simply reports `false` and the app
 /// falls back to `LocalSiteRuntime` / `RemoteSandboxSiteRuntime`.
 public enum LocalContainerSupport {
+    public enum Availability: Sendable, Equatable {
+        case available
+        case unavailable([UnavailabilityReason])
+
+        public var isAvailable: Bool {
+            if case .available = self { true } else { false }
+        }
+    }
+
+    public enum UnavailabilityReason: String, Sendable, Equatable, CaseIterable {
+        case notAppleSilicon
+        case unsupportedOS
+        case missingVirtualizationEntitlement
+
+        public var description: String {
+            switch self {
+            case .notAppleSilicon:
+                "Apple Silicon is required"
+            case .unsupportedOS:
+                "macOS 26 or newer is required"
+            case .missingVirtualizationEntitlement:
+                "signed build is missing com.apple.security.virtualization"
+            }
+        }
+    }
+
     public static func isAvailable(
         isAppleSilicon: Bool = hostIsAppleSilicon,
         osIsSupported: Bool = hostOSIsSupported,
         hasVirtualizationEntitlement: Bool = hostHasVirtualizationEntitlement
     ) -> Bool {
-        isAppleSilicon && osIsSupported && hasVirtualizationEntitlement
+        availability(
+            isAppleSilicon: isAppleSilicon,
+            osIsSupported: osIsSupported,
+            hasVirtualizationEntitlement: hasVirtualizationEntitlement
+        ).isAvailable
+    }
+
+    public static func availability(
+        isAppleSilicon: Bool = hostIsAppleSilicon,
+        osIsSupported: Bool = hostOSIsSupported,
+        hasVirtualizationEntitlement: Bool = hostHasVirtualizationEntitlement
+    ) -> Availability {
+        var reasons: [UnavailabilityReason] = []
+        if !isAppleSilicon { reasons.append(.notAppleSilicon) }
+        if !osIsSupported { reasons.append(.unsupportedOS) }
+        if !hasVirtualizationEntitlement { reasons.append(.missingVirtualizationEntitlement) }
+        return reasons.isEmpty ? .available : .unavailable(reasons)
     }
 
     /// True on arm64. Intel Macs report false.

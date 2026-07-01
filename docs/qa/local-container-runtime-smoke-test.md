@@ -147,8 +147,12 @@ Fail if the app is signed but the entitlement probe returns false.
 Expected:
 
 - The preview runtime is `LocalContainerSiteRuntime`.
+- The debug pane includes `runtime/stdout selected LocalContainerSiteRuntime`.
 - There is no fallback to `LocalSiteRuntime` once artifacts and entitlement are available.
 - If artifacts or entitlement are deliberately removed, the app falls back to `LocalSiteRuntime` without crashing.
+- Fallback logs include `runtime/stdout selected LocalSiteRuntime; local container unavailable: ...`
+  with the failed host gate and/or missing artifact named (`container image`, `Linux kernel`, or
+  `vminit initfs`).
 
 Fail if the container runtime is selected when artifacts are missing, or if fallback breaks preview startup.
 
