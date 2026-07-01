@@ -61,8 +61,8 @@ public struct RepoBootstrapError: Error, Equatable, Sendable {
 /// Run a subprocess and capture its output. Production: `ProcessSupervisor.shared.run`.
 public typealias RepoCommandRunner = @Sendable (_ executable: URL, _ args: [String], _ cwd: URL?) async throws -> ProcessSupervisor.RunResult
 
-/// Creates the remote repository and pushes to it. The part that differs between `gh` (DevID)
-/// and a future REST/token impl (#71). Git-side preflight lives in `RepoBootstrap`, not here.
+/// Creates the remote repository and pushes to it. Git-side preflight lives in `RepoBootstrap`,
+/// not here.
 public protocol RepoProvider: Sendable {
     /// True if the provider has usable credentials (no interactive prompt needed).
     func isAuthenticated() async -> Bool
@@ -71,7 +71,7 @@ public protocol RepoProvider: Sendable {
 }
 
 /// GitHub provider backed by the `gh` CLI. Reuses `gh`'s credential store (per CLAUDE.md the app
-/// does not own GitHub creds). DevID only — the UI that drives it is `#if !ANGLESITE_MAS`.
+/// does not own GitHub creds). The App Store UI compiles this path out.
 public struct GHRepoProvider: RepoProvider {
     private let run: RepoCommandRunner
     private let env = URL(fileURLWithPath: "/usr/bin/env")

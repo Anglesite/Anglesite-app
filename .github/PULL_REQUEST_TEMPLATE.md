@@ -13,5 +13,4 @@
 
 - [ ] `swift test --package-path .`
 - [ ] `xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build`
-- [ ] `xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debug build`
 - [ ] Manual smoke (if UI-touching): <!-- describe -->

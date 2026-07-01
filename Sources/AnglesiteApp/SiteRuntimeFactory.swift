@@ -1,10 +1,5 @@
 import AnglesiteCore
-
-// AnglesiteContainer links into the DevID app only; the MAS target intentionally
-// falls back to the host subprocess runtime.
-#if !ANGLESITE_MAS
 import AnglesiteContainer
-#endif
 
 protocol SiteRuntimeFactory: Sendable {
     func makeRuntime(
@@ -26,7 +21,6 @@ struct LiveSiteRuntimeFactory: SiteRuntimeFactory {
         knowledgeIndex: SiteKnowledgeIndex?,
         semanticRanker: SemanticRanker?
     ) -> any SiteRuntime {
-        #if !ANGLESITE_MAS
         if LocalContainerSupport.isAvailable(hasVirtualizationEntitlement: VirtualizationEntitlement.isPresent)
             && BundledImage.isProvisioned {
             return LocalContainerSiteRuntime(
@@ -37,7 +31,6 @@ struct LiveSiteRuntimeFactory: SiteRuntimeFactory {
                 semanticRanker: semanticRanker
             )
         }
-        #endif
         return LocalSiteRuntime(contentGraph: contentGraph, knowledgeIndex: knowledgeIndex, semanticRanker: semanticRanker)
     }
 }

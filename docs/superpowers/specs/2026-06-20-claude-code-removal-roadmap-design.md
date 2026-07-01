@@ -204,7 +204,7 @@ This is *stronger*: a non-LLM gate can't be prompt-injected or talked out of run
   `design-interview` before depending on it. The doc assumes Apple ships this; validate.
 - **On-device context ceiling (~4K).** `copy-edit` over a whole site may exceed even PCC
   context — may need deterministic chunking (per-page) before generation.
-- **MAS convergence.** Chat/Sparkle/`gh` are currently compiled out of MAS. Full removal +
+- **MAS convergence.** Chat and `gh` are currently compiled out of MAS. Full removal +
   Apple-only AI makes MAS the natural primary target; the two build targets should
   re-converge on capability. Track as a consequence, not a separate decision.
 - **Feature parity bar for "retire" (Bucket 6).** Confirm `creative-canvas` /

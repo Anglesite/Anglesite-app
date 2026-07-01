@@ -2,17 +2,18 @@
 #
 # Cloudflare Sandbox substrate wrapper — issue #62, consumed by #61 / #66.
 #
-# Both substrates run the SAME canonical image (container/Dockerfile). The
-# Cloudflare Sandbox SDK needs its init binary present so the Worker can drive the
-# container over the Sandbox HTTP API. This thin layer copies the sandbox init
-# (the `/container-server` dir from cloudflare/sandbox) on top of the canonical
-# image — the toolchain layers underneath stay byte-identical to what Apple
-# Containerization pulls.
+# This wraps the lowercase container/ base image for Cloudflare Sandbox. The
+# active macOS Apple Containerization image is built separately from
+# Containers/anglesite-dev/ and bundled into the app; it does not consume this
+# wrapper. The Cloudflare Sandbox SDK needs its init binary present so the Worker
+# can drive the container over the Sandbox HTTP API. This thin layer copies the
+# sandbox init (the `/container-server` dir from cloudflare/sandbox) on top of
+# the base image.
 #
 # The init binary is the ENTRYPOINT (`/container-server/sandbox`); it starts the
 # Sandbox HTTP API then spawns CMD as a child with signal forwarding.
 #
-# ⚠️ ARCH: cloudflare/sandbox is linux/amd64-only, so the canonical image must be
+# ⚠️ ARCH: cloudflare/sandbox is linux/amd64-only, so the base image must be
 # built amd64 (or multi-arch) for this substrate. See the #61 spike notes.
 #
 # The standalone-binary version MUST match the `@cloudflare/sandbox` npm package the

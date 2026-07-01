@@ -1,6 +1,6 @@
 // `ChatModel` is target-agnostic: it depends on the `ConversationalAssistant` protocol, so it
-// compiles and runs on both the Developer ID and Mac App Store targets. Production constructs it
-// with a `FoundationModelAssistant` backend; tests and previews inject lightweight fakes.
+// compiles in the App Store target and in package tests. Production constructs it with a
+// `FoundationModelAssistant` backend; tests and previews inject lightweight fakes.
 import Foundation
 import Observation
 import AnglesiteBridge

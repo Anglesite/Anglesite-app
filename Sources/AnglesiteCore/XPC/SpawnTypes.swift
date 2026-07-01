@@ -5,10 +5,10 @@ import Foundation
 // The pure-`Codable` value types describing a spawn request and its result. Kept in their own
 // file (separate from the `SupervisorBackend` protocol, which references the app-only `LogCenter`)
 // so they stay dependency-light. `Codable` is no longer load-bearing now that the XPC helper is
-// gone — both DevID and MAS spawn in-process via `InProcessBackend` — but it's harmless and these
-// remain the single shared call shape.
+// gone — the app spawns in-process via `InProcessBackend` — but it's harmless and these remain the
+// single shared call shape.
 
-/// One spawn request. `workingDirectory` is a plain path; in MAS the app holds the security-scoped
+/// One spawn request. `workingDirectory` is a plain path; the app holds the security-scoped
 /// grant for that folder (per-`SiteWindow`) so the spawned child inherits access — nothing
 /// bookmark-related crosses a process boundary.
 public struct SpawnSpec: Sendable, Codable, Equatable {

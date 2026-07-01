@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **Toolchain:** Xcode 27+ / Swift 6.4.
-- **No third-party frameworks** (Apple-only; Sparkle is the sole existing exception).
+- **No third-party frameworks** (Apple-only).
 - **Process spawning stays in `ProcessSupervisor`** — not touched by this work, but do not introduce `Process()` anywhere.
 - **MAS gating:** sandbox-only code goes behind `#if ANGLESITE_MAS`. That symbol is **not** set on the `AnglesiteCore`/`AnglesiteBridge` SPM packages, so any `#if ANGLESITE_MAS` in those packages is a no-op — keep MAS-only code (e.g. `SecurityScopedBookmark` minting) in the **app target** (`Sources/AnglesiteApp`).
 - **Branch base:** stacked on `#188` (`SiteStore.changeStream()` must exist). Merges after #188.

@@ -4,8 +4,9 @@ import WebKit
 /// App-target Web Inspector glue. This cannot live in `AnglesiteBridge` because package targets do
 /// not inherit the app target's `ANGLESITE_MAS` compilation condition.
 enum PreviewWebInspector {
-    /// Enables the in-app Web Inspector's context menu and programmatic open path for Developer ID
-    /// builds. MAS compiles this out entirely to avoid private WebKit API in the App Store binary.
+    /// Enables the in-app Web Inspector's context menu and programmatic open path for local
+    /// development builds. App Store builds compile this out entirely to avoid private WebKit API in
+    /// the binary.
     @MainActor
     static func enableDeveloperExtras(on configuration: WKWebViewConfiguration) {
         #if !ANGLESITE_MAS
@@ -22,7 +23,7 @@ enum PreviewWebInspector {
     }
 
     /// Opens the Web Inspector for `webView` in its own window. No-ops when `webView` is nil, when
-    /// the private inspector cannot be resolved, or in MAS where this compiles out.
+    /// the private inspector cannot be resolved, or in App Store builds where this compiles out.
     @MainActor
     static func show(_ webView: WKWebView?) {
         #if !ANGLESITE_MAS

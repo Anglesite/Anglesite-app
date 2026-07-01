@@ -13,7 +13,7 @@
 > - **A security-scoped grant does NOT reach a separate XPC helper** — not via bookmark resolution (6.5, fails even signed), not via fd-passing, not via `inherit` (6.6, "everything fails"). The grant is a sandbox extension **bound to the granting process**.
 > - **A direct child of the grant-holding app DOES inherit the grant** for absolute-path writes — `/bin/sh` and the bundled Node both wrote throughout a user-granted folder; a never-granted folder correctly EPERM'd (6.7, decisive).
 >
-> **Actual architecture for MAS:** the `AnglesiteMAS` app is sandboxed and uses the **same `InProcessBackend`** as the DevID build — it spawns Node/Astro/wrangler **directly** via `Process()`. Per `SiteWindow`, the app resolves the site's persisted security-scoped bookmark and calls `startAccessingSecurityScopedResource()`, holding the grant for the window's lifetime; the spawned children inherit folder access. **No XPC helper, no `XPCBackend`, no XPC protocol.** The only MAS-specific deltas over DevID are: (1) sandbox entitlements, (2) per-`SiteWindow` security-scoped grant management, (3) the **bundled Node binary re-signed** with `cs.allow-jit` + `cs.allow-unsigned-executable-memory` + `inherit` + `app-sandbox` (required or V8 OOMs under hardened runtime), (4) chat/Sparkle/`gh` compiled out, (5) MAS signing/packaging.
+> **Actual architecture for MAS:** the `AnglesiteMAS` app is sandboxed and uses the **same `InProcessBackend`** as the DevID build — it spawns Node/Astro/wrangler **directly** via `Process()`. Per `SiteWindow`, the app resolves the site's persisted security-scoped bookmark and calls `startAccessingSecurityScopedResource()`, holding the grant for the window's lifetime; the spawned children inherit folder access. **No XPC helper, no `XPCBackend`, no XPC protocol.** The only MAS-specific deltas over DevID are: (1) sandbox entitlements, (2) per-`SiteWindow` security-scoped grant management, (3) the **bundled Node binary re-signed** with `cs.allow-jit` + `cs.allow-unsigned-executable-memory` + `inherit` + `app-sandbox` (required or V8 OOMs under hardened runtime), (4) chat/`gh` compiled out, (5) MAS signing/packaging.
 >
 > **Status of shipped work:** Tasks 1 (MAS target), 2 (`SupervisorBackend`), 3 (`InProcessBackend`) are KEPT. Tasks 4 (XPC protocol), 5 (helper target), 6 (`XPCBackend`) are being REVERTED — the helper bought nothing and couldn't get folder access anyway. The `SupervisorBackend` protocol stays (clean seam; `InProcessBackend` is its only impl). `SpawnSpec.workingDirectoryBookmark` is removed (no boundary to cross).
 >
@@ -21,7 +21,7 @@
 
 ## Motivation
 
-Anglesite v1 ships exclusively as a Developer ID `.dmg` with auto-update via Sparkle — fine for early adopters, but the Mac App Store is the discovery surface most independent owners actually browse. Design doc §10 has always called for MAS distribution at v2; Phase 9 closing is the right moment to land it because the live-edit pipeline is now stable and we know exactly what the runtime spawns.
+Anglesite v1 ships exclusively as a Developer ID `.dmg` with a direct-download updater — fine for early adopters, but the Mac App Store is the discovery surface most independent owners actually browse. Design doc §10 has always called for MAS distribution at v2; Phase 9 closing is the right moment to land it because the live-edit pipeline is now stable and we know exactly what the runtime spawns.
 
 The hard part isn't packaging or signing — it's that the App Sandbox blocks `Process()` against arbitrary binaries, and Anglesite spawns *a lot* of them: the vendored Node binary (for `astro dev` and the plugin's MCP server), `wrangler` from each site's `node_modules/.bin/`, system `git`, `/usr/bin/env`. Sandboxed apps reach those binaries through a bundled XPC service with its own (typically more permissive) entitlement set. Phase 10.1 builds that service, wires it into the existing `ProcessSupervisor` actor as a swappable backend, and ships a second Xcode target (`AnglesiteMAS`) that uses it.
 
@@ -226,7 +226,7 @@ Three surfaces compile out of MAS via `#if !ANGLESITE_MAS`:
 |---|---|---|
 | Chat panel (`ChatModel`, `ChatView`, `Chat` button in `SiteWindow` header, `⌘K` shortcut) | Full chat backed by `claude` CLI | Button hidden; Cmd-K does nothing; `ChatModel`/`ChatView` not compiled |
 | `SettingsView.GitHubAuthSection` (the `gh auth status` panel) | Existing UI | Section replaced by a single-line note: *"Anglesite uses your existing `git` credentials (macOS Keychain or SSH key)."* with a small `Help` button that opens a `HelpBook` page or — until the help book exists — a `https://anglesite.dev/help/mas-git-setup` URL. |
-| Sparkle (`Updater`, `SUFeedURL`, `SUPublicEDKey` in `Info.plist`, "Check for Updates…" menu item) | Sparkle 2.x as today | Compiled out entirely. App Store handles updates. |
+| Direct-download updater | In-app updater | Compiled out entirely. App Store handles updates. |
 
 The plugin (`Resources/plugin/`) is copied into both bundles unchanged — annotations, the edit overlay, `apply_edit`, the toolbar integration all work in MAS via the XPC-spawned MCP server.
 
@@ -236,7 +236,7 @@ The plugin (`Resources/plugin/`) is copied into both bundles unchanged — annot
 AnglesiteMAS.app/
 ├── Contents/
 │   ├── MacOS/AnglesiteMAS
-│   ├── Info.plist                         (MAS-specific; no Sparkle keys)
+│   ├── Info.plist                         (MAS-specific; App Store updates)
 │   ├── Resources/
 │   │   ├── node-runtime/                  (vendored Node, signed)
 │   │   ├── plugin/                        (copy of ../anglesite at build time)
@@ -284,7 +284,7 @@ release.sh --mas <version>
 New files:
 
 - `scripts/exportOptions-mas.plist` — `method: app-store-connect`, `signingStyle: manual`, `provisioningProfiles` for `dev.anglesite.app.mas` and `dev.anglesite.app.mas.helper`.
-- `docs/release.md` gains a "Mac App Store submission" section with: pre-submission entitlements diff (`codesign -d --entitlements - …` against both bundles), checklist of MAS-incompatible patterns to confirm absent (`temporary-exception`, Sparkle frameworks, `claude` CLI references in the MAS binary), and App Store Connect metadata template.
+- `docs/release.md` gains a "Mac App Store submission" section with: pre-submission entitlements diff (`codesign -d --entitlements - …` against both bundles), checklist of MAS-incompatible patterns to confirm absent (`temporary-exception`, direct-download update frameworks, `claude` CLI references in the MAS binary), and App Store Connect metadata template.
 
 The DevID path of `release.sh` is unchanged.
 
@@ -319,7 +319,7 @@ Superseded by spike result #2 above. Git is plugin-side Node, best-effort, and a
 | WKWebView in MAS can't load `http://localhost:4321` over plain HTTP | `NSAllowsLocalNetworking` is already present in `Info.plist` and the MAS app inherits it. Verify in smoke fixture. |
 | Astro's filesystem watcher behaves differently inside the helper's sandbox | The helper's `inherit` entitlement should pass file-watcher API access to Node. Verify in smoke fixture; if watching breaks, fall back to polling with `--force-polling` (Astro supports it). |
 | Helper crash leaves orphan child processes | `NSXPCConnection.invalidate` triggers the connection's `invalidationHandler` in the helper, which calls `shutdownAll`. If the helper itself crashes, launchd reaps the service and the spawned children become reparented to launchd; the app's next connection sets up fresh state. Acceptable — same blast radius as the DevID build losing the app process. |
-| Sparkle removal breaks the existing menu structure | The "Check for Updates…" menu item is wrapped in `#if !ANGLESITE_MAS`. Menu layout is otherwise unchanged. |
+| Removing the direct-download updater breaks the existing menu structure | The updater menu item is wrapped in `#if !ANGLESITE_MAS`. Menu layout is otherwise unchanged. |
 
 ## Non-goals
 

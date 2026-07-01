@@ -4,7 +4,7 @@
 
 **Goal:** Ship Anglesite on the Mac App Store as a sandboxed second target (`AnglesiteMAS`) alongside the existing Developer ID build (`Anglesite`), without the chat panel (deferred to Phase 10.2).
 
-**Architecture:** Introduce a `SupervisorBackend` protocol that `ProcessSupervisor` delegates to; refactor the existing direct-`Process()` code into `InProcessBackend` (used by DevID); build an `XPCBackend` that talks to a new `AnglesiteHelper` XPC service (used by MAS). Security-scoped bookmarks per site, threaded through XPC. MAS-specific entitlements; chat / Sparkle / `gh` Settings panel compiled out via `#if !ANGLESITE_MAS`.
+**Architecture:** Introduce a `SupervisorBackend` protocol that `ProcessSupervisor` delegates to; refactor the existing direct-`Process()` code into `InProcessBackend` (used by DevID); build an `XPCBackend` that talks to a new `AnglesiteHelper` XPC service (used by MAS). Security-scoped bookmarks per site, threaded through XPC. MAS-specific entitlements; chat / `gh` Settings panel compiled out via `#if !ANGLESITE_MAS`.
 
 **Tech Stack:** Swift 5.10 / SwiftUI / actors, XPC services (`NSXPCConnection`), Apple App Sandbox + Hardened Runtime, xcodegen, `xcodebuild`, vendored Node.js runtime.
 
@@ -37,7 +37,7 @@ Seven spikes (Task 0, sub-spikes B/Node, 6.5, 6.6, 6.7 — notes files dated 202
 - **Task N — Bundled Node re-sign for sandbox.** A build step (re-sign `Resources/node-runtime/bin/node` — and any other Mach-O under node-runtime — with the app's identity + an entitlements plist carrying `app-sandbox`/`inherit`/`cs.allow-jit`/`cs.allow-unsigned-executable-memory`) so V8 runs under the MAS app's hardened runtime. Wire into the MAS target's build phases / `scripts/`. (This also subsumes the deferred DevID Node re-sign #1/#4 conceptually, but scope to MAS here.)
 - **Task 8 — Migrate the 2 direct `Process()` sites** (`DeployCommand` env/wrangler, `SettingsView` `gh`) through `ProcessSupervisor`. Unchanged from original. (`gh` is then compiled out of MAS in Task 10.)
 - **Task 9 — Chat out of MAS** (`#if !ANGLESITE_MAS`). Unchanged.
-- **Task 10 — Sparkle + `gh` Settings out of MAS.** Sparkle slice already done in Task 1; finish the `gh` Settings variant.
+- **Task 10 — `gh` Settings out of MAS.** The updater slice was already handled in Task 1; finish the `gh` Settings variant.
 - **Task 11 — MAS smoke fixture.** Build/run the `AnglesiteMAS` scheme (real-signed, Node re-signed), set up a per-site scoped grant, drive the full preview/edit/**write-heavy** loop (Astro build writing `dist/`, npm, image drop into `public/images/`), and a real `wrangler` invocation. Node discovery must handle **nvm**-installed node (the existing e2e MCP test only probes `/opt/homebrew`,`/usr/local`,`/usr/bin` and skips under nvm — fix or note). No helper to exercise anymore.
 - **Task 12 — Release pipeline + docs.** MAS archive/export/`productbuild`/upload + the Node re-sign step + the WWDR G3 preflight check + entitlements diff (no helper to check now). `docs/release.md` MAS section.
 - **Task 13 — Final integration check + build-plan/CLAUDE.md flip.** Both schemes build, suite green, MAS smoke green, docs updated.
@@ -97,7 +97,7 @@ scripts/create-smoke-fixture.sh --mas     # MAS smoke (exists after Task 11)
 | `Sources/AnglesiteHelper/HelperService.swift` | Implements `AnglesiteHelperProtocol`. Spawns and tracks child processes; pipes stdout/stderr back over XPC. |
 | `Resources/AnglesiteMAS.entitlements` | App-sandbox + network.client + file bookmarks. |
 | `Resources/AnglesiteHelper.entitlements` | App-sandbox + inherit + network + JIT for Node. |
-| `Resources/AnglesiteMAS-Info.plist` | MAS app Info.plist — no Sparkle keys. |
+| `Resources/AnglesiteMAS-Info.plist` | MAS app Info.plist — App Store update channel. |
 | `Resources/AnglesiteHelper-Info.plist` | XPC service Info.plist. |
 | `scripts/exportOptions-mas.plist` | `xcodebuild -exportArchive` config for App Store Connect. |
 | `Tests/AnglesiteCoreTests/SupervisorBackendTests.swift` | `MockBackend`, `SpawnSpec` Codable round-trip. |
@@ -115,7 +115,7 @@ scripts/create-smoke-fixture.sh --mas     # MAS smoke (exists after Task 11)
 | `Sources/AnglesiteApp/ChatModel.swift` | Wrap file body in `#if !ANGLESITE_MAS`. |
 | `Sources/AnglesiteApp/ChatView.swift` | Wrap file body in `#if !ANGLESITE_MAS`. |
 | `Sources/AnglesiteApp/SiteWindow.swift` | Wrap chat button + Cmd-K + `ChatModel` field in `#if !ANGLESITE_MAS`. |
-| `Sources/AnglesiteApp/Updater.swift` | Wrap file body in `#if !ANGLESITE_MAS`; conditional `import Sparkle`. |
+| `Sources/AnglesiteApp/Updater.swift` | Wrap file body in `#if !ANGLESITE_MAS`. |
 | `Resources/Info.plist` | Stays as the DevID `Info.plist`. Unchanged. |
 | `scripts/release.sh` | `--mas` flag → archive + productbuild + altool sub-pipeline. |
 | `scripts/create-smoke-fixture.sh` | `--mas` flag → build MAS scheme, set bookmark, run smoke through XPC. |
@@ -238,7 +238,7 @@ The throwaway spike project is *not* committed.
 
 - [ ] **Step 1: Add `Resources/AnglesiteMAS-Info.plist`.**
 
-Create the file as a copy of the existing `Resources/Info.plist` with these differences: no `SUFeedURL`, no `SUPublicEDKey`, no `SUEnableAutomaticChecks`, no `SUEnableInstallerLauncherService`. Keep `NSAllowsLocalNetworking`, `NSAppleEventsUsageDescription`, version strings.
+Create the file as a copy of the existing `Resources/Info.plist` with the direct-download updater keys omitted. Keep `NSAllowsLocalNetworking`, `NSAppleEventsUsageDescription`, version strings.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -302,7 +302,7 @@ Create the file as a copy of the existing `Resources/Info.plist` with these diff
 
 - [ ] **Step 3: Add the target and scheme to `project.yml`.**
 
-Insert these under `targets:` after the existing `Anglesite:` target block (keep `Anglesite:` untouched). The MAS target shares all sources with `Anglesite:` except `Updater.swift` (Sparkle); that's handled via `#if !ANGLESITE_MAS` in Task 10, not by excluding the file:
+Insert these under `targets:` after the existing `Anglesite:` target block (keep `Anglesite:` untouched). The MAS target shares all sources with `Anglesite:` except `Updater.swift`; that's handled via `#if !ANGLESITE_MAS` in Task 10, not by excluding the file:
 
 ```yaml
   AnglesiteMAS:
@@ -423,7 +423,7 @@ feat(mas): scaffold AnglesiteMAS target (compiles; not yet wired up)
 
 Adds the second Xcode target for the Mac App Store distribution. Same
 SwiftUI sources as DevID; differs only in entitlements (sandbox on),
-Info.plist (no Sparkle keys), bundle ID (dev.anglesite.app.mas), and
+Info.plist (App Store update channel), bundle ID (dev.anglesite.app.mas), and
 the ANGLESITE_MAS compile flag. No XPC plumbing yet — that lands in
 later tasks. The MAS build is non-functional at runtime (Process()
 calls will fail under sandbox) until Task 6 wires up the helper.
@@ -2284,7 +2284,7 @@ EOF
 
 ---
 
-## Task 10: Compile Sparkle + `gh` Settings panel out of MAS
+## Task 10: Compile direct-download updater + `gh` Settings panel out of MAS
 
 **Files:**
 - Modify: `Sources/AnglesiteApp/Updater.swift`
@@ -2297,7 +2297,6 @@ EOF
 #if !ANGLESITE_MAS
 import SwiftUI
 import Combine
-import Sparkle
 
 // … entire existing class body unchanged …
 #endif
@@ -2306,10 +2305,10 @@ import Sparkle
 - [ ] **Step 2: Find every reference to `Updater` and wrap.**
 
 ```sh
-grep -rn "Updater\|SPUStandardUpdaterController\|@StateObject.*updater\|.checkForUpdates" Sources --include='*.swift'
+grep -rn "Updater\|@StateObject.*updater\|.checkForUpdates" Sources --include='*.swift'
 ```
 
-Common sites: `AnglesiteApp.swift` constructs an `Updater()` and a Menu Command for "Check for Updates…" Wrap them:
+Common sites: `AnglesiteApp.swift` constructs an `Updater()` and a menu command. Wrap them:
 
 ```swift
 #if !ANGLESITE_MAS
@@ -2319,7 +2318,7 @@ Common sites: `AnglesiteApp.swift` constructs an `Updater()` and a Menu Command 
 // In the .commands modifier:
 CommandGroup(after: .appInfo) {
     #if !ANGLESITE_MAS
-    Button("Check for Updates…") {
+    Button("Update") {
         updater.checkForUpdates()
     }
     .disabled(!updater.canCheckForUpdates)
@@ -2368,21 +2367,21 @@ xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debu
 
 Expected: both succeed.
 
-- [ ] **Step 5: Confirm Sparkle is gone from the MAS bundle.**
+- [ ] **Step 5: Confirm the direct-download updater is gone from the MAS bundle.**
 
 ```sh
 DERIVED=$(find ~/Library/Developer/Xcode/DerivedData -maxdepth 1 -name "Anglesite-*" -type d | head -1)
 ls "$DERIVED/Build/Products/Debug/Anglesite.app/Contents/Frameworks/" 2>&1
 ```
 
-The DevID Anglesite.app should show `Sparkle.framework`. To check the MAS build, build it explicitly and inspect:
+The DevID Anglesite.app should show the direct-download update framework. To check the MAS build, build it explicitly and inspect:
 
 ```sh
 xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debug -derivedDataPath /tmp/mas-derived build 2>&1 | tail -3
 ls /tmp/mas-derived/Build/Products/Debug/Anglesite.app/Contents/Frameworks/ 2>&1
 ```
 
-Expected for MAS: the directory either doesn't exist or contains no `Sparkle.framework`.
+Expected for MAS: the directory either doesn't exist or contains no direct-download update framework.
 
 - [ ] **Step 6: Run tests.**
 
@@ -2397,12 +2396,11 @@ Expected: all pass.
 ```sh
 git add Sources/AnglesiteApp/Updater.swift Sources/AnglesiteApp/SettingsView.swift Sources/AnglesiteApp/AnglesiteApp.swift
 git commit -m "$(cat <<'EOF'
-feat(mas): omit Sparkle + gh Settings panel from MAS build
+feat(mas): omit updater + gh Settings panel from MAS build
 
-Updater.swift (Sparkle 2.x wrapper) is entirely wrapped in
-#if !ANGLESITE_MAS — the framework is not linked into the MAS app at
-all. The "Check for Updates…" menu item is removed in MAS (App Store
-handles updates).
+Updater.swift is entirely wrapped in #if !ANGLESITE_MAS, so the
+direct-download updater is not linked into the MAS app at all. App
+Store updates handle the MAS build.
 
 SettingsView's GitHubAuthSection has two variants: the existing
 gh-backed status panel in DevID, and a simpler one-liner with a
@@ -2681,7 +2679,7 @@ fi
 
 - [ ] **Step 3: Add the MAS section to `docs/release.md`.**
 
-Open `docs/release.md` and add a new section. Existing sections cover Sparkle key generation, appcast, notarization for the DevID build. The MAS section:
+Open `docs/release.md` and add a new section. Existing sections cover direct-download update setup and notarization for the DevID build. The MAS section:
 
 ```markdown
 ## Mac App Store submission (AnglesiteMAS)
@@ -2712,10 +2710,10 @@ Before running `scripts/release.sh --mas <version>`:
   Neither output should contain `com.apple.security.temporary-exception.*` or
   `com.apple.security.cs.disable-library-validation`.
 
-- [ ] Confirm Sparkle is absent from the MAS bundle:
+- [ ] Confirm the direct-download update framework is absent from the MAS bundle:
 
   ```sh
-  test ! -d out/mas-<version>/Anglesite.app/Contents/Frameworks/Sparkle.framework && echo OK
+  test ! -d out/mas-<version>/Anglesite.app/Contents/Frameworks/Updater.framework && echo OK
   ```
 
 - [ ] Confirm `claude` CLI is not referenced in the MAS binary:
@@ -2760,7 +2758,7 @@ of the script is unchanged.
 
 docs/release.md gains a "Mac App Store submission" section: one-time
 ASC setup (app record + profiles), per-release checklist (version bumps,
-smoke fixtures, entitlements diff, Sparkle/claude absence checks), and
+smoke fixtures, entitlements diff, updater/claude absence checks), and
 upload instructions.
 
 Phase 10.1 Task 12 of docs/specs/2026-05-27-sandboxed-app-store-plan.md.
@@ -2804,7 +2802,7 @@ Find the `## Phase 10 — v2 polish` section. Currently it's a one-line summary.
 
 Per design doc §12: Mac App Store build (sandboxed), Quick Look, Spotlight, Settings polish.
 
-1. ✅ Sandboxed Mac App Store build. `AnglesiteMAS` ships alongside the existing `Anglesite` Developer ID target — same Swift sources, divergent entitlements + Info.plist + signing. Subprocess spawning routes through a new `SupervisorBackend` protocol (DevID uses `InProcessBackend` / direct `Process()`; MAS uses `XPCBackend` → `AnglesiteHelper.xpc` bundled in `Contents/XPCServices/`). Security-scoped bookmarks per site, threaded through `SiteStore.Site.bookmarkData` and every `SpawnSpec` headed to the helper. Chat panel, Sparkle, and the `gh`-backed GitHub Settings section are compiled out via `#if !ANGLESITE_MAS`. Design: [`docs/specs/2026-05-27-sandboxed-app-store-design.md`](specs/2026-05-27-sandboxed-app-store-design.md). Plan: [`docs/specs/2026-05-27-sandboxed-app-store-plan.md`](specs/2026-05-27-sandboxed-app-store-plan.md). Remaining v2 work: native Anthropic API chat client (10.2), Quick Look extension (10.3), Spotlight metadata (10.4), Settings polish (10.5).
+1. ✅ Sandboxed Mac App Store build. `AnglesiteMAS` ships alongside the existing `Anglesite` Developer ID target — same Swift sources, divergent entitlements + Info.plist + signing. Subprocess spawning routes through a new `SupervisorBackend` protocol (DevID uses `InProcessBackend` / direct `Process()`; MAS uses `XPCBackend` → `AnglesiteHelper.xpc` bundled in `Contents/XPCServices/`). Security-scoped bookmarks per site, threaded through `SiteStore.Site.bookmarkData` and every `SpawnSpec` headed to the helper. Chat panel and the `gh`-backed GitHub Settings section are compiled out via `#if !ANGLESITE_MAS`. Design: [`docs/specs/2026-05-27-sandboxed-app-store-design.md`](specs/2026-05-27-sandboxed-app-store-design.md). Plan: [`docs/specs/2026-05-27-sandboxed-app-store-plan.md`](specs/2026-05-27-sandboxed-app-store-plan.md). Remaining v2 work: native Anthropic API chat client (10.2), Quick Look extension (10.3), Spotlight metadata (10.4), Settings polish (10.5).
 2. (10.2) Native Anthropic API chat client.
 3. (10.3) Quick Look extension for site projects.
 4. (10.4) Spotlight metadata indexer.
@@ -2816,7 +2814,7 @@ Per design doc §12: Mac App Store build (sandboxed), Quick Look, Spotlight, Set
 Find the line that currently reads "Current phase: **Phase 10** — v2 polish (sandboxed App Store build, Quick Look, Spotlight, Settings polish). Phases 0–9 are complete: …" and replace the Phase 10 portion:
 
 ```markdown
-See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 10.2** — native Anthropic API chat client (chat in MAS). Phase 10.1 (sandboxed Mac App Store build with helper-tool architecture) shipped. Phases 0–9 are complete: multi-window (#54), health badge (#31), image-drop → `optimize-images` (#32), per-edit undo (#33). Outstanding asterisks from earlier phases: opt-in primed npm cache size budget (#6), Sparkle manual key/appcast setup (DevID only — MAS gets App Store updates), app icon assets (#55), symlink-path normalization in `SiteStore.identifier(for:)` (#56). Deferred Release-track: Developer ID re-sign of embedded Node + notarization (#1/#4).
+See [`docs/build-plan.md`](docs/build-plan.md) for the phased roadmap. Current phase: **Phase 10.2** — native Anthropic API chat client (chat in MAS). Phase 10.1 (sandboxed Mac App Store build with helper-tool architecture) shipped. Phases 0–9 are complete: multi-window (#54), health badge (#31), image-drop → `optimize-images` (#32), per-edit undo (#33). Outstanding asterisks from earlier phases: opt-in primed npm cache size budget (#6), app icon assets (#55), symlink-path normalization in `SiteStore.identifier(for:)` (#56). Deferred Release-track: Developer ID re-sign of embedded Node + notarization (#1/#4).
 ```
 
 - [ ] **Step 4: Commit.**
