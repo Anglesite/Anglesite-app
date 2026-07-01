@@ -137,6 +137,8 @@ The long-term architecture replaces the in-process Node subprocess with a contai
   `scripts/audit-host-node-retirement.sh` inventories the remaining host-Node surface today and
   becomes the `--expect-retired` cleanup gate when #66/#69 are proven.
 - 🔲 **iOS target** (#71) — thin SwiftUI/UIKit client using only the remote (Cloudflare) runtime.
+  `scripts/audit-ios-thin-client-readiness.sh` inventories the current platform blockers and
+  becomes the `--expect-ready` gate before wiring the iOS app target.
 
 ---
 
