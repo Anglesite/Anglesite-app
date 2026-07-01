@@ -33,6 +33,7 @@ struct SiteWindow: View {
         contentGraph: SiteContentGraph,
         knowledgeIndex: SiteKnowledgeIndex,
         semanticRanker: SemanticRanker?,
+        runtimeFactory: any SiteRuntimeFactory,
         contentIndexerStore: ContentIndexerStore
     ) {
         self.siteID = siteID
@@ -40,6 +41,7 @@ struct SiteWindow: View {
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
+            runtimeFactory: runtimeFactory,
             contentIndexerStore: contentIndexerStore
         ))
     }

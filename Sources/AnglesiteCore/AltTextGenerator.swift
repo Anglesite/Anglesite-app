@@ -29,7 +29,7 @@ public struct AltTextGenerator: Sendable {
     private let isEnabled: @Sendable () -> Bool
     private let produce: Producer
     private let apply: Applier
-    private let log: @Sendable (String) -> Void
+    private let log: @Sendable (String) async -> Void
 
     public init(
         siteID: String,
@@ -37,7 +37,7 @@ public struct AltTextGenerator: Sendable {
         isEnabled: @escaping @Sendable () -> Bool,
         produce: @escaping Producer,
         apply: @escaping Applier,
-        log: @escaping @Sendable (String) -> Void = { _ in }
+        log: @escaping @Sendable (String) async -> Void = { _ in }
     ) {
         self.siteID = siteID
         self.siteDirectory = siteDirectory
@@ -66,7 +66,7 @@ public struct AltTextGenerator: Sendable {
         do {
             alt = try await produce(imageFileURL(forSrc: src), context)
         } catch {
-            log("alt-text generation failed for \(src): \(error)")
+            await log("alt-text generation failed for \(src): \(error)")
             return
         }
 
