@@ -42,7 +42,10 @@ final class PageMetadataModel: InspectorEditorModel {
         defer { isLoading = false }
         let url = file.url
         do {
-            adopt(try await fileSession.load(from: url))
+            var session = fileSession
+            let text = try await session.load(from: url)
+            fileSession = session
+            adopt(text)
             loadError = nil
             warnIfNoModificationDate(after: "load")
         } catch {
@@ -58,7 +61,9 @@ final class PageMetadataModel: InspectorEditorModel {
         let newContents = PageMetadataEditor.write(metadata, into: contents)
         let url = file.url
         do {
-            try await fileSession.save(newContents, to: url)
+            var session = fileSession
+            try await session.save(newContents, to: url)
+            fileSession = session
             savedMetadata = metadata
             warnIfNoModificationDate(after: "save")
             await commit()
@@ -71,14 +76,19 @@ final class PageMetadataModel: InspectorEditorModel {
 
     func flushBeforeLeaving() async -> Bool {
         guard isDirty else { return true }
-        guard await fileSession.canFlushBeforeLeaving(file: file.url, bufferIsDirty: true) else { return false }
+        var session = fileSession
+        let canFlush = await session.canFlushBeforeLeaving(file: file.url, bufferIsDirty: true)
+        fileSession = session
+        guard canFlush else { return false }
         return await save()
     }
 
     func checkExternalChange() async {
         guard loadError == nil else { return }
         let dirty = isDirty
-        let change = await fileSession.externalChange(at: file.url, bufferIsDirty: dirty)
+        var session = fileSession
+        let change = await session.externalChange(at: file.url, bufferIsDirty: dirty)
+        fileSession = session
         switch change {
         case .some(.reloadable(let disk)):
             adopt(disk)
@@ -92,7 +102,12 @@ final class PageMetadataModel: InspectorEditorModel {
     func keepMyChanges() { fileSession.keepMyChanges() }
 
     func reloadFromDisk() async {
-        guard let disk = await fileSession.reloadFromConflict(file: file.url) else { return }
+        var session = fileSession
+        guard let disk = await session.reloadFromConflict(file: file.url) else {
+            fileSession = session
+            return
+        }
+        fileSession = session
         adopt(disk)
     }
 

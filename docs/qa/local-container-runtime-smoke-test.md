@@ -27,6 +27,11 @@ This smoke intentionally exercises the real substrate. It is not expected to run
 - The sibling plugin checkout exists at `/Users/dwk/Developer/github.com/Anglesite/anglesite`, or `ANGLESITE_PLUGIN_SRC` points at it.
 - A test `.anglesite` package whose `Source/` directory is a git repo.
 
+Docker is a build-time dependency only. `scripts/vendor-container-image.sh` uses Docker buildx to
+produce a portable OCI image layout in `Resources/container-image/`. The app does not run Docker at
+runtime; `ContainerizationControl` imports that OCI layout with Apple's Containerization APIs,
+unpacks it to an ext4 rootfs, and boots it through `VZVirtualMachineManager`.
+
 ## Artifact Provisioning
 
 `LiveSiteRuntimeFactory` selects `LocalContainerSiteRuntime` only when both conditions are true:
