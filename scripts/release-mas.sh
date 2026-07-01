@@ -12,10 +12,10 @@
 # updates ship through it, not Sparkle.
 #
 # Prerequisites (one-time, see docs/release.md "Mac App Store submission"):
-#   - An App Store Connect app record for bundle id dev.anglesite.app.mas.
+#   - An App Store Connect app record for bundle id io.dwk.anglesite.
 #   - An "Apple Distribution" cert + a "Mac Installer Distribution" cert in the keychain.
 #   - The Apple WWDR (G3) intermediate cert (https://www.apple.com/certificateauthority/).
-#   - A Mac App Store provisioning profile for dev.anglesite.app.mas, installed.
+#   - A Mac App Store provisioning profile for io.dwk.anglesite, installed.
 #   - An App Store Connect API key (.p8 in ~/.appstoreconnect/private_keys/ or
 #     ~/.private_keys/) plus its key id + issuer id, for keychain-free altool upload.
 #
@@ -31,7 +31,7 @@
 # Env:
 #   TEAM_ID               (required) 10-char Apple Developer Team ID.
 #   PROVISIONING_PROFILE  (required) Name of the installed App Store provisioning profile
-#                         for dev.anglesite.app.mas.
+#                         for io.dwk.anglesite.
 #   ASC_API_KEY_ID        (required unless --validate-only) App Store Connect API key id.
 #   ASC_API_ISSUER_ID     (required unless --validate-only) App Store Connect API issuer id.
 
@@ -53,7 +53,7 @@ ARCHIVE_PATH="$BUILD_DIR/AnglesiteMAS.xcarchive"
 EXPORT_DIR="$BUILD_DIR/export-mas"
 EXPORT_OPTIONS="$BUILD_DIR/exportOptions-appstore.plist"
 EXPORT_OPTIONS_TEMPLATE="$SCRIPT_DIR/exportOptions-appstore.plist"
-BUNDLE_ID="dev.anglesite.app.mas"
+BUNDLE_ID="io.dwk.anglesite"
 SCHEME="AnglesiteMAS"
 CONFIGURATION="Release"
 

@@ -1,23 +1,23 @@
 # Anglesite (Mac app)
 
-A native macOS app that wraps the [Anglesite Claude plugin](https://github.com/Anglesite/anglesite) and gives non-technical site owners a click-to-edit experience for their website.
+A native macOS app that wraps the [Anglesite Codex plugin](https://github.com/Anglesite/anglesite) and gives non-technical site owners a click-to-edit experience for their website.
 
-The app does not replace the plugin — it embeds it. Scaffolding, edits, deploys, and skills all flow through the same skills, hooks, and MCP server that Claude Code uses today; this app is a custom **host** for that machinery with native UI on top.
+The app does not replace the plugin — it embeds it. Scaffolding, edits, deploys, and skills all flow through the same skills, hooks, and MCP server that Codex uses today; this app is a custom **host** for that machinery with native UI on top.
 
 ## Status
 
 **Pre-release.** The v0 → v1 core is built (Phases 0–9): embedded Node runtime, plugin/site plumbing, supervised subprocesses, the WKWebView live preview with click-to-edit overlay routed through the plugin's MCP server, deploy via `wrangler` (with the plugin's mandatory pre-deploy scan), Keychain/`gh` credentials, the per-site chat panel, multi-window, the deploy-readiness health badge, image-drop optimization, and per-edit undo.
 
 In progress (Phase 10, v2 polish):
-- **Sandboxed Mac App Store build (Phase 10.1).** A second target, `AnglesiteMAS`, ships under the App Sandbox. It uses the same in-process subprocess path as the Developer ID build, holding a per-site security-scoped bookmark grant so the directly-spawned Node/Astro/wrangler children inherit folder access (no XPC helper — see the architecture pivot in [`docs/specs/2026-05-27-sandboxed-app-store-plan.md`](docs/specs/2026-05-27-sandboxed-app-store-plan.md)). The bundled Node is re-signed with hardened-runtime JIT/sandbox entitlements. Chat, Sparkle auto-update, and the `gh` Settings panel are compiled out of the MAS build (`#if !ANGLESITE_MAS`). *Not yet run end-to-end under real App Store signing (Task 11); the App Store submission pipeline is pending (Task 12).*
+- **Sandboxed Mac App Store build (Phase 10.1).** A second target, `AnglesiteMAS`, ships under the App Sandbox. It uses the same in-process subprocess path as the Developer ID build, holding a per-site security-scoped bookmark grant so the directly-spawned Node/Astro/wrangler children inherit folder access (no XPC helper — see the architecture pivot in [`docs/specs/2026-05-27-sandboxed-app-store-plan.md`](docs/specs/2026-05-27-sandboxed-app-store-plan.md)). The bundled Node is re-signed with hardened-runtime JIT/sandbox entitlements. Chat is available on MAS through Foundation Models; Sparkle auto-update and the `gh` Settings panel are compiled out of the MAS build (`#if !ANGLESITE_MAS`). *Not yet run end-to-end under real App Store signing (Task 11); the App Store submission script/docs are present, with the first real validation/upload still pending (Task 12).*
 - **Apple Help Book** — shipped. 15 hand-authored HTML pages with `hiutil` search index, accessible via Help ▸ Anglesite Help.
 
 Also landed since v1:
 - **`SiteRuntime` protocol** (#65) — abstracts the execution substrate so `PreviewModel` is decoupled from how a site runs (in-process subprocess vs. local container vs. Cloudflare).
 - **HTTP/Streamable MCP transport** (#64) — `MCPClient` can connect over HTTP in addition to stdio, enabling container-backed runtimes.
-- **Containerization spikes** — Apple Containerization (#60, DevID-only; MAS-incompatible) and Cloudflare Sandbox (#61, shared OCI image) are complete. Production container runtimes (#66, #69) and the iOS thin client (#71) are open.
-- **Xcode 27 migration** (#108) — macOS 27+ deployment target, `@State` macro audit, Swift 6.4 toolchain. Both schemes build clean; 662 tests pass.
-- **macOS 27 platform features** (open) — system-wide MCP (#101), Spotlight/App Intents (#102), native chat on Foundation Models (#105), and more.
+- **Containerization** — Apple Containerization is available in the DevID build when the local capability gate passes; `LocalContainerSiteRuntime` (#69) has landed, while MAS entitlement work and the remote Cloudflare Worker control plane remain open.
+- **Xcode 27 migration** (#108) — macOS 27+ deployment target, `@State` macro audit, Swift 6.4 toolchain. Both schemes build clean; use `swift test --package-path .` for the SwiftPM-covered test targets.
+- **macOS 27 platform features** — Spotlight/App Intents indexing, View Annotations, structured task UI, and Foundation Models chat have landed; system-wide MCP, App Intents Testing, SwiftUI 27 toolbar adoption, and other follow-ups remain open.
 
 See [`docs/build-plan.md`](docs/build-plan.md) for the full phased status.
 
