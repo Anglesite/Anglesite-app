@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   validateStartBody,
+  validateStatusBody,
   validateStopBody,
   isValidationError,
 } from "../src/validation.js";
@@ -97,6 +98,19 @@ describe("validateStopBody", () => {
 
   it("rejects empty siteID", () => {
     const result = validateStopBody({ siteID: "" });
+    expect(isValidationError(result)).toBe(true);
+  });
+});
+
+describe("validateStatusBody", () => {
+  it("accepts a valid body", () => {
+    const result = validateStatusBody({ siteID: "site-1" });
+    expect(isValidationError(result)).toBe(false);
+    expect(result).toEqual({ siteID: "site-1" });
+  });
+
+  it("rejects invalid siteID", () => {
+    const result = validateStatusBody({ siteID: "bad chars!!" });
     expect(isValidationError(result)).toBe(true);
   });
 });

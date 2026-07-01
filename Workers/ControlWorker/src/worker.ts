@@ -3,10 +3,11 @@ import { Sandbox, type Env } from "./sandbox-env.js";
 import { authorized } from "./auth.js";
 import {
   validateStartBody,
+  validateStatusBody,
   validateStopBody,
   isValidationError,
 } from "./validation.js";
-import type { StartResponse } from "./types.js";
+import type { StartResponse, StatusResponse } from "./types.js";
 
 export { Sandbox };
 
@@ -15,6 +16,13 @@ const json = (data: unknown, status = 200) =>
     status,
     headers: { "content-type": "application/json" },
   });
+
+function withMCPPath(rawURL: string): string {
+  const url = new URL(rawURL);
+  const base = url.pathname.replace(/\/$/, "");
+  url.pathname = `${base}/mcp`;
+  return url.toString();
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -109,7 +117,29 @@ export default {
 
         const response: StartResponse = {
           previewURL: previewTunnel.url,
-          mcpURL: mcpTunnel.url,
+          mcpURL: withMCPPath(mcpTunnel.url),
+        };
+        return json(response, 200);
+      }
+
+      if (url.pathname === "/status" && request.method === "POST") {
+        const rawBody = await request.json();
+        const parsed = validateStatusBody(rawBody);
+        if (isValidationError(parsed))
+          return json(
+            { error: parsed.message, field: parsed.field },
+            400,
+          );
+
+        const sandbox = getSandbox(env.Sandbox, parsed.siteID);
+        const [previewProbe, mcpProbe] = await Promise.all([
+          sandbox.exec(`curl -s -o /dev/null 'http://localhost:${PROXY_PORT}/'`),
+          sandbox.exec(`curl -s -o /dev/null 'http://localhost:${MCP_PORT}/mcp'`),
+        ]);
+        const response: StatusResponse = {
+          siteID: parsed.siteID,
+          previewReady: previewProbe.success,
+          mcpReady: mcpProbe.success,
         };
         return json(response, 200);
       }
@@ -125,8 +155,8 @@ export default {
 
         const sandbox = getSandbox(env.Sandbox, parsed.siteID);
         await Promise.allSettled([
-          sandbox.tunnels.drop(Number(PROXY_PORT)),
-          sandbox.tunnels.drop(Number(MCP_PORT)),
+          sandbox.tunnels.destroy(Number(PROXY_PORT)),
+          sandbox.tunnels.destroy(Number(MCP_PORT)),
         ]);
         return json({ stopped: true }, 200);
       }

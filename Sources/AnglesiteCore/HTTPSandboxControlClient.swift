@@ -15,6 +15,8 @@ public struct HTTPSandboxControlClient: SandboxControlClient {
 
     private struct StartBody: Encodable { let siteID, gitRemote, gitRef, token: String }
     private struct StartResponse: Decodable { let previewURL: URL; let mcpURL: URL }
+    private struct StatusBody: Encodable { let siteID: String }
+    private struct StatusResponse: Decodable { let siteID: String; let previewReady: Bool; let mcpReady: Bool }
     private struct StopBody: Encodable { let siteID: String }
 
     public func start(siteID: String, gitRemote: URL, gitRef: String, token: SessionToken) async throws -> SandboxSession {
@@ -30,6 +32,16 @@ public struct HTTPSandboxControlClient: SandboxControlClient {
 
     public func stop(siteID: String) async throws {
         _ = try await post("stop", body: StopBody(siteID: siteID))
+    }
+
+    public func status(siteID: String) async throws -> SandboxStatus {
+        let data = try await post("status", body: StatusBody(siteID: siteID))
+        do {
+            let r = try JSONDecoder().decode(StatusResponse.self, from: data)
+            return SandboxStatus(siteID: r.siteID, previewReady: r.previewReady, mcpReady: r.mcpReady)
+        } catch {
+            throw SandboxControlError.startFailed("bad response: \(error)")
+        }
     }
 
     private func post(_ path: String, body: some Encodable) async throws -> Data {

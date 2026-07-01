@@ -38,6 +38,22 @@ struct HTTPSandboxControlClientTests {
                 siteID: "s", gitRemote: URL(string: "https://x/r.git")!, gitRef: "main", token: SessionToken(value: "t"))
         }
     }
+
+    @Test("status posts and parses readiness")
+    func statusParses() async throws {
+        SandboxStubURLProtocol.handler = { req in
+            #expect(req.url?.path == "/status")
+            #expect(req.value(forHTTPHeaderField: "Authorization") == "Bearer api-tok")
+            let body = #"{"siteID":"s1","previewReady":true,"mcpReady":false}"#
+            return (200, Data(body.utf8))
+        }
+        let client = HTTPSandboxControlClient(
+            workerBaseURL: URL(string: "https://worker.example.workers.dev")!,
+            apiToken: "api-tok", urlSession: session())
+        let status = try await client.status(siteID: "s1")
+        #expect(status == SandboxStatus(siteID: "s1", previewReady: true, mcpReady: false))
+        #expect(status.isReady == false)
+    }
 }
 
 /// Minimal URLProtocol stub for offline HTTP-client tests (sandbox control client variant).

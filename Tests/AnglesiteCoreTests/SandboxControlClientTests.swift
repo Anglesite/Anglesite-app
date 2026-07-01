@@ -37,4 +37,16 @@ struct SandboxControlClientTests {
         try await fake.stop(siteID: "site-1")
         #expect(await fake.stopped == ["site-1"])
     }
+
+    @Test("fake returns configured status")
+    func fakeStatus() async throws {
+        let expected = SandboxStatus(siteID: "site-1", previewReady: true, mcpReady: false)
+        let fake = FakeSandboxControlClient(
+            startResult: .success(SandboxSession(
+                previewURL: URL(string: "https://p")!, mcpURL: URL(string: "https://m/mcp")!)),
+            statusResult: .success(expected))
+        let got = try await fake.status(siteID: "site-1")
+        #expect(got == expected)
+        #expect(got.isReady == false)
+    }
 }
