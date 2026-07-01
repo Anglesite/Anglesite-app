@@ -90,6 +90,23 @@ writing_tools_assignment_is_mac_gated() {
     ' "$path"
 }
 
+ios_shell_target_is_safe() {
+    path_exists "Sources/AnglesiteIOS" || return 1
+    awk '
+        /name: "AnglesiteIOS"/ { inTarget = 1; foundTarget = 1 }
+        inTarget && /dependencies:/ {
+            if ($0 ~ /AnglesiteBridge|AnglesiteCore/) { unsafeDependency = 1 }
+        }
+        inTarget && /path: "Sources\/AnglesiteIOS"/ { sawPath = 1 }
+        inTarget && /^[[:space:]]*\),[[:space:]]*$/ {
+            inTarget = 0
+        }
+        END {
+            exit (foundTarget == 1 && sawPath == 1 && unsafeDependency != 1) ? 0 : 1
+        }
+    ' Package.swift
+}
+
 if pattern_exists "Package.swift" "\\.iOS\\("; then
     ready "Swift package declares an iOS platform"
 else
@@ -102,10 +119,10 @@ else
     blocker "No iOS app target" "project.yml has only macOS targets"
 fi
 
-if path_exists "Sources/AnglesiteIOS"; then
-    ready "iOS shell source directory exists"
+if ios_shell_target_is_safe; then
+    ready "iOS shell source target exists"
 else
-    blocker "No iOS shell sources" "Sources/AnglesiteIOS is absent"
+    blocker "No iOS shell sources" "Sources/AnglesiteIOS and Package.swift lack an iOS-safe AnglesiteIOS target"
 fi
 
 if path_exists "Resources/Info-iOS.plist" || pattern_exists "project.yml" "INFOPLIST_FILE:.*iOS"; then

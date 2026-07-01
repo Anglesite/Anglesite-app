@@ -20,8 +20,11 @@ Expected today:
 
 - The command exits 0.
 - It lists the remote-runtime and bridge pieces already present.
-- It lists the remaining blockers, including package/project platform declarations, the missing iOS
-  shell, FSEvents/security-scoped/Core host runtime surfaces, and AppKit-bound intents code.
+- It lists the remaining blockers, including package/project platform declarations, iOS app bundle
+  metadata, FSEvents/security-scoped/Core host runtime surfaces, and AppKit-bound intents code.
+
+The `AnglesiteIOS` shell target must not depend on `AnglesiteBridge` until the bridge can be split
+away from `AnglesiteCore`; otherwise SwiftPM pulls macOS-only host runtime files into iOS builds.
 
 ## Readiness Gate
 
