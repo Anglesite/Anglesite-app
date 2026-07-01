@@ -33,7 +33,7 @@ APP_PATH="$BUILD_DIR/export/Anglesite.app"
 ZIP_PATH="$BUILD_DIR/Anglesite-${VERSION}.zip"
 APPCAST_PATH="$BUILD_DIR/appcast.xml"
 TAG="v${VERSION}"
-MIN_SYSTEM_VERSION="14.0"
+MIN_SYSTEM_VERSION="27.0"
 
 cd "$REPO_ROOT"
 

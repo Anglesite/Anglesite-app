@@ -27,7 +27,7 @@
     <!-- Manual signing requires an explicit App Store provisioning profile for the bundle id. -->
     <key>provisioningProfiles</key>
     <dict>
-        <key>dev.anglesite.app.mas</key>
+        <key>io.dwk.anglesite</key>
         <string>__PROVISIONING_PROFILE__</string>
     </dict>
     <key>uploadSymbols</key>

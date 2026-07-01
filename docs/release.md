@@ -106,7 +106,7 @@ ships updates itself.
 
 ### One-time setup (App Store)
 
-1. **App Store Connect app record.** Create an app for bundle id `dev.anglesite.app.mas`
+1. **App Store Connect app record.** Create an app for bundle id `io.dwk.anglesite`
    in [App Store Connect](https://appstoreconnect.apple.com/) → Apps. The build won't
    upload until the record exists.
 
@@ -119,7 +119,7 @@ ships updates itself.
    if any is missing.
 
 3. **Provisioning profile.** Create a **Mac App Store** provisioning profile for
-   `dev.anglesite.app.mas` tied to the Apple Distribution cert, download it, and install it
+   `io.dwk.anglesite` tied to the Apple Distribution cert, download it, and install it
    (double-click, or drop into `~/Library/MobileDevice/Provisioning Profiles/`). Note its
    name — you pass it as `PROVISIONING_PROFILE`.
 
