@@ -134,6 +134,8 @@ The long-term architecture replaces the in-process Node subprocess with a contai
   - 🔲 **End-to-end boot verification (Task 10)** — the entitlement-gated boot → preview → `apply_edit` round-trip on an Apple-Silicon Mac is **author-run** (`com.apple.security.virtualization` can't be exercised on CI). Everything below the gate is verified as far as possible without it (conformer compiles against real 0.34; the sidecar boots + serves MCP in plain Docker). A distribution-grade vendor-kernel pipeline (vs. the current env-override + `vendor-container-kernel.sh`) is the remaining provisioning piece.
   - 🔲 **Virtualization entitlement approval (Wall 2)** — `com.apple.security.virtualization` is present in `Resources/Anglesite.entitlements`; file/complete the Apple approval request so the App Store provisioning profile grants it. Precedented (`try-containers/Containers`) but still a release gate.
 - 🔲 **Retire embedded Node** (#70) — once containers land, the vendored Node + JIT re-sign can be removed.
+  `scripts/audit-host-node-retirement.sh` inventories the remaining host-Node surface today and
+  becomes the `--expect-retired` cleanup gate when #66/#69 are proven.
 - 🔲 **iOS target** (#71) — thin SwiftUI/UIKit client using only the remote (Cloudflare) runtime.
 
 ---
