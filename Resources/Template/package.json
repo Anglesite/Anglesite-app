@@ -11,9 +11,9 @@
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.0",
-    "astro": "^5.0.0",
+    "astro": "^6.4.8",
     "astro-embed": "^0.13.0",
-    "astro-seo-schema": "^5.2.0"
+    "astro-seo-schema": "^6.0.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
