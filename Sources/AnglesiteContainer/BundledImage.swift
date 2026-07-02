@@ -33,6 +33,13 @@ public enum BundledImage {
         // Alongside the main executable (xctest / CLI).
         candidates.append(Bundle.main.bundleURL)
         candidates.append(Bundle.main.bundleURL.deletingLastPathComponent())
+        // Inside a real .app's Contents/Resources/ — where SwiftPM-generated resource bundles
+        // actually land for a statically-linked target (Bundle(for:).bundleURL above resolves to
+        // Bundle.main itself in that case, never Contents/Resources, so none of the candidates
+        // above match without this).
+        if let resourceURL = Bundle.main.resourceURL {
+            candidates.append(resourceURL)
+        }
         for base in candidates {
             let url = base.appendingPathComponent(bundleName)
             if let b = Bundle(url: url) { return b }
@@ -159,6 +166,26 @@ public enum BundledImage {
         let dir = base.appendingPathComponent("Anglesite/container-store", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
+    }
+
+    /// Stages a (possibly read-only, bundle-hosted) OCI layout into a writable directory.
+    ///
+    /// `ImageStore.load(from:)` writes ingest-tracking files (e.g. `ingest/`) directly inside the
+    /// layout directory it reads from — not just into the destination store — so passing the
+    /// bundled `layoutURL()`/`initfsLayoutURL()` straight in fails with EPERM on a real, read-only
+    /// `.app`. `name` identifies the artifact (e.g. "app-image", "vminit-initfs") and namespaces its
+    /// staged copy under `storeURL()` so repeated launches reuse it instead of re-copying every time.
+    public static func stagedLayoutURL(source: URL, name: String) throws -> URL {
+        let staged = try storeURL().appendingPathComponent("layout-staging/\(name)", isDirectory: true)
+        if FileManager.default.fileExists(atPath: staged.appendingPathComponent("index.json").path) {
+            return staged
+        }
+        try FileManager.default.createDirectory(
+            at: staged.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try? FileManager.default.removeItem(at: staged)
+        try FileManager.default.copyItem(at: source, to: staged)
+        return staged
     }
 }
 

@@ -57,22 +57,33 @@ public struct ContainerizationControl: LocalContainerControl {
         // (otherwise disk grows per start/stop). Both are site-scoped so concurrent starts don't race.
         let rootfsURL = storeURL.appendingPathComponent("rootfs-\(siteID).ext4")
         let initfsURL = storeURL.appendingPathComponent("initfs-\(siteID).ext4")
+        // A prior run for this siteID may have left these behind — normal teardown deletes them,
+        // but a force-quit, crash, or OS restart skips that cleanup. `EXT4Unpacker.unpack(at:)`
+        // refuses to overwrite an existing block device file, so a stale leftover would otherwise
+        // block every subsequent start for the same site. A fresh boot never wants to reuse the
+        // previous run's rootfs, so clear both unconditionally before unpacking.
+        try? FileManager.default.removeItem(at: rootfsURL)
+        try? FileManager.default.removeItem(at: initfsURL)
 
         // 1. Import the bundled OCI layouts into the on-disk ImageStore and unpack to bootable mounts.
-        //    `load(from:)` is idempotent against an existing store (re-import returns the same image).
+        //    `load(from:)` is idempotent against an existing store (re-import returns the same image),
+        //    but it also needs to write into the layout directory itself (not just the store), so both
+        //    layouts are staged to a writable copy first — the bundled originals are read-only.
         let rootfs: Containerization.Mount
         let initfs: Containerization.Mount
         do {
             let store = try ImageStore(path: storeURL)
 
             // App image -> ext4 rootfs mount.
-            let appImage = try await loadOrGet(store, layout: imageLayoutURL, reference: BundledImage.imageReference)
+            let stagedImageLayout = try BundledImage.stagedLayoutURL(source: imageLayoutURL, name: "app-image")
+            let appImage = try await loadOrGet(store, layout: stagedImageLayout, reference: BundledImage.imageReference)
             rootfs = try await EXT4Unpacker(blockSizeInBytes: 8 * 1024 * 1024 * 1024)
                 .unpack(appImage, for: .current, at: rootfsURL)
 
             // vminit initfs OCI layout -> ext4 init mount (the guest-agent root filesystem).
+            let stagedInitfsLayout = try BundledImage.stagedLayoutURL(source: initfsLayoutURL, name: "vminit-initfs")
             let initImageRef = "vminit:latest"
-            let initImage = InitImage(image: try await loadOrGet(store, layout: initfsLayoutURL, reference: initImageRef))
+            let initImage = InitImage(image: try await loadOrGet(store, layout: stagedInitfsLayout, reference: initImageRef))
             initfs = try await initImage.initBlock(at: initfsURL, for: .linuxArm)
         } catch {
             // Unpacking may have created partial ext4 files before failing; don't leak them.
@@ -94,8 +105,12 @@ public struct ContainerizationControl: LocalContainerControl {
             )
 
             container = try LinuxContainer(siteID, rootfs: rootfs, vmm: vmm) { config in
-                // Keep the init process alive so the VM stays up while we exec into it.
-                config.process.arguments = ["/bin/sh"]
+                // Keep the init process alive so the VM stays up while we exec into it. A bare
+                // `/bin/sh` starts an *interactive* shell — with no controlling TTY and closed
+                // stdin it reads EOF and exits almost immediately, racing vmexec's own post-fork
+                // bookkeeping (which then fails with ESRCH/"No such process" against the already-
+                // dead PID, surfacing as "no PID data from sync pipe" on the very first exec).
+                config.process.arguments = ["/bin/sh", "-c", "while true; do sleep 3600; done"]
                 config.process.workingDirectory = "/"
                 config.cpus = 2
                 config.memoryInBytes = 2 * 1024 * 1024 * 1024
