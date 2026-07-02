@@ -31,13 +31,20 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          # Track the vendored runtime (scripts/vendor-node.sh) so CI tests on the
+          # same Node major the app ships.
+          node-version-file: scripts/node-version.txt
           cache: npm
           cache-dependency-path: JS/edit-overlay/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      # Unrelated to the overlay, but this is the cheap ubuntu lint lane: verify every
+      # intra-book link/asset in the Apple Help Book resolves (plain bash+grep, no deps).
+      - name: Check Help Book links
+        working-directory: ${{ github.workspace }}
+        run: scripts/check-help-links.sh
 
   build-test:
     runs-on: macos-15
@@ -50,19 +57,25 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      # The end-to-end test in AnglesiteBridgeTests spawns the real plugin's MCP server, so
-      # CI needs the sibling repo present and `npm ci`-installed. Without these the test cleanly
-      # `XCTSkip`s; with them, the full overlay → patcher → file-on-disk round-trip is exercised.
+      # The end-to-end tests spawn the real plugin's MCP server, so CI needs the sibling repo
+      # present and `npm ci`-installed. Without these, the Swift Testing suites gated with
+      # `.enabled(if:)` traits skip cleanly (ANGLESITE_PLUGIN_PATH absent); with them, the full
+      # overlay → patcher → file-on-disk round-trip is exercised.
       - name: Checkout sibling Anglesite plugin
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Anglesite/anglesite
+          # Pinned to the plugin release the app currently bundles/exercises (apply_edit
+          # dry_run/edit-style, typed create_content) — bump when the app adopts a new plugin release.
+          ref: v1.2.0
           path: anglesite-plugin
 
       - name: Set up Node (for the bundled plugin's MCP server)
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          # Track the vendored runtime (scripts/vendor-node.sh) so the e2e tests spawn
+          # the plugin's MCP server on the same Node the app embeds.
+          node-version-file: scripts/node-version.txt
 
       - name: Install plugin dependencies
         working-directory: anglesite-plugin
@@ -184,6 +197,10 @@ jobs:
     # app launch (sidestepping the LaunchServices block on running a macOS-27 .app on an older host),
     # no vendored Node, no sibling plugin, and no signing — the library target pulls none of those.
     env:
+      # Override the workflow-level skip: CLI xcodebuild (unlike GUI Xcode) passes this env into
+      # Package.swift manifest evaluation, which would drop the AnglesiteContainer product while
+      # the xcodegen-generated project still declares a dependency on it — failing at project load.
+      ANGLESITE_SKIP_CONTAINER: '0'
       # Keep in sync with the xcodeproj-sync lane above (and MIN_XCODEGEN in check-xcodeproj-sync.sh).
       XCODEGEN_VERSION: 2.45.4
       XCODEGEN_SHA256: 090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef
