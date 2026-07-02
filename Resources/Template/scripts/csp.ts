@@ -2,7 +2,7 @@
 /**
  * Build-time CSP generator. Reads SCRIPT_ALLOW from .site-config and writes a
  * complete public/_headers file. Integration domains are applied broadly to the
- * four directives embeds need (script/frame/connect/img). See
+ * five directives embeds/forms need (script/frame/connect/img/form-action). See
  * docs/superpowers/specs/2026-06-22-csp-headers-enforcement-design.md.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { readConfigFromString } from "./config";
 
 /** Directives each configured integration domain is added to. */
-const EMBED_DIRECTIVES = ["script-src", "frame-src", "connect-src", "img-src"];
+const EMBED_DIRECTIVES = ["script-src", "frame-src", "connect-src", "img-src", "form-action"];
 
 /** Baseline directive values (secure-by-default). */
 const BASE: Record<string, string[]> = {

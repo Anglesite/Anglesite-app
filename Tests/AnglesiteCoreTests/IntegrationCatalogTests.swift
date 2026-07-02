@@ -3,8 +3,8 @@ import Testing
 @testable import AnglesiteCore
 
 @Suite struct IntegrationCatalogTests {
-    @Test func hasAllThreeIntegrations() {
-        #expect(Set(IntegrationCatalog.all.map(\.id)) == Set([.booking, .donations, .giscus]))
+    @Test func hasAllIntegrations() {
+        #expect(Set(IntegrationCatalog.all.map(\.id)) == Set([.booking, .contact, .donations, .giscus]))
     }
 
     @Test(arguments: IntegrationCatalog.all)
@@ -72,6 +72,32 @@ import Testing
     @Test func bookingWritesEventSlugAndButtonText() {
         let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .booking))
         #expect(keys.isSuperset(of: ["BOOKING_PROVIDER", "BOOKING_USERNAME", "BOOKING_STYLE", "BOOKING_EVENT_SLUG", "BOOKING_BUTTON_TEXT"]))
+    }
+
+    @Test func contactHasProviderGatedFields() {
+        let contact = IntegrationCatalog.descriptor(for: .contact)
+        let formEndpoint = contact.fields.first { $0.key == "formEndpoint" }
+        #expect(formEndpoint?.visibleWhen == .providerIs("formspree"))
+        let email = contact.fields.first { $0.key == "email" }
+        #expect(email?.visibleWhen == .providerIs("mailto"))
+    }
+
+    /// A deployed Formspree contact form needs its endpoint domain in the browser's own
+    /// `form-action` CSP directive, or the submission is blocked — see #469 review.
+    @Test func contactFormspreeProviderDeclaresCSPDomainAndDescriptorAddsIt() {
+        let contact = IntegrationCatalog.descriptor(for: .contact)
+        let formspree = contact.providers.first { $0.id == "formspree" }
+        #expect(formspree?.cspDomains == ["formspree.io"])
+        let hasAddCSP = contact.operations.contains {
+            if case .addCSPDomains(let fromProvider, _, _) = $0 { return fromProvider }
+            return false
+        }
+        #expect(hasAddCSP)
+    }
+
+    @Test func contactWritesProviderEndpointEmailAndButtonText() {
+        let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .contact))
+        #expect(keys.isSuperset(of: ["CONTACT_PROVIDER", "CONTACT_FORM_ENDPOINT", "CONTACT_EMAIL", "CONTACT_BUTTON_TEXT"]))
     }
 
     @Test func giscusWritesAllIds() {

@@ -36,13 +36,15 @@ import Foundation
         let root = templateRoot()
         // staged (copied on-demand):
         for p in ["integrations/components/BookingWidget.astro", "integrations/components/DonationButton.astro",
-                  "integrations/components/Comments.astro", "integrations/pages/book.astro", "integrations/pages/donate.astro"] {
+                  "integrations/components/Comments.astro", "integrations/components/ContactForm.astro",
+                  "integrations/pages/book.astro", "integrations/pages/donate.astro", "integrations/pages/contact.astro"] {
             #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "missing staged \(p)")
         }
         // NOT base-scaffolded: every staged asset must be absent from src/ (covers all five —
         // both components previously omitted, DonationButton and Comments, are now checked).
         for p in ["src/components/BookingWidget.astro", "src/components/DonationButton.astro",
-                  "src/components/Comments.astro", "src/pages/book.astro", "src/pages/donate.astro"] {
+                  "src/components/Comments.astro", "src/components/ContactForm.astro",
+                  "src/pages/book.astro", "src/pages/donate.astro", "src/pages/contact.astro"] {
             #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "should be staged, not in src: \(p)")
         }
     }
@@ -66,7 +68,7 @@ import Foundation
 
     @Test func onDemandPagesUseReadConfigNotImportMetaEnv() throws {
         let root = templateRoot()
-        for p in ["integrations/pages/book.astro", "integrations/pages/donate.astro"] {
+        for p in ["integrations/pages/book.astro", "integrations/pages/donate.astro", "integrations/pages/contact.astro"] {
             let s = try String(contentsOf: root.appendingPathComponent(p), encoding: .utf8)
             #expect(s.contains("readConfig("), "\(p) should use readConfig")
             #expect(!s.contains("import.meta.env"), "\(p) must not use import.meta.env")
@@ -139,5 +141,14 @@ import Foundation
         let donateUnknown = donateReferenced.subtracting(donateWritten)
         #expect(donateUnknown.isEmpty,
             "donate.astro references config keys not written by donations descriptor: \(donateUnknown.sorted())")
+
+        // Contact: integrations/pages/contact.astro
+        let contactURL = root.appendingPathComponent("integrations/pages/contact.astro")
+        let contactSource = try String(contentsOf: contactURL, encoding: .utf8)
+        let contactReferenced = readConfigKeysReferenced(in: contactSource)
+        let contactWritten = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .contact))
+        let contactUnknown = contactReferenced.subtracting(contactWritten)
+        #expect(contactUnknown.isEmpty,
+            "contact.astro references config keys not written by contact descriptor: \(contactUnknown.sorted())")
     }
 }

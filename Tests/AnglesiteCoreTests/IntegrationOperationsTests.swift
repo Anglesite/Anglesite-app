@@ -30,7 +30,7 @@ import Foundation
 
     @Test func descriptorsExposesCatalog() {
         let ops = IntegrationOperations(sourceDirectory: { _ in nil }, templateDirectory: { nil })
-        #expect(ops.descriptors().count == 3)
+        #expect(ops.descriptors().count == IntegrationCatalog.all.count)
     }
 
     @Test func planThenApplySucceedsForGiscus() async {
@@ -100,5 +100,48 @@ import Foundation
         #expect(terminal == .done(integrationID: "booking"))
         #expect(FileManager.default.fileExists(atPath: src.appendingPathComponent("src/pages/book.astro").path))
         #expect(FileManager.default.fileExists(atPath: src.appendingPathComponent("src/components/BookingWidget.astro").path))
+    }
+
+    func makeContactTemplate() -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tmpl-contact-\(UUID().uuidString)")
+        for p in ["integrations/components/ContactForm.astro", "integrations/pages/contact.astro"] {
+            let url = root.appendingPathComponent(p)
+            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try! "F".write(to: url, atomically: true, encoding: .utf8)
+        }
+        return root
+    }
+
+    @Test func planThenApplySucceedsForContactFormspree() async {
+        let src = makeBookingSource()
+        let tmpl = makeContactTemplate()
+        let ops = IntegrationOperations(sourceDirectory: { _ in src }, templateDirectory: { tmpl })
+        let answers: Answers = ["provider": "formspree", "formEndpoint": "https://formspree.io/f/xyz"]
+        guard case .success(let plan) = await ops.plan(integrationID: .contact, answers: answers, siteID: "s1") else {
+            Issue.record("plan failed"); return
+        }
+        let terminal = await ops.apply(plan, siteID: "s1")
+        #expect(terminal == .done(integrationID: "contact"))
+        #expect(FileManager.default.fileExists(atPath: src.appendingPathComponent("src/pages/contact.astro").path))
+        #expect(FileManager.default.fileExists(atPath: src.appendingPathComponent("src/components/ContactForm.astro").path))
+    }
+
+    @Test func planThenApplySucceedsForContactMailto() async {
+        let src = makeBookingSource()
+        let tmpl = makeContactTemplate()
+        let ops = IntegrationOperations(sourceDirectory: { _ in src }, templateDirectory: { tmpl })
+        let answers: Answers = ["provider": "mailto", "email": "hello@example.com"]
+        guard case .success(let plan) = await ops.plan(integrationID: .contact, answers: answers, siteID: "s1") else {
+            Issue.record("plan failed"); return
+        }
+        let terminal = await ops.apply(plan, siteID: "s1")
+        #expect(terminal == .done(integrationID: "contact"))
+        #expect(FileManager.default.fileExists(atPath: src.appendingPathComponent("src/pages/contact.astro").path))
+    }
+
+    @Test func contactMissingProviderFails() async {
+        let ops = IntegrationOperations(sourceDirectory: { _ in self.makeBookingSource() }, templateDirectory: { self.makeContactTemplate() })
+        let r = await ops.plan(integrationID: .contact, answers: [:], siteID: "s1")
+        #expect(r == .failure(.providerRequired))
     }
 }

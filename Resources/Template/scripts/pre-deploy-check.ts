@@ -99,6 +99,29 @@ export function checkHeaders(headersContent: string | null, configContent: strin
 }
 
 /**
+ * Scan built content for likely PII (email, phone, SSN). An email that appears only as a
+ * `mailto:` link target is published intent — e.g. a contact-form fallback the site owner
+ * deliberately configured — not accidental exposure, so it's stripped before the email check.
+ * Phone/SSN patterns are unaffected. One issue per pattern per file, matching the prior inline
+ * scan's behavior.
+ */
+export function checkPII(content: string, file: string): Issue[] {
+  const issues: Issue[] = [];
+  const withoutMailtoLinks = content.replace(
+    /mailto:[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
+    "",
+  );
+  for (const { name, pattern } of PII_PATTERNS) {
+    pattern.lastIndex = 0;
+    const haystack = name === "email" ? withoutMailtoLinks : content;
+    if (pattern.test(haystack)) {
+      issues.push({ severity: "error", message: `Possible ${name} found`, file });
+    }
+  }
+  return issues;
+}
+
+/**
  * Insecure (http://) subresource references in built HTML/CSS. Targets resource
  * attributes (`src`) and CSS `url(...)` only — NOT `href` — so anchor links and
  * `xmlns="http://..."` declarations do not false-positive. Advisory: slice A's
@@ -214,12 +237,7 @@ async function scan(): Promise<Issue[]> {
     const rel = relative(process.cwd(), file);
     relPaths.push(rel);
 
-    for (const { name, pattern } of PII_PATTERNS) {
-      pattern.lastIndex = 0;
-      if (pattern.test(content)) {
-        issues.push({ severity: "error", message: `Possible ${name} found`, file: rel });
-      }
-    }
+    issues.push(...checkPII(content, rel));
 
     for (const { name, pattern } of SECRET_PATTERNS) {
       pattern.lastIndex = 0;

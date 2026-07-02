@@ -24,18 +24,26 @@ test("buildCSP: baseline when no integrations configured", () => {
   );
 });
 
-test("buildCSP: a configured domain lands in script/frame/connect/img only", () => {
+test("buildCSP: a configured domain lands in script/frame/connect/img/form-action only", () => {
   const csp = buildCSP("SCRIPT_ALLOW=giscus.app");
-  // present in the four embed directives
+  // present in the five embed directives
   assert.match(csp, /script-src 'self' static\.cloudflareinsights\.com giscus\.app;/);
   assert.match(csp, /img-src 'self' data: giscus\.app;/);
   assert.match(csp, /connect-src 'self' cloudflareinsights\.com giscus\.app;/);
   assert.match(csp, /frame-src 'self' giscus\.app;/);
+  assert.match(csp, /form-action 'self' giscus\.app/);
   // absent from non-embed directives
   assert.match(csp, /style-src 'self' 'unsafe-inline';/);
   assert.ok(!/style-src[^;]*giscus\.app/.test(csp));
   assert.match(csp, /object-src 'none';/);
   assert.ok(!/object-src[^;]*giscus\.app/.test(csp));
+});
+
+// A contact form POSTing to a third-party provider (e.g. Formspree) needs its own domain
+// in form-action, or the browser's own CSP blocks the submission — see #469 review.
+test("buildCSP: a configured domain allows the browser to submit forms to it", () => {
+  const csp = buildCSP("SCRIPT_ALLOW=formspree.io");
+  assert.match(csp, /form-action 'self' formspree\.io/);
 });
 
 test("buildHeaders: includes security headers, CSP, and astro caching", () => {
