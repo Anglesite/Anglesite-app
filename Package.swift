@@ -100,10 +100,16 @@ if includeContainer {
                 .product(name: "ContainerizationExtras", package: "containerization")
             ],
             path: "Sources/AnglesiteContainer",
+            // `swift-tools-version: 5.10` silently drops `.copy()` resources whose path
+            // escapes the target directory (no warning, no error — the resource bundle
+            // just never gets the content). `Resources/container-{image,kernel,initfs}/`
+            // are symlinked in-target here so the copy stays within
+            // Sources/AnglesiteContainer while the vendored artifacts still live at the
+            // top-level Resources/ alongside the rest of the app's bundled resources.
             resources: [
-                .copy("../../Resources/container-image"),
-                .copy("../../Resources/container-kernel"),
-                .copy("../../Resources/container-initfs")
+                .copy("Resources/container-image"),
+                .copy("Resources/container-kernel"),
+                .copy("Resources/container-initfs")
             ],
             swiftSettings: strictConcurrency
         )
