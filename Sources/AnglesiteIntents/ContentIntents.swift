@@ -9,7 +9,7 @@ import Foundation
 ///   queries use).
 /// - **Preview** (`PreviewSiteIntent`) routes through `WindowRouter` like `OpenSiteIntent`.
 /// - **Creates** (`AddPageIntent`, `AddPostIntent`) go through `ContentOperationsService`
-///   (→ `HeadlessRuntimePool` → plugin `create_page`/`create_post`), bypassed by
+///   (→ native in-process `NativeContentOperations` scaffolding, Bucket 1/Slice 2), bypassed by
 ///   `ContentOperationsOverride.scoped`.
 ///
 /// `EditContentIntent` is intentionally absent in Phase A: turning a natural-language edit

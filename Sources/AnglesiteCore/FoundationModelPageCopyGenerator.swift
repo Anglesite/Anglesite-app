@@ -31,10 +31,19 @@ public struct FoundationModelPageCopyGenerator: PageCopyGenerating {
                 context: context,
                 resultType: GeneratedPageCopySuggestion.self
             )
-            return PageCopySuggestion(description: generated.description)
+            guard let description = Self.normalizedDescription(generated.description) else { return nil }
+            return PageCopySuggestion(description: description)
         } catch {
             return nil
         }
+    }
+
+    /// The model's `@Guide` is a hint, not an enforced constraint — it can legally return a blank
+    /// string. Collapse that to `nil` so a degenerate model output can't beat "no suggestion" and
+    /// silently override `ContentScaffold`'s title-derived default with an empty description.
+    static func normalizedDescription(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     static func prompt(for title: String) -> String {

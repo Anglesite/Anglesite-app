@@ -79,6 +79,21 @@ final class AppSettingsTests {
         #expect(settings.autoGenerateAltText)
     }
 
+    // MARK: Auto page-copy (Slice 2 — FM short-copy for create page/post)
+
+    @Test("autoGeneratePageCopy defaults to true (on)") func autoPageCopyDefaultsToTrue() {
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.autoGeneratePageCopy)
+    }
+
+    @Test("autoGeneratePageCopy round trip") func autoPageCopyRoundTrip() {
+        let settings = AppSettings(defaults: defaults)
+        settings.autoGeneratePageCopy = false
+        #expect(!settings.autoGeneratePageCopy)
+        settings.autoGeneratePageCopy = true
+        #expect(settings.autoGeneratePageCopy)
+    }
+
     @Test("announcesLiveUpdates defaults to true (on)") func announcesLiveUpdatesDefaultsToTrue() {
         let settings = AppSettings(defaults: defaults)
         #expect(settings.announcesLiveUpdates)

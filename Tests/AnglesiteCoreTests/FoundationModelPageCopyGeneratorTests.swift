@@ -11,6 +11,15 @@ import Testing
         #expect(prompt.lowercased().contains("meta description"))
     }
 
+    @Test func normalizedDescriptionTrimsWhitespace() {
+        #expect(FoundationModelPageCopyGenerator.normalizedDescription(" Meet the team. ") == "Meet the team.")
+    }
+
+    @Test func normalizedDescriptionCollapsesBlankToNil() {
+        #expect(FoundationModelPageCopyGenerator.normalizedDescription("") == nil)
+        #expect(FoundationModelPageCopyGenerator.normalizedDescription("   ") == nil)
+    }
+
     @Test func emptyTitleReturnsNilWithoutModel() async {
         // Whitespace-only title must short-circuit to nil and never invoke the on-device model,
         // so this is deterministic on machines with or without Apple Intelligence.

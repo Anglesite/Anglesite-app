@@ -19,6 +19,7 @@ public final class AppSettings: @unchecked Sendable {
         public static let lastOpenedSiteID   = "anglesite.lastOpenedSiteID"
         public static let sitesRootBookmark  = "anglesite.sitesRootBookmark"
         public static let autoGenerateAltText = "anglesite.autoGenerateAltText"
+        public static let autoGeneratePageCopy = "anglesite.autoGeneratePageCopy"
         public static let announcesLiveUpdates = "anglesite.announcesLiveUpdates"
         public static let didCleanLegacyChatBackendDefaults = "anglesite.didCleanLegacyChatBackendDefaults"
     }
@@ -118,6 +119,18 @@ public final class AppSettings: @unchecked Sendable {
             return defaults.bool(forKey: Key.autoGenerateAltText)
         }
         set { defaults.set(newValue, forKey: Key.autoGenerateAltText) }
+    }
+
+    /// When on (the default), creating a page/post auto-suggests a short SEO meta description
+    /// with the on-device model (Slice 2 of the Claude Code removal roadmap). No-ops gracefully
+    /// when Apple Intelligence is unavailable — the scaffold falls back to a title-derived
+    /// default. Stored inverted-from-absent so an untouched install defaults to `true`.
+    public var autoGeneratePageCopy: Bool {
+        get {
+            guard defaults.object(forKey: Key.autoGeneratePageCopy) != nil else { return true }
+            return defaults.bool(forKey: Key.autoGeneratePageCopy)
+        }
+        set { defaults.set(newValue, forKey: Key.autoGeneratePageCopy) }
     }
 
     /// Whether the app posts VoiceOver live-region announcements for streaming chat and deploy

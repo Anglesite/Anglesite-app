@@ -19,6 +19,7 @@ private struct AdvancedSettingsView: View {
     @AppStorage(AppSettings.Key.sitesRootOverride) private var sitesRootOverride: String = ""
     @AppStorage(AppSettings.Key.debugPaneEnabled) private var debugPaneEnabled: Bool = false
     @AppStorage(AppSettings.Key.autoGenerateAltText) private var autoGenerateAltText: Bool = true
+    @AppStorage(AppSettings.Key.autoGeneratePageCopy) private var autoGeneratePageCopy: Bool = true
     @AppStorage(AppSettings.Key.announcesLiveUpdates) private var announcesLiveUpdates: Bool = true
 
     var body: some View {
@@ -26,6 +27,10 @@ private struct AdvancedSettingsView: View {
             Section("Editing") {
                 Toggle("Auto-generate alt text for dropped images", isOn: $autoGenerateAltText)
                 Text("When you drop an image onto the preview, Anglesite uses Apple's on-device vision model to write descriptive alt text and applies it automatically. Runs locally; requires Apple Intelligence to be enabled. Purely decorative images get empty alt text and role=\"presentation\".")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("Auto-suggest descriptions for new pages and posts", isOn: $autoGeneratePageCopy)
+                Text("When you create a page or post, Anglesite uses Apple's on-device model to suggest a short SEO description. Runs locally; requires Apple Intelligence to be enabled. Falls back to a title-derived description when off or unavailable.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

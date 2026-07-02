@@ -25,3 +25,21 @@ public struct NoopPageCopyGenerator: PageCopyGenerating {
         nil
     }
 }
+
+/// Gates a base generator behind a user setting (`AppSettings.autoGeneratePageCopy`), mirroring
+/// how `AltTextGenerator` is gated behind `autoGenerateAltText`. Skips the base generator entirely
+/// when disabled, rather than calling it and discarding the result.
+public struct SettingsGatedPageCopyGenerator: PageCopyGenerating {
+    private let isEnabled: @Sendable () -> Bool
+    private let base: any PageCopyGenerating
+
+    public init(isEnabled: @escaping @Sendable () -> Bool, base: any PageCopyGenerating) {
+        self.isEnabled = isEnabled
+        self.base = base
+    }
+
+    public func suggestDescription(title: String, siteID: String, siteDirectory: URL) async -> PageCopySuggestion? {
+        guard isEnabled() else { return nil }
+        return await base.suggestDescription(title: title, siteID: siteID, siteDirectory: siteDirectory)
+    }
+}
