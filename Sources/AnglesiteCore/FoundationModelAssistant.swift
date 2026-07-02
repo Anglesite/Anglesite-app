@@ -222,11 +222,15 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         activeDrains += 1
         // Unstructured `Task` in an actor inherits the actor's isolation (Swift 6), so these
         // `activeDrains` mutations are actor-safe — keep it `Task`, not `Task.detached`.
+        // Route/content ride along on the prompt itself, not the session's fixed instructions
+        // (#457) — so each turn reflects the page the user is *currently* viewing, not whatever it
+        // was when the cached session was first created.
+        let turnPrompt = Self.turnPrompt(for: prompt, context: context)
         Task {
             defer { activeDrains -= 1 }
             do {
                 var previous = ""
-                for try await snapshot in session.streamResponse(to: prompt) {
+                for try await snapshot in session.streamResponse(to: turnPrompt) {
                     // `streamResponse` yields cumulative snapshots; emit only the newly-appended tail.
                     let full = snapshot.content
                     if full.hasPrefix(previous) {
@@ -333,7 +337,14 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         @unknown default:
             throw AssistantError.unavailable("The on-device model is unavailable on this device.")
         }
-        let instructions = Self.instructions(for: context)
+        // Conversational sessions (`includeSpotlight: true`, i.e. built via `conversationSession`)
+        // keep minimal, stable instructions — page route/content is folded into each turn's prompt
+        // by `turnPrompt(for:context:)` instead, so a cached session doesn't bake in whatever page
+        // the user was viewing when the conversation started and never update it (#457). One-shot
+        // `generate`/`generateStructured` build a fresh session per call, so there's no staleness
+        // risk there — they keep the fuller instructions (`FoundationModelEditInterpreter` and
+        // `AltTextGenerator` both rely on `currentPageRoute` reaching the model this way).
+        let instructions = Self.instructions(for: context, includePageContext: !includeSpotlight)
         let tools = conversationTools(for: context, includeSpotlight: includeSpotlight)
         // `tools` is empty only on the one-shot paths (`includeSpotlight: false`) with no
         // editBridge/contentGraph; the converse path always appends Spotlight, so its session is
@@ -400,11 +411,48 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         session = LanguageModelSession(tools: tools, transcript: Transcript(entries: retained))
     }
 
-    /// Folds the situational ``AssistantContext`` into session instructions.
-    private static func instructions(for context: AssistantContext) -> String {
+    /// Character cap on how much of ``AssistantContext/currentPageContent`` is folded into a
+    /// prompt (#457). No on-device tokenizer is available to measure the real 4,096-token budget,
+    /// so this is a conservative character-based proxy — chosen so a caller passing e.g. raw page
+    /// HTML can't single-handedly crowd out the user's own prompt and the rest of the
+    /// conversation. Applies to both ``instructions(for:includePageContext:)`` (one-shot paths) and
+    /// ``turnPrompt(for:context:)`` (the conversational path).
+    static let maxPageContentCharacters = 2_000
+
+    /// Truncates `content` to ``maxPageContentCharacters``, operating on whatever text the caller
+    /// passed — extracted text is expected, not raw HTML (no HTML-extraction utility exists yet in
+    /// `AnglesiteCore`; that's separate, larger work, out of scope here).
+    static func truncatedPageContent(_ content: String) -> String {
+        guard content.count > maxPageContentCharacters else { return content }
+        return String(content.prefix(maxPageContentCharacters)) + "…"
+    }
+
+    /// Folds the situational ``AssistantContext`` into session instructions. `includePageContext`
+    /// is false for the conversational session, whose instructions must stay stable across turns —
+    /// see the call site in ``makeSession(context:includeSpotlight:)``.
+    static func instructions(for context: AssistantContext, includePageContext: Bool) -> String {
         var lines = ["You are an assistant helping edit and improve a website."]
+        if includePageContext {
+            if let route = context.currentPageRoute { lines.append("The user is viewing the page at \(route).") }
+            if let content = context.currentPageContent {
+                lines.append("Current page content:\n\(truncatedPageContent(content))")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Composes a conversational turn's actual prompt: the current page's route/content (truncated,
+    /// #457) prepended to the user's message. Used only by ``converse(prompt:context:)`` — the
+    /// session's instructions stay minimal and stable (see ``instructions(for:includePageContext:)``),
+    /// so per-turn context reaches the model without rebuilding the session or leaving it stale when
+    /// the user navigates mid-conversation.
+    static func turnPrompt(for prompt: String, context: AssistantContext) -> String {
+        var lines: [String] = []
         if let route = context.currentPageRoute { lines.append("The user is viewing the page at \(route).") }
-        if let content = context.currentPageContent { lines.append("Current page content:\n\(content)") }
+        if let content = context.currentPageContent {
+            lines.append("Current page content:\n\(truncatedPageContent(content))")
+        }
+        lines.append(prompt)
         return lines.joined(separator: "\n")
     }
 }
