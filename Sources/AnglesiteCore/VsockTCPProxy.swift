@@ -151,7 +151,7 @@ final class ProxyConnection: @unchecked Sendable {
                 return
             }
 
-            if !Self.writeAll(Data(bytes: buffer, count: n), to: toFD) {
+            if !Self.writeAll(Data(buffer[0..<n]), to: toFD) {
                 self.close()
             }
         }
