@@ -144,7 +144,7 @@ final class ProxyConnection: @unchecked Sendable {
             if alreadyClosed { return }
 
             var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-            let n = buffer.withUnsafeMutableBytes { Foundation.read(fromFD, $0.baseAddress, $0.count) }
+            let n = buffer.withUnsafeMutableBytes { read(fromFD, $0.baseAddress, $0.count) }
             if n <= 0 {
                 if n < 0 && errno == EINTR { return }  // transient; retry on the next readability callback
                 self.close()
@@ -167,7 +167,7 @@ final class ProxyConnection: @unchecked Sendable {
             while offset < total {
                 let n = rawBuffer.baseAddress!.advanced(by: offset)
                     .withMemoryRebound(to: UInt8.self, capacity: total - offset) { ptr in
-                        Foundation.write(fd, ptr, total - offset)
+                        write(fd, ptr, total - offset)
                     }
                 if n > 0 {
                     offset += n
