@@ -56,6 +56,16 @@ struct FoundationModelAssistantTests {
         #expect(FoundationModelAssistant().capabilities.providerName == "On-Device")
     }
 
+    @Test("maxRetainedTurns is clamped to at least 1, not left non-positive (#456)")
+    func maxRetainedTurnsIsClamped() {
+        // trimSessionIfNeeded's cutoff indexing (`promptIndices.count - maxRetainedTurns`) assumes
+        // at least 1; `<= 0` would index at/past the end of `promptIndices` and crash once a turn
+        // lands. `init` clamps rather than crashing.
+        #expect(FoundationModelAssistant(maxRetainedTurns: 0).maxRetainedTurnsForTesting == 1)
+        #expect(FoundationModelAssistant(maxRetainedTurns: -5).maxRetainedTurnsForTesting == 1)
+        #expect(FoundationModelAssistant(maxRetainedTurns: 3).maxRetainedTurnsForTesting == 3)
+    }
+
     @Test("PCC-tier assistant constructs and remains usable (falls back to on-device)")
     func pccConstructsAndIsUsable() {
         // `capabilities` is a nonisolated var, so it reads synchronously off the actor.
@@ -280,6 +290,125 @@ struct FoundationModelAssistantTests {
 
         // Turn 2: recall is only possible if the session (and its history) persisted across turns —
         // the bug this guards against created a fresh, memoryless session per turn.
+        var reply = ""
+        for await event in try await assistant.converse(
+            prompt: "What is the code word I gave you? Reply with only the word.",
+            context: context
+        ) {
+            if case .textDelta(let text) = event { reply += text }
+        }
+        #expect(reply.localizedCaseInsensitiveContains("Falkor"))
+    }
+
+    // MARK: Page context budget / placement (#457, pure — no model required)
+
+    @Test("conversational-session instructions never contain page route or content")
+    func conversationalInstructionsOmitPageContext() {
+        let context = AssistantContext(
+            siteID: "site-1",
+            siteDirectory: URL(fileURLWithPath: "/tmp/site"),
+            currentPageRoute: "/about",
+            currentPageContent: "Some page body text."
+        )
+        let instructions = FoundationModelAssistant.instructions(for: context, includePageContext: false)
+        #expect(!instructions.contains("/about"))
+        #expect(!instructions.contains("Some page body text."))
+    }
+
+    @Test("one-shot instructions still carry page route/content (EditInterpreter/AltTextGenerator rely on this)")
+    func oneShotInstructionsIncludePageContext() {
+        let context = AssistantContext(
+            siteID: "site-1",
+            siteDirectory: URL(fileURLWithPath: "/tmp/site"),
+            currentPageRoute: "/about",
+            currentPageContent: "Some page body text."
+        )
+        let instructions = FoundationModelAssistant.instructions(for: context, includePageContext: true)
+        #expect(instructions.contains("/about"))
+        #expect(instructions.contains("Some page body text."))
+    }
+
+    @Test("page content over the character budget is truncated")
+    func pageContentIsTruncated() {
+        let longContent = String(repeating: "x", count: FoundationModelAssistant.maxPageContentCharacters + 500)
+        let truncated = FoundationModelAssistant.truncatedPageContent(longContent)
+        #expect(truncated.count <= FoundationModelAssistant.maxPageContentCharacters + 1)  // +1 for the "…" marker
+        #expect(truncated.hasSuffix("…"))
+    }
+
+    @Test("page content under the character budget passes through unchanged")
+    func shortPageContentIsUnchanged() {
+        let short = "just a short page"
+        #expect(FoundationModelAssistant.truncatedPageContent(short) == short)
+    }
+
+    @Test("turnPrompt composes route + truncated content + the user's prompt, in order")
+    func turnPromptComposesContext() {
+        let context = AssistantContext(
+            siteID: "site-1",
+            siteDirectory: URL(fileURLWithPath: "/tmp/site"),
+            currentPageRoute: "/about",
+            currentPageContent: "Some page body text."
+        )
+        let composed = FoundationModelAssistant.turnPrompt(for: "What does this page say?", context: context)
+        #expect(composed.contains("/about"))
+        #expect(composed.contains("Some page body text."))
+        #expect(composed.hasSuffix("What does this page say?"))
+    }
+
+    @Test("turnPrompt with no page context is just the prompt")
+    func turnPromptWithoutContextIsBare() {
+        let context = makeContext()  // no currentPageRoute/currentPageContent
+        #expect(FoundationModelAssistant.turnPrompt(for: "hello", context: context) == "hello")
+    }
+
+    @Test("converse reflects a navigated page's context on the very next turn, without a session reset (#457)")
+    func converseReflectsUpdatedContextPerTurn() async throws {
+        guard modelAvailable() else { return }
+        let assistant = FoundationModelAssistant()
+
+        // Turn 1: no page context.
+        for await _ in try await assistant.converse(prompt: "Reply with just 'ok'.", context: makeContext()) {}
+
+        // Turn 2: the user "navigated" — a fresh AssistantContext carries new page content, with no
+        // resetSession() call in between. The cached session's *instructions* were fixed at turn 1
+        // (before this page existed), so this only works if the content rides on the turn's prompt.
+        let navigatedContext = AssistantContext(
+            siteID: "site-1",
+            siteDirectory: URL(fileURLWithPath: "/tmp/site"),
+            currentPageContent: "The secret ingredient is saffron."
+        )
+        var reply = ""
+        for await event in try await assistant.converse(
+            prompt: "What is the secret ingredient mentioned in the current page content? Reply with only the word.",
+            context: navigatedContext
+        ) {
+            if case .textDelta(let text) = event { reply += text }
+        }
+        #expect(reply.localizedCaseInsensitiveContains("saffron"))
+    }
+
+    @Test("converse trims the cached session's transcript once it exceeds the retained-turn budget (#456)")
+    func converseTrimsTranscriptBeyondBudget() async throws {
+        guard modelAvailable() else { return }
+        let assistant = FoundationModelAssistant(maxRetainedTurns: 2)
+        let context = makeContext()
+
+        for turn in 1...4 {
+            let prompt = turn == 3
+                ? "Remember this code word: Falkor. Reply with just 'ok'."
+                : "Reply with just 'ok'."
+            for await _ in try await assistant.converse(prompt: prompt, context: context) {}
+        }
+
+        // Four turns landed but the retained-turn budget is 2 — the cached session must have been
+        // rebuilt from a trimmed window rather than growing unbounded.
+        let promptCount = await assistant.promptCountForTesting
+        #expect(promptCount != nil)
+        if let promptCount { #expect(promptCount <= 2) }
+
+        // The trimmed window keeps the *most recent* turns, so the code word planted on turn 3
+        // (within the last 2 turns as of turn 4's completion) must still be recoverable.
         var reply = ""
         for await event in try await assistant.converse(
             prompt: "What is the code word I gave you? Reply with only the word.",
