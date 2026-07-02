@@ -24,6 +24,13 @@ elif [[ $# -gt 0 ]]; then
     exit 2
 fi
 
+# rg is load-bearing: check_pattern runs it inside an `if` condition, where a missing
+# ripgrep reads as "no match" and biases --expect-retired toward a false pass. Fail loudly.
+if ! command -v rg >/dev/null 2>&1; then
+    echo "error: ripgrep (rg) not found on PATH — install it (brew install ripgrep) and re-run." >&2
+    exit 3
+fi
+
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 cd "$REPO_ROOT"

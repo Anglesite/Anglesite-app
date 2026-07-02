@@ -18,13 +18,11 @@ This complements the automated coverage in:
 ## Preconditions
 
 - macOS 27 or newer with Siri, Apple Intelligence, and App Intents enabled for the signed app under test.
-- A current build of both schemes:
-  - `Anglesite` (Developer ID / unsandboxed local dev target)
-  - `AnglesiteMAS` (sandboxed Mac App Store target)
+- A current build of the `Anglesite` scheme (the single sandboxed Mac App Store target).
 - The app has been launched once after install so App Shortcuts and App Entities are registered with the system.
 - Microphone/Siri permissions are granted.
 - The test site is an `.anglesite` package opened through the app, not a bare `Source/` directory.
-- For the MAS pass, the site package has an active security-scoped grant by opening it through Anglesite before invoking Siri.
+- The site package has an active security-scoped grant by opening it through Anglesite before invoking Siri (the target is sandboxed).
 
 Suggested build commands:
 
@@ -32,8 +30,6 @@ Suggested build commands:
 xcodegen generate
 env ANGLESITE_PLUGIN_SRC=/Users/dwk/Developer/github.com/Anglesite/anglesite \
   xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build
-env ANGLESITE_PLUGIN_SRC=/Users/dwk/Developer/github.com/Anglesite/anglesite \
-  xcodebuild -project Anglesite.xcodeproj -scheme AnglesiteMAS -configuration Debug build
 ```
 
 ## Fixture Site
@@ -56,7 +52,7 @@ Optional readiness check: in the site window, open **Site > Siri AI Readiness** 
 
 ## Evidence to Capture
 
-For each target, record:
+For each run, record:
 
 - App scheme and build identifier or commit SHA.
 - Site package path.
@@ -69,15 +65,15 @@ For each target, record:
 
 ## Pass/Fail Table
 
-| Case | DevID | MAS | Notes |
-|---|---|---|---|
-| 1. Diverse preview opens |  |  |  |
-| 2. Heading resolves to `ElementEntity` |  |  |  |
-| 3. Image resolves to `ImageEntity` or image-backed visible entity |  |  |  |
-| 4. Spoken heading edit routes through `EditContentIntent` -> `apply_edit` |  |  |  |
-| 5. Scroll refreshes annotations |  |  |  |
-| 6. Navigation refreshes annotations |  |  |  |
-| 7. Multiple windows stay scoped to the correct site |  |  |  |
+| Case | Result | Notes |
+|---|---|---|
+| 1. Diverse preview opens |  |  |
+| 2. Heading resolves to `ElementEntity` |  |  |
+| 3. Image resolves to `ImageEntity` or image-backed visible entity |  |  |
+| 4. Spoken heading edit routes through `EditContentIntent` -> `apply_edit` |  |  |
+| 5. Scroll refreshes annotations |  |  |
+| 6. Navigation refreshes annotations |  |  |
+| 7. Multiple windows stay scoped to the correct site |  |  |
 
 Use `PASS`, `FAIL`, or `N/A`, and explain any `N/A`.
 
@@ -235,22 +231,19 @@ Expected:
 
 Fail if Siri or the edit router crosses site IDs, uses a stale provider from a closed/background window, or mutates the wrong package.
 
-## MAS-Specific Checks
+## Sandbox-Specific Checks
 
-Run the full table against `AnglesiteMAS`.
+The `Anglesite` scheme is the sandboxed Mac App Store target, so the full table above already exercises the sandboxed build.
 
 Additional expected behavior:
 
 - With the site opened through Anglesite, writes/spawns inherit the package grant and the edit succeeds after confirmation.
 - If testing the missing-grant case separately, write actions must fail closed with a clear access error. They must not silently no-op or write outside the package.
 
-Do not count the MAS pass as complete if only the DevID target was exercised.
-
 ## Closeout Criteria For #150
 
 The issue can be closed when:
 
-- All seven cases pass on `Anglesite`.
-- All seven cases pass on `AnglesiteMAS`, or any target-specific limitation is documented with a follow-up issue.
+- All seven cases pass on `Anglesite`, or any limitation is documented with a follow-up issue.
 - The run record includes the build/commit, site fixture, and notes for any failures or retries.
 - The edit case has evidence that the write went through `EditContentIntent` and `apply_edit` after confirmation.

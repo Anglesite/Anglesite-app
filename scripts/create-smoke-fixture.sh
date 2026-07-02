@@ -146,15 +146,19 @@ cat <<EOF
 
   Then exercise the WRITE-HEAVY loop and watch for sandbox denials
   (log stream --predicate 'eventMessage CONTAINS "deny"' --style compact):
-    1. Open Folder… → pick anglesite-smoke. This Powerbox grant is the per-site
-       security-scoped grant (do NOT pre-inject a bookmark — a foreign process's
-       scoped bookmark won't resolve in the app; cf. spike 6.5). It persists for
-       next launch.
+    1. File ▸ Import Site… → in the open panel choose anglesite-smoke, then in the
+       save panel keep the suggested anglesite-smoke.anglesite name (default
+       location ~/Sites). The app copies the folder into the new package's
+       Source/, so the later write steps land there, not in ~/Sites/anglesite-smoke.
+       The save-panel Powerbox grant is the per-site security-scoped grant on the
+       package (do NOT pre-inject a bookmark — a foreign process's scoped bookmark
+       won't resolve in the app; cf. spike 6.5). It persists for next launch.
     2. Preview should reach .ready — Astro dev writes .astro/ and serves :4321.
        A node child must be parented by the app (ps -o pid,ppid,comm).
-    3. Deploy button → 'npm run build' must write dist/ inside the granted folder,
-       then the pre-deploy scan runs. (A real 'wrangler deploy' needs a Cloudflare
-       token; reaching the wrangler spawn is the in-sandbox signal.)
+    3. Deploy button → 'npm run build' must write dist/ inside the granted
+       package's Source/, then the pre-deploy scan runs. (A real 'wrangler deploy'
+       needs a Cloudflare token; reaching the wrangler spawn is the in-sandbox
+       signal.)
     4. Drag an image onto an <img> in the preview → bytes write to
        public/images/ and sharp runs. THIS is where cs.disable-library-validation
        is exercised: if the optimized variants appear, sharp's native addon loaded

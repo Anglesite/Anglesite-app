@@ -56,6 +56,9 @@ if [[ ! -x "$OVERLAY_DIR/node_modules/.bin/esbuild" ]]; then
     fi
 fi
 
+echo "==> Type-checking JS/edit-overlay"
+"$NPM" run typecheck
+
 echo "==> Building overlay → ${DEST_DIR#"$REPO_ROOT"/}/overlay.js"
 "$NPM" run build
 

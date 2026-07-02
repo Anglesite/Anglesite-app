@@ -1,5 +1,6 @@
-import { defineCollection, z } from "astro:content";
+import { defineCollection } from "astro:content";
 import { glob } from "astro/loaders";
+import { z } from "astro/zod";
 
 // Blog posts live as Markdown in src/content/blog/. The glob loader derives each
 // entry's `id` from its filename (e.g. welcome-to-your-blog.md -> "welcome-to-your-blog"),

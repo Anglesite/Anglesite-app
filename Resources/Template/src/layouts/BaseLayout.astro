@@ -1,4 +1,5 @@
 ---
+import "../styles/global.css";
 import Hcard from "../components/Hcard.astro";
 // anglesite:imports — integration component imports are injected here on setup
 
@@ -18,7 +19,6 @@ const { title, description } = Astro.props;
     <meta name="generator" content={Astro.generator} />
     {description && <meta name="description" content={description} />}
     <title>{title}</title>
-    <link rel="stylesheet" href="/src/styles/global.css" />
     <link rel="alternate" type="application/rss+xml" title="RSS" href="/rss.xml" />
     <link rel="alternate" type="application/atom+xml" title="Atom" href="/atom.xml" />
     <link rel="alternate" type="application/feed+json" title="JSON Feed" href="/feed.json" />

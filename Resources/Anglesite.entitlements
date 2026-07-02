@@ -6,6 +6,11 @@
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- The directly-spawned Node/astro dev server binds localhost; children inherit
+	     the app's sandbox profile, so the listen entitlement must live here
+	     (docs/specs/2026-05-28-node-sandbox-subspike-notes.md, Finding 3). -->
+	<key>com.apple.security.network.server</key>
+	<true/>
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 	<key>com.apple.security.files.bookmarks.app-scope</key>

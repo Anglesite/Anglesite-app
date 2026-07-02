@@ -546,6 +546,12 @@ final class SiteWindowModel {
     /// lifetime. Must run before any subprocess spawn so direct children inherit folder access.
     /// On a stale bookmark, re-mint and persist a fresh one (grant must be active to do so).
     private func acquireGrant(for site: SiteStore.Site, in store: SiteStore) async {
+        // Release any prior grant first (window replay into the same instance): the window now
+        // shows a different site, so keeping the old grant — even on the failure paths below — leaks.
+        if let previous = scopedURL {
+            previous.stopAccessingSecurityScopedResource()
+            scopedURL = nil
+        }
         guard let bookmark = await store.bookmarkData(for: site.id) else {
             await LogCenter.shared.append(
                 source: "grant:\(site.id)", stream: .stderr,
