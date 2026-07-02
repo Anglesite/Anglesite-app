@@ -12,6 +12,7 @@ public struct NativeContentOperations: ContentOperationsService {
     private let siteDirectory: @Sendable (_ siteID: String) async -> URL?
     private let gitCommit: GitCommit
     private let now: @Sendable () -> Date
+    private let copyGenerator: any PageCopyGenerating
     // FileManager is a thread-safe singleton but not Sendable; nonisolated(unsafe) preserves the
     // test-injection seam (the plan's intended seam for write-failure paths) without breaking the
     // struct's Sendable conformance.
@@ -21,11 +22,13 @@ public struct NativeContentOperations: ContentOperationsService {
         siteDirectory: @escaping @Sendable (_ siteID: String) async -> URL?,
         gitCommit: @escaping GitCommit = NativeContentOperations.processGitCommit,
         now: @escaping @Sendable () -> Date = { Date() },
+        copyGenerator: any PageCopyGenerating = NoopPageCopyGenerator(),
         fileManager: FileManager = .default
     ) {
         self.siteDirectory = siteDirectory
         self.gitCommit = gitCommit
         self.now = now
+        self.copyGenerator = copyGenerator
         self.fileManager = fileManager
     }
 
@@ -59,10 +62,12 @@ public struct NativeContentOperations: ContentOperationsService {
         }
 
         onProgress?(.createCallingPlugin)
+        let suggestion = await copyGenerator.suggestDescription(title: title, siteID: siteID, siteDirectory: root)
         let contents = ContentScaffold.renderPage(
             title: title,
             layoutImport: ContentScaffold.layoutImport(normalizedRoute: normalized),
-            template: template)
+            template: template,
+            description: suggestion?.description)
         do { try write(contents, to: abs) }
         catch { return .failed(reason: "\(error)") }
 
@@ -95,7 +100,8 @@ public struct NativeContentOperations: ContentOperationsService {
         }
 
         onProgress?(.createCallingPlugin)
-        let contents = ContentScaffold.renderPost(title: cleanTitle, now: now())
+        let suggestion = await copyGenerator.suggestDescription(title: cleanTitle, siteID: siteID, siteDirectory: root)
+        let contents = ContentScaffold.renderPost(title: cleanTitle, now: now(), description: suggestion?.description ?? "")
         do { try write(contents, to: abs) }
         catch { return .failed(reason: "\(error)") }
 

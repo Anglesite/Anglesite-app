@@ -112,4 +112,12 @@ public struct GeneratedDeployFailureSummary: Equatable, Sendable {
     @Guide(description: "A concrete next step the site owner can take to fix it. Empty string if none is clear.")
     public var suggestedFix: String
 }
+
+/// On-device guided-generation result for a new page/post's short copy. Mapped to the
+/// non-gated `PageCopySuggestion` before it crosses the FoundationModels gate.
+@Generable
+public struct GeneratedPageCopySuggestion: Equatable, Sendable {
+    @Guide(description: "A single concise SEO meta description sentence, under 160 characters, that does not repeat the title verbatim.")
+    public var description: String
+}
 #endif

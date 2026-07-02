@@ -64,9 +64,10 @@ public enum ContentScaffold {
     public static func renderPage(
         title: String,
         layoutImport: String,
-        template: PageTemplate = .standard
+        template: PageTemplate = .standard,
+        description: String? = nil
     ) -> String {
-        let description = "\(title)."
+        let description = description ?? "\(title)."
         let body: String
         switch template.id {
         case PageTemplate.landing.id:
@@ -116,14 +117,14 @@ public enum ContentScaffold {
         """ + "\n"
     }
 
-    public static func renderPost(title: String, now: Date) -> String {
+    public static func renderPost(title: String, now: Date, description: String = "") -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let publishDate = formatter.string(from: now)
         return """
         ---
         title: "\(escapeYAML(title))"
-        description: ""
+        description: "\(escapeYAML(description))"
         publishDate: \(publishDate)
         draft: true
         tags: []
