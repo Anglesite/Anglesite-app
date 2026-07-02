@@ -290,6 +290,37 @@ struct FoundationModelAssistantTests {
         #expect(reply.localizedCaseInsensitiveContains("Falkor"))
     }
 
+    @Test("converse trims the cached session's transcript once it exceeds the retained-turn budget (#456)")
+    func converseTrimsTranscriptBeyondBudget() async throws {
+        guard modelAvailable() else { return }
+        let assistant = FoundationModelAssistant(maxRetainedTurns: 2)
+        let context = makeContext()
+
+        for turn in 1...4 {
+            let prompt = turn == 3
+                ? "Remember this code word: Falkor. Reply with just 'ok'."
+                : "Reply with just 'ok'."
+            for await _ in try await assistant.converse(prompt: prompt, context: context) {}
+        }
+
+        // Four turns landed but the retained-turn budget is 2 — the cached session must have been
+        // rebuilt from a trimmed window rather than growing unbounded.
+        let promptCount = await assistant.promptCountForTesting
+        #expect(promptCount != nil)
+        if let promptCount { #expect(promptCount <= 2) }
+
+        // The trimmed window keeps the *most recent* turns, so the code word planted on turn 3
+        // (within the last 2 turns as of turn 4's completion) must still be recoverable.
+        var reply = ""
+        for await event in try await assistant.converse(
+            prompt: "What is the code word I gave you? Reply with only the word.",
+            context: context
+        ) {
+            if case .textDelta(let text) = event { reply += text }
+        }
+        #expect(reply.localizedCaseInsensitiveContains("Falkor"))
+    }
+
     @Test("cancel mid-stream yields .cancelled and ends the turn")
     func cancelMidStreamYieldsCancelled() async throws {
         guard modelAvailable() else { return }

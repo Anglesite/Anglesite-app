@@ -50,6 +50,14 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// retains conversation history across turns. Created lazily on the first turn and cleared by
     /// ``resetSession()``. The one-shot ``generate(prompt:context:)`` path deliberately bypasses it.
     private var session: LanguageModelSession?
+    /// How many user turns (`Transcript.Entry.prompt` entries) the cached ``session`` retains
+    /// before it's rebuilt from a trimmed window (#456). Apple's session accumulates the full
+    /// prompt/response/tool-call transcript internally with no built-in compaction, and
+    /// `maxContextTokens` (4,096 on-device) is only an advertised capability — nothing enforces it
+    /// against the growing session, so a long-running chat can silently exceed the window. A
+    /// heuristic turn count rather than an exact token budget: FoundationModels exposes no token
+    /// accounting on `Transcript`, so this trades precision for something that's at least bounded.
+    private let maxRetainedTurns: Int
 
     /// The multi-turn ``converse(prompt:context:)`` session attaches Apple's `SpotlightSearchTool`
     /// (budget-fit `.focused(.items)`/`.compact` config) for local RAG over indexed site content,
@@ -63,7 +71,8 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         contentGraph: SiteContentGraph? = nil,
         knowledgeIndex: SiteKnowledgeIndex? = nil,
         semanticRanker: SemanticRanker? = nil,
-        integrationService: (any IntegrationOperationsService)? = nil
+        integrationService: (any IntegrationOperationsService)? = nil,
+        maxRetainedTurns: Int = 12
     ) {
         self.tier = tier
         self.editBridge = editBridge
@@ -71,6 +80,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
         self.integrationService = integrationService
+        self.maxRetainedTurns = maxRetainedTurns
         if tier == .privateCloudCompute {
             // v1 has no separate PCC session; fall back to on-device with a logged warning so the
             // requested tier degrades gracefully rather than erroring (see spec / #155).
@@ -227,6 +237,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
             } catch {
                 relay.complete(.failed(message: error.localizedDescription))
             }
+            trimSessionIfNeeded(current: session, context: context)
         }
 
         // Consumer dropped the stream: stop delivering, but keep draining (we never cancel the model).
@@ -250,6 +261,15 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         activeRelay?.cancel()
         activeRelay = nil
         session = nil
+    }
+
+    /// Test-only: number of `.prompt` entries in the cached session's transcript, or `nil` if no
+    /// session is cached. Exercises ``trimSessionIfNeeded(current:context:)`` (#456) without a
+    /// public surface.
+    var promptCountForTesting: Int? {
+        session?.transcript.reduce(into: 0) { count, entry in
+            if case .prompt = entry { count += 1 }
+        }
     }
 
     /// Display label for `SpotlightSearchTool` in the `.started` event. `SpotlightSearchTool`
@@ -306,6 +326,19 @@ public actor FoundationModelAssistant: ConversationalAssistant {
             throw AssistantError.unavailable("The on-device model is unavailable on this device.")
         }
         let instructions = Self.instructions(for: context)
+        let tools = conversationTools(for: context, includeSpotlight: includeSpotlight)
+        // `tools` is empty only on the one-shot paths (`includeSpotlight: false`) with no
+        // editBridge/contentGraph; the converse path always appends Spotlight, so its session is
+        // never tool-less. The empty branch preserves the prior tool-less one-shot behavior.
+        return tools.isEmpty
+            ? LanguageModelSession(instructions: instructions)
+            : LanguageModelSession(tools: tools, instructions: instructions)
+    }
+
+    /// Builds the tool set for `context`. Shared by ``makeSession(context:includeSpotlight:)`` and
+    /// ``trimSessionIfNeeded(current:context:)`` so a rebuilt (trimmed) conversational session gets
+    /// the same tools a freshly-created one would.
+    private func conversationTools(for context: AssistantContext, includeSpotlight: Bool) -> [any Tool] {
         var tools: [any Tool] = []
         if includeSpotlight {
             // Default GuidanceLevel.complete injects a ~13k-token query manual that exceeds the
@@ -331,12 +364,32 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         if let integrationService {
             tools.append(SetupIntegrationTool(service: integrationService, siteID: context.siteID))
         }
-        // `tools` is empty only on the one-shot paths (`includeSpotlight: false`) with no
-        // editBridge/contentGraph; the converse path always appends Spotlight, so its session is
-        // never tool-less. The empty branch preserves the prior tool-less one-shot behavior.
-        return tools.isEmpty
-            ? LanguageModelSession(instructions: instructions)
-            : LanguageModelSession(tools: tools, instructions: instructions)
+        return tools
+    }
+
+    /// Rebuilds the cached ``session`` from a trimmed suffix of its transcript once it holds more
+    /// than ``maxRetainedTurns`` turns — the only lever available since FoundationModels exposes no
+    /// compaction API (#456). Runs after each turn drains so the *next* turn (not the one that just
+    /// finished) benefits from the smaller transcript. `current === session` guards against
+    /// clobbering a session a newer turn already replaced while this drain was still in flight (see
+    /// `activeDrains` in ``converse(prompt:context:)``).
+    private func trimSessionIfNeeded(current: LanguageModelSession, context: AssistantContext) {
+        guard session === current else { return }
+        let transcript = current.transcript
+        let promptIndices = transcript.indices.filter {
+            if case .prompt = transcript[$0] { return true }
+            return false
+        }
+        guard promptIndices.count > maxRetainedTurns else { return }
+        let cutoff = promptIndices[promptIndices.count - maxRetainedTurns]
+        var retained = Array(transcript[cutoff...])
+        // Keep the leading instructions entry so the trimmed session still carries the route/page
+        // context it was created with.
+        if let first = transcript.first, case .instructions = first {
+            retained.insert(first, at: 0)
+        }
+        let tools = conversationTools(for: context, includeSpotlight: true)
+        session = LanguageModelSession(tools: tools, transcript: Transcript(entries: retained))
     }
 
     /// Folds the situational ``AssistantContext`` into session instructions.
