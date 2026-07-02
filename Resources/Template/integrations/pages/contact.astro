@@ -1,0 +1,14 @@
+---
+import BaseLayout from "../../src/layouts/BaseLayout.astro";
+import ContactForm from "../components/ContactForm.astro";
+import { readConfig, asContactProvider } from "../../scripts/config";
+---
+
+<BaseLayout title="Contact">
+  <ContactForm
+    provider={asContactProvider(readConfig("CONTACT_PROVIDER"))}
+    formEndpoint={readConfig("CONTACT_FORM_ENDPOINT")}
+    email={readConfig("CONTACT_EMAIL")}
+    buttonText={readConfig("CONTACT_BUTTON_TEXT")}
+  />
+</BaseLayout>

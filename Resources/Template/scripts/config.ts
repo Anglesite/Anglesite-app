@@ -46,6 +46,7 @@ export function readConfig(
 
 export type BookingProvider = "cal" | "calendly";
 export type DonationsProvider = "stripe" | "liberapay" | "github-sponsors";
+export type ContactProvider = "formspree" | "mailto";
 
 export function asBookingProvider(
   value: string | undefined,
@@ -59,4 +60,10 @@ export function asDonationsProvider(
   return value === "stripe" || value === "liberapay" || value === "github-sponsors"
     ? value
     : undefined;
+}
+
+export function asContactProvider(
+  value: string | undefined,
+): ContactProvider | undefined {
+  return value === "formspree" || value === "mailto" ? value : undefined;
 }

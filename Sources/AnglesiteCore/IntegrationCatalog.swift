@@ -44,7 +44,7 @@ public extension IntegrationDescriptor {
 }
 
 public enum IntegrationCatalog {
-    public static let all: [IntegrationDescriptor] = [booking, donations, giscus]
+    public static let all: [IntegrationDescriptor] = [booking, contact, donations, giscus]
 
     public static func descriptor(for id: IntegrationID) -> IntegrationDescriptor {
         guard let d = all.first(where: { $0.id == id }) else {
@@ -102,6 +102,37 @@ public enum IntegrationCatalog {
                 ConfigEntry(key: "BOOKING_BUTTON_TEXT", value: "{{buttonText}}"),
             ], when: .always),
             .addCSPDomains(fromProvider: true, extra: [], when: .always),
+        ])
+
+    // MARK: contact
+    static let contact = IntegrationDescriptor(
+        id: .contact,
+        displayName: "Contact Form",
+        summary: "Let visitors reach you with a form (Formspree) or a plain email link.",
+        providers: [
+            Provider(id: "formspree", displayName: "Formspree", cspDomains: []),
+            Provider(id: "mailto", displayName: "Plain email link", cspDomains: []),
+        ],
+        fields: [
+            Field(key: "formEndpoint", label: "Form URL", kind: .url,
+                  help: "Your Formspree form endpoint, e.g. https://formspree.io/f/xxxxxxx.",
+                  visibleWhen: .providerIs("formspree")),
+            Field(key: "email", label: "Your email address", kind: .email,
+                  help: "Messages open in the visitor's email client, addressed to you.",
+                  visibleWhen: .providerIs("mailto")),
+            Field(key: "buttonText", label: "Button text", kind: .text, isOptional: true, defaultValue: "Send Message"),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/ContactForm.astro"),
+                      to: "src/components/ContactForm.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/pages/contact.astro"),
+                      to: "src/pages/contact.astro", when: .always),
+            .writeConfig([
+                ConfigEntry(key: "CONTACT_PROVIDER", value: "{{provider}}"),
+                ConfigEntry(key: "CONTACT_FORM_ENDPOINT", value: "{{formEndpoint}}"),
+                ConfigEntry(key: "CONTACT_EMAIL", value: "{{email}}"),
+                ConfigEntry(key: "CONTACT_BUTTON_TEXT", value: "{{buttonText}}"),
+            ], when: .always),
         ])
 
     // MARK: donations

@@ -1,4 +1,4 @@
-public enum IntegrationID: String, Sendable, CaseIterable { case booking, donations, giscus }
+public enum IntegrationID: String, Sendable, CaseIterable { case booking, contact, donations, giscus }
 
 public struct Template: Sendable, Equatable, ExpressibleByStringLiteral {
     public let raw: String

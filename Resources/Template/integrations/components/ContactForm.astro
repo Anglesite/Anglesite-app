@@ -1,0 +1,29 @@
+---
+interface Props {
+  provider?: "formspree" | "mailto";
+  formEndpoint?: string;
+  email?: string;
+  buttonText?: string;
+}
+const {
+  provider = "formspree",
+  formEndpoint = "",
+  email = "",
+  buttonText = "Send Message",
+} = Astro.props;
+---
+{provider === "mailto" ? (
+  <a href={`mailto:${email}`} class="contact-form contact-form--mailto">
+    {buttonText}
+  </a>
+) : (
+  <form action={formEndpoint} method="POST" class="contact-form contact-form--formspree">
+    <label for="contact-name">Name</label>
+    <input id="contact-name" type="text" name="name" required />
+    <label for="contact-email">Email</label>
+    <input id="contact-email" type="email" name="email" required />
+    <label for="contact-message">Message</label>
+    <textarea id="contact-message" name="message" required></textarea>
+    <button type="submit">{buttonText}</button>
+  </form>
+)}
