@@ -6,6 +6,8 @@
 # with $ANGLESITE_PLUGIN_SRC for CI or alternative checkouts. The script is a
 # best-effort sync: if the source is missing it emits a warning and exits 0 so
 # the Xcode build keeps going; PluginRuntime surfaces the absence at runtime.
+# Exception: a plugin that is FOUND but older than $MIN_PLUGIN_VERSION fails the
+# build loudly — see the minimum-version guard below.
 #
 # rsync is used so node_modules, .git, and other heavy/private dirs are
 # excluded and unchanged files are skipped on incremental builds.
@@ -32,6 +34,27 @@ if [[ ! -f "$SRC/.claude-plugin/plugin.json" ]]; then
     echo "         Skipping plugin bundling." >&2
     exit 0
 fi
+
+# Minimum-version guard: the app requires plugin features introduced in 1.2.0
+# (apply_edit dry_run/edit-style, typed create_content). A MISSING plugin stays
+# best-effort (handled above — PluginRuntime reports it at runtime), but bundling
+# a plugin that IS present yet too old would ship an app whose edit pipeline
+# fails in confusing ways at runtime — fail the build loudly instead.
+MIN_PLUGIN_VERSION="1.2.0"
+PLUGIN_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SRC/.claude-plugin/plugin.json" | head -n 1)
+if [[ -z "$PLUGIN_VERSION" ]]; then
+    echo "error: couldn't read \"version\" from $SRC/.claude-plugin/plugin.json" >&2
+    echo "       The app requires plugin >= $MIN_PLUGIN_VERSION; refusing to bundle an unidentifiable plugin." >&2
+    exit 1
+fi
+# sort -V orders versions numerically (1.2.0 < 1.10.0); the min version must sort first (or equal).
+if [[ "$(printf '%s\n%s\n' "$MIN_PLUGIN_VERSION" "$PLUGIN_VERSION" | sort -V | head -n 1)" != "$MIN_PLUGIN_VERSION" ]]; then
+    echo "error: plugin at $SRC is version $PLUGIN_VERSION, but the app requires >= $MIN_PLUGIN_VERSION." >&2
+    echo "       Update the plugin checkout (git -C \"$SRC\" pull) or point ANGLESITE_PLUGIN_SRC" >&2
+    echo "       at a plugin release >= $MIN_PLUGIN_VERSION." >&2
+    exit 1
+fi
+echo "==> Plugin version $PLUGIN_VERSION (requires >= $MIN_PLUGIN_VERSION) — OK"
 
 mkdir -p "$DEST"
 

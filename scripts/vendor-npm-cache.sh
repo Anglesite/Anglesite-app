@@ -13,8 +13,8 @@
 # (build-plan Phase 1 step 5): the primed cache is ~768MB raw → ~264MB gzipped — over
 # the original 100MB DMG-bloat budget, accepted as the price of offline first-launch
 # (decided 2026-05-29). It is idempotent: it rebuilds only when the bundled plugin
-# commit (Resources/plugin/.bundled-from-commit) changes, so a normal incremental
-# build skips the ~1min install.
+# commit (Resources/plugin/.bundled-from-commit) or a Resources/Template lockfile
+# changes, so a normal incremental build skips the ~1min install.
 #
 # Requires the bundled plugin (run scripts/copy-plugin.sh first) and a working
 # `npm` — uses the vendored Resources/node-runtime/bin/npm if present, else the
@@ -62,9 +62,17 @@ if [[ -z "$plugin_version" ]]; then
 fi
 [[ -n "$plugin_version" ]] || plugin_version=$(date -u +%Y%m%dT%H%M%SZ)
 
+# The cache also primes Resources/Template deps (see the install loop below), so the
+# stamp must key on the template lockfiles too — otherwise a template lockfile bump
+# ships a stale cache until the next plugin bump. Hash of no files is a stable
+# constant, so a template without lockfiles still yields a deterministic stamp.
+template_lock_hash=$(find "$REPO_ROOT/Resources/Template" -name package-lock.json -not -path '*/node_modules/*' \
+    -exec shasum {} + 2>/dev/null | sort | shasum | awk '{print $1}')
+cache_version="$plugin_version-$template_lock_hash"
+
 # Idempotent: nothing to do if already built for this version.
-if [[ -f "$TARBALL" && -f "$VERSION_FILE" && "$(tr -d '[:space:]' < "$VERSION_FILE")" == "$plugin_version" ]]; then
-    echo "==> vendor-npm-cache: cache.tar already current for $plugin_version. Skipping."
+if [[ -f "$TARBALL" && -f "$VERSION_FILE" && "$(tr -d '[:space:]' < "$VERSION_FILE")" == "$cache_version" ]]; then
+    echo "==> vendor-npm-cache: cache.tar already current for $cache_version. Skipping."
     exit 0
 fi
 
@@ -110,9 +118,9 @@ done
 mkdir -p "$DEST_DIR"
 echo "==> Writing $TARBALL"
 tar -czf "$TARBALL" -C "$CACHE" .
-echo "$plugin_version" > "$VERSION_FILE"
+echo "$cache_version" > "$VERSION_FILE"
 
 size=$(du -sh "$TARBALL" 2>/dev/null | awk '{print $1}')
 echo
-echo "Primed npm cache: $TARBALL (${size:-?}, version $plugin_version)"
+echo "Primed npm cache: $TARBALL (${size:-?}, version $cache_version)"
 echo "  note: ~264MB gzipped, bundled by default — set ANGLESITE_BUILD_NPM_CACHE=0 to skip."

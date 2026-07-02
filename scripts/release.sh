@@ -2,9 +2,12 @@
 #
 # Mac App Store release pipeline for the Anglesite target.
 #
-# Archives the sandboxed Anglesite scheme, exports an App Store .pkg (signed with the
-# Apple Distribution + Mac Installer Distribution identities), verifies the bundled-Node
-# re-sign survived the archive, then validates and uploads to App Store Connect.
+# Archives the sandboxed Anglesite scheme, verifies the bundled-Node re-sign survived
+# the archive, then hands the App Store .pkg (signed with the Apple Distribution +
+# Mac Installer Distribution identities) to App Store Connect via
+# `xcodebuild -exportArchive` with `destination: upload`. (App Store Connect stopped
+# accepting `altool --upload-app` in November 2023 — the supported CLI paths are
+# xcodebuild's upload destination or Transporter.)
 #
 # There is deliberately no direct-download update feed or GitHub Release step. On the App Store,
 # App Store Connect is the distribution channel and updates ship through it.
@@ -14,17 +17,21 @@
 #   - An "Apple Distribution" cert + a "Mac Installer Distribution" cert in the keychain.
 #   - The Apple WWDR (G3) intermediate cert (https://www.apple.com/certificateauthority/).
 #   - A Mac App Store provisioning profile for io.dwk.anglesite, installed.
-#   - An App Store Connect API key (.p8 in ~/.appstoreconnect/private_keys/ or
-#     ~/.private_keys/) plus its key id + issuer id, for keychain-free altool upload.
+#   - An App Store Connect API key (AuthKey_<key id>.p8 in ~/.appstoreconnect/private_keys/
+#     or ~/.private_keys/, or point ASC_API_KEY_PATH at it) plus its key id + issuer id,
+#     for keychain-free xcodebuild upload.
 #
 # Usage:
 #   TEAM_ID=ABCDE12345 \
 #   PROVISIONING_PROFILE="Anglesite MAS App Store" \
 #   ASC_API_KEY_ID=XXXXXXXXXX ASC_API_ISSUER_ID=00000000-0000-0000-0000-000000000000 \
-#     scripts/release.sh [--validate-only]
+#     scripts/release.sh [--validate-only] [--force]
 #
-#   --validate-only   Archive + export + `altool --validate-app`, but stop before upload.
-#                     Useful before a real App Store upload.
+#   --validate-only   Archive + export the signed .pkg locally (destination: export),
+#                     but stop before upload. Useful before a real App Store upload;
+#                     Transporter.app's "Verify" can pre-validate the exported .pkg.
+#   --force           Proceed even if the git worktree is dirty. By default the script
+#                     refuses to archive uncommitted changes.
 #
 # Env:
 #   TEAM_ID               (required) 10-char Apple Developer Team ID.
@@ -32,14 +39,18 @@
 #                         for io.dwk.anglesite.
 #   ASC_API_KEY_ID        (required unless --validate-only) App Store Connect API key id.
 #   ASC_API_ISSUER_ID     (required unless --validate-only) App Store Connect API issuer id.
+#   ASC_API_KEY_PATH      (optional) Explicit path to the AuthKey_<key id>.p8 file; when
+#                         unset, the standard private_keys directories are searched.
 
 set -euo pipefail
 
 VALIDATE_ONLY=0
+FORCE=0
 for arg in "$@"; do
     case "$arg" in
         --validate-only) VALIDATE_ONLY=1 ;;
-        -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+        --force) FORCE=1 ;;
+        -h|--help) sed -n '2,43p' "$0"; exit 0 ;;
         *) echo "error: unknown argument '$arg'" >&2; exit 64 ;;
     esac
 done
@@ -59,7 +70,7 @@ bail() { printf 'error: %s\n' "$*" >&2; exit 1; }
 step() { printf '\n=== %s ===\n' "$*"; }
 
 # --- Preflight ---------------------------------------------------------------
-step "0/6 preflight"
+step "0/5 preflight"
 
 [[ -n "${TEAM_ID:-}" ]] \
     || bail "TEAM_ID is unset. Export your 10-character Apple Developer Team ID and re-run."
@@ -68,7 +79,17 @@ step "0/6 preflight"
 
 command -v xcodegen >/dev/null || bail "xcodegen not installed. brew install xcodegen"
 command -v xcodebuild >/dev/null || bail "xcodebuild not on PATH (install Xcode + command line tools)."
-xcrun --find altool >/dev/null 2>&1 || bail "xcrun altool unavailable. Use a full Xcode install (not just CLT)."
+
+# Refuse to archive a dirty worktree: the .xcarchive would bake in uncommitted changes
+# that match no commit, making the shipped build unreproducible. --force overrides for
+# deliberate local experiments.
+if [[ "$FORCE" -eq 0 ]] && git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    dirty=$(git -C "$REPO_ROOT" status --porcelain)
+    if [[ -n "$dirty" ]]; then
+        printf '%s\n' "$dirty" | sed 's/^/    /' >&2
+        bail "worktree is dirty (uncommitted changes above). Commit/stash them, or re-run with --force."
+    fi
+fi
 
 # Apple Distribution signing identity (signs the .app).
 security find-identity -v -p codesigning 2>/dev/null | grep -q "Apple Distribution" \
@@ -83,28 +104,57 @@ security find-identity -v 2>/dev/null | grep -Eq "Mac Installer Distribution|3rd
 security find-certificate -a 2>/dev/null | grep -q "Apple Worldwide Developer Relations" \
     || bail "Apple WWDR intermediate cert missing. Download G3 from https://www.apple.com/certificateauthority/ and add it to the keychain."
 
+ASC_KEY_PATH=""
 if [[ "$VALIDATE_ONLY" -eq 0 ]]; then
     [[ -n "${ASC_API_KEY_ID:-}" ]] \
         || bail "ASC_API_KEY_ID is unset (needed for upload). Re-run with --validate-only to skip the upload step."
     [[ -n "${ASC_API_ISSUER_ID:-}" ]] \
         || bail "ASC_API_ISSUER_ID is unset (needed for upload). Re-run with --validate-only to skip the upload step."
+    # xcodebuild (unlike altool) needs the API key file path spelled out; search the
+    # standard private_keys locations unless ASC_API_KEY_PATH points at it directly.
+    if [[ -n "${ASC_API_KEY_PATH:-}" ]]; then
+        [[ -f "$ASC_API_KEY_PATH" ]] || bail "ASC_API_KEY_PATH is set but no file exists at $ASC_API_KEY_PATH."
+        ASC_KEY_PATH="$ASC_API_KEY_PATH"
+    else
+        for dir in "$HOME/.appstoreconnect/private_keys" "$HOME/.private_keys" "$HOME/private_keys" "./private_keys"; do
+            if [[ -f "$dir/AuthKey_${ASC_API_KEY_ID}.p8" ]]; then
+                ASC_KEY_PATH="$dir/AuthKey_${ASC_API_KEY_ID}.p8"
+                break
+            fi
+        done
+        [[ -n "$ASC_KEY_PATH" ]] \
+            || bail "AuthKey_${ASC_API_KEY_ID}.p8 not found in ~/.appstoreconnect/private_keys/ or ~/.private_keys/. Install the .p8 there or set ASC_API_KEY_PATH."
+    fi
+    # xcodebuild requires -authenticationKeyPath to be absolute; normalize.
+    ASC_KEY_PATH="$(cd "$(dirname "$ASC_KEY_PATH")" && pwd)/$(basename "$ASC_KEY_PATH")"
 fi
 
 echo "  team:        $TEAM_ID"
 echo "  profile:     $PROVISIONING_PROFILE"
-echo "  mode:        $([[ "$VALIDATE_ONLY" -eq 1 ]] && echo 'validate-only (no upload)' || echo 'validate + upload')"
+echo "  mode:        $([[ "$VALIDATE_ONLY" -eq 1 ]] && echo 'validate-only (export .pkg, no upload)' || echo 'export + upload to App Store Connect')"
 
 # --- Generate project + export options ---------------------------------------
-step "1/6 xcodegen generate"
+step "1/5 xcodegen generate"
 (cd "$REPO_ROOT" && xcodegen generate)
 
 mkdir -p "$BUILD_DIR"
-sed -e "s/__TEAM_ID__/$TEAM_ID/g" \
-    -e "s/__PROVISIONING_PROFILE__/$PROVISIONING_PROFILE/g" \
-    "$EXPORT_OPTIONS_TEMPLATE" > "$EXPORT_OPTIONS"
+# Fill in the template with plutil, not sed: a team id / profile name containing sed
+# or XML metacharacters (/ & \ < …) round-trips correctly, and plutil validates the
+# plist as it writes. The template's __TEAM_ID__/__PROVISIONING_PROFILE__ placeholders
+# are simply overwritten. (Dots in the bundle-id keypath segment need escaping.)
+cp "$EXPORT_OPTIONS_TEMPLATE" "$EXPORT_OPTIONS"
+plutil -replace teamID -string "$TEAM_ID" "$EXPORT_OPTIONS"
+plutil -replace "provisioningProfiles.${BUNDLE_ID//./\\.}" -string "$PROVISIONING_PROFILE" "$EXPORT_OPTIONS"
+
+if [[ "$VALIDATE_ONLY" -eq 0 ]]; then
+    # destination `upload` makes -exportArchive hand the signed .pkg straight to
+    # App Store Connect. The template omits the key, so exports default to `export`
+    # (write the .pkg locally) in --validate-only mode.
+    plutil -insert destination -string upload "$EXPORT_OPTIONS"
+fi
 
 # --- Archive -----------------------------------------------------------------
-step "2/6 xcodebuild archive ($SCHEME)"
+step "2/5 xcodebuild archive ($SCHEME)"
 rm -rf "$ARCHIVE_PATH"
 xcodebuild \
     -project "$REPO_ROOT/Anglesite.xcodeproj" \
@@ -118,7 +168,7 @@ xcodebuild \
 # --- Verify the bundled-Node re-sign survived the archive --------------------
 # resign-node.sh runs as a post-build phase; confirm the embedded Node is signed with a
 # hardened runtime and the same team as the app, before we wrap it in the installer .pkg.
-step "3/6 verify bundled-Node re-sign"
+step "3/5 verify bundled-Node re-sign"
 ARCHIVED_APP="$ARCHIVE_PATH/Products/Applications/Anglesite.app"
 NODE_BIN="$ARCHIVED_APP/Contents/Resources/node-runtime/bin/node"
 if [[ -f "$NODE_BIN" ]]; then
@@ -134,53 +184,50 @@ else
     echo "  no bundled Node at $NODE_BIN — node-runtime is an optional resource; skipping."
 fi
 
-# --- Export ------------------------------------------------------------------
-step "4/6 xcodebuild -exportArchive (app-store-connect)"
+# --- Export (and, unless --validate-only, upload) -----------------------------
+# With `destination: upload` in the export options, this single xcodebuild call
+# packages AND submits to App Store Connect, authenticated by the ASC API key —
+# the supported replacement for the retired `altool --validate/--upload-app`.
+step "4/5 xcodebuild -exportArchive ($([[ "$VALIDATE_ONLY" -eq 1 ]] && echo 'destination: export' || echo 'destination: upload'))"
 rm -rf "$EXPORT_DIR"
-xcodebuild -exportArchive \
-    -archivePath "$ARCHIVE_PATH" \
-    -exportPath "$EXPORT_DIR" \
+export_args=(
+    -exportArchive
+    -archivePath "$ARCHIVE_PATH"
+    -exportPath "$EXPORT_DIR"
     -exportOptionsPlist "$EXPORT_OPTIONS"
-
-PKG_PATH="$(find "$EXPORT_DIR" -maxdepth 1 -name '*.pkg' -print -quit)"
-[[ -n "$PKG_PATH" && -f "$PKG_PATH" ]] || bail "export produced no .pkg under $EXPORT_DIR"
-echo "  → $PKG_PATH ($(stat -f%z "$PKG_PATH") bytes)"
-
-# --- Validate ----------------------------------------------------------------
-# Validation does not need ASC API creds when running purely against the package shape,
-# but App Store Connect validation (asset/entitlement checks) does — so it shares the
-# upload credentials. In --validate-only mode without creds we still run the local
-# package validation that altool can do offline.
-step "5/6 altool --validate-app"
-validate_args=(--validate-app --type macos --file "$PKG_PATH")
-upload_args=(--upload-app --type macos --file "$PKG_PATH")
-if [[ -n "${ASC_API_KEY_ID:-}" && -n "${ASC_API_ISSUER_ID:-}" ]]; then
-    validate_args+=(--apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_ISSUER_ID")
-    upload_args+=(--apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_ISSUER_ID")
-    xcrun altool "${validate_args[@]}"
-else
-    echo "  (no ASC API creds — skipping App Store Connect validation; supply ASC_API_KEY_ID/ISSUER to enable)"
+)
+if [[ "$VALIDATE_ONLY" -eq 0 ]]; then
+    export_args+=(
+        -allowProvisioningUpdates
+        -authenticationKeyID "$ASC_API_KEY_ID"
+        -authenticationKeyIssuerID "$ASC_API_ISSUER_ID"
+        -authenticationKeyPath "$ASC_KEY_PATH"
+    )
 fi
+xcodebuild "${export_args[@]}"
 
-# --- Upload ------------------------------------------------------------------
-step "6/6 altool --upload-app"
+# --- Result ------------------------------------------------------------------
+step "5/5 result"
 if [[ "$VALIDATE_ONLY" -eq 1 ]]; then
+    PKG_PATH="$(find "$EXPORT_DIR" -maxdepth 1 -name '*.pkg' -print -quit)"
+    [[ -n "$PKG_PATH" && -f "$PKG_PATH" ]] || bail "export produced no .pkg under $EXPORT_DIR"
+    echo "  → $PKG_PATH ($(stat -f%z "$PKG_PATH") bytes)"
     cat <<EOF
 
 ✅ Validate-only run complete. Package ready at:
      $PKG_PATH
 
 To upload to App Store Connect, re-run without --validate-only (and with
-ASC_API_KEY_ID / ASC_API_ISSUER_ID set), or drop the .pkg into Transporter.app.
+ASC_API_KEY_ID / ASC_API_ISSUER_ID set), or drop the .pkg into Transporter.app
+(whose "Verify" button runs the App Store Connect pre-upload validation).
 EOF
     exit 0
 fi
 
-xcrun altool "${upload_args[@]}"
-
 cat <<EOF
 
 ✅ Uploaded $SCHEME to App Store Connect.
+   (Upload logs, if any, are under $EXPORT_DIR.)
 
 Next steps:
   1. Wait for processing in App Store Connect → TestFlight / App Store.
