@@ -65,9 +65,11 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Anglesite/anglesite
-          # Pinned to the plugin release the app currently bundles/exercises (apply_edit
-          # dry_run/edit-style, typed create_content) — bump when the app adopts a new plugin release.
-          ref: v1.2.0
+          # Pinned to the plugin commit the app currently exercises. The typed create_content
+          # tool (plugin #377/#389) that CreateContentEndToEndTests drives postdates the
+          # v1.2.0 tag, so this pins the exact commit — replace with the next tagged plugin
+          # release once one is cut.
+          ref: ebf29c342fedf5a2e617055ee286030d0f8f3103
           path: anglesite-plugin
 
       - name: Set up Node (for the bundled plugin's MCP server)
