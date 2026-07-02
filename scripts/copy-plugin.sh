@@ -41,7 +41,11 @@ fi
 # a plugin that IS present yet too old would ship an app whose edit pipeline
 # fails in confusing ways at runtime — fail the build loudly instead.
 MIN_PLUGIN_VERSION="1.2.0"
-PLUGIN_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SRC/.claude-plugin/plugin.json" | head -n 1)
+# plutil parses the JSON and extracts the top-level key specifically — a first-match
+# grep could be fooled by a nested "version" (engines/mcpServers/…) appearing earlier
+# in the manifest. This script only runs on macOS (Xcode build phase), so plutil is
+# always present. Missing key / invalid JSON → empty, caught below.
+PLUGIN_VERSION=$(plutil -extract version raw -o - "$SRC/.claude-plugin/plugin.json" 2>/dev/null || true)
 if [[ -z "$PLUGIN_VERSION" ]]; then
     echo "error: couldn't read \"version\" from $SRC/.claude-plugin/plugin.json" >&2
     echo "       The app requires plugin >= $MIN_PLUGIN_VERSION; refusing to bundle an unidentifiable plugin." >&2
