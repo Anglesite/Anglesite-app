@@ -17,7 +17,7 @@ Also landed since v1:
 - **HTTP/Streamable MCP transport** (#64) — `MCPClient` can connect over HTTP in addition to stdio, enabling container-backed runtimes.
 - **Containerization** — Apple Containerization is the macOS runtime direction. The active app-bundled image source is `Containers/anglesite-dev/`, exported by `scripts/vendor-container-image.sh` into `Resources/container-image/` and booted by the `AnglesiteContainer` target. Docker/buildx is only used to build that inert OCI root filesystem. The lowercase `container/` directory is the Cloudflare Sandbox / remote-runtime image pipeline for `RemoteSandboxSiteRuntime` and iOS work, not the macOS app image.
 - **Xcode 27 migration** (#108) — macOS 27+ deployment target, `@State` macro audit, Swift 6.4 toolchain.
-- **macOS 27 platform features** (open) — system-wide MCP (#101), Spotlight/App Intents (#102), native chat on Foundation Models (#105), and more.
+- **macOS 27 platform features** — the first platform wave has shipped: system-wide MCP (#101), Spotlight/App Intents (#102), native chat on Foundation Models (#105), and more.
 
 See [`docs/build-plan.md`](docs/build-plan.md) for the full phased status.
 
@@ -69,7 +69,7 @@ There is one app target, ad-hoc-signed in Debug so it builds without an Apple ac
 |---|---|---|---|
 | `Anglesite` | `io.dwk.anglesite` | Mac App Store | on (App Sandbox) |
 
-> **Don't `xed .`** — this repo contains both a `Package.swift` and an `Anglesite.xcodeproj`. `xed .` opens the package, whose scheme picker only shows `Anglesite-Package` (libraries only, no runnable target). Open the `.xcodeproj` explicitly; the scheme picker should then show `Anglesite`, `AnglesiteCore`, and `AnglesiteBridge`, and ⌘R should run the app.
+> **Don't `xed .`** — this repo contains both a `Package.swift` and an `Anglesite.xcodeproj`. `xed .` opens the package, whose scheme picker only shows `Anglesite-Package` (libraries only, no runnable target). Open the `.xcodeproj` explicitly; the scheme picker should then show `Anglesite`, `AnglesiteCore`, `AnglesiteBridge`, `AnglesiteSiteModel`, `AnglesiteIntents`, and `AnglesiteContainer`, and ⌘R should run the app.
 
 The Debug configuration uses ad-hoc signing so contributors can build and run locally without any Apple Developer enrollment. App Store Release builds require a paid Apple Developer account and a provisioning profile with the app's restricted entitlements; see [`docs/release.md`](docs/release.md).
 

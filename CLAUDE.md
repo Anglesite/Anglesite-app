@@ -37,7 +37,7 @@ A site is a self-contained `.anglesite` **package** (#242) — a directory with 
 - `Source/` — the Astro project, a git repo. The externally-editable, clonable unit; `cd`/git/VS Code/CLI descend into it.
 - `Config/` — app-owned per-site state (`settings.plist` via `SiteConfigStore`, `chat-history.jsonl`, caches). **Never** in git. `.site-config` stays in `Source/` (template/plugin-owned).
 
-`AnglesitePackage` (AnglesiteCore) is the single source of truth for this layout. The app opens packages explicitly — Finder double-click / `onOpenURL`, **File ▸ Open Site…** (an `NSOpenPanel` filtering on the `io.dwk.anglesite.site` UTI via `UTType.anglesiteSite`), **Open Recent** — and discovers them via a **recents registry** (`SiteStore`, `recents.json`), not by scanning a folder. `SiteStore.Site` carries `packageURL` + computed `sourceDirectory`/`configDirectory` (there is no `path`).
+`AnglesitePackage` (AnglesiteSiteModel, re-exported by AnglesiteCore) is the single source of truth for this layout. The app opens packages explicitly — Finder double-click / `onOpenURL`, **File ▸ Open Site…** (an `NSOpenPanel` filtering on the `io.dwk.anglesite.site` UTI via `UTType.anglesiteSite`), **Open Recent** — and discovers them via a **recents registry** (`SiteStore`, `recents.json`), not by scanning a folder. `SiteStore.Site` carries `packageURL` + computed `sourceDirectory`/`configDirectory` (there is no `path`).
 
 Operationally: **File ▸ Import** copies a plain Anglesite directory into a new package (migrating any legacy `.anglesite/` into `Config/`); **File ▸ Export** copies `Source/` back out. New sites scaffold into `Source/` (with `git init`); the dev server, deploy, and `pre-deploy-check` all run with cwd = `Source/`. On MAS, one security-scoped bookmark per package covers both `Source/` and `Config/`. `~/Sites/` is now just the default save location for new/imported packages — not a discovery root (there is no legacy `sites.json` migration, so Import is the upgrade path for pre-package sites).
 
@@ -53,18 +53,24 @@ Operationally: **File ▸ Import** copies a plain Anglesite directory into a new
 
 ```
 Sources/
-├── AnglesiteApp/      SwiftUI views, app entry point, scenes, settings
-├── AnglesiteCore/     Subprocess supervision, MCP client, edit pipeline, Keychain
-└── AnglesiteBridge/   WKWebView script messages + JS overlay injection
+├── AnglesiteApp/        SwiftUI views, app entry point, scenes, settings
+├── AnglesiteCore/       Subprocess supervision, MCP client, edit pipeline, Keychain
+├── AnglesiteSiteModel/  `.anglesite` site package model (AnglesitePackage, package layout)
+├── AnglesiteIntents/    App Intents: Siri/Shortcuts/Spotlight entities and intents
+├── AnglesiteContainer/  Apple Containerization local container runtime
+└── AnglesiteBridge/     WKWebView script messages + JS overlay injection
 JS/
-└── edit-overlay/      TypeScript edit overlay compiled and bundled into app resources
+└── edit-overlay/        TypeScript edit overlay compiled and bundled into app resources
 Resources/
-├── Template/          Website template (themes, scaffold script, Astro source, pre-deploy check) — committed
-├── node-runtime/      (gitignored) Vendored Node binary, populated by scripts/vendor-node.sh
-├── plugin/            (gitignored) Plugin MCP server + skills, populated by scripts/copy-plugin.sh
-│                      (template excluded — lives in Resources/Template/ instead)
-├── Anglesite.help/    Apple Help Book (HTML pages; hiutil index built by scripts/build-help-index.sh)
-└── *.entitlements     App sandbox/signing entitlements plus node-runtime.entitlements for the Node re-sign
+├── Template/            Website template (themes, scaffold script, Astro source, pre-deploy check) — committed
+├── node-runtime/        (gitignored) Vendored Node binary, populated by scripts/vendor-node.sh
+├── plugin/              (gitignored) Plugin MCP server + skills, populated by scripts/copy-plugin.sh
+│                        (template excluded — lives in Resources/Template/ instead)
+├── container-image/     (gitignored) Vendored arm64 OCI image, populated by scripts/vendor-container-image.sh
+├── container-kernel/    (gitignored) Vendored Linux kernel binary, populated by scripts/vendor-container-kernel.sh
+├── container-initfs/    (gitignored) Vendored vminit initfs OCI layout, populated by scripts/vendor-container-kernel.sh
+├── Anglesite.help/      Apple Help Book (HTML pages; hiutil index built by scripts/build-help-index.sh)
+└── *.entitlements       App sandbox/signing entitlements plus node-runtime.entitlements for the Node re-sign
 ```
 
 ## Editing guidelines
@@ -97,7 +103,7 @@ open Anglesite.xcodeproj
 xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build
 ```
 
-Tests: `swift test --package-path .` runs the SwiftPM test targets (`AnglesiteSiteModelTests`, `AnglesiteCoreTests`, `AnglesiteBridgeTests`, and, on Swift 6.4+/Xcode 27, `AnglesiteIntentsTests`). `AnglesiteContainerLocalTests` is opt-in with `ANGLESITE_CONTAINER_TESTS=1`; its end-to-end cases also require `ANGLESITE_CONTAINER_E2E=1`. Most suites are Swift Testing (#74), with the remaining XCTest holdouts in `AnglesiteCoreTests`. The MCP / apply-edit e2e tests (`AppliesEditEndToEndTests`, `MCPClientHTTPEndToEndTests`) need the sibling plugin checkout + node; when absent they **fail** rather than skip (they `throw` a `SkipReason` error, which Swift Testing — unlike XCTest's `XCTSkip` — records as an issue), so set `ANGLESITE_PLUGIN_PATH` to the plugin checkout to run them. If `swift build`/`swift test` seems to hang with no output, a stale SwiftPM process is likely holding the `.build` lock — check `pgrep -fl swift-test` and kill the orphan rather than assuming a bad test.
+Tests: `swift test --package-path .` runs the SwiftPM test targets (`AnglesiteSiteModelTests`, `AnglesiteCoreTests`, `AnglesiteBridgeTests`, and, on Swift 6.4+/Xcode 27, `AnglesiteIntentsTests`). `AnglesiteContainerLocalTests` is opt-in with `ANGLESITE_CONTAINER_TESTS=1`; its end-to-end cases also require `ANGLESITE_CONTAINER_E2E=1`. Most suites are Swift Testing (#74), with the remaining XCTest holdouts in `AnglesiteCoreTests` and `AnglesiteBridgeTests`. The MCP / apply-edit e2e tests (`AppliesEditEndToEndTests`, `MCPClientHTTPEndToEndTests`) need the sibling plugin checkout + node; they're gated with Swift Testing's `.enabled(if:)` trait, so they skip cleanly when the plugin is absent — set `ANGLESITE_PLUGIN_PATH` to the plugin checkout to make them run. If `swift build`/`swift test` seems to hang with no output, a stale SwiftPM process is likely holding the `.build` lock — check `pgrep -fl swift-test` and kill the orphan rather than assuming a bad test.
 
 Note: `swift test` runs on CI's older runners even though `Package.swift` declares `.macOS("27.0")` — a SwiftPM CLI test binary tolerates a high deployment target as long as it doesn't call macOS-27-only symbols at runtime. **Hosted** app tests (`xcodebuild test` with `Anglesite.app` as the test host) do *not* work there: launching a macOS-27 `.app` is blocked on a macOS-15 runner by LaunchServices. So app-target logic that needs CI coverage (e.g. `DeployModel`'s token orchestration) is kept thin and pushed into a testable `AnglesiteCore` type (`TokenOnboarding`) rather than tested through a hosted app target.
 
@@ -109,4 +115,4 @@ Note: `swift test` runs on CI's older runners even though `Package.swift` declar
 
 **macOS 27 / Siri AI:** the first platform wave has shipped (system-wide MCP, Spotlight App-Intents indexing, View Annotations, App Intents Testing, Foundation Models chat, SwiftUI 27 toolbars, the Xcode 27 migration audit). Ongoing work is tracked under the Siri AI phases (A–D, ~#132–135) and their sub-issues — check `gh issue list` for the live set.
 
-**`.anglesite` package model (#242):** shipped — a site is a `.anglesite` package (see "Site identity" above). Design + phase plans: [`docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md`](docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md) and `docs/superpowers/plans/2026-06-19-anglesite-package-model-p{1..5}-*.md`. It dovetails with the still-open epics: the git-bootstrap (#68) and container runtimes (#66/#69) operate on the package's `Source/` repo, and `Config/` never enters a container. The first open follow-up is the `SiteConfigStore.displayName` override consumer (#266).
+**`.anglesite` package model (#242):** shipped — a site is a `.anglesite` package (see "Site identity" above). Design + phase plans: [`docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md`](docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md) and `docs/superpowers/plans/2026-06-19-anglesite-package-model-p{1..5}-*.md`. It dovetails with the container epics: the git-bootstrap (#68, shipped) and the still-open container runtimes (#66/#69) operate on the package's `Source/` repo, and `Config/` never enters a container. The `SiteConfigStore.displayName` override consumer (#266) has since shipped.
