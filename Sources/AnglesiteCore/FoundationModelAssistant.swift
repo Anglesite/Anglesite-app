@@ -80,7 +80,11 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
         self.integrationService = integrationService
-        self.maxRetainedTurns = maxRetainedTurns
+        // `trimSessionIfNeeded`'s cutoff indexing (`promptIndices.count - maxRetainedTurns`) assumes
+        // at least 1: `<= 0` would index at or past the end of `promptIndices` and crash. Clamp
+        // rather than crash so a caller passing e.g. `0` ("keep no history") degrades to the
+        // smallest valid window instead of trapping.
+        self.maxRetainedTurns = max(1, maxRetainedTurns)
         if tier == .privateCloudCompute {
             // v1 has no separate PCC session; fall back to on-device with a logged warning so the
             // requested tier degrades gracefully rather than erroring (see spec / #155).
@@ -262,6 +266,10 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         activeRelay = nil
         session = nil
     }
+
+    /// Test-only: the clamped ``maxRetainedTurns`` actually stored, so tests can assert `init`
+    /// clamps non-positive values rather than crashing later in ``trimSessionIfNeeded``.
+    nonisolated var maxRetainedTurnsForTesting: Int { maxRetainedTurns }
 
     /// Test-only: number of `.prompt` entries in the cached session's transcript, or `nil` if no
     /// session is cached. Exercises ``trimSessionIfNeeded(current:context:)`` (#456) without a

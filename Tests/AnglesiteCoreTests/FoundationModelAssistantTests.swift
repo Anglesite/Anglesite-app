@@ -56,6 +56,16 @@ struct FoundationModelAssistantTests {
         #expect(FoundationModelAssistant().capabilities.providerName == "On-Device")
     }
 
+    @Test("maxRetainedTurns is clamped to at least 1, not left non-positive (#456)")
+    func maxRetainedTurnsIsClamped() {
+        // trimSessionIfNeeded's cutoff indexing (`promptIndices.count - maxRetainedTurns`) assumes
+        // at least 1; `<= 0` would index at/past the end of `promptIndices` and crash once a turn
+        // lands. `init` clamps rather than crashing.
+        #expect(FoundationModelAssistant(maxRetainedTurns: 0).maxRetainedTurnsForTesting == 1)
+        #expect(FoundationModelAssistant(maxRetainedTurns: -5).maxRetainedTurnsForTesting == 1)
+        #expect(FoundationModelAssistant(maxRetainedTurns: 3).maxRetainedTurnsForTesting == 3)
+    }
+
     @Test("PCC-tier assistant constructs and remains usable (falls back to on-device)")
     func pccConstructsAndIsUsable() {
         // `capabilities` is a nonisolated var, so it reads synchronously off the actor.
