@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkHeaders, checkMixedContent, checkSRI, checkExternalLinkRel, checkArtifactPresence } from "./pre-deploy-check";
+import { checkHeaders, checkMixedContent, checkSRI, checkExternalLinkRel, checkArtifactPresence, checkPII } from "./pre-deploy-check";
 
 const GOOD = `/*
   Content-Security-Policy: default-src 'self'; frame-src 'self' js.stripe.com
@@ -47,6 +47,31 @@ test("substring of an allowed domain does not satisfy coverage", () => {
   assert.equal(issues.length, 1);
   assert.equal(issues[0].severity, "error");
   assert.match(issues[0].message, /cal\.com/);
+});
+
+test("checkPII: flags a bare email in page content", () => {
+  const issues = checkPII("<p>Contact us at hello@example.com</p>", "dist/index.html");
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].severity, "error");
+  assert.match(issues[0].message, /email/);
+});
+
+test("checkPII: does not flag an email that only appears as a mailto: link target", () => {
+  const issues = checkPII('<a href="mailto:hello@example.com">Email us</a>', "dist/contact.html");
+  assert.deepEqual(issues, []);
+});
+
+test("checkPII: still flags a bare email elsewhere on a page that also has a mailto link", () => {
+  const html = '<a href="mailto:hello@example.com">Email us</a><p>debug: admin@internal.example.com</p>';
+  const issues = checkPII(html, "dist/contact.html");
+  assert.equal(issues.length, 1);
+  assert.match(issues[0].message, /email/);
+});
+
+test("checkPII: still flags phone numbers regardless of mailto content", () => {
+  const issues = checkPII('<a href="mailto:hello@example.com">Email</a> Call 555-123-4567', "dist/contact.html");
+  assert.equal(issues.length, 1);
+  assert.match(issues[0].message, /phone/);
 });
 
 test("checkMixedContent: flags an insecure src", () => {

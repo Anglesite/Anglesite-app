@@ -110,7 +110,7 @@ public enum IntegrationCatalog {
         displayName: "Contact Form",
         summary: "Let visitors reach you with a form (Formspree) or a plain email link.",
         providers: [
-            Provider(id: "formspree", displayName: "Formspree", cspDomains: []),
+            Provider(id: "formspree", displayName: "Formspree", cspDomains: ["formspree.io"]),
             Provider(id: "mailto", displayName: "Plain email link", cspDomains: []),
         ],
         fields: [
@@ -133,6 +133,7 @@ public enum IntegrationCatalog {
                 ConfigEntry(key: "CONTACT_EMAIL", value: "{{email}}"),
                 ConfigEntry(key: "CONTACT_BUTTON_TEXT", value: "{{buttonText}}"),
             ], when: .always),
+            .addCSPDomains(fromProvider: true, extra: [], when: .always),
         ])
 
     // MARK: donations

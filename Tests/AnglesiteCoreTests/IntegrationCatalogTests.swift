@@ -82,6 +82,19 @@ import Testing
         #expect(email?.visibleWhen == .providerIs("mailto"))
     }
 
+    /// A deployed Formspree contact form needs its endpoint domain in the browser's own
+    /// `form-action` CSP directive, or the submission is blocked — see #469 review.
+    @Test func contactFormspreeProviderDeclaresCSPDomainAndDescriptorAddsIt() {
+        let contact = IntegrationCatalog.descriptor(for: .contact)
+        let formspree = contact.providers.first { $0.id == "formspree" }
+        #expect(formspree?.cspDomains == ["formspree.io"])
+        let hasAddCSP = contact.operations.contains {
+            if case .addCSPDomains(let fromProvider, _, _) = $0 { return fromProvider }
+            return false
+        }
+        #expect(hasAddCSP)
+    }
+
     @Test func contactWritesProviderEndpointEmailAndButtonText() {
         let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .contact))
         #expect(keys.isSuperset(of: ["CONTACT_PROVIDER", "CONTACT_FORM_ENDPOINT", "CONTACT_EMAIL", "CONTACT_BUTTON_TEXT"]))
