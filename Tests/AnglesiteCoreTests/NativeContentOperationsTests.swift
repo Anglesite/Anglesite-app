@@ -66,6 +66,23 @@ struct NativeContentOperationsTests {
         #expect(reason.contains("already exists"))
     }
 
+    @Test("createPage uses the copy generator's suggested description")
+    func createPageUsesSuggestedDescription() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("native-content-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { _, _, _ in "deadbeef" },
+            now: { Date(timeIntervalSince1970: 1_750_000_000) },
+            copyGenerator: StubPageCopyGenerator(suggestion: PageCopySuggestion(description: "Meet our team."))
+        )
+        let result = await ops.createPage(siteID: "s1", name: "About", route: nil)
+        #expect(result == .created(filePath: "src/pages/about.astro", identifier: "/about"))
+        let written = try String(contentsOf: root.appendingPathComponent("src/pages/about.astro"), encoding: .utf8)
+        #expect(written.contains("description=\"Meet our team.\""))
+    }
+
     @Test("unknown site returns .siteNotFound")
     func siteNotFound() async {
         let ops = NativeContentOperations(siteDirectory: { _ in nil }, gitCommit: { _, _, _ in nil })
@@ -82,6 +99,23 @@ struct NativeContentOperationsTests {
         #expect(written.contains("draft: true"))
         let calls = await spy.calls
         #expect(calls.first?.2 == "anglesite: add posts hello-world")
+    }
+
+    @Test("createPost uses the copy generator's suggested description")
+    func createPostUsesSuggestedDescription() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("native-content-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { _, _, _ in "deadbeef" },
+            now: { Date(timeIntervalSince1970: 1_750_000_000) },
+            copyGenerator: StubPageCopyGenerator(suggestion: PageCopySuggestion(description: "How we shipped it."))
+        )
+        let result = await ops.createPost(siteID: "s1", title: "Launch Day", collection: nil, slug: nil)
+        #expect(result == .created(filePath: "src/content/posts/launch-day.md", identifier: "launch-day"))
+        let written = try String(contentsOf: root.appendingPathComponent("src/content/posts/launch-day.md"), encoding: .utf8)
+        #expect(written.contains("description: \"How we shipped it.\""))
     }
 
     @Test("createPost honors a custom collection")
@@ -179,5 +213,12 @@ struct NativeContentOperationsTests {
         try "page".write(to: repo.appendingPathComponent("p.astro"), atomically: true, encoding: .utf8)
         let sha = await NativeContentOperations.processGitCommit(repo, "p.astro", "anglesite: add page /p")
         #expect(sha?.count == 40)
+    }
+}
+
+private struct StubPageCopyGenerator: PageCopyGenerating {
+    let suggestion: PageCopySuggestion?
+    func suggestDescription(title: String, siteID: String, siteDirectory: URL) async -> PageCopySuggestion? {
+        suggestion
     }
 }

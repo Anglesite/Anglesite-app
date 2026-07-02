@@ -43,6 +43,23 @@ struct ContentScaffoldTests {
         #expect(out.hasSuffix("</BaseLayout>\n"))
     }
 
+    @Test("renderPage uses a provided description instead of the title-derived default")
+    func renderPageCustomDescription() {
+        let out = ContentScaffold.renderPage(
+            title: "About",
+            layoutImport: "../layouts/BaseLayout.astro",
+            description: "Meet the team behind the studio."
+        )
+        #expect(out.contains("description=\"Meet the team behind the studio.\""))
+        #expect(!out.contains("description=\"About.\""))
+    }
+
+    @Test("renderPage falls back to the title-derived description when none is given")
+    func renderPageDefaultDescription() {
+        let out = ContentScaffold.renderPage(title: "About", layoutImport: "../layouts/BaseLayout.astro")
+        #expect(out.contains("description=\"About.\""))
+    }
+
     @Test("renderPost emits a draft with ISO8601 publishDate and YAML-escaped title")
     func renderPost() {
         let date = Date(timeIntervalSince1970: 1_750_000_000) // fixed, deterministic
@@ -51,6 +68,13 @@ struct ContentScaffoldTests {
         #expect(out.contains("draft: true"))
         #expect(out.contains("publishDate: 2025-06-15T15:06:40.000Z"))
         #expect(out.hasSuffix("Write your post here.\n"))
+    }
+
+    @Test("renderPost uses a provided description instead of leaving it empty")
+    func renderPostCustomDescription() {
+        let date = Date(timeIntervalSince1970: 1_750_000_000)
+        let out = ContentScaffold.renderPost(title: "Launch Day", now: date, description: "How we shipped it.")
+        #expect(out.contains("description: \"How we shipped it.\""))
     }
 
     @Test("renderEntry emits frontmatter for a note with body below the block")

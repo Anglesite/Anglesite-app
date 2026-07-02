@@ -51,7 +51,7 @@ public struct ContentCreationWorkflow: ContentOperationsService {
         knowledgeIndex: SiteKnowledgeIndex? = nil,
         siteDirectory: @escaping SiteDirectoryResolver
     ) -> ContentCreationWorkflow {
-        let native = NativeContentOperations(siteDirectory: siteDirectory)
+        let native = NativeContentOperations(siteDirectory: siteDirectory, copyGenerator: PageCopyGeneratorFactory.makeDefault())
         return ContentCreationWorkflow(
             operations: native,
             contentGraph: contentGraph,
