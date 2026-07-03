@@ -7,7 +7,7 @@ This is the **native macOS app** that hosts the Anglesite Codex plugin. The plug
 | Repo | Role |
 |---|---|
 | `Anglesite/anglesite` | Codex plugin: skills, hooks, MCP server, docs |
-| `Anglesite/Anglesite-app` *(this repo)* | macOS app: SwiftUI shell, website template, embedded Node, WKWebView preview, edit overlay |
+| `Anglesite/Anglesite-app` *(this repo)* | macOS app: SwiftUI shell, website template, WKWebView preview, edit overlay |
 
 The **website template** (Astro project skeleton, themes, scaffold script, pre-deploy check) lives in this repo at `Resources/Template/`. It is a committed, first-class app resource — not copied from the plugin at build time. `TemplateRuntime` resolves it from the app bundle (with a Settings override for development).
 
@@ -27,7 +27,7 @@ When in doubt, the plugin is the source of truth for skills, hooks, and the MCP 
 - **Swift / SwiftUI** — app shell. Targets macOS 27+.
 - **Plain SwiftUI + actors** for v0. No TCA, no third-party state libraries.
 - **WKWebView** — live preview of the Astro dev server.
-- **Embedded Node** — vendored at build time. The single App Store app target re-signs it via `scripts/resign-node.sh` with the app's identity + hardened-runtime sandbox/JIT entitlements from `Resources/node-runtime.entitlements`.
+- **No host-side Node runtime** — retired (#70). Dev-server, build, and deploy commands run inside a container runtime (local Apple Containerization or the remote Cloudflare sandbox) instead of a bundled host Node.
 - **MCP** — talks to the plugin's server over stdio (local subprocess) or HTTP/Streamable transport (for container-backed runtimes). `MCPClient` abstracts the transport behind an `MCPTransport` seam; `SiteRuntime` (protocol) abstracts the execution substrate so `PreviewModel` doesn't know whether a site runs in-process or in a container.
 
 ## Site identity — the `.anglesite` package
@@ -66,14 +66,13 @@ JS/
 └── edit-overlay/        TypeScript edit overlay compiled and bundled into app resources
 Resources/
 ├── Template/            Website template (themes, scaffold script, Astro source, pre-deploy check) — committed
-├── node-runtime/        (gitignored) Vendored Node binary, populated by scripts/vendor-node.sh
 ├── plugin/              (gitignored) Plugin MCP server + skills, populated by scripts/copy-plugin.sh
 │                        (template excluded — lives in Resources/Template/ instead)
 ├── container-image/     (gitignored) Vendored arm64 OCI image, populated by scripts/vendor-container-image.sh
 ├── container-kernel/    (gitignored) Vendored Linux kernel binary, populated by scripts/vendor-container-kernel.sh
 ├── container-initfs/    (gitignored) Vendored vminit initfs OCI layout, populated by scripts/vendor-container-kernel.sh
 ├── Anglesite.help/      Apple Help Book (HTML pages; hiutil index built by scripts/build-help-index.sh)
-└── *.entitlements       App sandbox/signing entitlements plus node-runtime.entitlements for the Node re-sign
+└── *.entitlements       App sandbox/signing entitlements
 ```
 
 ## Editing guidelines
