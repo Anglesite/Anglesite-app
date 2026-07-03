@@ -89,8 +89,10 @@ Resources/Anglesite.help/**/*.helpindex
 *.swp
 *~
 
-# Claude Code harness state
-.claude/
+# Claude Code harness state (worktrees, local state) — but share the
+# project permission allowlist so parallel agents prompt less
+.claude/*
+!.claude/settings.json
 
 # Codex harness state (worktrees, agent scratch)
 .Codex/
