@@ -161,7 +161,7 @@ var packageDependencies: [Package.Dependency] = []
 if includeContainer {
     packageProducts.append(.library(name: "AnglesiteContainer", targets: ["AnglesiteContainer"]))
     packageDependencies.append(
-        .package(url: "https://github.com/apple/containerization.git", .upToNextMinor(from: "0.34.0"))
+        .package(url: "https://github.com/apple/containerization.git", .upToNextMinor(from: "0.35.0"))
     )
 }
 
