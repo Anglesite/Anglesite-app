@@ -1,0 +1,13 @@
+---
+import BaseLayout from "../../src/layouts/BaseLayout.astro";
+import PodcastPlayer from "../components/PodcastPlayer.astro";
+import { readConfig, asPodcastProvider } from "../../scripts/config";
+---
+
+<BaseLayout title="Podcast">
+  <PodcastPlayer
+    provider={asPodcastProvider(readConfig("PODCAST_PROVIDER"))}
+    showId={readConfig("PODCAST_SHOW_ID")}
+    rssUrl={readConfig("PODCAST_RSS_URL")}
+  />
+</BaseLayout>

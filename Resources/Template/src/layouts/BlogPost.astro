@@ -1,8 +1,9 @@
 ---
 // BlogPost.astro — layout for an individual blog post. The post route
 // src/pages/blog/[...slug].astro renders through this layout; the Markdown body
-// fills the <slot/>, and the comments anchor in the <article> below is where the
-// giscus integration injects its widget when comments are set up.
+// fills the <slot/>, the share anchor is where the share integration injects its
+// buttons, and the comments anchor is where the giscus integration injects its
+// widget when comments are set up.
 import { Schema } from "astro-seo-schema";
 import { blogPostingSchema } from "../lib/schema.ts";
 import { ownerName } from "../lib/profile.ts";
@@ -39,6 +40,7 @@ const jsonLd = blogPostingSchema(
       {iso && <time class="dt-published" datetime={iso}>{human}</time>}
     </a>
     <div class="e-content"><slot /></div>
+    <!-- anglesite:share -->
     <!-- anglesite:comments -->
   </article>
 </BaseLayout>

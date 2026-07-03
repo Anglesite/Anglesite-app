@@ -49,6 +49,7 @@ public extension IntegrationDescriptor {
 public enum IntegrationCatalog {
     public static let all: [IntegrationDescriptor] = [
         booking, contact, donations, giscus, newsletter, consent, pwa, redirects,
+        tracking, share, podcast,
     ]
 
     public static func descriptor(for id: IntegrationID) -> IntegrationDescriptor {
@@ -339,5 +340,106 @@ public enum IntegrationCatalog {
         ],
         operations: [
             .appendLine(file: "public/_redirects", line: "{{fromPath}} {{toPath}} {{status}}", when: .always),
+        ])
+
+    // MARK: tracking
+    static let tracking = IntegrationDescriptor(
+        id: .tracking,
+        displayName: "Analytics",
+        summary: "Add privacy-friendly visitor analytics (Plausible, Fathom, or Google Analytics 4).",
+        providers: [
+            Provider(id: "plausible", displayName: "Plausible", cspDomains: ["plausible.io"]),
+            Provider(id: "fathom", displayName: "Fathom", cspDomains: ["cdn.usefathom.com"]),
+            // gtag.js loads from googletagmanager.com, but GA4's actual event beacons
+            // (/g/collect) go to google-analytics.com / regional analytics.google.com hosts —
+            // without these, connect-src silently drops every hit once the generated CSP is
+            // enforced (see PR #473 review).
+            Provider(id: "ga4", displayName: "Google Analytics 4",
+                     cspDomains: ["www.googletagmanager.com", "*.google-analytics.com", "*.analytics.google.com"]),
+        ],
+        fields: [
+            Field(key: "domain", label: "Site domain", kind: .text,
+                  help: "Your site's domain as registered with Plausible, e.g. example.com.",
+                  visibleWhen: .providerIs("plausible")),
+            Field(key: "siteId", label: "Fathom Site ID", kind: .text,
+                  help: "Found in your Fathom site settings, e.g. ABCDEFGH.",
+                  visibleWhen: .providerIs("fathom")),
+            Field(key: "measurementId", label: "Measurement ID", kind: .text,
+                  help: "Your GA4 measurement ID, e.g. G-XXXXXXX.",
+                  visibleWhen: .providerIs("ga4")),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/TrackingScript.astro"),
+                      to: "src/components/TrackingScript.astro", when: .always),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "// anglesite:imports",
+                            snippet: "import TrackingScript from \"../components/TrackingScript.astro\";\nimport { readConfig, asTrackingProvider } from \"../../scripts/config\";",
+                            when: .always, style: .line),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:head-end -->",
+                            snippet: "{!!readConfig(\"TRACKING_PROVIDER\") && (<TrackingScript provider={asTrackingProvider(readConfig(\"TRACKING_PROVIDER\"))} domain={readConfig(\"TRACKING_DOMAIN\")} siteId={readConfig(\"TRACKING_SITE_ID\")} measurementId={readConfig(\"TRACKING_MEASUREMENT_ID\")} />)}",
+                            when: .always, style: .html),
+            .writeConfig([
+                ConfigEntry(key: "TRACKING_PROVIDER", value: "{{provider}}"),
+                ConfigEntry(key: "TRACKING_DOMAIN", value: "{{domain}}"),
+                ConfigEntry(key: "TRACKING_SITE_ID", value: "{{siteId}}"),
+                ConfigEntry(key: "TRACKING_MEASUREMENT_ID", value: "{{measurementId}}"),
+            ], when: .always),
+            .addCSPDomains(fromProvider: true, extra: [], fromFieldHost: nil, when: .always),
+        ])
+
+    // MARK: share
+    static let share = IntegrationDescriptor(
+        id: .share,
+        displayName: "Share Buttons",
+        summary: "Let readers share a blog post to X, Mastodon, or LinkedIn, or copy its link.",
+        providers: [],
+        fields: [
+            Field(key: "twitter", label: "Share to X (Twitter)", kind: .bool, defaultValue: "true"),
+            Field(key: "mastodon", label: "Share to Mastodon", kind: .bool, defaultValue: "true"),
+            Field(key: "linkedin", label: "Share to LinkedIn", kind: .bool, defaultValue: "false"),
+            Field(key: "copyLink", label: "Copy-link button", kind: .bool, defaultValue: "true"),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/ShareButtons.astro"),
+                      to: "src/components/ShareButtons.astro", when: .always),
+            .injectAtAnchor(file: "src/layouts/BlogPost.astro", anchor: "// anglesite:imports",
+                            snippet: "import ShareButtons from \"../components/ShareButtons.astro\";\nimport { readConfig } from \"../../scripts/config\";",
+                            when: .always, style: .line),
+            .injectAtAnchor(file: "src/layouts/BlogPost.astro", anchor: "<!-- anglesite:share -->",
+                            snippet: "<ShareButtons title={title} twitter={readConfig(\"SHARE_TWITTER\") === \"true\"} mastodon={readConfig(\"SHARE_MASTODON\") === \"true\"} linkedin={readConfig(\"SHARE_LINKEDIN\") === \"true\"} copyLink={readConfig(\"SHARE_COPY_LINK\") === \"true\"} />",
+                            when: .always, style: .html),
+            .writeConfig([
+                ConfigEntry(key: "SHARE_TWITTER", value: "{{twitter}}"),
+                ConfigEntry(key: "SHARE_MASTODON", value: "{{mastodon}}"),
+                ConfigEntry(key: "SHARE_LINKEDIN", value: "{{linkedin}}"),
+                ConfigEntry(key: "SHARE_COPY_LINK", value: "{{copyLink}}"),
+            ], when: .always),
+        ])
+
+    // MARK: podcast
+    static let podcast = IntegrationDescriptor(
+        id: .podcast,
+        displayName: "Podcast",
+        summary: "Embed your podcast's episode player (Spotify or Transistor.fm) on a /podcast page.",
+        providers: [
+            Provider(id: "spotify", displayName: "Spotify", cspDomains: ["open.spotify.com"]),
+            Provider(id: "transistor", displayName: "Transistor.fm", cspDomains: ["share.transistor.fm"]),
+        ],
+        fields: [
+            Field(key: "showId", label: "Show ID", kind: .text,
+                  help: "Spotify: the show ID from open.spotify.com/show/XXXX. Transistor: the share ID from share.transistor.fm/s/XXXX."),
+            Field(key: "rssUrl", label: "RSS feed URL", kind: .url, isOptional: true,
+                  help: "Optional link to your podcast's raw RSS feed, for other podcast apps."),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/PodcastPlayer.astro"),
+                      to: "src/components/PodcastPlayer.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/pages/podcast.astro"),
+                      to: "src/pages/podcast.astro", when: .always),
+            .writeConfig([
+                ConfigEntry(key: "PODCAST_PROVIDER", value: "{{provider}}"),
+                ConfigEntry(key: "PODCAST_SHOW_ID", value: "{{showId}}"),
+                ConfigEntry(key: "PODCAST_RSS_URL", value: "{{rssUrl}}"),
+            ], when: .always),
+            .addCSPDomains(fromProvider: true, extra: [], fromFieldHost: nil, when: .always),
         ])
 }
