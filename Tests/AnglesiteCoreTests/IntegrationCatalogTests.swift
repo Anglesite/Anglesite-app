@@ -7,6 +7,9 @@ import Testing
         #expect(Set(IntegrationCatalog.all.map(\.id)) == Set([
             .booking, .contact, .donations, .giscus, .newsletter, .consent, .pwa, .redirects,
             .tracking, .share, .podcast,
+            .indieweb, .menu,
+            .buyButton, .lemonSqueezy, .paddle, .snipcart, .shopifyBuyButton,
+            .domain,
         ]))
     }
 
@@ -278,6 +281,86 @@ import Testing
         #expect(Set(podcast.providers.map(\.id)) == Set(["spotify", "transistor"]))
         let keys = writtenConfigKeys(for: podcast)
         #expect(keys.isSuperset(of: ["PODCAST_PROVIDER", "PODCAST_SHOW_ID", "PODCAST_RSS_URL"]))
+    }
+
+    @Test func indiewebHasNoProvidersAndWritesRelMeAndWebmentionKeys() {
+        let indieweb = IntegrationCatalog.descriptor(for: .indieweb)
+        #expect(indieweb.providers.isEmpty)
+        let keys = writtenConfigKeys(for: indieweb)
+        #expect(keys.isSuperset(of: ["INDIEWEB_REL_ME_1", "INDIEWEB_REL_ME_2", "INDIEWEB_REL_ME_3", "INDIEWEB_WEBMENTION_USERNAME"]))
+    }
+
+    @Test func menuWritesAllFourItemPairs() {
+        let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .menu))
+        #expect(keys.isSuperset(of: [
+            "MENU_ITEM_1_LABEL", "MENU_ITEM_1_PATH", "MENU_ITEM_2_LABEL", "MENU_ITEM_2_PATH",
+            "MENU_ITEM_3_LABEL", "MENU_ITEM_3_PATH", "MENU_ITEM_4_LABEL", "MENU_ITEM_4_PATH",
+        ]))
+    }
+
+    @Test func menuInjectsIntoBaseLayoutAtDedicatedNavAnchor() {
+        let menu = IntegrationCatalog.descriptor(for: .menu)
+        let hasNavAnchorInject = menu.operations.contains {
+            if case .injectAtAnchor(let file, let anchor, _, _, _) = $0 {
+                return file.raw == "src/layouts/BaseLayout.astro" && anchor == "<!-- anglesite:nav -->"
+            }
+            return false
+        }
+        #expect(hasNavAnchorInject)
+    }
+
+    @Test func buyButtonHasStripeAndPolarProvidersWithCSPFromProvider() {
+        let buyButton = IntegrationCatalog.descriptor(for: .buyButton)
+        #expect(Set(buyButton.providers.map(\.id)) == Set(["stripe", "polar"]))
+        let hasAddCSP = buyButton.operations.contains {
+            if case .addCSPDomains(let fromProvider, _, _, _) = $0 { return fromProvider }
+            return false
+        }
+        #expect(hasAddCSP)
+    }
+
+    @Test func lemonSqueezyHasNoProvidersAndDeclaresCSPDomains() {
+        let lemonSqueezy = IntegrationCatalog.descriptor(for: .lemonSqueezy)
+        #expect(lemonSqueezy.providers.isEmpty)
+        let cspDomains = lemonSqueezy.operations.compactMap { op -> [String]? in
+            if case .addCSPDomains(_, let extra, _, _) = op { return extra }
+            return nil
+        }.flatMap { $0 }
+        #expect(Set(cspDomains) == Set(["assets.lemonsqueezy.com", "app.lemonsqueezy.com"]))
+    }
+
+    @Test func paddleWritesClientTokenPriceIdAndButtonText() {
+        let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .paddle))
+        #expect(keys.isSuperset(of: ["PADDLE_CLIENT_TOKEN", "PADDLE_PRICE_ID", "PADDLE_BUTTON_TEXT"]))
+    }
+
+    @Test func snipcartInjectsCartContainerAtBodyEndGatedOnApiKey() {
+        let snipcart = IntegrationCatalog.descriptor(for: .snipcart)
+        let bodyEndInject = snipcart.operations.first {
+            if case .injectAtAnchor(_, let anchor, _, _, _) = $0 { return anchor == "<!-- anglesite:body-end -->" }
+            return false
+        }
+        guard case .injectAtAnchor(_, _, let snippet, _, _)? = bodyEndInject else {
+            Issue.record("expected a body-end inject"); return
+        }
+        #expect(snippet.raw.contains("readConfig(\"SNIPCART_API_KEY\")"))
+    }
+
+    @Test func shopifyBuyButtonWritesDomainTokenAndProductId() {
+        let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .shopifyBuyButton))
+        #expect(keys.isSuperset(of: ["SHOPIFY_DOMAIN", "SHOPIFY_STOREFRONT_TOKEN", "SHOPIFY_PRODUCT_ID"]))
+    }
+
+    @Test func domainHasNoProvidersAndWritesDomainNameAndCopiesSetupDoc() {
+        let domain = IntegrationCatalog.descriptor(for: .domain)
+        #expect(domain.providers.isEmpty)
+        let keys = writtenConfigKeys(for: domain)
+        #expect(keys.contains("DOMAIN_NAME"))
+        let copiesSetupDoc = domain.operations.contains {
+            if case .copyFile(let from, _, _) = $0 { return from.path == "integrations/docs/domain-setup.md" }
+            return false
+        }
+        #expect(copiesSetupDoc)
     }
 
     private func writtenConfigKeys(for d: IntegrationDescriptor) -> Set<String> {

@@ -41,13 +41,20 @@ import Foundation
                   "integrations/components/InstallPrompt.astro",
                   "integrations/components/TrackingScript.astro", "integrations/components/ShareButtons.astro",
                   "integrations/components/PodcastPlayer.astro",
+                  "integrations/components/Nav.astro",
+                  "integrations/components/BuyButton.astro", "integrations/components/LemonSqueezyButton.astro",
+                  "integrations/components/PaddleCheckout.astro", "integrations/components/SnipcartButton.astro",
+                  "integrations/components/ShopifyBuyButton.astro",
                   "integrations/pages/book.astro", "integrations/pages/donate.astro", "integrations/pages/contact.astro",
                   "integrations/pages/subscribe.astro", "integrations/pages/subscribe/thanks.astro",
                   "integrations/pages/manifest.webmanifest.ts", "integrations/pages/offline.astro",
                   "integrations/pages/podcast.astro",
+                  "integrations/pages/buy.astro", "integrations/pages/shop.astro", "integrations/pages/pricing.astro",
+                  "integrations/pages/store.astro", "integrations/pages/products.astro",
                   "integrations/public/sw.js",
                   "integrations/worker/subscribe-worker.js", "integrations/worker/subscribe-wrangler.toml",
-                  "integrations/docs/newsletter-setup.md", "integrations/docs/pwa-setup.md"] {
+                  "integrations/docs/newsletter-setup.md", "integrations/docs/pwa-setup.md",
+                  "integrations/docs/domain-setup.md"] {
             #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "missing staged \(p)")
         }
         // NOT base-scaffolded: every staged asset must be absent from src/ (covers all five —
@@ -58,12 +65,18 @@ import Foundation
                   "src/components/InstallPrompt.astro",
                   "src/components/TrackingScript.astro", "src/components/ShareButtons.astro",
                   "src/components/PodcastPlayer.astro",
+                  "src/components/Nav.astro",
+                  "src/components/BuyButton.astro", "src/components/LemonSqueezyButton.astro",
+                  "src/components/PaddleCheckout.astro", "src/components/SnipcartButton.astro",
+                  "src/components/ShopifyBuyButton.astro",
                   "src/pages/book.astro", "src/pages/donate.astro", "src/pages/contact.astro",
                   "src/pages/subscribe.astro", "src/pages/subscribe/thanks.astro",
                   "src/pages/manifest.webmanifest.ts", "src/pages/offline.astro", "public/sw.js",
                   "src/pages/podcast.astro",
+                  "src/pages/buy.astro", "src/pages/shop.astro", "src/pages/pricing.astro",
+                  "src/pages/store.astro", "src/pages/products.astro",
                   "worker/subscribe-worker.js", "worker/subscribe-wrangler.toml",
-                  "docs/newsletter-setup.md", "docs/pwa-setup.md"] {
+                  "docs/newsletter-setup.md", "docs/pwa-setup.md", "docs/domain-setup.md"] {
             #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "should be staged, not in src: \(p)")
         }
     }
@@ -72,6 +85,7 @@ import Foundation
         let root = templateRoot()
         let base = try String(contentsOf: root.appendingPathComponent("src/layouts/BaseLayout.astro"), encoding: .utf8)
         #expect(base.contains("// anglesite:imports"))
+        #expect(base.contains("<!-- anglesite:nav -->"))
         #expect(base.contains("<!-- anglesite:body-end -->"))
         #expect(base.contains("<!-- anglesite:head-end -->"))
         let blog = try String(contentsOf: root.appendingPathComponent("src/layouts/BlogPost.astro"), encoding: .utf8)
@@ -191,5 +205,41 @@ import Foundation
             let unknown = referenced.subtracting(pwaWritten)
             #expect(unknown.isEmpty, "\(p) references config keys not written by pwa descriptor: \(unknown.sorted())")
         }
+
+        // Buy button: integrations/pages/buy.astro
+        let buyURL = root.appendingPathComponent("integrations/pages/buy.astro")
+        let buySource = try String(contentsOf: buyURL, encoding: .utf8)
+        let buyReferenced = readConfigKeysReferenced(in: buySource)
+        let buyWritten = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .buyButton))
+        let buyUnknown = buyReferenced.subtracting(buyWritten)
+        #expect(buyUnknown.isEmpty,
+            "buy.astro references config keys not written by buyButton descriptor: \(buyUnknown.sorted())")
+
+        // Lemon Squeezy: integrations/pages/shop.astro
+        let shopURL = root.appendingPathComponent("integrations/pages/shop.astro")
+        let shopSource = try String(contentsOf: shopURL, encoding: .utf8)
+        let shopReferenced = readConfigKeysReferenced(in: shopSource)
+        let shopWritten = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .lemonSqueezy))
+        let shopUnknown = shopReferenced.subtracting(shopWritten)
+        #expect(shopUnknown.isEmpty,
+            "shop.astro references config keys not written by lemonSqueezy descriptor: \(shopUnknown.sorted())")
+
+        // Paddle: integrations/pages/pricing.astro
+        let pricingURL = root.appendingPathComponent("integrations/pages/pricing.astro")
+        let pricingSource = try String(contentsOf: pricingURL, encoding: .utf8)
+        let pricingReferenced = readConfigKeysReferenced(in: pricingSource)
+        let pricingWritten = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .paddle))
+        let pricingUnknown = pricingReferenced.subtracting(pricingWritten)
+        #expect(pricingUnknown.isEmpty,
+            "pricing.astro references config keys not written by paddle descriptor: \(pricingUnknown.sorted())")
+
+        // Shopify Buy Button: integrations/pages/products.astro
+        let productsURL = root.appendingPathComponent("integrations/pages/products.astro")
+        let productsSource = try String(contentsOf: productsURL, encoding: .utf8)
+        let productsReferenced = readConfigKeysReferenced(in: productsSource)
+        let productsWritten = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .shopifyBuyButton))
+        let productsUnknown = productsReferenced.subtracting(productsWritten)
+        #expect(productsUnknown.isEmpty,
+            "products.astro references config keys not written by shopifyBuyButton descriptor: \(productsUnknown.sorted())")
     }
 }
