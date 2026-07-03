@@ -163,7 +163,12 @@ public struct ContainerizationControl: LocalContainerControl {
     /// `sourceRepo: nil` boots a bare container (no virtio-fs share) — used by the vsock e2e test.
     /// Does NOT register the container in `live` — the caller owns its lifecycle (either `start()`'s
     /// own phases 3–6 followed by `live.store`, or a test calling `stopBareContainer` directly).
-    internal func makeBareContainer(siteID: String, sourceRepo: URL? = nil) async throws -> LinuxContainer {
+    ///
+    /// `public` (rather than `internal`) so `anglesite-container-probe` — a standalone executable
+    /// that can't `@testable import` — can drive the same bare-boot path entitled with
+    /// `com.apple.security.virtualization`, which `swift test`'s own runner can never carry. Still
+    /// not part of the `LocalContainerControl` protocol seam; only test/probe code calls it directly.
+    public func makeBareContainer(siteID: String, sourceRepo: URL? = nil) async throws -> LinuxContainer {
         // 0. Resolve the writable image store + boot artifacts. Missing artifacts are typed
         //    provisioning errors, surfaced as `imageUnavailable` instead of a silent mis-boot.
         let storeURL: URL
@@ -270,7 +275,9 @@ public struct ContainerizationControl: LocalContainerControl {
     /// `start()`'s own error paths and `LiveContainers.teardown` perform: stop the VM first (releases
     /// the file handles), then remove the backing rootfs/initfs ext4 images. Best-effort — errors from
     /// `container.stop()` are swallowed, matching every other teardown path in this file.
-    internal func stopBareContainer(_ container: LinuxContainer, siteID: String) async {
+    ///
+    /// `public` alongside `makeBareContainer` — see its doc comment.
+    public func stopBareContainer(_ container: LinuxContainer, siteID: String) async {
         try? await container.stop()
         guard let storeURL = try? BundledImage.storeURL() else { return }
         try? FileManager.default.removeItem(at: storeURL.appendingPathComponent("rootfs-\(siteID).ext4"))
@@ -504,7 +511,10 @@ public struct ContainerizationControl: LocalContainerControl {
     /// and then iterates `vendedProcesses` calling `_delete()` on each before stopping the VM
     /// (`LinuxContainer.swift:803` and `:835-851`). Every `exec`'d process is registered in
     /// `vendedProcesses`, so stopping the container cleans them all up — no per-process tracking needed.
-    internal func runDetached(
+    ///
+    /// `public` alongside `makeBareContainer`/`stopBareContainer` — see `makeBareContainer`'s doc
+    /// comment. The vsock echo probe/test use this to start the guest `socat` echo listener.
+    public func runDetached(
         _ container: LinuxContainer,
         id: String,
         label: String,

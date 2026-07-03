@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Entitlements for the standalone `anglesite-container-probe` CLI (scripts/run-container-probe.sh).
+
+      swiftpm-testing-helper (the process `swift test` actually runs) is not, and cannot be,
+      entitled with com.apple.security.virtualization — so `swift test` alone can never reach
+      the live vsock/boot gate for AnglesiteContainer (VM creation fails before dialVsock is ever
+      called). This probe is a separate signed executable that links AnglesiteContainer directly
+      and carries just the one entitlement needed to create and start a VZVirtualMachine.
+    -->
+
+    <key>com.apple.security.virtualization</key><true/>
+</dict>
+</plist>

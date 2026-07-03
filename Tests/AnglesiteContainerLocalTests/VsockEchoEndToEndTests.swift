@@ -2,6 +2,9 @@ import Foundation
 import Testing
 @testable import AnglesiteContainer
 
+// On a stock toolchain, `swift test` cannot grant `com.apple.security.virtualization` to its own
+// runner — use `scripts/run-container-probe.sh echo` to run this same round-trip entitled.
+
 /// Minimal synthetic repro for the #69 vsock handshake mystery: no git, no npm, no astro —
 /// one guest socat echo listener on an AF_VSOCK port, one host dialVsock, assert bytes
 /// round-trip. If THIS fails, the bug is in the framework/kernel vsock path and this file

@@ -114,6 +114,23 @@ if includeContainer {
             swiftSettings: strictConcurrency
         )
     )
+    // Standalone, individually-codesignable CLI so the live vsock/boot gate can run entitled
+    // with `com.apple.security.virtualization` (see Resources/container-probe.entitlements and
+    // scripts/run-container-probe.sh) — `swift test`'s own runner (swiftpm-testing-helper) can
+    // never carry that entitlement. Included under the same `includeContainer` conditional as
+    // AnglesiteContainer itself so CI (ANGLESITE_SKIP_CONTAINER=1) never sees it.
+    packageTargets.append(
+        .executableTarget(
+            name: "AnglesiteContainerProbe",
+            dependencies: [
+                "AnglesiteContainer",
+                "AnglesiteCore",
+                .product(name: "Containerization", package: "containerization")
+            ],
+            path: "Sources/AnglesiteContainerProbe",
+            swiftSettings: strictConcurrency
+        )
+    )
 }
 
 #if compiler(>=6.4)
@@ -160,6 +177,7 @@ var packageDependencies: [Package.Dependency] = []
 // package/product, included by default otherwise.
 if includeContainer {
     packageProducts.append(.library(name: "AnglesiteContainer", targets: ["AnglesiteContainer"]))
+    packageProducts.append(.executable(name: "anglesite-container-probe", targets: ["AnglesiteContainerProbe"]))
     packageDependencies.append(
         .package(url: "https://github.com/apple/containerization.git", .upToNextMinor(from: "0.35.0"))
     )
