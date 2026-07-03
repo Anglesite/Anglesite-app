@@ -175,19 +175,10 @@ public actor AuditCommand {
 
     // MARK: - Default seams
 
-    /// Reuses `DeployCommand`'s vendored-npm resolution: `npm run build` via the
-    /// embedded Node. Identical to `DeployCommand.resolveBuildCommand` — kept here
-    /// rather than pulled into a shared helper so each command's defaults are
-    /// self-contained and obvious.
+    /// Host Node is retired (#70). Audits must run through the container runtime once validation
+    /// lands; until then the command fails explicitly instead of spawning embedded Node.
     public static let resolveBuildCommand: CommandResolver = { siteDirectory in
-        guard let node = NodeRuntime.bundledExecutableURL else {
-            return .unavailable(reason: "the embedded Node runtime isn't bundled (rebuild the app)")
-        }
-        let npm = node.deletingLastPathComponent().appendingPathComponent("npm")
-        guard FileManager.default.isExecutableFile(atPath: npm.path) else {
-            return .unavailable(reason: "vendored npm not found — rebuild the app")
-        }
-        return .run(executable: node, arguments: [npm.path, "run", "build"])
+        .unavailable(reason: HostNodeRetirement.reason("audit build"))
     }
 
     /// Default runner set. Starts with just `A11yAuditRunner`; SEO / perf / link-check

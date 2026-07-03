@@ -2,7 +2,7 @@
 #
 # Mac App Store release pipeline for the Anglesite target.
 #
-# Archives the sandboxed Anglesite scheme, verifies the bundled-Node re-sign survived
+# Archives the sandboxed Anglesite scheme, verifies the archived app's signature survived
 # the archive, then hands the App Store .pkg (signed with the Apple Distribution +
 # Mac Installer Distribution identities) to App Store Connect via
 # `xcodebuild -exportArchive` with `destination: upload`. (App Store Connect stopped
@@ -165,24 +165,15 @@ xcodebuild \
     archive
 [[ -d "$ARCHIVE_PATH" ]] || bail "archive produced no .xcarchive at $ARCHIVE_PATH"
 
-# --- Verify the bundled-Node re-sign survived the archive --------------------
-# resign-node.sh runs as a post-build phase; confirm the embedded Node is signed with a
-# hardened runtime and the same team as the app, before we wrap it in the installer .pkg.
-step "3/5 verify bundled-Node re-sign"
+# --- Verify the app signature survived the archive ---------------------------
+step "3/5 verify archived app signature"
 ARCHIVED_APP="$ARCHIVE_PATH/Products/Applications/Anglesite.app"
-NODE_BIN="$ARCHIVED_APP/Contents/Resources/node-runtime/bin/node"
-if [[ -f "$NODE_BIN" ]]; then
-    codesign --verify --strict --verbose=2 "$NODE_BIN" \
-        || bail "bundled Node failed codesign --verify. The resign-node.sh post-build phase did not hold through archive."
-    node_team="$(codesign -dvv "$NODE_BIN" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
-    [[ "$node_team" == "$TEAM_ID" ]] \
-        || bail "bundled Node TeamIdentifier '$node_team' != app team '$TEAM_ID' — bundle seal/App Store acceptance would fail."
-    codesign -d --entitlements - --xml "$NODE_BIN" 2>/dev/null | grep -q "com.apple.security.cs.allow-jit" \
-        && echo "  node: signed, team=$node_team, JIT entitlement present" \
-        || echo "  node: signed, team=$node_team (no JIT entitlement — confirm intended)"
-else
-    echo "  no bundled Node at $NODE_BIN — node-runtime is an optional resource; skipping."
-fi
+codesign --verify --strict --verbose=2 "$ARCHIVED_APP" \
+    || bail "archived app failed codesign --verify."
+app_team="$(codesign -dvv "$ARCHIVED_APP" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+[[ "$app_team" == "$TEAM_ID" ]] \
+    || bail "app TeamIdentifier '$app_team' != expected team '$TEAM_ID'."
+echo "  app: signed, team=$app_team"
 
 # --- Export (and, unless --validate-only, upload) -----------------------------
 # With `destination: upload` in the export options, this single xcodebuild call

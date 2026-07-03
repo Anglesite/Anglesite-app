@@ -6,10 +6,10 @@ The app does not replace the plugin — it embeds it. Scaffolding, edits, deploy
 
 ## Status
 
-**Pre-release.** The v0 → v1 core is built (Phases 0–9): embedded Node runtime, plugin/site plumbing, supervised subprocesses, the WKWebView live preview with click-to-edit overlay routed through the plugin's MCP server, deploy via `wrangler` (with the plugin's mandatory pre-deploy scan), Keychain/`gh` credentials, the per-site chat panel, multi-window, the deploy-readiness health badge, image-drop optimization, and per-edit undo.
+**Pre-release.** The v0 → v1 core is built (Phases 0–9): plugin/site plumbing, supervised subprocesses, the WKWebView live preview with click-to-edit overlay routed through the plugin's MCP server, deploy via `wrangler` (with the plugin's mandatory pre-deploy scan), Keychain/`gh` credentials, the per-site chat panel, multi-window, the deploy-readiness health badge, image-drop optimization, and per-edit undo.
 
 In progress (Phase 10, v2 polish):
-- **Mac App Store build.** `Anglesite` is the single sandboxed app target (`io.dwk.anglesite`). The old direct-download target has been retired. The bundled Node is re-signed with hardened-runtime JIT/sandbox entitlements, and local Apple Containerization is the macOS runtime direction.
+- **Mac App Store build.** `Anglesite` is the single sandboxed app target (`io.dwk.anglesite`). The old direct-download target has been retired. The host-side embedded Node runtime has been retired (#70); local Apple Containerization is the macOS runtime direction.
 - **Apple Help Book** — shipped. 15 hand-authored HTML pages with `hiutil` search index, accessible via Help ▸ Anglesite Help.
 
 Also landed since v1:
@@ -31,7 +31,7 @@ See [`docs/build-plan.md`](docs/build-plan.md) for the full phased status.
 - macOS 27+
 - Xcode 27+ (Swift 6.4; required for the SwiftUI 27 `@State` macro semantics audited in [`docs/specs/2026-06-10-xcode27-state-macro-audit-notes.md`](docs/specs/2026-06-10-xcode27-state-macro-audit-notes.md))
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`) — the `.xcodeproj` is generated from [`project.yml`](project.yml)
-- A bundled Node.js runtime is shipped with the app — users do not need Node installed.
+- The host-side embedded Node runtime has been retired (#70) — dev-server, build, and deploy commands run in a container runtime instead, so users do not need Node installed.
 
 ## Building
 
@@ -39,9 +39,6 @@ See [`docs/build-plan.md`](docs/build-plan.md) for the full phased status.
 # Clone alongside the plugin repo
 git clone https://github.com/Anglesite/Anglesite-app.git
 cd Anglesite-app
-
-# Vendor the bundled Node runtime (version pinned in scripts/node-version.txt)
-scripts/vendor-node.sh
 
 # Generate the Xcode project
 xcodegen generate

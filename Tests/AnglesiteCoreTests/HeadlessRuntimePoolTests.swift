@@ -86,6 +86,14 @@ struct HeadlessRuntimePoolTests {
         #expect(await pool.cachedSiteIDs.isEmpty)
     }
 
+    @Test("default runtime is unavailable after host Node retirement")
+    func defaultRuntimeUnavailable() async {
+        let pool = HeadlessRuntimePool()
+        let runtime = await pool.runtime(siteID: "s1", siteDirectory: dir)
+        #expect(runtime == nil)
+        #expect(await pool.cachedSiteIDs.isEmpty)
+    }
+
     @Test("an expired runtime is torn down and a fresh one spawned on the next request")
     func ttlExpiryTearsDownAndRespawns() async {
         let clock = Clock(t0)

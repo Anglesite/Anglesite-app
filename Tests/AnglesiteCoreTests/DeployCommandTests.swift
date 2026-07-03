@@ -71,6 +71,22 @@ struct DeployCommandTests {
            : #"{"ok":false,"failures":[{"category":"pii-email","file":"dist/index.html","detail":"email","remediation":"wrap it"}],"warnings":[]}"#
     }
 
+    @Test("default host resolvers fail explicitly after host Node retirement")
+    func defaultHostResolversUnavailable() async {
+        #expect(
+            DeployCommand.resolveBuildCommand(tmpDir)
+                == .unavailable(reason: "site build must run in the container runtime; host Node has been retired")
+        )
+        #expect(
+            DeployCommand.resolveWranglerCommand(tmpDir)
+                == .unavailable(reason: "wrangler deploy must run in the container runtime; host Node has been retired")
+        )
+        #expect(
+            await DeployCommand.defaultPreflight(tmpDir)
+                == .error(reason: "pre-deploy check must run in the container runtime; host Node has been retired")
+        )
+    }
+
     // MARK: Full flow through the fake executor
 
     @Test("Drives build → preflight → wrangler and succeeds with the extracted URL")

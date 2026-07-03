@@ -159,13 +159,13 @@ final class SiteScaffolderTests: XCTestCase {
         XCTAssertEqual(step, "copyingTemplate")
     }
 
-    func testNpmFailureIsNonFatalAndStillRegisters() async throws {
+    func testGitInitFailureIsNonFatalAndStillRegisters() async throws {
         let root = tmpDir()
         let registered = OSAllocatedUnfairLock<Bool>(initialState: false)
         let scaffolder = SiteScaffolder(
             sitesRoot: root, templateURL: URL(fileURLWithPath: "/template"), catalog: ThemeCatalog(themes: [theme]),
-            run: fakeRunner(npmExit: 1, calls: CallRecorder()),
-            gitInit: { _ in },
+            run: fakeRunner(calls: CallRecorder()),
+            gitInit: { _ in throw CocoaError(.fileWriteUnknown) },
             register: { pkg in
                 registered.withLock { $0 = true }
                 return try SiteStore.Site.make(package: pkg)
@@ -173,9 +173,9 @@ final class SiteScaffolderTests: XCTestCase {
         )
         var steps: [SiteScaffolder.ScaffoldStep] = []
         for await s in scaffolder.scaffold(makeDraft()) { steps.append(s) }
-        XCTAssertTrue(registered.withLock { $0 }, "npm failure should not block registration")
-        XCTAssertTrue(steps.contains { if case .warning(let s, _) = $0 { return s == "installing" }; return false })
-        guard case .done? = steps.last else { return XCTFail("expected .done despite npm failure") }
+        XCTAssertTrue(registered.withLock { $0 }, "git init failure should not block registration")
+        XCTAssertTrue(steps.contains { if case .warning(let s, _) = $0 { return s == "copyingTemplate" }; return false })
+        guard case .done? = steps.last else { return XCTFail("expected .done despite git init failure") }
     }
 }
 

@@ -278,43 +278,12 @@ public actor SocialWorkerProvisionCommand {
     }
 
     public static let defaultRunner: CommandRunner = { siteDirectory, arguments, environment, source in
-        let wranglerBin = siteDirectory
-            .appendingPathComponent("node_modules", isDirectory: true)
-            .appendingPathComponent(".bin", isDirectory: true)
-            .appendingPathComponent("wrangler")
-        guard FileManager.default.isExecutableFile(atPath: wranglerBin.path) else {
-            return ProcessSupervisor.RunResult(
-                stdout: "wrangler not installed — run `npm install` in this site",
-                stderr: "",
-                exitCode: 127
-            )
-        }
-        guard let node = NodeRuntime.bundledExecutableURL else {
-            return ProcessSupervisor.RunResult(
-                stdout: "the embedded Node runtime isn't bundled (rebuild the app)",
-                stderr: "",
-                exitCode: 127
-            )
-        }
-
-        let result = try await ProcessSupervisor.shared.run(
-            executable: node,
-            arguments: [wranglerBin.path] + arguments,
-            environment: environment,
-            currentDirectoryURL: siteDirectory
-        )
-        await append(result.stdout, source: source, stream: .stdout)
-        await append(result.stderr, source: source, stream: .stderr)
-        return result
+        let reason = HostNodeRetirement.reason("social worker provisioning")
+        await LogCenter.shared.append(source: source, stream: .stderr, text: reason)
+        return ProcessSupervisor.RunResult(stdout: reason, stderr: "", exitCode: 127)
     }
 
     public static let defaultDeployer: Deployer = { token, siteID, siteDirectory in
         await DeployCommand(tokenSource: { token }).deploy(siteID: siteID, siteDirectory: siteDirectory)
-    }
-
-    private static func append(_ text: String, source: String, stream: LogCenter.Stream) async {
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) where !line.isEmpty {
-            await LogCenter.shared.append(source: source, stream: stream, text: String(line))
-        }
     }
 }
