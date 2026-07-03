@@ -131,6 +131,11 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             activeSiteID = siteID
             setState(.ready(siteID: siteID, url: session.previewURL))
         } catch {
+            // Finish the boot log stream immediately rather than leaving it for the next start()/
+            // stop() call to clean up via teardown() — every other exit path in this method is
+            // scrupulous about this, and control.start() has already stopped the container on its
+            // own failure paths, so no further guest output can arrive here.
+            await finishBootLogStream()
             guard gen == generation else { return }
             setState(.failed(siteID: siteID, message: Self.friendlyMessage(for: error)))
         }
@@ -160,8 +165,16 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             activeSiteID = nil
         }
         // Stop the container first (above) so no more guest output can arrive, then finish the
-        // stream and await the drain so any already-buffered lines land in LogCenter before this
-        // returns — mirrors ContainerDeployExecutor's finish-then-await-drain discipline.
+        // stream — see finishBootLogStream().
+        await finishBootLogStream()
+    }
+
+    /// Finishes the boot-log continuation and awaits its drain task so any already-buffered lines
+    /// land in `LogCenter` before returning — mirrors `ContainerDeployExecutor`'s finish-then-await-
+    /// drain discipline. Idempotent (safe to call when nothing is running). Called from both
+    /// `teardown()` and `start()`'s catch block, so a failed start cleans up its own stream
+    /// immediately rather than leaking it to whatever the next `start()`/`stop()` happens to be.
+    private func finishBootLogStream() async {
         if let continuation = bootLogContinuation {
             continuation.finish()
             bootLogContinuation = nil

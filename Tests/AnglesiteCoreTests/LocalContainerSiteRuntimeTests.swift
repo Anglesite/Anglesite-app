@@ -57,6 +57,39 @@ struct LocalContainerSiteRuntimeTests {
         } else { Issue.record("expected .failed, got \(await rt.state)") }
     }
 
+    /// Regression test: the boot-log stream must be finished immediately when `control.start()`
+    /// throws, not left for the next `start()`/`stop()` call's `teardown()` to clean up. Verifies
+    /// this by checking the failure path delivers its lines through the SAME live subscription
+    /// discipline as the success path (startStreamsBootOutputToLogCenter below) — if the catch block
+    /// didn't finish the continuation, the drain task would still be running, but the lines would
+    /// still arrive; the meaningful assertion is that this settles (doesn't hang collecting) and
+    /// delivers exactly the lines the fake emitted before throwing.
+    @Test("a failed start still delivers its boot output to LogCenter before settling to .failed")
+    func startFailedStillStreamsBootOutput() async {
+        let fake = FakeLocalContainerControl(
+            startResult: .failure(.bootFailed("vm refused to boot")),
+            startStdoutLines: ["unpacking rootfs", "vm boot failed"])
+        let logCenter = LogCenter()
+        let subscription = await logCenter.subscribe()
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let rt = LocalContainerSiteRuntime(
+            ref: "HEAD", control: fake, mcpClient: mcp, logCenter: logCenter, connect: { _, _ in })
+
+        await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+
+        var collected: [LogCenter.LogLine] = []
+        for await line in subscription.stream {
+            collected.append(line)
+            if collected.count == 2 { break }
+        }
+        subscription.cancel()
+
+        #expect(collected.map(\.text) == ["unpacking rootfs", "vm boot failed"])
+        if case .failed(let id, _) = await rt.state {
+            #expect(id == "s1")
+        } else { Issue.record("expected .failed, got \(await rt.state)") }
+    }
+
     @Test("start streams the control's boot output into LogCenter under container:<siteID>")
     func startStreamsBootOutputToLogCenter() async {
         let fake = FakeLocalContainerControl(

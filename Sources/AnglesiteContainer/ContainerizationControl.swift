@@ -427,12 +427,32 @@ public struct ContainerizationControl: LocalContainerControl {
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
         addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+
+        // Non-blocking connect with a bounded (2s) deadline: a plain blocking connect() has no
+        // timeout of its own — SO_RCVTIMEO/SO_SNDTIMEO above only bound the read()/write() below —
+        // so a stuck handshake could hang this probe well past its intended ~500ms poll cadence.
+        let flags = fcntl(fd, F_GETFL, 0)
+        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
         let connectRC = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        guard connectRC == 0 else { return "connect() failed: errno=\(errno)" }
+        if connectRC != 0 {
+            guard errno == EINPROGRESS else { return "connect() failed: errno=\(errno)" }
+            var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            let pollRC = poll(&pfd, 1, 2000)
+            guard pollRC > 0 else {
+                return pollRC == 0 ? "connect() timed out after 2s" : "poll() failed: errno=\(errno)"
+            }
+            var soError: Int32 = 0
+            var soErrorLen = socklen_t(MemoryLayout<Int32>.size)
+            getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &soErrorLen)
+            guard soError == 0 else { return "connect() failed: errno=\(soError)" }
+        }
+        // Restore blocking mode: the read()/write() below rely on SO_RCVTIMEO/SO_SNDTIMEO, which
+        // only bound blocking calls (a non-blocking read/write would just return EAGAIN instantly).
+        _ = fcntl(fd, F_SETFL, flags)
 
         let request = Array("GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n".utf8)
         let sent = request.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
@@ -566,10 +586,23 @@ final class EventRateLimiter: @unchecked Sendable {
     private let lock = NSLock()
     private var counts: [String: Int] = [:]
 
+    /// Rate-limits by a key derived from `message` — everything before the first `": "` — rather
+    /// than the full string. Callers interpolate variable detail after a colon (an error's
+    /// description, an errno value's underlying message, etc.); keying on the full text would let
+    /// that detail vary per occurrence and fragment the count into one dictionary entry per call,
+    /// silently defeating the throttle (and growing `counts` unboundedly) for exactly the messages
+    /// most likely to repeat during a real failure storm.
     func log(_ message: String, onOutput: @Sendable (String, LogCenter.Stream) -> Void) {
+        let key: String
+        if let colonSpace = message.range(of: ": ") {
+            key = String(message[..<colonSpace.lowerBound])
+        } else {
+            key = message
+        }
+
         lock.lock()
-        let count = (counts[message] ?? 0) + 1
-        counts[message] = count
+        let count = (counts[key] ?? 0) + 1
+        counts[key] = count
         lock.unlock()
 
         guard count <= 5 || count % 100 == 0 else { return }
