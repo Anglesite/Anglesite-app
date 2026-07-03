@@ -258,6 +258,47 @@ import Foundation
         #expect(!r.steps.contains { if case .createFile(let p, _) = $0 { return p == "src/pages/book.astro" }; return false })
     }
 
+    @Test func redirectsProducesAppendLineStepToRedirectsFile() throws {
+        let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .redirects),
+            answers: ["fromPath": "/old", "toPath": "/new", "status": "301"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
+        guard case .appendLine(let path, let line)? = r.steps.first else {
+            Issue.record("expected a single appendLine step, got \(r.steps)")
+            return
+        }
+        #expect(path == "public/_redirects")
+        #expect(line == "/old /new 301")
+    }
+
+    @Test func siteNameWarningFiresOnlyWhenReferencedAndFallsBackWhenMissing() throws {
+        let desc = IntegrationDescriptor(
+            id: .pwa, displayName: "SiteNameTest", summary: "",
+            providers: [], fields: [],
+            operations: [.writeConfig([ConfigEntry(key: "NAME", value: "{{siteName}}")], when: .always)])
+
+        let srcNoConfig = makeSource()
+        let planA = try IntegrationPlanner.plan(descriptor: desc,
+            answers: [:], sourceDirectory: srcNoConfig, templateDirectory: makeTemplate()).get()
+        #expect(!planA.warnings.isEmpty)
+        if case .upsertConfig(let kvs) = planA.steps.first {
+            #expect(kvs.first?.value == "My Site")
+        } else {
+            Issue.record("expected upsertConfig step, got \(String(describing: planA.steps.first))")
+        }
+
+        let srcWithConfig = makeSource()
+        try "SITE_NAME=Jane's Bakery\n".write(
+            to: srcWithConfig.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+        let planB = try IntegrationPlanner.plan(descriptor: desc,
+            answers: [:], sourceDirectory: srcWithConfig, templateDirectory: makeTemplate()).get()
+        #expect(planB.warnings.isEmpty)
+        if case .upsertConfig(let kvs) = planB.steps.first {
+            #expect(kvs.first?.value == "Jane's Bakery")
+        } else {
+            Issue.record("expected upsertConfig step, got \(String(describing: planB.steps.first))")
+        }
+    }
+
     @Test func fieldInVisibilityMatchesAnyListedValue() {
         let cond = Condition.fieldIn(key: "style", values: ["floating", "button"])
         #expect(IntegrationPlanner.isVisible(cond, answers: ["style": "floating"], providerID: nil))

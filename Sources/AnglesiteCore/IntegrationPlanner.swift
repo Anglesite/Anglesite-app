@@ -59,6 +59,14 @@ public enum IntegrationPlanner {
                 warnings.append(PlanWarning("Couldn't read the site's brand color; used a default."))
             }
         }
+        if let name = siteName(sourceDirectory: sourceDirectory, fileManager: fileManager) {
+            tokens["siteName"] = name
+        } else {
+            tokens["siteName"] = "My Site"
+            if descriptor.operations.contains(where: { operationReferences("siteName", $0) }) {
+                warnings.append(PlanWarning("Couldn't read the site's name; used a default."))
+            }
+        }
 
         // 5. Resolve operations into concrete steps using effective answers.
         var steps: [PlannedStep] = []
@@ -98,6 +106,9 @@ public enum IntegrationPlanner {
                     snippet: snippet.resolve(tokens),
                     style: style
                 ))
+            case .appendLine(let file, let line, let when):
+                guard isVisible(when, answers: effective, providerID: providerID) else { continue }
+                steps.append(.appendLine(relativePath: file.resolve(tokens), line: line.resolve(tokens)))
             }
         }
 
@@ -120,6 +131,7 @@ public enum IntegrationPlanner {
         case .copyFile(_, let to, _): return to.raw.contains(needle)
         case .writeConfig(let entries, _): return entries.contains { $0.value.raw.contains(needle) }
         case .injectAtAnchor(let file, _, let snippet, _, _): return file.raw.contains(needle) || snippet.raw.contains(needle)
+        case .appendLine(let file, let line, _): return file.raw.contains(needle) || line.raw.contains(needle)
         case .addCSPDomains: return false
         }
     }
@@ -131,5 +143,18 @@ public enum IntegrationPlanner {
         let rest = text[r.upperBound...]
         guard let semi = rest.firstIndex(of: ";") else { return nil }
         return rest[..<semi].trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func siteName(sourceDirectory: URL, fileManager: FileManager) -> String? {
+        let config = sourceDirectory.appendingPathComponent(".site-config")
+        guard let text = try? String(contentsOf: config, encoding: .utf8) else { return nil }
+        for line in text.split(separator: "\n") {
+            guard let eq = line.firstIndex(of: "=") else { continue }
+            let key = line[line.startIndex..<eq]
+            guard key == "SITE_NAME" else { continue }
+            let value = line[line.index(after: eq)...]
+            return value.trimmingCharacters(in: .whitespaces)
+        }
+        return nil
     }
 }

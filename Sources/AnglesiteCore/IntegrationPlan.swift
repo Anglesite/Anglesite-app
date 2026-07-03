@@ -5,6 +5,7 @@ public enum PlannedStep: Sendable, Equatable {
     case upsertConfig([ConfigKV])
     case injectAnchor(relativeFile: String, anchor: String, id: String, snippet: String, style: MarkerInjector.CommentStyle)
     case addCSP([String])
+    case appendLine(relativePath: String, line: String)
 }
 
 public struct ConfigKV: Sendable, Equatable {
@@ -33,6 +34,7 @@ public struct OperationPlan: Sendable, Equatable {
             case .upsertConfig(let kvs): lines.append("Set \(kvs.count) config key\(kvs.count == 1 ? "" : "s")")
             case .injectAnchor(let file, _, _, _, _): lines.append("Add a component to \(file)")
             case .addCSP(let domains): lines.append("Allow \(domains.count) domain\(domains.count == 1 ? "" : "s") in the site's security policy")
+            case .appendLine(let path, _): lines.append("Append a line to \(path)")
             }
         }
         for w in warnings { lines.append("Warning: \(w.message)") }

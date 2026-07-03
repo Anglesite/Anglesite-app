@@ -37,21 +37,27 @@ import Foundation
         // staged (copied on-demand):
         for p in ["integrations/components/BookingWidget.astro", "integrations/components/DonationButton.astro",
                   "integrations/components/Comments.astro", "integrations/components/ContactForm.astro",
-                  "integrations/components/NewsletterForm.astro",
+                  "integrations/components/NewsletterForm.astro", "integrations/components/ConsentBanner.astro",
+                  "integrations/components/InstallPrompt.astro",
                   "integrations/pages/book.astro", "integrations/pages/donate.astro", "integrations/pages/contact.astro",
                   "integrations/pages/subscribe.astro", "integrations/pages/subscribe/thanks.astro",
+                  "integrations/pages/manifest.webmanifest.ts", "integrations/pages/offline.astro",
+                  "integrations/public/sw.js",
                   "integrations/worker/subscribe-worker.js", "integrations/worker/subscribe-wrangler.toml",
-                  "integrations/docs/newsletter-setup.md"] {
+                  "integrations/docs/newsletter-setup.md", "integrations/docs/pwa-setup.md"] {
             #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "missing staged \(p)")
         }
         // NOT base-scaffolded: every staged asset must be absent from src/ (covers all five —
         // both components previously omitted, DonationButton and Comments, are now checked).
         for p in ["src/components/BookingWidget.astro", "src/components/DonationButton.astro",
                   "src/components/Comments.astro", "src/components/ContactForm.astro",
-                  "src/components/NewsletterForm.astro",
+                  "src/components/NewsletterForm.astro", "src/components/ConsentBanner.astro",
+                  "src/components/InstallPrompt.astro",
                   "src/pages/book.astro", "src/pages/donate.astro", "src/pages/contact.astro",
                   "src/pages/subscribe.astro", "src/pages/subscribe/thanks.astro",
-                  "worker/subscribe-worker.js", "worker/subscribe-wrangler.toml", "docs/newsletter-setup.md"] {
+                  "src/pages/manifest.webmanifest.ts", "src/pages/offline.astro", "public/sw.js",
+                  "worker/subscribe-worker.js", "worker/subscribe-wrangler.toml",
+                  "docs/newsletter-setup.md", "docs/pwa-setup.md"] {
             #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "should be staged, not in src: \(p)")
         }
     }
@@ -61,6 +67,7 @@ import Foundation
         let base = try String(contentsOf: root.appendingPathComponent("src/layouts/BaseLayout.astro"), encoding: .utf8)
         #expect(base.contains("// anglesite:imports"))
         #expect(base.contains("<!-- anglesite:body-end -->"))
+        #expect(base.contains("<!-- anglesite:head-end -->"))
         let blog = try String(contentsOf: root.appendingPathComponent("src/layouts/BlogPost.astro"), encoding: .utf8)
         #expect(blog.contains("// anglesite:imports"))
         #expect(blog.contains("<!-- anglesite:comments -->"))
@@ -76,7 +83,8 @@ import Foundation
     @Test func onDemandPagesUseReadConfigNotImportMetaEnv() throws {
         let root = templateRoot()
         for p in ["integrations/pages/book.astro", "integrations/pages/donate.astro", "integrations/pages/contact.astro",
-                  "integrations/pages/subscribe.astro"] {
+                  "integrations/pages/subscribe.astro", "integrations/pages/offline.astro",
+                  "integrations/pages/manifest.webmanifest.ts"] {
             let s = try String(contentsOf: root.appendingPathComponent(p), encoding: .utf8)
             #expect(s.contains("readConfig("), "\(p) should use readConfig")
             #expect(!s.contains("import.meta.env"), "\(p) must not use import.meta.env")
@@ -167,5 +175,14 @@ import Foundation
         let subscribeUnknown = subscribeReferenced.subtracting(subscribeWritten)
         #expect(subscribeUnknown.isEmpty,
             "subscribe.astro references config keys not written by newsletter descriptor: \(subscribeUnknown.sorted())")
+
+        // PWA: integrations/pages/offline.astro and manifest.webmanifest.ts
+        let pwaWritten = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .pwa))
+        for p in ["integrations/pages/offline.astro", "integrations/pages/manifest.webmanifest.ts"] {
+            let source = try String(contentsOf: root.appendingPathComponent(p), encoding: .utf8)
+            let referenced = readConfigKeysReferenced(in: source)
+            let unknown = referenced.subtracting(pwaWritten)
+            #expect(unknown.isEmpty, "\(p) references config keys not written by pwa descriptor: \(unknown.sorted())")
+        }
     }
 }

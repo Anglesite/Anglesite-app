@@ -85,6 +85,30 @@ import Foundation
         #expect(cfg.contains("SCRIPT_ALLOW=js.stripe.com"))
     }
 
+    @Test func appendLineCreatesFileWhenMissing() async {
+        let src = makeSource()
+        let plan = OperationPlan(integrationID: .redirects, steps: [
+            .appendLine(relativePath: "public/_redirects", line: "/old /new 301"),
+        ], warnings: [])
+        let steps = await collect(IntegrationScaffolder().apply(plan, in: src))
+        #expect(steps.contains(.done(integrationID: "redirects")))
+        let contents = try! String(contentsOf: src.appendingPathComponent("public/_redirects"), encoding: .utf8)
+        #expect(contents == "/old /new 301\n")
+    }
+
+    @Test func appendLineAppendsRatherThanOverwritingExistingFile() async {
+        let src = makeSource()
+        let path = src.appendingPathComponent("public/_redirects")
+        try! FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try! "/first /a 301\n".write(to: path, atomically: true, encoding: .utf8)
+        let plan = OperationPlan(integrationID: .redirects, steps: [
+            .appendLine(relativePath: "public/_redirects", line: "/second /b 302"),
+        ], warnings: [])
+        _ = await collect(IntegrationScaffolder().apply(plan, in: src))
+        let contents = try! String(contentsOf: path, encoding: .utf8)
+        #expect(contents == "/first /a 301\n/second /b 302\n")
+    }
+
     @Test func appliesLineStyleInjectIntoFrontmatter() async {
         let src = makeSource()  // existing helper that returns a temp dir
         let rel = "src/layouts/BaseLayout.astro"
