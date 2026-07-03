@@ -11,6 +11,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     public let mcpClient: MCPClient
     private let knowledgeIndex: SiteKnowledgeIndex?
     private let semanticRanker: SemanticRanker?
+    private let logCenter: LogCenter
     private let connect: @Sendable (MCPClient, URL) async throws -> Void
     private let makeFileWatcher: @Sendable () -> any SiteFileWatching
     private var fileWatcher: (any SiteFileWatching)?
@@ -21,12 +22,19 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private var activeSiteID: String?
     private var loadedKnowledgeSiteID: String?
 
+    /// Drains the current container's boot/guest-process output into `logCenter`. Long-lived for
+    /// the container's whole run (astro/mcp keep emitting after `start()` returns), so it's stored
+    /// rather than scoped to one call — `teardown()` finishes it after the container actually stops.
+    private var bootLogContinuation: AsyncStream<(String, LogCenter.Stream)>.Continuation?
+    private var bootLogDrainTask: Task<Void, Never>?
+
     public init(
         ref: String,
         control: any LocalContainerControl,
         mcpClient: MCPClient,
         knowledgeIndex: SiteKnowledgeIndex? = nil,
         semanticRanker: SemanticRanker? = nil,
+        logCenter: LogCenter = .shared,
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) },
         makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { FSEventsFileWatcher() }
     ) {
@@ -35,6 +43,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         self.mcpClient = mcpClient
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
+        self.logCenter = logCenter
         self.connect = connect
         self.makeFileWatcher = makeFileWatcher
     }
@@ -82,8 +91,25 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         generation += 1
         let gen = generation
         setState(.starting(siteID: siteID))
+
+        // Wire the container's boot/guest-process output (repo clone, npm install + astro dev, the
+        // MCP sidecar, the vsock bridge) into LogCenter under a per-site source tag, live, the same
+        // way ContainerDeployExecutor streams exec output — this is the only visibility into what's
+        // happening inside the guest during the (historically opaque, see #69) boot window.
+        let (lines, continuation) = AsyncStream<(String, LogCenter.Stream)>.makeStream(bufferingPolicy: .unbounded)
+        bootLogContinuation = continuation
+        let logCenter = self.logCenter
+        let source = "container:\(siteID)"
+        bootLogDrainTask = Task.detached(priority: .utility) {
+            for await (line, stream) in lines {
+                await logCenter.append(source: source, stream: stream, text: line)
+            }
+        }
+
         do {
-            let session = try await control.start(siteID: siteID, sourceRepo: siteDirectory, ref: ref)
+            let session = try await control.start(
+                siteID: siteID, sourceRepo: siteDirectory, ref: ref,
+                onOutput: { line, stream in continuation.yield((line, stream)) })
             guard gen == generation else { return }
             try await connect(mcpClient, session.mcpURL)
             guard gen == generation else { return }
@@ -105,6 +131,11 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             activeSiteID = siteID
             setState(.ready(siteID: siteID, url: session.previewURL))
         } catch {
+            // Finish the boot log stream immediately rather than leaving it for the next start()/
+            // stop() call to clean up via teardown() — every other exit path in this method is
+            // scrupulous about this, and control.start() has already stopped the container on its
+            // own failure paths, so no further guest output can arrive here.
+            await finishBootLogStream()
             guard gen == generation else { return }
             setState(.failed(siteID: siteID, message: Self.friendlyMessage(for: error)))
         }
@@ -133,6 +164,23 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             try? await control.stop(siteID: id)
             activeSiteID = nil
         }
+        // Stop the container first (above) so no more guest output can arrive, then finish the
+        // stream — see finishBootLogStream().
+        await finishBootLogStream()
+    }
+
+    /// Finishes the boot-log continuation and awaits its drain task so any already-buffered lines
+    /// land in `LogCenter` before returning — mirrors `ContainerDeployExecutor`'s finish-then-await-
+    /// drain discipline. Idempotent (safe to call when nothing is running). Called from both
+    /// `teardown()` and `start()`'s catch block, so a failed start cleans up its own stream
+    /// immediately rather than leaking it to whatever the next `start()`/`stop()` happens to be.
+    private func finishBootLogStream() async {
+        if let continuation = bootLogContinuation {
+            continuation.finish()
+            bootLogContinuation = nil
+        }
+        await bootLogDrainTask?.value
+        bootLogDrainTask = nil
     }
 
     private func startFileWatcher(siteID: String, projectRoot: URL, generation gen: Int) {

@@ -219,7 +219,10 @@ private actor StepAwareFakeContainerControl: LocalContainerControl {
     private let scanOK = #"{"ok":true,"failures":[],"warnings":[]}"#
     private let wranglerOut = "Published site (1s)\n  https://site.example.workers.dev"
 
-    func start(siteID: String, sourceRepo: URL, ref: String) async throws -> LocalContainerSession {
+    func start(
+        siteID: String, sourceRepo: URL, ref: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> LocalContainerSession {
         throw LocalContainerError.virtualizationUnavailable
     }
 

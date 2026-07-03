@@ -279,7 +279,10 @@ struct ContainerDeployExecutorTests {
 private actor ThrowingFakeLocalContainerControl: LocalContainerControl {
     enum ExecError: Error { case boom }
 
-    func start(siteID: String, sourceRepo: URL, ref: String) async throws -> LocalContainerSession {
+    func start(
+        siteID: String, sourceRepo: URL, ref: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> LocalContainerSession {
         throw ExecError.boom
     }
     func stop(siteID: String) async throws {}
@@ -308,7 +311,10 @@ private actor CancelParkingFakeContainerControl: LocalContainerControl {
         await withCheckedContinuation { cont in parkedContinuation = cont }
     }
 
-    func start(siteID: String, sourceRepo: URL, ref: String) async throws -> LocalContainerSession {
+    func start(
+        siteID: String, sourceRepo: URL, ref: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> LocalContainerSession {
         throw LocalContainerError.virtualizationUnavailable
     }
     func stop(siteID: String) async throws {}

@@ -36,7 +36,23 @@ public struct ContainerExecResult: Sendable, Equatable {
 /// production conformer; `FakeLocalContainerControl` backs the tests. Mirrors `SandboxControlClient`.
 /// No `Containerization`/`Virtualization` types cross this seam.
 public protocol LocalContainerControl: Sendable {
-    func start(siteID: String, sourceRepo: URL, ref: String) async throws -> LocalContainerSession
+    /// Boots the container and starts its guest processes (repo clone, `npm install` + `astro dev`,
+    /// the MCP sidecar, the vsock bridge). `onOutput` receives every guest process's stdout/stderr
+    /// line as it arrives — each line is prefixed with the emitting process's label (e.g. `[astro]`)
+    /// so a single log source can distinguish them. Guest boot has historically been the least
+    /// observable part of this stack (see #69): without this, a slow/hung `npm install` or a
+    /// network/DNS failure inside the guest is invisible until `waitUntilServing`'s timeout fires
+    /// with no diagnostic trail.
+    ///
+    /// `onOutput` is `@escaping`: the production conformer hands it to guest processes' `Writer`
+    /// sinks, which can legitimately fire it after `start` returns (these processes are detached,
+    /// not awaited) — up until `stop(siteID:)` tears the container down.
+    func start(
+        siteID: String,
+        sourceRepo: URL,
+        ref: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> LocalContainerSession
     func stop(siteID: String) async throws
 
     /// Run `argv` inside the named container's guest environment, streaming each output line to
