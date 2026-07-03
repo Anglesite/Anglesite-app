@@ -1,4 +1,6 @@
-public enum IntegrationID: String, Sendable, CaseIterable { case booking, contact, donations, giscus, newsletter }
+public enum IntegrationID: String, Sendable, CaseIterable {
+    case booking, contact, donations, giscus, newsletter, consent, pwa, redirects
+}
 
 public struct Template: Sendable, Equatable, ExpressibleByStringLiteral {
     public let raw: String
@@ -18,6 +20,10 @@ public struct Choice: Sendable, Equatable { public let value: String; public let
 
 public enum FieldKind: Sendable, Equatable {
     case text, email, url
+    /// A site-relative path (e.g. `/old-page`) or an absolute URL, with no interior whitespace —
+    /// for fields whose value ends up on a space-delimited line (e.g. `public/_redirects`), where
+    /// an unvalidated `.text` value containing a space would silently corrupt the line format.
+    case path
     case choice([Choice])
     case bool
 }
@@ -72,6 +78,10 @@ public enum Operation: Sendable, Equatable {
     /// `extra`/provider domains — for endpoints that aren't a fixed per-provider domain.
     case addCSPDomains(fromProvider: Bool, extra: [String], fromFieldHost: String?, when: Condition)
     case injectAtAnchor(file: Template, anchor: String, snippet: Template, when: Condition, style: MarkerInjector.CommentStyle)
+    /// Appends `line` to `file`, creating the file if it doesn't exist. Unlike `copyFile`, this
+    /// is not idempotent-by-content-match — each call appends again. Use for accumulating files
+    /// (`public/_redirects`, `public/_headers`) rather than one-shot feature toggles.
+    case appendLine(file: Template, line: Template, when: Condition)
 }
 
 public struct IntegrationDescriptor: Sendable, Equatable, Identifiable {

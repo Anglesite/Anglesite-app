@@ -30,7 +30,7 @@ public extension IntegrationDescriptor {
         }
         for (i, op) in operations.enumerated() {
             switch op {
-            case .copyFile(_, _, let w), .writeConfig(_, let w), .injectAtAnchor(_, _, _, let w, _):
+            case .copyFile(_, _, let w), .writeConfig(_, let w), .injectAtAnchor(_, _, _, let w, _), .appendLine(_, _, let w):
                 check(w, "operation \(i)")
             case .addCSPDomains(let fromProvider, _, let fromFieldHost, let w):
                 check(w, "operation \(i)")
@@ -47,7 +47,9 @@ public extension IntegrationDescriptor {
 }
 
 public enum IntegrationCatalog {
-    public static let all: [IntegrationDescriptor] = [booking, contact, donations, giscus, newsletter]
+    public static let all: [IntegrationDescriptor] = [
+        booking, contact, donations, giscus, newsletter, consent, pwa, redirects,
+    ]
 
     public static func descriptor(for id: IntegrationID) -> IntegrationDescriptor {
         guard let d = all.first(where: { $0.id == id }) else {
@@ -237,5 +239,105 @@ public enum IntegrationCatalog {
             // The Worker's own domain isn't a fixed per-provider CSP domain (it's a per-site
             // deployment) — extract it from the workerUrl field instead of a static list.
             .addCSPDomains(fromProvider: false, extra: [], fromFieldHost: "workerUrl", when: .always),
+        ])
+
+    // MARK: consent
+    static let consent = IntegrationDescriptor(
+        id: .consent,
+        displayName: "Cookie Consent",
+        summary: "Add a category-based cookie consent banner that gates analytics, embeds, or ad-tech until visitors opt in.",
+        providers: [],
+        fields: [
+            Field(key: "analytics", label: "Analytics (Plausible, GA4, Fathom, etc.)", kind: .bool, defaultValue: "false"),
+            Field(key: "embeds", label: "Embeds (YouTube, Vimeo, Spotify, social)", kind: .bool, defaultValue: "false"),
+            Field(key: "ads", label: "Ads / marketing pixels", kind: .bool, defaultValue: "false"),
+            Field(key: "defaultPolicy", label: "Default for first-time visitors", kind: .choice([
+                Choice(value: "geo", label: "Geo — default-deny in the EU/UK, default-allow elsewhere"),
+                Choice(value: "strict", label: "Strict — default-deny everywhere"),
+            ]), defaultValue: "strict"),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/ConsentBanner.astro"),
+                      to: "src/components/ConsentBanner.astro", when: .always),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "// anglesite:imports",
+                            snippet: "import ConsentBanner from \"../components/ConsentBanner.astro\";\nimport { readConfig } from \"../../scripts/config\";",
+                            when: .always, style: .line),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:body-end -->",
+                            snippet: "<ConsentBanner analytics={readConfig(\"CONSENT_ANALYTICS\") === \"true\"} embeds={readConfig(\"CONSENT_EMBEDS\") === \"true\"} ads={readConfig(\"CONSENT_ADS\") === \"true\"} defaultPolicy={readConfig(\"CONSENT_DEFAULT\")} version={readConfig(\"CONSENT_VERSION\")} />",
+                            when: .always, style: .html),
+            .writeConfig([
+                ConfigEntry(key: "CONSENT_ANALYTICS", value: "{{analytics}}"),
+                ConfigEntry(key: "CONSENT_EMBEDS", value: "{{embeds}}"),
+                ConfigEntry(key: "CONSENT_ADS", value: "{{ads}}"),
+                ConfigEntry(key: "CONSENT_DEFAULT", value: "{{defaultPolicy}}"),
+                ConfigEntry(key: "CONSENT_VERSION", value: "1"),
+            ], when: .always),
+        ])
+
+    // MARK: pwa
+    static let pwa = IntegrationDescriptor(
+        id: .pwa,
+        displayName: "Progressive Web App",
+        summary: "Make the site installable with offline support — a manifest, service worker, and offline page.",
+        providers: [],
+        fields: [
+            Field(key: "description", label: "Description", kind: .text, isOptional: true, defaultValue: "",
+                  help: "One-sentence description shown in install prompts."),
+            Field(key: "installPrompt", label: "Show an install prompt to first-time visitors", kind: .bool, defaultValue: "true"),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/pages/manifest.webmanifest.ts"),
+                      to: "src/pages/manifest.webmanifest.ts", when: .always),
+            .copyFile(from: TemplateRef("integrations/public/sw.js"),
+                      to: "public/sw.js", when: .always),
+            .copyFile(from: TemplateRef("integrations/pages/offline.astro"),
+                      to: "src/pages/offline.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/components/InstallPrompt.astro"),
+                      to: "src/components/InstallPrompt.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/docs/pwa-setup.md"),
+                      to: "docs/pwa-setup.md", when: .always),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:head-end -->",
+                            snippet: "<link rel=\"manifest\" href=\"/manifest.webmanifest\" />\n<meta name=\"theme-color\" content={readConfig(\"PWA_THEME_COLOR\")} />",
+                            when: .always, style: .html),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "// anglesite:imports",
+                            snippet: "import InstallPrompt from \"../components/InstallPrompt.astro\";\nimport { readConfig } from \"../../scripts/config\";",
+                            when: .always, style: .line),
+            // The install prompt's install-prompt on/off toggle is resolved at Astro build time
+            // via readConfig, the same way booking's floating-vs-button variants are — not by
+            // gating this operation itself, so it can share the body-end anchor with the
+            // sw-registration script in one combined block.
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:body-end -->",
+                            snippet: "<script is:inline>if(\"serviceWorker\" in navigator){navigator.serviceWorker.register(\"/sw.js\");}</script>\n{readConfig(\"PWA_INSTALL_PROMPT\") === \"true\" && (<InstallPrompt appName={readConfig(\"PWA_SITE_NAME\")} />)}",
+                            when: .always, style: .html),
+            .writeConfig([
+                ConfigEntry(key: "PWA_DESCRIPTION", value: "{{description}}"),
+                ConfigEntry(key: "PWA_INSTALL_PROMPT", value: "{{installPrompt}}"),
+                ConfigEntry(key: "PWA_THEME_COLOR", value: "{{brandColor}}"),
+                ConfigEntry(key: "PWA_SITE_NAME", value: "{{siteName}}"),
+            ], when: .always),
+            // No appendLine to public/_headers here: scripts/csp.ts's prebuild step
+            // unconditionally regenerates that whole file every build, so anything appended
+            // outside it would be silently wiped on the next build. buildHeaders() instead
+            // derives the /sw.js cache rule from whether public/sw.js exists on disk.
+        ])
+
+    // MARK: redirects
+    static let redirects = IntegrationDescriptor(
+        id: .redirects,
+        displayName: "Redirect",
+        summary: "Add a redirect so an old URL keeps working after a page moves or is renamed.",
+        providers: [],
+        fields: [
+            Field(key: "fromPath", label: "Old path", kind: .path,
+                  help: "The path that's about to break, e.g. /old-page. No spaces."),
+            Field(key: "toPath", label: "New destination", kind: .path,
+                  help: "Where visitors should land now, e.g. /about or a full https:// URL. No spaces."),
+            Field(key: "status", label: "Type", kind: .choice([
+                Choice(value: "301", label: "Permanent — the old page is gone for good"),
+                Choice(value: "302", label: "Temporary — it might come back"),
+            ]), defaultValue: "301"),
+        ],
+        operations: [
+            .appendLine(file: "public/_redirects", line: "{{fromPath}} {{toPath}} {{status}}", when: .always),
         ])
 }

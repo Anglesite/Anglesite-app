@@ -43,7 +43,7 @@ import Foundation
         _ = await collect(IntegrationScaffolder().apply(plan, in: src))
         _ = await collect(IntegrationScaffolder().apply(plan, in: src))  // twice
         let layout = try! String(contentsOf: src.appendingPathComponent("src/layouts/BaseLayout.astro"), encoding: .utf8)
-        #expect(layout.components(separatedBy: "<!-- anglesite:booking:start -->").count == 2)  // exactly one block
+        #expect(layout.components(separatedBy: "<!-- anglesite:booking-body-end:start -->").count == 2)  // exactly one block
     }
 
     @Test func injectAnchorFailsWhenAnchorMissing() async {
@@ -85,6 +85,30 @@ import Foundation
         #expect(cfg.contains("SCRIPT_ALLOW=js.stripe.com"))
     }
 
+    @Test func appendLineCreatesFileWhenMissing() async {
+        let src = makeSource()
+        let plan = OperationPlan(integrationID: .redirects, steps: [
+            .appendLine(relativePath: "public/_redirects", line: "/old /new 301"),
+        ], warnings: [])
+        let steps = await collect(IntegrationScaffolder().apply(plan, in: src))
+        #expect(steps.contains(.done(integrationID: "redirects")))
+        let contents = try! String(contentsOf: src.appendingPathComponent("public/_redirects"), encoding: .utf8)
+        #expect(contents == "/old /new 301\n")
+    }
+
+    @Test func appendLineAppendsRatherThanOverwritingExistingFile() async {
+        let src = makeSource()
+        let path = src.appendingPathComponent("public/_redirects")
+        try! FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try! "/first /a 301\n".write(to: path, atomically: true, encoding: .utf8)
+        let plan = OperationPlan(integrationID: .redirects, steps: [
+            .appendLine(relativePath: "public/_redirects", line: "/second /b 302"),
+        ], warnings: [])
+        _ = await collect(IntegrationScaffolder().apply(plan, in: src))
+        let contents = try! String(contentsOf: path, encoding: .utf8)
+        #expect(contents == "/first /a 301\n/second /b 302\n")
+    }
+
     @Test func appliesLineStyleInjectIntoFrontmatter() async {
         let src = makeSource()  // existing helper that returns a temp dir
         let rel = "src/layouts/BaseLayout.astro"
@@ -99,6 +123,6 @@ import Foundation
         for await s in IntegrationScaffolder().apply(plan, in: src) { last = s }
         #expect(last == .done(integrationID: "booking"))
         let out = try! String(contentsOf: url, encoding: .utf8)
-        #expect(out.contains("// anglesite:booking:start\nimport BookingWidget"))
+        #expect(out.contains("// anglesite:booking-imports:start\nimport BookingWidget"))
     }
 }

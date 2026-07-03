@@ -22,6 +22,12 @@ import Testing
         #expect(s.contains("Username"))
     }
 
+    @Test func describesDuplicateLineAsAlreadyThere() {
+        let s = SetupIntegrationArguments.reply(for: .failure(.duplicateLine(file: "public/_redirects")),
+                                                descriptor: IntegrationCatalog.descriptor(for: .redirects))
+        #expect(s.contains("already there"))
+    }
+
     @Test func describesPlanAsConfirmation() {
         let plan = OperationPlan(integrationID: .giscus, steps: [.addCSP(["giscus.app"])], warnings: [])
         let s = SetupIntegrationArguments.reply(for: .success(plan),

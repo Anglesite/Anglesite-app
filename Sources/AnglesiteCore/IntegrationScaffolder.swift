@@ -53,6 +53,17 @@ public actor IntegrationScaffolder {
                     }
                 } catch { return emit(.failed(step: "writingFiles", message: humanize(error))) }
 
+            case .appendLine(let rel, let line):
+                let url = source.appendingPathComponent(rel)
+                do {
+                    var current = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+                    if !current.isEmpty, !current.hasSuffix("\n") { current += "\n" }
+                    current += line
+                    if !current.hasSuffix("\n") { current += "\n" }
+                    try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try current.write(to: url, atomically: true, encoding: .utf8)
+                } catch { return emit(.failed(step: "writingFiles", message: humanize(error))) }
+
             case .upsertConfig, .addCSP:
                 // Config mutations are batched below; nothing to do per-step here.
                 continue

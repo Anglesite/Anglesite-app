@@ -1,0 +1,102 @@
+---
+interface Props {
+  appName?: string;
+}
+const { appName = "this site" } = Astro.props;
+---
+
+<div class="install-prompt" hidden>
+  <p>Add <strong>{appName}</strong> to your home screen for quick access.</p>
+  <div class="install-prompt-actions">
+    <button class="install-prompt-action" data-action="install" type="button">Install</button>
+    <button class="install-prompt-action" data-action="dismiss" type="button">Not now</button>
+  </div>
+</div>
+
+<style>
+  .install-prompt {
+    position: fixed;
+    bottom: var(--spacing-unit, 1rem);
+    left: var(--spacing-unit, 1rem);
+    right: var(--spacing-unit, 1rem);
+    max-width: 28rem;
+    margin-inline: auto;
+    padding: var(--spacing-unit, 1rem);
+    background: var(--color-surface, #fff);
+    border: 1px solid var(--color-text-muted, #999);
+    border-radius: var(--radius-lg, 0.5rem);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 900;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .install-prompt p {
+    flex: 1 1 100%;
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--color-text, #111);
+  }
+  .install-prompt-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-inline-start: auto;
+  }
+  .install-prompt-action[data-action="install"] {
+    background: var(--color-primary, #2563eb);
+    color: #fff;
+    border: none;
+    padding: 0.375rem 1rem;
+    border-radius: var(--radius-sm, 0.25rem);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.875rem;
+  }
+  .install-prompt-action[data-action="dismiss"] {
+    background: none;
+    border: none;
+    color: var(--color-text-muted, #666);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.875rem;
+  }
+</style>
+
+<script is:inline>
+  (function () {
+    var DISMISS_KEY = "pwa-install-dismissed";
+    var DISMISS_MS = 30 * 24 * 60 * 60 * 1000;
+    var banner = document.querySelector(".install-prompt");
+    if (!banner) return;
+
+    var dismissed = localStorage.getItem(DISMISS_KEY);
+    if (dismissed && Date.now() - parseInt(dismissed, 10) < DISMISS_MS) return;
+
+    var deferredPrompt = null;
+
+    window.addEventListener("beforeinstallprompt", function (e) {
+      e.preventDefault();
+      deferredPrompt = e;
+      banner.hidden = false;
+    });
+
+    banner.addEventListener("click", function (e) {
+      var action = e.target && e.target.dataset && e.target.dataset.action;
+      if (action === "install" && deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then(function () {
+          deferredPrompt = null;
+          banner.hidden = true;
+        });
+      } else if (action === "dismiss") {
+        localStorage.setItem(DISMISS_KEY, String(Date.now()));
+        banner.hidden = true;
+      }
+    });
+
+    window.addEventListener("appinstalled", function () {
+      banner.hidden = true;
+    });
+  })();
+</script>

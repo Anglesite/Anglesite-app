@@ -43,6 +43,10 @@ public enum IntegrationPlanner {
             // producing no CSP entry later for a descriptor that uses addCSPDomains(fromFieldHost:).
             case .url where URL(string: value)?.host == nil:
                 return .failure(.invalidValue(key: field.key, reason: "not an absolute URL (needs a host, e.g. https://example.com)"))
+            case .path where value.contains(where: { $0.isWhitespace }):
+                return .failure(.invalidValue(key: field.key, reason: "must not contain whitespace"))
+            case .path where !(value.hasPrefix("/") || URL(string: value)?.host != nil):
+                return .failure(.invalidValue(key: field.key, reason: "must start with / or be an absolute URL"))
             case .choice(let choices) where !choices.contains(where: { $0.value == value }):
                 return .failure(.invalidValue(key: field.key, reason: "not one of the allowed choices"))
             default: break
@@ -57,6 +61,14 @@ public enum IntegrationPlanner {
             tokens["brandColor"] = "#000000"
             if descriptor.operations.contains(where: { operationReferences("brandColor", $0) }) {
                 warnings.append(PlanWarning("Couldn't read the site's brand color; used a default."))
+            }
+        }
+        if let name = siteName(sourceDirectory: sourceDirectory, fileManager: fileManager) {
+            tokens["siteName"] = name
+        } else {
+            tokens["siteName"] = "My Site"
+            if descriptor.operations.contains(where: { operationReferences("siteName", $0) }) {
+                warnings.append(PlanWarning("Couldn't read the site's name; used a default."))
             }
         }
 
@@ -98,6 +110,14 @@ public enum IntegrationPlanner {
                     snippet: snippet.resolve(tokens),
                     style: style
                 ))
+            case .appendLine(let file, let line, let when):
+                guard isVisible(when, answers: effective, providerID: providerID) else { continue }
+                let resolvedFile = file.resolve(tokens)
+                let resolvedLine = line.resolve(tokens)
+                if lineAlreadyExists(resolvedLine, inFileAt: resolvedFile, sourceDirectory: sourceDirectory, fileManager: fileManager) {
+                    return .failure(.duplicateLine(file: resolvedFile))
+                }
+                steps.append(.appendLine(relativePath: resolvedFile, line: resolvedLine))
             }
         }
 
@@ -120,6 +140,7 @@ public enum IntegrationPlanner {
         case .copyFile(_, let to, _): return to.raw.contains(needle)
         case .writeConfig(let entries, _): return entries.contains { $0.value.raw.contains(needle) }
         case .injectAtAnchor(let file, _, let snippet, _, _): return file.raw.contains(needle) || snippet.raw.contains(needle)
+        case .appendLine(let file, let line, _): return file.raw.contains(needle) || line.raw.contains(needle)
         case .addCSPDomains: return false
         }
     }
@@ -131,5 +152,29 @@ public enum IntegrationPlanner {
         let rest = text[r.upperBound...]
         guard let semi = rest.firstIndex(of: ";") else { return nil }
         return rest[..<semi].trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func siteName(sourceDirectory: URL, fileManager: FileManager) -> String? {
+        let config = sourceDirectory.appendingPathComponent(".site-config")
+        guard let text = try? String(contentsOf: config, encoding: .utf8) else { return nil }
+        for line in text.split(separator: "\n") {
+            guard let eq = line.firstIndex(of: "=") else { continue }
+            let key = line[line.startIndex..<eq]
+            guard key == "SITE_NAME" else { continue }
+            let value = line[line.index(after: eq)...]
+            return value.trimmingCharacters(in: .whitespaces)
+        }
+        return nil
+    }
+
+    /// Whether `line` (trimmed) already exists verbatim (trimmed) as a line in the target file.
+    /// A missing file/directory just means "not present yet" — not an error.
+    private static func lineAlreadyExists(
+        _ line: String, inFileAt relativePath: String, sourceDirectory: URL, fileManager: FileManager
+    ) -> Bool {
+        let url = sourceDirectory.appendingPathComponent(relativePath)
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return false }
+        let target = line.trimmingCharacters(in: .whitespaces)
+        return text.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces) == target }
     }
 }
