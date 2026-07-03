@@ -57,6 +57,40 @@ struct LocalContainerSiteRuntimeTests {
         } else { Issue.record("expected .failed, got \(await rt.state)") }
     }
 
+    @Test("start streams the control's boot output into LogCenter under container:<siteID>")
+    func startStreamsBootOutputToLogCenter() async {
+        let fake = FakeLocalContainerControl(
+            startResult: .success(Self.ok),
+            startStdoutLines: ["npm install starting", "npm install done"])
+        let logCenter = LogCenter()
+        // Subscribe BEFORE start(): the drain task appends asynchronously (it's a detached task
+        // consuming an AsyncStream, kept alive for the container's whole run — see
+        // LocalContainerSiteRuntime.bootLogDrainTask), so a snapshot taken right after start()
+        // returns is not guaranteed to observe the lines yet. Live subscription + bounded collect
+        // waits for exactly the expected lines instead of racing the drain.
+        let subscription = await logCenter.subscribe()
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let rt = LocalContainerSiteRuntime(
+            ref: "HEAD",
+            control: fake,
+            mcpClient: mcp,
+            logCenter: logCenter,
+            connect: { _, _ in })
+
+        await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+
+        var collected: [LogCenter.LogLine] = []
+        for await line in subscription.stream {
+            collected.append(line)
+            if collected.count == 2 { break }
+        }
+        subscription.cancel()
+
+        #expect(collected.map(\.source) == ["container:s1", "container:s1"])
+        #expect(collected.map(\.text) == ["npm install starting", "npm install done"])
+        #expect(collected.allSatisfy { $0.stream == .stdout })
+    }
+
     @Test("stop calls the control client and returns to .idle")
     func stop() async {
         let (rt, fake) = makeRuntime(.success(Self.ok))
@@ -235,7 +269,7 @@ struct FakeLocalContainerControlExecTests {
 }
 
 /// Thread-safe sink for `onOutput` lines in tests (the seam's closure is `@escaping @Sendable`).
-private final class LineCollector: @unchecked Sendable {
+final class LineCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var _lines: [String] = []
     private var _streams: [LogCenter.Stream] = []

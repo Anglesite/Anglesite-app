@@ -37,7 +37,12 @@ public struct ContainerizationControl: LocalContainerControl {
         self.imageLayoutURLOverride = imageLayoutURL
     }
 
-    public func start(siteID: String, sourceRepo: URL, ref: String) async throws -> LocalContainerSession {
+    public func start(
+        siteID: String,
+        sourceRepo: URL,
+        ref: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> LocalContainerSession {
         // 0. Resolve the writable image store + boot artifacts. Missing artifacts are typed
         //    provisioning errors, surfaced as `imageUnavailable` instead of a silent mis-boot.
         let storeURL: URL
@@ -153,9 +158,11 @@ public struct ContainerizationControl: LocalContainerControl {
         }
 
         // 4. Start astro dev (guest TCP 4321), the MCP sidecar (guest TCP 4399), and the vsock bridge.
-        //    These are detached: `exec` + `.start()` with no `.wait()`.
+        //    These are detached: `exec` + `.start()` with no `.wait()`. Each gets its own label so a
+        //    single onOutput stream can distinguish them (this is the only visibility into what the
+        //    guest is doing during boot — see #69's opaque `npm install`/`astro dev` startup window).
         do {
-            try await runDetached(container, id: "astro", ["sh", "-lc",
+            try await runDetached(container, id: "astro", label: "astro", onOutput: onOutput, ["sh", "-lc",
                 "cd /workspace/site && npm install --no-audit --no-fund && npx astro dev --port 4321 --host 127.0.0.1"])
 
             // MCP sidecar: baked into the image at /usr/local/lib/anglesite-mcp/ by the two-stage
@@ -165,12 +172,20 @@ public struct ContainerizationControl: LocalContainerControl {
             // ANGLESITE_MCP_PORT sets the listen port, ANGLESITE_PROJECT_ROOT points at the cloned repo.
             // ANGLESITE_MCP_HOST is intentionally unset — it defaults to 127.0.0.1, which is correct:
             // the in-guest vsock bridge reaches the sidecar via dial("tcp","127.0.0.1:4399").
-            try await runDetached(container, id: "mcp", ["sh", "-lc",
+            try await runDetached(container, id: "mcp", label: "mcp", onOutput: onOutput, ["sh", "-lc",
                 "ANGLESITE_MCP_TRANSPORT=http ANGLESITE_MCP_PORT=4399 ANGLESITE_PROJECT_ROOT=/workspace/site node /usr/local/lib/anglesite-mcp/server/index.mjs"])
 
             // Guest vsock<->TCP bridge: maps guest vsock ports onto the local TCP listeners above so
             // host-side dialVsock reaches them. baked by Task 6.
-            try await runDetached(container, id: "bridge",
+            //
+            // #69 open mystery: this process's own stdout/stderr have never once appeared in
+            // LogCenter — not even an unconditional line at the very top of its main() — across every
+            // configuration tried (direct exec, shell-wrapped, launched first instead of last). The
+            // binary in the built image is confirmed correct (contains the expected log strings) and
+            // `exec()` never throws, so the process does get launched; `dialVsock` mostly reports
+            // success but the resulting connection is dead instantly (zero bytes), and occasionally
+            // throws ECONNRESET outright. Root cause is still open — see the #69 write-up.
+            try await runDetached(container, id: "bridge", label: "bridge", onOutput: onOutput,
                 ["/usr/local/bin/vsock-bridge", "4321:4321", "4399:4399"])
         } catch {
             try? await container.stop()
@@ -182,8 +197,31 @@ public struct ContainerizationControl: LocalContainerControl {
         // 5. Expose: a host-side vsock->TCP proxy per port. dialVsock(port:) -> FileHandle slots
         //    directly into VsockDialer (Phase 1's `@Sendable (UInt32) async throws -> FileHandle`).
         let dial: VsockDialer = { port in try await container.dialVsock(port: port) }
-        let previewProxy = VsockTCPProxy(guestPort: Self.previewPort, dial: dial)
-        let mcpProxy = VsockTCPProxy(guestPort: Self.mcpPort, dial: dial)
+        // A failing dial (container.dialVsock unable to reach the guest) previously closed the
+        // TCP side with zero trail — indistinguishable from a slow/hung guest process, both
+        // surfacing as NSURLErrorNetworkConnectionLost on the polling URLSession (see #69).
+        //
+        // waitUntilServing's polling URLSession retries a lost connection internally, far faster
+        // than its own 500ms interval — so a persistently-broken dial can emit thousands of
+        // identical proxy events within seconds, evicting the one-time guest boot lines (astro/mcp/
+        // bridge startup) out of LogCenter's bounded ring buffer before anyone reads them. Rate-limit
+        // to the first few occurrences of each distinct message, then periodically, so a real storm
+        // stays visible (with a running count) without burying everything else.
+        let eventLimiter = EventRateLimiter()
+        let previewProxy = VsockTCPProxy(
+            guestPort: Self.previewPort,
+            dial: dial,
+            onDialError: { error in
+                eventLimiter.log("[proxy:preview] dialVsock(\(Self.previewPort)) failed: \(error)", onOutput: onOutput)
+            },
+            onEvent: { event in eventLimiter.log("[proxy:preview] \(event)", onOutput: onOutput) })
+        let mcpProxy = VsockTCPProxy(
+            guestPort: Self.mcpPort,
+            dial: dial,
+            onDialError: { error in
+                eventLimiter.log("[proxy:mcp] dialVsock(\(Self.mcpPort)) failed: \(error)", onOutput: onOutput)
+            },
+            onEvent: { event in eventLimiter.log("[proxy:mcp] \(event)", onOutput: onOutput) })
         let previewURL: URL
         let mcpURL: URL
         do {
@@ -340,32 +378,70 @@ public struct ContainerizationControl: LocalContainerControl {
     /// Poll the preview URL through the host proxy until the guest dev server answers, or time out.
     /// Bounded and cancellation-aware: each `Task.sleep` throws `CancellationError` if the start task
     /// is cancelled, and the overall wait is capped so a never-ready server doesn't hang `start()`.
+    ///
+    /// Uses a raw, deliberately-paced socket probe rather than `URLSession` (see `probeOnce`):
+    /// `URLSession.data(for:)` silently retries a lost connection internally for idempotent GET
+    /// requests, up to its own `timeoutInterval` — observed hammering the vsock proxy at a rate far
+    /// higher than this function's own 500ms interval (sub-millisecond, per #69's live smoke), which
+    /// is suspected of destabilizing the virtio-vsock transport itself: every attempt failed
+    /// identically for the full timeout window, even long after the guest server was confirmed
+    /// ready. One clean attempt per interval removes that confound.
     private func waitUntilServing(
         _ url: URL,
         timeout: Duration = .seconds(90),
         interval: Duration = .milliseconds(500)
     ) async throws {
+        guard let port = url.port, let portValue = UInt16(exactly: port) else {
+            throw LocalContainerError.bootFailed("waitUntilServing: URL has no valid port: \(url.absoluteString)")
+        }
         let deadline = ContinuousClock.now.advanced(by: timeout)
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 5
-        var lastError: Error?
+        var lastError: String?
         while ContinuousClock.now < deadline {
             try Task.checkCancellation()
-            do {
-                let (_, response) = try await URLSession.shared.data(for: request)
-                // Any HTTP response means the listener is up and serving (even a 404 dev page).
-                if response is HTTPURLResponse {
-                    return
-                }
-            } catch {
+            if let error = Self.probeOnce(port: portValue) {
                 lastError = error
+            } else {
+                return
             }
             try await Task.sleep(for: interval)
         }
         throw LocalContainerError.bootFailed(
             "timed out after \(timeout) waiting for \(url.absoluteString)"
             + (lastError.map { "; last error: \($0)" } ?? ""))
+    }
+
+    /// One deliberate readiness probe: connect, send a minimal HTTP/1.0 GET, and confirm at least one
+    /// byte comes back. Returns `nil` on success, or a description of what failed. Uses raw POSIX
+    /// sockets (matching `VsockTCPProxy`'s style) so there is no hidden retry/pipelining behavior
+    /// between here and the wire.
+    private static func probeOnce(port: UInt16) -> String? {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return "socket() failed: errno=\(errno)" }
+        defer { close(fd) }
+
+        var tv = timeval(tv_sec: 2, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connectRC = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard connectRC == 0 else { return "connect() failed: errno=\(errno)" }
+
+        let request = Array("GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n".utf8)
+        let sent = request.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+        guard sent > 0 else { return "write() failed: errno=\(errno)" }
+
+        var buffer = [UInt8](repeating: 0, count: 16)
+        let n = buffer.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
+        guard n > 0 else { return "read() after connect returned \(n); errno=\(errno)" }
+        return nil
     }
 
     /// Run a guest process to completion, throwing if it exits non-zero.
@@ -381,16 +457,32 @@ public struct ContainerizationControl: LocalContainerControl {
         }
     }
 
-    /// Start a guest process detached (no `wait`), e.g. a long-running dev server.
+    /// Start a guest process detached (no `wait`), e.g. a long-running dev server. Its stdout/stderr
+    /// stream to `onOutput` live via `LineStreamingWriter`, each line prefixed `[label]` so a single
+    /// stream can distinguish astro/mcp/bridge output — this is the only visibility into the guest
+    /// during boot (see #69: previously these ran with no output capture at all).
     ///
     /// We intentionally do NOT `delete()` these processes here, unlike `runToCompletion`. Teardown
     /// relies on `LinuxContainer.stop()` to reap them: `stop()` issues `agent.kill(pid: -1, SIGKILL)`
     /// and then iterates `vendedProcesses` calling `_delete()` on each before stopping the VM
     /// (`LinuxContainer.swift:803` and `:835-851`). Every `exec`'d process is registered in
     /// `vendedProcesses`, so stopping the container cleans them all up — no per-process tracking needed.
-    private func runDetached(_ container: LinuxContainer, id: String, _ argv: [String]) async throws {
+    private func runDetached(
+        _ container: LinuxContainer,
+        id: String,
+        label: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void,
+        _ argv: [String]
+    ) async throws {
+        let tag: @Sendable (String, LogCenter.Stream) -> Void = { line, stream in
+            onOutput("[\(label)] \(line)", stream)
+        }
+        let stdoutSink = LineStreamingWriter(stream: .stdout, onLine: tag)
+        let stderrSink = LineStreamingWriter(stream: .stderr, onLine: tag)
         let proc = try await container.exec(id) { config in
             config.arguments = argv
+            config.stdout = stdoutSink
+            config.stderr = stderrSink
         }
         try await proc.start()
     }
@@ -463,5 +555,24 @@ final class LineStreamingWriter: @unchecked Sendable, Writer {
         guard !pending.isEmpty else { return }
         onLine(String(decoding: pending, as: UTF8.self), stream)
         pending.removeAll()
+    }
+}
+
+/// Caps how often an identical diagnostic message reaches `LogCenter` (see the proxy `onEvent`/
+/// `onDialError` wiring in `start()`): the first few occurrences always log, then only every 100th,
+/// each with a running count — enough to see a storm is happening and how big, without it evicting
+/// unrelated one-time boot lines (astro/mcp/bridge startup) out of the bounded ring buffer.
+final class EventRateLimiter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts: [String: Int] = [:]
+
+    func log(_ message: String, onOutput: @Sendable (String, LogCenter.Stream) -> Void) {
+        lock.lock()
+        let count = (counts[message] ?? 0) + 1
+        counts[message] = count
+        lock.unlock()
+
+        guard count <= 5 || count % 100 == 0 else { return }
+        onOutput("\(message) (occurrence #\(count))", .stderr)
     }
 }

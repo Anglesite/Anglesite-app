@@ -113,6 +113,67 @@ struct VsockTCPProxyTests {
         await proxy.stop()
     }
 
+    /// Regression test for #69: `waitUntilServing` polls the proxy's URL with a fresh short-lived
+    /// TCP connection roughly every 500ms until the guest answers. Each poll dials a fresh guest
+    /// pair and is abruptly abandoned client-side (mirroring `URLSession` giving up on a slow/no
+    /// response and opening a new connection next tick) — the proxy must keep serving unrelated,
+    /// later connections cleanly rather than getting wedged after the churn. This does not
+    /// reproduce the exact `FileHandle`-accessor race the raw-POSIX rewrite fixes (that race is
+    /// timing-dependent and only surfaced on a real device — see #69/#470), but it does guard the
+    /// observable symptom: repeated connect/abandon cycles must not corrupt state for later, real
+    /// connections.
+    @Test("proxy keeps serving new connections after many abrupt client-side disconnects")
+    func survivesRepeatedAbruptDisconnects() async throws {
+        for _ in 0..<20 {
+            let (guestForProxy, guestPeer) = socketPair()
+            let proxy = VsockTCPProxy(guestPort: 4321, dial: { _ in guestForProxy })
+            let url = try await proxy.start()
+            let client = try connectTCPToProxy(to: url)
+            // Abandon immediately — no write, no read — the same shape as a client that opens a
+            // socket, gets no prompt response, and gives up before the next poll tick.
+            try client.close()
+            await proxy.stop()
+            try? guestPeer.close()
+        }
+
+        // One more, real, iteration: the proxy must still relay correctly after the churn above.
+        let (guestForProxy, guestPeer) = socketPair()
+        setRecvTimeout(guestPeer)
+        let proxy = VsockTCPProxy(guestPort: 4321, dial: { _ in guestForProxy })
+        let url = try await proxy.start()
+        let client = try connectTCPToProxy(to: url)
+        try client.write(contentsOf: Data("hello".utf8))
+        let got = await readExactly(5, from: guestPeer)
+        #expect(got == Data("hello".utf8))
+        await proxy.stop()
+    }
+
+    /// Regression test for #69: a failing `dial(guestPort)` (e.g. `container.dialVsock` unable to
+    /// reach the guest) was previously swallowed by `handleAccepted`'s `catch { try? tcp.close() }`
+    /// with zero diagnostic trail — indistinguishable from a slow/hung guest process. The client
+    /// just saw its TCP connection close with no data, which is exactly `NSURLErrorNetworkConnection
+    /// Lost` on the `URLSession` side. `onDialError` surfaces the real underlying error instead.
+    @Test("a failing dial() reports the error via onDialError instead of failing silently")
+    func dialFailureReportsError() async throws {
+        struct DialError: Error, Equatable { let message: String }
+        let collector = LineCollector()
+        let proxy = VsockTCPProxy(
+            guestPort: 4321,
+            dial: { _ in throw DialError(message: "boom") },
+            onDialError: { error in collector.append("\(error)", .stderr) })
+        let url = try await proxy.start()
+        let client = try connectTCPToProxy(to: url)
+        setRecvTimeout(client)
+
+        // The client's connection should be closed (no bytes ever sent) once the dial fails.
+        let got = await readExactly(1, from: client, timeout: .seconds(5))
+        #expect(got.isEmpty)
+
+        // The dial failure must have been reported, not swallowed.
+        #expect(collector.lines.contains { $0.contains("boom") })
+        await proxy.stop()
+    }
+
     @Test("closed connection is removed from connections (no unbounded growth)")
     func closedConnectionRemovedFromConnections() async throws {
         let (guestForProxy, guestPeer) = socketPair()

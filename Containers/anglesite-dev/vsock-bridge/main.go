@@ -19,6 +19,7 @@ import (
 )
 
 func main() {
+	log.Printf("vsock-bridge: process started, args=%v", os.Args[1:])
 	for _, arg := range os.Args[1:] {
 		parts := strings.SplitN(arg, ":", 2)
 		if len(parts) != 2 {
@@ -59,6 +60,7 @@ func listen(vport uint32, tcpPort string) {
 		unix.Close(fd)
 		return
 	}
+	log.Printf("vsock-bridge: listening on vport=%d, forwarding to 127.0.0.1:%s", vport, tcpPort)
 	for {
 		nfd, _, err := unix.Accept(fd)
 		if err != nil {
@@ -70,6 +72,7 @@ func listen(vport uint32, tcpPort string) {
 			log.Printf("vsock-bridge: accept vport=%d: %v — listener closed", vport, err)
 			return
 		}
+		log.Printf("vsock-bridge: accept vport=%d succeeded", vport)
 		go splice(nfd, tcpPort)
 	}
 }
@@ -82,14 +85,18 @@ type closeWriter interface {
 func splice(vfd int, tcpPort string) {
 	vconn, err := osConn(vfd)
 	if err != nil {
+		log.Printf("vsock-bridge: osConn tport=%s: %v", tcpPort, err)
 		unix.Close(vfd)
 		return
 	}
+	log.Printf("vsock-bridge: accepted vsock conn, dialing 127.0.0.1:%s", tcpPort)
 	tconn, err := net.Dial("tcp", "127.0.0.1:"+tcpPort)
 	if err != nil {
+		log.Printf("vsock-bridge: dial 127.0.0.1:%s failed: %v", tcpPort, err)
 		vconn.Close()
 		return
 	}
+	log.Printf("vsock-bridge: dial 127.0.0.1:%s succeeded, splicing", tcpPort)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -97,7 +104,8 @@ func splice(vfd int, tcpPort string) {
 	// vsock → TCP
 	go func() {
 		defer wg.Done()
-		io.Copy(tconn, vconn)
+		n, err := io.Copy(tconn, vconn)
+		log.Printf("vsock-bridge: vsock->tcp(%s) done: %d bytes, err=%v", tcpPort, n, err)
 		// Signal EOF to the TCP side without closing the read direction.
 		if cw, ok := tconn.(closeWriter); ok {
 			cw.CloseWrite()
@@ -109,7 +117,8 @@ func splice(vfd int, tcpPort string) {
 	// TCP → vsock
 	go func() {
 		defer wg.Done()
-		io.Copy(vconn, tconn)
+		n, err := io.Copy(vconn, tconn)
+		log.Printf("vsock-bridge: tcp->vsock(%s) done: %d bytes, err=%v", tcpPort, n, err)
 		// Signal EOF to the vsock side without closing the read direction.
 		if cw, ok := vconn.(closeWriter); ok {
 			cw.CloseWrite()

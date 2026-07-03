@@ -12,13 +12,31 @@ public typealias VsockDialer = @Sendable (_ guestPort: UInt32) async throws -> F
 public actor VsockTCPProxy {
     private let guestPort: UInt32
     private let dial: VsockDialer
+    /// Reports a failed `dial(guestPort)` (e.g. `container.dialVsock` unable to reach the guest).
+    /// Without this, `handleAccepted`'s catch silently closed the TCP side with zero diagnostic
+    /// trail — indistinguishable, from the client's perspective, from a slow/hung guest process:
+    /// both surface as `NSURLErrorNetworkConnectionLost` on the polling `URLSession` (see #69).
+    private let onDialError: @Sendable (Error) -> Void
+    /// Diagnostic-only lifecycle events (see #69): "accepted" when a host TCP connection lands,
+    /// "dial-ok" when `dial(guestPort)` returns without throwing. Together with `onDialError` these
+    /// pin down exactly which stage — accept, dial, or the byte-level splice — a silently-broken
+    /// connection actually failed at, instead of every failure looking identical from the outside
+    /// (`NSURLErrorNetworkConnectionLost` on the polling `URLSession`).
+    private let onEvent: @Sendable (String) -> Void
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var connections: [ProxyConnection] = []
 
-    public init(guestPort: UInt32, dial: @escaping VsockDialer) {
+    public init(
+        guestPort: UInt32,
+        dial: @escaping VsockDialer,
+        onDialError: @escaping @Sendable (Error) -> Void = { _ in },
+        onEvent: @escaping @Sendable (String) -> Void = { _ in }
+    ) {
         self.guestPort = guestPort
         self.dial = dial
+        self.onDialError = onDialError
+        self.onEvent = onEvent
     }
 
     /// Bind + listen on 127.0.0.1:0, install the accept handler, and return the loopback URL with
@@ -76,13 +94,16 @@ public actor VsockTCPProxy {
     }
 
     private func handleAccepted(_ tcpFD: Int32) async {
+        onEvent("accepted")
         let tcp = FileHandle(fileDescriptor: tcpFD, closeOnDealloc: true)
         do {
             let guest = try await dial(guestPort)
-            let conn = ProxyConnection(tcp: tcp, guest: guest)
+            onEvent("dial-ok")
+            let conn = ProxyConnection(tcp: tcp, guest: guest, onEvent: onEvent)
             connections.append(conn)
             conn.start(onClose: { [weak self] c in Task { await self?.removeConnection(c) } })
         } catch {
+            onDialError(error)
             try? tcp.close()
         }
     }
@@ -95,32 +116,93 @@ public actor VsockTCPProxy {
     var connectionCount: Int { connections.count }
 }
 
-/// One spliced TCP↔vsock pair. Uses each handle's `readabilityHandler` to copy bytes both ways;
-/// an empty read (EOF) tears the pair down.
+/// One spliced TCP↔vsock pair. Uses each handle's `readabilityHandler` to detect when bytes are
+/// available, then copies them via raw POSIX `read`/`write` on the captured fds (see `pump` below
+/// for why); an empty read (EOF) or unrecoverable write error tears the pair down.
 final class ProxyConnection: @unchecked Sendable {
     private let tcp: FileHandle
     private let guest: FileHandle
+    // Captured once at init, before either direction's readability handler can fire — every
+    // subsequent read/write goes through these raw descriptors, never through NSFileHandle's
+    // ObjC read/write/fileDescriptor accessors (see `pump` below for why).
+    private let tcpFD: Int32
+    private let guestFD: Int32
     private let lock = NSLock()
     private var closed = false
     /// Called exactly once, after the connection closes, with `self` as the argument.
     /// Invoked outside the lock to avoid re-entrancy / deadlock.
     private var onClose: (@Sendable (_ conn: ProxyConnection) -> Void)?
+    private let onEvent: @Sendable (String) -> Void
 
-    init(tcp: FileHandle, guest: FileHandle) { self.tcp = tcp; self.guest = guest }
+    init(tcp: FileHandle, guest: FileHandle, onEvent: @escaping @Sendable (String) -> Void = { _ in }) {
+        self.tcp = tcp
+        self.guest = guest
+        self.tcpFD = tcp.fileDescriptor
+        self.guestFD = guest.fileDescriptor
+        self.onEvent = onEvent
+    }
 
     /// Begin pumping bytes in both directions. `onClose` is provided here (set-once, private) so
     /// there is no mutable public var window between construction and the first read handler firing.
     func start(onClose: @escaping @Sendable (ProxyConnection) -> Void) {
         self.onClose = onClose
-        pump(from: tcp, to: guest)
-        pump(from: guest, to: tcp)
+        pump(from: tcp, fromFD: tcpFD, toFD: guestFD, label: "tcp->guest")
+        pump(from: guest, fromFD: guestFD, toFD: tcpFD, label: "guest->tcp")
     }
 
-    private func pump(from: FileHandle, to: FileHandle) {
-        from.readabilityHandler = { [weak self] h in
-            let data = h.availableData
-            if data.isEmpty { self?.close(); return }
-            try? to.write(contentsOf: data)
+    /// Reads from `fromFD` and forwards to `toFD` whenever `from` reports readable, entirely via raw
+    /// POSIX `read`/`write` on the captured descriptors — never via `FileHandle.availableData`,
+    /// `.write(contentsOf:)`, or `.fileDescriptor`. Each direction's handler runs on that FileHandle's
+    /// own dispatch source, so the two directions of one connection execute concurrently: an EOF on
+    /// one side calls `close()`, which can run while the other side's handler is already mid-flight.
+    /// Those NSFileHandle accessors raise an Objective-C `NSException` (not a Swift error, so `try?`
+    /// can't catch it) when touched on a handle the other thread is concurrently closing — that
+    /// crashed the whole app via `abort()`. Raw syscalls on a captured fd number just return an
+    /// ordinary POSIX error in the same situation.
+    private func pump(from: FileHandle, fromFD: Int32, toFD: Int32, label: String) {
+        from.readabilityHandler = { [weak self] _ in
+            guard let self else { return }
+            self.lock.lock()
+            let alreadyClosed = self.closed
+            self.lock.unlock()
+            if alreadyClosed { return }
+
+            var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+            let n = buffer.withUnsafeMutableBytes { read(fromFD, $0.baseAddress, $0.count) }
+            if n <= 0 {
+                if n < 0 && errno == EINTR { return }  // transient; retry on the next readability callback
+                self.onEvent(n == 0 ? "\(label) EOF" : "\(label) read error errno=\(errno)")
+                self.close()
+                return
+            }
+
+            if !Self.writeAll(Data(buffer[0..<n]), to: toFD) {
+                self.onEvent("\(label) write error errno=\(errno)")
+                self.close()
+            }
+        }
+    }
+
+    /// Writes every byte of `data` to `fd`, retrying on `EINTR` and partial writes. Returns `false`
+    /// (rather than throwing/raising) on any unrecoverable error, e.g. `EPIPE`/`ECONNRESET` when the
+    /// peer has closed its end.
+    private static func writeAll(_ data: Data, to fd: Int32) -> Bool {
+        data.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) -> Bool in
+            var offset = 0
+            let total = rawBuffer.count
+            while offset < total {
+                let n = rawBuffer.baseAddress!.advanced(by: offset)
+                    .withMemoryRebound(to: UInt8.self, capacity: total - offset) { ptr in
+                        write(fd, ptr, total - offset)
+                    }
+                if n > 0 {
+                    offset += n
+                    continue
+                }
+                if n < 0 && errno == EINTR { continue }
+                return false
+            }
+            return true
         }
     }
 

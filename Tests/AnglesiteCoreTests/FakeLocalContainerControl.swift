@@ -6,6 +6,9 @@ actor FakeLocalContainerControl: LocalContainerControl {
     private(set) var stopped: [String] = []
     private(set) var startedRepos: [(siteID: String, repo: URL, ref: String)] = []
 
+    /// Lines replayed to `start`'s `onOutput` in order before it returns (or throws).
+    var startStdoutLines: [String]
+
     /// Canned result returned by `exec`. Defaults to a successful empty run.
     var execResult: ContainerExecResult
     /// Lines replayed to `onOutput` in order before `exec` returns.
@@ -15,16 +18,24 @@ actor FakeLocalContainerControl: LocalContainerControl {
 
     init(
         startResult: Result<LocalContainerSession, LocalContainerError>,
+        startStdoutLines: [String] = [],
         execResult: ContainerExecResult = ContainerExecResult(exitCode: 0, stdout: "", stderr: ""),
         execStdoutLines: [String] = []
     ) {
         self.startResult = startResult
+        self.startStdoutLines = startStdoutLines
         self.execResult = execResult
         self.execStdoutLines = execStdoutLines
     }
 
-    func start(siteID: String, sourceRepo: URL, ref: String) async throws -> LocalContainerSession {
+    func start(
+        siteID: String,
+        sourceRepo: URL,
+        ref: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> LocalContainerSession {
         startedRepos.append((siteID, sourceRepo, ref))
+        for line in startStdoutLines { onOutput(line, .stdout) }
         return try startResult.get()
     }
 
@@ -63,7 +74,12 @@ actor GatedFakeLocalContainerControl: LocalContainerControl {
     }
     func release() { gateContinuation?.resume(); gateContinuation = nil }
 
-    func start(siteID: String, sourceRepo: URL, ref: String) async throws -> LocalContainerSession {
+    func start(
+        siteID: String,
+        sourceRepo: URL,
+        ref: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> LocalContainerSession {
         await withCheckedContinuation { cont in
             parkedContinuation?.resume()
             parkedContinuation = nil

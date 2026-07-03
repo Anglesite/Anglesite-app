@@ -20,7 +20,12 @@ struct ContainerizationControlTests {
         let control = ContainerizationControl()
         let repo = try makeThrowawayAstroRepo()
         defer { try? FileManager.default.removeItem(at: repo) }
-        let session = try await control.start(siteID: "e2e", sourceRepo: repo, ref: "HEAD")
+        // Capture every guest boot/process line to stderr as it arrives — this is the diagnostic
+        // trail #69 lacked (a hung/slow `npm install` or guest network/DNS failure previously
+        // surfaced only as an opaque `waitUntilServing` timeout with nothing to look at).
+        let session = try await control.start(siteID: "e2e", sourceRepo: repo, ref: "HEAD") { line, stream in
+            FileHandle.standardError.write(Data("[\(stream)] \(line)\n".utf8))
+        }
         // Safety net: fires on any exit path (incl. a thrown #expect below) so a failed
         // assertion doesn't leave the VM running. stop() is idempotent, so the awaited
         // happy-path stop below is harmless after this.
