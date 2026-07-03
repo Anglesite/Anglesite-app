@@ -175,18 +175,13 @@ public struct ContainerizationControl: LocalContainerControl {
             try await runDetached(container, id: "mcp", label: "mcp", onOutput: onOutput, ["sh", "-lc",
                 "ANGLESITE_MCP_TRANSPORT=http ANGLESITE_MCP_PORT=4399 ANGLESITE_PROJECT_ROOT=/workspace/site node /usr/local/lib/anglesite-mcp/server/index.mjs"])
 
-            // Guest vsock<->TCP bridge: maps guest vsock ports onto the local TCP listeners above so
-            // host-side dialVsock reaches them. baked by Task 6.
-            //
-            // #69 open mystery: this process's own stdout/stderr have never once appeared in
-            // LogCenter — not even an unconditional line at the very top of its main() — across every
-            // configuration tried (direct exec, shell-wrapped, launched first instead of last). The
-            // binary in the built image is confirmed correct (contains the expected log strings) and
-            // `exec()` never throws, so the process does get launched; `dialVsock` mostly reports
-            // success but the resulting connection is dead instantly (zero bytes), and occasionally
-            // throws ECONNRESET outright. Root cause is still open — see the #69 write-up.
-            try await runDetached(container, id: "bridge", label: "bridge", onOutput: onOutput,
-                ["/usr/local/bin/vsock-bridge", "4321:4321", "4399:4399"])
+            // Guest vsock<->TCP bridges (socat, baked into the image): map guest vsock ports onto the
+            // local TCP listeners above so host-side dialVsock reaches them. One process per port;
+            // `fork` accepts unlimited sequential/parallel connections.
+            try await runDetached(container, id: "bridge-preview", label: "bridge-preview", onOutput: onOutput,
+                ["/usr/bin/socat", "VSOCK-LISTEN:4321,reuseaddr,fork", "TCP:127.0.0.1:4321"])
+            try await runDetached(container, id: "bridge-mcp", label: "bridge-mcp", onOutput: onOutput,
+                ["/usr/bin/socat", "VSOCK-LISTEN:4399,reuseaddr,fork", "TCP:127.0.0.1:4399"])
         } catch {
             try? await container.stop()
             try? FileManager.default.removeItem(at: rootfsURL)

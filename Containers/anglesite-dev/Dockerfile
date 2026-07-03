@@ -1,19 +1,14 @@
 # Anglesite local dev-server image (arm64 / Apple Silicon). Built and exported as an OCI layout by
-# scripts/vendor-container-image.sh, then bundled into AnglesiteContainer. Bakes Node + git +
-# the vsock→TCP bridge + the app's MCP sidecar (the plugin's server/, npm ci'd for linux-arm64 so
+# scripts/vendor-container-image.sh, then bundled into AnglesiteContainer. Bakes Node + git + socat
+# (the vsock<->TCP bridge) + the app's MCP sidecar (the plugin's server/, npm ci'd for linux-arm64 so
 # sharp's native binary is correct) so a fresh container needs no in-guest install.
-
-# Build the vsock bridge.
-FROM --platform=linux/arm64 golang:1.22-bookworm AS bridge
-WORKDIR /src
-COPY vsock-bridge/ ./vsock-bridge/
-RUN cd vsock-bridge && go mod tidy && CGO_ENABLED=0 GOARCH=arm64 go build -o /vsock-bridge .
 
 # Pinned to linux/arm64 digest for reproducible vendoring. Re-bump periodically for base security updates.
 FROM node:22-bookworm-slim@sha256:6db9be2ebb4bafb687a078ef5ba1b1dd256e8004d246a31fd210b6b848ab6be2
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+# socat is the guest-side vsock<->TCP bridge: the host reaches astro/mcp (guest-local TCP) by
+# dialing AF_VSOCK ports that socat forwards to 127.0.0.1 (no vmnet on the sandboxed host, #60).
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates socat \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=bridge /vsock-bridge /usr/local/bin/vsock-bridge
 # MCP sidecar: staged by scripts/vendor-container-image.sh from the plugin's server/ dir.
 # npm ci runs on linux/arm64 → pulls @img/sharp-linux-arm64 (the native prebuilt) from the
 # lockfile. --omit=dev drops devDependencies. We intentionally do NOT pass --omit=optional
