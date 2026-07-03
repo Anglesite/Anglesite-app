@@ -1,3 +1,4 @@
+import AnglesiteCore
 import Foundation
 
 /// Sentinel for `Bundle(for:)`-based resource-bundle discovery (no NSObject subclass needed elsewhere).
@@ -175,37 +176,13 @@ public enum BundledImage {
     /// bundled `layoutURL()`/`initfsLayoutURL()` straight in fails with EPERM on a real, read-only
     /// `.app`. `name` identifies the artifact (e.g. "app-image", "vminit-initfs") and namespaces its
     /// staged copy under `storeURL()` so repeated launches reuse it instead of re-copying every time.
+    /// A staged copy whose `index.json` no longer matches the source's (an app update shipped a new
+    /// bundled image) is replaced, so installs never keep booting a stale image.
     ///
-    /// `name` is shared across all sites (not site-scoped, unlike the ext4 rootfs/initfs), so two
-    /// site windows cold-booting `LocalContainerSiteRuntime` around the same time can call this
-    /// concurrently for the same artifact. Each caller copies into its own uniquely-named temp
-    /// directory and only atomically moves it into place if `staged` still doesn't exist by the
-    /// time the copy finishes — so a slower caller can never delete or observe a partial copy from
-    /// a faster one; it just discards its own redundant copy and reuses the winner's result.
+    /// Implemented by `OCILayoutStaging` in AnglesiteCore (pure Foundation) so the staging/staleness
+    /// behavior stays unit-tested on CI, which never compiles this module.
     public static func stagedLayoutURL(source: URL, name: String) throws -> URL {
-        let staged = try storeURL().appendingPathComponent("layout-staging/\(name)", isDirectory: true)
-        let stagedIndex = staged.appendingPathComponent("index.json").path
-        if FileManager.default.fileExists(atPath: stagedIndex) {
-            return staged
-        }
-        let parent = staged.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-
-        let tempDir = parent.appendingPathComponent(".staging-\(name)-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.copyItem(at: source, to: tempDir)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        if FileManager.default.fileExists(atPath: stagedIndex) {
-            return staged  // another caller finished staging while we were copying
-        }
-        do {
-            try FileManager.default.moveItem(at: tempDir, to: staged)
-        } catch {
-            // Lost the race to a concurrent stager. If they succeeded, use their result;
-            // otherwise this is a real failure (e.g. disk full) and should propagate.
-            guard FileManager.default.fileExists(atPath: stagedIndex) else { throw error }
-        }
-        return staged
+        try OCILayoutStaging.stagedLayoutURL(source: source, name: name, storeRoot: storeURL())
     }
 }
 
