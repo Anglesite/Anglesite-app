@@ -38,8 +38,11 @@ public enum IntegrationPlanner {
             switch field.kind {
             case .email where !value.contains("@"):
                 return .failure(.invalidValue(key: field.key, reason: "not an email address"))
-            case .url where URL(string: value)?.scheme == nil:
-                return .failure(.invalidValue(key: field.key, reason: "not a URL"))
+            // Require a host (not just a parseable scheme) so a value like "https:" or
+            // "mailto:foo@bar.com" fails here with a clear message, instead of silently
+            // producing no CSP entry later for a descriptor that uses addCSPDomains(fromFieldHost:).
+            case .url where URL(string: value)?.host == nil:
+                return .failure(.invalidValue(key: field.key, reason: "not an absolute URL (needs a host, e.g. https://example.com)"))
             case .choice(let choices) where !choices.contains(where: { $0.value == value }):
                 return .failure(.invalidValue(key: field.key, reason: "not one of the allowed choices"))
             default: break
@@ -75,12 +78,15 @@ public enum IntegrationPlanner {
             case .writeConfig(let entries, let when):
                 guard isVisible(when, answers: effective, providerID: providerID) else { continue }
                 steps.append(.upsertConfig(entries.map { ConfigKV(key: $0.key, value: $0.value.resolve(tokens)) }))
-            case .addCSPDomains(let fromProvider, let extra, let when):
+            case .addCSPDomains(let fromProvider, let extra, let fromFieldHost, let when):
                 guard isVisible(when, answers: effective, providerID: providerID) else { continue }
                 var domains = extra
                 if fromProvider, let p = providerID,
                    let provider = descriptor.providers.first(where: { $0.id == p }) {
                     domains = provider.cspDomains + extra
+                }
+                if let key = fromFieldHost, let value = effective[key], let host = URL(string: value)?.host {
+                    domains.append(host)
                 }
                 if !domains.isEmpty { steps.append(.addCSP(domains)) }
             case .injectAtAnchor(let file, let anchor, let snippet, let when, let style):

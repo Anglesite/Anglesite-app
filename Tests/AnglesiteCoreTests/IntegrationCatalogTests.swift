@@ -4,7 +4,7 @@ import Testing
 
 @Suite struct IntegrationCatalogTests {
     @Test func hasAllIntegrations() {
-        #expect(Set(IntegrationCatalog.all.map(\.id)) == Set([.booking, .contact, .donations, .giscus]))
+        #expect(Set(IntegrationCatalog.all.map(\.id)) == Set([.booking, .contact, .donations, .giscus, .newsletter]))
     }
 
     @Test(arguments: IntegrationCatalog.all)
@@ -45,6 +45,14 @@ import Testing
             fields: [Field(key: "f", label: "F", kind: .text,
                            visibleWhen: .fieldIn(key: "nope", values: ["x"]))],
             operations: [])
+        #expect(bad.validate().contains { $0.contains("nope") })
+    }
+
+    @Test func validateCatchesDanglingCSPFieldHostReference() {
+        let bad = IntegrationDescriptor(
+            id: .newsletter, displayName: "N", summary: "s",
+            providers: [], fields: [],
+            operations: [.addCSPDomains(fromProvider: false, extra: [], fromFieldHost: "nope", when: .always)])
         #expect(bad.validate().contains { $0.contains("nope") })
     }
 
@@ -89,7 +97,7 @@ import Testing
         let formspree = contact.providers.first { $0.id == "formspree" }
         #expect(formspree?.cspDomains == ["formspree.io"])
         let hasAddCSP = contact.operations.contains {
-            if case .addCSPDomains(let fromProvider, _, _) = $0 { return fromProvider }
+            if case .addCSPDomains(let fromProvider, _, _, _) = $0 { return fromProvider }
             return false
         }
         #expect(hasAddCSP)
@@ -103,6 +111,27 @@ import Testing
     @Test func giscusWritesAllIds() {
         let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .giscus))
         #expect(keys.isSuperset(of: ["GISCUS_REPO", "GISCUS_CATEGORY", "GISCUS_REPO_ID", "GISCUS_CATEGORY_ID", "GISCUS_MAPPING"]))
+    }
+
+    @Test func newsletterHasPlatformChoice() {
+        let newsletter = IntegrationCatalog.descriptor(for: .newsletter)
+        #expect(Set(newsletter.providers.map(\.id)) == Set(["buttondown", "mailchimp"]))
+    }
+
+    @Test func newsletterWritesPlatformWorkerUrlAndButtonText() {
+        let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .newsletter))
+        #expect(keys.isSuperset(of: ["NEWSLETTER_PLATFORM", "NEWSLETTER_WORKER_URL", "NEWSLETTER_BUTTON_TEXT"]))
+    }
+
+    /// The subscribe Worker's domain is a per-site deployment, not a fixed per-provider
+    /// domain — the CSP op must derive it from the workerUrl field, not a static/provider list.
+    @Test func newsletterDeclaresCSPDomainFromWorkerUrlField() {
+        let newsletter = IntegrationCatalog.descriptor(for: .newsletter)
+        let hasFieldHostCSP = newsletter.operations.contains {
+            if case .addCSPDomains(_, _, let fromFieldHost, _) = $0 { return fromFieldHost == "workerUrl" }
+            return false
+        }
+        #expect(hasFieldHostCSP)
     }
 
     @Test func injectedSnippetKeysAreWrittenByDescriptor() throws {

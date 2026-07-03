@@ -144,4 +144,52 @@ import Foundation
         let r = await ops.plan(integrationID: .contact, answers: [:], siteID: "s1")
         #expect(r == .failure(.providerRequired))
     }
+
+    func makeNewsletterTemplate() -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tmpl-newsletter-\(UUID().uuidString)")
+        for p in ["integrations/components/NewsletterForm.astro", "integrations/pages/subscribe.astro",
+                  "integrations/pages/subscribe/thanks.astro", "integrations/worker/subscribe-worker.js",
+                  "integrations/worker/subscribe-wrangler.toml", "integrations/docs/newsletter-setup.md"] {
+            let url = root.appendingPathComponent(p)
+            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try! "N".write(to: url, atomically: true, encoding: .utf8)
+        }
+        return root
+    }
+
+    @Test func planThenApplySucceedsForNewsletter() async {
+        let src = makeBookingSource()
+        let tmpl = makeNewsletterTemplate()
+        let ops = IntegrationOperations(sourceDirectory: { _ in src }, templateDirectory: { tmpl })
+        let answers: Answers = ["provider": "buttondown", "workerUrl": "https://newsletter-subscribe.jane.workers.dev"]
+        guard case .success(let plan) = await ops.plan(integrationID: .newsletter, answers: answers, siteID: "s1") else {
+            Issue.record("plan failed"); return
+        }
+        let terminal = await ops.apply(plan, siteID: "s1")
+        #expect(terminal == .done(integrationID: "newsletter"))
+        #expect(FileManager.default.fileExists(atPath: src.appendingPathComponent("src/pages/subscribe.astro").path))
+        #expect(FileManager.default.fileExists(atPath: src.appendingPathComponent("src/pages/subscribe/thanks.astro").path))
+        #expect(FileManager.default.fileExists(atPath: src.appendingPathComponent("src/components/NewsletterForm.astro").path))
+    }
+
+    /// The Worker's host is per-site, so it must land in `.site-config`'s SCRIPT_ALLOW via the
+    /// workerUrl field, not a static provider domain (see #462 batch-2 CSP field-derivation).
+    @Test func newsletterAddsWorkerHostToCSPConfig() async {
+        let src = makeBookingSource()
+        let tmpl = makeNewsletterTemplate()
+        let ops = IntegrationOperations(sourceDirectory: { _ in src }, templateDirectory: { tmpl })
+        let answers: Answers = ["provider": "mailchimp", "workerUrl": "https://newsletter-subscribe.jane.workers.dev/subscribe"]
+        guard case .success(let plan) = await ops.plan(integrationID: .newsletter, answers: answers, siteID: "s1") else {
+            Issue.record("plan failed"); return
+        }
+        _ = await ops.apply(plan, siteID: "s1")
+        let config = try! String(contentsOf: src.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(config.contains("newsletter-subscribe.jane.workers.dev"))
+    }
+
+    @Test func newsletterMissingWorkerUrlFails() async {
+        let ops = IntegrationOperations(sourceDirectory: { _ in self.makeBookingSource() }, templateDirectory: { self.makeNewsletterTemplate() })
+        let r = await ops.plan(integrationID: .newsletter, answers: ["provider": "buttondown"], siteID: "s1")
+        #expect(r == .failure(.missingRequiredField(key: "workerUrl")))
+    }
 }
