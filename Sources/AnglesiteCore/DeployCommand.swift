@@ -305,16 +305,16 @@ public actor DeployCommand {
     /// Default `PreflightChecker`: host-side preflight was retired with embedded Node. Container
     /// runtimes must provide the executable preflight path.
     public static let defaultPreflight: PreflightChecker = { siteDirectory in
-        .error(reason: "pre-deploy check must run in the container runtime; host Node has been retired")
+        .error(reason: HostNodeRetirement.reason("pre-deploy check"))
     }
 
     /// Default `CommandResolver`: host-side wrangler deploy was retired with embedded Node.
     public static let resolveWranglerCommand: CommandResolver = { siteDirectory in
-        .unavailable(reason: "wrangler deploy must run in the container runtime; host Node has been retired")
+        .unavailable(reason: HostNodeRetirement.reason("wrangler deploy"))
     }
 
     /// Default `BuildCommandResolver`: host-side site build was retired with embedded Node.
     public static let resolveBuildCommand: CommandResolver = { siteDirectory in
-        .unavailable(reason: "site build must run in the container runtime; host Node has been retired")
+        .unavailable(reason: HostNodeRetirement.reason("site build"))
     }
 }

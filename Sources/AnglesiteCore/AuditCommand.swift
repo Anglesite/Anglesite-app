@@ -178,7 +178,7 @@ public actor AuditCommand {
     /// Host Node is retired (#70). Audits must run through the container runtime once validation
     /// lands; until then the command fails explicitly instead of spawning embedded Node.
     public static let resolveBuildCommand: CommandResolver = { siteDirectory in
-        .unavailable(reason: "audit build must run in the container runtime; host Node has been retired")
+        .unavailable(reason: HostNodeRetirement.reason("audit build"))
     }
 
     /// Default runner set. Starts with just `A11yAuditRunner`; SEO / perf / link-check

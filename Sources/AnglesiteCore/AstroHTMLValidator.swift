@@ -33,7 +33,7 @@ public struct AstroHTMLValidator: CustomAnalyticsHTMLValidating, Sendable {
             return "Custom analytics HTML couldn't be validated because Astro dependencies are missing. Run npm install in this site and try again."
         }
         guard let node = nodeExecutable() else {
-            return "Custom analytics HTML validation must run in the container runtime; host Node has been retired."
+            return HostNodeRetirement.reason("Custom analytics HTML validation") + "."
         }
 
         let workDirectory = fileManager.temporaryDirectory

@@ -278,20 +278,12 @@ public actor SocialWorkerProvisionCommand {
     }
 
     public static let defaultRunner: CommandRunner = { siteDirectory, arguments, environment, source in
-        ProcessSupervisor.RunResult(
-            stdout: "social worker provisioning must run in the container runtime; host Node has been retired",
-            stderr: "",
-            exitCode: 127
-        )
+        let reason = HostNodeRetirement.reason("social worker provisioning")
+        await LogCenter.shared.append(source: source, stream: .stderr, text: reason)
+        return ProcessSupervisor.RunResult(stdout: reason, stderr: "", exitCode: 127)
     }
 
     public static let defaultDeployer: Deployer = { token, siteID, siteDirectory in
         await DeployCommand(tokenSource: { token }).deploy(siteID: siteID, siteDirectory: siteDirectory)
-    }
-
-    private static func append(_ text: String, source: String, stream: LogCenter.Stream) async {
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) where !line.isEmpty {
-            await LogCenter.shared.append(source: source, stream: stream, text: String(line))
-        }
     }
 }

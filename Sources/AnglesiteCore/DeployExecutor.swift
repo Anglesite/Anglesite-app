@@ -286,6 +286,6 @@ public struct HostDeployExecutor: DeployExecutor {
     /// Host-side preflight is retired with embedded Node. Container runtimes must provide the
     /// executable preflight path.
     public static let preflightResolver: DeployCommand.CommandResolver = { siteDirectory in
-        .unavailable(reason: "pre-deploy check must run in the container runtime; host Node has been retired")
+        .unavailable(reason: HostNodeRetirement.reason("pre-deploy check"))
     }
 }

@@ -54,6 +54,21 @@ check_pattern() {
     fi
 }
 
+# Unlike check_pattern (which targets one known file), check_grep sweeps Sources/ and Tests/
+# broadly. It backs the four retired-type checks below: their defining files are deleted by
+# this same retirement, so a fixed-path check would go permanently dark (an `-e` guard that can
+# never be true again) instead of catching a regression, e.g. someone resurrecting the type in
+# a new file.
+check_grep() {
+    local label="$1"
+    local pattern="$2"
+    local match
+    match=$(rg -n "$pattern" Sources Tests 2>/dev/null | head -1 || true)
+    if [[ -n "$match" ]]; then
+        FINDINGS+=("$label -> $match")
+    fi
+}
+
 check_path "Node vendor script" "scripts/vendor-node.sh"
 check_path "Node re-sign script" "scripts/resign-node.sh"
 check_path "Primed npm cache vendor script" "scripts/vendor-npm-cache.sh"
@@ -65,10 +80,10 @@ check_pattern "Xcode project vendors npm-cache resources" "project.yml" "Resourc
 check_pattern "Xcode project vendors Node during build" "project.yml" "Vendor Node runtime"
 check_pattern "Xcode project vendors npm cache during build" "project.yml" "Vendor primed npm cache"
 check_pattern "Xcode project re-signs bundled Node" "project.yml" "Re-sign bundled Node"
-check_pattern "Swift resolves bundled Node" "Sources/AnglesiteCore/NodeRuntime.swift" "node-runtime"
-check_pattern "Swift npm cache extractor remains" "Sources/AnglesiteCore/NodeModulesCache.swift" "NodeModulesCache|npm-cache"
-check_pattern "Swift Astro dev-server supervisor remains" "Sources/AnglesiteCore/AstroDevServer.swift" "AstroDevServer|astro dev"
-check_pattern "Swift host preview runtime remains" "Sources/AnglesiteCore/LocalSiteRuntime.swift" "host-subprocess|LocalSiteRuntime"
+check_grep "Swift resolves bundled Node" '\bNodeRuntime\b'
+check_grep "Swift npm cache extractor remains" '\bNodeModulesCache\b'
+check_grep "Swift Astro dev-server supervisor remains" '\bAstroDevServer\b'
+check_grep "Swift host preview runtime remains" '\bLocalSiteRuntime\b'
 
 echo "Host Node retirement audit (#70)"
 echo "Mode: $MODE"

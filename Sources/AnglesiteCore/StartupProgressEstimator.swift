@@ -163,12 +163,19 @@ public struct StartupProgressEstimator: Sendable, Equatable {
     }
 
     private static func parseReadyURL(_ text: String) -> URL? {
+        // Mirrors the retired `AstroDevServer.parseReadyURL`/`stripANSI` so a dev-server log line
+        // still parses the same way it did before host Node retirement. The `?` in the ANSI class
+        // matters: CSI private-mode sequences (e.g. `ESC[?25l`, used to hide/show the cursor)
+        // wouldn't be stripped without it.
         let cleaned = text.replacingOccurrences(
-            of: #"\u{001B}\[[0-9;]*[A-Za-z]"#,
+            of: #"\u{001B}\[[0-9;?]*[A-Za-z]"#,
             with: "",
             options: .regularExpression
         )
-        guard let range = cleaned.range(of: #"https?://[^\s\)]+"#, options: .regularExpression) else {
+        guard let range = cleaned.range(
+            of: #"https?://[^\s/]+(?::\d+)?(?:/[^\s]*)?"#,
+            options: .regularExpression
+        ) else {
             return nil
         }
         let candidate = String(cleaned[range]).trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
