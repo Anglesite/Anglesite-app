@@ -116,13 +116,39 @@ public actor VsockTCPProxy {
     var connectionCount: Int { connections.count }
 }
 
-/// One spliced TCP↔vsock pair. Uses each handle's `readabilityHandler` to detect when bytes are
-/// available, then copies them via `FileHandle`'s own `availableData`/`write(contentsOf:)` (see
-/// `pump` below for why a lock, not raw POSIX syscalls, is what makes this safe); an empty read
-/// (EOF) or unrecoverable write error tears the pair down.
+/// One spliced TCP↔vsock pair, driven entirely by **`DispatchIO`** on the raw file descriptors —
+/// deliberately NOT by `FileHandle`'s `availableData`/`write(contentsOf:)`.
+///
+/// Why not `FileHandle`: those accessors raise an Objective-C `NSException` (not a Swift `Error`,
+/// so no `do`/`catch` or `try?` can intercept it) on ordinary socket-level failures — ECONNRESET on
+/// read, EPIPE on write. For this proxy a peer disconnect is a NORMAL event (every `waitUntilServing`
+/// poll and every WKWebView connection close produces one), so an uncatchable exception there aborts
+/// the whole process on a completely routine occurrence. Prior fixes (PR #470's raw-POSIX pump, then
+/// d6019aea's lock held across read+write) only addressed a concurrent-*close* race; neither can help
+/// the error path, where the exception fires on a single-threaded plain error return.
+///
+/// Why `DispatchIO` and not raw POSIX `read`/`write`: `DispatchIO` reports every error as a plain
+/// `errno` value in its completion handler — zero ObjC-exception surface — while staying pure
+/// libdispatch. The raw-POSIX/`UnsafeMutableRawBufferPointer` approach also avoided the exception,
+/// but pulled in a Swift/Foundation overlay symbol (`libswift_DarwinFoundation1.dylib`) that CI's
+/// Xcode 26.2 toolchain doesn't ship, breaking `swift test`'s dlopen entirely (see #69). `DispatchIO`
+/// touches none of that overlay.
+///
+/// Each direction is a streaming `DispatchIO.read` (length `.max`) whose handler forwards received
+/// `DispatchData` via `DispatchIO.write`. EOF (empty final chunk, error 0), a read error, or a write
+/// error tears the whole pair down exactly once via `closeLocked()`.
+///
+/// fd ownership: `DispatchIO` takes ownership of the fd it is given and closes it. The incoming
+/// `FileHandle`s (the accepted TCP handle; the dialer's guest handle) have their own lifetimes and
+/// close their own fds on dealloc, so this type `dup()`s each fd up front and hands the *duplicate*
+/// to `DispatchIO`. That way there is no shared fd and no double-close: the FileHandles free their
+/// originals whenever they dealloc, and the channels free the dups on teardown.
 final class ProxyConnection: @unchecked Sendable {
-    private let tcp: FileHandle
-    private let guest: FileHandle
+    private let tcpFD: Int32
+    private let guestFD: Int32
+    private let queue = DispatchQueue(label: "io.dwk.anglesite.vsock-proxy.conn")
+    private var tcpIO: DispatchIO?
+    private var guestIO: DispatchIO?
     private let lock = NSLock()
     private var closed = false
     /// Called exactly once, after the connection closes, with `self` as the argument.
@@ -130,8 +156,10 @@ final class ProxyConnection: @unchecked Sendable {
     private let onEvent: @Sendable (String) -> Void
 
     init(tcp: FileHandle, guest: FileHandle, onEvent: @escaping @Sendable (String) -> Void = { _ in }) {
-        self.tcp = tcp
-        self.guest = guest
+        // dup() so DispatchIO owns independent fds; the FileHandles keep and close their originals.
+        // This is the whole double-close-avoidance story — see the type doc.
+        self.tcpFD = dup(tcp.fileDescriptor)
+        self.guestFD = dup(guest.fileDescriptor)
         self.onEvent = onEvent
     }
 
@@ -139,43 +167,48 @@ final class ProxyConnection: @unchecked Sendable {
     /// there is no mutable public var window between construction and the first read handler firing.
     func start(onClose: @escaping @Sendable (ProxyConnection) -> Void) {
         self.onClose = onClose
-        pump(from: tcp, to: guest, label: "tcp->guest")
-        pump(from: guest, to: tcp, label: "guest->tcp")
+
+        // One DispatchIO channel per fd. The cleanup handler runs when the channel closes; DispatchIO
+        // closes the fd for us (ownership transferred from the FileHandle). An errno here (e.g. a
+        // channel torn down mid-flight) is not actionable beyond teardown, which closeLocked already
+        // performs, so it is intentionally ignored.
+        let tcpChannel = DispatchIO(type: .stream, fileDescriptor: tcpFD, queue: queue) { _ in }
+        let guestChannel = DispatchIO(type: .stream, fileDescriptor: guestFD, queue: queue) { _ in }
+        // Deliver bytes as soon as any arrive rather than buffering to a high-water mark.
+        tcpChannel.setLimit(lowWater: 1)
+        guestChannel.setLimit(lowWater: 1)
+        self.tcpIO = tcpChannel
+        self.guestIO = guestChannel
+
+        pump(readFrom: tcpChannel, writeTo: guestChannel, label: "tcp->guest")
+        pump(readFrom: guestChannel, writeTo: tcpChannel, label: "guest->tcp")
     }
 
-    /// Reads from `from` and forwards to `to` whenever `from` reports readable. Each direction's
-    /// handler runs on that `FileHandle`'s own dispatch source, so the two directions of one
-    /// connection can fire concurrently on different threads: an EOF on one side calls `close()`,
-    /// which can run while the other side's handler is mid-flight. `FileHandle.availableData` and
-    /// `.write(contentsOf:)` raise an Objective-C `NSException` (not a Swift error — `try?` can't
-    /// catch it) when invoked on a handle another thread is concurrently invalidating via `.close()`
-    /// — that previously crashed the whole app via `abort()`. Holding `lock` across the ENTIRE
-    /// read-then-write (not just an initial "already closed?" check), and having `close()` acquire
-    /// the same lock before touching either handle, means a read/write here and a close() can never
-    /// overlap: whichever gets the lock first runs to completion before the other proceeds. This
-    /// serializes the two directions of a single connection against each other (and against close()),
-    /// trading a small amount of throughput for correctness — an acceptable cost for a dev-preview
-    /// proxy. (An earlier version of this method used raw POSIX `read`/`write` on captured fds
-    /// instead of a lock; that also closed the race, but pulled in a Swift/Foundation overlay symbol
-    /// CI's older Xcode toolchain doesn't ship, failing `swift test`'s dlopen entirely — see #69.)
-    private func pump(from: FileHandle, to: FileHandle, label: String) {
-        from.readabilityHandler = { [weak self] handle in
+    /// Streaming read on `readFrom`; every chunk is forwarded to `writeTo`. All errors surface as
+    /// `errno` values in the handlers — never as an ObjC `NSException` — so a peer reset (ECONNRESET
+    /// on read, EPIPE on write) is handled as a clean teardown instead of a process abort.
+    private func pump(readFrom: DispatchIO, writeTo: DispatchIO, label: String) {
+        readFrom.read(offset: 0, length: Int.max, queue: queue) { [weak self] done, data, error in
             guard let self else { return }
-            self.lock.lock()
-            defer { self.lock.unlock() }
-            guard !self.closed else { return }
-
-            let data = handle.availableData
-            if data.isEmpty {
-                self.onEvent("\(label) EOF")
-                self.closeLocked()
+            if let data, !data.isEmpty {
+                writeTo.write(offset: 0, data: data, queue: self.queue) { [weak self] wDone, _, wError in
+                    guard let self else { return }
+                    if wError != 0 && wDone {
+                        self.onEvent("\(label) write error: errno \(wError) (\(String(cString: strerror(wError))))")
+                        self.close()
+                    }
+                }
+            }
+            if error != 0 {
+                // ECONNRESET / EBADF / etc. — the read side of the peer went away abnormally.
+                self.onEvent("\(label) read error: errno \(error) (\(String(cString: strerror(error))))")
+                self.close()
                 return
             }
-            do {
-                try to.write(contentsOf: data)
-            } catch {
-                self.onEvent("\(label) write error: \(error)")
-                self.closeLocked()
+            if done && (data == nil || data!.isEmpty) {
+                // Clean EOF: peer closed with a FIN and no error.
+                self.onEvent("\(label) EOF")
+                self.close()
             }
         }
     }
@@ -186,17 +219,18 @@ final class ProxyConnection: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// Idempotent teardown. Must be called with `lock` held. `onClose` is invoked here (not after
-    /// unlocking): it only ever does `Task { await self?.removeConnection(c) }`-shaped work, which
-    /// schedules and returns immediately, so calling it while holding this instance's own lock
-    /// cannot deadlock or re-enter this lock.
+    /// Idempotent teardown. Must be called with `lock` held. Closing each `DispatchIO` channel
+    /// (`.stop` flag: cancel any in-flight read/write immediately) closes its owned fd and runs its
+    /// cleanup handler. `onClose` is invoked here (not after unlocking): it only ever does
+    /// `Task { await self?.removeConnection(c) }`-shaped work, which schedules and returns
+    /// immediately, so calling it while holding this instance's own lock cannot deadlock or re-enter.
     private func closeLocked() {
         guard !closed else { return }
         closed = true
-        tcp.readabilityHandler = nil
-        guest.readabilityHandler = nil
-        try? tcp.close()
-        try? guest.close()
+        tcpIO?.close(flags: .stop)
+        guestIO?.close(flags: .stop)
+        tcpIO = nil
+        guestIO = nil
         onClose?(self)
     }
 }

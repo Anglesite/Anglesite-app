@@ -174,6 +174,127 @@ struct VsockTCPProxyTests {
         await proxy.stop()
     }
 
+    /// Make a connected pair of TCP loopback FileHandles (a listen/accept/connect handshake on
+    /// 127.0.0.1:0). Unlike an AF_UNIX `socketpair`, a *TCP* peer that closes with SO_LINGER 0
+    /// delivers a real RST, so the other end's read fails with ECONNRESET and its write with EPIPE
+    /// — the exact conditions that make `FileHandle.availableData`/`.write(contentsOf:)` raise an
+    /// ObjC `NSException`. `socketpair` (AF_UNIX) instead returns a clean EOF on peer close and can
+    /// never reproduce the production crash.
+    private func tcpPair() throws -> (FileHandle, FileHandle) {
+        let listenFD = socket(AF_INET, SOCK_STREAM, 0)
+        #expect(listenFD >= 0)
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = 0
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        _ = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(listenFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        #expect(listen(listenFD, 1) == 0)
+        var bound = sockaddr_in()
+        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &bound) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(listenFD, $0, &len) }
+        }
+        let clientFD = socket(AF_INET, SOCK_STREAM, 0)
+        #expect(clientFD >= 0)
+        var connAddr = sockaddr_in()
+        connAddr.sin_family = sa_family_t(AF_INET)
+        connAddr.sin_port = bound.sin_port
+        connAddr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let crc = withUnsafePointer(to: &connAddr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(clientFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        #expect(crc == 0)
+        let acceptedFD = accept(listenFD, nil, nil)
+        #expect(acceptedFD >= 0)
+        close(listenFD)
+        return (FileHandle(fileDescriptor: acceptedFD, closeOnDealloc: true),
+                FileHandle(fileDescriptor: clientFD, closeOnDealloc: true))
+    }
+
+    /// Force a TCP RST on `fh` when it closes: SO_LINGER {onoff:1, linger:0} makes close(2) send an
+    /// RST instead of a graceful FIN. A subsequent read on the peer then fails with ECONNRESET and a
+    /// write with EPIPE — the two socket-level errors that make `FileHandle.availableData` /
+    /// `.write(contentsOf:)` raise an *Objective-C* `NSException` (not a Swift error), which no
+    /// `try?`/`do-catch` in the pump can intercept.
+    private func forceResetOnClose(_ fh: FileHandle) {
+        var l = linger(l_onoff: 1, l_linger: 0)
+        setsockopt(fh.fileDescriptor, SOL_SOCKET, SO_LINGER, &l, socklen_t(MemoryLayout<linger>.size))
+    }
+
+    /// Regression test for #69: when a proxied peer disconnects with a TCP RST (ECONNRESET),
+    /// `ProxyConnection.pump`'s read of `availableData` must NOT crash the process. Every
+    /// `waitUntilServing` poll and every WKWebView connection close produces exactly this event, so
+    /// a peer reset is a NORMAL occurrence and must tear the connection down cleanly, never abort.
+    ///
+    /// Pre-fix this test does not "fail" — it CRASHES THE TEST RUNNER: `FileHandle.availableData`
+    /// raises an uncatchable ObjC `NSFileHandleOperationException` ("Connection reset by peer") on
+    /// the dispatch-source thread, and `libc++abi` aborts the whole process. Run it isolated
+    /// (`swift test --filter resetOnGuest...`) to capture that crash as RED evidence. Post-fix it
+    /// tears the connection down and removes it (connectionCount → 0), like the EOF path.
+    @Test("guest peer RST (ECONNRESET) during read tears down cleanly, never aborts")
+    func resetOnGuestReadDoesNotCrash() async throws {
+        // TCP pair (not socketpair): only a TCP peer closing with SO_LINGER 0 delivers a real RST,
+        // producing ECONNRESET on the proxy's read. An AF_UNIX socketpair returns a clean EOF and
+        // cannot reproduce the crash.
+        let (guestForProxy, guestPeer) = try tcpPair()
+        setRecvTimeout(guestPeer)
+        let proxy = VsockTCPProxy(guestPort: 4321, dial: { _ in guestForProxy })
+        let url = try await proxy.start()
+        let client = try connectTCPToProxy(to: url)
+
+        // Drive a byte through so accept + dial + both pump directions are live and the proxy is
+        // actively reading the guest handle.
+        try client.write(contentsOf: Data("ping".utf8))
+        _ = await readExactly(4, from: guestPeer)
+        #expect(await waitUntilConnectionCount(proxy, 1) == 1)
+
+        // RST the guest peer. The proxy's guest->tcp readabilityHandler wakes and reads
+        // `availableData`, which — pre-fix — raises NSFileHandleOperationException and aborts.
+        // Post-fix it must be handled like EOF: close the connection, remove it.
+        forceResetOnClose(guestPeer)
+        try guestPeer.close()
+
+        let countAfterReset = await waitUntilConnectionCount(proxy, 0)
+        #expect(countAfterReset == 0)
+        await proxy.stop()
+    }
+
+    /// Regression test for #69, write side: when the *client* (TCP) peer resets, a pending
+    /// guest->client forward hits EPIPE on write. Like the read side, `FileHandle.write(contentsOf:)`
+    /// raises an ObjC `NSException` on EPIPE that no Swift `catch` can intercept, so pre-fix this
+    /// also aborts the runner. Post-fix the write failure tears the connection down cleanly.
+    @Test("client peer RST (EPIPE) during write tears down cleanly, never aborts")
+    func resetOnClientWriteDoesNotCrash() async throws {
+        let (guestForProxy, guestPeer) = try tcpPair()
+        setRecvTimeout(guestPeer)
+        let proxy = VsockTCPProxy(guestPort: 4321, dial: { _ in guestForProxy })
+        let url = try await proxy.start()
+        let client = try connectTCPToProxy(to: url)
+
+        // Establish the connection (accept + dial) with a byte in the client->guest direction.
+        try client.write(contentsOf: Data("ping".utf8))
+        _ = await readExactly(4, from: guestPeer)
+        #expect(await waitUntilConnectionCount(proxy, 1) == 1)
+
+        // RST the client so the socket's peer is gone, then push a large payload from the guest.
+        // The proxy's guest->tcp handler wakes, reads the payload, and writes it into the
+        // now-reset client fd → EPIPE → (pre-fix) NSException → abort. A large payload makes the
+        // write actually reach the broken fd rather than being absorbed by kernel buffering.
+        forceResetOnClose(client)
+        try client.close()
+        try guestPeer.write(contentsOf: Data(repeating: 0x41, count: 256 * 1024))
+
+        let countAfterReset = await waitUntilConnectionCount(proxy, 0)
+        #expect(countAfterReset == 0)
+        await proxy.stop()
+    }
+
     @Test("closed connection is removed from connections (no unbounded growth)")
     func closedConnectionRemovedFromConnections() async throws {
         let (guestForProxy, guestPeer) = socketPair()
