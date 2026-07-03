@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(swift test *)",
+      "Bash(swift build *)",
+      "Bash(xcodebuild *)",
+      "Bash(xcodegen generate)",
+      "Bash(git fetch *)",
+      "mcp__computer-use__screenshot",
+      "mcp__computer-use__zoom",
+      "mcp__computer-use__wait"
+    ]
+  }
+}

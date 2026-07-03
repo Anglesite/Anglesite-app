@@ -20,6 +20,8 @@ Paired PRs are only needed for MCP schema changes and skill additions — templa
 
 When in doubt, the plugin is the source of truth for skills, hooks, and the MCP message schema. The app is a *host* — it does not own those. The app *does* own the template.
 
+> **Direction note:** the Claude Code / plugin-skill dependency is being retired under epic #459 (see "Plan" below). New feature journeys should land as deterministic Swift/TypeScript or Apple Intelligence paths, not new `claude --print` / markdown-skill paths.
+
 ## Stack
 
 - **Swift / SwiftUI** — app shell. Targets macOS 27+.
@@ -58,6 +60,7 @@ Sources/
 ├── AnglesiteSiteModel/  `.anglesite` site package model (AnglesitePackage, package layout)
 ├── AnglesiteIntents/    App Intents: Siri/Shortcuts/Spotlight entities and intents
 ├── AnglesiteContainer/  Apple Containerization local container runtime
+├── AnglesiteIOS/        iOS WKWebView preview shell for the remote-only runtime path (#71)
 └── AnglesiteBridge/     WKWebView script messages + JS overlay injection
 JS/
 └── edit-overlay/        TypeScript edit overlay compiled and bundled into app resources
@@ -113,6 +116,8 @@ Note: `swift test` runs on CI's older runners even though `Package.swift` declar
 
 **Containerization epic (#59):** The `SiteRuntime` protocol (#65) and HTTP/Streamable MCP transport (#64) are landed and shipping. Apple Containerization is the macOS runtime direction: `LocalContainerSiteRuntime` imports the app-bundled OCI layout, boots it with Apple's Containerization framework, and exposes preview/MCP over vsock proxies. Docker/buildx is only an image-build tool for producing that OCI root filesystem; the app does not run Docker. The active macOS image source is `Containers/anglesite-dev/`, vendored by `scripts/vendor-container-image.sh` into `Resources/container-image/`. The lowercase `container/` directory is the Cloudflare Sandbox / remote-runtime image pipeline for `RemoteSandboxSiteRuntime` and iOS work, not the app-bundled macOS image. Local-container selection is gated at runtime on the restricted virtualization entitlement and provisioned image/kernel/initfs resources.
 
-**macOS 27 / Siri AI:** the first platform wave has shipped (system-wide MCP, Spotlight App-Intents indexing, View Annotations, App Intents Testing, Foundation Models chat, SwiftUI 27 toolbars, the Xcode 27 migration audit). Ongoing work is tracked under the Siri AI phases (A–D, ~#132–135) and their sub-issues — check `gh issue list` for the live set.
+**macOS 27 / Siri AI:** the platform wave has shipped and the Siri AI phases A–D (#132–135) are all closed (system-wide MCP, Spotlight App-Intents indexing, View Annotations, App Intents Testing, Foundation Models chat, SwiftUI 27 toolbars, the Xcode 27 migration audit). Follow-on intelligence work now lives under the Claude Code removal epic below.
+
+**Claude Code removal epic (#459):** the active migration driving current feature work — retire the `claude --print` subprocess, `ClaudeAgent`, and the markdown skills, replacing them with deterministic Swift/TypeScript plus Apple Intelligence (on-device Foundation Models, escalating to Private Cloud Compute). **No external LLM APIs, ever.** Spec: [`docs/superpowers/specs/2026-06-20-claude-code-removal-roadmap-design.md`](docs/superpowers/specs/2026-06-20-claude-code-removal-roadmap-design.md). Work lands as vertical slices (each ends "tool before brain": deterministic tool → FM Tool + App Intent + GUI → delete that journey's `claude --print` path). Slices 1, 2, and 4 (#460, #461, #463) have landed; Slice 3 (#462, integrations wizard catalog) is in flight; Slices 5–7 (#464–466) are queued. Slice 7 deletes `ClaudeAgent` and converts the plugin repo — so don't extend the Claude-plugin path for new features without checking this epic first.
 
 **`.anglesite` package model (#242):** shipped — a site is a `.anglesite` package (see "Site identity" above). Design + phase plans: [`docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md`](docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md) and `docs/superpowers/plans/2026-06-19-anglesite-package-model-p{1..5}-*.md`. It dovetails with the container epics: the git-bootstrap (#68, shipped) and the still-open container runtimes (#66/#69) operate on the package's `Source/` repo, and `Config/` never enters a container. The `SiteConfigStore.displayName` override consumer (#266) has since shipped.
