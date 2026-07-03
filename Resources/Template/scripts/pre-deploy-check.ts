@@ -42,9 +42,10 @@ const SECRET_PATTERNS = [
   { name: "private key", pattern: /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/g },
 ];
 
+// Trackers with no first-party integration in this catalog. Google Analytics/Tag
+// Manager are deliberately absent — the `tracking` integration (ga4 provider) makes
+// them a supported, owner-opted-in choice, the same way Plausible/Fathom always were.
 const BLOCKED_SCRIPTS = [
-  /google-analytics\.com/i,
-  /googletagmanager\.com/i,
   /facebook\.net.*fbevents/i,
   /hotjar\.com/i,
 ];

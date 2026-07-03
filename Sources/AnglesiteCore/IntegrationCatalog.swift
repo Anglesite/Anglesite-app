@@ -353,7 +353,12 @@ public enum IntegrationCatalog {
         providers: [
             Provider(id: "plausible", displayName: "Plausible", cspDomains: ["plausible.io"]),
             Provider(id: "fathom", displayName: "Fathom", cspDomains: ["cdn.usefathom.com"]),
-            Provider(id: "ga4", displayName: "Google Analytics 4", cspDomains: ["www.googletagmanager.com"]),
+            // gtag.js loads from googletagmanager.com, but GA4's actual event beacons
+            // (/g/collect) go to google-analytics.com / regional analytics.google.com hosts —
+            // without these, connect-src silently drops every hit once the generated CSP is
+            // enforced (see PR #473 review).
+            Provider(id: "ga4", displayName: "Google Analytics 4",
+                     cspDomains: ["www.googletagmanager.com", "*.google-analytics.com", "*.analytics.google.com"]),
         ],
         fields: [
             Field(key: "domain", label: "Site domain", kind: .text,
