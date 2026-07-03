@@ -163,8 +163,8 @@ public struct StartupProgressEstimator: Sendable, Equatable {
     }
 
     private static func parseReadyURL(_ text: String) -> URL? {
-        // Mirrors the retired `AstroDevServer.parseReadyURL`/`stripANSI` so a dev-server log line
-        // still parses the same way it did before host Node retirement. The `?` in the ANSI class
+        // Mirrors the pre-#70 dev-server ready-URL parser/ANSI-stripper so a log line still
+        // parses the same way it did before host Node retirement. The `?` in the ANSI class
         // matters: CSI private-mode sequences (e.g. `ESC[?25l`, used to hide/show the cursor)
         // wouldn't be stripped without it.
         let cleaned = text.replacingOccurrences(
