@@ -148,7 +148,8 @@ import Foundation
     func makeNewsletterTemplate() -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("tmpl-newsletter-\(UUID().uuidString)")
         for p in ["integrations/components/NewsletterForm.astro", "integrations/pages/subscribe.astro",
-                  "integrations/pages/subscribe/thanks.astro"] {
+                  "integrations/pages/subscribe/thanks.astro", "integrations/worker/subscribe-worker.js",
+                  "integrations/worker/subscribe-wrangler.toml", "integrations/docs/newsletter-setup.md"] {
             let url = root.appendingPathComponent(p)
             try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try! "N".write(to: url, atomically: true, encoding: .utf8)

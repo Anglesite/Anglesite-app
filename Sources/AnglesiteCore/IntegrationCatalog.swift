@@ -213,7 +213,7 @@ public enum IntegrationCatalog {
         ],
         fields: [
             Field(key: "workerUrl", label: "Subscribe Worker URL", kind: .url,
-                  help: "The Cloudflare Worker URL that proxies subscribe requests to your newsletter platform — see docs/newsletter-sending.md."),
+                  help: "The Cloudflare Worker URL that proxies subscribe requests to your newsletter platform — see docs/newsletter-setup.md, included in this site, for how to deploy it."),
             Field(key: "buttonText", label: "Button text", kind: .text, isOptional: true, defaultValue: "Subscribe"),
         ],
         operations: [
@@ -223,6 +223,12 @@ public enum IntegrationCatalog {
                       to: "src/pages/subscribe.astro", when: .always),
             .copyFile(from: TemplateRef("integrations/pages/subscribe/thanks.astro"),
                       to: "src/pages/subscribe/thanks.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/worker/subscribe-worker.js"),
+                      to: "worker/subscribe-worker.js", when: .always),
+            .copyFile(from: TemplateRef("integrations/worker/subscribe-wrangler.toml"),
+                      to: "worker/subscribe-wrangler.toml", when: .always),
+            .copyFile(from: TemplateRef("integrations/docs/newsletter-setup.md"),
+                      to: "docs/newsletter-setup.md", when: .always),
             .writeConfig([
                 ConfigEntry(key: "NEWSLETTER_PLATFORM", value: "{{provider}}"),
                 ConfigEntry(key: "NEWSLETTER_WORKER_URL", value: "{{workerUrl}}"),

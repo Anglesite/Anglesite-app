@@ -1,0 +1,16 @@
+# Newsletter subscribe Worker — see docs/newsletter-setup.md for deployment steps.
+# Receives subscribe form submissions and forwards them to your newsletter platform.
+#
+# Secrets are set via: npx wrangler secret put <NAME> --config worker/subscribe-wrangler.toml
+#   NEWSLETTER_API_KEY  — Buttondown or Mailchimp API key
+#   NEWSLETTER_PLATFORM — "buttondown" or "mailchimp"
+#   MAILCHIMP_LIST_ID   — Mailchimp audience/list ID (Mailchimp only)
+#   SITE_DOMAIN         — your site's domain, for CORS origin validation
+
+name = "newsletter-subscribe"
+main = "subscribe-worker.js"
+compatibility_date = "2024-01-01"
+
+[observability]
+enabled = true
+head_sampling_rate = 1.0

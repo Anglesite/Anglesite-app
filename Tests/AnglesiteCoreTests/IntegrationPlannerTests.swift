@@ -35,6 +35,26 @@ import Foundation
         if case .failure(.invalidValue(let key, _)) = r { #expect(key == "link") } else { Issue.record("expected invalidValue") }
     }
 
+    /// A scheme-only value like "https:" or a "mailto:" address parses with a non-nil scheme but
+    /// no host — without this check it would pass field validation, then addCSPDomains(fromFieldHost:)
+    /// would silently add no CSP domain, leaving the subscribe form blocked by CSP at runtime with
+    /// no error surfaced at plan time. See #471 review.
+    @Test(arguments: ["https:", "mailto:foo@bar.com", "not a url"])
+    func urlFieldRequiresHostNotJustScheme(_ badValue: String) {
+        let tmpl = FileManager.default.temporaryDirectory.appendingPathComponent("tmpl-newsletter-\(UUID().uuidString)")
+        for p in ["integrations/components/NewsletterForm.astro", "integrations/pages/subscribe.astro",
+                  "integrations/pages/subscribe/thanks.astro"] {
+            let url = tmpl.appendingPathComponent(p)
+            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try! "N".write(to: url, atomically: true, encoding: .utf8)
+        }
+        let r = IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .newsletter),
+                                        answers: ["provider": "buttondown", "workerUrl": badValue],
+                                        sourceDirectory: makeSource(), templateDirectory: tmpl)
+        if case .failure(.invalidValue(let key, _)) = r { #expect(key == "workerUrl") }
+        else { Issue.record("expected invalidValue for workerUrl=\(badValue), got \(r)") }
+    }
+
     @Test func bookingInlineProducesBookPageNotAnchorInjection() throws {
         let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .booking),
             answers: ["provider": "cal", "username": "jane", "style": "inline"],
