@@ -52,8 +52,13 @@ public enum OCILayoutStaging {
         }
         if FileManager.default.fileExists(atPath: staged.path) {
             // Stale copy from a previously-bundled image: swap the fresh copy in atomically so a
-            // concurrent reader never observes a partially-replaced layout.
-            _ = try FileManager.default.replaceItemAt(staged, withItemAt: tempDir)
+            // concurrent reader never observes a partially-replaced layout. `replaceItemAt` is
+            // documented as possibly not replacing in place — honor the URL it reports the new
+            // item at rather than assuming it landed at `staged`.
+            if let replaced = try FileManager.default.replaceItemAt(staged, withItemAt: tempDir) {
+                return replaced
+            }
+            return staged
         } else {
             do {
                 try FileManager.default.moveItem(at: tempDir, to: staged)
