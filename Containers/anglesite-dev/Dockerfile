@@ -22,4 +22,20 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN cd /usr/local/lib/anglesite-mcp \
     && npm ci --omit=dev \
     && rm -rf node_modules/playwright node_modules/playwright-core node_modules/.cache/ms-playwright
+
+# ---- Pre-baked site toolchain (skip cold npm install on boot; design §5b) ----
+# Install the template's full dependency closure once, at image-build time. This keeps the
+# resolved node_modules so a cloned site whose lockfile matches the template reuses it with
+# zero install (anglesite-hydrate), AND leaves npm's cache (/root/.npm) in the layer so a
+# drifted-lockfile site's `npm ci --prefer-offline` mostly avoids the network. Full closure
+# (no --omit=dev): astro dev/check need devDependencies (tsx, @astrojs/check, typescript).
+ENV ANGLESITE_HOME=/opt/anglesite
+COPY template/package.json template/package-lock.json ${ANGLESITE_HOME}/baked/
+RUN cd ${ANGLESITE_HOME}/baked \
+    && ( npm ci \
+         || { echo "WARN: template lockfile out of sync — falling back to npm install" >&2; \
+              npm install; } )
+COPY hydrate.sh /usr/local/bin/anglesite-hydrate
+RUN chmod +x /usr/local/bin/anglesite-hydrate
+
 WORKDIR /workspace

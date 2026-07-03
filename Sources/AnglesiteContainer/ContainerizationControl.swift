@@ -162,8 +162,10 @@ public struct ContainerizationControl: LocalContainerControl {
         //    single onOutput stream can distinguish them (this is the only visibility into what the
         //    guest is doing during boot — see #69's opaque `npm install`/`astro dev` startup window).
         do {
+            // Hydrate deps from the image's baked toolchain (zero-install hardlink when the site's
+            // lockfile matches the template; offline-first npm ci otherwise), then start astro.
             try await runDetached(container, id: "astro", label: "astro", onOutput: onOutput, ["sh", "-lc",
-                "cd /workspace/site && npm install --no-audit --no-fund && npx astro dev --port 4321 --host 127.0.0.1"])
+                "/usr/local/bin/anglesite-hydrate /workspace/site && cd /workspace/site && npx astro dev --port 4321 --host 127.0.0.1"])
 
             // MCP sidecar: baked into the image at /usr/local/lib/anglesite-mcp/ by the two-stage
             // Dockerfile (scripts/vendor-container-image.sh stages the plugin's server/ dir into the
