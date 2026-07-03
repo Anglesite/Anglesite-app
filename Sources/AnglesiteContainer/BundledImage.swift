@@ -33,6 +33,13 @@ public enum BundledImage {
         // Alongside the main executable (xctest / CLI).
         candidates.append(Bundle.main.bundleURL)
         candidates.append(Bundle.main.bundleURL.deletingLastPathComponent())
+        // Inside a real .app's Contents/Resources/ — where SwiftPM-generated resource bundles
+        // actually land for a statically-linked target (Bundle(for:).bundleURL above resolves to
+        // Bundle.main itself in that case, never Contents/Resources, so none of the candidates
+        // above match without this).
+        if let resourceURL = Bundle.main.resourceURL {
+            candidates.append(resourceURL)
+        }
         for base in candidates {
             let url = base.appendingPathComponent(bundleName)
             if let b = Bundle(url: url) { return b }
@@ -159,6 +166,46 @@ public enum BundledImage {
         let dir = base.appendingPathComponent("Anglesite/container-store", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
+    }
+
+    /// Stages a (possibly read-only, bundle-hosted) OCI layout into a writable directory.
+    ///
+    /// `ImageStore.load(from:)` writes ingest-tracking files (e.g. `ingest/`) directly inside the
+    /// layout directory it reads from — not just into the destination store — so passing the
+    /// bundled `layoutURL()`/`initfsLayoutURL()` straight in fails with EPERM on a real, read-only
+    /// `.app`. `name` identifies the artifact (e.g. "app-image", "vminit-initfs") and namespaces its
+    /// staged copy under `storeURL()` so repeated launches reuse it instead of re-copying every time.
+    ///
+    /// `name` is shared across all sites (not site-scoped, unlike the ext4 rootfs/initfs), so two
+    /// site windows cold-booting `LocalContainerSiteRuntime` around the same time can call this
+    /// concurrently for the same artifact. Each caller copies into its own uniquely-named temp
+    /// directory and only atomically moves it into place if `staged` still doesn't exist by the
+    /// time the copy finishes — so a slower caller can never delete or observe a partial copy from
+    /// a faster one; it just discards its own redundant copy and reuses the winner's result.
+    public static func stagedLayoutURL(source: URL, name: String) throws -> URL {
+        let staged = try storeURL().appendingPathComponent("layout-staging/\(name)", isDirectory: true)
+        let stagedIndex = staged.appendingPathComponent("index.json").path
+        if FileManager.default.fileExists(atPath: stagedIndex) {
+            return staged
+        }
+        let parent = staged.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+
+        let tempDir = parent.appendingPathComponent(".staging-\(name)-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.copyItem(at: source, to: tempDir)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        if FileManager.default.fileExists(atPath: stagedIndex) {
+            return staged  // another caller finished staging while we were copying
+        }
+        do {
+            try FileManager.default.moveItem(at: tempDir, to: staged)
+        } catch {
+            // Lost the race to a concurrent stager. If they succeeded, use their result;
+            // otherwise this is a real failure (e.g. disk full) and should propagate.
+            guard FileManager.default.fileExists(atPath: stagedIndex) else { throw error }
+        }
+        return staged
     }
 }
 
