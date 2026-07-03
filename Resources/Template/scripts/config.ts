@@ -49,6 +49,7 @@ export type DonationsProvider = "stripe" | "liberapay" | "github-sponsors";
 export type ContactProvider = "formspree" | "mailto";
 export type TrackingProvider = "plausible" | "fathom" | "ga4";
 export type PodcastProvider = "spotify" | "transistor";
+export type BuyButtonProvider = "stripe" | "polar";
 
 export function asBookingProvider(
   value: string | undefined,
@@ -80,4 +81,10 @@ export function asPodcastProvider(
   value: string | undefined,
 ): PodcastProvider | undefined {
   return value === "spotify" || value === "transistor" ? value : undefined;
+}
+
+export function asBuyButtonProvider(
+  value: string | undefined,
+): BuyButtonProvider | undefined {
+  return value === "stripe" || value === "polar" ? value : undefined;
 }

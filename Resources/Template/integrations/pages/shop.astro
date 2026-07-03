@@ -1,0 +1,12 @@
+---
+import BaseLayout from "../../src/layouts/BaseLayout.astro";
+import LemonSqueezyButton from "../components/LemonSqueezyButton.astro";
+import { readConfig } from "../../scripts/config";
+---
+
+<BaseLayout title="Shop">
+  <LemonSqueezyButton
+    href={readConfig("LEMON_SQUEEZY_CHECKOUT_URL")}
+    label={readConfig("LEMON_SQUEEZY_BUTTON_TEXT")}
+  />
+</BaseLayout>

@@ -50,6 +50,9 @@ public enum IntegrationCatalog {
     public static let all: [IntegrationDescriptor] = [
         booking, contact, donations, giscus, newsletter, consent, pwa, redirects,
         tracking, share, podcast,
+        indieweb, menu,
+        buyButton, lemonSqueezy, paddle, snipcart, shopifyBuyButton,
+        domain,
     ]
 
     public static func descriptor(for id: IntegrationID) -> IntegrationDescriptor {
@@ -436,5 +439,226 @@ public enum IntegrationCatalog {
                 ConfigEntry(key: "PODCAST_RSS_URL", value: "{{rssUrl}}"),
             ], when: .always),
             .addCSPDomains(fromProvider: true, extra: [], fromFieldHost: nil, when: .always),
+        ])
+
+    // MARK: indieweb
+    static let indieweb = IntegrationDescriptor(
+        id: .indieweb,
+        displayName: "IndieWeb",
+        summary: "Add rel=me identity links and webmention/pingback endpoint discovery.",
+        providers: [],
+        fields: [
+            Field(key: "relMe1", label: "Profile link #1", kind: .url, isOptional: true,
+                  help: "e.g. your Mastodon profile — proves you own both."),
+            Field(key: "relMe2", label: "Profile link #2", kind: .url, isOptional: true),
+            Field(key: "relMe3", label: "Profile link #3", kind: .url, isOptional: true),
+            Field(key: "webmentionUsername", label: "webmention.io username", kind: .text, isOptional: true,
+                  help: "Usually your domain, e.g. example.com — enables webmention/pingback discovery via webmention.io."),
+        ],
+        operations: [
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "// anglesite:imports",
+                            snippet: "import { readConfig } from \"../../scripts/config\";",
+                            when: .always, style: .line),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:head-end -->",
+                            snippet: "{!!readConfig(\"INDIEWEB_REL_ME_1\") && (<link rel=\"me\" href={readConfig(\"INDIEWEB_REL_ME_1\")} />)}\n{!!readConfig(\"INDIEWEB_REL_ME_2\") && (<link rel=\"me\" href={readConfig(\"INDIEWEB_REL_ME_2\")} />)}\n{!!readConfig(\"INDIEWEB_REL_ME_3\") && (<link rel=\"me\" href={readConfig(\"INDIEWEB_REL_ME_3\")} />)}\n{!!readConfig(\"INDIEWEB_WEBMENTION_USERNAME\") && (<link rel=\"webmention\" href={`https://webmention.io/${readConfig(\"INDIEWEB_WEBMENTION_USERNAME\")}/webmention`} />)}\n{!!readConfig(\"INDIEWEB_WEBMENTION_USERNAME\") && (<link rel=\"pingback\" href={`https://webmention.io/${readConfig(\"INDIEWEB_WEBMENTION_USERNAME\")}/xmlrpc`} />)}",
+                            when: .always, style: .html),
+            .writeConfig([
+                ConfigEntry(key: "INDIEWEB_REL_ME_1", value: "{{relMe1}}"),
+                ConfigEntry(key: "INDIEWEB_REL_ME_2", value: "{{relMe2}}"),
+                ConfigEntry(key: "INDIEWEB_REL_ME_3", value: "{{relMe3}}"),
+                ConfigEntry(key: "INDIEWEB_WEBMENTION_USERNAME", value: "{{webmentionUsername}}"),
+            ], when: .always),
+        ])
+
+    // MARK: menu
+    static let menu = IntegrationDescriptor(
+        id: .menu,
+        displayName: "Navigation Menu",
+        summary: "Add a configurable top navigation with up to four links.",
+        providers: [],
+        fields: [
+            Field(key: "item1Label", label: "Item 1 label", kind: .text, isOptional: true, defaultValue: "Home"),
+            Field(key: "item1Path", label: "Item 1 path", kind: .path, isOptional: true, defaultValue: "/"),
+            Field(key: "item2Label", label: "Item 2 label", kind: .text, isOptional: true, defaultValue: "Blog"),
+            Field(key: "item2Path", label: "Item 2 path", kind: .path, isOptional: true, defaultValue: "/blog"),
+            Field(key: "item3Label", label: "Item 3 label", kind: .text, isOptional: true),
+            Field(key: "item3Path", label: "Item 3 path", kind: .path, isOptional: true),
+            Field(key: "item4Label", label: "Item 4 label", kind: .text, isOptional: true),
+            Field(key: "item4Path", label: "Item 4 path", kind: .path, isOptional: true),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/Nav.astro"),
+                      to: "src/components/Nav.astro", when: .always),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "// anglesite:imports",
+                            snippet: "import Nav from \"../components/Nav.astro\";\nimport { readConfig } from \"../../scripts/config\";",
+                            when: .always, style: .line),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:nav -->",
+                            snippet: "<Nav item1Label={readConfig(\"MENU_ITEM_1_LABEL\")} item1Path={readConfig(\"MENU_ITEM_1_PATH\")} item2Label={readConfig(\"MENU_ITEM_2_LABEL\")} item2Path={readConfig(\"MENU_ITEM_2_PATH\")} item3Label={readConfig(\"MENU_ITEM_3_LABEL\")} item3Path={readConfig(\"MENU_ITEM_3_PATH\")} item4Label={readConfig(\"MENU_ITEM_4_LABEL\")} item4Path={readConfig(\"MENU_ITEM_4_PATH\")} />",
+                            when: .always, style: .html),
+            .writeConfig([
+                ConfigEntry(key: "MENU_ITEM_1_LABEL", value: "{{item1Label}}"),
+                ConfigEntry(key: "MENU_ITEM_1_PATH", value: "{{item1Path}}"),
+                ConfigEntry(key: "MENU_ITEM_2_LABEL", value: "{{item2Label}}"),
+                ConfigEntry(key: "MENU_ITEM_2_PATH", value: "{{item2Path}}"),
+                ConfigEntry(key: "MENU_ITEM_3_LABEL", value: "{{item3Label}}"),
+                ConfigEntry(key: "MENU_ITEM_3_PATH", value: "{{item3Path}}"),
+                ConfigEntry(key: "MENU_ITEM_4_LABEL", value: "{{item4Label}}"),
+                ConfigEntry(key: "MENU_ITEM_4_PATH", value: "{{item4Path}}"),
+            ], when: .always),
+        ])
+
+    // MARK: buyButton
+    static let buyButton = IntegrationDescriptor(
+        id: .buyButton,
+        displayName: "Buy Button",
+        summary: "Sell a single product, service, or digital good with a Stripe or Polar checkout link.",
+        providers: [
+            Provider(id: "stripe", displayName: "Stripe", cspDomains: ["js.stripe.com", "buy.stripe.com"]),
+            Provider(id: "polar", displayName: "Polar", cspDomains: ["polar.sh", "buy.polar.sh"]),
+        ],
+        fields: [
+            Field(key: "checkoutUrl", label: "Checkout link", kind: .url,
+                  help: "Your Stripe Payment Link or Polar checkout URL."),
+            Field(key: "buttonText", label: "Button text", kind: .text, isOptional: true, defaultValue: "Buy Now"),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/BuyButton.astro"),
+                      to: "src/components/BuyButton.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/pages/buy.astro"),
+                      to: "src/pages/buy.astro", when: .always),
+            .writeConfig([
+                ConfigEntry(key: "BUY_BUTTON_PROVIDER", value: "{{provider}}"),
+                ConfigEntry(key: "BUY_BUTTON_CHECKOUT_URL", value: "{{checkoutUrl}}"),
+                ConfigEntry(key: "BUY_BUTTON_TEXT", value: "{{buttonText}}"),
+            ], when: .always),
+            .addCSPDomains(fromProvider: true, extra: [], fromFieldHost: nil, when: .always),
+        ])
+
+    // MARK: lemonSqueezy
+    static let lemonSqueezy = IntegrationDescriptor(
+        id: .lemonSqueezy,
+        displayName: "Lemon Squeezy",
+        summary: "Sell digital products with a Lemon Squeezy overlay checkout.",
+        providers: [],
+        fields: [
+            Field(key: "checkoutUrl", label: "Checkout URL", kind: .url,
+                  help: "Your Lemon Squeezy checkout URL, e.g. https://your-store.lemonsqueezy.com/checkout/buy/xxxx."),
+            Field(key: "buttonText", label: "Button text", kind: .text, isOptional: true, defaultValue: "Buy Now"),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/LemonSqueezyButton.astro"),
+                      to: "src/components/LemonSqueezyButton.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/pages/shop.astro"),
+                      to: "src/pages/shop.astro", when: .always),
+            .writeConfig([
+                ConfigEntry(key: "LEMON_SQUEEZY_CHECKOUT_URL", value: "{{checkoutUrl}}"),
+                ConfigEntry(key: "LEMON_SQUEEZY_BUTTON_TEXT", value: "{{buttonText}}"),
+            ], when: .always),
+            .addCSPDomains(fromProvider: false, extra: ["assets.lemonsqueezy.com", "app.lemonsqueezy.com"],
+                           fromFieldHost: nil, when: .always),
+        ])
+
+    // MARK: paddle
+    static let paddle = IntegrationDescriptor(
+        id: .paddle,
+        displayName: "Paddle",
+        summary: "Set up Paddle checkout for software licensing, SaaS subscriptions, or metered billing.",
+        providers: [],
+        fields: [
+            Field(key: "clientToken", label: "Client-side token", kind: .text,
+                  help: "Paddle > Developer Tools > Authentication > client-side token."),
+            Field(key: "priceId", label: "Price ID", kind: .text,
+                  help: "The Paddle price ID to check out, e.g. pri_xxxxxxxxx."),
+            Field(key: "buttonText", label: "Button text", kind: .text, isOptional: true, defaultValue: "Subscribe"),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/PaddleCheckout.astro"),
+                      to: "src/components/PaddleCheckout.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/pages/pricing.astro"),
+                      to: "src/pages/pricing.astro", when: .always),
+            .writeConfig([
+                ConfigEntry(key: "PADDLE_CLIENT_TOKEN", value: "{{clientToken}}"),
+                ConfigEntry(key: "PADDLE_PRICE_ID", value: "{{priceId}}"),
+                ConfigEntry(key: "PADDLE_BUTTON_TEXT", value: "{{buttonText}}"),
+            ], when: .always),
+            .addCSPDomains(fromProvider: false,
+                           extra: ["cdn.paddle.com", "checkout.paddle.com", "buy.paddle.com"],
+                           fromFieldHost: nil, when: .always),
+        ])
+
+    // MARK: snipcart
+    static let snipcart = IntegrationDescriptor(
+        id: .snipcart,
+        displayName: "Snipcart",
+        summary: "Set up Snipcart ecommerce for a small physical product catalog.",
+        providers: [],
+        fields: [
+            Field(key: "apiKey", label: "Snipcart public API key", kind: .text,
+                  help: "Found in Snipcart dashboard > Account > API Keys > Public test/live key."),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/SnipcartButton.astro"),
+                      to: "src/components/SnipcartButton.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/pages/store.astro"),
+                      to: "src/pages/store.astro", when: .always),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "// anglesite:imports",
+                            snippet: "import { readConfig } from \"../../scripts/config\";",
+                            when: .always, style: .line),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:body-end -->",
+                            snippet: "{!!readConfig(\"SNIPCART_API_KEY\") && (<div hidden id=\"snipcart\" data-api-key={readConfig(\"SNIPCART_API_KEY\")} data-config-modal-style=\"side\"></div>)}\n{!!readConfig(\"SNIPCART_API_KEY\") && (<script async src=\"https://cdn.snipcart.com/themes/v3.7.3/default/snipcart.js\"></script>)}",
+                            when: .always, style: .html),
+            .writeConfig([
+                ConfigEntry(key: "SNIPCART_API_KEY", value: "{{apiKey}}"),
+            ], when: .always),
+            .addCSPDomains(fromProvider: false,
+                           extra: ["cdn.snipcart.com", "app.snipcart.com"],
+                           fromFieldHost: nil, when: .always),
+        ])
+
+    // MARK: shopifyBuyButton
+    static let shopifyBuyButton = IntegrationDescriptor(
+        id: .shopifyBuyButton,
+        displayName: "Shopify Buy Button",
+        summary: "Set up Shopify Buy Button for a full physical product catalog with dashboard.",
+        providers: [],
+        fields: [
+            Field(key: "shopDomain", label: "Shop domain", kind: .text,
+                  help: "e.g. your-store.myshopify.com"),
+            Field(key: "storefrontAccessToken", label: "Storefront access token", kind: .text,
+                  help: "Shopify Admin > Apps > Headless / Storefront API > create a storefront access token."),
+            Field(key: "productId", label: "Product ID", kind: .text,
+                  help: "The Shopify product ID to feature, e.g. gid://shopify/Product/1234567890 or its numeric id."),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/ShopifyBuyButton.astro"),
+                      to: "src/components/ShopifyBuyButton.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/pages/products.astro"),
+                      to: "src/pages/products.astro", when: .always),
+            .writeConfig([
+                ConfigEntry(key: "SHOPIFY_DOMAIN", value: "{{shopDomain}}"),
+                ConfigEntry(key: "SHOPIFY_STOREFRONT_TOKEN", value: "{{storefrontAccessToken}}"),
+                ConfigEntry(key: "SHOPIFY_PRODUCT_ID", value: "{{productId}}"),
+            ], when: .always),
+            .addCSPDomains(fromProvider: false,
+                           extra: ["sdks.shopifycdn.com", "cdn.shopify.com"],
+                           fromFieldHost: nil, when: .always),
+        ])
+
+    // MARK: domain
+    static let domain = IntegrationDescriptor(
+        id: .domain,
+        displayName: "Custom Domain",
+        summary: "Record your custom domain and generate a DNS setup guide.",
+        providers: [],
+        fields: [
+            Field(key: "domainName", label: "Domain", kind: .text,
+                  help: "Your custom domain, e.g. example.com (no https:// or trailing slash)."),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/docs/domain-setup.md"),
+                      to: "docs/domain-setup.md", when: .always),
+            .writeConfig([
+                ConfigEntry(key: "DOMAIN_NAME", value: "{{domainName}}"),
+            ], when: .always),
         ])
 }
