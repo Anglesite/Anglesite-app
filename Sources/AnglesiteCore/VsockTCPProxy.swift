@@ -117,28 +117,21 @@ public actor VsockTCPProxy {
 }
 
 /// One spliced TCP↔vsock pair. Uses each handle's `readabilityHandler` to detect when bytes are
-/// available, then copies them via raw POSIX `read`/`write` on the captured fds (see `pump` below
-/// for why); an empty read (EOF) or unrecoverable write error tears the pair down.
+/// available, then copies them via `FileHandle`'s own `availableData`/`write(contentsOf:)` (see
+/// `pump` below for why a lock, not raw POSIX syscalls, is what makes this safe); an empty read
+/// (EOF) or unrecoverable write error tears the pair down.
 final class ProxyConnection: @unchecked Sendable {
     private let tcp: FileHandle
     private let guest: FileHandle
-    // Captured once at init, before either direction's readability handler can fire — every
-    // subsequent read/write goes through these raw descriptors, never through NSFileHandle's
-    // ObjC read/write/fileDescriptor accessors (see `pump` below for why).
-    private let tcpFD: Int32
-    private let guestFD: Int32
     private let lock = NSLock()
     private var closed = false
     /// Called exactly once, after the connection closes, with `self` as the argument.
-    /// Invoked outside the lock to avoid re-entrancy / deadlock.
     private var onClose: (@Sendable (_ conn: ProxyConnection) -> Void)?
     private let onEvent: @Sendable (String) -> Void
 
     init(tcp: FileHandle, guest: FileHandle, onEvent: @escaping @Sendable (String) -> Void = { _ in }) {
         self.tcp = tcp
         self.guest = guest
-        self.tcpFD = tcp.fileDescriptor
-        self.guestFD = guest.fileDescriptor
         self.onEvent = onEvent
     }
 
@@ -146,81 +139,64 @@ final class ProxyConnection: @unchecked Sendable {
     /// there is no mutable public var window between construction and the first read handler firing.
     func start(onClose: @escaping @Sendable (ProxyConnection) -> Void) {
         self.onClose = onClose
-        pump(from: tcp, fromFD: tcpFD, toFD: guestFD, label: "tcp->guest")
-        pump(from: guest, fromFD: guestFD, toFD: tcpFD, label: "guest->tcp")
+        pump(from: tcp, to: guest, label: "tcp->guest")
+        pump(from: guest, to: tcp, label: "guest->tcp")
     }
 
-    /// Reads from `fromFD` and forwards to `toFD` whenever `from` reports readable, entirely via raw
-    /// POSIX `read`/`write` on the captured descriptors — never via `FileHandle.availableData`,
-    /// `.write(contentsOf:)`, or `.fileDescriptor`. Each direction's handler runs on that FileHandle's
-    /// own dispatch source, so the two directions of one connection execute concurrently: an EOF on
-    /// one side calls `close()`, which can run while the other side's handler is already mid-flight.
-    /// Those NSFileHandle accessors raise an Objective-C `NSException` (not a Swift error, so `try?`
-    /// can't catch it) when touched on a handle the other thread is concurrently closing — that
-    /// crashed the whole app via `abort()`. Raw syscalls on a captured fd number just return an
-    /// ordinary POSIX error in the same situation.
-    private func pump(from: FileHandle, fromFD: Int32, toFD: Int32, label: String) {
-        from.readabilityHandler = { [weak self] _ in
+    /// Reads from `from` and forwards to `to` whenever `from` reports readable. Each direction's
+    /// handler runs on that `FileHandle`'s own dispatch source, so the two directions of one
+    /// connection can fire concurrently on different threads: an EOF on one side calls `close()`,
+    /// which can run while the other side's handler is mid-flight. `FileHandle.availableData` and
+    /// `.write(contentsOf:)` raise an Objective-C `NSException` (not a Swift error — `try?` can't
+    /// catch it) when invoked on a handle another thread is concurrently invalidating via `.close()`
+    /// — that previously crashed the whole app via `abort()`. Holding `lock` across the ENTIRE
+    /// read-then-write (not just an initial "already closed?" check), and having `close()` acquire
+    /// the same lock before touching either handle, means a read/write here and a close() can never
+    /// overlap: whichever gets the lock first runs to completion before the other proceeds. This
+    /// serializes the two directions of a single connection against each other (and against close()),
+    /// trading a small amount of throughput for correctness — an acceptable cost for a dev-preview
+    /// proxy. (An earlier version of this method used raw POSIX `read`/`write` on captured fds
+    /// instead of a lock; that also closed the race, but pulled in a Swift/Foundation overlay symbol
+    /// CI's older Xcode toolchain doesn't ship, failing `swift test`'s dlopen entirely — see #69.)
+    private func pump(from: FileHandle, to: FileHandle, label: String) {
+        from.readabilityHandler = { [weak self] handle in
             guard let self else { return }
             self.lock.lock()
-            let alreadyClosed = self.closed
-            self.lock.unlock()
-            if alreadyClosed { return }
+            defer { self.lock.unlock() }
+            guard !self.closed else { return }
 
-            var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-            let n = buffer.withUnsafeMutableBytes { read(fromFD, $0.baseAddress, $0.count) }
-            if n <= 0 {
-                if n < 0 && errno == EINTR { return }  // transient; retry on the next readability callback
-                self.onEvent(n == 0 ? "\(label) EOF" : "\(label) read error errno=\(errno)")
-                self.close()
+            let data = handle.availableData
+            if data.isEmpty {
+                self.onEvent("\(label) EOF")
+                self.closeLocked()
                 return
             }
-
-            if !Self.writeAll(Data(buffer[0..<n]), to: toFD) {
-                self.onEvent("\(label) write error errno=\(errno)")
-                self.close()
+            do {
+                try to.write(contentsOf: data)
+            } catch {
+                self.onEvent("\(label) write error: \(error)")
+                self.closeLocked()
             }
-        }
-    }
-
-    /// Writes every byte of `data` to `fd`, retrying on `EINTR` and partial writes. Returns `false`
-    /// (rather than throwing/raising) on any unrecoverable error, e.g. `EPIPE`/`ECONNRESET` when the
-    /// peer has closed its end.
-    private static func writeAll(_ data: Data, to fd: Int32) -> Bool {
-        data.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) -> Bool in
-            var offset = 0
-            let total = rawBuffer.count
-            while offset < total {
-                let n = rawBuffer.baseAddress!.advanced(by: offset)
-                    .withMemoryRebound(to: UInt8.self, capacity: total - offset) { ptr in
-                        write(fd, ptr, total - offset)
-                    }
-                if n > 0 {
-                    offset += n
-                    continue
-                }
-                if n < 0 && errno == EINTR { continue }
-                return false
-            }
-            return true
         }
     }
 
     func close() {
-        // Idempotent: only the first caller transitions closed → true.
-        // Handlers are cleared + fds closed under the lock; onClose invoked AFTER unlock (never under the lock).
         lock.lock()
-        if closed {
-            lock.unlock()
-            return
-        }
+        closeLocked()
+        lock.unlock()
+    }
+
+    /// Idempotent teardown. Must be called with `lock` held. `onClose` is invoked here (not after
+    /// unlocking): it only ever does `Task { await self?.removeConnection(c) }`-shaped work, which
+    /// schedules and returns immediately, so calling it while holding this instance's own lock
+    /// cannot deadlock or re-enter this lock.
+    private func closeLocked() {
+        guard !closed else { return }
         closed = true
         tcp.readabilityHandler = nil
         guest.readabilityHandler = nil
         try? tcp.close()
         try? guest.close()
-        lock.unlock()
-
         onClose?(self)
     }
 }
