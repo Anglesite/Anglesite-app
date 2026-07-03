@@ -1,4 +1,4 @@
-public enum IntegrationID: String, Sendable, CaseIterable { case booking, contact, donations, giscus }
+public enum IntegrationID: String, Sendable, CaseIterable { case booking, contact, donations, giscus, newsletter }
 
 public struct Template: Sendable, Equatable, ExpressibleByStringLiteral {
     public let raw: String
@@ -67,7 +67,10 @@ public struct TemplateRef: Sendable, Equatable { public let path: String
 public enum Operation: Sendable, Equatable {
     case copyFile(from: TemplateRef, to: Template, when: Condition)
     case writeConfig([ConfigEntry], when: Condition)
-    case addCSPDomains(fromProvider: Bool, extra: [String], when: Condition)
+    /// `fromFieldHost` names a `.url`-kind field whose value's host (e.g. a per-site
+    /// Cloudflare Worker subdomain) is extracted at plan time and added alongside
+    /// `extra`/provider domains — for endpoints that aren't a fixed per-provider domain.
+    case addCSPDomains(fromProvider: Bool, extra: [String], fromFieldHost: String?, when: Condition)
     case injectAtAnchor(file: Template, anchor: String, snippet: Template, when: Condition, style: MarkerInjector.CommentStyle)
 }
 

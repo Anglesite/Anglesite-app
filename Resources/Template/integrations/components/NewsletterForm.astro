@@ -1,0 +1,12 @@
+---
+interface Props {
+  workerUrl?: string;
+  buttonText?: string;
+}
+const { workerUrl = "", buttonText = "Subscribe" } = Astro.props;
+---
+<form action={workerUrl} method="POST" class="newsletter-form">
+  <label for="newsletter-email">Email address</label>
+  <input id="newsletter-email" type="email" name="email" required autocomplete="email" placeholder="you@example.com" />
+  <button type="submit">{buttonText}</button>
+</form>

@@ -61,11 +61,11 @@ import FoundationModels
 public struct SetupIntegrationTool: Tool, Sendable {
     public static let toolName = "setupIntegration"
     public let name = SetupIntegrationTool.toolName
-    public let description = "Set up a website integration (booking, donations, or giscus comments). Returns a plan to confirm before applying."
+    public let description = "Set up a website integration (booking, contact form, donations, giscus comments, or newsletter). Returns a plan to confirm before applying."
 
     @Generable
     public struct Arguments {
-        @Guide(description: "Integration to add: 'booking', 'donations', or 'giscus'.")
+        @Guide(description: "Integration to add: 'booking', 'contact', 'donations', 'giscus', or 'newsletter'.")
         public var integrationType: String
         @Guide(description: "Provider id when the integration needs one (e.g. 'cal', 'calendly', 'stripe').")
         public var provider: String?
@@ -83,7 +83,7 @@ public struct SetupIntegrationTool: Tool, Sendable {
 
     public func call(arguments: Arguments) async throws -> String {
         guard let id = SetupIntegrationArguments.id(for: arguments.integrationType) else {
-            return "I can set up booking, donations, or giscus comments. Which one?"
+            return "I can set up booking, a contact form, donations, giscus comments, or a newsletter. Which one?"
         }
         var answers = SetupIntegrationArguments.parseConfig(arguments.config)
         if let p = arguments.provider { answers["provider"] = p }

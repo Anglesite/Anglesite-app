@@ -32,10 +32,13 @@ public extension IntegrationDescriptor {
             switch op {
             case .copyFile(_, _, let w), .writeConfig(_, let w), .injectAtAnchor(_, _, _, let w, _):
                 check(w, "operation \(i)")
-            case .addCSPDomains(let fromProvider, _, let w):
+            case .addCSPDomains(let fromProvider, _, let fromFieldHost, let w):
                 check(w, "operation \(i)")
                 if fromProvider && providers.isEmpty {
                     problems.append("operation \(i): addCSPDomains(fromProvider:) but integration has no providers")
+                }
+                if let key = fromFieldHost, !fieldKeys.contains(key) {
+                    problems.append("operation \(i): addCSPDomains(fromFieldHost:) references unknown field \"\(key)\"")
                 }
             }
         }
@@ -44,7 +47,7 @@ public extension IntegrationDescriptor {
 }
 
 public enum IntegrationCatalog {
-    public static let all: [IntegrationDescriptor] = [booking, contact, donations, giscus]
+    public static let all: [IntegrationDescriptor] = [booking, contact, donations, giscus, newsletter]
 
     public static func descriptor(for id: IntegrationID) -> IntegrationDescriptor {
         guard let d = all.first(where: { $0.id == id }) else {
@@ -101,7 +104,7 @@ public enum IntegrationCatalog {
                 ConfigEntry(key: "BOOKING_EVENT_SLUG", value: "{{eventSlug}}"),
                 ConfigEntry(key: "BOOKING_BUTTON_TEXT", value: "{{buttonText}}"),
             ], when: .always),
-            .addCSPDomains(fromProvider: true, extra: [], when: .always),
+            .addCSPDomains(fromProvider: true, extra: [], fromFieldHost: nil, when: .always),
         ])
 
     // MARK: contact
@@ -133,7 +136,7 @@ public enum IntegrationCatalog {
                 ConfigEntry(key: "CONTACT_EMAIL", value: "{{email}}"),
                 ConfigEntry(key: "CONTACT_BUTTON_TEXT", value: "{{buttonText}}"),
             ], when: .always),
-            .addCSPDomains(fromProvider: true, extra: [], when: .always),
+            .addCSPDomains(fromProvider: true, extra: [], fromFieldHost: nil, when: .always),
         ])
 
     // MARK: donations
@@ -161,7 +164,7 @@ public enum IntegrationCatalog {
                 ConfigEntry(key: "DONATIONS_LINK", value: "{{link}}"),
                 ConfigEntry(key: "DONATIONS_BUTTON_TEXT", value: "{{buttonText}}"),
             ], when: .always),
-            .addCSPDomains(fromProvider: true, extra: [], when: .always),
+            .addCSPDomains(fromProvider: true, extra: [], fromFieldHost: nil, when: .always),
         ])
 
     // MARK: giscus
@@ -196,6 +199,37 @@ public enum IntegrationCatalog {
                 ConfigEntry(key: "GISCUS_CATEGORY_ID", value: "{{categoryId}}"),
                 ConfigEntry(key: "GISCUS_MAPPING", value: "{{mapping}}"),
             ], when: .always),
-            .addCSPDomains(fromProvider: false, extra: ["giscus.app"], when: .always),
+            .addCSPDomains(fromProvider: false, extra: ["giscus.app"], fromFieldHost: nil, when: .always),
+        ])
+
+    // MARK: newsletter
+    static let newsletter = IntegrationDescriptor(
+        id: .newsletter,
+        displayName: "Newsletter",
+        summary: "Let visitors subscribe to email updates (Buttondown or Mailchimp), via a Worker that keeps your API key off the client.",
+        providers: [
+            Provider(id: "buttondown", displayName: "Buttondown", cspDomains: []),
+            Provider(id: "mailchimp", displayName: "Mailchimp", cspDomains: []),
+        ],
+        fields: [
+            Field(key: "workerUrl", label: "Subscribe Worker URL", kind: .url,
+                  help: "The Cloudflare Worker URL that proxies subscribe requests to your newsletter platform — see docs/newsletter-sending.md."),
+            Field(key: "buttonText", label: "Button text", kind: .text, isOptional: true, defaultValue: "Subscribe"),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/NewsletterForm.astro"),
+                      to: "src/components/NewsletterForm.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/pages/subscribe.astro"),
+                      to: "src/pages/subscribe.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/pages/subscribe/thanks.astro"),
+                      to: "src/pages/subscribe/thanks.astro", when: .always),
+            .writeConfig([
+                ConfigEntry(key: "NEWSLETTER_PLATFORM", value: "{{provider}}"),
+                ConfigEntry(key: "NEWSLETTER_WORKER_URL", value: "{{workerUrl}}"),
+                ConfigEntry(key: "NEWSLETTER_BUTTON_TEXT", value: "{{buttonText}}"),
+            ], when: .always),
+            // The Worker's own domain isn't a fixed per-provider CSP domain (it's a per-site
+            // deployment) — extract it from the workerUrl field instead of a static list.
+            .addCSPDomains(fromProvider: false, extra: [], fromFieldHost: "workerUrl", when: .always),
         ])
 }

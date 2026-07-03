@@ -1,0 +1,18 @@
+---
+import BaseLayout from "../../src/layouts/BaseLayout.astro";
+import NewsletterForm from "../components/NewsletterForm.astro";
+import { readConfig } from "../../scripts/config";
+---
+
+<BaseLayout
+  title="Subscribe"
+  description="Subscribe to get updates delivered straight to your inbox. No spam — unsubscribe anytime."
+>
+  <h1>Subscribe</h1>
+  <p>Get updates delivered to your inbox.</p>
+  <NewsletterForm
+    workerUrl={readConfig("NEWSLETTER_WORKER_URL")}
+    buttonText={readConfig("NEWSLETTER_BUTTON_TEXT")}
+  />
+  <p>No spam. Unsubscribe anytime.</p>
+</BaseLayout>

@@ -75,12 +75,15 @@ public enum IntegrationPlanner {
             case .writeConfig(let entries, let when):
                 guard isVisible(when, answers: effective, providerID: providerID) else { continue }
                 steps.append(.upsertConfig(entries.map { ConfigKV(key: $0.key, value: $0.value.resolve(tokens)) }))
-            case .addCSPDomains(let fromProvider, let extra, let when):
+            case .addCSPDomains(let fromProvider, let extra, let fromFieldHost, let when):
                 guard isVisible(when, answers: effective, providerID: providerID) else { continue }
                 var domains = extra
                 if fromProvider, let p = providerID,
                    let provider = descriptor.providers.first(where: { $0.id == p }) {
                     domains = provider.cspDomains + extra
+                }
+                if let key = fromFieldHost, let value = effective[key], let host = URL(string: value)?.host {
+                    domains.append(host)
                 }
                 if !domains.isEmpty { steps.append(.addCSP(domains)) }
             case .injectAtAnchor(let file, let anchor, let snippet, let when, let style):

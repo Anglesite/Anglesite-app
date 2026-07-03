@@ -37,14 +37,18 @@ import Foundation
         // staged (copied on-demand):
         for p in ["integrations/components/BookingWidget.astro", "integrations/components/DonationButton.astro",
                   "integrations/components/Comments.astro", "integrations/components/ContactForm.astro",
-                  "integrations/pages/book.astro", "integrations/pages/donate.astro", "integrations/pages/contact.astro"] {
+                  "integrations/components/NewsletterForm.astro",
+                  "integrations/pages/book.astro", "integrations/pages/donate.astro", "integrations/pages/contact.astro",
+                  "integrations/pages/subscribe.astro", "integrations/pages/subscribe/thanks.astro"] {
             #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "missing staged \(p)")
         }
         // NOT base-scaffolded: every staged asset must be absent from src/ (covers all five —
         // both components previously omitted, DonationButton and Comments, are now checked).
         for p in ["src/components/BookingWidget.astro", "src/components/DonationButton.astro",
                   "src/components/Comments.astro", "src/components/ContactForm.astro",
-                  "src/pages/book.astro", "src/pages/donate.astro", "src/pages/contact.astro"] {
+                  "src/components/NewsletterForm.astro",
+                  "src/pages/book.astro", "src/pages/donate.astro", "src/pages/contact.astro",
+                  "src/pages/subscribe.astro", "src/pages/subscribe/thanks.astro"] {
             #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "should be staged, not in src: \(p)")
         }
     }
@@ -68,7 +72,8 @@ import Foundation
 
     @Test func onDemandPagesUseReadConfigNotImportMetaEnv() throws {
         let root = templateRoot()
-        for p in ["integrations/pages/book.astro", "integrations/pages/donate.astro", "integrations/pages/contact.astro"] {
+        for p in ["integrations/pages/book.astro", "integrations/pages/donate.astro", "integrations/pages/contact.astro",
+                  "integrations/pages/subscribe.astro"] {
             let s = try String(contentsOf: root.appendingPathComponent(p), encoding: .utf8)
             #expect(s.contains("readConfig("), "\(p) should use readConfig")
             #expect(!s.contains("import.meta.env"), "\(p) must not use import.meta.env")
@@ -150,5 +155,14 @@ import Foundation
         let contactUnknown = contactReferenced.subtracting(contactWritten)
         #expect(contactUnknown.isEmpty,
             "contact.astro references config keys not written by contact descriptor: \(contactUnknown.sorted())")
+
+        // Newsletter: integrations/pages/subscribe.astro
+        let subscribeURL = root.appendingPathComponent("integrations/pages/subscribe.astro")
+        let subscribeSource = try String(contentsOf: subscribeURL, encoding: .utf8)
+        let subscribeReferenced = readConfigKeysReferenced(in: subscribeSource)
+        let subscribeWritten = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .newsletter))
+        let subscribeUnknown = subscribeReferenced.subtracting(subscribeWritten)
+        #expect(subscribeUnknown.isEmpty,
+            "subscribe.astro references config keys not written by newsletter descriptor: \(subscribeUnknown.sorted())")
     }
 }
