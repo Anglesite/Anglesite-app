@@ -39,9 +39,12 @@ import Foundation
                   "integrations/components/Comments.astro", "integrations/components/ContactForm.astro",
                   "integrations/components/NewsletterForm.astro", "integrations/components/ConsentBanner.astro",
                   "integrations/components/InstallPrompt.astro",
+                  "integrations/components/TrackingScript.astro", "integrations/components/ShareButtons.astro",
+                  "integrations/components/PodcastPlayer.astro",
                   "integrations/pages/book.astro", "integrations/pages/donate.astro", "integrations/pages/contact.astro",
                   "integrations/pages/subscribe.astro", "integrations/pages/subscribe/thanks.astro",
                   "integrations/pages/manifest.webmanifest.ts", "integrations/pages/offline.astro",
+                  "integrations/pages/podcast.astro",
                   "integrations/public/sw.js",
                   "integrations/worker/subscribe-worker.js", "integrations/worker/subscribe-wrangler.toml",
                   "integrations/docs/newsletter-setup.md", "integrations/docs/pwa-setup.md"] {
@@ -53,9 +56,12 @@ import Foundation
                   "src/components/Comments.astro", "src/components/ContactForm.astro",
                   "src/components/NewsletterForm.astro", "src/components/ConsentBanner.astro",
                   "src/components/InstallPrompt.astro",
+                  "src/components/TrackingScript.astro", "src/components/ShareButtons.astro",
+                  "src/components/PodcastPlayer.astro",
                   "src/pages/book.astro", "src/pages/donate.astro", "src/pages/contact.astro",
                   "src/pages/subscribe.astro", "src/pages/subscribe/thanks.astro",
                   "src/pages/manifest.webmanifest.ts", "src/pages/offline.astro", "public/sw.js",
+                  "src/pages/podcast.astro",
                   "worker/subscribe-worker.js", "worker/subscribe-wrangler.toml",
                   "docs/newsletter-setup.md", "docs/pwa-setup.md"] {
             #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "should be staged, not in src: \(p)")
@@ -70,6 +76,7 @@ import Foundation
         #expect(base.contains("<!-- anglesite:head-end -->"))
         let blog = try String(contentsOf: root.appendingPathComponent("src/layouts/BlogPost.astro"), encoding: .utf8)
         #expect(blog.contains("// anglesite:imports"))
+        #expect(blog.contains("<!-- anglesite:share -->"))
         #expect(blog.contains("<!-- anglesite:comments -->"))
     }
 

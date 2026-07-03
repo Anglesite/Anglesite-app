@@ -6,6 +6,7 @@ import Testing
     @Test func hasAllIntegrations() {
         #expect(Set(IntegrationCatalog.all.map(\.id)) == Set([
             .booking, .contact, .donations, .giscus, .newsletter, .consent, .pwa, .redirects,
+            .tracking, .share, .podcast,
         ]))
     }
 
@@ -231,6 +232,52 @@ import Testing
         let status = redirects.fields.first { $0.key == "status" }
         guard case .choice(let choices)? = status?.kind else { Issue.record("no status choice"); return }
         #expect(Set(choices.map { $0.value }) == Set(["301", "302"]))
+    }
+
+    @Test func trackingHasProviderGatedFieldsAndCSPFromProvider() {
+        let tracking = IntegrationCatalog.descriptor(for: .tracking)
+        #expect(Set(tracking.providers.map(\.id)) == Set(["plausible", "fathom", "ga4"]))
+        let domain = tracking.fields.first { $0.key == "domain" }
+        #expect(domain?.visibleWhen == .providerIs("plausible"))
+        let siteId = tracking.fields.first { $0.key == "siteId" }
+        #expect(siteId?.visibleWhen == .providerIs("fathom"))
+        let measurementId = tracking.fields.first { $0.key == "measurementId" }
+        #expect(measurementId?.visibleWhen == .providerIs("ga4"))
+        let hasAddCSP = tracking.operations.contains {
+            if case .addCSPDomains(let fromProvider, _, _, _) = $0 { return fromProvider }
+            return false
+        }
+        #expect(hasAddCSP)
+    }
+
+    @Test func trackingWritesProviderAndAllIdentifierKeys() {
+        let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .tracking))
+        #expect(keys.isSuperset(of: ["TRACKING_PROVIDER", "TRACKING_DOMAIN", "TRACKING_SITE_ID", "TRACKING_MEASUREMENT_ID"]))
+    }
+
+    @Test func shareHasNoProvidersAndWritesAllNetworkToggles() {
+        let share = IntegrationCatalog.descriptor(for: .share)
+        #expect(share.providers.isEmpty)
+        let keys = writtenConfigKeys(for: share)
+        #expect(keys.isSuperset(of: ["SHARE_TWITTER", "SHARE_MASTODON", "SHARE_LINKEDIN", "SHARE_COPY_LINK"]))
+    }
+
+    @Test func shareInjectsIntoBlogPostLayoutAtDedicatedAnchor() {
+        let share = IntegrationCatalog.descriptor(for: .share)
+        let hasShareAnchorInject = share.operations.contains {
+            if case .injectAtAnchor(let file, let anchor, _, _, _) = $0 {
+                return file.raw == "src/layouts/BlogPost.astro" && anchor == "<!-- anglesite:share -->"
+            }
+            return false
+        }
+        #expect(hasShareAnchorInject)
+    }
+
+    @Test func podcastHasTwoProvidersAndWritesShowIdAndRssUrl() {
+        let podcast = IntegrationCatalog.descriptor(for: .podcast)
+        #expect(Set(podcast.providers.map(\.id)) == Set(["spotify", "transistor"]))
+        let keys = writtenConfigKeys(for: podcast)
+        #expect(keys.isSuperset(of: ["PODCAST_PROVIDER", "PODCAST_SHOW_ID", "PODCAST_RSS_URL"]))
     }
 
     private func writtenConfigKeys(for d: IntegrationDescriptor) -> Set<String> {
