@@ -58,8 +58,17 @@ export function buildCSP(configContent: string): string {
   ).join("; ");
 }
 
-/** Compose the full public/_headers file body. */
-export function buildHeaders(configContent: string): string {
+/**
+ * Compose the full public/_headers file body.
+ *
+ * `serviceWorkerPresent` is derived by `main()` from whether `public/sw.js` exists on disk. The
+ * pwa integration doesn't append its own `/sw.js` cache rule directly into `_headers` — this
+ * function unconditionally regenerates the whole file on every build's `prebuild` step, so
+ * anything appended outside of it would be silently wiped on the very next build. Re-deriving the
+ * rule here from the file's presence means it survives every rebuild without pwa needing to touch
+ * `_headers` at all.
+ */
+export function buildHeaders(configContent: string, serviceWorkerPresent = false): string {
   const csp = buildCSP(configContent);
   // Only the exact (case-insensitive) string "true" enables preload — submission to
   // the browser preload lists is hard to reverse, so "1"/"yes"/"on" deliberately do not.
@@ -71,7 +80,7 @@ export function buildHeaders(configContent: string): string {
   // still isolating attacker-opened windows.
   // CORP: same-site (not same-origin) keeps cross-origin (cross-site) isolation but
   // lets same-site subdomains load shared assets (e.g. a logo on blog.example.com).
-  return `/*
+  let out = `/*
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
@@ -85,14 +94,23 @@ export function buildHeaders(configContent: string): string {
 /_astro/*
   Cache-Control: public, max-age=31536000, immutable
 `;
+  if (serviceWorkerPresent) {
+    out += `
+/sw.js
+  Cache-Control: no-cache
+  Service-Worker-Allowed: /
+`;
+  }
+  return out;
 }
 
 function main(): void {
   const configPath = resolve(process.cwd(), ".site-config");
   const config = existsSync(configPath) ? readFileSync(configPath, "utf-8") : "";
   const outPath = resolve(process.cwd(), "public", "_headers");
+  const serviceWorkerPresent = existsSync(resolve(process.cwd(), "public", "sw.js"));
   mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, buildHeaders(config), "utf-8");
+  writeFileSync(outPath, buildHeaders(config, serviceWorkerPresent), "utf-8");
   console.log(`Wrote ${outPath}`);
 }
 

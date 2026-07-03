@@ -42,6 +42,8 @@ public enum SetupIntegrationArguments {
             // message generic, matching `.templateUnavailable` (this is a packaging failure, not
             // actionable user input).
             return "The site template is incomplete — a required component is missing. Please reinstall Anglesite."
+        case .failure(.duplicateLine):
+            return "That's already there — nothing to add."
         }
     }
 

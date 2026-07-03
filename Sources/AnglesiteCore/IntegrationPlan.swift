@@ -52,4 +52,9 @@ public enum IntegrationError: Error, Equatable, Sendable {
     /// A staged asset the descriptor copies is absent from the template — a hard error, since
     /// proceeding would inject an `import` for a file that was never written.
     case missingTemplateAsset(path: String)
+    /// An `.appendLine` operation's resolved line already exists verbatim in the target file —
+    /// e.g. reopening the redirects wizard with the same answers twice. Unlike `.copyFile`
+    /// (idempotent by construction — same content in, same content out), `.appendLine`
+    /// accumulates, so without this check a repeat run would duplicate the line.
+    case duplicateLine(file: String)
 }

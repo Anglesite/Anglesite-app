@@ -43,7 +43,7 @@ import Foundation
         _ = await collect(IntegrationScaffolder().apply(plan, in: src))
         _ = await collect(IntegrationScaffolder().apply(plan, in: src))  // twice
         let layout = try! String(contentsOf: src.appendingPathComponent("src/layouts/BaseLayout.astro"), encoding: .utf8)
-        #expect(layout.components(separatedBy: "<!-- anglesite:booking:start -->").count == 2)  // exactly one block
+        #expect(layout.components(separatedBy: "<!-- anglesite:booking-body-end:start -->").count == 2)  // exactly one block
     }
 
     @Test func injectAnchorFailsWhenAnchorMissing() async {
@@ -123,6 +123,6 @@ import Foundation
         for await s in IntegrationScaffolder().apply(plan, in: src) { last = s }
         #expect(last == .done(integrationID: "booking"))
         let out = try! String(contentsOf: url, encoding: .utf8)
-        #expect(out.contains("// anglesite:booking:start\nimport BookingWidget"))
+        #expect(out.contains("// anglesite:booking-imports:start\nimport BookingWidget"))
     }
 }

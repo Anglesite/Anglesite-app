@@ -86,6 +86,19 @@ test("buildCSP: upgrade-insecure-requests survives custom SCRIPT_ALLOW config", 
   assert.match(csp, /upgrade-insecure-requests$/);
 });
 
+test("buildHeaders: no sw.js rule by default", () => {
+  const out = buildHeaders("");
+  assert.ok(!/\/sw\.js/.test(out));
+});
+
+// The pwa integration doesn't append its own rule to _headers — this function regenerates the
+// whole file on every prebuild, so anything appended outside it would be wiped on the next
+// build. main() derives this flag from whether public/sw.js exists on disk instead.
+test("buildHeaders: serviceWorkerPresent adds a no-cache rule for /sw.js", () => {
+  const out = buildHeaders("", true);
+  assert.match(out, /\n\/sw\.js\n  Cache-Control: no-cache\n  Service-Worker-Allowed: \/\n/);
+});
+
 test("committed public/_headers is byte-identical to buildHeaders(\"\")", () => {
   const committed = readFileSync(
     resolve(dirname(fileURLToPath(import.meta.url)), "../public/_headers"),

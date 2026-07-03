@@ -77,12 +77,19 @@ const categoryKeys = categories.map((c) => c.key);
       }
       function writeCookie(name, value, days) {
         var expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
-        document.cookie = name + "=" + encodeURIComponent(value) + "; expires=" + expires + "; path=/; SameSite=Lax";
+        var secure = window.location.protocol === "https:" ? "; Secure" : "";
+        document.cookie = name + "=" + encodeURIComponent(value) + "; expires=" + expires + "; path=/; SameSite=Lax" + secure;
       }
       function isEUVisitor() {
+        // Known gap: EU/EEA overseas territories with a non-Europe/Atlantic IANA zone name
+        // (e.g. America/Cayenne for French Guiana, Indian/Reunion, America/Guadeloupe,
+        // America/Martinique, Indian/Mayotte) are not matched here and get default-allow under
+        // the "geo" policy, even though GDPR applies to them. A visitor-IP-based lookup (e.g. via
+        // Cloudflare's request.cf.country at the edge) would cover this properly; this
+        // client-side timezone heuristic is a best-effort approximation, not exhaustive.
         try {
           var tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-          return /^(Europe|Atlantic\/(Canary|Faroe|Reykjavik))\//.test(tz) || tz.indexOf("Atlantic/") === 0;
+          return /^(Europe|Atlantic\/(Canary|Faroe|Reykjavik))\//.test(tz);
         } catch (e) {
           return false;
         }

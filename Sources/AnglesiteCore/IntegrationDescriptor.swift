@@ -20,6 +20,10 @@ public struct Choice: Sendable, Equatable { public let value: String; public let
 
 public enum FieldKind: Sendable, Equatable {
     case text, email, url
+    /// A site-relative path (e.g. `/old-page`) or an absolute URL, with no interior whitespace —
+    /// for fields whose value ends up on a space-delimited line (e.g. `public/_redirects`), where
+    /// an unvalidated `.text` value containing a space would silently corrupt the line format.
+    case path
     case choice([Choice])
     case bool
 }

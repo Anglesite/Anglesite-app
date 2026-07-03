@@ -66,7 +66,7 @@ struct IntegrationWizard: View {
             set: { model.answers[field.key] = $0 }
         )
         switch field.kind {
-        case .text, .email, .url:
+        case .text, .email, .url, .path:
             LabeledContent(field.label) {
                 TextField(field.label, text: binding)
                     .labelsHidden()

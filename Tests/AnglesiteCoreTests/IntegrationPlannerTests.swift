@@ -270,6 +270,64 @@ import Foundation
         #expect(line == "/old /new 301")
     }
 
+    @Test func redirectsFromPathRejectsWhitespace() {
+        let r = IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .redirects),
+            answers: ["fromPath": "/old page", "toPath": "/new", "status": "301"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate())
+        if case .failure(.invalidValue(let key, _)) = r { #expect(key == "fromPath") }
+        else { Issue.record("expected .failure(.invalidValue(key: \"fromPath\", ...)), got \(r)") }
+    }
+
+    @Test func redirectsToPathRejectsValueWithNoLeadingSlashOrScheme() {
+        let r = IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .redirects),
+            answers: ["fromPath": "/old", "toPath": "new-page", "status": "301"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate())
+        if case .failure(.invalidValue(let key, _)) = r { #expect(key == "toPath") }
+        else { Issue.record("expected .failure(.invalidValue(key: \"toPath\", ...)), got \(r)") }
+    }
+
+    /// `.appendLine` accumulates rather than overwriting (unlike `.copyFile`, which is
+    /// idempotent by construction), so re-running the same wizard answers twice must be
+    /// rejected up front instead of silently duplicating the line.
+    private func makeSourceWithRedirects(_ contents: String) -> URL {
+        let src = makeSource()
+        let url = src.appendingPathComponent("public/_redirects")
+        try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try! contents.write(to: url, atomically: true, encoding: .utf8)
+        return src
+    }
+
+    @Test func redirectsRejectsExactDuplicateOfAnExistingLine() {
+        let src = makeSourceWithRedirects("/old /new 301\n")
+        let r = IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .redirects),
+            answers: ["fromPath": "/old", "toPath": "/new", "status": "301"],
+            sourceDirectory: src, templateDirectory: makeTemplate())
+        #expect(r == .failure(.duplicateLine(file: "public/_redirects")))
+    }
+
+    @Test func redirectsAllowsADifferentRuleForTheSameFile() throws {
+        let src = makeSourceWithRedirects("/old /new 301\n")
+        let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .redirects),
+            answers: ["fromPath": "/other", "toPath": "/elsewhere", "status": "302"],
+            sourceDirectory: src, templateDirectory: makeTemplate()).get()
+        guard case .appendLine(_, let line)? = r.steps.first else {
+            Issue.record("expected a single appendLine step, got \(r.steps)")
+            return
+        }
+        #expect(line == "/other /elsewhere 302")
+    }
+
+    @Test func redirectsToPathAcceptsAbsoluteURL() throws {
+        let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .redirects),
+            answers: ["fromPath": "/old", "toPath": "https://example.com/elsewhere", "status": "301"],
+            sourceDirectory: makeSource(), templateDirectory: makeTemplate()).get()
+        guard case .appendLine(_, let line)? = r.steps.first else {
+            Issue.record("expected a single appendLine step, got \(r.steps)")
+            return
+        }
+        #expect(line == "/old https://example.com/elsewhere 301")
+    }
+
     @Test func siteNameWarningFiresOnlyWhenReferencedAndFallsBackWhenMissing() throws {
         let desc = IntegrationDescriptor(
             id: .pwa, displayName: "SiteNameTest", summary: "",

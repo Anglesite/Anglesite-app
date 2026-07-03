@@ -82,8 +82,8 @@ import Foundation
         let terminal = await ops.apply(plan, siteID: "s1")
         #expect(terminal == .done(integrationID: "booking"))
         let layout = try! String(contentsOf: src.appendingPathComponent("src/layouts/BaseLayout.astro"), encoding: .utf8)
-        #expect(layout.contains("// anglesite:booking:start"))
-        #expect(layout.contains("<!-- anglesite:booking:start -->"))
+        #expect(layout.contains("// anglesite:booking-imports:start"))
+        #expect(layout.contains("<!-- anglesite:booking-body-end:start -->"))
         #expect(FileManager.default.fileExists(atPath: src.appendingPathComponent("src/components/BookingWidget.astro").path))
         #expect(!FileManager.default.fileExists(atPath: src.appendingPathComponent("src/pages/book.astro").path))
     }

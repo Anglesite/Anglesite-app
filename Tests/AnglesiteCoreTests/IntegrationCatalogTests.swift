@@ -79,10 +79,12 @@ import Testing
         }
     }
 
-    /// MarkerInjector keys an injected block by descriptor id alone (not anchor+style), so two
-    /// `.injectAtAnchor` operations in the same descriptor sharing an anchor+style would collide:
-    /// the second one silently replaces the first's content instead of appending (regression
-    /// guard for the pwa install-prompt/service-worker collision found in review).
+    /// `MarkerInjector` keys an injected block by (descriptor id, anchor, style) — two
+    /// `.injectAtAnchor` operations in the same descriptor sharing all three would collide: the
+    /// second one would silently replace the first's content instead of appending (regression
+    /// guard for the pwa install-prompt/service-worker collision found in review; a *second*,
+    /// deeper bug — the same-style-different-anchor collision that review actually caught — was
+    /// in `MarkerInjector` itself and is fixed there, not by avoiding the shape here).
     @Test(arguments: IntegrationCatalog.all)
     func noDescriptorHasCollidingInjectAtAnchorOperations(_ descriptor: IntegrationDescriptor) {
         var seen = Set<String>()
@@ -189,9 +191,7 @@ import Testing
 
     /// The install prompt's on/off toggle is resolved at Astro build time via readConfig (like
     /// booking's floating/button variants), not by gating the copyFile/inject operations
-    /// themselves — two `.html` injects at the same anchor would collide (MarkerInjector keys a
-    /// block by descriptor id alone, so a second inject at the same anchor silently replaces the
-    /// first's content instead of appending).
+    /// themselves — two `.html` injects at the same anchor+style would collide.
     @Test func pwaInstallPromptToggleIsResolvedAtBuildTimeNotByGatingOperations() {
         let pwa = IntegrationCatalog.descriptor(for: .pwa)
         let htmlBodyEndInjects = pwa.operations.filter {

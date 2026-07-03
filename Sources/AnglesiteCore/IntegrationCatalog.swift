@@ -302,11 +302,10 @@ public enum IntegrationCatalog {
             .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "// anglesite:imports",
                             snippet: "import InstallPrompt from \"../components/InstallPrompt.astro\";\nimport { readConfig } from \"../../scripts/config\";",
                             when: .always, style: .line),
-            // A single combined body-end block: two operations at the same anchor+style would
-            // collide (MarkerInjector keys a block by descriptor id alone, so the second inject
-            // would silently replace the first's content instead of appending). The install
-            // prompt's on/off toggle is resolved at Astro build time via readConfig, the same way
-            // booking's floating-vs-button variants are — not by gating this operation itself.
+            // The install prompt's install-prompt on/off toggle is resolved at Astro build time
+            // via readConfig, the same way booking's floating-vs-button variants are — not by
+            // gating this operation itself, so it can share the body-end anchor with the
+            // sw-registration script in one combined block.
             .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:body-end -->",
                             snippet: "<script is:inline>if(\"serviceWorker\" in navigator){navigator.serviceWorker.register(\"/sw.js\");}</script>\n{readConfig(\"PWA_INSTALL_PROMPT\") === \"true\" && (<InstallPrompt appName={readConfig(\"PWA_SITE_NAME\")} />)}",
                             when: .always, style: .html),
@@ -316,9 +315,10 @@ public enum IntegrationCatalog {
                 ConfigEntry(key: "PWA_THEME_COLOR", value: "{{brandColor}}"),
                 ConfigEntry(key: "PWA_SITE_NAME", value: "{{siteName}}"),
             ], when: .always),
-            .appendLine(file: "public/_headers",
-                        line: "\n/sw.js\n  Cache-Control: no-cache\n  Service-Worker-Allowed: /",
-                        when: .always),
+            // No appendLine to public/_headers here: scripts/csp.ts's prebuild step
+            // unconditionally regenerates that whole file every build, so anything appended
+            // outside it would be silently wiped on the next build. buildHeaders() instead
+            // derives the /sw.js cache rule from whether public/sw.js exists on disk.
         ])
 
     // MARK: redirects
@@ -328,10 +328,10 @@ public enum IntegrationCatalog {
         summary: "Add a redirect so an old URL keeps working after a page moves or is renamed.",
         providers: [],
         fields: [
-            Field(key: "fromPath", label: "Old path", kind: .text,
-                  help: "The path that's about to break, e.g. /old-page."),
-            Field(key: "toPath", label: "New destination", kind: .text,
-                  help: "Where visitors should land now, e.g. /about or a full https:// URL."),
+            Field(key: "fromPath", label: "Old path", kind: .path,
+                  help: "The path that's about to break, e.g. /old-page. No spaces."),
+            Field(key: "toPath", label: "New destination", kind: .path,
+                  help: "Where visitors should land now, e.g. /about or a full https:// URL. No spaces."),
             Field(key: "status", label: "Type", kind: .choice([
                 Choice(value: "301", label: "Permanent — the old page is gone for good"),
                 Choice(value: "302", label: "Temporary — it might come back"),
