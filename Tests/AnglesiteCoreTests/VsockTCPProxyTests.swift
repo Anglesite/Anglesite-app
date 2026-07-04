@@ -2,6 +2,15 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
+/// `.serialized`: this suite drives real sockets and per-connection `DispatchIO`/`DispatchQueue`
+/// pumps. Under CI's full parallel test run (1087 tests across 163 suites on a resource-constrained
+/// macos-15 runner), the global GCD thread pool gets so oversubscribed that some of these tests'
+/// read/write handlers never get scheduled within their generous (10-20s) polling deadlines — the
+/// same 3 of 9 tests failed identically, with 0 bytes ever received, on two consecutive CI runs of
+/// an unmodified commit, while a local `swift test --filter VsockTCPProxyTests` run passes every
+/// test in under 200ms. Serializing this suite's own tests removes its largest source of internal
+/// GCD contention so it isn't competing with itself on top of the rest of the parallel test binary.
+@Suite(.serialized)
 struct VsockTCPProxyTests {
     /// Make a connected pair of FileHandles via socketpair(2). One end is handed to the proxy as
     /// the "guest"; the test holds the other to act as the guest peer.
