@@ -100,3 +100,74 @@ struct CloudflareWritingTests {
         }
     }
 }
+
+extension CloudflareWritingTests {
+    private func spiedClient(_ routes: [String: (Int, String)]) -> (HTTPCloudflareClient, TransportSpy) {
+        let spy = TransportSpy()
+        let inner = fakeTransport(routes)
+        let client = HTTPCloudflareClient(transport: { request in
+            spy.record(request)
+            return try await inner(request)
+        })
+        return (client, spy)
+    }
+
+    @Test("setSpeedBrain PATCHes the speed_brain setting")
+    func speedBrainWrite() async throws {
+        let (client, spy) = spiedClient([
+            "/settings/speed_brain": (200, #"{"success":true,"result":{}}"#),
+        ])
+        try await client.setSpeedBrain(zoneID: "z", enabled: true, apiToken: "t")
+        let request = try #require(spy.requests.last)
+        #expect(request.httpMethod == "PATCH")
+        #expect(request.url!.path.hasSuffix("/zones/z/settings/speed_brain"))
+        #expect(String(data: request.httpBody ?? Data(), encoding: .utf8)!.contains(#""value":"on""#))
+    }
+
+    @Test("setECH PATCHes the ech setting")
+    func echWrite() async throws {
+        let (client, spy) = spiedClient([
+            "/settings/ech": (200, #"{"success":true,"result":{}}"#),
+        ])
+        try await client.setECH(zoneID: "z", enabled: true, apiToken: "t")
+        let request = try #require(spy.requests.last)
+        #expect(request.httpMethod == "PATCH")
+        #expect(request.url!.path.hasSuffix("/zones/z/settings/ech"))
+    }
+
+    @Test("setPageShield PUTs enabled")
+    func pageShieldWrite() async throws {
+        let (client, spy) = spiedClient([
+            "/page_shield": (200, #"{"success":true,"result":{}}"#),
+        ])
+        try await client.setPageShield(zoneID: "z", enabled: true, apiToken: "t")
+        let request = try #require(spy.requests.last)
+        #expect(request.httpMethod == "PUT")
+        #expect(String(data: request.httpBody ?? Data(), encoding: .utf8)!.contains(#""enabled":true"#))
+    }
+
+    @Test("enableZstandardCompression creates the compression ruleset when absent")
+    func zstdCreatesRuleset() async throws {
+        let (client, spy) = spiedClient([
+            "/zones/z/rulesets": (200, #"{"success":true,"result":[]}"#),
+        ])
+        try await client.enableZstandardCompression(zoneID: "z", apiToken: "t")
+        let post = try #require(spy.requests.last)
+        #expect(post.httpMethod == "POST")
+        #expect(post.url!.path.hasSuffix("/zones/z/rulesets"))
+        let body = String(data: post.httpBody ?? Data(), encoding: .utf8)!
+        #expect(body.contains("http_response_compression"))
+        #expect(body.contains(#""name":"zstd""#))
+    }
+
+    @Test("enableZstandardCompression appends a rule when the ruleset exists")
+    func zstdAppendsRule() async throws {
+        let (client, spy) = spiedClient([
+            "/zones/z/rulesets/comp1/rules": (200, #"{"success":true,"result":{}}"#),
+            "/zones/z/rulesets": (200, #"{"success":true,"result":[{"id":"comp1","phase":"http_response_compression"}]}"#),
+        ])
+        try await client.enableZstandardCompression(zoneID: "z", apiToken: "t")
+        let post = try #require(spy.requests.last)
+        #expect(post.url!.path.hasSuffix("/zones/z/rulesets/comp1/rules"))
+    }
+}

@@ -10,6 +10,12 @@ public protocol CloudflareWriting: Sendable {
     func addDNSRecord(zoneID: String, record: DNSRecordPayload, apiToken: String) async throws
     func setBotFightMode(zoneID: String, enabled: Bool, apiToken: String) async throws
     func createWAFCustomRule(zoneID: String, rule: WAFRulePayload, apiToken: String) async throws
+    func setSpeedBrain(zoneID: String, enabled: Bool, apiToken: String) async throws
+    func setECH(zoneID: String, enabled: Bool, apiToken: String) async throws
+    /// Idempotent: creates the `http_response_compression` ruleset with a zstd-first rule, or
+    /// appends the rule to the existing ruleset.
+    func enableZstandardCompression(zoneID: String, apiToken: String) async throws
+    func setPageShield(zoneID: String, enabled: Bool, apiToken: String) async throws
 }
 
 /// Payload for creating a DNS record via the Cloudflare API.

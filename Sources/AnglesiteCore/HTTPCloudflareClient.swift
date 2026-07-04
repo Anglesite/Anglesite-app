@@ -285,4 +285,57 @@ extension HTTPCloudflareClient: CloudflareWriting {
                              apiToken: apiToken)
         }
     }
+
+    public func setSpeedBrain(zoneID: String, enabled: Bool, apiToken: String) async throws {
+        try await mutate(method: "PATCH", "/zones/\(zoneID)/settings/speed_brain",
+                         body: ["value": enabled ? "on" : "off"], apiToken: apiToken)
+    }
+
+    public func setECH(zoneID: String, enabled: Bool, apiToken: String) async throws {
+        try await mutate(method: "PATCH", "/zones/\(zoneID)/settings/ech",
+                         body: ["value": enabled ? "on" : "off"], apiToken: apiToken)
+    }
+
+    public func setPageShield(zoneID: String, enabled: Bool, apiToken: String) async throws {
+        try await mutate(method: "PUT", "/zones/\(zoneID)/page_shield",
+                         body: ["enabled": enabled], apiToken: apiToken)
+    }
+
+    public func enableZstandardCompression(zoneID: String, apiToken: String) async throws {
+        struct CompressionRule: Encodable, Sendable {
+            struct Params: Encodable, Sendable {
+                struct Algorithm: Encodable, Sendable { let name: String }
+                let algorithms: [Algorithm]
+            }
+            let description: String
+            let expression: String
+            let action: String
+            let action_parameters: Params
+        }
+        let rule = CompressionRule(
+            description: "Anglesite: prefer Zstandard compression",
+            expression: "true",
+            action: "compress_response",
+            action_parameters: .init(algorithms: [
+                .init(name: "zstd"), .init(name: "brotli"), .init(name: "gzip"),
+            ]))
+
+        let rulesets = try await get("/zones/\(zoneID)/rulesets", apiToken: apiToken, as: [CFRuleset].self)
+        if let existing = rulesets.first(where: { $0.phase == "http_response_compression" }) {
+            try await mutate(method: "POST", "/zones/\(zoneID)/rulesets/\(existing.id)/rules",
+                             body: rule, apiToken: apiToken)
+        } else {
+            struct NewRuleset: Encodable, Sendable {
+                let name: String
+                let kind: String
+                let phase: String
+                let rules: [CompressionRule]
+            }
+            try await mutate(method: "POST", "/zones/\(zoneID)/rulesets",
+                             body: NewRuleset(name: "Anglesite compression rules",
+                                              kind: "zone", phase: "http_response_compression",
+                                              rules: [rule]),
+                             apiToken: apiToken)
+        }
+    }
 }

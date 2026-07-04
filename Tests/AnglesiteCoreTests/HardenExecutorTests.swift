@@ -156,4 +156,16 @@ final class MockCloudflareWriter: CloudflareWriting, @unchecked Sendable {
     func createWAFCustomRule(zoneID: String, rule: WAFRulePayload, apiToken: String) async throws {
         try record("createWAFCustomRule")
     }
+    func setSpeedBrain(zoneID: String, enabled: Bool, apiToken: String) async throws {
+        try record("setSpeedBrain")
+    }
+    func setECH(zoneID: String, enabled: Bool, apiToken: String) async throws {
+        try record("setECH")
+    }
+    func enableZstandardCompression(zoneID: String, apiToken: String) async throws {
+        try record("enableZstandardCompression")
+    }
+    func setPageShield(zoneID: String, enabled: Bool, apiToken: String) async throws {
+        try record("setPageShield")
+    }
 }
