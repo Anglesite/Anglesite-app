@@ -16,7 +16,9 @@ struct HardenPlannerTests {
             botFightMode: true,
             wafCustomRules: HardenPlanner.curatedWAFRules.map {
                 .init(description: $0.description, expression: $0.expression, action: $0.action)
-            })
+            },
+            speedBrain: true, ech: true, zstdCompression: true,
+            pageShield: .init(enabled: true, scriptHosts: []))
     }
 
     private func bare() -> CloudflareZoneState {
@@ -137,5 +139,22 @@ struct HardenPlannerTests {
         s.dmarcRecords = ["v=DMARC1; sp=none; p=reject; rua=mailto:x@example.com"]
         let plan = HardenPlanner.plan(from: s, domain: "example.com")
         #expect(!plan.items.contains(.addDMARCReject))
+    }
+
+    @Test("a bare zone plans the harden-pack items")
+    func bareGetsHardenPack() {
+        let plan = HardenPlanner.plan(from: bare(), domain: "example.com")
+        #expect(plan.items.contains(.enableSpeedBrain))
+        #expect(plan.items.contains(.enableZstandardCompression))
+        #expect(plan.items.contains(.enableECH))
+        #expect(plan.items.contains(.enablePageShieldMonitoring))
+    }
+
+    @Test("page shield monitoring is planned when the state is unreadable (nil)")
+    func pageShieldNilPlansEnable() {
+        var state = hardened()
+        state.pageShield = nil
+        let plan = HardenPlanner.plan(from: state, domain: "example.com")
+        #expect(plan.items == [.enablePageShieldMonitoring])
     }
 }

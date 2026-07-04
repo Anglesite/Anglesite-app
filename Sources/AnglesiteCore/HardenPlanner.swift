@@ -73,6 +73,19 @@ public enum HardenPlanner {
             items.append(.enableBotFightMode)
         }
 
+        if !state.speedBrain {
+            items.append(.enableSpeedBrain)
+        }
+        if !state.zstdCompression {
+            items.append(.enableZstandardCompression)
+        }
+        if !state.ech {
+            items.append(.enableECH)
+        }
+        if state.pageShield?.enabled != true {
+            items.append(.enablePageShieldMonitoring)
+        }
+
         // Email hardening only for domains that don't send mail.
         if state.mxRecords.isEmpty {
             items.append(.addNullMX)

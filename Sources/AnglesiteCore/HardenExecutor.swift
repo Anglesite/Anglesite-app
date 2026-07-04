@@ -106,6 +106,14 @@ public struct HardenExecutor: Sendable {
                 zoneID: zoneID,
                 rule: WAFRulePayload(description: desc, expression: expr, action: action),
                 apiToken: apiToken)
+        case .enableSpeedBrain:
+            try await writer.setSpeedBrain(zoneID: zoneID, enabled: true, apiToken: apiToken)
+        case .enableZstandardCompression:
+            try await writer.enableZstandardCompression(zoneID: zoneID, apiToken: apiToken)
+        case .enableECH:
+            try await writer.setECH(zoneID: zoneID, enabled: true, apiToken: apiToken)
+        case .enablePageShieldMonitoring:
+            try await writer.setPageShield(zoneID: zoneID, enabled: true, apiToken: apiToken)
         }
     }
 }
