@@ -4,14 +4,14 @@ import Containerization
 import ContainerizationOCI
 import ContainerizationExtras
 
-/// `LocalContainerControl` over Apple Containerization (package version 0.34). Imports the bundled
+/// `LocalContainerControl` over Apple Containerization (package version 0.35). Imports the bundled
 /// arm64 OCI layout into an on-disk `ImageStore`, unpacks it to an ext4 rootfs, boots a Linux VM
 /// (`VZVirtualMachineManager`) with NAT outbound + vsock inbound, clones the site's `Source/` repo
 /// into the guest, starts `astro dev` (guest TCP 4321) + the Node MCP sidecar (guest TCP 4399) +
 /// the vsock bridge, and exposes both via host-side `VsockTCPProxy` instances dialing the guest
 /// over vsock. CI never compiles this file (the `AnglesiteContainer` target is app-only).
 ///
-/// API note: the implementation is written against the real 0.34 symbols, which differ from the
+/// API note: the implementation is written against the real 0.35 symbols, which differ from the
 /// plan's intended shapes. Notably there is no `LinuxContainer(image:networking:)` — booting needs a
 /// `Kernel` + an initfs `Mount` + an unpacked rootfs `Mount`; image import is `ImageStore.load(from:)`
 /// (not `importIfNeeded`); exec is two-phase (`exec` builds, `.start()` runs, `.wait()` blocks);
@@ -43,6 +43,132 @@ public struct ContainerizationControl: LocalContainerControl {
         ref: String,
         onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> LocalContainerSession {
+        let container = try await makeBareContainer(siteID: siteID, sourceRepo: sourceRepo)
+
+        // 3. Hydrate from the repo: clone the virtio-fs-shared host repo into /workspace/site, then
+        //    check out ref. Cloning from the read-only share (not in place) keeps /workspace writable
+        //    and preserves full git history — native, no network. Two steps because `git clone
+        //    --branch` rejects "HEAD"/bare SHAs; `git checkout` accepts both.
+        do {
+            try await runToCompletion(container, id: "clone",
+                ["git", "clone", Self.repoSharePath, "/workspace/site"])
+            try await runToCompletion(container, id: "checkout",
+                ["git", "-C", "/workspace/site", "checkout", ref])
+        } catch {
+            await stopBareContainer(container, siteID: siteID)
+            throw LocalContainerError.cloneFailed("\(error)")
+        }
+
+        // 4. Start astro dev (guest TCP 4321), the MCP sidecar (guest TCP 4399), and the vsock bridge.
+        //    These are detached: `exec` + `.start()` with no `.wait()`. Each gets its own label so a
+        //    single onOutput stream can distinguish them (this is the only visibility into what the
+        //    guest is doing during boot — see #69's opaque `npm install`/`astro dev` startup window).
+        do {
+            // Hydrate deps from the image's baked toolchain (zero-install hardlink when the site's
+            // lockfile matches the template; offline-first npm ci otherwise), then start astro.
+            try await runDetached(container, id: "astro", label: "astro", onOutput: onOutput, ["sh", "-lc",
+                "/usr/local/bin/anglesite-hydrate /workspace/site && cd /workspace/site && npx astro dev --port 4321 --host 127.0.0.1"])
+
+            // MCP sidecar: baked into the image at /usr/local/lib/anglesite-mcp/ by the two-stage
+            // Dockerfile (scripts/vendor-container-image.sh stages the plugin's server/ dir into the
+            // build context; npm ci runs on linux/arm64 so @img/sharp-linux-arm64 is the native prebuilt).
+            // The server reads config from ENV (not flags): ANGLESITE_MCP_TRANSPORT selects HTTP mode,
+            // ANGLESITE_MCP_PORT sets the listen port, ANGLESITE_PROJECT_ROOT points at the cloned repo.
+            // ANGLESITE_MCP_HOST is intentionally unset — it defaults to 127.0.0.1, which is correct:
+            // the in-guest vsock bridge reaches the sidecar via dial("tcp","127.0.0.1:4399").
+            try await runDetached(container, id: "mcp", label: "mcp", onOutput: onOutput, ["sh", "-lc",
+                "ANGLESITE_MCP_TRANSPORT=http ANGLESITE_MCP_PORT=4399 ANGLESITE_PROJECT_ROOT=/workspace/site node /usr/local/lib/anglesite-mcp/server/index.mjs"])
+
+            // Guest vsock<->TCP bridges (socat, baked into the image): map guest vsock ports onto the
+            // local TCP listeners above so host-side dialVsock reaches them. One process per port;
+            // `fork` accepts unlimited sequential/parallel connections.
+            try await runDetached(container, id: "bridge-preview", label: "bridge-preview", onOutput: onOutput,
+                ["/usr/bin/socat", "VSOCK-LISTEN:4321,reuseaddr,fork", "TCP:127.0.0.1:4321"])
+            try await runDetached(container, id: "bridge-mcp", label: "bridge-mcp", onOutput: onOutput,
+                ["/usr/bin/socat", "VSOCK-LISTEN:4399,reuseaddr,fork", "TCP:127.0.0.1:4399"])
+        } catch {
+            await stopBareContainer(container, siteID: siteID)
+            throw LocalContainerError.bootFailed("guest process launch failed: \(error)")
+        }
+
+        // 5. Expose: a host-side vsock->TCP proxy per port. dialVsock(port:) -> FileHandle slots
+        //    directly into VsockDialer (Phase 1's `@Sendable (UInt32) async throws -> FileHandle`).
+        let dial: VsockDialer = { port in try await container.dialVsock(port: port) }
+        // A failing dial (container.dialVsock unable to reach the guest) previously closed the
+        // TCP side with zero trail — indistinguishable from a slow/hung guest process, both
+        // surfacing as NSURLErrorNetworkConnectionLost on the polling URLSession (see #69).
+        //
+        // waitUntilServing's polling URLSession retries a lost connection internally, far faster
+        // than its own 500ms interval — so a persistently-broken dial can emit thousands of
+        // identical proxy events within seconds, evicting the one-time guest boot lines (astro/mcp/
+        // bridge startup) out of LogCenter's bounded ring buffer before anyone reads them. Rate-limit
+        // to the first few occurrences of each distinct message, then periodically, so a real storm
+        // stays visible (with a running count) without burying everything else.
+        let eventLimiter = EventRateLimiter()
+        let previewProxy = VsockTCPProxy(
+            guestPort: Self.previewPort,
+            dial: dial,
+            onDialError: { error in
+                eventLimiter.log("[proxy:preview] dialVsock(\(Self.previewPort)) failed: \(error)", onOutput: onOutput)
+            },
+            onEvent: { event in eventLimiter.log("[proxy:preview] \(event)", onOutput: onOutput) })
+        let mcpProxy = VsockTCPProxy(
+            guestPort: Self.mcpPort,
+            dial: dial,
+            onDialError: { error in
+                eventLimiter.log("[proxy:mcp] dialVsock(\(Self.mcpPort)) failed: \(error)", onOutput: onOutput)
+            },
+            onEvent: { event in eventLimiter.log("[proxy:mcp] \(event)", onOutput: onOutput) })
+        let previewURL: URL
+        let mcpURL: URL
+        do {
+            previewURL = try await previewProxy.start()
+            let mcpBase = try await mcpProxy.start()
+            mcpURL = mcpBase.appendingPathComponent("mcp")
+        } catch {
+            await previewProxy.stop()
+            await mcpProxy.stop()
+            await stopBareContainer(container, siteID: siteID)
+            throw LocalContainerError.bootFailed("proxy start failed: \(error)")
+        }
+
+        // 6. Wait for `astro dev` to actually serve before returning, so the first preview load
+        //    doesn't get connection-refused. Poll the preview URL through the host proxy until it
+        //    answers (or time out). Cancellation-friendly: `Task.sleep` throws on cancel.
+        do {
+            try await waitUntilServing(previewURL)
+        } catch {
+            await previewProxy.stop()
+            await mcpProxy.stop()
+            await stopBareContainer(container, siteID: siteID)
+            throw LocalContainerError.bootFailed("preview server did not become ready: \(error)")
+        }
+
+        // Recompute the ext4 artifact URLs `makeBareContainer` staged, purely for `live`'s bookkeeping
+        // (deleted on `stop()`/teardown) — derivation is a pure function of `siteID` + the store path,
+        // so this can't diverge from what was actually unpacked.
+        let storeURL = try BundledImage.storeURL()
+        let rootfsURL = storeURL.appendingPathComponent("rootfs-\(siteID).ext4")
+        let initfsURL = storeURL.appendingPathComponent("initfs-\(siteID).ext4")
+        await live.store(siteID: siteID, container: container,
+            proxies: [previewProxy, mcpProxy], ext4Artifacts: [rootfsURL, initfsURL])
+        return LocalContainerSession(previewURL: previewURL, mcpURL: mcpURL)
+    }
+
+    public func stop(siteID: String) async throws {
+        await live.teardown(siteID: siteID)
+    }
+
+    /// Phases 0–2 of `start()`: resolve bundled artifacts, unpack rootfs/initfs, boot the VM.
+    /// `sourceRepo: nil` boots a bare container (no virtio-fs share) — used by the vsock e2e test.
+    /// Does NOT register the container in `live` — the caller owns its lifecycle (either `start()`'s
+    /// own phases 3–6 followed by `live.store`, or a test calling `stopBareContainer` directly).
+    ///
+    /// `public` (rather than `internal`) so `anglesite-container-probe` — a standalone executable
+    /// that can't `@testable import` — can drive the same bare-boot path entitled with
+    /// `com.apple.security.virtualization`, which `swift test`'s own runner can never carry. Still
+    /// not part of the `LocalContainerControl` protocol seam; only test/probe code calls it directly.
+    public func makeBareContainer(siteID: String, sourceRepo: URL? = nil) async throws -> LinuxContainer {
         // 0. Resolve the writable image store + boot artifacts. Missing artifacts are typed
         //    provisioning errors, surfaced as `imageUnavailable` instead of a silent mis-boot.
         let storeURL: URL
@@ -98,7 +224,6 @@ public struct ContainerizationControl: LocalContainerControl {
         }
 
         // 2. Boot the container: Apple-Silicon VZ-backed VM, NAT outbound, auto vsock device.
-        let container: LinuxContainer
         do {
             let kernel = Kernel(path: kernelURL, platform: .linuxArm)
             let vmm = VZVirtualMachineManager(kernel: kernel, initialFilesystem: initfs)
@@ -109,7 +234,7 @@ public struct ContainerizationControl: LocalContainerControl {
                 ipv4Gateway: try IPv4Address("192.168.64.1")
             )
 
-            container = try LinuxContainer(siteID, rootfs: rootfs, vmm: vmm) { config in
+            let container = try LinuxContainer(siteID, rootfs: rootfs, vmm: vmm) { config in
                 // Keep the init process alive so the VM stays up while we exec into it. A bare
                 // `/bin/sh` starts an *interactive* shell — with no controlling TTY and closed
                 // stdin it reads EOF and exits almost immediately, racing vmexec's own post-fork
@@ -127,137 +252,36 @@ public struct ContainerizationControl: LocalContainerControl {
                 // against `Mount.swift:83` and `ContainerTests.swift:628` (`.share(source: directory.path,
                 // destination: "/mnt")`); `ro` is honoured (`ContainerTests.swift:3309`). NOT
                 // `Mount.sharedMount`, which references a named *pod volume*, not a host path.
-                config.mounts.append(.share(
-                    source: sourceRepo.path,
-                    destination: Self.repoSharePath,
-                    options: ["ro"]
-                ))
+                // Only mounted when a repo is provided — the bare vsock-echo e2e test boots with none.
+                if let sourceRepo {
+                    config.mounts.append(.share(
+                        source: sourceRepo.path,
+                        destination: Self.repoSharePath,
+                        options: ["ro"]
+                    ))
+                }
             }
             try await container.create()
             try await container.start()
+            return container
         } catch {
             try? FileManager.default.removeItem(at: rootfsURL)
             try? FileManager.default.removeItem(at: initfsURL)
             throw LocalContainerError.bootFailed("\(error)")
         }
-
-        // 3. Hydrate from the repo: clone the virtio-fs-shared host repo into /workspace/site, then
-        //    check out ref. Cloning from the read-only share (not in place) keeps /workspace writable
-        //    and preserves full git history — native, no network. Two steps because `git clone
-        //    --branch` rejects "HEAD"/bare SHAs; `git checkout` accepts both.
-        do {
-            try await runToCompletion(container, id: "clone",
-                ["git", "clone", Self.repoSharePath, "/workspace/site"])
-            try await runToCompletion(container, id: "checkout",
-                ["git", "-C", "/workspace/site", "checkout", ref])
-        } catch {
-            try? await container.stop()
-            try? FileManager.default.removeItem(at: rootfsURL)
-            try? FileManager.default.removeItem(at: initfsURL)
-            throw LocalContainerError.cloneFailed("\(error)")
-        }
-
-        // 4. Start astro dev (guest TCP 4321), the MCP sidecar (guest TCP 4399), and the vsock bridge.
-        //    These are detached: `exec` + `.start()` with no `.wait()`. Each gets its own label so a
-        //    single onOutput stream can distinguish them (this is the only visibility into what the
-        //    guest is doing during boot — see #69's opaque `npm install`/`astro dev` startup window).
-        do {
-            try await runDetached(container, id: "astro", label: "astro", onOutput: onOutput, ["sh", "-lc",
-                "cd /workspace/site && npm install --no-audit --no-fund && npx astro dev --port 4321 --host 127.0.0.1"])
-
-            // MCP sidecar: baked into the image at /usr/local/lib/anglesite-mcp/ by the two-stage
-            // Dockerfile (scripts/vendor-container-image.sh stages the plugin's server/ dir into the
-            // build context; npm ci runs on linux/arm64 so @img/sharp-linux-arm64 is the native prebuilt).
-            // The server reads config from ENV (not flags): ANGLESITE_MCP_TRANSPORT selects HTTP mode,
-            // ANGLESITE_MCP_PORT sets the listen port, ANGLESITE_PROJECT_ROOT points at the cloned repo.
-            // ANGLESITE_MCP_HOST is intentionally unset — it defaults to 127.0.0.1, which is correct:
-            // the in-guest vsock bridge reaches the sidecar via dial("tcp","127.0.0.1:4399").
-            try await runDetached(container, id: "mcp", label: "mcp", onOutput: onOutput, ["sh", "-lc",
-                "ANGLESITE_MCP_TRANSPORT=http ANGLESITE_MCP_PORT=4399 ANGLESITE_PROJECT_ROOT=/workspace/site node /usr/local/lib/anglesite-mcp/server/index.mjs"])
-
-            // Guest vsock<->TCP bridge: maps guest vsock ports onto the local TCP listeners above so
-            // host-side dialVsock reaches them. baked by Task 6.
-            //
-            // #69 open mystery: this process's own stdout/stderr have never once appeared in
-            // LogCenter — not even an unconditional line at the very top of its main() — across every
-            // configuration tried (direct exec, shell-wrapped, launched first instead of last). The
-            // binary in the built image is confirmed correct (contains the expected log strings) and
-            // `exec()` never throws, so the process does get launched; `dialVsock` mostly reports
-            // success but the resulting connection is dead instantly (zero bytes), and occasionally
-            // throws ECONNRESET outright. Root cause is still open — see the #69 write-up.
-            try await runDetached(container, id: "bridge", label: "bridge", onOutput: onOutput,
-                ["/usr/local/bin/vsock-bridge", "4321:4321", "4399:4399"])
-        } catch {
-            try? await container.stop()
-            try? FileManager.default.removeItem(at: rootfsURL)
-            try? FileManager.default.removeItem(at: initfsURL)
-            throw LocalContainerError.bootFailed("guest process launch failed: \(error)")
-        }
-
-        // 5. Expose: a host-side vsock->TCP proxy per port. dialVsock(port:) -> FileHandle slots
-        //    directly into VsockDialer (Phase 1's `@Sendable (UInt32) async throws -> FileHandle`).
-        let dial: VsockDialer = { port in try await container.dialVsock(port: port) }
-        // A failing dial (container.dialVsock unable to reach the guest) previously closed the
-        // TCP side with zero trail — indistinguishable from a slow/hung guest process, both
-        // surfacing as NSURLErrorNetworkConnectionLost on the polling URLSession (see #69).
-        //
-        // waitUntilServing's polling URLSession retries a lost connection internally, far faster
-        // than its own 500ms interval — so a persistently-broken dial can emit thousands of
-        // identical proxy events within seconds, evicting the one-time guest boot lines (astro/mcp/
-        // bridge startup) out of LogCenter's bounded ring buffer before anyone reads them. Rate-limit
-        // to the first few occurrences of each distinct message, then periodically, so a real storm
-        // stays visible (with a running count) without burying everything else.
-        let eventLimiter = EventRateLimiter()
-        let previewProxy = VsockTCPProxy(
-            guestPort: Self.previewPort,
-            dial: dial,
-            onDialError: { error in
-                eventLimiter.log("[proxy:preview] dialVsock(\(Self.previewPort)) failed: \(error)", onOutput: onOutput)
-            },
-            onEvent: { event in eventLimiter.log("[proxy:preview] \(event)", onOutput: onOutput) })
-        let mcpProxy = VsockTCPProxy(
-            guestPort: Self.mcpPort,
-            dial: dial,
-            onDialError: { error in
-                eventLimiter.log("[proxy:mcp] dialVsock(\(Self.mcpPort)) failed: \(error)", onOutput: onOutput)
-            },
-            onEvent: { event in eventLimiter.log("[proxy:mcp] \(event)", onOutput: onOutput) })
-        let previewURL: URL
-        let mcpURL: URL
-        do {
-            previewURL = try await previewProxy.start()
-            let mcpBase = try await mcpProxy.start()
-            mcpURL = mcpBase.appendingPathComponent("mcp")
-        } catch {
-            await previewProxy.stop()
-            await mcpProxy.stop()
-            try? await container.stop()
-            try? FileManager.default.removeItem(at: rootfsURL)
-            try? FileManager.default.removeItem(at: initfsURL)
-            throw LocalContainerError.bootFailed("proxy start failed: \(error)")
-        }
-
-        // 6. Wait for `astro dev` to actually serve before returning, so the first preview load
-        //    doesn't get connection-refused. Poll the preview URL through the host proxy until it
-        //    answers (or time out). Cancellation-friendly: `Task.sleep` throws on cancel.
-        do {
-            try await waitUntilServing(previewURL)
-        } catch {
-            await previewProxy.stop()
-            await mcpProxy.stop()
-            try? await container.stop()
-            try? FileManager.default.removeItem(at: rootfsURL)
-            try? FileManager.default.removeItem(at: initfsURL)
-            throw LocalContainerError.bootFailed("preview server did not become ready: \(error)")
-        }
-
-        await live.store(siteID: siteID, container: container,
-            proxies: [previewProxy, mcpProxy], ext4Artifacts: [rootfsURL, initfsURL])
-        return LocalContainerSession(previewURL: previewURL, mcpURL: mcpURL)
     }
 
-    public func stop(siteID: String) async throws {
-        await live.teardown(siteID: siteID)
+    /// Tear down a container produced by `makeBareContainer`, mirroring the ext4-artifact cleanup
+    /// `start()`'s own error paths and `LiveContainers.teardown` perform: stop the VM first (releases
+    /// the file handles), then remove the backing rootfs/initfs ext4 images. Best-effort — errors from
+    /// `container.stop()` are swallowed, matching every other teardown path in this file.
+    ///
+    /// `public` alongside `makeBareContainer` — see its doc comment.
+    public func stopBareContainer(_ container: LinuxContainer, siteID: String) async {
+        try? await container.stop()
+        guard let storeURL = try? BundledImage.storeURL() else { return }
+        try? FileManager.default.removeItem(at: storeURL.appendingPathComponent("rootfs-\(siteID).ext4"))
+        try? FileManager.default.removeItem(at: storeURL.appendingPathComponent("initfs-\(siteID).ext4"))
     }
 
     /// Run `argv` inside the named container as a one-shot guest exec, forwarding `environment`
@@ -268,7 +292,7 @@ public struct ContainerizationControl: LocalContainerControl {
     /// the host path. Mirrors `runToCompletion`'s lifecycle (`exec` -> `start` -> `wait` -> `delete`)
     /// but installs capturing/streaming `Writer`s.
     ///
-    /// Env/cwd are set via the real 0.34 `LinuxProcessConfiguration` fields — `arguments`,
+    /// Env/cwd are set via the real 0.35 `LinuxProcessConfiguration` fields — `arguments`,
     /// `environmentVariables`, `workingDirectory` (`LinuxProcessConfiguration.swift:366-370`) — so
     /// there is no shell wrapping and therefore no shell-metacharacter injection surface: each
     /// `K=V` pair and each argv element is passed literally to the guest agent (no `sh -lc`, no
@@ -487,7 +511,10 @@ public struct ContainerizationControl: LocalContainerControl {
     /// and then iterates `vendedProcesses` calling `_delete()` on each before stopping the VM
     /// (`LinuxContainer.swift:803` and `:835-851`). Every `exec`'d process is registered in
     /// `vendedProcesses`, so stopping the container cleans them all up — no per-process tracking needed.
-    private func runDetached(
+    ///
+    /// `public` alongside `makeBareContainer`/`stopBareContainer` — see `makeBareContainer`'s doc
+    /// comment. The vsock echo probe/test use this to start the guest `socat` echo listener.
+    public func runDetached(
         _ container: LinuxContainer,
         id: String,
         label: String,

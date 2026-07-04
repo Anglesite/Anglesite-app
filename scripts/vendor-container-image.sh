@@ -47,9 +47,23 @@ cp "$PLUGIN_SRC/package-lock.json" "$SIDECAR_STAGE/"
 
 echo "Sidecar staged: $(ls "$SIDECAR_STAGE")"
 
-# Clean up the staged sidecar on exit (success or failure) so it doesn't
-# accumulate in the build context. The directory itself is gitignored.
-cleanup_sidecar() { rm -rf "$SIDECAR_STAGE"; }
+# ---------------------------------------------------------------------------
+# Stage the website template's dependency manifests + the hydrate script into
+# the build context, so the image can bake the template's full node_modules
+# (design §5b, same pattern as container/Dockerfile). hydrate.sh is shared
+# with the Cloudflare image — container/hydrate.sh is the single source.
+# ---------------------------------------------------------------------------
+TEMPLATE_STAGE="$CTX/template"
+echo "Staging template manifests from $ROOT/Resources/Template → $TEMPLATE_STAGE"
+rm -rf "$TEMPLATE_STAGE"
+mkdir -p "$TEMPLATE_STAGE"
+cp "$ROOT/Resources/Template/package.json" "$TEMPLATE_STAGE/"
+cp "$ROOT/Resources/Template/package-lock.json" "$TEMPLATE_STAGE/"
+cp "$ROOT/container/hydrate.sh" "$CTX/hydrate.sh"
+
+# Clean up the staged sidecar + template + hydrate script on exit (success or
+# failure) so they don't accumulate in the build context. These are gitignored.
+cleanup_sidecar() { rm -rf "$SIDECAR_STAGE" "$TEMPLATE_STAGE" "$CTX/hydrate.sh"; }
 trap cleanup_sidecar EXIT
 
 echo "Building anglesite-dev:latest (linux/arm64)…"

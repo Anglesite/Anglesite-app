@@ -62,6 +62,12 @@ Resources/container-image/
 # cleaned up on exit; never committed — plugin source lives in the sibling anglesite repo).
 Containers/anglesite-dev/mcp-sidecar/
 
+# Transient template + hydrate-script staging (populated by scripts/vendor-container-image.sh from
+# Resources/Template/ and container/hydrate.sh, cleaned up on exit; never committed — both are
+# already tracked at their real, single-source locations).
+Containers/anglesite-dev/template/
+Containers/anglesite-dev/hydrate.sh
+
 # Vendored Linux kernel binary (populated by scripts/vendor-container-kernel.sh)
 Resources/container-kernel/*
 !Resources/container-kernel/.gitkeep
