@@ -25,7 +25,7 @@ This design adds the free (or at-cost) Cloudflare services that are *not* yet in
 ## 2. Decisions (from brainstorming)
 
 1. **Scope: all three lanes.** Site-owner wizard features, zone hardening/perf extensions, and third-party-provider reduction.
-2. **CF default, keep others.** Where a Cloudflare service overlaps an existing catalog provider (contact → Formspree, tracking → Plausible/Fathom/GA4), Cloudflare becomes the recommended/default provider; existing providers remain selectable. No forced migrations.
+2. **CF default, keep others.** Where a Cloudflare service overlaps an existing catalog provider (contact → Formspree, tracking → Plausible/Fathom/GA4), Cloudflare becomes the recommended/default provider; existing providers remain selectable. No forced migrations. **Exception — email:** iCloud Custom Email Domains ships at launch as a *peer* of Cloudflare Email Routing, neither defaulted (see Slice 2).
 3. **Free bar: at-cost extras included.** Generous free tiers qualify (Zaraz 1M events/mo, image transformations 5k unique/mo). Cloudflare Registrar (at-cost domains) is in scope. Paid-only products (Stream, Images storage) are out.
 4. **One "Anglesite" token.** A single custom token template covering all permissions the app can use, replacing the current "Edit Cloudflare Workers" template. Capability probing gives graceful degradation for existing narrow tokens.
 5. **Sequencing: vertical slices, value-first** (approach 1 of 3 considered; alternatives were harden-pack-first and a new top-level Cloudflare dashboard pane — the latter rejected as it bypasses the catalog and Harden seams).
@@ -79,15 +79,21 @@ The guided token-creation URL (pre-filled permissions) is updated accordingly.
 
 ## 6. Slice 2 — Email Routing + Cloudflare-native contact form
 
-**Deliverable A — new `email` integration descriptor ("Get you@yourdomain.com"):**
+**Deliverable A — new `email` integration descriptor ("Get you@yourdomain.com") with two peer providers:**
 
-1. Enable Email Routing on the zone (adds MX/TXT via API; surfaces conflicts if custom MX exists — abort with explanation rather than clobber).
-2. Create destination address → Cloudflare emails a verification link → wizard polls the API until verified ("check your inbox" step; resumable if the user quits).
-3. Create routing rule(s): named addresses (`hello@`, `contact@`…) and optional catch-all.
+- **iCloud Custom Email Domains** (peer option, shipping at launch): full mailboxes via the user's existing iCloud+ subscription. The wizard pre-creates Apple's required DNS records on the Cloudflare zone (MX to `mx01/mx02.mail.icloud.com`, SPF include, DKIM CNAME with the Apple-provided values), then hands off to icloud.com for the domain-verification step Apple requires, and verifies the records afterward. Apple-first fit for the app's audience (successor to the `anglesite:email` skill's recommendation under #459).
+- **Cloudflare Email Routing** (peer option): forwarding-only, no new mailbox.
+  1. Enable Email Routing on the zone (adds MX/TXT via API).
+  2. Create destination address → Cloudflare emails a verification link → wizard polls the API until verified ("check your inbox" step; resumable if the user quits).
+  3. Create routing rule(s): named addresses (`hello@`, `contact@`…) and optional catch-all.
+
+The two providers are **mutually exclusive MX owners**. The wizard reads current MX state first and treats it as either/or: switching providers is an explicit, confirmed step that replaces the records; pre-existing third-party MX (Google Workspace, Fastmail…) aborts with an explanation rather than clobbering. Neither provider is "default" — the wizard presents both as peers (iCloud = real mailboxes, needs iCloud+; Cloudflare = free forwarding to an inbox you already have).
 
 **Deliverable B — contact wizard gains a "Cloudflare" provider (new default):** a Worker route `/api/contact` with a `send_email` binding whose `destination_address` is locked to the owner's verified address. Sends to verified destination addresses are free on all plans. Submissions are Turnstile-verified (Slice 1). `WorkerComposition` learns the `send_email` binding type in `wrangler.toml` generation. Formspree and mailto remain selectable.
 
-**Interaction with Harden:** Harden already writes SPF/DMARC; enabling Email Routing changes the correct SPF answer (`include:_spf.mx.cloudflare.net`). `HardenPlanner` must become Email-Routing-aware so the two features don't fight over TXT records.
+**Deliverable B is provider-independent:** the contact-form Worker sends to any verified destination address — including an iCloud custom-domain mailbox once verified — so choosing iCloud email does not forgo the Cloudflare-native contact form.
+
+**Interaction with Harden:** Harden already writes SPF/DMARC; the correct SPF answer now depends on the email provider (`include:_spf.mx.cloudflare.net` for Email Routing, `include:icloud.com` for iCloud). `HardenPlanner` must become email-provider-aware so the two features don't fight over TXT records.
 
 ## 7. Slice 3 — Harden pack
 
