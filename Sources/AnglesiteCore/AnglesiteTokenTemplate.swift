@@ -1,0 +1,50 @@
+import Foundation
+
+/// The single "Anglesite" Cloudflare API token: one custom template carrying every permission the
+/// app can use across deploy, harden, and the integration wizards (spec:
+/// docs/superpowers/specs/2026-07-04-cloudflare-free-services-integration-design.md §4).
+///
+/// The dashboard pre-fill query params are undocumented; if Cloudflare changes the schema the link
+/// still lands on the token page and the prompt's numbered steps describe the permissions to add by
+/// hand, so the flow degrades rather than breaks (verified pre-fill behavior last on 2026-06-16 for
+/// the original five groups).
+public enum AnglesiteTokenTemplate {
+    public static let tokenName = "Anglesite"
+
+    /// Dashboard permission-group keys with their access level. Order is display order.
+    public static let permissionGroups: [(key: String, type: String)] = [
+        // Deploy (the original "Edit Cloudflare Workers" set)
+        ("workers_routes", "edit"),
+        ("workers_scripts", "edit"),
+        ("workers_kv_storage", "edit"),
+        ("workers_tail", "read"),
+        ("workers_r2", "edit"),
+        ("d1", "edit"),
+        // Harden + zone state
+        ("zone_settings", "edit"),
+        ("dns", "edit"),
+        ("zone_waf", "edit"),
+        ("page_shield", "read"),
+        ("analytics", "read"),
+        // Integration wizards (slices 1, 2, 5, 7)
+        ("challenge_widgets", "edit"),
+        ("email_routing_rules", "edit"),
+        ("email_routing_addresses", "edit"),
+        ("zaraz", "edit"),
+        ("registrar", "edit"),
+    ]
+
+    public static var createTokenURL: URL {
+        let permissions = "[" + permissionGroups
+            .map { #"{"key":"\#($0.key)","type":"\#($0.type)"}"# }
+            .joined(separator: ",") + "]"
+        var components = URLComponents(string: "https://dash.cloudflare.com/profile/api-tokens")!
+        components.queryItems = [
+            URLQueryItem(name: "name", value: tokenName),
+            URLQueryItem(name: "accountId", value: "*"),
+            URLQueryItem(name: "zoneId", value: "all"),
+            URLQueryItem(name: "permissionGroupKeys", value: permissions),
+        ]
+        return components.url!
+    }
+}

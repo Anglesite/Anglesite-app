@@ -7,11 +7,11 @@ import AnglesiteCore
 /// Deploy.
 ///
 /// The hard part for newcomers isn't pasting — it's knowing *which* token to make. So step 1 links
-/// to a pre-filled Cloudflare token form that reproduces the built-in "Edit Cloudflare Workers"
-/// template (the exact permissions `wrangler deploy` needs), and the numbered steps name that
-/// template by hand in case the (undocumented) pre-fill ever stops working. The token isn't trusted
-/// on faith: `DeployModel.verifyAndSaveToken` runs `wrangler whoami` before persisting, so a bad
-/// token is caught here instead of failing later inside the deploy.
+/// to a pre-filled Cloudflare token form that creates a custom token named "Anglesite" covering
+/// deploy + harden + the integration wizards (`AnglesiteTokenTemplate`), and the numbered steps
+/// describe that pre-fill by hand in case the (undocumented) pre-fill ever stops working. The token
+/// isn't trusted on faith: `DeployModel.verifyAndSaveToken` runs `wrangler whoami` before
+/// persisting, so a bad token is caught here instead of failing later inside the deploy.
 ///
 /// The view is intentionally narrow — it only onboards the token. Long-term management (replacing,
 /// clearing) happens in Settings → Advanced → Credentials, which shares the same `KeychainStore`
@@ -22,30 +22,6 @@ struct CloudflareTokenPromptView: View {
 
     @State private var token: String = ""
     @FocusState private var fieldFocused: Bool
-
-    /// Cloudflare's dashboard accepts undocumented query params that pre-fill the token-creation
-    /// form. These five permission groups reproduce the built-in "Edit Cloudflare Workers" template
-    /// — everything a Workers + Static Assets `wrangler deploy` needs. Verified against the live
-    /// dashboard on 2026-06-16: all five rows + the name pre-fill. If Cloudflare ever changes the
-    /// param schema, the link still lands on the token page and the on-screen steps name the
-    /// template to pick by hand, so the flow degrades rather than breaks.
-    private static let createTokenURL: URL = {
-        let permissions = """
-        [{"key":"workers_routes","type":"edit"},\
-        {"key":"workers_scripts","type":"edit"},\
-        {"key":"workers_kv_storage","type":"edit"},\
-        {"key":"workers_tail","type":"read"},\
-        {"key":"workers_r2","type":"edit"}]
-        """
-        var components = URLComponents(string: "https://dash.cloudflare.com/profile/api-tokens")!
-        components.queryItems = [
-            URLQueryItem(name: "name", value: "Anglesite Deploy"),
-            URLQueryItem(name: "accountId", value: "*"),
-            URLQueryItem(name: "zoneId", value: "all"),
-            URLQueryItem(name: "permissionGroupKeys", value: permissions)
-        ]
-        return components.url!
-    }()
 
     /// True once a verification is in flight (`.checking`) and during the brief success flash
     /// (`.connected`) — i.e. whenever the field and submit button should be locked so the user
@@ -74,12 +50,12 @@ struct CloudflareTokenPromptView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 step(1) {
-                    Link(destination: Self.createTokenURL) {
+                    Link(destination: AnglesiteTokenTemplate.createTokenURL) {
                         Label("Open Cloudflare API tokens", systemImage: "arrow.up.forward.app")
                     }
                 }
                 step(2) {
-                    Text("The “Edit Cloudflare Workers” permissions should already be selected (if not, pick that template). Click **Continue to summary**.")
+                    Text("A custom token named “Anglesite” should be pre-filled with all permissions Anglesite uses (if not, choose **Create Custom Token** and continue — deploy still works and Anglesite will ask again when a feature needs more access). Click **Continue to summary**.")
                 }
                 step(3) {
                     Text("Click **Create Token**, then copy it and paste it below.")
