@@ -36,10 +36,14 @@ struct HardenExecutorTests {
             .addSPFRejectAll,
             .addDMARCReject,
             .addWAFRule(description: "Block dotfiles", expression: "(x)", action: "block"),
+            .enableSpeedBrain,
+            .enableZstandardCompression,
+            .enableECH,
+            .enablePageShieldMonitoring,
         ])
         let result = await exec.execute(
             plan: plan, zoneID: "z", domain: "example.com", apiToken: "t")
-        #expect(result.appliedCount == 9)
+        #expect(result.appliedCount == 13)
         #expect(result.failedItems.isEmpty)
         #expect(writer.calls.contains("enableDNSSEC"))
         #expect(writer.calls.contains { $0.hasPrefix("addDNSRecord:CAA") })
@@ -50,6 +54,10 @@ struct HardenExecutorTests {
         #expect(writer.calls.contains("addDNSRecord:TXT:v=spf1 -all"))
         #expect(writer.calls.contains("addDNSRecord:TXT:v=DMARC1; p=reject"))
         #expect(writer.calls.contains("createWAFCustomRule"))
+        #expect(writer.calls.contains("setSpeedBrain"))
+        #expect(writer.calls.contains("enableZstandardCompression"))
+        #expect(writer.calls.contains("setECH"))
+        #expect(writer.calls.contains("setPageShield"))
     }
 
     @Test("a per-item failure does not abort remaining items")
@@ -108,7 +116,9 @@ final class MockCloudflareReader: CloudflareReading, @unchecked Sendable {
         dnssecActive: true, sslMode: "strict", alwaysUseHTTPS: true,
         hsts: .init(maxAge: 31_536_000, includeSubdomains: true, preload: false),
         caaRecords: [], mxRecords: [], spfRecords: ["v=spf1 -all"],
-        dmarcRecords: ["v=DMARC1; p=reject"], botFightMode: true)) {
+        dmarcRecords: ["v=DMARC1; p=reject"], botFightMode: true,
+        speedBrain: true, ech: true, zstdCompression: true,
+        pageShield: .init(enabled: true, scriptHosts: []))) {
         self.state = state
     }
 
