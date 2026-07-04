@@ -104,7 +104,7 @@ For the boot smoke, use a signed run of the app that actually carries `com.apple
 | 6. MCP connects through loopback proxy |  |  |
 | 7. `apply_edit` writes through in-container sidecar |  |  |
 | 8. Window close tears down VM/proxies/artifacts |  |  |
-| 9. Unprovisioned or unentitled build falls back to host runtime |  |  |
+| 9. Unprovisioned or unentitled build selects `UnavailableSiteRuntime` (preview disabled, no host fallback) |  |  |
 
 Use `PASS`, `FAIL`, or `N/A`, and explain any `N/A`.
 
@@ -231,7 +231,7 @@ Expected:
 
 Fail if closing the window leaves a live VM, live proxy listener, or unbounded ext4 files.
 
-### 9. Fallback Path
+### 9. Unavailable Path (no host fallback)
 
 Run one negative-control pass:
 
@@ -240,11 +240,15 @@ Run one negative-control pass:
 
 Expected:
 
-- The app uses `UnavailableSiteRuntime`.
-- Preview does not start through host Node.
-- The user sees a clear container runtime unavailable failure.
+- The app selects `UnavailableSiteRuntime`. There is NO host-subprocess preview fallback (#69).
+- The preview settles to the `.failed` state, showing the human-readable reason
+  (`Local container runtime is required, but it is not available yet (<reasons>).`).
+- The debug pane logs `runtime/stdout no host runtime fallback; local container unavailable:
+  <reasons>` with the failed host gate and/or missing artifact named in the `; `-joined reasons.
+- No host subprocess (npm dependency tree) is spawned to serve the preview.
 
-Fail if a normal dev build starts a host subprocess runtime because the container artifacts are absent.
+Fail if the build spins up a host-subprocess preview, crashes instead of surfacing `.failed`, or
+selects the container runtime when artifacts/entitlement are absent.
 
 ## Evidence To Record On #69
 
@@ -271,4 +275,5 @@ The local runtime smoke is complete when:
 - Preview and MCP both run through loopback vsock proxies.
 - `apply_edit` writes through the in-container sidecar.
 - Window close tears down the VM/proxies.
-- The fallback host runtime still works when artifacts or entitlement are absent.
+- A build without artifacts or entitlement settles to `UnavailableSiteRuntime` (preview `.failed`
+  with reasons), with no host-subprocess preview fallback (#69).

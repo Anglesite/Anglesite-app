@@ -295,6 +295,40 @@ struct VsockTCPProxyTests {
         await proxy.stop()
     }
 
+    /// Regression test for #69, truncation on clean teardown: on the normal path the guest finishes
+    /// its HTTP response (a final chunk queued as a `write` on the tcp channel) and then closes with a
+    /// clean FIN. If teardown `close(flags: .stop)`s the tcp channel, that queued write is CANCELLED
+    /// and the client receives a truncated body. The barrier-then-`.stop` teardown must instead drain
+    /// the queued write before cancelling the (infinite) read, so the client sees the WHOLE payload.
+    ///
+    /// A large payload (2 MiB) is deliberate: it exceeds the socket/DispatchIO buffer, so the tail of
+    /// the write is genuinely still enqueued when the guest FIN arrives and teardown begins — that is
+    /// the window a `.stop`-only close truncates. Pre-fix (`close(flags: .stop)` on both channels)
+    /// this read comes up short (received.count < payload.count); post-fix it is exact.
+    @Test("guest writes a full payload then FINs: client receives the COMPLETE payload, not truncated")
+    func fullPayloadDrainsBeforeTeardown() async throws {
+        let payloadSize = 2 * 1024 * 1024   // 2 MiB — larger than any socket/DispatchIO buffer
+        let payload = Data((0..<payloadSize).map { UInt8($0 & 0xff) })
+
+        let (guestForProxy, guestPeer) = socketPair()
+        let proxy = VsockTCPProxy(guestPort: 4321, dial: { _ in guestForProxy })
+        let url = try await proxy.start()
+        let client = try connectTCPToProxy(to: url)
+        setRecvTimeout(client)
+
+        // Guest writes the whole response, then immediately closes with a clean FIN. The final bytes
+        // are still queued for the guest->tcp forward when the proxy tears the pair down.
+        try guestPeer.write(contentsOf: payload)
+        try guestPeer.close()
+
+        // The client must receive every byte before its side of the proxy closes. readExactly polls
+        // to a generous deadline; a truncated forward returns fewer than payloadSize bytes.
+        let got = await readExactly(payloadSize, from: client, timeout: .seconds(20))
+        #expect(got.count == payloadSize)
+        #expect(got == payload)
+        await proxy.stop()
+    }
+
     @Test("closed connection is removed from connections (no unbounded growth)")
     func closedConnectionRemovedFromConnections() async throws {
         let (guestForProxy, guestPeer) = socketPair()

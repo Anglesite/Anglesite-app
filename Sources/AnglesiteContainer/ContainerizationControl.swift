@@ -4,14 +4,14 @@ import Containerization
 import ContainerizationOCI
 import ContainerizationExtras
 
-/// `LocalContainerControl` over Apple Containerization (package version 0.34). Imports the bundled
+/// `LocalContainerControl` over Apple Containerization (package version 0.35). Imports the bundled
 /// arm64 OCI layout into an on-disk `ImageStore`, unpacks it to an ext4 rootfs, boots a Linux VM
 /// (`VZVirtualMachineManager`) with NAT outbound + vsock inbound, clones the site's `Source/` repo
 /// into the guest, starts `astro dev` (guest TCP 4321) + the Node MCP sidecar (guest TCP 4399) +
 /// the vsock bridge, and exposes both via host-side `VsockTCPProxy` instances dialing the guest
 /// over vsock. CI never compiles this file (the `AnglesiteContainer` target is app-only).
 ///
-/// API note: the implementation is written against the real 0.34 symbols, which differ from the
+/// API note: the implementation is written against the real 0.35 symbols, which differ from the
 /// plan's intended shapes. Notably there is no `LinuxContainer(image:networking:)` — booting needs a
 /// `Kernel` + an initfs `Mount` + an unpacked rootfs `Mount`; image import is `ImageStore.load(from:)`
 /// (not `importIfNeeded`); exec is two-phase (`exec` builds, `.start()` runs, `.wait()` blocks);
@@ -292,7 +292,7 @@ public struct ContainerizationControl: LocalContainerControl {
     /// the host path. Mirrors `runToCompletion`'s lifecycle (`exec` -> `start` -> `wait` -> `delete`)
     /// but installs capturing/streaming `Writer`s.
     ///
-    /// Env/cwd are set via the real 0.34 `LinuxProcessConfiguration` fields — `arguments`,
+    /// Env/cwd are set via the real 0.35 `LinuxProcessConfiguration` fields — `arguments`,
     /// `environmentVariables`, `workingDirectory` (`LinuxProcessConfiguration.swift:366-370`) — so
     /// there is no shell wrapping and therefore no shell-metacharacter injection surface: each
     /// `K=V` pair and each argv element is passed literally to the guest agent (no `sh -lc`, no

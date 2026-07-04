@@ -219,16 +219,36 @@ final class ProxyConnection: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// Idempotent teardown. Must be called with `lock` held. Closing each `DispatchIO` channel
-    /// (`.stop` flag: cancel any in-flight read/write immediately) closes its owned fd and runs its
-    /// cleanup handler. `onClose` is invoked here (not after unlocking): it only ever does
-    /// `Task { await self?.removeConnection(c) }`-shaped work, which schedules and returns
-    /// immediately, so calling it while holding this instance's own lock cannot deadlock or re-enter.
+    /// Idempotent teardown. Must be called with `lock` held.
+    ///
+    /// Close-ordering matters: a bare `close(flags: .stop)` on both channels — the previous shape —
+    /// cancels ALL in-flight I/O, including a not-yet-drained final write. On the normal teardown
+    /// path (guest finishes its HTTP response → the last chunk is queued as a `write` on the tcp
+    /// channel → guest EOF → `close()`), that cancellation truncates the response body the client
+    /// receives. Both channels are write *targets* — the tcp channel carries guest→client bytes, the
+    /// guest channel carries client→guest bytes — so both can hold an undrained final write.
+    ///
+    /// A plain `close()` (default flags) would drain queued writes, but each channel also has a
+    /// streaming `read(offset:0, length:.max)` enqueued on it; that read never completes on its own,
+    /// so the channel — closing only "after all enqueued operations complete" — would stay open
+    /// forever and never tear down. The resolution is a per-channel `barrier`: the barrier block runs
+    /// on the channel's own queue only AFTER every previously-enqueued operation (crucially, the
+    /// queued writes) has finished, and it then `close(flags: .stop)`s to cancel the still-pinned
+    /// infinite read. Net effect: queued writes flush first, then the read is cancelled and the fd
+    /// closes — no truncation, still prompt.
+    ///
+    /// Exactly-once / deadlock-free: the `closed` guard makes teardown run once; each `barrier` is
+    /// scheduled once. The barrier block captures the channel directly (so nil-ing `tcpIO`/`guestIO`
+    /// below does not free it) and takes NO lock — barriers run on `queue`, and re-taking `lock`
+    /// there would risk deadlock, so the block does only the lock-free `close`. `onClose` is invoked
+    /// here (not after unlocking): it only ever does `Task { await self?.removeConnection(c) }`-shaped
+    /// work, which schedules and returns immediately, so calling it while holding this instance's own
+    /// lock cannot deadlock or re-enter.
     private func closeLocked() {
         guard !closed else { return }
         closed = true
-        tcpIO?.close(flags: .stop)
-        guestIO?.close(flags: .stop)
+        if let tcpIO { tcpIO.barrier { tcpIO.close(flags: .stop) } }
+        if let guestIO { guestIO.barrier { guestIO.close(flags: .stop) } }
         tcpIO = nil
         guestIO = nil
         onClose?(self)
