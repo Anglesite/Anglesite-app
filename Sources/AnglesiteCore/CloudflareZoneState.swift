@@ -31,6 +31,14 @@ public struct CloudflareZoneState: Sendable, Equatable {
     public var botFightMode: Bool
     /// Custom WAF rules in the `http_request_firewall_custom` phase.
     public var wafCustomRules: [WAFCustomRule]
+    /// Speed Brain (speculation-rules prefetching) zone setting.
+    public var speedBrain: Bool
+    /// Encrypted Client Hello zone setting.
+    public var ech: Bool
+    /// Whether a compression rule enables Zstandard (`http_response_compression` phase).
+    public var zstdCompression: Bool
+    /// Page Shield (client-side security) status + detected script hosts. `nil` when unreadable.
+    public var pageShield: PageShieldState?
 
     /// A single custom WAF rule from the zone's firewall ruleset.
     public struct WAFCustomRule: Sendable, Equatable {
@@ -44,9 +52,22 @@ public struct CloudflareZoneState: Sendable, Equatable {
         }
     }
 
+    /// Page Shield script-monitor snapshot.
+    public struct PageShieldState: Sendable, Equatable {
+        public var enabled: Bool
+        /// Unique, sorted hosts of scripts Page Shield has seen loading on the site.
+        public var scriptHosts: [String]
+        public init(enabled: Bool, scriptHosts: [String]) {
+            self.enabled = enabled
+            self.scriptHosts = scriptHosts
+        }
+    }
+
     public init(dnssecActive: Bool, sslMode: String, alwaysUseHTTPS: Bool, hsts: HSTS?,
                 caaRecords: [String], mxRecords: [String], spfRecords: [String], dmarcRecords: [String],
-                botFightMode: Bool = false, wafCustomRules: [WAFCustomRule] = []) {
+                botFightMode: Bool = false, wafCustomRules: [WAFCustomRule] = [],
+                speedBrain: Bool = false, ech: Bool = false, zstdCompression: Bool = false,
+                pageShield: PageShieldState? = nil) {
         self.dnssecActive = dnssecActive
         self.sslMode = sslMode
         self.alwaysUseHTTPS = alwaysUseHTTPS
@@ -57,5 +78,9 @@ public struct CloudflareZoneState: Sendable, Equatable {
         self.dmarcRecords = dmarcRecords
         self.botFightMode = botFightMode
         self.wafCustomRules = wafCustomRules
+        self.speedBrain = speedBrain
+        self.ech = ech
+        self.zstdCompression = zstdCompression
+        self.pageShield = pageShield
     }
 }
