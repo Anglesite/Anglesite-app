@@ -123,7 +123,7 @@ final class MockCloudflareReader: CloudflareReading, @unchecked Sendable {
     }
 
     func resolveZoneID(domain: String, apiToken: String) async throws -> String? { "z" }
-    func zoneState(zoneID: String, apiToken: String) async throws -> CloudflareZoneState {
+    func zoneState(zoneID: String, domain: String, apiToken: String) async throws -> CloudflareZoneState {
         if shouldFail { throw CloudflareError.malformedResponse }
         return state
     }

@@ -32,12 +32,27 @@ struct SecurityAuditTests {
         #expect(f.contains { $0.severity == .critical && $0.title.contains("SSL") })
     }
 
+    @Test("SSL mode Full (not Strict) is a warning, not clean and not critical")
+    func sslFullWarns() {
+        var s = clean(); s.sslMode = "full"
+        let f = SecurityAudit.evaluate(s, expectsMail: false)
+        #expect(f.contains { $0.severity == .warning && $0.title.contains("SSL") })
+        #expect(!f.contains { $0.severity == .critical })
+    }
+
     @Test("missing HSTS and Always-Use-HTTPS each warn")
     func httpsWarnings() {
         var s = clean(); s.hsts = nil; s.alwaysUseHTTPS = false
         let f = SecurityAudit.evaluate(s, expectsMail: false)
         #expect(f.contains { $0.title.contains("HSTS") })
         #expect(f.contains { $0.title.contains("HTTPS") })
+    }
+
+    @Test("a short HSTS max-age warns even when HSTS is enabled")
+    func hstsShortMaxAge() {
+        var s = clean(); s.hsts = .init(maxAge: 3600, includeSubdomains: true, preload: false)
+        let f = SecurityAudit.evaluate(s, expectsMail: false)
+        #expect(f.contains { $0.severity == .warning && $0.title.contains("HSTS") && $0.title.contains("short") })
     }
 
     @Test("missing CAA is an info finding")
@@ -60,6 +75,7 @@ struct SecurityAuditTests {
         var s = clean(); s.spfRecords = []; s.dmarcRecords = []
         let f = SecurityAudit.evaluate(s, expectsMail: true)
         #expect(!f.contains { $0.title.contains("SPF") })
+        #expect(!f.contains { $0.title.contains("DMARC") })
     }
 
     @Test("Bot Fight Mode off is an info finding")

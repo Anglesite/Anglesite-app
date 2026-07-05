@@ -6,7 +6,6 @@ public enum CloudflareError: Error, Equatable, Sendable {
     case http(status: Int)
     case api(message: String)
     case malformedResponse
-    case zoneNotFound(domain: String)
 }
 
 /// Read-only Cloudflare API seam. The concrete `HTTPCloudflareClient` talks to the
@@ -14,8 +13,10 @@ public enum CloudflareError: Error, Equatable, Sendable {
 public protocol CloudflareReading: Sendable {
     /// Resolve a zone's id from its apex domain, or nil if the token can't see it.
     func resolveZoneID(domain: String, apiToken: String) async throws -> String?
-    /// Fetch the security-relevant state for a zone.
-    func zoneState(zoneID: String, apiToken: String) async throws -> CloudflareZoneState
+    /// Fetch the security-relevant state for a zone. `domain` is the zone's apex hostname
+    /// (already known to callers via `resolveZoneID`) — used to scope CAA/MX/SPF/DMARC
+    /// grading to the apex, so a record on an unrelated subdomain can't count toward it.
+    func zoneState(zoneID: String, domain: String, apiToken: String) async throws -> CloudflareZoneState
 }
 
 /// Injectable HTTP boundary — identical shape to `CloudflareAPITokenVerifier.Transport`.
