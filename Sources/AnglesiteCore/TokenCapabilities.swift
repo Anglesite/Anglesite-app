@@ -1,5 +1,3 @@
-import Foundation
-
 /// A permission group the stored Cloudflare token has been *observed* to have, via
 /// `CloudflareCapabilityProber`. Capabilities are read-probe signals: presence means the token can
 /// at least read that product's API; absence (401/403 on the probe) means a wizard needing it must

@@ -322,6 +322,12 @@ extension HTTPCloudflareClient: CloudflareWriting {
 
         let rulesets = try await get("/zones/\(zoneID)/rulesets", apiToken: apiToken, as: [CFRuleset].self)
         if let existing = rulesets.first(where: { $0.phase == "http_response_compression" }) {
+            let full = try await get("/zones/\(zoneID)/rulesets/\(existing.id)", apiToken: apiToken, as: CFRuleset.self)
+            let alreadyHasZstd = (full.rules ?? []).contains { rule in
+                rule.action == "compress_response"
+                    && (rule.action_parameters?.algorithms ?? []).contains { $0.name == "zstd" }
+            }
+            if alreadyHasZstd { return }
             try await mutate(method: "POST", "/zones/\(zoneID)/rulesets/\(existing.id)/rules",
                              body: rule, apiToken: apiToken)
         } else {

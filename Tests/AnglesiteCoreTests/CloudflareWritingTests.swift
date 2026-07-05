@@ -164,10 +164,29 @@ extension CloudflareWritingTests {
     func zstdAppendsRule() async throws {
         let (client, spy) = spiedClient([
             "/zones/z/rulesets/comp1/rules": (200, #"{"success":true,"result":{}}"#),
+            "/zones/z/rulesets/comp1": (200, #"{"success":true,"result":{"id":"comp1","phase":"http_response_compression","rules":[]}}"#),
             "/zones/z/rulesets": (200, #"{"success":true,"result":[{"id":"comp1","phase":"http_response_compression"}]}"#),
         ])
         try await client.enableZstandardCompression(zoneID: "z", apiToken: "t")
         let post = try #require(spy.requests.last)
         #expect(post.url!.path.hasSuffix("/zones/z/rulesets/comp1/rules"))
+    }
+
+    @Test("enableZstandardCompression is a no-op when the ruleset already has a zstd rule")
+    func zstdAlreadyPresentSkipsPost() async throws {
+        let existingRuleJSON = """
+        {"success":true,"result":{"id":"comp1","phase":"http_response_compression","rules":[
+            {"description":"existing","expression":"true","action":"compress_response",
+             "action_parameters":{"algorithms":[{"name":"zstd"},{"name":"gzip"}]}}
+        ]}}
+        """
+        let (client, spy) = spiedClient([
+            "/zones/z/rulesets/comp1": (200, existingRuleJSON),
+            "/zones/z/rulesets": (200, #"{"success":true,"result":[{"id":"comp1","phase":"http_response_compression"}]}"#),
+        ])
+        try await client.enableZstandardCompression(zoneID: "z", apiToken: "t")
+        #expect(spy.requests.allSatisfy { $0.httpMethod == "GET" })
+        let last = try #require(spy.requests.last)
+        #expect(last.url!.path.hasSuffix("/zones/z/rulesets/comp1"))
     }
 }

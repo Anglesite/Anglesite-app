@@ -5,13 +5,20 @@ import Foundation
 /// docs/superpowers/specs/2026-07-04-cloudflare-free-services-integration-design.md §4).
 ///
 /// The dashboard pre-fill query params are undocumented; if Cloudflare changes the schema the link
-/// still lands on the token page and the prompt's numbered steps describe the permissions to add by
-/// hand, so the flow degrades rather than breaks (verified pre-fill behavior last on 2026-06-16 for
+/// still lands on the token page and the prompt tells the user to fall back to at least the built-in
+/// Edit Cloudflare Workers permissions, so deploy keeps working and feature wizards re-prompt for the
+/// rest, so the flow degrades rather than breaks (verified pre-fill behavior last on 2026-06-16 for
 /// the original five groups).
 public enum AnglesiteTokenTemplate {
     public static let tokenName = "Anglesite"
 
     /// Dashboard permission-group keys with their access level. Order is display order.
+    ///
+    /// `response_compression` and the `page_shield` access level are best-known and unverified
+    /// against the live dashboard (same degrade-gracefully caveat as the rest): Harden's Zstandard
+    /// write targets the `http_response_compression` ruleset phase, which is governed by the
+    /// Response Compression permission group, not `zone_waf`; and Page Shield needs write access
+    /// because Harden enables the script monitor via a `PUT`, not just reads its state.
     public static let permissionGroups: [(key: String, type: String)] = [
         // Deploy (the original "Edit Cloudflare Workers" set)
         ("workers_routes", "edit"),
@@ -24,7 +31,8 @@ public enum AnglesiteTokenTemplate {
         ("zone_settings", "edit"),
         ("dns", "edit"),
         ("zone_waf", "edit"),
-        ("page_shield", "read"),
+        ("response_compression", "edit"),
+        ("page_shield", "edit"),
         ("analytics", "read"),
         // Integration wizards (slices 1, 2, 5, 7)
         ("challenge_widgets", "edit"),
