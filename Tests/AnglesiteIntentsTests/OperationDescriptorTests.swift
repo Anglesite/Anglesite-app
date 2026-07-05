@@ -59,6 +59,9 @@ extension AppIntentsTests {
                 "add-booking": .init(sideEffect: .createsContent, requiresConfirmation: true, isCancellable: false, resultShape: .none),
                 "add-donations": .init(sideEffect: .createsContent, requiresConfirmation: true, isCancellable: false, resultShape: .none),
                 "add-comments": .init(sideEffect: .createsContent, requiresConfirmation: true, isCancellable: false, resultShape: .none),
+                "list-dns-records": .init(sideEffect: .readOnly, requiresConfirmation: false, isCancellable: false, resultShape: .none),
+                "add-dns-record": .init(sideEffect: .createsContent, requiresConfirmation: true, isCancellable: false, resultShape: .none),
+                "delete-dns-record": .init(sideEffect: .modifiesContent, requiresConfirmation: true, isCancellable: false, resultShape: .none),
             ]
             #expect(expected.count == AnglesiteOperations.all.count)
             for descriptor in AnglesiteOperations.all {
