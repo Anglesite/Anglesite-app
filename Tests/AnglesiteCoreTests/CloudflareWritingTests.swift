@@ -76,11 +76,37 @@ struct CloudflareWritingTests {
         let rulesetJSON = """
         {"success":true,"errors":[],"messages":[],"result":[{"id":"rs1","phase":"http_request_firewall_custom"}]}
         """
-        let client = HTTPCloudflareClient(transport: spyTransport(["/rulesets": (200, rulesetJSON)], spy: spy))
+        let rulesetDetailJSON = """
+        {"success":true,"errors":[],"messages":[],"result":{"id":"rs1","phase":"http_request_firewall_custom","rules":[]}}
+        """
+        let client = HTTPCloudflareClient(transport: spyTransport([
+            "/zones/zone123/rulesets/rs1": (200, rulesetDetailJSON),
+            "/rulesets": (200, rulesetJSON),
+        ], spy: spy))
         let rule = WAFRulePayload(description: "Block dotfiles", expression: "(x)", action: "block")
         try await client.createWAFCustomRule(zoneID: zoneID, rule: rule, apiToken: token)
         let postReqs = spy.requests.filter { $0.httpMethod == "POST" }
         #expect(!postReqs.isEmpty)
+    }
+
+    @Test("createWAFCustomRule is idempotent when a rule with the same description already exists")
+    func createWAFCustomRuleIdempotent() async throws {
+        let spy = TransportSpy()
+        let rulesetJSON = """
+        {"success":true,"errors":[],"messages":[],"result":[{"id":"rs1","phase":"http_request_firewall_custom"}]}
+        """
+        let rulesetDetailJSON = """
+        {"success":true,"errors":[],"messages":[],"result":{"id":"rs1","phase":"http_request_firewall_custom","rules":[
+            {"description":"Block Dotfiles","expression":"(x)","action":"block"}
+        ]}}
+        """
+        let client = HTTPCloudflareClient(transport: spyTransport([
+            "/zones/zone123/rulesets/rs1": (200, rulesetDetailJSON),
+            "/rulesets": (200, rulesetJSON),
+        ], spy: spy))
+        let rule = WAFRulePayload(description: "Block dotfiles", expression: "(x)", action: "block")
+        try await client.createWAFCustomRule(zoneID: zoneID, rule: rule, apiToken: token)
+        #expect(spy.requests.allSatisfy { $0.httpMethod == "GET" })
     }
 
     @Test("write methods include Authorization header")

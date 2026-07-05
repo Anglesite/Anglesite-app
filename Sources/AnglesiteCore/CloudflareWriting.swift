@@ -9,6 +9,8 @@ public protocol CloudflareWriting: Sendable {
                  apiToken: String) async throws
     func addDNSRecord(zoneID: String, record: DNSRecordPayload, apiToken: String) async throws
     func setBotFightMode(zoneID: String, enabled: Bool, apiToken: String) async throws
+    /// Idempotent by description: if the `http_request_firewall_custom` ruleset already contains a
+    /// rule whose description matches (case-insensitively), this is a no-op.
     func createWAFCustomRule(zoneID: String, rule: WAFRulePayload, apiToken: String) async throws
     func setSpeedBrain(zoneID: String, enabled: Bool, apiToken: String) async throws
     func setECH(zoneID: String, enabled: Bool, apiToken: String) async throws

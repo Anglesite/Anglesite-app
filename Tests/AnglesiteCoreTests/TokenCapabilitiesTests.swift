@@ -14,8 +14,10 @@ struct TokenCapabilitiesTests {
 
     @Test("every capability has a stable raw value")
     func stableRawValues() {
-        #expect(TokenCapability.allCases.count == 9)
+        #expect(TokenCapability.allCases.count == 10)
         #expect(TokenCapability.zoneSettings.rawValue == "zoneSettings")
         #expect(TokenCapability(rawValue: "registrar") == .registrar)
+        #expect(TokenCapability.wafRules.rawValue == "wafRules")
+        #expect(TokenCapability.responseCompression.rawValue == "responseCompression")
     }
 }

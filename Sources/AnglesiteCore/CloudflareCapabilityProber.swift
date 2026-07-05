@@ -7,6 +7,10 @@ import Foundation
 ///
 /// This exists so wizards can gate on `TokenCapabilities` up front and route the user through token
 /// re-onboarding (`AnglesiteTokenTemplate`) instead of failing halfway through an API orchestration.
+///
+/// This type intentionally ships without production callers in Slice 0; the first consumers (wizard
+/// gating + persisted capabilities) land with Slice 1 per
+/// `docs/superpowers/specs/2026-07-04-cloudflare-free-services-integration-design.md` §4.
 public struct CloudflareCapabilityProber: Sendable {
     private let baseURL: URL
     private let transport: CloudflareTransport
@@ -34,14 +38,18 @@ public struct CloudflareCapabilityProber: Sendable {
             probes += [
                 (.zoneSettings, "zones/\(zoneID)/settings/ssl"),
                 (.dns, "zones/\(zoneID)/dns_records?per_page=1"),
-                (.rulesets, "zones/\(zoneID)/rulesets"),
+                (.wafRules, "zones/\(zoneID)/rulesets/phases/http_request_firewall_custom/entrypoint"),
+                (.responseCompression, "zones/\(zoneID)/rulesets/phases/http_response_compression/entrypoint"),
                 (.emailRouting, "zones/\(zoneID)/email/routing"),
                 (.zaraz, "zones/\(zoneID)/settings/zaraz/config"),
                 (.pageShield, "zones/\(zoneID)/page_shield"),
             ]
         }
-        for (cap, path) in probes {
-            if await allowed(path, token: token) {
+        await withTaskGroup(of: (TokenCapability, Bool).self) { group in
+            for (cap, path) in probes {
+                group.addTask { (cap, await self.allowed(path, token: token)) }
+            }
+            for await (cap, isAllowed) in group where isAllowed {
                 caps.insert(cap)
             }
         }

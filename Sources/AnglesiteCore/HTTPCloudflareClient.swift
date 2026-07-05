@@ -105,26 +105,35 @@ public struct HTTPCloudflareClient: CloudflareReading {
     }
 
     public func zoneState(zoneID: String, apiToken: String) async throws -> CloudflareZoneState {
-        let dnssec = try await get("/zones/\(zoneID)/dnssec", apiToken: apiToken, as: CFDNSSEC.self)
-        let ssl = try await get("/zones/\(zoneID)/settings/ssl", apiToken: apiToken, as: CFStringSetting.self)
-        let https = try await get("/zones/\(zoneID)/settings/always_use_https", apiToken: apiToken, as: CFStringSetting.self)
-        let header = try await get("/zones/\(zoneID)/settings/security_header", apiToken: apiToken, as: CFSecurityHeader.self)
-        let records = try await get("/zones/\(zoneID)/dns_records?per_page=100", apiToken: apiToken, as: [CFDNSRecord].self)
+        async let dnssecReq = get("/zones/\(zoneID)/dnssec", apiToken: apiToken, as: CFDNSSEC.self)
+        async let sslReq = get("/zones/\(zoneID)/settings/ssl", apiToken: apiToken, as: CFStringSetting.self)
+        async let httpsReq = get("/zones/\(zoneID)/settings/always_use_https", apiToken: apiToken, as: CFStringSetting.self)
+        async let headerReq = get("/zones/\(zoneID)/settings/security_header", apiToken: apiToken, as: CFSecurityHeader.self)
+        async let recordsReq = get("/zones/\(zoneID)/dns_records?per_page=100", apiToken: apiToken, as: [CFDNSRecord].self)
 
-        let botFight: Bool
-        do {
-            let bot = try await get("/zones/\(zoneID)/settings/bot_management", apiToken: apiToken, as: CFBotManagement.self)
-            botFight = bot.fight_mode ?? false
-        } catch {
-            botFight = false
-        }
+        async let botFightResult: Bool = {
+            do {
+                let bot = try await self.get("/zones/\(zoneID)/settings/bot_management", apiToken: apiToken, as: CFBotManagement.self)
+                return bot.fight_mode ?? false
+            } catch {
+                return false
+            }
+        }()
 
-        let wafRules = (try? await fetchWAFCustomRules(zoneID: zoneID, apiToken: apiToken)) ?? []
+        async let wafRulesResult = (try? await fetchWAFCustomRules(zoneID: zoneID, apiToken: apiToken)) ?? []
 
-        let speedBrain = await settingIsOn("/zones/\(zoneID)/settings/speed_brain", apiToken: apiToken)
-        let ech = await settingIsOn("/zones/\(zoneID)/settings/ech", apiToken: apiToken)
-        let zstd = await zstdEnabled(zoneID: zoneID, apiToken: apiToken)
-        let pageShield = await pageShieldState(zoneID: zoneID, apiToken: apiToken)
+        async let speedBrainResult = settingIsOn("/zones/\(zoneID)/settings/speed_brain", apiToken: apiToken)
+        async let echResult = settingIsOn("/zones/\(zoneID)/settings/ech", apiToken: apiToken)
+        async let zstdResult = zstdEnabled(zoneID: zoneID, apiToken: apiToken)
+        async let pageShieldResult = pageShieldState(zoneID: zoneID, apiToken: apiToken)
+
+        let (dnssec, ssl, https, header, records) = try await (dnssecReq, sslReq, httpsReq, headerReq, recordsReq)
+        let botFight = await botFightResult
+        let wafRules = await wafRulesResult
+        let speedBrain = await speedBrainResult
+        let ech = await echResult
+        let zstd = await zstdResult
+        let pageShield = await pageShieldResult
 
         let sts = header.value.strict_transport_security
         let hsts: CloudflareZoneState.HSTS? = sts.enabled
@@ -169,14 +178,26 @@ public struct HTTPCloudflareClient: CloudflareReading {
     }
 
     private func zstdEnabled(zoneID: String, apiToken: String) async -> Bool {
-        guard let rulesets = try? await get("/zones/\(zoneID)/rulesets", apiToken: apiToken, as: [CFRuleset].self),
-              let compression = rulesets.first(where: { $0.phase == "http_response_compression" }),
-              let full = try? await get("/zones/\(zoneID)/rulesets/\(compression.id)", apiToken: apiToken, as: CFRuleset.self)
-        else { return false }
-        return (full.rules ?? []).contains { rule in
+        let ruleset = try? await compressionRuleset(zoneID: zoneID, apiToken: apiToken)
+        return ruleset?.hasZstd ?? false
+    }
+
+    /// Lists rulesets, finds the `http_response_compression` phase ruleset (if any), fetches its
+    /// full detail, and reports whether it already has a zstd `compress_response` rule.
+    /// Returns `nil` when there is no compression-phase ruleset yet.
+    private func compressionRuleset(
+        zoneID: String, apiToken: String
+    ) async throws -> (id: String, hasZstd: Bool)? {
+        let rulesets = try await get("/zones/\(zoneID)/rulesets", apiToken: apiToken, as: [CFRuleset].self)
+        guard let existing = rulesets.first(where: { $0.phase == "http_response_compression" }) else {
+            return nil
+        }
+        let full = try await get("/zones/\(zoneID)/rulesets/\(existing.id)", apiToken: apiToken, as: CFRuleset.self)
+        let hasZstd = (full.rules ?? []).contains { rule in
             rule.action == "compress_response"
                 && (rule.action_parameters?.algorithms ?? []).contains { $0.name == "zstd" }
         }
+        return (id: existing.id, hasZstd: hasZstd)
     }
 
     private func pageShieldState(zoneID: String, apiToken: String) async -> CloudflareZoneState.PageShieldState? {
@@ -269,6 +290,11 @@ extension HTTPCloudflareClient: CloudflareWriting {
         let existing = rulesets.first(where: { $0.phase == "http_request_firewall_custom" })
 
         if let rs = existing {
+            let full = try await get("/zones/\(zoneID)/rulesets/\(rs.id)", apiToken: apiToken, as: CFRuleset.self)
+            let alreadyPresent = (full.rules ?? []).contains {
+                ($0.description?.lowercased()) == rule.description.lowercased()
+            }
+            if alreadyPresent { return }
             try await mutate(method: "POST", "/zones/\(zoneID)/rulesets/\(rs.id)/rules",
                              body: rule, apiToken: apiToken)
         } else {
@@ -320,14 +346,8 @@ extension HTTPCloudflareClient: CloudflareWriting {
                 .init(name: "zstd"), .init(name: "brotli"), .init(name: "gzip"),
             ]))
 
-        let rulesets = try await get("/zones/\(zoneID)/rulesets", apiToken: apiToken, as: [CFRuleset].self)
-        if let existing = rulesets.first(where: { $0.phase == "http_response_compression" }) {
-            let full = try await get("/zones/\(zoneID)/rulesets/\(existing.id)", apiToken: apiToken, as: CFRuleset.self)
-            let alreadyHasZstd = (full.rules ?? []).contains { rule in
-                rule.action == "compress_response"
-                    && (rule.action_parameters?.algorithms ?? []).contains { $0.name == "zstd" }
-            }
-            if alreadyHasZstd { return }
+        if let existing = try await compressionRuleset(zoneID: zoneID, apiToken: apiToken) {
+            if existing.hasZstd { return }
             try await mutate(method: "POST", "/zones/\(zoneID)/rulesets/\(existing.id)/rules",
                              body: rule, apiToken: apiToken)
         } else {

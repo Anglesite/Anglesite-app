@@ -14,7 +14,8 @@ struct CloudflareCapabilityProberTests {
             "accounts/acc1/registrar/domains": (200, #"{"success":true,"result":[]}"#),
             "zones/z1/settings/ssl": (200, #"{"success":true,"result":{"value":"strict"}}"#),
             "zones/z1/dns_records": (403, #"{"success":false}"#),
-            "zones/z1/rulesets": (200, #"{"success":true,"result":[]}"#),
+            "zones/z1/rulesets/phases/http_request_firewall_custom/entrypoint": (200, #"{"success":true,"result":{}}"#),
+            "zones/z1/rulesets/phases/http_response_compression/entrypoint": (403, #"{"success":false}"#),
             "zones/z1/email/routing": (404, #"{"success":false}"#),
             "zones/z1/settings/zaraz/config": (403, #"{"success":false}"#),
             "zones/z1/page_shield": (200, #"{"success":true,"result":{"enabled":false}}"#),
@@ -25,7 +26,8 @@ struct CloudflareCapabilityProberTests {
         #expect(caps.contains(.registrar))
         #expect(caps.contains(.zoneSettings))
         #expect(!caps.contains(.dns))
-        #expect(caps.contains(.rulesets))
+        #expect(caps.contains(.wafRules))
+        #expect(!caps.contains(.responseCompression))
         #expect(caps.contains(.emailRouting))  // 404 = enabled-state miss, permission present
         #expect(!caps.contains(.zaraz))
         #expect(caps.contains(.pageShield))

@@ -9,8 +9,10 @@ public enum TokenCapability: String, CaseIterable, Codable, Sendable {
     case zoneSettings
     /// DNS record reads/writes.
     case dns
-    /// Zone rulesets (WAF custom rules, compression rules).
-    case rulesets
+    /// Zone WAF custom rules (http_request_firewall_custom phase).
+    case wafRules
+    /// Compression rules (http_response_compression phase, e.g. Zstandard).
+    case responseCompression
     /// Turnstile widget management.
     case turnstile
     /// Email Routing (rules + destination addresses).
