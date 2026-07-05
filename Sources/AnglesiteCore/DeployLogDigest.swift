@@ -25,9 +25,14 @@ public enum DeployLogDigest {
     private static func isBuildNoise(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if trimmed.contains("npm run build") { return true }
-        // npm script echo, e.g. "> astro build" — require an identifier after "> " so we don't
-        // drop wrangler/JSON lines like "> https://…" or "> {".
-        if trimmed.range(of: #"^> \w"#, options: .regularExpression) != nil { return true }
+        // npm script echo, e.g. "> astro build" — requires a letter (not digit) right after "> "
+        // *and* no "://" anywhere in the line, so wrangler/JSON lines like "> https://…",
+        // "> 1.2.3 deployed", or "> {" all survive (the first two would otherwise still match
+        // `\w`, which includes digits, since "h" and "1" are both word characters).
+        if trimmed.range(of: #"^> [A-Za-z]"#, options: .regularExpression) != nil,
+           !trimmed.contains("://") {
+            return true
+        }
         if trimmed.hasPrefix("✓ ") { return true }                 // Vite "✓ N modules transformed"
         if trimmed.lowercased().hasPrefix("vite v") { return true } // Vite banner
         if trimmed.lowercased().hasPrefix("transforming") { return true }
