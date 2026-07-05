@@ -21,6 +21,9 @@ struct DeployDrawerView: View {
             header
             Divider()
             failureSummarySection
+            if hasFailureSummaryContent {
+                Divider()
+            }
             logScroller
             Divider()
             footer
@@ -99,6 +102,15 @@ struct DeployDrawerView: View {
         }
     }
 
+    /// True when `failureSummarySection` renders content (spinner or a summary) — drives the
+    /// separator below it so the summary and the raw log don't run together visually.
+    private var hasFailureSummaryContent: Bool {
+        if case .failed = model.phase {
+            return model.summarizing || model.failureSummary != nil
+        }
+        return false
+    }
+
     @ViewBuilder
     private var failureSummarySection: some View {
         if case .failed = model.phase {
@@ -107,8 +119,14 @@ struct DeployDrawerView: View {
                     ProgressView().controlSize(.small)
                     Text("Summarizing…").font(.callout).foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
             } else if let s = model.failureSummary {
                 VStack(alignment: .leading, spacing: 6) {
+                    Label("AI summary — verify against the log below", systemImage: "sparkles")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                     Text(s.summary).font(.callout)
                     if !s.likelyCause.isEmpty {
                         Text("Likely cause: \(s.likelyCause)").font(.callout).foregroundStyle(.secondary)
@@ -117,6 +135,9 @@ struct DeployDrawerView: View {
                         Text("Suggested fix: \(s.suggestedFix)").font(.callout).foregroundStyle(.secondary)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
                 .textSelection(.enabled)
                 .accessibilityElement(children: .combine)
             }

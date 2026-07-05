@@ -23,10 +23,10 @@ import Testing
 #endif
 
 @Suite struct DeploySummarizerFactoryTests {
-    // The factory's product differs per toolchain (real conformer under Xcode 27, Noop on CI),
-    // but BOTH short-circuit a whitespace-only log to nil before touching any model — a real
-    // behavioral assertion that holds everywhere and never invokes Apple Intelligence.
-    @Test func makeDefaultProductShortCircuitsEmptyLog() async {
+    // A whitespace-only log returns nil on both toolchains, for different reasons: under Xcode 27
+    // the real conformer short-circuits before any model call; on CI the Noop returns nil for any
+    // input. Either way the assertion holds everywhere and never invokes Apple Intelligence.
+    @Test func makeDefaultProductReturnsNilForEmptyLog() async {
         let result = await DeploySummarizerFactory.makeDefault().summarize(
             failureLog: "   ", siteID: "s", siteDirectory: URL(fileURLWithPath: "/tmp/s")
         )

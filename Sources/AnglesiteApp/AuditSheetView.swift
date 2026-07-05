@@ -139,13 +139,12 @@ struct AuditSheetView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    Section {
-                        Text(report.summary)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .accessibilityLabel("Audit summary: \(report.summary)")
-                    }
+                    // Plain Text, not Section — Section has no effect inside a LazyVStack.
+                    Text(report.summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .accessibilityLabel("Audit summary: \(report.summary)")
                     ForEach(groupedFindings(report), id: \.0) { (category, items) in
                         categorySection(category: category, findings: items)
                     }
