@@ -15,7 +15,9 @@ public enum DomainOperationError: Error, Equatable, Sendable {
 /// `IntegrationOperationsService` backs both `IntegrationWizardModel` and `IntegrationIntents`.
 public protocol DomainOperationsService: Sendable {
     func listRecords(domain: String) async -> Result<[DNSRecord], DomainOperationError>
-    func addRecord(domain: String, type: String, name: String, content: String, ttl: Int) async -> Result<Void, DomainOperationError>
+    /// `priority` is required by MX records (lower = higher priority mail server) and ignored
+    /// by every other record type — `nil` for non-MX records.
+    func addRecord(domain: String, type: String, name: String, content: String, ttl: Int, priority: Int?) async -> Result<Void, DomainOperationError>
     func deleteRecord(domain: String, recordID: String) async -> Result<Void, DomainOperationError>
 }
 
@@ -71,14 +73,14 @@ public struct DomainOperations: DomainOperationsService {
         }
     }
 
-    public func addRecord(domain: String, type: String, name: String, content: String, ttl: Int) async -> Result<Void, DomainOperationError> {
+    public func addRecord(domain: String, type: String, name: String, content: String, ttl: Int, priority: Int?) async -> Result<Void, DomainOperationError> {
         guard let token = tokenProvider() else { return .failure(.noToken) }
         switch await resolveZone(domain: domain, token: token) {
         case .failure(let error):
             return .failure(error)
         case .success(let zoneID):
             do {
-                let payload = DNSRecordPayload(type: type, name: name, content: content, ttl: ttl)
+                let payload = DNSRecordPayload(type: type, name: name, content: content, ttl: ttl, priority: priority)
                 try await writer.addDNSRecord(zoneID: zoneID, record: payload, apiToken: token)
                 return .success(())
             } catch let error as CloudflareError {

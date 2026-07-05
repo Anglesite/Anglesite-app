@@ -57,6 +57,24 @@ extension AppIntentsTests {
             #expect(dialog.contains("Added"))
             #expect(fake.addedRecords.count == 1)
             #expect(fake.addedRecords.first?.name == "_atproto")
+            #expect(fake.addedRecords.first?.priority == nil)
+        }
+
+        @Test("AddDNSRecordIntent threads priority through for MX records")
+        func addMXWithPriority() async throws {
+            let fake = FakeDomainOps()
+            var intent = AddDNSRecordIntent()
+            intent.domain = "example.com"
+            intent.type = "MX"
+            intent.name = "example.com"
+            intent.content = "mail.example.com"
+            intent.ttl = 1
+            intent.priority = 10
+            let dialog = await DomainOperationsOverride.$scoped.withValue(fake) {
+                await intent.applyForTesting()
+            }
+            #expect(dialog.contains("Added"))
+            #expect(fake.addedRecords.first?.priority == 10)
         }
 
         @Test("DeleteDNSRecordIntent deletes the record and reports success")
@@ -77,7 +95,7 @@ extension AppIntentsTests {
 final class FakeDomainOps: DomainOperationsService, @unchecked Sendable {
     private let records: [DNSRecord]
     private let listError: DomainOperationError?
-    private(set) var addedRecords: [(name: String, type: String)] = []
+    private(set) var addedRecords: [(name: String, type: String, priority: Int?)] = []
     private(set) var deletedRecordIDs: [String] = []
 
     init(records: [DNSRecord] = [], listError: DomainOperationError? = nil) {
@@ -89,8 +107,8 @@ final class FakeDomainOps: DomainOperationsService, @unchecked Sendable {
         if let listError { return .failure(listError) }
         return .success(records)
     }
-    func addRecord(domain: String, type: String, name: String, content: String, ttl: Int) async -> Result<Void, DomainOperationError> {
-        addedRecords.append((name: name, type: type))
+    func addRecord(domain: String, type: String, name: String, content: String, ttl: Int, priority: Int?) async -> Result<Void, DomainOperationError> {
+        addedRecords.append((name: name, type: type, priority: priority))
         return .success(())
     }
     func deleteRecord(domain: String, recordID: String) async -> Result<Void, DomainOperationError> {

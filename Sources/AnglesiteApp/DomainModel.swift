@@ -12,14 +12,16 @@ final class DomainModel {
         var name: String
         var content: String
         var ttl: Int
+        /// Mail server priority (lower = preferred) — only meaningful for MX records.
+        var priority: Int?
         var context: Context
 
         static func empty(context: Context = .generic) -> Draft {
             switch context {
             case .bluesky:
-                return Draft(type: "TXT", name: "_atproto", content: "", ttl: 1, context: .bluesky)
+                return Draft(type: "TXT", name: "_atproto", content: "", ttl: 1, priority: nil, context: .bluesky)
             case .generic, .google:
-                return Draft(type: "TXT", name: "", content: "", ttl: 1, context: context)
+                return Draft(type: "TXT", name: "", content: "", ttl: 1, priority: nil, context: context)
             }
         }
     }
@@ -149,7 +151,7 @@ final class DomainModel {
     private func runAdd(draft: Draft, domain: String) async {
         phase = .applying(domain: domain)
         let result = await ops.addRecord(domain: domain, type: draft.type, name: draft.name,
-                                         content: draft.content, ttl: draft.ttl)
+                                         content: draft.content, ttl: draft.ttl, priority: draft.priority)
         switch result {
         case .success:
             await runLoad(domain: domain)

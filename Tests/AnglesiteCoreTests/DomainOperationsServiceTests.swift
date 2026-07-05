@@ -57,14 +57,24 @@ struct DomainOperationsServiceTests {
         let reader = FakeReader(zoneID: "z1")
         let writer = FakeWriter()
         let result = await service(reader: reader, writer: writer)
-            .addRecord(domain: "example.com", type: "TXT", name: "_atproto", content: "did=abc", ttl: 1)
+            .addRecord(domain: "example.com", type: "TXT", name: "_atproto", content: "did=abc", ttl: 1, priority: nil)
         #expect(result == .success(()))
-        #expect(writer.addedRecords == [DNSRecordPayload(type: "TXT", name: "_atproto", content: "did=abc", ttl: 1)])
+        #expect(writer.addedRecords == [DNSRecordPayload(type: "TXT", name: "_atproto", content: "did=abc", ttl: 1, priority: nil)])
+    }
+
+    @Test("addRecord threads priority through to the payload for MX records")
+    func addMXWithPriority() async {
+        let reader = FakeReader(zoneID: "z1")
+        let writer = FakeWriter()
+        let result = await service(reader: reader, writer: writer)
+            .addRecord(domain: "example.com", type: "MX", name: "example.com", content: "mail.example.com", ttl: 1, priority: 10)
+        #expect(result == .success(()))
+        #expect(writer.addedRecords == [DNSRecordPayload(type: "MX", name: "example.com", content: "mail.example.com", ttl: 1, priority: 10)])
     }
 
     @Test("addRecord fails with .noToken when no token is available")
     func addNoToken() async {
-        let result = await service(token: nil).addRecord(domain: "example.com", type: "TXT", name: "n", content: "c", ttl: 1)
+        let result = await service(token: nil).addRecord(domain: "example.com", type: "TXT", name: "n", content: "c", ttl: 1, priority: nil)
         #expect(result == .failure(.noToken))
     }
 
@@ -72,7 +82,7 @@ struct DomainOperationsServiceTests {
     func addCloudflareError() async {
         let writer = FakeWriter(addError: .api(message: "bad request"))
         let result = await service(reader: FakeReader(zoneID: "z1"), writer: writer)
-            .addRecord(domain: "example.com", type: "TXT", name: "n", content: "c", ttl: 1)
+            .addRecord(domain: "example.com", type: "TXT", name: "n", content: "c", ttl: 1, priority: nil)
         #expect(result == .failure(.cloudflare(.api(message: "bad request"))))
     }
 

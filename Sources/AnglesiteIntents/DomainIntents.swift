@@ -83,6 +83,8 @@ public struct AddDNSRecordIntent: AppIntent {
     @Parameter(title: "Name") public var name: String
     @Parameter(title: "Content") public var content: String
     @Parameter(title: "TTL", default: 1) public var ttl: Int
+    @Parameter(title: "Priority", description: "Required for MX records — lower is a more preferred mail server.")
+    public var priority: Int?
     @Dependency private var ops: any DomainOperationsService
 
     public init() {}
@@ -101,7 +103,7 @@ public struct AddDNSRecordIntent: AppIntent {
     }
 
     private func run(svc: any DomainOperationsService) async -> String {
-        switch await svc.addRecord(domain: domain, type: type, name: name, content: content, ttl: ttl) {
+        switch await svc.addRecord(domain: domain, type: type, name: name, content: content, ttl: ttl, priority: priority) {
         case .success:
             return DomainDialogs.added(type: type, name: name, domain: domain)
         case .failure(let error):

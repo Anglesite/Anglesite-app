@@ -222,8 +222,20 @@ struct DomainSheetView: View {
                 get: { draft.ttl },
                 set: { var d = draft; d.ttl = $0; model.updateDraft(d) }
             ), format: .number)
+            if draft.type == "MX" {
+                TextField("Priority", value: Binding(
+                    get: { draft.priority ?? 10 },
+                    set: { var d = draft; d.priority = $0; model.updateDraft(d) }
+                ), format: .number)
+                .help("Lower numbers are preferred mail servers, e.g. 10.")
+            }
         }
         .padding(16)
+    }
+
+    private func isAddRecordFormValid(_ draft: DomainModel.Draft) -> Bool {
+        !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !draft.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func deleteConfirmation(_ record: DNSRecord) -> some View {
@@ -246,10 +258,12 @@ struct DomainSheetView: View {
                 Button("Load records") { model.resolveAndLoad() }
                     .disabled(model.domainInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .buttonStyle(.borderedProminent)
-            case .addingRecord:
+            case .addingRecord(let draft, _, _):
                 Button("Cancel") { model.cancelAddRecord() }
                 Spacer()
-                Button("Add") { model.submitAddRecord() }.buttonStyle(.borderedProminent)
+                Button("Add") { model.submitAddRecord() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!isAddRecordFormValid(draft))
             case .confirmingDelete:
                 Button("Cancel") { model.cancelDelete() }
                 Spacer()
