@@ -8,7 +8,9 @@ struct SecurityAuditTests {
             hsts: .init(maxAge: 31_536_000, includeSubdomains: true, preload: false),
             caaRecords: ["0 issue \"letsencrypt.org\""], mxRecords: [],
             spfRecords: ["v=spf1 -all"], dmarcRecords: ["v=DMARC1; p=reject"],
-            botFightMode: true)
+            botFightMode: true,
+            speedBrain: true, ech: true, zstdCompression: true,
+            pageShield: .init(enabled: true, scriptHosts: []))
     }
 
     @Test("a fully hardened non-mail zone yields no findings")
@@ -71,5 +73,31 @@ struct SecurityAuditTests {
     func allSecurityCategory() {
         var s = clean(); s.dnssecActive = false; s.sslMode = "off"
         #expect(SecurityAudit.evaluate(s, expectsMail: false).allSatisfy { $0.category == .security })
+    }
+
+    @Test("ECH off yields an info finding")
+    func echOffInfo() {
+        var state = clean()
+        state.ech = false
+        let findings = SecurityAudit.evaluate(state, expectsMail: true)
+        #expect(findings.contains { $0.title.contains("Encrypted Client Hello") && $0.severity == .info })
+    }
+
+    @Test("Page Shield disabled yields an info finding")
+    func pageShieldOffInfo() {
+        var state = clean()
+        state.pageShield = nil
+        let findings = SecurityAudit.evaluate(state, expectsMail: true)
+        #expect(findings.contains { $0.title.contains("script monitoring") })
+    }
+
+    @Test("detected third-party scripts are surfaced with their hosts")
+    func pageShieldScriptsSurfaced() {
+        var state = clean()
+        state.pageShield = .init(enabled: true, scriptHosts: ["cdn.evil.example"])
+        let findings = SecurityAudit.evaluate(state, expectsMail: true)
+        let finding = findings.first { $0.title.contains("Third-party scripts") }
+        #expect(finding != nil)
+        #expect(finding?.detail.contains("cdn.evil.example") == true)
     }
 }
