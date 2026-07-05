@@ -1,0 +1,13 @@
+---
+import BaseLayout from "../../src/layouts/BaseLayout.astro";
+import ShopifyBuyButton from "../components/ShopifyBuyButton.astro";
+import { readConfig } from "../../scripts/config";
+---
+
+<BaseLayout title="Products">
+  <ShopifyBuyButton
+    shopDomain={readConfig("SHOPIFY_DOMAIN")}
+    storefrontAccessToken={readConfig("SHOPIFY_STOREFRONT_TOKEN")}
+    productId={readConfig("SHOPIFY_PRODUCT_ID")}
+  />
+</BaseLayout>
