@@ -147,6 +147,13 @@ struct DomainSheetView: View {
                 }
                 Spacer()
                 Button {
+                    model.refresh()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .help("Reload DNS records for this domain")
+                .disabled(model.isRunning)
+                Button {
                     model.beginAddRecord(context: .generic)
                 } label: {
                     Label("Add record", systemImage: "plus")

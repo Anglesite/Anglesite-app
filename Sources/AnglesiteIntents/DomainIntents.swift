@@ -164,9 +164,9 @@ extension ListDNSRecordsIntent {
 extension AddDNSRecordIntent {
     /// Drives plan→apply directly, bypassing the AppIntents `requestConfirmation` gate.
     /// Only callable when `DomainOperationsOverride.scoped` is bound.
-    func confirmAndApplyForTesting() async -> String {
+    func applyForTesting() async -> String {
         guard let svc = DomainOperationsOverride.scoped else {
-            fatalError("confirmAndApplyForTesting requires a bound DomainOperationsOverride.scoped")
+            fatalError("applyForTesting requires a bound DomainOperationsOverride.scoped")
         }
         return await run(svc: svc)
     }
@@ -175,9 +175,9 @@ extension AddDNSRecordIntent {
 extension DeleteDNSRecordIntent {
     /// Drives plan→apply directly, bypassing the AppIntents `requestConfirmation` gate.
     /// Only callable when `DomainOperationsOverride.scoped` is bound.
-    func confirmAndApplyForTesting() async -> String {
+    func applyForTesting() async -> String {
         guard let svc = DomainOperationsOverride.scoped else {
-            fatalError("confirmAndApplyForTesting requires a bound DomainOperationsOverride.scoped")
+            fatalError("applyForTesting requires a bound DomainOperationsOverride.scoped")
         }
         return await run(svc: svc)
     }

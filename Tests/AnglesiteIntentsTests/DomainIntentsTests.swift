@@ -52,7 +52,7 @@ extension AppIntentsTests {
             intent.content = "did=did:plc:abc"
             intent.ttl = 1
             let dialog = await DomainOperationsOverride.$scoped.withValue(fake) {
-                await intent.confirmAndApplyForTesting()
+                await intent.applyForTesting()
             }
             #expect(dialog.contains("Added"))
             #expect(fake.addedRecords.count == 1)
@@ -66,7 +66,7 @@ extension AppIntentsTests {
             intent.domain = "example.com"
             intent.recordID = "r1"
             let dialog = await DomainOperationsOverride.$scoped.withValue(fake) {
-                await intent.confirmAndApplyForTesting()
+                await intent.applyForTesting()
             }
             #expect(dialog.contains("Deleted"))
             #expect(fake.deletedRecordIDs == ["r1"])
