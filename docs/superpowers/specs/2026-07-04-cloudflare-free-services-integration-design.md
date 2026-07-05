@@ -65,7 +65,7 @@ Constraints inherited from the project:
 
 The guided token-creation URL (pre-filled permissions) is updated accordingly.
 
-**Capability probe:** after signature verification, `CloudflareAPITokenVerifier` performs cheap read probes per permission group and produces a `TokenCapabilities` option set, persisted alongside the token reference. Wizards and Harden check capabilities up front; a missing capability renders an inline "Upgrade your Cloudflare token" step that re-runs onboarding with the new template. Existing narrow tokens keep working for everything they already do — no forced re-mint.
+**Capability probe:** after signature verification, a `CloudflareCapabilityProber` performs cheap read probes per permission group and produces a `TokenCapabilities` set, persisted alongside the token reference. *(Implementation note: Slice 0 shipped the probe with `Codable` types but probe-on-demand only; persistence lands with the first consumer slice — Slice 1.)* Wizards and Harden check capabilities up front; a missing capability renders an inline "Upgrade your Cloudflare token" step that re-runs onboarding with the new template. Existing narrow tokens keep working for everything they already do — no forced re-mint.
 
 **Testing:** verifier probe logic against a stubbed HTTP layer; capability-gating unit tests.
 
