@@ -63,6 +63,11 @@ final class DeployModel {
     private let keychain: KeychainStore
     private let onboarding: TokenOnboarding
     private let summarizer: any DeployFailureSummarizing
+    /// Bumped at the start of every `runDeploy`. The async failure-summarization captures the
+    /// value at dispatch and only writes its result back if it still matches — so a summary from
+    /// a superseded deploy can't stomp the current deploy's state, even though
+    /// `generateStructured` doesn't honour cooperative cancellation.
+    private var summarizationGeneration: UInt = 0
     private var inFlight: Task<Void, Never>?
     /// Site to retry once the user pastes a token. `nil` outside the prompt flow.
     /// Carries the container control (if any) so the parked-then-retried deploy
@@ -120,6 +125,10 @@ final class DeployModel {
             tokenPromptPresented = true
             return
         }
+        // Flip `phase` synchronously, before scheduling the Task, so a second `deploy()` call
+        // on the same actor hop (e.g. a rapid re-invocation before this Task starts running)
+        // sees `isRunning == true` and bails via the guard above instead of racing runDeploy.
+        phase = .running(siteID: siteID, since: Date())
         inFlight = Task { @MainActor [weak self] in
             await self?.runDeploy(siteID: siteID, siteDirectory: siteDirectory, containerControl: containerControl)
         }
@@ -201,6 +210,11 @@ final class DeployModel {
         currentMilestone = nil
         failureSummary = nil
         summarizing = false
+        summarizationGeneration &+= 1   // invalidate any still-in-flight summary from a prior deploy
+        // Captured immediately after the bump — the authoritative "my generation" value for
+        // this call's summarization branch. Must NOT be re-read later via the live field, which
+        // may have moved on if a second `runDeploy` call started concurrently (see guard below).
+        let myGeneration = summarizationGeneration
         drawerPresented = true
         blockedPresented = false
 
@@ -258,13 +272,18 @@ final class DeployModel {
             phase = .succeeded(url: url, duration: duration)
         case .failed(let reason, let exit):
             phase = .failed(reason: reason, exitCode: exit)
+            let capturedLog = logText   // snapshot before the suspension; a later deploy clears logLines
             summarizing = true
-            failureSummary = await DeployFailureSummaryRequest.run(
-                logText: logText,
+            let summary = await DeployFailureSummaryRequest.run(
+                logText: capturedLog,
                 siteID: siteID,
                 siteDirectory: siteDirectory,
                 using: summarizer
             )
+            // Drop the result if another deploy started while we were summarizing — it has already
+            // reset failureSummary/summarizing and we must not clobber its state.
+            guard summarizationGeneration == myGeneration else { return }
+            failureSummary = summary
             summarizing = false
         case .blocked(let failures, let warnings):
             phase = .blocked(failures: failures, warnings: warnings)

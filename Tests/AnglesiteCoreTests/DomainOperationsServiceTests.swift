@@ -111,7 +111,7 @@ final class FakeReader: CloudflareReading, @unchecked Sendable {
         resolvedDomain = domain
         return zoneID
     }
-    func zoneState(zoneID: String, apiToken: String) async throws -> CloudflareZoneState {
+    func zoneState(zoneID: String, domain: String, apiToken: String) async throws -> CloudflareZoneState {
         fatalError("not used by DomainOperations")
     }
     func listDNSRecords(zoneID: String, apiToken: String) async throws -> [DNSRecord] {

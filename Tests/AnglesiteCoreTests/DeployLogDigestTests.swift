@@ -29,4 +29,19 @@ import Testing
         #expect(digest.count == DeployLogDigest.maxCharacters)
         #expect(digest == String(long.suffix(DeployLogDigest.maxCharacters)))
     }
+
+    @Test func keepsWranglerURLAndVersionLines() {
+        let raw = """
+        > astro build
+        > https://my-worker.username.workers.dev
+        > 1.2.3 deployed
+        > {"success":true}
+        ✘ [ERROR] deploy failed
+        """
+        let digest = DeployLogDigest.extract(from: raw)
+        #expect(!digest.contains("astro build"))
+        #expect(digest.contains("https://my-worker.username.workers.dev"))
+        #expect(digest.contains("1.2.3 deployed"))
+        #expect(digest.contains("{\"success\":true}"))
+    }
 }

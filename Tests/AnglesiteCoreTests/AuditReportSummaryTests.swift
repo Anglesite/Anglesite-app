@@ -42,4 +42,17 @@ private func finding(_ category: AuditReport.Finding.Category) -> AuditReport.Fi
         )
         #expect(report.summary == "No issues found in the checks that ran. The performance and SEO checks couldn't run.")
     }
+
+    @Test func threeSkippedRunnersUseOxfordComma() {
+        let report = AuditReport(
+            findings: [finding(.security)],
+            runnersExecuted: [.security],
+            runnersSkipped: [
+                .init(category: .accessibility, reason: "a"),
+                .init(category: .performance, reason: "b"),
+                .init(category: .seo, reason: "c"),
+            ]
+        )
+        #expect(report.summary == "1 security issue. The accessibility, performance, and SEO checks couldn't run.")
+    }
 }

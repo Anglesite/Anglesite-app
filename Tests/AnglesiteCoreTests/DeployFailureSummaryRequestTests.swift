@@ -28,13 +28,19 @@ private actor SpySummarizer: DeployFailureSummarizing {
     @Test func nonEmptyLogPassesDigestThrough() async {
         let expected = DeployFailureSummary(summary: "boom", likelyCause: "c", suggestedFix: "f")
         let spy = SpySummarizer(stub: expected)
+        // A log with build noise so the digest genuinely differs from the raw input — this proves
+        // the *digest* reaches the summarizer, not the raw log.
+        let rawLog = """
+        > astro build
+        ✓ 42 modules transformed
+        ✘ [ERROR] Could not resolve "./x"
+        """
         let result = await DeployFailureSummaryRequest.run(
-            logText: "✘ [ERROR] Could not resolve \"./x\"", siteID: "s", siteDirectory: dir, using: spy
+            logText: rawLog, siteID: "s", siteDirectory: dir, using: spy
         )
         #expect(result == expected)
-        // Assert the summarizer received the *digest*, not the raw log — so a future
-        // DeployLogDigest change that dropped the error line would fail here.
-        let rawLog = "✘ [ERROR] Could not resolve \"./x\""
-        #expect(await spy.receivedLog == DeployLogDigest.extract(from: rawLog))
+        let digest = DeployLogDigest.extract(from: rawLog)
+        #expect(digest != rawLog)                       // the noise was actually stripped
+        #expect(await spy.receivedLog == digest)        // and the digest is what was passed through
     }
 }

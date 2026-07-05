@@ -35,7 +35,6 @@ private func domainErrorMessage(_ error: DomainOperationError, domain: String) -
         case .http(let status): return "Cloudflare API returned HTTP \(status)."
         case .api(let message): return "Cloudflare API error: \(message)"
         case .malformedResponse: return "Unexpected response from Cloudflare API."
-        case .zoneNotFound(let d): return "Zone not found for \"\(d)\"."
         }
     }
 }

@@ -115,7 +115,7 @@ final class HardenModel {
                 return
             }
 
-            let state = try await reader.zoneState(zoneID: zoneID, apiToken: token)
+            let state = try await reader.zoneState(zoneID: zoneID, domain: domain, apiToken: token)
             let plan = HardenPlanner.plan(from: state, domain: domain)
             phase = .preview(plan: plan, domain: domain, zoneID: zoneID)
         } catch let error as CloudflareError {
@@ -154,8 +154,6 @@ final class HardenModel {
             return "Cloudflare API error: \(message)"
         case .malformedResponse:
             return "Unexpected response from Cloudflare API."
-        case .zoneNotFound(let d):
-            return "Zone not found for \"\(d)\". Check the domain and token permissions."
         }
     }
 }
