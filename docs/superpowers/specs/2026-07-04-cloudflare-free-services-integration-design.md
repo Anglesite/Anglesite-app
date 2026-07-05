@@ -61,7 +61,7 @@ Constraints inherited from the project:
 
 - Existing: Workers Scripts (Edit/Account), Workers KV (Edit/Account), Workers R2 (Edit/Account), D1 (Edit/Account), Workers Routes (Edit/Zone), Workers Tail (Read/Account)
 - Zone: Zone Settings (Edit), Zone Rulesets (Edit), DNS (Edit) — already exercised by Harden
-- New: Turnstile (Edit/Account), Email Routing (Edit/Zone + Account destination addresses), Zaraz (Edit/Zone), Zone Analytics (Read), Page Shield (Read), Registrar (Edit/Account)
+- New: Turnstile (Edit/Account), Email Routing (Edit/Zone + Account destination addresses), Zaraz (Edit/Zone), Zone Analytics (Read), Page Shield (Edit — Harden enables the script monitor), Response Compression (Edit), Registrar (Edit/Account)
 
 The guided token-creation URL (pre-filled permissions) is updated accordingly.
 
@@ -105,6 +105,8 @@ Extend `HardenPlanner` / `HardenExecutor` / `SecurityAudit` with newly free zone
 - **Page Shield script monitor** — read-only: surface detected third-party scripts in the audit report, cross-referenced against the CSP domains the integration catalog knows it added (an unexpected script is a red flag).
 
 Pure extension of the existing plan/execute/audit pattern; smallest slice. Audit/Harden App Intents pick these up automatically.
+
+**Implementation note:** the audit currently lists detected script hosts without cross-referencing the integration catalog's CSP domains — the comparison described above (flagging scripts the catalog didn't add) is deferred to a follow-up.
 
 ## 8. Slice 4 — Image transformations
 
