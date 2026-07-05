@@ -125,19 +125,25 @@ public struct HTTPCloudflareClient: CloudflareReading {
         return result
     }
 
-    /// Fetch every DNS record across pages (Cloudflare caps `per_page` at 100, so a
-    /// single page silently truncates zones with more records).
-    private func allDNSRecords(zoneID: String, apiToken: String) async throws -> [CFDNSRecord] {
-        var all: [CFDNSRecord] = []
+    /// Fetch every item across pages (Cloudflare caps `per_page` at 100, so a single page
+    /// silently truncates a list with more than 100 items). `path` must already include its
+    /// own query string (e.g. `...?per_page=100`); `&page=N` is appended per request.
+    private func paginated<T: Decodable & Sendable>(_ path: String, apiToken: String, as type: T.Type) async throws -> [T] {
+        var all: [T] = []
         var page = 1
         while true {
-            let env = try await getEnvelope("/zones/\(zoneID)/dns_records?per_page=100&page=\(page)",
-                                            apiToken: apiToken, as: [CFDNSRecord].self)
+            let env = try await getEnvelope("\(path)&page=\(page)", apiToken: apiToken, as: [T].self)
             all.append(contentsOf: env.result ?? [])
             guard let info = env.result_info, info.page < info.total_pages else { break }
             page += 1
         }
         return all
+    }
+
+    /// Fetch every DNS record across pages (Cloudflare caps `per_page` at 100, so a
+    /// single page silently truncates zones with more records).
+    private func allDNSRecords(zoneID: String, apiToken: String) async throws -> [CFDNSRecord] {
+        try await paginated("/zones/\(zoneID)/dns_records?per_page=100", apiToken: apiToken, as: CFDNSRecord.self)
     }
 
     public func resolveZoneID(domain: String, apiToken: String) async throws -> String? {
@@ -249,7 +255,7 @@ public struct HTTPCloudflareClient: CloudflareReading {
     }
 
     public func listDNSRecords(zoneID: String, apiToken: String) async throws -> [DNSRecord] {
-        let raw = try await get("/zones/\(zoneID)/dns_records?per_page=100", apiToken: apiToken, as: [CFFullDNSRecord].self)
+        let raw = try await paginated("/zones/\(zoneID)/dns_records?per_page=100", apiToken: apiToken, as: CFFullDNSRecord.self)
         return raw.map {
             DNSRecord(id: $0.id, type: $0.type, name: $0.name, content: $0.content,
                       ttl: $0.ttl, proxied: $0.proxied ?? false)

@@ -21,6 +21,21 @@ struct DomainDNSClientTests {
         #expect(records[1] == DNSRecord(id: "rec2", type: "A", name: "example.com", content: "192.0.2.1", ttl: 300, proxied: true))
     }
 
+    @Test("listDNSRecords follows pagination across pages")
+    func listPaginates() async throws {
+        func paged(_ result: String, page: Int, totalPages: Int) -> String {
+            "{\"success\":true,\"errors\":[],\"result\":\(result),\"result_info\":{\"page\":\(page),\"total_pages\":\(totalPages)}}"
+        }
+        let routes: [String: (Int, String)] = [
+            // "&page=" (not bare "page=") so this can't collide with "per_page=100" in the request URL.
+            "&page=1": (200, paged("[{\"id\":\"rec1\",\"type\":\"TXT\",\"name\":\"a.example.com\",\"content\":\"one\",\"ttl\":1}]", page: 1, totalPages: 2)),
+            "&page=2": (200, paged("[{\"id\":\"rec2\",\"type\":\"TXT\",\"name\":\"b.example.com\",\"content\":\"two\",\"ttl\":1}]", page: 2, totalPages: 2)),
+        ]
+        let client = HTTPCloudflareClient(transport: fakeTransport(routes))
+        let records = try await client.listDNSRecords(zoneID: zoneID, apiToken: token)
+        #expect(records.map(\.id) == ["rec1", "rec2"])
+    }
+
     @Test("listDNSRecords defaults proxied to false when absent")
     func listDefaultsProxied() async throws {
         let json = """
