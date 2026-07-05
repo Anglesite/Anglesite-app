@@ -1,6 +1,8 @@
 public enum IntegrationID: String, Sendable, CaseIterable {
     case booking, contact, donations, giscus, newsletter, consent, pwa, redirects
     case tracking, share, podcast
+    case indieweb, menu
+    case buyButton, lemonSqueezy, paddle, snipcart, shopifyBuyButton
 }
 
 public struct Template: Sendable, Equatable, ExpressibleByStringLiteral {

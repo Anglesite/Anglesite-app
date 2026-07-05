@@ -1,0 +1,13 @@
+---
+import BaseLayout from "../../src/layouts/BaseLayout.astro";
+import BuyButton from "../components/BuyButton.astro";
+import { readConfig, asBuyButtonProvider } from "../../scripts/config";
+---
+
+<BaseLayout title="Buy">
+  <BuyButton
+    href={readConfig("BUY_BUTTON_CHECKOUT_URL")}
+    label={readConfig("BUY_BUTTON_TEXT")}
+    provider={asBuyButtonProvider(readConfig("BUY_BUTTON_PROVIDER"))}
+  />
+</BaseLayout>

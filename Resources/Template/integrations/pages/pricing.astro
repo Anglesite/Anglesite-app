@@ -1,0 +1,13 @@
+---
+import BaseLayout from "../../src/layouts/BaseLayout.astro";
+import PaddleCheckout from "../components/PaddleCheckout.astro";
+import { readConfig } from "../../scripts/config";
+---
+
+<BaseLayout title="Pricing">
+  <PaddleCheckout
+    clientToken={readConfig("PADDLE_CLIENT_TOKEN")}
+    priceId={readConfig("PADDLE_PRICE_ID")}
+    buttonText={readConfig("PADDLE_BUTTON_TEXT")}
+  />
+</BaseLayout>
