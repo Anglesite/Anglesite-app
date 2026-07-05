@@ -36,6 +36,17 @@ private struct CFDNSRecord: Decodable, Sendable {
     let name: String
     let content: String
 }
+private struct CFFullDNSRecord: Decodable, Sendable {
+    let id: String
+    let type: String
+    let name: String
+    let content: String
+    let ttl: Int
+    let proxied: Bool?
+}
+
+/// Body for DELETE requests, which Cloudflare's API doesn't require but tolerates.
+private struct CFEmptyBody: Encodable, Sendable {}
 private struct CFBotManagement: Decodable, Sendable {
     let fight_mode: Bool?
     let enable_js: Bool?
@@ -192,6 +203,14 @@ public struct HTTPCloudflareClient: CloudflareReading {
         return .init(enabled: enabled, scriptHosts: hosts)
     }
 
+    public func listDNSRecords(zoneID: String, apiToken: String) async throws -> [DNSRecord] {
+        let raw = try await get("/zones/\(zoneID)/dns_records?per_page=100", apiToken: apiToken, as: [CFFullDNSRecord].self)
+        return raw.map {
+            DNSRecord(id: $0.id, type: $0.type, name: $0.name, content: $0.content,
+                      ttl: $0.ttl, proxied: $0.proxied ?? false)
+        }
+    }
+
     // MARK: - Write helpers
 
     private func mutate<Body: Encodable & Sendable>(
@@ -257,6 +276,11 @@ extension HTTPCloudflareClient: CloudflareWriting {
     public func addDNSRecord(zoneID: String, record: DNSRecordPayload, apiToken: String) async throws {
         try await mutate(method: "POST", "/zones/\(zoneID)/dns_records",
                          body: record, apiToken: apiToken)
+    }
+
+    public func deleteDNSRecord(zoneID: String, recordID: String, apiToken: String) async throws {
+        try await mutate(method: "DELETE", "/zones/\(zoneID)/dns_records/\(recordID)",
+                         body: CFEmptyBody(), apiToken: apiToken)
     }
 
     public func setBotFightMode(zoneID: String, enabled: Bool, apiToken: String) async throws {
