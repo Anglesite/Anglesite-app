@@ -127,6 +127,7 @@ final class MockCloudflareReader: CloudflareReading, @unchecked Sendable {
         if shouldFail { throw CloudflareError.malformedResponse }
         return state
     }
+    func listDNSRecords(zoneID: String, apiToken: String) async throws -> [DNSRecord] { [] }
 }
 
 final class MockCloudflareWriter: CloudflareWriting, @unchecked Sendable {
@@ -159,6 +160,9 @@ final class MockCloudflareWriter: CloudflareWriting, @unchecked Sendable {
     }
     func addDNSRecord(zoneID: String, record: DNSRecordPayload, apiToken: String) async throws {
         try self.record("addDNSRecord:\(record.type)\(record.content.isEmpty ? "" : ":\(record.content)")")
+    }
+    func deleteDNSRecord(zoneID: String, recordID: String, apiToken: String) async throws {
+        try record("deleteDNSRecord:\(recordID)")
     }
     func setBotFightMode(zoneID: String, enabled: Bool, apiToken: String) async throws {
         try record("setBotFightMode")

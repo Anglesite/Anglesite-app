@@ -338,6 +338,17 @@ struct SiteWindow: View {
                 .help("Set up a third-party integration for this site")
             }
             .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
+
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    model.domain.openSheet()
+                } label: {
+                    Label("Domain", systemImage: "globe")
+                }
+                .help("View and manage this domain's DNS records")
+                .disabled(model.domain.isRunning)
+            }
+            .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
         }
         .sheet(isPresented: $bindableModel.deploy.blockedPresented) {
             if case .blocked(let failures, let warnings) = model.deploy.phase {
@@ -360,6 +371,9 @@ struct SiteWindow: View {
         }
         .sheet(isPresented: $bindableModel.harden.sheetPresented) {
             HardenSheetView(model: model.harden)
+        }
+        .sheet(isPresented: $bindableModel.domain.sheetPresented) {
+            DomainSheetView(model: model.domain)
         }
         #if !ANGLESITE_MAS
         .sheet(isPresented: $bindableModel.publish.sheetPresented) {

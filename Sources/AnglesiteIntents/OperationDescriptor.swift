@@ -155,6 +155,27 @@ public enum AnglesiteOperations {
             requiresConfirmation: true, isCancellable: false,
             resultShape: .none
         ),
+        OperationDescriptor(
+            operationID: "list-dns-records", displayName: "List DNS Records",
+            intentTypeName: "ListDNSRecordsIntent", sideEffect: .readOnly,
+            requiresConfirmation: false, isCancellable: false,
+            resultShape: .none
+        ),
+        OperationDescriptor(
+            operationID: "add-dns-record", displayName: "Add DNS Record",
+            intentTypeName: "AddDNSRecordIntent", sideEffect: .createsContent,
+            requiresConfirmation: true, isCancellable: false,
+            resultShape: .none
+        ),
+        OperationDescriptor(
+            // `.modifiesContent`: extends the write-reach taxonomy from "site or its repository"
+            // to a site's Cloudflare-managed DNS zone state — deleting a record alters standing
+            // zone state rather than adding a new artifact the way `add-dns-record` does.
+            operationID: "delete-dns-record", displayName: "Delete DNS Record",
+            intentTypeName: "DeleteDNSRecordIntent", sideEffect: .modifiesContent,
+            requiresConfirmation: true, isCancellable: false,
+            resultShape: .none
+        ),
     ]
 
     /// Look up a descriptor by intent type name. `nil` if none registered.

@@ -154,8 +154,6 @@ final class HardenModel {
             return "Cloudflare API error: \(message)"
         case .malformedResponse:
             return "Unexpected response from Cloudflare API."
-        case .zoneNotFound(let d):
-            return "Zone not found for \"\(d)\". Check the domain and token permissions."
         }
     }
 }

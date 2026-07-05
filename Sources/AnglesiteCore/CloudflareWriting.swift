@@ -8,6 +8,8 @@ public protocol CloudflareWriting: Sendable {
     func setHSTS(zoneID: String, maxAge: Int, includeSubdomains: Bool, preload: Bool,
                  apiToken: String) async throws
     func addDNSRecord(zoneID: String, record: DNSRecordPayload, apiToken: String) async throws
+    /// Delete a DNS record by its Cloudflare-assigned record id (from `listDNSRecords`).
+    func deleteDNSRecord(zoneID: String, recordID: String, apiToken: String) async throws
     func setBotFightMode(zoneID: String, enabled: Bool, apiToken: String) async throws
     func createWAFCustomRule(zoneID: String, rule: WAFRulePayload, apiToken: String) async throws
     func setSpeedBrain(zoneID: String, enabled: Bool, apiToken: String) async throws

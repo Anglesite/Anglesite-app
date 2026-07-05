@@ -67,6 +67,7 @@ final class SiteWindowModel {
     var relatedPages: RelatedPagesModel
     var relatedPagesPresented = false
     var harden = HardenModel()
+    var domain = DomainModel()
     var health = HealthModel(runner: DefaultHealthCheckRunner())
     /// Drives the determinate startup progress bar shown in `mainPane` while the dev server boots.
     var startup = StartupProgressModel()
