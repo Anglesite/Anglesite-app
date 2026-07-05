@@ -115,7 +115,7 @@ final class HardenModel {
                 return
             }
 
-            let state = try await reader.zoneState(zoneID: zoneID, apiToken: token)
+            let state = try await reader.zoneState(zoneID: zoneID, domain: domain, apiToken: token)
             let plan = HardenPlanner.plan(from: state, domain: domain)
             phase = .preview(plan: plan, domain: domain, zoneID: zoneID)
         } catch let error as CloudflareError {

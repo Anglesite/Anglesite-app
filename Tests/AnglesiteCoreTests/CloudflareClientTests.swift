@@ -124,7 +124,7 @@ func zoneStateAssembles() async throws {
         "/rulesets": (200, env("[{\"id\":\"rs1\",\"phase\":\"http_request_firewall_custom\"}]")),
     ]
     let client = HTTPCloudflareClient(transport: fakeTransport(routes))
-    let s = try await client.zoneState(zoneID: "z", apiToken: "t")
+    let s = try await client.zoneState(zoneID: "z", domain: "example.com", apiToken: "t")
     #expect(s.dnssecActive)
     #expect(s.sslMode == "strict")
     #expect(s.alwaysUseHTTPS)
@@ -150,7 +150,7 @@ func zoneStateHSTSDisabled() async throws {
         "/rulesets": (200, env("[]")),
     ]
     let client = HTTPCloudflareClient(transport: fakeTransport(routes))
-    let s = try await client.zoneState(zoneID: "z", apiToken: "t")
+    let s = try await client.zoneState(zoneID: "z", domain: "example.com", apiToken: "t")
     #expect(!s.dnssecActive)
     #expect(s.hsts == nil)
     #expect(s.caaRecords.isEmpty)
@@ -179,7 +179,7 @@ extension CloudflareClientTests {
         routes["/page_shield"] = (200, #"{"success":true,"result":{"enabled":true}}"#)
 
         let client = HTTPCloudflareClient(transport: fakeTransport(routes))
-        let state = try await client.zoneState(zoneID: "z", apiToken: "t")
+        let state = try await client.zoneState(zoneID: "z", domain: "example.com", apiToken: "t")
         #expect(state.speedBrain)
         #expect(!state.ech)
         #expect(state.zstdCompression)
@@ -192,10 +192,48 @@ extension CloudflareClientTests {
         var routes = Self.baseRoutes
         routes["/zones/z/rulesets"] = (403, #"{"success":false}"#)
         let client = HTTPCloudflareClient(transport: fakeTransport(routes))
-        let state = try await client.zoneState(zoneID: "z", apiToken: "t")
+        let state = try await client.zoneState(zoneID: "z", domain: "example.com", apiToken: "t")
         #expect(!state.speedBrain)
         #expect(!state.ech)
         #expect(!state.zstdCompression)
         #expect(state.pageShield == nil)
+    }
+}
+
+@Test("zoneState follows DNS-record pagination across pages")
+func zoneStatePaginates() async throws {
+    let plain = { (r: String) in "{\"success\":true,\"errors\":[],\"messages\":[],\"result\":\(r)}" }
+    func paged(_ result: String, page: Int, totalPages: Int) -> String {
+        "{\"success\":true,\"errors\":[],\"result\":\(result),\"result_info\":{\"page\":\(page),\"total_pages\":\(totalPages)}}"
+    }
+    let routes: [String: (Int, String)] = [
+        "/dnssec": (200, plain("{\"status\":\"active\"}")),
+        "/settings/ssl": (200, plain("{\"value\":\"strict\"}")),
+        "/settings/always_use_https": (200, plain("{\"value\":\"on\"}")),
+        "/settings/security_header": (200, plain("{\"value\":{\"strict_transport_security\":{\"enabled\":false}}}")),
+        // "&page=" (not bare "page=") so this can't collide with "per_page=100" in the request URL.
+        "&page=1": (200, paged("[{\"type\":\"CAA\",\"name\":\"example.com\",\"content\":\"0 issue \\\"letsencrypt.org\\\"\"}]", page: 1, totalPages: 2)),
+        "&page=2": (200, paged("[{\"type\":\"TXT\",\"name\":\"example.com\",\"content\":\"v=spf1 -all\"}]", page: 2, totalPages: 2)),
+    ]
+    let client = HTTPCloudflareClient(transport: fakeTransport(routes))
+    let s = try await client.zoneState(zoneID: "z", domain: "example.com", apiToken: "t")
+    #expect(s.caaRecords == ["0 issue \"letsencrypt.org\""]) // page 1
+    #expect(s.spfRecords == ["v=spf1 -all"])                 // page 2 — proves pagination
+}
+
+@Test("success:false with an error message surfaces as .api")
+func apiErrorMaps() async {
+    let body = "{\"success\":false,\"errors\":[{\"message\":\"nope\"}],\"result\":null}"
+    let client = HTTPCloudflareClient(transport: fakeTransport(["/zones?": (200, body)]))
+    await #expect(throws: CloudflareError.api(message: "nope")) {
+        _ = try await client.resolveZoneID(domain: "example.com", apiToken: "t")
+    }
+}
+
+@Test("a 500 surfaces as .http(status:)")
+func httpErrorMaps() async {
+    let client = HTTPCloudflareClient(transport: fakeTransport(["/zones?": (500, "{}")]))
+    await #expect(throws: CloudflareError.http(status: 500)) {
+        _ = try await client.resolveZoneID(domain: "example.com", apiToken: "t")
     }
 }

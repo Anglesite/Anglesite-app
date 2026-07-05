@@ -1,11 +1,18 @@
 import Foundation
 
+/// Pagination metadata returned alongside list results.
+private struct CFResultInfo: Decodable, Sendable {
+    let page: Int
+    let total_pages: Int
+}
+
 /// Standard Cloudflare v4 response envelope.
 private struct CFEnvelope<T: Decodable & Sendable>: Decodable, Sendable {
     let success: Bool
     let result: T?
     struct APIError: Decodable, Sendable { let message: String }
     let errors: [APIError]?
+    let result_info: CFResultInfo?
 }
 
 /// Placeholder for write responses where we only check `success`.
@@ -76,13 +83,13 @@ public struct HTTPCloudflareClient: CloudflareReading {
         return (data, http)
     }
 
-    /// GET `path`, decode `CFEnvelope<T>`, return `result` or throw a mapped error.
-    private func get<T: Decodable & Sendable>(_ path: String, apiToken: String, as: T.Type) async throws -> T {
+    /// GET `path`, decode `CFEnvelope<T>`, return the whole envelope or throw a mapped error.
+    private func getEnvelope<T: Decodable & Sendable>(_ path: String, apiToken: String, as: T.Type) async throws -> CFEnvelope<T> {
         guard let url = URL(string: Self.base + path) else { throw CloudflareError.malformedResponse }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, http) = try await transport(request)
         if http.statusCode == 401 || http.statusCode == 403 { throw CloudflareError.unauthorized }
         guard (200..<300).contains(http.statusCode) else { throw CloudflareError.http(status: http.statusCode) }
@@ -92,10 +99,34 @@ public struct HTTPCloudflareClient: CloudflareReading {
         } catch {
             throw CloudflareError.malformedResponse
         }
-        guard env.success, let result = env.result else {
+        guard env.success else {
             throw CloudflareError.api(message: env.errors?.first?.message ?? "request failed")
         }
+        return env
+    }
+
+    /// GET `path` and return the decoded `result`, or throw `.api` when it is absent.
+    private func get<T: Decodable & Sendable>(_ path: String, apiToken: String, as type: T.Type) async throws -> T {
+        let env = try await getEnvelope(path, apiToken: apiToken, as: type)
+        guard let result = env.result else {
+            throw CloudflareError.api(message: env.errors?.first?.message ?? "missing result")
+        }
         return result
+    }
+
+    /// Fetch every DNS record across pages (Cloudflare caps `per_page` at 100, so a
+    /// single page silently truncates zones with more records).
+    private func allDNSRecords(zoneID: String, apiToken: String) async throws -> [CFDNSRecord] {
+        var all: [CFDNSRecord] = []
+        var page = 1
+        while true {
+            let env = try await getEnvelope("/zones/\(zoneID)/dns_records?per_page=100&page=\(page)",
+                                            apiToken: apiToken, as: [CFDNSRecord].self)
+            all.append(contentsOf: env.result ?? [])
+            guard let info = env.result_info, info.page < info.total_pages else { break }
+            page += 1
+        }
+        return all
     }
 
     public func resolveZoneID(domain: String, apiToken: String) async throws -> String? {
@@ -104,12 +135,20 @@ public struct HTTPCloudflareClient: CloudflareReading {
         return zones.first(where: { $0.name.lowercased() == domain.lowercased() })?.id
     }
 
-    public func zoneState(zoneID: String, apiToken: String) async throws -> CloudflareZoneState {
-        let dnssec = try await get("/zones/\(zoneID)/dnssec", apiToken: apiToken, as: CFDNSSEC.self)
-        let ssl = try await get("/zones/\(zoneID)/settings/ssl", apiToken: apiToken, as: CFStringSetting.self)
-        let https = try await get("/zones/\(zoneID)/settings/always_use_https", apiToken: apiToken, as: CFStringSetting.self)
-        let header = try await get("/zones/\(zoneID)/settings/security_header", apiToken: apiToken, as: CFSecurityHeader.self)
-        let records = try await get("/zones/\(zoneID)/dns_records?per_page=100", apiToken: apiToken, as: [CFDNSRecord].self)
+    public func zoneState(zoneID: String, domain: String, apiToken: String) async throws -> CloudflareZoneState {
+        // Independent reads — fan out concurrently rather than paying 5× round-trip latency.
+        async let dnssecCall = get("/zones/\(zoneID)/dnssec", apiToken: apiToken, as: CFDNSSEC.self)
+        async let sslCall = get("/zones/\(zoneID)/settings/ssl", apiToken: apiToken, as: CFStringSetting.self)
+        async let httpsCall = get("/zones/\(zoneID)/settings/always_use_https", apiToken: apiToken, as: CFStringSetting.self)
+        async let headerCall = get("/zones/\(zoneID)/settings/security_header", apiToken: apiToken, as: CFSecurityHeader.self)
+        async let recordsCall = allDNSRecords(zoneID: zoneID, apiToken: apiToken)
+
+        let dnssec = try await dnssecCall
+        let ssl = try await sslCall
+        let https = try await httpsCall
+        let header = try await headerCall
+        let records = try await recordsCall
+        let apex = domain.lowercased()
 
         let botFight: Bool
         do {
@@ -131,12 +170,18 @@ public struct HTTPCloudflareClient: CloudflareReading {
             ? .init(maxAge: sts.max_age ?? 0, includeSubdomains: sts.include_subdomains ?? false, preload: sts.preload ?? false)
             : nil
 
+        // Scoped to the zone apex — a record published on an unrelated subdomain must not
+        // count toward the apex domain's CAA/MX/SPF/DMARC posture (that direction of error
+        // produces a false "all clear" in a security audit).
         func contents(ofType t: String) -> [String] {
-            records.filter { $0.type.uppercased() == t }.map(\.content)
+            records.filter { $0.type.uppercased() == t && $0.name.lowercased() == apex }.map(\.content)
         }
-        let txt = records.filter { $0.type.uppercased() == "TXT" }
+        let txt = records.filter { $0.type.uppercased() == "TXT" && $0.name.lowercased() == apex }
         let spf = txt.filter { $0.content.lowercased().hasPrefix("v=spf1") }.map(\.content)
-        let dmarc = txt.filter { $0.name.lowercased().hasPrefix("_dmarc.") && $0.content.lowercased().hasPrefix("v=dmarc1") }.map(\.content)
+        let dmarcName = "_dmarc.\(apex)"
+        let dmarc = records
+            .filter { $0.type.uppercased() == "TXT" && $0.name.lowercased() == dmarcName && $0.content.lowercased().hasPrefix("v=dmarc1") }
+            .map(\.content)
 
         return CloudflareZoneState(
             dnssecActive: dnssec.status.lowercased() == "active",

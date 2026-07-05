@@ -54,7 +54,7 @@ public struct HardenExecutor: Sendable {
         let findings: [AuditReport.Finding]
         var auditErr: String?
         do {
-            let freshState = try await reader.zoneState(zoneID: zoneID, apiToken: apiToken)
+            let freshState = try await reader.zoneState(zoneID: zoneID, domain: domain, apiToken: apiToken)
             let expectsMail = !freshState.mxRecords.isEmpty
                 && !freshState.mxRecords.allSatisfy({ $0.trimmingCharacters(in: .whitespaces) == "." || $0.hasPrefix("0 .") })
             findings = SecurityAudit.evaluate(freshState, expectsMail: expectsMail)

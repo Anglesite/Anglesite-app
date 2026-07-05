@@ -14,7 +14,14 @@ public enum SecurityAudit {
                 "DNSSEC is disabled, leaving DNS responses unauthenticated.",
                 "Enable DNSSEC for the zone and publish the DS record at your registrar.")
         }
-        if !["full", "strict"].contains(state.sslMode.lowercased()) {
+        switch state.sslMode.lowercased() {
+        case "strict":
+            break // Full (strict): origin cert validated — the secure target.
+        case "full":
+            add(.warning, "SSL/TLS mode is Full but not Strict",
+                "Full mode encrypts the Cloudflare↔origin hop but does not validate the origin certificate, leaving it open to an active MITM on that hop.",
+                "Set the zone's SSL/TLS mode to Full (strict).")
+        default:
             add(.critical, "Weak SSL/TLS mode (\(state.sslMode))",
                 "SSL mode \"\(state.sslMode)\" allows unencrypted or unauthenticated origin connections.",
                 "Set the zone's SSL/TLS mode to Full (strict).")
