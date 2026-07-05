@@ -42,6 +42,14 @@ extension AppIntentsTests {
         /// the matrix's row 5b (a sibling read intent); `add-page`/`add-post` are row 6's two
         /// intents. `OpenSiteIntent` is row 1 (no curated phrase — reached via entity tap).
         /// `add-booking`, `add-donations`, `add-comments` are the bucket-3 integration intents (#282).
+        /// `list-dns-records`/`add-dns-record`/`delete-dns-record` are the Domain-sheet DNS
+        /// operations (#462, commit 13bce39b). Like the bucket-3 integration intents, they are
+        /// deliberately NOT registered in `AnglesiteShortcuts.phraseExposedIntentNames` (10-phrase
+        /// budget), so they are reached via the Domain sheet GUI / Shortcuts / entity match, not a
+        /// curated Siri phrase. `confirmsAtRuntime` mirrors each intent's `perform()` in
+        /// `DomainIntents.swift`: `ListDNSRecordsIntent` never calls `requestConfirmation`;
+        /// `AddDNSRecordIntent`/`DeleteDNSRecordIntent` both do, matching their registry
+        /// `requiresConfirmation: true` (unlike `edit-content`, there's no flag/runtime split here).
         static let workflows: [Workflow] = [
             Workflow(label: "Open this site", operationID: "open-site", sideEffect: .readOnly, confirmsAtRuntime: false),
             Workflow(label: "Back up this site", operationID: "backup-site", sideEffect: .createsContent, confirmsAtRuntime: false),
@@ -57,6 +65,9 @@ extension AppIntentsTests {
             Workflow(label: "Add booking integration", operationID: "add-booking", sideEffect: .createsContent, confirmsAtRuntime: true),
             Workflow(label: "Add donations integration", operationID: "add-donations", sideEffect: .createsContent, confirmsAtRuntime: true),
             Workflow(label: "Add comments integration", operationID: "add-comments", sideEffect: .createsContent, confirmsAtRuntime: true),
+            Workflow(label: "List DNS records for this domain", operationID: "list-dns-records", sideEffect: .readOnly, confirmsAtRuntime: false),
+            Workflow(label: "Add a DNS record", operationID: "add-dns-record", sideEffect: .createsContent, confirmsAtRuntime: true),
+            Workflow(label: "Delete a DNS record", operationID: "delete-dns-record", sideEffect: .modifiesContent, confirmsAtRuntime: true),
         ]
 
         /// Capabilities the doc marks manual-only. These map to no automated assertion by design;

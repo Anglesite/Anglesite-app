@@ -39,6 +39,9 @@ is `\(.applicationName)` at runtime.
 | 6 | Add page / post | `AddPageIntent` / `AddPostIntent` | "Add a page …" / "Add a post …" | creates content | no | `PageEntity?` / `PostEntity?` |
 | 7 | Preview a page | `PreviewSiteIntent` | "Preview my site …" / "Open my site preview …" | read-only | no | — (opens UI) |
 | 8 | Edit visible content with confirmation | `EditContentIntent` | "Edit this with Anglesite" / "Change this with Anglesite" | modifies content | **yes** † | — (dialog) |
+| 9 | List DNS records for this domain | `ListDNSRecordsIntent` | *(no phrase — Domain sheet GUI / Shortcuts)* | read-only | no | — (dialog) |
+| 10 | Add a DNS record | `AddDNSRecordIntent` | *(no phrase — Domain sheet GUI / Shortcuts)* | creates content | **yes** | — (dialog) |
+| 11 | Delete a DNS record | `DeleteDNSRecordIntent` | *(no phrase — Domain sheet GUI / Shortcuts)* | modifies content | **yes** | — (dialog) |
 
 † `EditContentIntent.perform()` calls `requestConfirmation` before any write (the dry-run →
 confirm → apply flow). The `AnglesiteOperations` descriptor for `edit-content` still declares
