@@ -105,16 +105,27 @@ public extension AuditReport {
         return sentence
     }
 
+    // Explicit switch (not `rawValue`) so a new `Finding.Category` case is a compile error
+    // here rather than a silently-wrong display string at runtime.
     private static func displayName(_ category: Finding.Category) -> String {
-        category == .seo ? "SEO" : category.rawValue
+        switch category {
+        case .seo: return "SEO"
+        case .security: return "security"
+        case .accessibility: return "accessibility"
+        case .performance: return "performance"
+        }
     }
 
     private static func skippedClause(_ names: [String]) -> String {
         let joined: String
-        if names.count == 1 {
+        switch names.count {
+        case 1:
             joined = names[0]
-        } else {
-            joined = names.dropLast().joined(separator: ", ") + " and " + (names.last ?? "")
+        case 2:
+            joined = names[0] + " and " + names[1]
+        default:
+            // Serial (Oxford) comma before the final "and": "a, b, and c".
+            joined = names.dropLast().joined(separator: ", ") + ", and " + (names.last ?? "")
         }
         let verb = names.count == 1 ? "check couldn't" : "checks couldn't"
         return "The \(joined) \(verb) run."

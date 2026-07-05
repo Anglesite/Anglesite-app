@@ -63,6 +63,11 @@ final class DeployModel {
     private let keychain: KeychainStore
     private let onboarding: TokenOnboarding
     private let summarizer: any DeployFailureSummarizing
+    /// Bumped at the start of every `runDeploy`. The async failure-summarization captures the
+    /// value at dispatch and only writes its result back if it still matches — so a summary from
+    /// a superseded deploy can't stomp the current deploy's state, even though
+    /// `generateStructured` doesn't honour cooperative cancellation.
+    private var summarizationGeneration: UInt = 0
     private var inFlight: Task<Void, Never>?
     /// Site to retry once the user pastes a token. `nil` outside the prompt flow.
     /// Carries the container control (if any) so the parked-then-retried deploy
@@ -201,6 +206,7 @@ final class DeployModel {
         currentMilestone = nil
         failureSummary = nil
         summarizing = false
+        summarizationGeneration &+= 1   // invalidate any still-in-flight summary from a prior deploy
         drawerPresented = true
         blockedPresented = false
 
@@ -258,13 +264,19 @@ final class DeployModel {
             phase = .succeeded(url: url, duration: duration)
         case .failed(let reason, let exit):
             phase = .failed(reason: reason, exitCode: exit)
+            let generation = summarizationGeneration
+            let capturedLog = logText   // snapshot before the suspension; a later deploy clears logLines
             summarizing = true
-            failureSummary = await DeployFailureSummaryRequest.run(
-                logText: logText,
+            let summary = await DeployFailureSummaryRequest.run(
+                logText: capturedLog,
                 siteID: siteID,
                 siteDirectory: siteDirectory,
                 using: summarizer
             )
+            // Drop the result if another deploy started while we were summarizing — it has already
+            // reset failureSummary/summarizing and we must not clobber its state.
+            guard summarizationGeneration == generation else { return }
+            failureSummary = summary
             summarizing = false
         case .blocked(let failures, let warnings):
             phase = .blocked(failures: failures, warnings: warnings)

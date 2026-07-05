@@ -13,8 +13,9 @@ public enum DeployLogDigest {
         let lines = logText.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let kept = lines.filter { !isBuildNoise($0) }
         var digest = kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        if digest.count > maxCharacters {
-            digest = String(digest.suffix(maxCharacters))
+        // Single-pass tail trim: index arithmetic avoids the double O(n) walk of `count` + `suffix`.
+        if let start = digest.index(digest.endIndex, offsetBy: -maxCharacters, limitedBy: digest.startIndex) {
+            digest = String(digest[start...])
         }
         return digest
     }
@@ -24,7 +25,9 @@ public enum DeployLogDigest {
     private static func isBuildNoise(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if trimmed.contains("npm run build") { return true }
-        if trimmed.hasPrefix("> ") { return true }                 // npm script echo, e.g. "> astro build"
+        // npm script echo, e.g. "> astro build" — require an identifier after "> " so we don't
+        // drop wrangler/JSON lines like "> https://…" or "> {".
+        if trimmed.range(of: #"^> \w"#, options: .regularExpression) != nil { return true }
         if trimmed.hasPrefix("✓ ") { return true }                 // Vite "✓ N modules transformed"
         if trimmed.lowercased().hasPrefix("vite v") { return true } // Vite banner
         if trimmed.lowercased().hasPrefix("transforming") { return true }

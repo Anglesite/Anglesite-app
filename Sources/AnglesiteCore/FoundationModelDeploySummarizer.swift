@@ -14,12 +14,15 @@ public enum DeploySummarizerFactory {
 
 #if compiler(>=6.4)
 import FoundationModels
+import os
 
 /// On-device summarizer: runs the digested failure log through the macOS 27 model via guided
 /// generation, then maps the result to the non-gated `DeployFailureSummary`. Any failure —
 /// including `AssistantError.unavailable` when Apple Intelligence is off — collapses to `nil`
 /// so the caller falls back to showing the raw log.
 public struct FoundationModelDeploySummarizer: DeployFailureSummarizing {
+    private let logger = Logger(subsystem: "dev.anglesite.app", category: "DeployFailureSummarizer")
+
     public init() {}
 
     public func summarize(failureLog: String, siteID: String, siteDirectory: URL) async -> DeployFailureSummary? {
@@ -37,6 +40,8 @@ public struct FoundationModelDeploySummarizer: DeployFailureSummarizing {
                 suggestedFix: generated.suggestedFix
             )
         } catch {
+            // Don't swallow silently — surface the failure (the caller still degrades to the raw log).
+            logger.warning("Deploy-failure summarization failed: \(error, privacy: .public)")
             return nil
         }
     }
