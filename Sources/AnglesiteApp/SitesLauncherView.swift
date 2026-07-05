@@ -105,12 +105,12 @@ struct SitesLauncherView: View {
         HStack {
             Text("Sites").font(.title2.bold())
             Spacer()
-            Button("Rescan sites", systemImage: "arrow.clockwise") {
+            Button("Reload sites", systemImage: "arrow.clockwise") {
                 Task { await refreshSites() }
             }
             .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
-            .help("Rescan ~/Sites")
+            .help("Reload site list")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -129,7 +129,7 @@ struct SitesLauncherView: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(site.name).font(.body.monospaced())
-                        Text(site.path.path)
+                        Text(site.packageURL.path)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -159,7 +159,7 @@ struct SitesLauncherView: View {
         }
         .listStyle(.inset)
         .confirmationDialog(
-            "Remove “\(siteToRemoveName)” from Anglesite?",
+            "Remove \"\(siteToRemoveName)\" from Anglesite?",
             isPresented: Binding(
                 get: { siteToRemove != nil },
                 set: { if !$0 { siteToRemove = nil } }
@@ -170,9 +170,9 @@ struct SitesLauncherView: View {
             Button("Remove from Anglesite", role: .destructive) { removeSite(site) }
             Button("Cancel", role: .cancel) {}
         } message: { site in
-            // Removal only forgets the site here — the folder on disk is untouched, matching
+            // Removal only forgets the site here — the package on disk is untouched, matching
             // `SiteStore.remove(id:)`. Owners can still open it in Finder, VS Code, or the CLI.
-            Text("This removes it from Anglesite's list only. The files in \(site.path.path) are left on disk.")
+            Text("This removes it from Anglesite's list only. The files in \(site.packageURL.path) are left on disk.")
         }
     }
 
@@ -182,7 +182,7 @@ struct SitesLauncherView: View {
                 .font(.largeTitle).foregroundStyle(.tertiary)
             Text("No Anglesite sites found")
                 .font(.headline)
-            Text("Create one with `/anglesite:start` in `~/Sites/<name>/`, or use **Add Site → Import existing site…** to add an existing project.")
+            Text("Create one with **Add Site → Create new site…**, or use **Add Site → Import existing site…** to add an existing `.anglesite` package.")
                 .font(.callout).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
@@ -236,9 +236,8 @@ struct SitesLauncherView: View {
 
     /// Forget `site` from the registry without touching its files. On MAS this also drops the
     /// site's persisted security-scoped bookmark, since that lives inline in the `Site` entry.
-    /// We prune the local list directly rather than re-running `refreshSites()`: a DevID rescan
-    /// of `~/Sites` would immediately rediscover a still-present in-root folder, undoing the
-    /// removal visually. Persistence is handled by `remove(id:)`.
+    /// We prune the local list directly rather than re-running `refreshSites()`: the registry no
+    /// longer scans `~/Sites`, so removal is permanent until the package is re-opened.
     ///
     /// An already-open `SiteWindow` for this site auto-closes: it observes `SiteStore.changeStream()`
     /// and dismisses itself when its id leaves the registry, which tears down its dev-server/MCP
@@ -261,7 +260,7 @@ struct SitesLauncherView: View {
                 await refreshSites()
                 open(site: site)
             } catch {
-                // `SiteActions.ImportError.localizedDescription` names the folder and the reason.
+                // `SiteActions.ImportError.localizedDescription` names the package and the reason.
                 loadError = error.localizedDescription
             }
         }
@@ -290,8 +289,10 @@ struct SitesLauncherView: View {
         #endif
         try? FileManager.default.createDirectory(at: sitesRoot, withIntermediateDirectories: true)
 
-        let known = (try? await SiteStore.shared.refresh()) ?? []
-        let takenSlugs = Set(known.map { SiteSlug.derive(from: $0.name) })
+        // Load persisted registry to derive taken slugs; no scan needed (registry = source of truth).
+        try? await SiteStore.shared.load()
+        let knownSites = await SiteStore.shared.sites
+        let takenSlugs = Set(knownSites.map { SiteSlug.derive(from: $0.name) })
 
         let model = NewSiteWizardModel(catalog: catalog, slugTaken: { takenSlugs.contains($0) })
 
@@ -302,11 +303,16 @@ struct SitesLauncherView: View {
             run: { exe, args, cwd in
                 try await ProcessSupervisor.shared.run(executable: exe, arguments: args, currentDirectoryURL: cwd)
             },
-            register: { url in
-                let site = try await SiteStore.shared.add(url)
+            gitInit: { sourceDir in
+                let git = URL(fileURLWithPath: "/usr/bin/git")
+                _ = try await ProcessSupervisor.shared.run(executable: git, arguments: ["init"], currentDirectoryURL: sourceDir)
+            },
+            register: { package in
+                let site = try await SiteStore.shared.record(package)
                 #if ANGLESITE_MAS
-                let bookmark = try SecurityScopedBookmark.create(for: url)
-                try await SiteStore.shared.setBookmark(bookmark, for: site.id)
+                if let bm = try? SecurityScopedBookmark.create(for: package.url) {
+                    try? await SiteStore.shared.setBookmark(bm, for: site.id)
+                }
                 #endif
                 return site
             }
@@ -370,7 +376,7 @@ struct SitesLauncherView: View {
     private func refreshSites() async {
         do {
             try await SiteStore.shared.load()
-            sites = try await SiteStore.shared.refresh()
+            sites = await SiteStore.shared.sites
             loadError = nil
         } catch {
             loadError = "\(error)"
