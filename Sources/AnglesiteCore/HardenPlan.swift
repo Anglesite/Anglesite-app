@@ -24,6 +24,10 @@ public enum HardenPlanItem: Sendable, Hashable, CustomStringConvertible {
     case addSPFRejectAll
     case addDMARCReject
     case addWAFRule(description: String, expression: String, action: String)
+    case enableSpeedBrain
+    case enableZstandardCompression
+    case enableECH
+    case enablePageShieldMonitoring
 
     public var description: String {
         switch self {
@@ -48,6 +52,14 @@ public enum HardenPlanItem: Sendable, Hashable, CustomStringConvertible {
             return "+ Add DMARC record: v=DMARC1; p=reject"
         case .addWAFRule(let desc, _, let action):
             return "+ Add WAF rule [\(action)]: \(desc)"
+        case .enableSpeedBrain:
+            return "+ Enable Speed Brain (speculative prefetching)"
+        case .enableZstandardCompression:
+            return "+ Enable Zstandard compression"
+        case .enableECH:
+            return "+ Enable Encrypted Client Hello (ECH)"
+        case .enablePageShieldMonitoring:
+            return "+ Enable client-side script monitoring (Page Shield)"
         }
     }
 }

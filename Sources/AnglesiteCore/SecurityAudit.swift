@@ -55,6 +55,20 @@ public enum SecurityAudit {
                     "Publish _dmarc TXT: v=DMARC1; p=reject")
             }
         }
+        if !state.ech {
+            add(.info, "Encrypted Client Hello is off",
+                "Without ECH, the site hostname is visible in plaintext during TLS handshakes.",
+                "Enable Encrypted Client Hello (ECH) in the zone's TLS settings.")
+        }
+        if state.pageShield?.enabled != true {
+            add(.info, "Client-side script monitoring is off",
+                "Page Shield is not watching which scripts run on the site, so a compromised third-party script would go unnoticed.",
+                "Enable Page Shield's script monitor (free on all plans).")
+        } else if let shield = state.pageShield, !shield.scriptHosts.isEmpty {
+            add(.info, "Third-party scripts detected",
+                "Page Shield sees scripts loading from: \(shield.scriptHosts.joined(separator: ", ")).",
+                "Review each host; remove any you don't recognize and keep the CSP in sync.")
+        }
         return findings
     }
 }

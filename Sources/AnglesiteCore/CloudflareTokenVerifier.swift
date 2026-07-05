@@ -26,7 +26,7 @@ public enum TokenVerifyError: Error, Equatable, Sendable {
     public var userMessage: String {
         switch self {
         case .invalidToken:
-            return "That token didn’t work. Make sure you picked the “Edit Cloudflare Workers” template and copied the whole token."
+            return "That token didn’t work. Use the “Create token” link (it pre-fills the “Anglesite” token) and copy the whole token."
         case .network:
             return "Couldn’t reach Cloudflare. Check your connection and try again."
         case .unavailable(let reason):

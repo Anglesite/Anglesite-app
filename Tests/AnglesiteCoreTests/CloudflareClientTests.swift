@@ -157,3 +157,45 @@ func zoneStateHSTSDisabled() async throws {
     #expect(!s.botFightMode)
     #expect(s.wafCustomRules.isEmpty)
 }
+
+extension CloudflareClientTests {
+    private static let baseRoutes: [String: (Int, String)] = [
+        "/dnssec": (200, #"{"success":true,"result":{"status":"active"}}"#),
+        "/settings/ssl": (200, #"{"success":true,"result":{"value":"strict"}}"#),
+        "/settings/always_use_https": (200, #"{"success":true,"result":{"value":"on"}}"#),
+        "/settings/security_header": (200, #"{"success":true,"result":{"value":{"strict_transport_security":{"enabled":true,"max_age":31536000,"include_subdomains":true,"preload":false}}}}"#),
+        "/dns_records": (200, #"{"success":true,"result":[]}"#),
+        "/settings/bot_management": (403, #"{"success":false}"#),
+    ]
+
+    @Test("zoneState reads the harden-pack settings when the API grants them")
+    func zoneStateHardenPack() async throws {
+        var routes = Self.baseRoutes
+        routes["/settings/speed_brain"] = (200, #"{"success":true,"result":{"value":"on"}}"#)
+        routes["/settings/ech"] = (200, #"{"success":true,"result":{"value":"off"}}"#)
+        routes["/zones/z/rulesets/comp1"] = (200, #"{"success":true,"result":{"id":"comp1","phase":"http_response_compression","rules":[{"expression":"true","action":"compress_response","action_parameters":{"algorithms":[{"name":"zstd"},{"name":"gzip"}]}}]}}"#)
+        routes["/zones/z/rulesets"] = (200, #"{"success":true,"result":[{"id":"comp1","phase":"http_response_compression"}]}"#)
+        routes["/page_shield/scripts"] = (200, #"{"success":true,"result":[{"url":"https://cdn.evil.example/t.js","host":"cdn.evil.example"}]}"#)
+        routes["/page_shield"] = (200, #"{"success":true,"result":{"enabled":true}}"#)
+
+        let client = HTTPCloudflareClient(transport: fakeTransport(routes))
+        let state = try await client.zoneState(zoneID: "z", apiToken: "t")
+        #expect(state.speedBrain)
+        #expect(!state.ech)
+        #expect(state.zstdCompression)
+        #expect(state.pageShield == .init(enabled: true, scriptHosts: ["cdn.evil.example"]))
+    }
+
+    @Test("zoneState defaults the harden-pack fields when the token can't read them")
+    func zoneStateHardenPackDegrades() async throws {
+        // No speed_brain/ech/page_shield routes at all -> fakeTransport 404s -> envelope failure.
+        var routes = Self.baseRoutes
+        routes["/zones/z/rulesets"] = (403, #"{"success":false}"#)
+        let client = HTTPCloudflareClient(transport: fakeTransport(routes))
+        let state = try await client.zoneState(zoneID: "z", apiToken: "t")
+        #expect(!state.speedBrain)
+        #expect(!state.ech)
+        #expect(!state.zstdCompression)
+        #expect(state.pageShield == nil)
+    }
+}

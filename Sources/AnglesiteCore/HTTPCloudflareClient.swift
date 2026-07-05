@@ -49,6 +49,16 @@ private struct CFRulesetRule: Decodable, Sendable {
     let description: String?
     let expression: String
     let action: String
+    let action_parameters: Params?
+    struct Params: Decodable, Sendable {
+        let algorithms: [Algorithm]?
+        struct Algorithm: Decodable, Sendable { let name: String? }
+    }
+}
+private struct CFPageShield: Decodable, Sendable { let enabled: Bool? }
+private struct CFPageShieldScript: Decodable, Sendable {
+    let url: String?
+    let host: String?
 }
 
 /// Read-only Cloudflare v4 client. All methods are GETs.
@@ -109,7 +119,12 @@ public struct HTTPCloudflareClient: CloudflareReading {
             botFight = false
         }
 
-        let wafRules = try await fetchWAFCustomRules(zoneID: zoneID, apiToken: apiToken)
+        let wafRules = (try? await fetchWAFCustomRules(zoneID: zoneID, apiToken: apiToken)) ?? []
+
+        let speedBrain = await settingIsOn("/zones/\(zoneID)/settings/speed_brain", apiToken: apiToken)
+        let ech = await settingIsOn("/zones/\(zoneID)/settings/ech", apiToken: apiToken)
+        let zstd = await zstdEnabled(zoneID: zoneID, apiToken: apiToken)
+        let pageShield = await pageShieldState(zoneID: zoneID, apiToken: apiToken)
 
         let sts = header.value.strict_transport_security
         let hsts: CloudflareZoneState.HSTS? = sts.enabled
@@ -133,7 +148,8 @@ public struct HTTPCloudflareClient: CloudflareReading {
             spfRecords: spf,
             dmarcRecords: dmarc,
             botFightMode: botFight,
-            wafCustomRules: wafRules)
+            wafCustomRules: wafRules,
+            speedBrain: speedBrain, ech: ech, zstdCompression: zstd, pageShield: pageShield)
     }
 
     private func fetchWAFCustomRules(zoneID: String, apiToken: String) async throws -> [CloudflareZoneState.WAFCustomRule] {
@@ -145,6 +161,35 @@ public struct HTTPCloudflareClient: CloudflareReading {
         return (full.rules ?? []).map {
             .init(description: $0.description ?? "", expression: $0.expression, action: $0.action)
         }
+    }
+
+    /// Reads an on/off zone setting, defaulting to `false` when the token can't see it.
+    private func settingIsOn(_ path: String, apiToken: String) async -> Bool {
+        ((try? await get(path, apiToken: apiToken, as: CFStringSetting.self))?.value.lowercased()) == "on"
+    }
+
+    private func zstdEnabled(zoneID: String, apiToken: String) async -> Bool {
+        guard let rulesets = try? await get("/zones/\(zoneID)/rulesets", apiToken: apiToken, as: [CFRuleset].self),
+              let compression = rulesets.first(where: { $0.phase == "http_response_compression" }),
+              let full = try? await get("/zones/\(zoneID)/rulesets/\(compression.id)", apiToken: apiToken, as: CFRuleset.self)
+        else { return false }
+        return (full.rules ?? []).contains { rule in
+            rule.action == "compress_response"
+                && (rule.action_parameters?.algorithms ?? []).contains { $0.name == "zstd" }
+        }
+    }
+
+    private func pageShieldState(zoneID: String, apiToken: String) async -> CloudflareZoneState.PageShieldState? {
+        guard let shield = try? await get("/zones/\(zoneID)/page_shield", apiToken: apiToken, as: CFPageShield.self) else {
+            return nil
+        }
+        let enabled = shield.enabled ?? false
+        var hosts: [String] = []
+        if enabled,
+           let scripts = try? await get("/zones/\(zoneID)/page_shield/scripts", apiToken: apiToken, as: [CFPageShieldScript].self) {
+            hosts = Set(scripts.compactMap { $0.host ?? $0.url.flatMap { URL(string: $0)?.host } }).sorted()
+        }
+        return .init(enabled: enabled, scriptHosts: hosts)
     }
 
     // MARK: - Write helpers
@@ -236,6 +281,65 @@ extension HTTPCloudflareClient: CloudflareWriting {
             try await mutate(method: "POST", "/zones/\(zoneID)/rulesets",
                              body: NewRuleset(name: "Anglesite security rules",
                                               kind: "zone", phase: "http_request_firewall_custom",
+                                              rules: [rule]),
+                             apiToken: apiToken)
+        }
+    }
+
+    public func setSpeedBrain(zoneID: String, enabled: Bool, apiToken: String) async throws {
+        try await mutate(method: "PATCH", "/zones/\(zoneID)/settings/speed_brain",
+                         body: ["value": enabled ? "on" : "off"], apiToken: apiToken)
+    }
+
+    public func setECH(zoneID: String, enabled: Bool, apiToken: String) async throws {
+        try await mutate(method: "PATCH", "/zones/\(zoneID)/settings/ech",
+                         body: ["value": enabled ? "on" : "off"], apiToken: apiToken)
+    }
+
+    public func setPageShield(zoneID: String, enabled: Bool, apiToken: String) async throws {
+        try await mutate(method: "PUT", "/zones/\(zoneID)/page_shield",
+                         body: ["enabled": enabled], apiToken: apiToken)
+    }
+
+    public func enableZstandardCompression(zoneID: String, apiToken: String) async throws {
+        struct CompressionRule: Encodable, Sendable {
+            struct Params: Encodable, Sendable {
+                struct Algorithm: Encodable, Sendable { let name: String }
+                let algorithms: [Algorithm]
+            }
+            let description: String
+            let expression: String
+            let action: String
+            let action_parameters: Params
+        }
+        let rule = CompressionRule(
+            description: "Anglesite: prefer Zstandard compression",
+            expression: "true",
+            action: "compress_response",
+            action_parameters: .init(algorithms: [
+                .init(name: "zstd"), .init(name: "brotli"), .init(name: "gzip"),
+            ]))
+
+        let rulesets = try await get("/zones/\(zoneID)/rulesets", apiToken: apiToken, as: [CFRuleset].self)
+        if let existing = rulesets.first(where: { $0.phase == "http_response_compression" }) {
+            let full = try await get("/zones/\(zoneID)/rulesets/\(existing.id)", apiToken: apiToken, as: CFRuleset.self)
+            let alreadyHasZstd = (full.rules ?? []).contains { rule in
+                rule.action == "compress_response"
+                    && (rule.action_parameters?.algorithms ?? []).contains { $0.name == "zstd" }
+            }
+            if alreadyHasZstd { return }
+            try await mutate(method: "POST", "/zones/\(zoneID)/rulesets/\(existing.id)/rules",
+                             body: rule, apiToken: apiToken)
+        } else {
+            struct NewRuleset: Encodable, Sendable {
+                let name: String
+                let kind: String
+                let phase: String
+                let rules: [CompressionRule]
+            }
+            try await mutate(method: "POST", "/zones/\(zoneID)/rulesets",
+                             body: NewRuleset(name: "Anglesite compression rules",
+                                              kind: "zone", phase: "http_response_compression",
                                               rules: [rule]),
                              apiToken: apiToken)
         }

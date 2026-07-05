@@ -5,9 +5,9 @@ import Foundation
 /// Tests for the user-facing copy of `TokenVerifyError`. The verifier behavior itself lives in
 /// `CloudflareAPITokenVerifierTests` (the native, Node-free conformer).
 struct CloudflareTokenVerifierTests {
-    @Test("Invalid-token error names the Edit Cloudflare Workers template")
+    @Test("Invalid-token error names the Anglesite token")
     func invalidTokenCopyNamesTemplate() {
-        #expect(TokenVerifyError.invalidToken.userMessage.contains("Edit Cloudflare Workers"))
+        #expect(TokenVerifyError.invalidToken.userMessage.contains("Anglesite"))
     }
 
     @Test("Network error tells the user to check their connection")
