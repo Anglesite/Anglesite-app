@@ -40,7 +40,7 @@ fi
 # best-effort (handled above — PluginRuntime reports it at runtime), but bundling
 # a plugin that IS present yet too old would ship an app whose edit pipeline
 # fails in confusing ways at runtime — fail the build loudly instead.
-MIN_PLUGIN_VERSION="1.2.0"
+MIN_PLUGIN_VERSION="1.3.0"
 # plutil parses the JSON and extracts the top-level key specifically — a first-match
 # grep could be fooled by a nested "version" (engines/mcpServers/…) appearing earlier
 # in the manifest. This script only runs on macOS (Xcode build phase), so plutil is
