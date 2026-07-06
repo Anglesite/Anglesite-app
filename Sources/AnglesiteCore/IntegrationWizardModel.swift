@@ -87,7 +87,15 @@ public final class IntegrationWizardModel: Identifiable {
     /// Entry point for the "Add a Store" router: jumps straight to `.fields` (or `.pickProvider`
     /// if the router didn't resolve a provider, e.g. `.donations`) instead of going through
     /// `.pickIntegration`/`.pickProvider` in order — the router already answered those questions.
+    ///
+    /// Resets `answers` first: this model persists for the whole wizard session (one instance per
+    /// open sheet, not per attempt), so a second "Add a Store" attempt after backing out of a first
+    /// would otherwise carry over stale field values — e.g. `buyButton` and `lemonSqueezy` share the
+    /// `checkoutUrl`/`buttonText` field keys, so switching categories could pre-fill the wrong
+    /// platform's data, and a stale `answers["provider"]` could satisfy `.pickProvider`'s
+    /// `canContinue` without the user ever choosing a provider for the new integration.
     public func startFromRouter(_ route: AddStoreRouter.Route) {
+        answers = [:]
         selectedID = route.integrationID
         if let provider = route.presetProvider {
             answers["provider"] = provider
