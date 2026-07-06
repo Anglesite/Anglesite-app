@@ -7,6 +7,10 @@ import AnglesiteCore
 /// survives the Preview/Editor toggle. All IO is async/off-main in the model.
 struct MainPaneEditorView: View {
     @Bindable var model: FileEditorModel
+    /// Non-nil once the preview's runtime is ready; enables the `.component` editor case below.
+    /// `nil` falls back to the plain text editor (dev server still starting, or no site window
+    /// wiring available, e.g. in previews).
+    var componentContext: ComponentEditorContext? = nil
     @Environment(\.controlActiveState) private var controlActiveState
 
     var body: some View {
@@ -30,6 +34,14 @@ struct MainPaneEditorView: View {
                         TextEditor(text: $model.text)
                             .font(.system(.body, design: .monospaced))
                             .scrollContentBackground(.hidden)
+                    case .component:
+                        if let componentContext {
+                            ComponentEditorView(file: model.file, context: componentContext, fileEditor: model)
+                        } else {
+                            TextEditor(text: $model.text)
+                                .font(.system(.body, design: .monospaced))
+                                .scrollContentBackground(.hidden)
+                        }
                     }
                 }
             }
