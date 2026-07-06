@@ -3,7 +3,7 @@ import AnglesiteCore
 
 /// Drives the determinate startup progress bar for one site window. Owns a pure
 /// `StartupProgressEstimator` and feeds it three things: runtime-state changes (pushed in by
-/// `SiteWindow` via `ingest(state:)`), the site's `astro:<id>` stdout lines (subscribed from
+/// `SiteWindow` via `ingest(state:)`), the site's `container:<id>` stdout lines (subscribed from
 /// `LogCenter`), and ~20 fps `tick`s that ease the fill forward. On success it persists the
 /// measured timing so the next startup paces itself. The estimator stays host-independent and
 /// CI-tested; this class is the SwiftUI/actor wiring around it.
@@ -74,7 +74,11 @@ final class StartupProgressModel {
 
     private func subscribeToLogs(siteID: String) {
         logTask?.cancel()
-        let source = "astro:\(siteID)"
+        // `LocalContainerSiteRuntime` is the only `SiteRuntime` that currently streams to
+        // `LogCenter`, tagged `container:<id>` (see `LocalContainerSiteRuntime.swift`).
+        // `RemoteSandboxSiteRuntime` doesn't stream logs yet; when it does, it should use the
+        // same tag scheme so this subscription picks it up too.
+        let source = "container:\(siteID)"
         logTask = Task { @MainActor [weak self] in
             guard let center = self?.logCenter else { return }
             let subscription = await center.subscribe()

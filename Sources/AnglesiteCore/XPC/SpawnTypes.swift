@@ -18,7 +18,7 @@ public struct SpawnSpec: Sendable, Codable, Equatable {
     public let workingDirectory: URL?
     /// When `true`, the spawned process gets a writable stdin pipe (MCP JSON-RPC framing needs this).
     public let stdinPipe: Bool
-    /// Tag used by `LogCenter` when streaming stdout/stderr — e.g. `"astro:dev:<siteID>"`.
+    /// Tag used by `LogCenter` when streaming stdout/stderr — e.g. `"container:<siteID>"`.
     public let logSource: String
 
     public init(
