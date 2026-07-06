@@ -5,18 +5,36 @@ import AnglesiteBridge
 
 /// Read-only Component Editor (slice 1): outline + harness canvas + inspector.
 struct ComponentEditorView: View {
-    @State private var model: ComponentEditorModel
+    let file: FileRef
+    let context: ComponentEditorContext
+    @Bindable var fileEditor: FileEditorModel
+
+    @State private var model: ComponentEditorModel?
     /// Design (three-pane) vs Source (existing text editor) — the escape hatch.
     @State private var mode: Mode = .design
     @State private var webView: WKWebView?
 
     enum Mode: String, CaseIterable { case design = "Design", source = "Source" }
 
-    let fileEditor: FileEditorModel
-
     init(file: FileRef, context: ComponentEditorContext, fileEditor: FileEditorModel) {
-        _model = State(initialValue: ComponentEditorModel(file: file, context: context))
+        self.file = file
+        self.context = context
         self.fileEditor = fileEditor
+    }
+
+    /// Identity for the load task: re-runs (and rebuilds `model`) whenever
+    /// the edited file changes OR the dev server transitions from not-ready
+    /// to ready (or back), rather than freezing the context/model at the
+    /// view's first identity. `baseURL` is included as a String so a
+    /// nil→non-nil transition (dev server finishing startup) is itself a
+    /// new task identity, not just a value the stale model captured once.
+    private struct LoadKey: Hashable {
+        let baseURL: String?
+        let fileID: String
+    }
+
+    private var loadKey: LoadKey {
+        LoadKey(baseURL: context.baseURL?.absoluteString, fileID: file.id)
     }
 
     var body: some View {
@@ -31,33 +49,54 @@ struct ComponentEditorView: View {
             switch mode {
             case .design: designPane
             case .source:
-                TextEditor(text: .constant(fileEditor.text))
+                TextEditor(text: $fileEditor.text)
                     .font(.system(.body, design: .monospaced))
                     .scrollContentBackground(.hidden)
             }
         }
-        .task { await model.load() }
-        .onChange(of: model.selectedNodeID) { _, newValue in
+        .task(id: loadKey) {
+            let freshModel = ComponentEditorModel(file: file, context: context)
+            model = freshModel
+            await freshModel.load()
+        }
+        .onChange(of: model?.selectedNodeID) { _, newValue in
             highlightInCanvas(nodeID: newValue)
         }
     }
 
     @ViewBuilder private var designPane: some View {
-        if let error = model.loadError {
-            ContentUnavailableView("Can't Open Component", systemImage: "exclamationmark.triangle", description: Text(error))
-        } else if model.isLoading || model.model == nil {
-            ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            HSplitView {
-                outline.frame(minWidth: 180, idealWidth: 220)
-                canvas.frame(minWidth: 320).layoutPriority(1)
-                inspector.frame(minWidth: 220, idealWidth: 260)
+        if let model {
+            if let error = model.loadError {
+                if case .notConnected = model.loadErrorReason {
+                    // Dev server isn't up yet — not a hard failure. `loadKey`
+                    // re-fires this view's `.task` once `context.baseURL`
+                    // transitions to non-nil, which retries the load; this
+                    // is the interim state, matching the canvas's own
+                    // "Dev Server Starting…" placeholder rather than an
+                    // error page.
+                    ContentUnavailableView("Dev Server Starting…", systemImage: "hourglass")
+                } else {
+                    ContentUnavailableView("Can't Open Component", systemImage: "exclamationmark.triangle", description: Text(error))
+                }
+            } else if model.isLoading || model.model == nil {
+                ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                HSplitView {
+                    outline(model).frame(minWidth: 180, idealWidth: 220)
+                    canvas(model).frame(minWidth: 320).layoutPriority(1)
+                    inspector(model).frame(minWidth: 220, idealWidth: 260)
+                }
             }
+        } else {
+            ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private var outline: some View {
-        List(model.outlineRows, selection: $model.selectedNodeID) { row in
+    private func outline(_ model: ComponentEditorModel) -> some View {
+        List(model.outlineRows, selection: Binding(
+            get: { model.selectedNodeID },
+            set: { model.selectedNodeID = $0 }
+        )) { row in
             HStack(spacing: 4) {
                 Image(systemName: icon(for: row.node.kind))
                     .foregroundStyle(.secondary)
@@ -69,13 +108,17 @@ struct ComponentEditorView: View {
         .listStyle(.sidebar)
     }
 
-    @ViewBuilder private var canvas: some View {
+    @ViewBuilder private func canvas(_ model: ComponentEditorModel) -> some View {
         VStack(spacing: 0) {
             if let props = model.model?.frontmatter?.props, !props.isEmpty {
-                knobsBar(props: props)
+                knobsBar(model, props: props)
                 Divider()
             }
-            if let url = model.harnessURL {
+            // Gated directly on `context.baseURL` (not just `model.harnessURL`)
+            // so the live canvas replaces this placeholder the moment the dev
+            // server becomes ready, in lockstep with the `loadKey`-driven
+            // reload above.
+            if context.baseURL != nil, let url = model.harnessURL {
                 ComponentCanvasView(
                     url: url,
                     onSelection: { model.canvasSelected($0) },
@@ -88,12 +131,12 @@ struct ComponentEditorView: View {
         }
     }
 
-    private func knobsBar(props: [ComponentModel.Prop]) -> some View {
+    private func knobsBar(_ model: ComponentEditorModel, props: [ComponentModel.Prop]) -> some View {
         ScrollView(.horizontal) {
             HStack {
                 ForEach(props, id: \.name) { prop in
                     LabeledContent(prop.name) {
-                        TextField(prop.type, text: knobBinding(prop.name))
+                        TextField(prop.type, text: knobBinding(model, name: prop.name))
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 120)
                     }
@@ -103,14 +146,14 @@ struct ComponentEditorView: View {
         }
     }
 
-    private func knobBinding(_ name: String) -> Binding<String> {
+    private func knobBinding(_ model: ComponentEditorModel, name: String) -> Binding<String> {
         Binding(
             get: { model.knobValues[name] ?? "" },
             set: { model.knobValues[name] = $0 }
         )
     }
 
-    private var inspector: some View {
+    private func inspector(_ model: ComponentEditorModel) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if let node = model.selectedNode {
@@ -157,7 +200,7 @@ struct ComponentEditorView: View {
     }
 
     private func highlightInCanvas(nodeID: String?) {
-        guard let webView else { return }
+        guard let webView, let model else { return }
         guard let nodeID,
               let node = model.outlineRows.first(where: { $0.node.id == nodeID })?.node,
               let loc = node.loc
