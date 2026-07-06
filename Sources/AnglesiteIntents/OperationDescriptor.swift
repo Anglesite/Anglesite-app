@@ -176,6 +176,12 @@ public enum AnglesiteOperations {
             requiresConfirmation: true, isCancellable: false,
             resultShape: .none
         ),
+        OperationDescriptor(
+            operationID: "add-store", displayName: "Add Store",
+            intentTypeName: "AddStoreIntent", sideEffect: .createsContent,
+            requiresConfirmation: true, isCancellable: false,
+            resultShape: .none
+        ),
     ]
 
     /// Look up a descriptor by intent type name. `nil` if none registered.

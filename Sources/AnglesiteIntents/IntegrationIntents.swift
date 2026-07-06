@@ -161,6 +161,101 @@ public struct AddGiscusIntent: AppIntent {
     }
 }
 
+// MARK: - Add Store (router)
+
+public enum StoreCategoryAppEnum: String, AppEnum, Sendable, CaseIterable {
+    case service, donations, digitalDownloads, physicalGoods, software
+
+    public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Store Category" }
+    public static let caseDisplayRepresentations: [StoreCategoryAppEnum: DisplayRepresentation] = [
+        .service: "A service or one-off",
+        .donations: "Donations or fundraising",
+        .digitalDownloads: "Digital downloads",
+        .physicalGoods: "Physical goods",
+        .software: "Software or SaaS",
+    ]
+
+    var core: StoreCategory { StoreCategory(rawValue: rawValue)! }
+}
+
+public enum DigitalPreferenceAppEnum: String, AppEnum, Sendable, CaseIterable {
+    case polar, lemonSqueezy
+
+    public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Digital Platform" }
+    public static let caseDisplayRepresentations: [DigitalPreferenceAppEnum: DisplayRepresentation] = [
+        .polar: "Polar", .lemonSqueezy: "Lemon Squeezy",
+    ]
+
+    var core: DigitalPreference { DigitalPreference(rawValue: rawValue)! }
+}
+
+public enum CatalogSizeAppEnum: String, AppEnum, Sendable, CaseIterable {
+    case few, catalog
+
+    public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Catalog Size" }
+    public static let caseDisplayRepresentations: [CatalogSizeAppEnum: DisplayRepresentation] = [
+        .few: "Just a few", .catalog: "A full, growing catalog",
+    ]
+
+    var core: CatalogSize { CatalogSize(rawValue: rawValue)! }
+}
+
+public struct AddStoreIntent: AppIntent {
+    public static let title: LocalizedStringResource = "Add a Store"
+    public static let description = IntentDescription(
+        "Answer a couple of questions and Anglesite sets up the right commerce integration."
+    )
+
+    @Parameter(title: "Site") public var site: SiteEntity
+    @Parameter(title: "What are you selling?") public var category: StoreCategoryAppEnum
+    @Parameter(title: "Digital platform", description: "polar or lemonSqueezy — only used for digital downloads.")
+    public var digitalPreference: DigitalPreferenceAppEnum?
+    @Parameter(title: "Catalog size", description: "few or catalog — only used for physical goods.")
+    public var catalogSize: CatalogSizeAppEnum?
+    @Parameter(title: "Details", description: "Remaining field values as key=value pairs, e.g. checkoutUrl=https://buy.stripe.com/xyz.")
+    public var config: String?
+    @Dependency private var ops: any IntegrationOperationsService
+
+    public init() {}
+
+    public static var parameterSummary: some ParameterSummary {
+        Summary("Add a store to \(\.$site)")
+    }
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog {
+        let svc = IntegrationOperationsOverride.scoped ?? ops
+        let (route, descriptor, answers) = resolvedRoute()
+        let planResult = await svc.plan(integrationID: route.integrationID, answers: answers, siteID: site.id)
+        if case .failure = planResult {
+            let reply = SetupIntegrationArguments.reply(for: planResult, descriptor: descriptor)
+            return .result(dialog: IntentDialog(stringLiteral: reply))
+        }
+        if IntegrationOperationsOverride.scoped == nil {
+            try await requestConfirmation(
+                dialog: "Set up \(descriptor.displayName) on \(site.displayName)?"
+            )
+        }
+        let dialog = await applyIntegration(ops: svc, id: route.integrationID, answers: answers, site: site)
+        return .result(dialog: IntentDialog(stringLiteral: dialog))
+    }
+
+    /// Pure: computes the route, its descriptor, and the merged answers dict. Shared by
+    /// `perform()` and `confirmAndApplyForTesting()` so the two stay in lockstep.
+    private func resolvedRoute() -> (AddStoreRouter.Route, IntegrationDescriptor, Answers) {
+        let route = AddStoreRouter.route(
+            category: category.core,
+            digitalPreference: digitalPreference?.core,
+            catalogSize: catalogSize?.core
+        )
+        var answers = SetupIntegrationArguments.parseConfig(config)
+        if let preset = route.presetProvider {
+            answers["provider"] = preset
+        }
+        let descriptor = IntegrationCatalog.descriptor(for: route.integrationID)
+        return (route, descriptor, answers)
+    }
+}
+
 // MARK: - Test-only helpers
 
 extension AddBookingIntent {
@@ -209,5 +304,21 @@ extension AddGiscusIntent {
             "mapping": "pathname",
         ]
         return await applyIntegration(ops: svc, id: .giscus, answers: answers, site: site)
+    }
+}
+
+extension AddStoreIntent {
+    /// Drives plan→(reprompt|apply) without the AppIntents confirmation gate. Only callable when
+    /// `IntegrationOperationsOverride.scoped` is bound.
+    func confirmAndApplyForTesting() async throws -> String {
+        guard let svc = IntegrationOperationsOverride.scoped else {
+            fatalError("confirmAndApplyForTesting requires a bound IntegrationOperationsOverride.scoped")
+        }
+        let (route, descriptor, answers) = resolvedRoute()
+        let planResult = await svc.plan(integrationID: route.integrationID, answers: answers, siteID: site.id)
+        if case .failure = planResult {
+            return SetupIntegrationArguments.reply(for: planResult, descriptor: descriptor)
+        }
+        return await applyIntegration(ops: svc, id: route.integrationID, answers: answers, site: site)
     }
 }
