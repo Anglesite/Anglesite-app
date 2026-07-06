@@ -84,6 +84,17 @@ public final class IntegrationWizardModel: Identifiable {
         step = prev
     }
 
+    /// Entry point for the "Add a Store" router: jumps straight to `.fields` (or `.pickProvider`
+    /// if the router didn't resolve a provider, e.g. `.donations`) instead of going through
+    /// `.pickIntegration`/`.pickProvider` in order — the router already answered those questions.
+    public func startFromRouter(_ route: AddStoreRouter.Route) {
+        selectedID = route.integrationID
+        if let provider = route.presetProvider {
+            answers["provider"] = provider
+        }
+        step = (descriptor?.providers.isEmpty == true || route.presetProvider != nil) ? .fields : .pickProvider
+    }
+
     public func apply() async {
         guard let plan else { return }
         step = .applying

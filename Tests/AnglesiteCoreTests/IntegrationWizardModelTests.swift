@@ -101,4 +101,27 @@ import Foundation
         m.back()
         #expect(m.step == .pickProvider)
     }
+
+    @Test func startFromRouterWithPresetProviderJumpsToFields() {
+        let m = IntegrationWizardModel(service: FakeService(), siteID: "s")
+        m.startFromRouter(AddStoreRouter.Route(integrationID: .buyButton, presetProvider: "stripe"))
+        #expect(m.selectedID == .buyButton)
+        #expect(m.answers["provider"] == "stripe")
+        #expect(m.step == .fields)
+    }
+
+    @Test func startFromRouterWithNoProvidersJumpsToFields() {
+        let m = IntegrationWizardModel(service: FakeService(), siteID: "s")
+        m.startFromRouter(AddStoreRouter.Route(integrationID: .snipcart, presetProvider: nil))
+        #expect(m.selectedID == .snipcart)
+        #expect(m.step == .fields)
+    }
+
+    @Test func startFromRouterWithUnresolvedProviderGoesToPickProvider() {
+        let m = IntegrationWizardModel(service: FakeService(), siteID: "s")
+        m.startFromRouter(AddStoreRouter.Route(integrationID: .donations, presetProvider: nil))
+        #expect(m.selectedID == .donations)
+        #expect(m.answers["provider"] == nil)
+        #expect(m.step == .pickProvider)
+    }
 }
