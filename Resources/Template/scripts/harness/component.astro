@@ -1,0 +1,56 @@
+---
+// Renders exactly one project component for the Component Editor canvas.
+// Dev-only (injected by anglesite-harness.ts); never part of a build.
+export const prerender = false;
+
+const modules = import.meta.glob(["/src/components/**/*.astro", "/src/layouts/**/*.astro"]);
+const name = Astro.params.name ?? "";
+const key = [`/src/components/${name}.astro`, `/src/layouts/${name}.astro`].find((k) => k in modules);
+
+let Component: any = null;
+let error: string | null = null;
+if (key) {
+  try {
+    Component = ((await modules[key]()) as { default: unknown }).default;
+  } catch (err) {
+    error = String(err);
+  }
+} else {
+  error = `No component named "${name}" under src/components/ or src/layouts/.`;
+}
+
+let props: Record<string, unknown> = {};
+const raw = Astro.url.searchParams.get("props");
+if (raw) {
+  try {
+    props = JSON.parse(raw);
+  } catch {
+    /* malformed props param: render with defaults */
+  }
+}
+---
+
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Anglesite Component Harness</title>
+    <style>
+      body { margin: 0; padding: 16px; background: #fff; }
+      .anglesite-harness-error { font: 13px ui-monospace, monospace; color: #b00020; white-space: pre-wrap; }
+      .anglesite-harness-slot-sample { outline: 1px dashed #b0b0b0; padding: 2px 6px; color: #666; }
+    </style>
+  </head>
+  <body>
+    {
+      error ? (
+        <pre class="anglesite-harness-error">{error}</pre>
+      ) : (
+        <Component {...props}>
+          <span class="anglesite-harness-slot-sample">Slot content</span>
+        </Component>
+      )
+    }
+  </body>
+</html>
