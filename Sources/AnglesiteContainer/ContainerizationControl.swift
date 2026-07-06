@@ -288,16 +288,32 @@ public struct ContainerizationControl: LocalContainerControl {
             // race would still block here until the real call resolves — defeating the timeout. This
             // races via an unstructured `Task`, so a genuine hang leaks that one task but still lets
             // this function return promptly with a diagnosable error.
-            try await Self.racingTimeout(timeout: Self.vmBootTimeout, timeoutError: LocalContainerError.bootFailed(
-                "VM did not finish booting within \(Self.vmBootTimeout) — the process may carry the "
-                + "virtualization entitlement without being provisioned to actually use it (ad-hoc/"
-                + "debug-signed builds); Virtualization framework can hang rather than throw in that case")
+            //
+            // If the boot was merely slow rather than genuinely hung (disk contention, first-run
+            // staging), `container.create()`/`.start()` can still succeed AFTER the timeout has already
+            // failed this call and the caller has moved on. `onLateSuccess` tears that VM down instead
+            // of leaking it — otherwise nothing else in the process ever holds a reference to it, and
+            // it would keep consuming host resources (2 vCPU/2GB) until the app quits, one leak per
+            // timed-out retry.
+            let bootedContainer = try await Self.racingTimeout(
+                timeout: Self.vmBootTimeout,
+                timeoutError: LocalContainerError.bootFailed(
+                    "VM did not finish booting within \(Self.vmBootTimeout) — the process may carry the "
+                    + "virtualization entitlement without being provisioned to actually use it (ad-hoc/"
+                    + "debug-signed builds); Virtualization framework can hang rather than throw in that case"),
+                onLateSuccess: { lateContainer in
+                    onOutput(
+                        "[boot] VM finished booting after its \(Self.vmBootTimeout) timeout already failed "
+                        + "this request; stopping it now to avoid an orphaned VM", .stderr)
+                    Task { await self.stopBareContainer(lateContainer, siteID: siteID) }
+                }
             ) {
                 try await container.create()
                 try await container.start()
+                return container
             }
             onOutput("[boot] VM started", .stdout)
-            return container
+            return bootedContainer
         } catch {
             onOutput("[boot] VM boot failed: \(error)", .stderr)
             try? FileManager.default.removeItem(at: rootfsURL)
@@ -315,32 +331,47 @@ public struct ContainerizationControl: LocalContainerControl {
     /// first decides the outcome; the loser (if it's `operation`, having genuinely hung) is simply
     /// abandoned rather than awaited. That's the entire point: a structured race still blocks the
     /// caller until every child task completes, which is exactly what a true VZ hang defeats.
-    private static func racingTimeout<T: Sendable>(
+    ///
+    /// If `operation` was merely slow rather than hung, it can still succeed after the timeout has
+    /// already resolved this call with an error. `onLateSuccess` is the caller's chance to react to
+    /// that value — e.g. tear down a resource `operation` produced that nothing else now references —
+    /// since the returned/thrown result from this function only ever reflects whichever side won.
+    /// `internal` (not `private`) so `RacingTimeoutTests` can exercise it directly via `@testable
+    /// import` — it's a pure, generic async primitive with no Virtualization/entitlement dependency,
+    /// so it doesn't need `ANGLESITE_CONTAINER_E2E`'s real-hardware gate, just this target's normal
+    /// `ANGLESITE_CONTAINER_TESTS` build gate (this whole target only builds locally/opt-in — see the
+    /// file-level doc comment on `ContainerizationControlTests`).
+    static func racingTimeout<T: Sendable>(
         timeout: Duration,
         timeoutError: @autoclosure @escaping @Sendable () -> Error,
+        onLateSuccess: @escaping @Sendable (T) -> Void = { _ in },
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
             let lock = NSLock()
             var resumed = false
-            func resumeOnce(_ result: Result<T, Error>) {
+            func resumeOnce(_ result: Result<T, Error>) -> Bool {
                 lock.lock()
                 let alreadyResumed = resumed
                 resumed = true
                 lock.unlock()
-                guard !alreadyResumed else { return }
+                guard !alreadyResumed else { return false }
                 continuation.resume(with: result)
+                return true
             }
             Task {
                 do {
-                    resumeOnce(.success(try await operation()))
+                    let value = try await operation()
+                    if !resumeOnce(.success(value)) {
+                        onLateSuccess(value)
+                    }
                 } catch {
-                    resumeOnce(.failure(error))
+                    _ = resumeOnce(.failure(error))
                 }
             }
             Task {
                 try? await Task.sleep(for: timeout)
-                resumeOnce(.failure(timeoutError()))
+                _ = resumeOnce(.failure(timeoutError()))
             }
         }
     }
