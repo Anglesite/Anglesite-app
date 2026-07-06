@@ -27,14 +27,39 @@ public enum ComponentOutline {
         return rows
     }
 
-    /// Exact source-loc match — the canvas reports the loc Astro stamped on
-    /// the rendered element, which is the node's start position.
+    /// Source-loc match — the canvas reports the loc Astro's dev server
+    /// stamps on the rendered element via `data-astro-source-loc`, which is
+    /// the END of the element's opening tag (verified against
+    /// `@astrojs/compiler`'s `transform(..., { annotateSourceFile: true })`:
+    /// an element parsed at line L column 1 is annotated `L:C` for some
+    /// `C > 1`). The parser's own `loc` on `ComponentModel.Node` is the START
+    /// of the tag, so lines always match but columns never do exactly.
+    ///
+    /// Match by line; among same-line candidates whose column is at or
+    /// before the reported column (the annotation column is always ≥ the
+    /// parse column of the same element), pick the greatest column — i.e.
+    /// the closest preceding start position. An exact line+column match
+    /// always wins first, in case some future emitter does annotate the
+    /// start position.
     public static func node(atLine line: Int, column: Int, in root: ComponentModel.Node) -> ComponentModel.Node? {
-        if root.loc?.line == line, root.loc?.column == column { return root }
-        for child in root.children {
-            if let match = node(atLine: line, column: column, in: child) { return match }
+        var exact: ComponentModel.Node?
+        var bestOffset: ComponentModel.Node?
+        var bestOffsetColumn = Int.min
+
+        func visit(_ node: ComponentModel.Node) {
+            if let loc = node.loc, loc.line == line {
+                if loc.column == column, exact == nil {
+                    exact = node
+                } else if loc.column <= column, loc.column > bestOffsetColumn {
+                    bestOffsetColumn = loc.column
+                    bestOffset = node
+                }
+            }
+            for child in node.children { visit(child) }
         }
-        return nil
+        visit(root)
+
+        return exact ?? bestOffset
     }
 }
 

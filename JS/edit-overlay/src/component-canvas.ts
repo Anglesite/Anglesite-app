@@ -47,11 +47,34 @@ export function installComponentCanvas(): void {
   (window as unknown as Record<string, unknown>).anglesiteCanvas = {
     highlight(line: number, column: number): void {
       clearRing();
-      const el = document.querySelector(`[data-astro-source-loc="${line}:${column}"]`);
+      const el = findByLoc(line, column);
       if (el) drawRing(el);
     },
     clear: clearRing,
   };
+}
+
+/// Astro's dev server stamps `data-astro-source-loc` at the END of an
+/// element's opening tag, not at its parse position — so native passes the
+/// PARSE column (from the component's structured model), which never equals
+/// the annotation column on the matching element. Match on line only via a
+/// prefix selector, then among same-line candidates pick the one whose
+/// annotated column is nearest >= the requested column (closest following
+/// start), falling back to the first same-line match if none qualifies.
+function findByLoc(line: number, column: number): Element | null {
+  const candidates = Array.from(document.querySelectorAll(`[data-astro-source-loc^="${line}:"]`));
+  if (candidates.length === 0) return null;
+  let best: Element | null = null;
+  let bestColumn = Infinity;
+  for (const el of candidates) {
+    const loc = el.getAttribute("data-astro-source-loc") ?? "";
+    const col = Number(loc.split(":")[1]);
+    if (!Number.isNaN(col) && col >= column && col < bestColumn) {
+      bestColumn = col;
+      best = el;
+    }
+  }
+  return best ?? candidates[0] ?? null;
 }
 
 function onClick(event: MouseEvent): void {
