@@ -50,6 +50,10 @@ extension AppIntentsTests {
         /// `DomainIntents.swift`: `ListDNSRecordsIntent` never calls `requestConfirmation`;
         /// `AddDNSRecordIntent`/`DeleteDNSRecordIntent` both do, matching their registry
         /// `requiresConfirmation: true` (unlike `edit-content`, there's no flag/runtime split here).
+        /// `add-store` (#462) is the router-backed "Add a Store" wizard entry point
+        /// (`AddStoreIntent`); like the bucket-3 integration intents it is not phrase-exposed
+        /// (10-phrase budget) and always confirms before applying, matching its registry
+        /// `requiresConfirmation: true`.
         static let workflows: [Workflow] = [
             Workflow(label: "Open this site", operationID: "open-site", sideEffect: .readOnly, confirmsAtRuntime: false),
             Workflow(label: "Back up this site", operationID: "backup-site", sideEffect: .createsContent, confirmsAtRuntime: false),
@@ -68,6 +72,7 @@ extension AppIntentsTests {
             Workflow(label: "List DNS records for this domain", operationID: "list-dns-records", sideEffect: .readOnly, confirmsAtRuntime: false),
             Workflow(label: "Add a DNS record", operationID: "add-dns-record", sideEffect: .createsContent, confirmsAtRuntime: true),
             Workflow(label: "Delete a DNS record", operationID: "delete-dns-record", sideEffect: .modifiesContent, confirmsAtRuntime: true),
+            Workflow(label: "Add a store", operationID: "add-store", sideEffect: .createsContent, confirmsAtRuntime: true),
         ]
 
         /// Capabilities the doc marks manual-only. These map to no automated assertion by design;

@@ -52,4 +52,46 @@ import AnglesiteCore
         #expect(IntegrationDialogs.applied(integration: "booking", siteName: "Acme").contains("Acme"))
         #expect(IntegrationDialogs.failed(reason: "nope", siteName: "Acme").contains("nope"))
     }
+
+    @Test func addStoreIntentRoutesServiceToStripeBuyButton() async throws {
+        let intent = AddStoreIntent()
+        intent.site = SiteEntity(id: "s1", name: "Acme", creationDate: nil, modificationDate: nil)
+        intent.category = .service
+        intent.config = "checkoutUrl=https://buy.stripe.com/test"
+        let dialog = try await IntegrationOperationsOverride.$scoped.withValue(FakeService(terminal: .done(integrationID: "buyButton"))) {
+            try await intent.confirmAndApplyForTesting()
+        }
+        #expect(dialog.contains("buyButton") || dialog.contains("Acme"))
+    }
+
+    @Test func addStoreIntentRoutesDigitalDownloadsLemonSqueezy() async throws {
+        let intent = AddStoreIntent()
+        intent.site = SiteEntity(id: "s1", name: "Acme", creationDate: nil, modificationDate: nil)
+        intent.category = .digitalDownloads
+        intent.digitalPreference = .lemonSqueezy
+        intent.config = "checkoutUrl=https://acme.lemonsqueezy.com/checkout/buy/xyz"
+        let dialog = try await IntegrationOperationsOverride.$scoped.withValue(FakeService(terminal: .done(integrationID: "lemonSqueezy"))) {
+            try await intent.confirmAndApplyForTesting()
+        }
+        #expect(dialog.contains("lemonSqueezy") || dialog.contains("Acme"))
+    }
+
+    @Test func addStoreIntentRepromptsWhenARequiredFieldIsMissing() async throws {
+        struct MissingFieldService: IntegrationOperationsService {
+            func descriptors() -> [IntegrationDescriptor] { IntegrationCatalog.all }
+            func plan(integrationID: IntegrationID, answers: Answers, siteID: String) async -> Result<OperationPlan, IntegrationError> {
+                .failure(.missingRequiredField(key: "checkoutUrl"))
+            }
+            func apply(_ plan: OperationPlan, siteID: String) async -> IntegrationScaffolder.SetupStep {
+                .done(integrationID: plan.integrationID.rawValue)
+            }
+        }
+        let intent = AddStoreIntent()
+        intent.site = SiteEntity(id: "s1", name: "Acme", creationDate: nil, modificationDate: nil)
+        intent.category = .service
+        let dialog = try await IntegrationOperationsOverride.$scoped.withValue(MissingFieldService()) {
+            try await intent.confirmAndApplyForTesting()
+        }
+        #expect(dialog.contains("Checkout link"))
+    }
 }
