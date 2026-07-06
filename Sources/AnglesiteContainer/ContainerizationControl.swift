@@ -43,7 +43,7 @@ public struct ContainerizationControl: LocalContainerControl {
         ref: String,
         onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> LocalContainerSession {
-        let container = try await makeBareContainer(siteID: siteID, sourceRepo: sourceRepo)
+        let container = try await makeBareContainer(siteID: siteID, sourceRepo: sourceRepo, onOutput: onOutput)
 
         // 3. Hydrate from the repo: clone the virtio-fs-shared host repo into /workspace/site, then
         //    check out ref. Cloning from the read-only share (not in place) keeps /workspace writable
@@ -168,9 +168,18 @@ public struct ContainerizationControl: LocalContainerControl {
     /// that can't `@testable import` — can drive the same bare-boot path entitled with
     /// `com.apple.security.virtualization`, which `swift test`'s own runner can never carry. Still
     /// not part of the `LocalContainerControl` protocol seam; only test/probe code calls it directly.
-    public func makeBareContainer(siteID: String, sourceRepo: URL? = nil) async throws -> LinuxContainer {
+    /// `onOutput` streams boot-phase progress (see #498 — this phase previously ran silently, so a
+    /// VZ boot hang looked identical to nothing having started at all). Defaults to a no-op so the
+    /// vsock e2e test and `anglesite-container-probe` (neither wired to a `LogCenter`) don't need
+    /// updating.
+    public func makeBareContainer(
+        siteID: String,
+        sourceRepo: URL? = nil,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void = { _, _ in }
+    ) async throws -> LinuxContainer {
         // 0. Resolve the writable image store + boot artifacts. Missing artifacts are typed
         //    provisioning errors, surfaced as `imageUnavailable` instead of a silent mis-boot.
+        onOutput("[boot] resolving bundled image/kernel artifacts", .stdout)
         let storeURL: URL
         let imageLayoutURL: URL
         let kernelURL: URL
@@ -181,6 +190,7 @@ public struct ContainerizationControl: LocalContainerControl {
             kernelURL = try BundledImage.kernelURL()
             initfsLayoutURL = try BundledImage.initfsLayoutURL()
         } catch {
+            onOutput("[boot] artifact resolution failed: \(error)", .stderr)
             throw LocalContainerError.imageUnavailable("\(error)")
         }
 
@@ -203,11 +213,13 @@ public struct ContainerizationControl: LocalContainerControl {
         let rootfs: Containerization.Mount
         let initfs: Containerization.Mount
         do {
+            onOutput("[boot] importing OCI layouts into image store", .stdout)
             let store = try ImageStore(path: storeURL)
 
             // App image -> ext4 rootfs mount.
             let stagedImageLayout = try BundledImage.stagedLayoutURL(source: imageLayoutURL, name: "app-image")
             let appImage = try await loadOrGet(store, layout: stagedImageLayout, reference: BundledImage.imageReference)
+            onOutput("[boot] unpacking app image to ext4 rootfs", .stdout)
             rootfs = try await EXT4Unpacker(blockSizeInBytes: 8 * 1024 * 1024 * 1024)
                 .unpack(appImage, for: .current, at: rootfsURL)
 
@@ -215,11 +227,13 @@ public struct ContainerizationControl: LocalContainerControl {
             let stagedInitfsLayout = try BundledImage.stagedLayoutURL(source: initfsLayoutURL, name: "vminit-initfs")
             let initImageRef = "vminit:latest"
             let initImage = InitImage(image: try await loadOrGet(store, layout: stagedInitfsLayout, reference: initImageRef))
+            onOutput("[boot] unpacking vminit initfs to ext4", .stdout)
             initfs = try await initImage.initBlock(at: initfsURL, for: .linuxArm)
         } catch {
             // Unpacking may have created partial ext4 files before failing; don't leak them.
             try? FileManager.default.removeItem(at: rootfsURL)
             try? FileManager.default.removeItem(at: initfsURL)
+            onOutput("[boot] image import/unpack failed: \(error)", .stderr)
             throw LocalContainerError.imageUnavailable("\(error)")
         }
 
@@ -261,13 +275,104 @@ public struct ContainerizationControl: LocalContainerControl {
                     ))
                 }
             }
-            try await container.create()
-            try await container.start()
-            return container
+            onOutput("[boot] starting Virtualization-framework VM (create+start)", .stdout)
+            // `container.create()`/`.start()` can hang rather than throw when the process carries the
+            // `com.apple.security.virtualization` entitlement key but isn't actually provisioned to use
+            // it (ad-hoc/debug-signed builds — see #498): VZ never surfaces a clean error in that case,
+            // so without a bound here `start()` parks forever with nothing logged. `waitUntilServing`
+            // already bounds the dev-server-ready check the same way; this mirrors that for VM boot.
+            //
+            // Deliberately NOT a `withThrowingTaskGroup`/structured-concurrency race: a group awaits
+            // every child task before its scope can return, even a cancelled one, so if `create()`/
+            // `.start()` doesn't itself observe cancellation (a raw VZ hang may not), a group-based
+            // race would still block here until the real call resolves — defeating the timeout. This
+            // races via an unstructured `Task`, so a genuine hang leaks that one task but still lets
+            // this function return promptly with a diagnosable error.
+            //
+            // If the boot was merely slow rather than genuinely hung (disk contention, first-run
+            // staging), `container.create()`/`.start()` can still succeed AFTER the timeout has already
+            // failed this call and the caller has moved on. `onLateSuccess` tears that VM down instead
+            // of leaking it — otherwise nothing else in the process ever holds a reference to it, and
+            // it would keep consuming host resources (2 vCPU/2GB) until the app quits, one leak per
+            // timed-out retry.
+            let bootedContainer = try await Self.racingTimeout(
+                timeout: Self.vmBootTimeout,
+                timeoutError: LocalContainerError.bootFailed(
+                    "VM did not finish booting within \(Self.vmBootTimeout) — the process may carry the "
+                    + "virtualization entitlement without being provisioned to actually use it (ad-hoc/"
+                    + "debug-signed builds); Virtualization framework can hang rather than throw in that case"),
+                onLateSuccess: { lateContainer in
+                    onOutput(
+                        "[boot] VM finished booting after its \(Self.vmBootTimeout) timeout already failed "
+                        + "this request; stopping it now to avoid an orphaned VM", .stderr)
+                    Task { await self.stopBareContainer(lateContainer, siteID: siteID) }
+                }
+            ) {
+                try await container.create()
+                try await container.start()
+                return container
+            }
+            onOutput("[boot] VM started", .stdout)
+            return bootedContainer
         } catch {
+            onOutput("[boot] VM boot failed: \(error)", .stderr)
             try? FileManager.default.removeItem(at: rootfsURL)
             try? FileManager.default.removeItem(at: initfsURL)
             throw LocalContainerError.bootFailed("\(error)")
+        }
+    }
+
+    /// Bound on `container.create()`/`.start()` — see the call site's comment on why this exists.
+    private static let vmBootTimeout: Duration = .seconds(30)
+
+    /// Races `operation` against a `timeout`, resolving to whichever finishes first. Unlike a
+    /// `withThrowingTaskGroup`-based race, this does NOT wait for `operation` to finish once the
+    /// timeout wins — each side runs in its own unstructured `Task` and whichever calls `resumeOnce`
+    /// first decides the outcome; the loser (if it's `operation`, having genuinely hung) is simply
+    /// abandoned rather than awaited. That's the entire point: a structured race still blocks the
+    /// caller until every child task completes, which is exactly what a true VZ hang defeats.
+    ///
+    /// If `operation` was merely slow rather than hung, it can still succeed after the timeout has
+    /// already resolved this call with an error. `onLateSuccess` is the caller's chance to react to
+    /// that value — e.g. tear down a resource `operation` produced that nothing else now references —
+    /// since the returned/thrown result from this function only ever reflects whichever side won.
+    /// `internal` (not `private`) so `RacingTimeoutTests` can exercise it directly via `@testable
+    /// import` — it's a pure, generic async primitive with no Virtualization/entitlement dependency,
+    /// so it doesn't need `ANGLESITE_CONTAINER_E2E`'s real-hardware gate, just this target's normal
+    /// `ANGLESITE_CONTAINER_TESTS` build gate (this whole target only builds locally/opt-in — see the
+    /// file-level doc comment on `ContainerizationControlTests`).
+    static func racingTimeout<T: Sendable>(
+        timeout: Duration,
+        timeoutError: @autoclosure @escaping @Sendable () -> Error,
+        onLateSuccess: @escaping @Sendable (T) -> Void = { _ in },
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+            let lock = NSLock()
+            var resumed = false
+            func resumeOnce(_ result: Result<T, Error>) -> Bool {
+                lock.lock()
+                let alreadyResumed = resumed
+                resumed = true
+                lock.unlock()
+                guard !alreadyResumed else { return false }
+                continuation.resume(with: result)
+                return true
+            }
+            Task {
+                do {
+                    let value = try await operation()
+                    if !resumeOnce(.success(value)) {
+                        onLateSuccess(value)
+                    }
+                } catch {
+                    _ = resumeOnce(.failure(error))
+                }
+            }
+            Task {
+                try? await Task.sleep(for: timeout)
+                _ = resumeOnce(.failure(timeoutError()))
+            }
         }
     }
 
