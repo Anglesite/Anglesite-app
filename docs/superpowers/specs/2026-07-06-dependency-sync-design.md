@@ -68,14 +68,41 @@ range is newer than the site's or baseline's). Malformed or non-numeric leading
 segments (e.g. a stray pre-release tag) are treated as equal/incomparable and
 skipped rather than guessed at.
 
+### 3.1 Fast-path gate: the site's stamped Anglesite app version
+
+The template ships bundled 1:1 with the app — a given app version has exactly one
+possible template state. `Source/.site-config`'s `ANGLESITE_VERSION` field already
+exists for exactly this purpose, but currently (a pre-existing bug found while
+investigating #502) `Resources/Template/scripts/scaffold.sh` hardcodes it to
+`"1.0.0"` for every site regardless of when it's scaffolded — the field has never
+actually been meaningful.
+
+This feature fixes that: `SiteScaffolder` stamps `ANGLESITE_VERSION` with the real
+running app version (`Bundle.main`'s short version string) via the existing
+`SiteConfigFile.upsert()` helper, immediately after `scaffold.sh` succeeds —
+superseding whatever placeholder value the script itself writes. No changes to
+`scaffold.sh` itself; the correction happens entirely on the Swift side, so this
+stays clear of the unrelated `scaffold.sh` heredoc bug tracked in #501.
+
+The detection hook (§4) reads this stamp first: if it **equals** the currently
+running app's version, the check short-circuits immediately — nothing could have
+drifted, since the template hasn't changed since this site was last synced. No
+`package.json`/baseline parsing happens at all in that case. Only when the stamped
+version differs (older *or* newer — direction doesn't matter for the gate, only
+equality does) does the flow fall through to the real baseline-based 3-way diff
+above, which remains the sole source of truth for *which* packages actually offer
+an update. The version stamp is a cheap skip signal and human-readable provenance,
+not a substitute for the baseline snapshot.
+
 ## 4. Detection hook
 
 In `SiteWindowModel.loadAndStart()` (`Sources/AnglesiteApp/SiteWindowModel.swift`),
-immediately after `site` resolves and before `preview.open()` is called. The check
-reads and parses two small local JSON files (site's `package.json`,
-`dependency-baseline.json` if present) plus the app-bundled template's
-`package.json` — no container, no network, effectively instant. It completes before
-`preview.open()` would otherwise be called.
+immediately after `site` resolves and before `preview.open()` is called. First
+reads `.site-config`'s `ANGLESITE_VERSION` stamp (§3.1) — if it matches the running
+app's version, done, no further work. Otherwise reads and parses two small local
+JSON files (site's `package.json`, `dependency-baseline.json` if present) plus the
+app-bundled template's `package.json` — still no container, no network, effectively
+instant. All of this completes before `preview.open()` would otherwise be called.
 
 If the diff produces zero offers, nothing changes — `preview.open()` proceeds
 exactly as today.
@@ -105,7 +132,15 @@ No host-side npm invocation (there is no host Node — #70). On **Update**:
 2. Delete `Source/package-lock.json`.
 3. Overwrite `Config/dependency-baseline.json` with the post-update ranges (these
    are now the new "site never touched it" baseline going forward).
-4. Proceed into `preview.open()` as normal.
+4. Update `.site-config`'s `ANGLESITE_VERSION` (via `SiteConfigFile.upsert()`) to
+   the currently running app's version — the site is now synced, so the §3.1 fast
+   path will correctly skip on every subsequent open until the app itself updates
+   again.
+5. Proceed into `preview.open()` as normal.
+
+On **Skip**, none of steps 1–4 happen — importantly, the `ANGLESITE_VERSION` stamp
+is *not* bumped, so the fast path in §3.1 will not incorrectly short-circuit next
+time; the prompt correctly reappears.
 
 Step 2 means the next container boot's existing `container/hydrate.sh` no longer
 finds a lockfile to `cmp` against the baked one, so it falls to its own `npm install`
@@ -145,7 +180,11 @@ container, no npm, no network:
 - `package.json` rewrite step: given input text + an accepted-offers list, assert
   the exact output text — tested independently of any live container.
 - `SiteScaffolder`: extend its existing test suite to assert the baseline file is
-  written for a newly-scaffolded site.
+  written for a newly-scaffolded site, and that `ANGLESITE_VERSION` is stamped with
+  the real running app version rather than the script's placeholder.
+- §3.1 fast-path gate: unit tests for equal-version skip, differing-version
+  fall-through (both older and newer), and that `Skip` leaves the stamp untouched
+  while `Update` bumps it.
 - The actual `npm install` outcome after a lockfile deletion is **not** new test
   surface for this feature — it's exercised by `hydrate.sh`'s existing coverage.
 
@@ -153,8 +192,13 @@ container, no npm, no network:
 
 - New: dependency-baseline model + version comparator + 3-way diff (`AnglesiteCore`)
 - New: `package.json` rewrite helper (`AnglesiteCore`)
-- Modify: `SiteScaffolder.swift` — write baseline at scaffold time
-- Modify: `SiteWindowModel.swift` — detection hook before `preview.open()`
+- Modify: `SiteScaffolder.swift` — write baseline at scaffold time; correct the
+  `ANGLESITE_VERSION` stamp via `SiteConfigFile.upsert()` after `scaffold.sh` runs
+  (§3.1) — no changes to `scaffold.sh` itself
+- Modify: `SiteConfigFile.swift` — add a version-reading helper if one doesn't
+  already exist
+- Modify: `SiteWindowModel.swift` — detection hook before `preview.open()`,
+  including the §3.1 fast-path check
 - Modify: `SiteWindow.swift` — the update-offer sheet
 - Modify: `PreviewModel.swift` / preview loading view — "Updating dependencies…"
   transient framing for the post-update boot
