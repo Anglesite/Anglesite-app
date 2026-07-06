@@ -35,8 +35,8 @@ if [[ ! -f "$SRC/.claude-plugin/plugin.json" ]]; then
     exit 0
 fi
 
-# Minimum-version guard: the app requires plugin features introduced in 1.2.0
-# (apply_edit dry_run/edit-style, typed create_content). A MISSING plugin stays
+# Minimum-version guard: the app requires plugin features introduced in 1.3.0
+# (get_component_model, used by the Component Editor). A MISSING plugin stays
 # best-effort (handled above — PluginRuntime reports it at runtime), but bundling
 # a plugin that IS present yet too old would ship an app whose edit pipeline
 # fails in confusing ways at runtime — fail the build loudly instead.
