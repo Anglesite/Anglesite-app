@@ -46,15 +46,20 @@ rsync -a \
     "$TEMPLATE_ROOT/" "$TARGET/"
 
 # Stamp the scaffolded site with the Anglesite version and document config keys.
+#
+# Written with printf (not a heredoc): zsh implements heredocs via a scratch
+# file in the process's Darwin temp dir, which can fail to create in some
+# sandboxed/subprocess-spawned environments (#501). printf redirection writes
+# straight to $TARGET/.site-config with no intermediate temp file.
 VERSION="1.0.0"
-cat > "$TARGET/.site-config" <<SITECONFIG
-ANGLESITE_VERSION=$VERSION
-# SITE_URL=https://example.com        — site domain (used in feeds, sitemap, security.txt)
-# SECURITY_CONTACT=security@example.com — RFC 9116 security.txt contact (email or URI)
-# HSTS_PRELOAD=true                    — opt-in HSTS preload submission (hard to reverse)
-# SCRIPT_ALLOW=example.com             — additional CSP script-src domains (comma-separated)
-# BLOCK_AI=true                        — block AI training crawlers via robots.txt (off by default;
-#                                        trades away AI-search discoverability)
-SITECONFIG
+printf '%s\n' \
+    "ANGLESITE_VERSION=$VERSION" \
+    "# SITE_URL=https://example.com        — site domain (used in feeds, sitemap, security.txt)" \
+    "# SECURITY_CONTACT=security@example.com — RFC 9116 security.txt contact (email or URI)" \
+    "# HSTS_PRELOAD=true                    — opt-in HSTS preload submission (hard to reverse)" \
+    "# SCRIPT_ALLOW=example.com             — additional CSP script-src domains (comma-separated)" \
+    "# BLOCK_AI=true                        — block AI training crawlers via robots.txt (off by default;" \
+    "#                                        trades away AI-search discoverability)" \
+    > "$TARGET/.site-config"
 
 echo "==> Scaffolded Anglesite site in $TARGET"

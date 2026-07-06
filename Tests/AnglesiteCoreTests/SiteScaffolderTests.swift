@@ -159,6 +159,43 @@ final class SiteScaffolderTests: XCTestCase {
         XCTAssertEqual(step, "copyingTemplate")
     }
 
+    /// Resolve the real scaffold.sh from the in-repo template (Resources/Template/), mirroring
+    /// HomepageWriterTests.realIndexAstroURL()'s repo-root-relative lookup.
+    private static func realScaffoldScriptURL() -> URL {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return repoRoot.appendingPathComponent("Resources/Template/scripts/scaffold.sh")
+    }
+
+    /// Regression coverage for #501: exercises the real scaffold.sh subprocess (not the mocked
+    /// CommandRunner the other tests use) to confirm .site-config is still generated correctly
+    /// now that the heredoc has been replaced with printf. Other tests in this file mock
+    /// scaffold.sh entirely, so they wouldn't catch a reintroduced heredoc-shaped regression here.
+    func testRealScaffoldScriptWritesSiteConfigWithoutHeredoc() throws {
+        let script = Self.realScaffoldScriptURL()
+        guard FileManager.default.fileExists(atPath: script.path) else {
+            throw XCTSkip("scaffold.sh not found at \(script.path)")
+        }
+        let target = tmpDir().appendingPathComponent("scaffold-test")
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = [script.path, "--yes", target.path]
+        let stderrPipe = Pipe()
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+
+        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertEqual(process.terminationStatus, 0, "scaffold.sh failed: \(stderr)")
+        XCTAssertFalse(stderr.contains("here document"), "heredoc scratch-file error reintroduced: \(stderr)")
+
+        let cfg = try String(contentsOf: target.appendingPathComponent(".site-config"), encoding: .utf8)
+        XCTAssertTrue(cfg.contains("ANGLESITE_VERSION=1.0.0"))
+        XCTAssertTrue(cfg.contains("# SITE_URL=https://example.com"))
+        XCTAssertTrue(cfg.contains("# BLOCK_AI=true"))
+    }
+
     func testGitInitFailureIsNonFatalAndStillRegisters() async throws {
         let root = tmpDir()
         let registered = OSAllocatedUnfairLock<Bool>(initialState: false)
