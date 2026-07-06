@@ -101,4 +101,41 @@ import Foundation
         m.back()
         #expect(m.step == .pickProvider)
     }
+
+    @Test func startFromRouterWithPresetProviderJumpsToFields() {
+        let m = IntegrationWizardModel(service: FakeService(), siteID: "s")
+        m.startFromRouter(AddStoreRouter.Route(integrationID: .buyButton, presetProvider: "stripe"))
+        #expect(m.selectedID == .buyButton)
+        #expect(m.answers["provider"] == "stripe")
+        #expect(m.step == .fields)
+    }
+
+    @Test func startFromRouterWithNoProvidersJumpsToFields() {
+        let m = IntegrationWizardModel(service: FakeService(), siteID: "s")
+        m.startFromRouter(AddStoreRouter.Route(integrationID: .snipcart, presetProvider: nil))
+        #expect(m.selectedID == .snipcart)
+        #expect(m.step == .fields)
+    }
+
+    @Test func startFromRouterWithUnresolvedProviderGoesToPickProvider() {
+        let m = IntegrationWizardModel(service: FakeService(), siteID: "s")
+        m.startFromRouter(AddStoreRouter.Route(integrationID: .donations, presetProvider: nil))
+        #expect(m.selectedID == .donations)
+        #expect(m.answers["provider"] == nil)
+        #expect(m.step == .pickProvider)
+    }
+
+    @Test func startFromRouterClearsStaleAnswersFromAPriorAttempt() {
+        // Regression: the model persists for the whole wizard session (one instance per open
+        // sheet), so a second "Add a Store" attempt after backing out of a first must not carry
+        // over the prior attempt's answers — a stale "provider" could satisfy .pickProvider's
+        // canContinue without the user choosing one, and buyButton/lemonSqueezy share the
+        // checkoutUrl/buttonText field keys, so stale field values could leak across categories.
+        let m = IntegrationWizardModel(service: FakeService(), siteID: "s")
+        m.startFromRouter(AddStoreRouter.Route(integrationID: .buyButton, presetProvider: "stripe"))
+        m.answers["checkoutUrl"] = "https://buy.stripe.com/test"
+        m.startFromRouter(AddStoreRouter.Route(integrationID: .donations, presetProvider: nil))
+        #expect(m.answers["provider"] == nil)
+        #expect(m.answers["checkoutUrl"] == nil)
+    }
 }

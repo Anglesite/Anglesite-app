@@ -5,6 +5,7 @@ import AnglesiteCore
 struct IntegrationWizard: View {
     @Bindable var model: IntegrationWizardModel
     let onClose: () -> Void
+    @State private var showingAddStore = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,13 +25,39 @@ struct IntegrationWizard: View {
     // MARK: Steps
 
     private var pickIntegration: some View {
-        List(model.descriptorsForPicker, id: \.id,
-             selection: Binding(get: { model.selectedID }, set: { model.selectedID = $0 })) { d in
-            VStack(alignment: .leading, spacing: 2) {
-                Text(d.displayName).font(.headline)
-                Text(d.summary).font(.caption).foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            Button {
+                showingAddStore = true
+            } label: {
+                HStack {
+                    Image(systemName: "cart")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Add a Store").font(.headline)
+                        Text("Answer a couple of questions and we'll pick the right commerce integration.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 16)
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 4)
+            .buttonStyle(.plain)
+            Divider()
+            List(model.descriptorsForPicker, id: \.id,
+                 selection: Binding(get: { model.selectedID }, set: { model.selectedID = $0 })) { d in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(d.displayName).font(.headline)
+                    Text(d.summary).font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .sheet(isPresented: $showingAddStore) {
+            AddStoreIntakeView { route in
+                showingAddStore = false
+                model.startFromRouter(route)
+            }
         }
     }
 
