@@ -18,13 +18,15 @@ import AnglesiteCore
 /// — it's unit-tested independent of `WKScriptMessage`, which has no public initializer and is
 /// awkward to fake.
 ///
-/// **API change vs prior versions:** the static `handle(body:via:)` method is gone, replaced
-/// by `dispatch(body:via:onVisibleElements:onCanvasSelection:onComputedStyles:)`. All current
+/// **API change vs prior versions:** the primary entry point is now
+/// `dispatch(body:via:onVisibleElements:onCanvasSelection:onComputedStyles:)`. All current
 /// callers are internal to this repo (the `WKScriptMessageHandler` impl below, the unit tests,
-/// and `PreviewView`'s production init); no deprecated shim is provided. If you're a downstream
-/// framework consumer hitting this, the migration is mechanical: rename `handle` → `dispatch`,
-/// pass `nil` for the optional handlers to preserve the apply-edit-only behavior, and match on
-/// the richer `DispatchResult` enum instead of `Result<EditReply, EditMessage.DecodeError>`.
+/// and `PreviewView`'s production init) and use `dispatch` directly. The old `handle(body:via:)`
+/// signature is kept as a `@available(*, deprecated)` shim below — apply-edit only, matching its
+/// prior behavior — so a downstream framework consumer hitting this gets a fix-it instead of a
+/// cryptic missing-member error. The migration is mechanical: rename `handle` → `dispatch`, pass
+/// `nil` for the optional handlers to preserve the apply-edit-only behavior, and match on the
+/// richer `DispatchResult` enum instead of `Result<EditReply, EditMessage.DecodeError>`.
 public final class AnglesiteScriptHandler: NSObject, WKScriptMessageHandler {
     public typealias VisibleElementsHandler = @Sendable ([VisibleElement]) async -> Void
     public typealias CanvasSelectionHandler = @Sendable (CanvasSelectionMessage) async -> Void

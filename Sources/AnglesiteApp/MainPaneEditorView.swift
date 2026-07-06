@@ -1,10 +1,12 @@
 import SwiftUI
 import AnglesiteCore
 
-/// Inline editor for a navigator-selected file. v1 is a plain text editor (`EditorKind.resolve`
-/// always returns `.text`); the `switch` is where future file-specific editors attach. State lives
-/// in `FileEditorModel` (owned by `SiteWindow`) so navigating away can auto-save and the buffer
-/// survives the Preview/Editor toggle. All IO is async/off-main in the model.
+/// Inline editor for a navigator-selected file. `EditorKind.resolve` picks the editor per file:
+/// plain text for most files, a dedicated `PlistEditorView`-backed case for `.plist`, and the
+/// three-pane `ComponentEditorView` (outline + canvas + inspector) for `.astro` components when
+/// `componentContext` is available. State lives in `FileEditorModel` (owned by `SiteWindow`) so
+/// navigating away can auto-save and the buffer survives the Preview/Editor toggle. All IO is
+/// async/off-main in the model.
 struct MainPaneEditorView: View {
     @Bindable var model: FileEditorModel
     /// Non-nil once the preview's runtime is ready; enables the `.component` editor case below.
