@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import AnglesiteBridge
 import AnglesiteCore
@@ -167,6 +168,33 @@ struct AnglesiteScriptHandlerTests {
     private func deprecatedHandle(body: Any, via router: EditRouter) async -> Result<EditReply, EditMessage.DecodeError> {
         await AnglesiteScriptHandler.handle(body: body, via: router)
     }
+
+    @Test("Dispatch routes canvas-selection to its handler") func dispatchRoutesCanvasSelection() async {
+        let router = RecordingRouter(reply: EditReply(id: "-", status: .failed, message: "unused"))
+        let received = LockIsolated<CanvasSelectionMessage?>(nil)
+        let result = await AnglesiteScriptHandler.dispatch(
+            body: ["type": "anglesite:canvas-selection", "file": "/f.astro", "line": 7, "column": 1],
+            via: router,
+            onCanvasSelection: { msg in received.setValue(msg) }
+        )
+        guard case .canvasSelectionHandled = result else {
+            Issue.record("expected .canvasSelectionHandled, got \(result)")
+            return
+        }
+        #expect(received.value?.line == 7)
+    }
+
+    @Test("Canvas messages without a handler are dropped, not rejected") func dispatchDropsUnhandledCanvas() async {
+        let router = RecordingRouter(reply: EditReply(id: "-", status: .failed, message: "unused"))
+        let result = await AnglesiteScriptHandler.dispatch(
+            body: ["type": "anglesite:computed-styles", "styles": ["display": "block"]],
+            via: router
+        )
+        guard case .computedStylesDropped = result else {
+            Issue.record("expected .computedStylesDropped, got \(result)")
+            return
+        }
+    }
 }
 
 private actor RecordingRouter: EditRouter {
@@ -182,4 +210,16 @@ private actor RecordingRouter: EditRouter {
 private actor ElementCollector {
     private(set) var batches: [[VisibleElement]] = []
     func append(_ batch: [VisibleElement]) { batches.append(batch) }
+}
+
+final class LockIsolated<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: Value
+    init(_ value: Value) { self._value = value }
+    var value: Value {
+        lock.withLock { _value }
+    }
+    func setValue(_ new: Value) {
+        lock.withLock { _value = new }
+    }
 }
