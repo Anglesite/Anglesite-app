@@ -49,6 +49,19 @@ struct StartupProgressEstimatorTests {
         #expect(est.fraction >= 0.55)
     }
 
+    @Test("A container-prefixed astro line still parses through to connecting")
+    func containerPrefixedLineParses() {
+        // Real lines from `LocalContainerSiteRuntime` are prefixed by the guest process label,
+        // e.g. "[astro] ┃ Local    http://127.0.0.1:4321/" — the URL regex must still find the
+        // URL despite the leading "[astro] " tag.
+        var est = make()
+        est.ingest(runtimeState: .starting(siteID: "s"), at: 0)
+        est.ingest(logText: "[astro] Building for production...", at: 0.2)
+        est.ingest(logText: "[astro] ┃ Local    http://127.0.0.1:4321/", at: 0.5)
+        #expect(est.phase == .connecting)
+        #expect(est.fraction >= 0.55)
+    }
+
     @Test("A URL line as the very first log jumps straight to connecting")
     func urlFirstLineSkipsBuilding() {
         var est = make()
