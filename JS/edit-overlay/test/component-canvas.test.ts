@@ -54,15 +54,36 @@ describe("component canvas", () => {
     expect(typeof styles.styles.display).toBe("string");
   });
 
-  it("exposes highlight/clear hooks for native", () => {
+  it("exposes highlight/clear hooks for native, matching on line with an offset annotation column", () => {
+    // Real-world case: Astro's dev server stamps the annotation at the END
+    // of the opening tag (e.g. parse column 1 -> annotated column 23), so
+    // native's requested column (the parsed start) never equals the
+    // annotation's column exactly. `highlight` must still resolve it.
     setPath("/_anglesite/component/Card");
     capturePosts();
     document.body.innerHTML =
-      `<article data-astro-source-file="/f.astro" data-astro-source-loc="7:1">hi</article>`;
+      `<article data-astro-source-file="/f.astro" data-astro-source-loc="7:23">hi</article>`;
     installComponentCanvas();
     (window as any).anglesiteCanvas.highlight(7, 1);
     expect(document.querySelector(".anglesite-canvas-ring")).not.toBeNull();
     (window as any).anglesiteCanvas.clear();
     expect(document.querySelector(".anglesite-canvas-ring")).toBeNull();
+  });
+
+  it("highlight picks the nearest following column among same-line candidates", () => {
+    setPath("/_anglesite/component/Card");
+    capturePosts();
+    document.body.innerHTML =
+      `<span id="a" data-astro-source-file="/f.astro" data-astro-source-loc="8:7"></span>` +
+      `<span id="b" data-astro-source-file="/f.astro" data-astro-source-loc="8:20"></span>`;
+    installComponentCanvas();
+    (window as any).anglesiteCanvas.highlight(8, 5);
+    let ring = document.querySelector(".anglesite-canvas-ring") as HTMLElement;
+    expect(ring).not.toBeNull();
+    (window as any).anglesiteCanvas.clear();
+
+    (window as any).anglesiteCanvas.highlight(8, 15);
+    ring = document.querySelector(".anglesite-canvas-ring") as HTMLElement;
+    expect(ring).not.toBeNull();
   });
 });

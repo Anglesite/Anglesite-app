@@ -49,7 +49,10 @@ Rejected alternatives:
 
 ```jsonc
 {
-  "version": "<commit SHA the model was computed from>",
+  "version": "<content hash of the file the model was computed from>",
+                           // sha256 of the source, NOT a git SHA: apply_edit
+                           // commits to the hidden edits branch without moving
+                           // HEAD, so a repo SHA can't detect staleness (PR #410 review)
   "path": "src/components/Card.astro",
   "template": {            // tree of nodes
     "id": "n0",            // stable within this model version (index-path derived)
@@ -104,7 +107,7 @@ strict decode extends to the new shapes on both sides. Each op returns
 | `set-props-interface` | props array | codegen/update the `Props` interface in frontmatter |
 | `extract-component` | nodeId, newName | new `.astro` file from the subtree, hoist obvious props, replace with instance + import |
 
-**Concurrency:** if `baseVersion` ≠ current file commit, the op is rejected with a
+**Concurrency:** if `baseVersion` ≠ the current file's content hash, the op is rejected with a
 `stale` status; the app refetches and either replays trivially-mergeable ops or
 surfaces the conflict banner (§5). This is the same optimistic pattern as the
 existing external-change detection, moved server-side.

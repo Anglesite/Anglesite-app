@@ -460,7 +460,16 @@ struct SiteWindow: View {
         switch model.mainPaneMode {
         case .editor:
             if case .text(let editorModel) = model.activeEditor {
-                MainPaneEditorView(model: editorModel)
+                MainPaneEditorView(
+                    model: editorModel,
+                    componentContext: ComponentEditorContext(
+                        baseURL: model.preview.readyURL,
+                        modelClient: ComponentModelClient(mcpClient: { [preview = model.preview] in
+                            await preview.mcpClient()
+                        }),
+                        sourceRoot: site.sourceDirectory
+                    )
+                )
             } else if case .plist(let plistEditorModel) = model.activeEditor {
                 PlistEditorView(model: plistEditorModel) { title in
                     Task { await model.saveWebsiteTitle(title) }

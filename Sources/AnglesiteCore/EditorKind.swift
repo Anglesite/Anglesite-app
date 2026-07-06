@@ -4,12 +4,16 @@ import Foundation
 public enum EditorKind: Sendable, Equatable {
     case text
     case plist
+    case component
 
     /// Resolves the editor for a file. A single decision point so the routing rule lives in one
     /// tested place; kept on the enum to keep the public API surface tidy.
     public static func resolve(for file: FileRef) -> EditorKind {
         if file.group == .metadata, file.url.pathExtension.lowercased() == "plist" {
             return .plist
+        }
+        if file.group == .components, file.url.pathExtension.lowercased() == "astro" {
+            return .component
         }
         return .text
     }
