@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
 # Creates a smoke-test Anglesite site at ~/Sites/anglesite-smoke/, populated
-# from the in-repo template (Resources/Template/) with `node_modules` installed.
+# from the in-repo template (Resources/Template/).
 #
 # Use this fixture to manually verify the sandboxed App Store app end-to-end.
 # A real-signed build is produced so the run exercises the App Sandbox, hardened
 # runtime signing, and local Apple Containerization capability gates.
 #
-# Idempotent: re-running mirrors any template changes and runs `npm install`
-# incrementally.
+# Idempotent: re-running mirrors any template changes. A local `npm install`
+# still runs to keep the fixture usable outside the app, but the App Store smoke
+# must validate the container-backed runtime path, not host Node.
 
 set -euo pipefail
 
@@ -126,8 +127,9 @@ cat <<EOF
 ✓ Smoke fixture ready: $FIXTURE_DIR
 ✓ Real-signed App Store app built: $APP
 
-  This is the load-bearing Phase 10.1 validation — it must run INTERACTIVELY
-  under the real signature (the sandbox/JIT entitlements aren't enforced ad-hoc).
+  This is the load-bearing Phase 10.1 / #81 validation — it must run
+  INTERACTIVELY under the real signature (the App Sandbox and virtualization
+  entitlement path are not representative under unsigned/no-signing builds).
 
   Launch the built app from a normal location (signed sandboxed apps refuse to
   run from /private/tmp):
@@ -142,19 +144,21 @@ cat <<EOF
        The save-panel Powerbox grant is the per-site security-scoped grant on the
        package (do NOT pre-inject a bookmark — a foreign process's scoped bookmark
        won't resolve in the app; cf. spike 6.5). It persists for next launch.
-    2. Preview should be served by the selected container runtime, not by a host
-       subprocess. The debug log must not mention LocalSiteRuntime.
-    3. Deploy button → build/preflight/deploy must run inside the container runtime
-       against the granted package's Source/, then the pre-deploy scan runs, or the
-       app must clearly report that container validation is unavailable. (A real
-       'wrangler deploy' needs a Cloudflare token; reaching the wrangler spawn is
-       the in-sandbox signal.)
+    2. Preview should be served by LocalContainerSiteRuntime, not by a host
+       subprocess. The debug log should include the runtime selection and must
+       not show any host Node preview fallback.
+    3. Deploy button → build/preflight/deploy must run against the granted
+       package's Source/ using the active container runtime where applicable,
+       then the pre-deploy scan runs. A real 'wrangler deploy' needs a Cloudflare
+       token; if no token is configured, capture the prompt/error instead of
+       treating it as a sandbox failure.
     4. Drag an image onto an <img> in the preview → bytes write to public/images/
        through the container-backed edit path. Record any sandbox denial.
     5. Close the window → runtime children reaped. Quit → no orphan runtime process.
-    6. Chat button must be ABSENT (compiled out of App Store); Settings → no GitHub
-       Connect row, and updates are handled by the App Store.
+    6. Foundation Models chat should be present. Settings → no GitHub Connect
+       row, and updates are handled by the App Store.
 
-  Capture PASS/FAIL per step (esp. #2 runtime selection and #3 container deploy path)
-  in a notes file; this is the validation evidence required before #70 merges.
+  Capture PASS/FAIL per step (especially #2 runtime selection, #3 deploy path,
+  #4 image-drop writes, and any sandbox denials) in a notes file; this is the
+  validation evidence required for #81 / Phase 10.1 closeout.
 EOF
