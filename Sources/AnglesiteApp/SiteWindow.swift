@@ -492,7 +492,10 @@ struct SiteWindow: View {
                         modelClient: ComponentModelClient(mcpClient: { [preview = model.preview] in
                             await preview.mcpClient()
                         }),
-                        sourceRoot: site.sourceDirectory
+                        sourceRoot: site.sourceDirectory,
+                        editRouter: MCPApplyEditRouter(mcpClient: { [preview = model.preview] in
+                            await preview.mcpClient()
+                        })
                     )
                 )
             } else if case .plist(let plistEditorModel) = model.activeEditor {

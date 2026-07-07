@@ -121,6 +121,7 @@ struct ComponentEditorView: View {
             if context.baseURL != nil, let url = model.harnessURL {
                 ComponentCanvasView(
                     url: url,
+                    editRouter: context.editRouter,
                     onSelection: { model.canvasSelected($0) },
                     onComputedStyles: { model.computedStyles = $0.styles },
                     onWebView: { webView = $0 }
@@ -232,9 +233,14 @@ struct ComponentEditorView: View {
 }
 
 /// Harness-page WKWebView: same bridge as the preview, wired to the
-/// component-canvas handlers. No edit routing in slice 1.
+/// component-canvas handlers. Routes edits (e.g. a Styles panel change)
+/// through `editRouter` when the site window has wired one up (slice 2);
+/// falls back to `LoggingEditRouter()` — logs to the Debug pane instead of
+/// applying — when it hasn't (dev server not started yet, or a context that
+/// intentionally has no write capability).
 private struct ComponentCanvasView: NSViewRepresentable {
     let url: URL
+    var editRouter: EditRouter?
     let onSelection: @MainActor (CanvasSelectionMessage) -> Void
     let onComputedStyles: @MainActor (ComputedStylesReport) -> Void
     var onWebView: (WKWebView) -> Void = { _ in }
@@ -249,7 +255,7 @@ private struct ComponentCanvasView: NSViewRepresentable {
         let onSelection = self.onSelection
         let onComputedStyles = self.onComputedStyles
         let handler = AnglesiteScriptHandler(
-            router: LoggingEditRouter(),
+            router: editRouter ?? LoggingEditRouter(),
             onCanvasSelection: { message in await MainActor.run { onSelection(message) } },
             onComputedStyles: { report in await MainActor.run { onComputedStyles(report) } }
         )

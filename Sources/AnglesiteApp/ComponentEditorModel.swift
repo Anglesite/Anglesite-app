@@ -8,6 +8,12 @@ struct ComponentEditorContext {
     let baseURL: URL?
     let modelClient: ComponentModelClient?
     let sourceRoot: URL
+    /// Routes canvas-originated edits (e.g. a style tweak from the Styles
+    /// panel) to the running site's MCP server. `nil` until the site window
+    /// wires a real router (dev server not started yet, or a test/preview
+    /// context that doesn't need write capability) — `ComponentCanvasView`
+    /// falls back to `LoggingEditRouter()` in that case.
+    let editRouter: EditRouter?
 }
 
 @MainActor
