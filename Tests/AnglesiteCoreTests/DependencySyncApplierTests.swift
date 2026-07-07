@@ -1,0 +1,68 @@
+import Testing
+import Foundation
+@testable import AnglesiteCore
+
+@Suite struct DependencySyncApplierTests {
+    private func tmpDir() -> URL {
+        let d = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+
+    private static let packageJSON = """
+    { "dependencies": { "astro": "^5.0.0" } }
+    """
+
+    private func makeSourceAndConfig() throws -> (source: URL, config: URL) {
+        let root = tmpDir()
+        let source = root.appendingPathComponent("Source")
+        let config = root.appendingPathComponent("Config")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        try Self.packageJSON.write(to: source.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+        try "old lockfile contents".write(to: source.appendingPathComponent("package-lock.json"), atomically: true, encoding: .utf8)
+        try "ANGLESITE_VERSION=1.2.0\n".write(to: source.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+        return (source, config)
+    }
+
+    @Test func rewritesPackageJSONWithTheAcceptedRange() throws {
+        let (source, config) = try makeSourceAndConfig()
+        let offers = [DependencyUpdateOffer(name: "astro", currentRange: "^5.0.0", offeredRange: "^6.4.8")]
+        try DependencySyncApplier.apply(offers, sourceDirectory: source, configDirectory: config, runningAppVersion: "1.4.0")
+        let updated = try String(contentsOf: source.appendingPathComponent("package.json"), encoding: .utf8)
+        #expect(updated.contains("\"astro\": \"^6.4.8\""))
+    }
+
+    @Test func deletesTheStaleLockfile() throws {
+        let (source, config) = try makeSourceAndConfig()
+        let offers = [DependencyUpdateOffer(name: "astro", currentRange: "^5.0.0", offeredRange: "^6.4.8")]
+        try DependencySyncApplier.apply(offers, sourceDirectory: source, configDirectory: config, runningAppVersion: "1.4.0")
+        #expect(!FileManager.default.fileExists(atPath: source.appendingPathComponent("package-lock.json").path))
+    }
+
+    @Test func savesTheNewBaselineWithTheAcceptedRanges() throws {
+        let (source, config) = try makeSourceAndConfig()
+        let offers = [DependencyUpdateOffer(name: "astro", currentRange: "^5.0.0", offeredRange: "^6.4.8")]
+        try DependencySyncApplier.apply(offers, sourceDirectory: source, configDirectory: config, runningAppVersion: "1.4.0")
+        #expect(DependencyBaseline.load(from: config) == ["astro": "^6.4.8"])
+    }
+
+    @Test func bumpsTheAnglesiteVersionStamp() throws {
+        let (source, config) = try makeSourceAndConfig()
+        let offers = [DependencyUpdateOffer(name: "astro", currentRange: "^5.0.0", offeredRange: "^6.4.8")]
+        try DependencySyncApplier.apply(offers, sourceDirectory: source, configDirectory: config, runningAppVersion: "1.4.0")
+        let siteConfig = try String(contentsOf: source.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(SiteConfigFile.value(forKey: "ANGLESITE_VERSION", in: siteConfig) == "1.4.0")
+    }
+
+    @Test func throwsReadFailedWhenPackageJSONIsMissing() throws {
+        let root = tmpDir()
+        let source = root.appendingPathComponent("Source")
+        let config = root.appendingPathComponent("Config")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        #expect(throws: DependencySyncApplier.ApplyError.readFailed) {
+            try DependencySyncApplier.apply([], sourceDirectory: source, configDirectory: config, runningAppVersion: "1.4.0")
+        }
+    }
+}
