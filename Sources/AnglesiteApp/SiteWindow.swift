@@ -518,7 +518,12 @@ struct SiteWindow: View {
             )
         case .starting:
             centeredStatus {
-                StartupProgressView(title: "Starting dev server for \(site.name)…", model: model.startup)
+                StartupProgressView(
+                    title: model.preview.isUpdatingDependencies
+                        ? "Updating dependencies — this may take a minute…"
+                        : "Starting dev server for \(site.name)…",
+                    model: model.startup
+                )
             }
         case .failed(_, let message):
             centeredStatus {

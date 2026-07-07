@@ -520,6 +520,7 @@ final class SiteWindowModel {
                                 configDirectory: resolved.configDirectory,
                                 runningAppVersion: runningVersion
                             )
+                            self.preview.isUpdatingDependencies = true
                         }
                         self.dependencyUpdateModel = nil
                         continuation.resume()
