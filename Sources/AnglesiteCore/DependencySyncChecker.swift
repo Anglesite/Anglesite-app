@@ -1,0 +1,32 @@
+import Foundation
+
+/// Top-level entry point for the dependency-sync feature: the fast-path gate
+/// (spec §3.1) plus the full 3-way diff, wired together. Never throws — any
+/// unreadable/malformed input degrades to "nothing to offer" (spec §7), since
+/// this is a diagnostic convenience feature that must never block a site opening.
+public enum DependencySyncChecker {
+    public static func check(
+        sourceDirectory: URL,
+        configDirectory: URL,
+        templateDirectory: URL,
+        runningAppVersion: String
+    ) -> [DependencyUpdateOffer] {
+        let siteConfigURL = sourceDirectory.appendingPathComponent(".site-config")
+        if let siteConfigContents = try? String(contentsOf: siteConfigURL, encoding: .utf8),
+           let stampedVersion = SiteConfigFile.value(forKey: "ANGLESITE_VERSION", in: siteConfigContents),
+           stampedVersion == runningAppVersion {
+            return []
+        }
+
+        guard let sitePackageText = try? String(
+                contentsOf: sourceDirectory.appendingPathComponent("package.json"), encoding: .utf8),
+              let siteDeps = try? PackageJSONDependencies.extract(from: sitePackageText),
+              let templatePackageText = try? String(
+                contentsOf: templateDirectory.appendingPathComponent("package.json"), encoding: .utf8),
+              let templateDeps = try? PackageJSONDependencies.extract(from: templatePackageText)
+        else { return [] }
+
+        let baseline = DependencyBaseline.load(from: configDirectory)
+        return DependencySync.diff(site: siteDeps, baseline: baseline, template: templateDeps)
+    }
+}
