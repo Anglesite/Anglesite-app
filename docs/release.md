@@ -52,9 +52,9 @@ The script:
 
 1. runs `xcodegen generate`;
 2. archives the `Anglesite` scheme;
-3. verifies the bundled Node re-sign survived the archive;
-4. exports an App Store `.pkg`;
-5. validates and uploads with `xcrun altool`.
+3. verifies the archived app signature and Team ID;
+4. exports, and unless `--validate-only` uploads, an App Store `.pkg` via
+   `xcodebuild -exportArchive`.
 
 Use `--validate-only` to archive/export/validate without uploading. Transporter
 is still a valid manual fallback: drop the exported `.pkg` onto Transporter.app.

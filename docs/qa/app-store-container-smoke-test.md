@@ -1,0 +1,88 @@
+# App Store Container Runtime Smoke Test
+
+**Issue:** [#81](https://github.com/Anglesite/Anglesite-app/issues/81)  
+**Scope:** real-signed, write-heavy smoke for the single sandboxed `Anglesite` App Store target.  
+**Target runtime:** `LocalContainerSiteRuntime` through Apple Containerization.
+
+## Purpose
+
+Validate the release-signing shape that CI cannot exercise:
+
+- the App Store-sandboxed app carries the granted `com.apple.security.virtualization` entitlement;
+- the app selects `LocalContainerSiteRuntime`, not any retired host Node preview path;
+- preview, MCP/edit, image writes, build/preflight, deploy prompting, and teardown all work through the package security-scoped grant;
+- sandbox denials and container failures are visible in logs.
+
+This is an interactive author-run smoke. A no-signing or ad-hoc build is not sufficient.
+
+## Preconditions
+
+- Apple Silicon Mac on the supported macOS/Xcode versions.
+- Apple Development or distribution signing identity for the app team.
+- Provisioning profile that grants `com.apple.security.virtualization`.
+- Container artifacts provisioned in the app bundle, or equivalent release artifact path:
+  - `Resources/container-image/index.json`
+  - `Resources/container-kernel/vmlinux`
+  - `Resources/container-initfs/index.json`
+- Cloudflare token available if the deploy step should reach a real `wrangler deploy`.
+
+Run the local runtime probes first:
+
+```sh
+SIGN_IDENTITY="Apple Development: <name> (<TEAMID>)" scripts/run-container-probe.sh echo
+SIGN_IDENTITY="Apple Development: <name> (<TEAMID>)" scripts/run-container-probe.sh boot
+```
+
+Both must pass, or the App Store smoke is expected to fail at runtime startup.
+
+## Build Fixture And App
+
+Use the helper script to create the site fixture and a real-signed app:
+
+```sh
+DEVELOPMENT_TEAM=<TEAMID> scripts/create-smoke-fixture.sh
+```
+
+The script prints the built app path and the interactive steps. Copy the built app to `~/Applications/` before launching; signed sandboxed apps should not be launched from temporary build directories.
+
+## Smoke Matrix
+
+| Case | Result | Evidence |
+|---|---|---|
+| Real-signed app launches from `~/Applications` |  |  |
+| App signature has expected Team ID |  |  |
+| Provisioning profile grants `com.apple.security.virtualization` |  |  |
+| Imported fixture package opens with a security-scoped grant |  |  |
+| Runtime selection logs `LocalContainerSiteRuntime` |  |  |
+| No host Node preview fallback starts |  |  |
+| Preview loads through loopback proxy |  |  |
+| MCP/edit path applies a text edit through the in-container sidecar |  |  |
+| Image drop writes optimized assets under `Source/public/images/` |  |  |
+| Build/preflight/deploy path reaches the expected Cloudflare token or wrangler result |  |  |
+| Foundation Models chat is present |  |  |
+| GitHub `gh` settings/auth UI is absent in App Store build |  |  |
+| Window close tears down VM/proxies |  |  |
+| No relevant sandbox denials appear during the run |  |  |
+
+Use `PASS`, `FAIL`, or `N/A`, and record exact failure logs for every non-pass.
+
+## Log Capture
+
+In a separate terminal, capture sandbox denials while running the smoke:
+
+```sh
+log stream --predicate 'eventMessage CONTAINS "deny"' --style compact
+```
+
+Also save the app debug pane logs for these sources when present:
+
+- `runtime`
+- `container:<siteID>`
+- `deploy:<siteID>:build`
+- `deploy:<siteID>:preflight`
+- `deploy:<siteID>:wrangler`
+
+## Acceptance
+
+#81 can close when the matrix passes on a real-signed App Store-target build, or when every failure has a follow-up issue with captured logs and a clear owner.
+
