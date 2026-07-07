@@ -409,6 +409,26 @@ struct SiteWindow: View {
                 }
             }
         }
+        .sheet(item: $bindableModel.dependencyUpdateModel) { updateModel in
+            NavigationStack {
+                List(updateModel.offers, id: \.name) { offer in
+                    LabeledContent(offer.name) {
+                        Text("\(offer.currentRange) → \(offer.offeredRange)")
+                            .font(.system(.body, design: .monospaced))
+                    }
+                }
+                .navigationTitle("Dependency Updates Available")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Skip") { updateModel.skip() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Update") { updateModel.update() }
+                    }
+                }
+            }
+            .frame(minWidth: 420, minHeight: 260)
+        }
         .sheet(item: $bindableModel.integrationWizardModel) { wizardModel in
             NavigationStack {
                 IntegrationWizard(model: wizardModel, onClose: { model.integrationWizardModel = nil })

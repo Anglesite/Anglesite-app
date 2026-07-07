@@ -79,6 +79,9 @@ final class SiteWindowModel {
     /// Non-nil ⟺ the Add Integration wizard is presented. Coupling presentation to the model
     /// (`.sheet(item:)`) prevents an empty sheet if construction somehow lags.
     var integrationWizardModel: IntegrationWizardModel?
+    /// Non-nil ⟺ the dependency-update-offer sheet is presented (`.sheet(item:)`), set by the
+    /// detection hook in `loadAndStart()` when `DependencySyncChecker` finds offers to show.
+    var dependencyUpdateModel: DependencyUpdateModel?
     var newPagePresented = false
     var newCollectionPresented = false
     var navigator: SiteNavigatorModel?
@@ -499,6 +502,31 @@ final class SiteWindowModel {
             PreviewAnnotationProviderRegistry.shared.register(provider, for: resolved.id)
         }
 
+        if let templateURL = TemplateRuntime.bundledURL(), let runningVersion = AppVersion.current() {
+            let offers = DependencySyncChecker.check(
+                sourceDirectory: resolved.sourceDirectory,
+                configDirectory: resolved.configDirectory,
+                templateDirectory: templateURL,
+                runningAppVersion: runningVersion
+            )
+            if !offers.isEmpty {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    dependencyUpdateModel = DependencyUpdateModel(offers: offers) { [weak self] accepted in
+                        guard let self else { continuation.resume(); return }
+                        if accepted {
+                            try? DependencySyncApplier.apply(
+                                offers,
+                                sourceDirectory: resolved.sourceDirectory,
+                                configDirectory: resolved.configDirectory,
+                                runningAppVersion: runningVersion
+                            )
+                        }
+                        self.dependencyUpdateModel = nil
+                        continuation.resume()
+                    }
+                }
+            }
+        }
         preview.open(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
         // Scan from the package ROOT (not Source/): SiteFileTree's adaptive layout detects the
         // `.anglesite` package here and resolves Source/ for Components/Styles plus the sibling
