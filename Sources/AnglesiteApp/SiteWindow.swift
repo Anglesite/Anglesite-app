@@ -428,6 +428,11 @@ struct SiteWindow: View {
                 }
             }
             .frame(minWidth: 420, minHeight: 260)
+            // `loadAndStart()` suspends on a `CheckedContinuation` that only Skip/Update resume
+            // (see `SiteWindowModel.loadAndStart`). Block outside-tap/swipe dismissal so those two
+            // buttons are structurally the only way out — otherwise the continuation would leak
+            // and `preview.open()` would never run.
+            .interactiveDismissDisabled()
         }
         .sheet(item: $bindableModel.integrationWizardModel) { wizardModel in
             NavigationStack {
