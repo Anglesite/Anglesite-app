@@ -28,4 +28,15 @@ public enum SiteConfigFile {
         for d in domains where !merged.contains(d) { merged.append(d) }
         return upsert([(cspKey, merged.joined(separator: ","))], into: contents)
     }
+
+    /// Reads a single `KEY=value` line's value from `.site-config`-formatted
+    /// contents, or `nil` if the key isn't present. Lines starting with `#`
+    /// (comments) never match, even if they look like `# KEY=value`.
+    public static func value(forKey key: String, in contents: String) -> String? {
+        for line in contents.split(separator: "\n") {
+            guard line.hasPrefix("\(key)=") else { continue }
+            return String(line.dropFirst(key.count + 1))
+        }
+        return nil
+    }
 }
