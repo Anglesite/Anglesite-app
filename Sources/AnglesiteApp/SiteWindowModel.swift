@@ -514,13 +514,20 @@ final class SiteWindowModel {
                     dependencyUpdateModel = DependencyUpdateModel(offers: offers) { [weak self] accepted in
                         guard let self else { continuation.resume(); return }
                         if accepted {
-                            try? DependencySyncApplier.apply(
-                                offers,
-                                sourceDirectory: resolved.sourceDirectory,
-                                configDirectory: resolved.configDirectory,
-                                runningAppVersion: runningVersion
-                            )
-                            self.preview.isUpdatingDependencies = true
+                            do {
+                                try DependencySyncApplier.apply(
+                                    offers,
+                                    sourceDirectory: resolved.sourceDirectory,
+                                    configDirectory: resolved.configDirectory,
+                                    runningAppVersion: runningVersion
+                                )
+                                self.preview.isUpdatingDependencies = true
+                            } catch {
+                                // package.json rewrite failed — nothing was written, so
+                                // the site opens against its unchanged files. Leave
+                                // isUpdatingDependencies false: this boot is a normal
+                                // one, not a post-update one.
+                            }
                         }
                         self.dependencyUpdateModel = nil
                         continuation.resume()
