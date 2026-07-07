@@ -26,12 +26,16 @@ public actor SiteScaffolder {
     private let gitInit: GitInit
     private let register: Register
     private let fileManager: FileManager
+    private let appVersion: @Sendable () -> String?
 
     /// `catalog` (not a fixed theme) so the owner's Look-step choice resolves at pipeline time
-    /// from `draft.themeID`.
+    /// from `draft.themeID`. `appVersion` defaults to `AppVersion.current()` (i.e. `Bundle.main`);
+    /// tests inject a fixed string since `Bundle.main` inside `swift test` is the test runner and
+    /// has no `CFBundleShortVersionString`.
     public init(sitesRoot: URL, templateURL: URL, catalog: ThemeCatalog,
                 run: @escaping CommandRunner, gitInit: @escaping GitInit,
-                register: @escaping Register, fileManager: FileManager = .default) {
+                register: @escaping Register, fileManager: FileManager = .default,
+                appVersion: @escaping @Sendable () -> String? = { AppVersion.current() }) {
         self.sitesRoot = sitesRoot
         self.templateURL = templateURL
         self.catalog = catalog
@@ -39,6 +43,7 @@ public actor SiteScaffolder {
         self.gitInit = gitInit
         self.register = register
         self.fileManager = fileManager
+        self.appVersion = appVersion
     }
 
     public nonisolated func scaffold(_ draft: NewSiteDraft) -> AsyncStream<ScaffoldStep> {
@@ -73,6 +78,29 @@ public actor SiteScaffolder {
                 return emit(.failed(step: "copyingTemplate", message: "Couldn't create the site files.\n\(r.stderr)"))
             }
         } catch { return emit(.failed(step: "copyingTemplate", message: humanize(error))) }
+
+        // Write the dependency baseline (spec §3) and correct the ANGLESITE_VERSION
+        // stamp scaffold.sh just wrote (it hardcodes a "1.0.0" placeholder — the real
+        // value is a Swift-side concern, since scaffold.sh has no access to the running
+        // app's version). Both are best-effort: a failure here must never fail the
+        // overall scaffold, since the site itself was already created successfully —
+        // but unlike the version stamp, losing the baseline silently disables
+        // dependency-sync for this site going forward, so it surfaces as a warning.
+        let configDir = package.configURL
+        do {
+            let templatePackageText = try String(
+                contentsOf: templateURL.appendingPathComponent("package.json"), encoding: .utf8)
+            let templateDeps = try PackageJSONDependencies.extract(from: templatePackageText)
+            try DependencyBaseline.save(templateDeps, to: configDir)
+        } catch {
+            emit(.warning(step: "copyingTemplate", message: "Dependency baseline not saved: \(humanize(error))"))
+        }
+        if let currentAppVersion = appVersion() {
+            let siteConfigURL = siteDir.appendingPathComponent(".site-config")
+            let existingConfig = (try? String(contentsOf: siteConfigURL, encoding: .utf8)) ?? ""
+            let updatedConfig = SiteConfigFile.upsert([("ANGLESITE_VERSION", currentAppVersion)], into: existingConfig)
+            try? updatedConfig.write(to: siteConfigURL, atomically: true, encoding: .utf8)
+        }
 
         // 2b. git init in Source/ (non-fatal — coordinates with #68).
         do { try await gitInit(siteDir) }

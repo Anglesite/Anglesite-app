@@ -15,6 +15,13 @@ final class PreviewModel {
     /// the runtime is still `.starting`.
     private(set) var openSiteID: String?
 
+    /// Set by SiteWindowModel right before calling `open()` following an accepted
+    /// dependency update (Task 9) — that boot will hit the slow `npm install` path
+    /// instead of the instant hardlink path (the lockfile was just deleted), so the
+    /// loading UI should say so rather than looking like the #502 stall. Cleared
+    /// whenever `state` settles to `.ready` or `.failed`.
+    var isUpdatingDependencies = false
+
     /// The page route the preview should show, set by `navigate(toRoute:)` (e.g. from
     /// `PreviewSiteIntent`). `nil` means the site root. Persisted, not consumed, so a dev-server
     /// restart that rebinds the port re-derives the target against the new base URL.
@@ -60,6 +67,12 @@ final class PreviewModel {
         Task { @MainActor [weak self] in
             for await newState in await runtime.observe() {
                 self?.state = newState
+                switch newState {
+                case .ready, .failed:
+                    self?.isUpdatingDependencies = false
+                case .idle, .starting:
+                    break
+                }
             }
         }
     }

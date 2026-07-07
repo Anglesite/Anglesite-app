@@ -409,6 +409,31 @@ struct SiteWindow: View {
                 }
             }
         }
+        .sheet(item: $bindableModel.dependencyUpdateModel) { updateModel in
+            NavigationStack {
+                List(updateModel.offers, id: \.name) { offer in
+                    LabeledContent(offer.name) {
+                        Text("\(offer.currentRange) → \(offer.offeredRange)")
+                            .font(.system(.body, design: .monospaced))
+                    }
+                }
+                .navigationTitle("Dependency Updates Available")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Skip") { updateModel.skip() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Update") { updateModel.update() }
+                    }
+                }
+            }
+            .frame(minWidth: 420, minHeight: 260)
+            // `loadAndStart()` suspends on a `CheckedContinuation` that only Skip/Update resume
+            // (see `SiteWindowModel.loadAndStart`). Block outside-tap/swipe dismissal so those two
+            // buttons are structurally the only way out — otherwise the continuation would leak
+            // and `preview.open()` would never run.
+            .interactiveDismissDisabled()
+        }
         .sheet(item: $bindableModel.integrationWizardModel) { wizardModel in
             NavigationStack {
                 IntegrationWizard(model: wizardModel, onClose: { model.integrationWizardModel = nil })
@@ -498,7 +523,12 @@ struct SiteWindow: View {
             )
         case .starting:
             centeredStatus {
-                StartupProgressView(title: "Starting dev server for \(site.name)…", model: model.startup)
+                StartupProgressView(
+                    title: model.preview.isUpdatingDependencies
+                        ? "Updating dependencies — this may take a minute…"
+                        : "Starting dev server for \(site.name)…",
+                    model: model.startup
+                )
             }
         case .failed(_, let message):
             centeredStatus {

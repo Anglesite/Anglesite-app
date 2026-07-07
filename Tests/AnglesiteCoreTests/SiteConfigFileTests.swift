@@ -41,4 +41,18 @@ import Testing
         #expect(out.contains("BOOKING_PROVIDER=calendly"))
         #expect(out.contains("SITE_NAME=Acme"))
     }
+
+    @Test func readsAnExistingKeysValue() {
+        let value = SiteConfigFile.value(forKey: "ANGLESITE_VERSION", in: "ANGLESITE_VERSION=1.0.0\nSITE_NAME=Acme\n")
+        #expect(value == "1.0.0")
+    }
+
+    @Test func returnsNilForAMissingKey() {
+        #expect(SiteConfigFile.value(forKey: "ANGLESITE_VERSION", in: "SITE_NAME=Acme\n") == nil)
+    }
+
+    @Test func ignoresCommentLinesWhenReadingAValue() {
+        let contents = "# ANGLESITE_VERSION=commented-out\nANGLESITE_VERSION=1.2.0\n"
+        #expect(SiteConfigFile.value(forKey: "ANGLESITE_VERSION", in: contents) == "1.2.0")
+    }
 }

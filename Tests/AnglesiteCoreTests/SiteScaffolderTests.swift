@@ -61,9 +61,13 @@ final class SiteScaffolderTests: XCTestCase {
         let expectedID = try AnglesitePackage(url: pkgURL).readMarker().siteID.uuidString
         if case .done(let id) = steps.last { XCTAssertEqual(id, expectedID) }
         else { XCTFail("expected .done last, got \(String(describing: steps.last))") }
-        // .site-config gained SITE_NAME without clobbering the stamped version — lives in Source/.
+        // .site-config gained SITE_NAME. The ANGLESITE_VERSION scaffold.sh's placeholder wrote
+        // ("1.0.0") gets corrected to the real running app/bundle version by SiteScaffolder itself
+        // (see testHappyPathWritesADependencyBaselineAndStampsTheRealAppVersion) — here we only
+        // assert it's no longer the placeholder, since the actual value is whatever Bundle.main
+        // resolves to inside the XCTest host and isn't this test's concern.
         let cfg = try String(contentsOf: pkgURL.appendingPathComponent("Source/.site-config"), encoding: .utf8)
-        XCTAssertTrue(cfg.contains("ANGLESITE_VERSION=1.0.0"))
+        XCTAssertFalse(cfg.contains("ANGLESITE_VERSION=1.0.0"))
         XCTAssertTrue(cfg.contains("SITE_NAME=Acme Co"))
         // Theme + homepage applied in Source/:
         let css = try String(contentsOf: pkgURL.appendingPathComponent("Source/src/styles/global.css"), encoding: .utf8)
@@ -157,6 +161,50 @@ final class SiteScaffolderTests: XCTestCase {
         for await s in scaffolder.scaffold(makeDraft()) { steps.append(s) }
         guard case .failed(let step, _)? = steps.last else { return XCTFail("expected .failed") }
         XCTAssertEqual(step, "copyingTemplate")
+    }
+
+    func testHappyPathWritesADependencyBaselineAndStampsTheRealAppVersion() async throws {
+        let root = tmpDir()
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let templateURL = repoRoot.appendingPathComponent("Resources/Template", isDirectory: true)
+        let calls = CallRecorder()
+        let scaffolder = SiteScaffolder(
+            sitesRoot: root, templateURL: templateURL, catalog: ThemeCatalog(themes: [theme]),
+            run: fakeRunner(calls: calls),
+            gitInit: { _ in },
+            register: { pkg in try SiteStore.Site.make(package: pkg) },
+            appVersion: { "9.9.9" }
+        )
+        for await _ in scaffolder.scaffold(makeDraft()) {}
+
+        let pkgURL = root.appendingPathComponent("acme-co.anglesite")
+        let configDir = pkgURL.appendingPathComponent("Config")
+        let baseline = DependencyBaseline.load(from: configDir)
+        XCTAssertNotNil(baseline)
+        XCTAssertEqual(baseline?["astro"], "^6.4.8")  // matches Resources/Template/package.json today
+
+        let siteConfig = try String(
+            contentsOf: pkgURL.appendingPathComponent("Source/.site-config"), encoding: .utf8)
+        let stampedVersion = SiteConfigFile.value(forKey: "ANGLESITE_VERSION", in: siteConfig)
+        XCTAssertEqual(stampedVersion, "9.9.9")
+        XCTAssertNotEqual(stampedVersion, "1.0.0")  // no longer the scaffold.sh placeholder
+    }
+
+    func testMissingTemplatePackageJSONWarnsButStillRegisters() async throws {
+        // makeScaffolder's default templateURL ("/template") has no package.json,
+        // so reading it for the dependency baseline fails — this must surface as a
+        // warning rather than disappearing silently (the site would otherwise never
+        // get dependency-sync, with no record of why).
+        let root = tmpDir()
+        let scaffolder = makeScaffolder(root: root)
+        var steps: [SiteScaffolder.ScaffoldStep] = []
+        for await s in scaffolder.scaffold(makeDraft()) { steps.append(s) }
+
+        XCTAssertTrue(steps.contains { if case .warning(let s, _) = $0 { return s == "copyingTemplate" }; return false })
+        let pkgURL = root.appendingPathComponent("acme-co.anglesite")
+        XCTAssertNil(DependencyBaseline.load(from: pkgURL.appendingPathComponent("Config")))
+        guard case .done? = steps.last else { return XCTFail("expected .done despite missing template package.json") }
     }
 
     /// Resolve the real scaffold.sh from the in-repo template (Resources/Template/), mirroring
