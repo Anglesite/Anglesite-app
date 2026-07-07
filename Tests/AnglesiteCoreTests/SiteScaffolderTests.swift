@@ -191,6 +191,22 @@ final class SiteScaffolderTests: XCTestCase {
         XCTAssertNotEqual(stampedVersion, "1.0.0")  // no longer the scaffold.sh placeholder
     }
 
+    func testMissingTemplatePackageJSONWarnsButStillRegisters() async throws {
+        // makeScaffolder's default templateURL ("/template") has no package.json,
+        // so reading it for the dependency baseline fails — this must surface as a
+        // warning rather than disappearing silently (the site would otherwise never
+        // get dependency-sync, with no record of why).
+        let root = tmpDir()
+        let scaffolder = makeScaffolder(root: root)
+        var steps: [SiteScaffolder.ScaffoldStep] = []
+        for await s in scaffolder.scaffold(makeDraft()) { steps.append(s) }
+
+        XCTAssertTrue(steps.contains { if case .warning(let s, _) = $0 { return s == "copyingTemplate" }; return false })
+        let pkgURL = root.appendingPathComponent("acme-co.anglesite")
+        XCTAssertNil(DependencyBaseline.load(from: pkgURL.appendingPathComponent("Config")))
+        guard case .done? = steps.last else { return XCTFail("expected .done despite missing template package.json") }
+    }
+
     func testGitInitFailureIsNonFatalAndStillRegisters() async throws {
         let root = tmpDir()
         let registered = OSAllocatedUnfairLock<Bool>(initialState: false)

@@ -83,12 +83,17 @@ public actor SiteScaffolder {
         // stamp scaffold.sh just wrote (it hardcodes a "1.0.0" placeholder — the real
         // value is a Swift-side concern, since scaffold.sh has no access to the running
         // app's version). Both are best-effort: a failure here must never fail the
-        // overall scaffold, since the site itself was already created successfully.
+        // overall scaffold, since the site itself was already created successfully —
+        // but unlike the version stamp, losing the baseline silently disables
+        // dependency-sync for this site going forward, so it surfaces as a warning.
         let configDir = package.configURL
-        if let templatePackageText = try? String(
-                contentsOf: templateURL.appendingPathComponent("package.json"), encoding: .utf8),
-           let templateDeps = try? PackageJSONDependencies.extract(from: templatePackageText) {
-            try? DependencyBaseline.save(templateDeps, to: configDir)
+        do {
+            let templatePackageText = try String(
+                contentsOf: templateURL.appendingPathComponent("package.json"), encoding: .utf8)
+            let templateDeps = try PackageJSONDependencies.extract(from: templatePackageText)
+            try DependencyBaseline.save(templateDeps, to: configDir)
+        } catch {
+            emit(.warning(step: "copyingTemplate", message: "Dependency baseline not saved: \(humanize(error))"))
         }
         if let currentAppVersion = appVersion() {
             let siteConfigURL = siteDir.appendingPathComponent(".site-config")
