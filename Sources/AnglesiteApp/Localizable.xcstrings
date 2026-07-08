@@ -342,6 +342,9 @@
     "Choose Image" : {
 
     },
+    "Choose Logo" : {
+
+    },
     "Choose where to save the local .anglesite file." : {
 
     },
@@ -999,6 +1002,9 @@
 
     },
     "Save Website…" : {
+
+    },
+    "Save Your Website" : {
 
     },
     "Save your website" : {

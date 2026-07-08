@@ -334,7 +334,7 @@ struct NewSiteWizard: View {
 
     @MainActor private func saveWebsite() {
         let panel = NSSavePanel()
-        panel.title = "Save Your Website"
+        panel.title = String(localized: "Save Your Website")
         panel.prompt = String(localized: "Save")
         panel.allowedContentTypes = [.anglesiteSite]
         panel.canCreateDirectories = true
@@ -356,7 +356,7 @@ struct NewSiteWizard: View {
 
     @MainActor private func chooseLogo() {
         let panel = NSOpenPanel()
-        panel.title = "Choose Logo"
+        panel.title = String(localized: "Choose Logo")
         panel.prompt = String(localized: "Choose")
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
