@@ -17,6 +17,14 @@ import Foundation
 /// inherent tradeoff of regex-based scanning versus a full AST parse and is not closed here;
 /// Delete always requires explicit user confirmation and is git-tracked/recoverable, which is
 /// this scanner's primary mitigation for this class of false positive.
+///
+/// **Alias resolution scope:** `tsconfig.json`/`jsconfig.json` `compilerOptions.paths` (wildcard
+/// and exact entries), `baseUrl`, and a same-project `extends` chain are resolved (see
+/// `loadPathAliases`/`resolveAlias`). Aliases declared *only* via `astro.config.mjs`'s
+/// `vite.resolve.alias` — not mirrored into tsconfig/jsconfig `paths`, which Astro's docs
+/// recommend keeping in sync but do not enforce — are **not** resolved: an import through such an
+/// alias with no matching `paths` entry stays unresolved and can flag a live file as unused. Same
+/// mitigation as the regex blind spots above: confirmation-gated, git-tracked delete.
 public enum DeadAssetScanner {
     public struct CleanupCandidate: Sendable, Equatable, Identifiable {
         public let id: String
@@ -146,49 +154,97 @@ public enum DeadAssetScanner {
         return resolveRelativePath(dir, relativeTo: sourcePath)
     }
 
-    /// Alias pattern → target patterns, both retaining their single `*` wildcard, e.g.
-    /// `"@components/*" → ["src/components/*"]`. Read from the site's own `tsconfig.json`/
-    /// `jsconfig.json` `compilerOptions.paths` (not `extends` chains — Astro's own base configs
-    /// never define `paths`). Malformed/missing/commented JSON safely degrades to an empty map,
-    /// matching this scanner's "never guess" resolution philosophy.
-    static func loadPathAliases(projectRoot: URL) -> [String: [String]] {
-        for name in ["tsconfig.json", "jsconfig.json"] {
-            let url = projectRoot.appendingPathComponent(name)
-            guard let data = try? Data(contentsOf: url) else { continue }
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-            guard let compilerOptions = json["compilerOptions"] as? [String: Any] else { continue }
-            guard let paths = compilerOptions["paths"] as? [String: Any] else { continue }
-            var result: [String: [String]] = [:]
-            for (pattern, targets) in paths {
-                guard let targetList = targets as? [String] else { continue }
-                result[pattern] = targetList
-            }
-            if !result.isEmpty { return result }
-        }
-        return [:]
+    /// A tsconfig/jsconfig's alias-relevant `compilerOptions`, merged across an `extends` chain
+    /// (a child's own `baseUrl`/`paths` win over anything inherited — matching how TypeScript
+    /// itself merges `compilerOptions`). `baseUrl` is stored exactly as written in the config
+    /// (project-root-relative in the common case).
+    struct PathAliasConfig: Equatable {
+        let baseUrl: String?
+        let paths: [String: [String]]
     }
 
-    /// Resolves `ref` against `aliases` (from `loadPathAliases`): finds an alias pattern whose
-    /// `*`-stripped prefix/suffix matches `ref`, substitutes the corresponding target pattern's
-    /// prefix/suffix. Only single-`*` patterns are handled — matching the common
-    /// `"@foo/*": ["src/foo/*"]` shape; anything else is skipped (never guessed at).
-    static func resolveAlias(_ ref: String, aliases: [String: [String]]) -> String? {
-        for (pattern, targets) in aliases {
-            guard let starIndex = pattern.firstIndex(of: "*"), pattern.filter({ $0 == "*" }).count == 1 else { continue }
-            let prefix = String(pattern[pattern.startIndex..<starIndex])
-            let suffix = String(pattern[pattern.index(after: starIndex)...])
-            guard ref.hasPrefix(prefix), ref.hasSuffix(suffix), ref.count >= prefix.count + suffix.count else { continue }
-            let matched = String(ref.dropFirst(prefix.count).dropLast(suffix.count))
-            for target in targets {
-                guard let targetStar = target.firstIndex(of: "*"), target.filter({ $0 == "*" }).count == 1 else { continue }
-                let targetPrefix = String(target[target.startIndex..<targetStar])
-                let targetSuffix = String(target[target.index(after: targetStar)...])
-                var resolved = targetPrefix + matched + targetSuffix
-                if resolved.hasPrefix("./") { resolved.removeFirst(2) }
-                return resolved
+    /// Loads `tsconfig.json` or `jsconfig.json` from `projectRoot` (in that order — the first one
+    /// that yields a non-empty `baseUrl`/`paths`, after following its `extends` chain, wins).
+    /// Malformed/missing/commented JSON safely degrades to an empty config, matching this
+    /// scanner's "never guess" resolution philosophy.
+    static func loadPathAliases(projectRoot: URL) -> PathAliasConfig {
+        for name in ["tsconfig.json", "jsconfig.json"] {
+            let url = projectRoot.appendingPathComponent(name)
+            if let config = loadTSConfig(at: url, depth: 0), config.baseUrl != nil || !config.paths.isEmpty {
+                return config
+            }
+        }
+        return PathAliasConfig(baseUrl: nil, paths: [:])
+    }
+
+    /// Loads one tsconfig/jsconfig file, recursively following a relative `extends` chain (TS
+    /// resolves `extends` relative to the extending file's own directory; a depth guard avoids an
+    /// accidental cycle). Returns `nil` only if `url` itself can't be read/parsed as JSON.
+    private static func loadTSConfig(at url: URL, depth: Int) -> PathAliasConfig? {
+        guard depth < 5 else { return nil }
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+
+        var inherited = PathAliasConfig(baseUrl: nil, paths: [:])
+        if let extendsRef = json["extends"] as? String {
+            let parentURL = url.deletingLastPathComponent().appendingPathComponent(extendsRef)
+            if let parent = loadTSConfig(at: parentURL, depth: depth + 1) {
+                inherited = parent
+            }
+        }
+
+        let compilerOptions = json["compilerOptions"] as? [String: Any]
+        let baseUrl = (compilerOptions?["baseUrl"] as? String) ?? inherited.baseUrl
+        var paths = inherited.paths
+        if let rawPaths = compilerOptions?["paths"] as? [String: Any] {
+            for (pattern, targets) in rawPaths {
+                guard let targetList = targets as? [String] else { continue }
+                paths[pattern] = targetList
+            }
+        }
+        return PathAliasConfig(baseUrl: baseUrl, paths: paths)
+    }
+
+    /// Resolves `ref` against `config` (from `loadPathAliases`): finds a `paths` pattern —
+    /// wildcard (single `*`) or exact — matching `ref`, substitutes the corresponding target
+    /// (first target wins, matching TypeScript's own resolution order), then resolves that target
+    /// relative to `baseUrl` (or, when `baseUrl` is unset, relative to the project root directly —
+    /// matching how TypeScript resolves `paths` without an explicit `baseUrl`).
+    static func resolveAlias(_ ref: String, config: PathAliasConfig) -> String? {
+        for (pattern, targets) in config.paths {
+            let starCount = pattern.filter({ $0 == "*" }).count
+            if starCount == 1, let starIndex = pattern.firstIndex(of: "*") {
+                let prefix = String(pattern[pattern.startIndex..<starIndex])
+                let suffix = String(pattern[pattern.index(after: starIndex)...])
+                guard ref.hasPrefix(prefix), ref.hasSuffix(suffix), ref.count >= prefix.count + suffix.count else { continue }
+                let matched = String(ref.dropFirst(prefix.count).dropLast(suffix.count))
+                for target in targets {
+                    guard let targetStar = target.firstIndex(of: "*"), target.filter({ $0 == "*" }).count == 1 else { continue }
+                    let targetPrefix = String(target[target.startIndex..<targetStar])
+                    let targetSuffix = String(target[target.index(after: targetStar)...])
+                    let resolved = targetPrefix + matched + targetSuffix
+                    return applyBaseURL(resolved, config.baseUrl)
+                }
+            } else if starCount == 0, pattern == ref, let target = targets.first {
+                return applyBaseURL(target, config.baseUrl)
             }
         }
         return nil
+    }
+
+    /// Prefixes `target` (a `paths`-substituted specifier, possibly still `./`-relative) with
+    /// `baseUrl` when one is configured; strips a leading `./` either way. `baseUrl` is treated as
+    /// project-root-relative (the common single-tsconfig case); an `extends` chain that reaches a
+    /// parent config outside the project root and sets its own `baseUrl` would misresolve here —
+    /// an accepted, narrow gap, no worse than the pre-existing no-`baseUrl` behavior.
+    private static func applyBaseURL(_ target: String, _ baseUrl: String?) -> String {
+        var clean = target
+        if clean.hasPrefix("./") { clean.removeFirst(2) }
+        guard let baseUrl, !baseUrl.isEmpty, baseUrl != "." else { return clean }
+        var base = baseUrl
+        if base.hasPrefix("./") { base.removeFirst(2) }
+        if base.hasSuffix("/") { base.removeLast() }
+        return "\(base)/\(clean)"
     }
 
     private static func matches(_ regex: NSRegularExpression, in source: String, group: Int) -> [String] {
@@ -215,7 +271,7 @@ public enum DeadAssetScanner {
     public static func scan(projectRoot: URL, images: [SiteContentGraph.Image]) -> [CleanupCandidate] {
         var fileReferenceCounts: [String: Int] = [:]
         var globDirectories: Set<String> = []
-        let aliases = loadPathAliases(projectRoot: projectRoot)
+        let aliasConfig = loadPathAliases(projectRoot: projectRoot)
 
         for abs in walk(projectRoot) {
             let ext = "." + abs.pathExtension.lowercased()
@@ -225,11 +281,11 @@ public enum DeadAssetScanner {
             let relPath = relativePosix(abs, from: projectRoot)
 
             let refs = extractReferences(source: source, path: relPath)
-            for ref in refs.fileReferences { fileReferenceCounts[ref, default: 0] += 1 }
-            globDirectories.formUnion(refs.globDirectories)
+            for ref in refs.fileReferences { fileReferenceCounts[ref.lowercased(), default: 0] += 1 }
+            globDirectories.formUnion(refs.globDirectories.map { $0.lowercased() })
             for raw in refs.unresolvedReferences {
-                if let aliasResolved = resolveAlias(raw, aliases: aliases) {
-                    fileReferenceCounts[aliasResolved, default: 0] += 1
+                if let aliasResolved = resolveAlias(raw, config: aliasConfig) {
+                    fileReferenceCounts[aliasResolved.lowercased(), default: 0] += 1
                 }
             }
 
@@ -238,15 +294,16 @@ public enum DeadAssetScanner {
             let frontmatter = Frontmatter.parse(source)
             if case let .string(layoutRef)? = frontmatter["layout"],
                let resolved = resolve(layoutRef, relativeTo: relPath) {
-                fileReferenceCounts[resolved, default: 0] += 1
+                fileReferenceCounts[resolved.lowercased(), default: 0] += 1
             }
         }
 
         func referenceCount(for path: String) -> Int {
-            if globDirectories.contains(where: { path.hasPrefix($0 + "/") }) {
-                return max(1, fileReferenceCounts[path] ?? 0)
+            let key = path.lowercased()
+            if globDirectories.contains(where: { key.hasPrefix($0 + "/") }) {
+                return max(1, fileReferenceCounts[key] ?? 0)
             }
-            return fileReferenceCounts[path] ?? 0
+            return fileReferenceCounts[key] ?? 0
         }
 
         var candidates: [CleanupCandidate] = []

@@ -152,13 +152,57 @@ struct DeadAssetScannerScanTests {
         #expect(!candidates.map(\.path).contains("src/components/Header.astro"))
     }
 
-    @Test("no tsconfig paths means alias-style imports remain unresolved and unused files are still flagged")
-    func noAliasConfig() {
+    @Test("KNOWN LIMITATION: an alias with no matching tsconfig/jsconfig paths entry (e.g. vite.resolve.alias in astro.config.mjs) still produces a false-positive unused flag")
+    func aliasWithNoPathsEntryIsNotResolved() {
         let root = makeSite([
             "src/pages/index.astro": "---\nimport Header from '@components/Header.astro';\n---\n<Header />",
             "src/components/Header.astro": "<header>Site</header>",
         ])
         let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
         #expect(candidates.map(\.path).contains("src/components/Header.astro"))
+    }
+
+    @Test("baseUrl-relative path alias resolves to the real file")
+    func tsconfigBaseURLAlias() {
+        let root = makeSite([
+            "tsconfig.json": #"{"compilerOptions": {"baseUrl": "./src", "paths": {"@components/*": ["components/*"]}}}"#,
+            "src/pages/index.astro": "---\nimport Header from '@components/Header.astro';\n---\n<Header />",
+            "src/components/Header.astro": "<header>Site</header>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/Header.astro"))
+    }
+
+    @Test("exact (non-wildcard) path alias resolves to the real file")
+    func tsconfigExactAlias() {
+        let root = makeSite([
+            "tsconfig.json": #"{"compilerOptions": {"paths": {"@header": ["src/components/Header.astro"]}}}"#,
+            "src/pages/index.astro": "---\nimport Header from '@header';\n---\n<Header />",
+            "src/components/Header.astro": "<header>Site</header>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/Header.astro"))
+    }
+
+    @Test("path alias inherited through an extends chain resolves to the real file")
+    func tsconfigExtendsChain() {
+        let root = makeSite([
+            "tsconfig.base.json": #"{"compilerOptions": {"paths": {"@components/*": ["src/components/*"]}}}"#,
+            "tsconfig.json": #"{"extends": "./tsconfig.base.json"}"#,
+            "src/pages/index.astro": "---\nimport Header from '@components/Header.astro';\n---\n<Header />",
+            "src/components/Header.astro": "<header>Site</header>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/Header.astro"))
+    }
+
+    @Test("reference matching is case-insensitive (default APFS is case-insensitive-but-case-preserving)")
+    func caseInsensitiveMatch() {
+        let root = makeSite([
+            "src/pages/index.astro": "---\nimport Header from '../components/header.astro';\n---\n<Header />",
+            "src/components/Header.astro": "<header>Site</header>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/Header.astro"))
     }
 }
