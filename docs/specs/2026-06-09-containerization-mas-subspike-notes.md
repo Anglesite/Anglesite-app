@@ -21,8 +21,9 @@
 > vsock→TCP proxy** reach guest ports with only `com.apple.security.virtualization` — no
 > `com.apple.vm.networking`. A shipping sandboxed MAS app (`try-containers/Containers`) proves it. So
 > `LocalContainerSiteRuntime` (#69) is viable on **MAS too** (Apple Silicon), gated only on the
-> clearable `.virtualization` grant. See the **"Wall 3 resolved"** addendum at the bottom. The
-> walls/prediction below are retained for history.
+> clearable `.virtualization` grant *(✅ since dissolved entirely — the entitlement is unrestricted,
+> no grant exists; see the 2026-07-07 addendum)*. See the **"Wall 3 resolved"** addendum at the
+> bottom. The walls/prediction below are retained for history.
 
 **Prediction:** the MAS build of Anglesite will **not** be able to drive Apple Containerization locally. The DevID build can. Take the fallback branch in #60's "Output (decision)":
 
@@ -272,7 +273,7 @@ relay pattern; guest bridge ~0.5d; `LocalContainerSiteRuntime` integration ~2–
 
 | Entitlement | Status |
 |---|---|
-| `com.apple.security.virtualization` | **Restricted — request from Apple.** Wall 2; the `try-containers/Containers` precedent confirms an indie can get it granted for a sandboxed MAS app. |
+| `com.apple.security.virtualization` | ~~**Restricted — request from Apple.**~~ ✅ **Unrestricted — nothing to request** (2026-07-07 addendum). Wall 2 dissolved; ad-hoc builds boot VMs. |
 | `com.apple.security.network.client` / `.server` | Standard MAS — for the `127.0.0.1` proxy listen/connect. |
 | `com.apple.security.temporary-exception.files.absolute-path.read-write` (`/Users/`) | Temporary exception (App-Review case-by-case), as in the precedent. |
 | `com.apple.vm.networking` | **NOT needed.** This was Wall 3; the NAT+vsock architecture avoids it. |
@@ -286,3 +287,42 @@ under #69. Sources (with commit SHAs) and the full Q&A: see the Wall 3 research 
 this addendum (`try-containers/Containers` `SandboxedContainersService.swift` /
 `Containers.entitlements`; `apple/containerization` `VZVirtualMachineInstance.swift`,
 `VirtualMachineInstance.swift`, `LinuxContainer.swift`, `UnixSocketRelay.swift`, `VsockListener.swift`).
+
+---
+
+## Addendum — Wall 2 dissolved: the entitlement is unrestricted (2026-07-07)
+
+**Empirical result:** `scripts/run-container-probe.sh echo` with its **default ad-hoc identity**
+(`codesign --sign -`, no Apple account, no provisioning profile) booted an Apple Containerization
+VM and passed the vsock echo gate on this machine (`GATE: PASS`). Therefore
+`com.apple.security.virtualization` is an ordinary, **unrestricted** entitlement — there is no
+Apple approval to request and no provisioning-profile grant involved, for DevID *or* dev builds.
+
+### What the 2026-06-09 matrix actually showed
+
+The original run's failures were re-attributed:
+
+- **Config A** (SIGKILL) carried `com.apple.vm.networking` — that *is* (was) the restricted one.
+  `amfid`'s rejection was about `.vm.networking`, not `.virtualization`. (As of 2026, "VMNet" is a
+  self-service capability in the developer portal, available to every membership tier — even the
+  formerly DTS-only entitlement no longer needs a negotiation.)
+- **Config B** (SIGTRAP) failed for the same reason as Config C: an app-sandboxed **raw CLI
+  binary** with no `.app` bundle. Sandbox bootstrap, not entitlement enforcement.
+- The "Wall 2 = restricted, needs Apple approval" conclusion — echoed later by #498's
+  "entitlement not honored on ad-hoc builds" hypothesis — was a misreading. #498's real problems
+  were unlogged boot (#499) and a stale-lockfile `npm ci` (#502, which itself observed "the VM
+  booting fine" on an ad-hoc Debug build).
+
+### Corroboration
+
+- Virtualization is **not listed** on Apple's supported-capabilities (macOS) page — it is not a
+  portal capability at all, so there is nothing to request or embed in a profile.
+- `Code-Hex/vz`'s documented workflow is exactly `codesign --sign -` with this entitlement.
+- `try-containers/Containers` ships it sandboxed on the Mac App Store (per the 2026-06-20
+  addendum) — no "restricted-entitlement approval process" needs to be inferred from that.
+
+### Net
+
+The June 20 addendum's "Wall 2 is clearable via a provisioning-profile request" overstated the
+cost: there is no request. Remaining MAS check: App Store Connect upload validation accepting the
+entitlement with a standard profile — exercised by `scripts/release.sh --validate-only`.
