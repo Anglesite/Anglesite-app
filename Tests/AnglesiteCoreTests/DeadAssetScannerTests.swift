@@ -205,4 +205,84 @@ struct DeadAssetScannerScanTests {
         let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
         #expect(!candidates.map(\.path).contains("src/components/Header.astro"))
     }
+
+    @Test("multi-target path alias: a component under a later target is still resolved")
+    func tsconfigMultiTargetAlias() {
+        let root = makeSite([
+            "tsconfig.json": #"{"compilerOptions": {"paths": {"@shared/*": ["src/nonexistent/*", "src/components/*"]}}}"#,
+            "src/pages/index.astro": "---\nimport Header from '@shared/Header.astro';\n---\n<Header />",
+            "src/components/Header.astro": "<header>Site</header>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/Header.astro"))
+    }
+
+    @Test("import.meta.glob (array of patterns) marks the resolved directories, not exact files")
+    func importMetaGlobDirectory() {
+        let root = makeSite([
+            "src/pages/index.astro": "---\nconst modules = import.meta.glob([\"../components/**/*.astro\", \"../layouts/**/*.astro\"]);\n---\n<div></div>",
+            "src/components/Card.astro": "<div>card</div>",
+            "src/layouts/Post.astro": "<slot />",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        let paths = Set(candidates.map(\.path))
+        #expect(!paths.contains("src/components/Card.astro"))
+        #expect(!paths.contains("src/layouts/Post.astro"))
+    }
+
+    @Test("import.meta.glob with a root-relative pattern (leading slash) resolves against the project root, not public/")
+    func importMetaGlobRootRelative() {
+        let root = makeSite([
+            "src/pages/index.astro": "---\nconst modules = import.meta.glob(\"/src/components/**/*.astro\");\n---\n<div></div>",
+            "src/components/Card.astro": "<div>card</div>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/Card.astro"))
+    }
+
+    @Test("top-level scripts/ (dev-harness glob) is excluded from the reference scan")
+    func scriptsDirectoryExcluded() {
+        let root = makeSite([
+            "scripts/harness/component.astro": "---\nconst modules = import.meta.glob([\"/src/components/**/*.astro\", \"/src/layouts/**/*.astro\"]);\n---\n<div></div>",
+            "src/pages/index.astro": "<div>no imports here</div>",
+            "src/components/Orphan.astro": "<div>never imported</div>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(candidates.map(\.path).contains("src/components/Orphan.astro"))
+    }
+
+    @Test("a nested src/scripts/ directory (not the top-level dev-tooling one) is still scanned")
+    func nestedScriptsDirectoryStillScanned() {
+        let root = makeSite([
+            "src/scripts/analytics.js": "import Icon from '../components/Icon.astro';",
+            "src/components/Icon.astro": "<svg></svg>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/Icon.astro"))
+    }
+
+    @Test("components referenced only from a .tsx file are not flagged as unused")
+    func referencedFromTypeScriptFile() {
+        let root = makeSite([
+            "src/components/Icon.astro": "<svg></svg>",
+            "src/widgets/Widget.tsx": "import Icon from '../components/Icon.astro';\nexport default function Widget() { return null; }",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/Icon.astro"))
+    }
+
+    @Test("images referenced only from a .jsx island's src attribute are not flagged as unused")
+    func imageReferencedFromJSXIsland() {
+        let root = makeSite([
+            "src/islands/Hero.jsx": "export default function Hero() { return <img src=\"/images/hero.png\" />; }",
+        ])
+        let images = [
+            SiteContentGraph.Image(
+                id: "s:image:public/images/hero.png", siteID: "s",
+                relativePath: "public/images/hero.png", fileName: "hero.png",
+                byteSize: nil, usedOnPages: [], lastModified: Date(timeIntervalSince1970: 0)),
+        ]
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: images)
+        #expect(!candidates.map(\.path).contains("public/images/hero.png"))
+    }
 }

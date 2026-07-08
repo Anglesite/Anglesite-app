@@ -2,8 +2,24 @@ import Foundation
 
 /// Detects unused `.astro` components/layouts and unused `public/images` assets by building a
 /// reference graph from `import` statements, `href`/`src` attributes, markdown image syntax,
-/// CSS `url()`, `Astro.glob` calls, and frontmatter `layout:` fields — then finding files with
-/// zero resolved inbound references.
+/// CSS `url()`, `Astro.glob`/`import.meta.glob` calls, and frontmatter `layout:` fields — then
+/// finding files with zero resolved inbound references. Reference *sources* scanned include
+/// `.astro`/`.md`/`.mdx`/`.mdoc`/`.markdown`/`.css` as well as `.ts`/`.tsx`/`.js`/`.jsx` (framework
+/// islands and helper/config files commonly reference `.astro` components or `public/` assets
+/// too) — though only `.astro` files under `src/components`/`src/layouts` and entries in `images`
+/// are ever *candidates* for deletion; JS/TS files themselves are never flagged as dead (see the
+/// design doc's non-goals — JS/TS import resolution has materially more edge cases: barrel files,
+/// re-exports, tsconfig `extends` scoping).
+///
+/// The top-level `scripts/` directory (dev-only tooling — the Component Editor's preview harness,
+/// pre-deploy checks) is excluded from the reference scan entirely — a path-prefix check in
+/// `scan`, not the general `excludedDirNames` set, precisely because a nested directory like
+/// `src/scripts/` (real sites commonly hold client-side JS there) must still be scanned. This
+/// matters beyond just "don't waste time scanning tooling": the bundled template's own
+/// `scripts/harness/component.astro` deliberately blankets *all* of
+/// `src/components/**` and `src/layouts/**` via `import.meta.glob` to power the live component
+/// preview — if that file were scanned, its own blanket glob would suppress unused-component/
+/// layout detection for every site scaffolded from this template.
 ///
 /// An unresolvable reference (bare specifier, unconfigured path alias) is never counted as proof
 /// of use *or* disuse — it is simply skipped. This biases the whole scanner toward
@@ -18,9 +34,9 @@ import Foundation
 /// Delete always requires explicit user confirmation and is git-tracked/recoverable, which is
 /// this scanner's primary mitigation for this class of false positive.
 ///
-/// **Alias resolution scope:** `tsconfig.json`/`jsconfig.json` `compilerOptions.paths` (wildcard
-/// and exact entries), `baseUrl`, and a same-project `extends` chain are resolved (see
-/// `loadPathAliases`/`resolveAlias`). Aliases declared *only* via `astro.config.mjs`'s
+/// **Alias resolution scope:** `tsconfig.json`/`jsconfig.json` `compilerOptions.paths` (wildcard,
+/// exact, and multi-target entries), `baseUrl`, and a same-project `extends` chain are resolved
+/// (see `loadPathAliases`/`resolveAlias`). Aliases declared *only* via `astro.config.mjs`'s
 /// `vite.resolve.alias` — not mirrored into tsconfig/jsconfig `paths`, which Astro's docs
 /// recommend keeping in sync but do not enforce — are **not** resolved: an import through such an
 /// alias with no matching `paths` entry stays unresolved and can flag a live file as unused. Same
@@ -66,8 +82,13 @@ public enum DeadAssetScanner {
         pattern: #"!\[[^\]]*\]\(([^)]+)\)"#)
     private static let cssURLRegex = try! NSRegularExpression(
         pattern: #"url\(\s*['"]?([^'")]+)['"]?\s*\)"#, options: [.caseInsensitive])
-    private static let astroGlobRegex = try! NSRegularExpression(
-        pattern: #"Astro\.glob\(\s*['"]([^'"]+)['"]"#)
+    /// Matches an `Astro.glob(...)` or `import.meta.glob(...)` call's full argument list (up to
+    /// the first `)`), so it works whether the call takes a single quoted string or an array of
+    /// them. `globPatternsRegex` then pulls every individually-quoted pattern out of that capture.
+    private static let globCallRegex = try! NSRegularExpression(
+        pattern: #"(?:Astro\.glob|import\.meta\.glob)\(([^)]*)\)"#)
+    private static let globPatternsRegex = try! NSRegularExpression(
+        pattern: #"['"]([^'"]+)['"]"#)
 
     /// Extracts and resolves every reference in `source`, a file at project-relative `path`.
     static func extractReferences(source: String, path: String) -> ReferenceSource {
@@ -88,8 +109,10 @@ public enum DeadAssetScanner {
         }
 
         var globDirs = Set<String>()
-        for pattern in matches(astroGlobRegex, in: source, group: 1) {
-            if let dir = resolveGlobDirectory(pattern, relativeTo: path) { globDirs.insert(dir) }
+        for call in matches(globCallRegex, in: source, group: 1) {
+            for pattern in matches(globPatternsRegex, in: call, group: 1) {
+                if let dir = resolveGlobDirectory(pattern, relativeTo: path) { globDirs.insert(dir) }
+            }
         }
 
         return ReferenceSource(
@@ -137,21 +160,30 @@ public enum DeadAssetScanner {
         return dirComponents.joined(separator: "/")
     }
 
-    /// Truncates an `Astro.glob` pattern down to its containing directory (e.g.
-    /// `../content/*.md` → the resolved form of `../content`) and resolves that against
-    /// `sourcePath`. Only relative glob patterns are handled — Astro.glob never takes an
-    /// absolute-from-public pattern.
+    /// Truncates a glob pattern down to its containing directory (e.g. `../content/*.md` → the
+    /// resolved form of `../content`) and resolves that. A leading `/` is `import.meta.glob`'s
+    /// project-root-relative form (Vite/Astro convention — distinct from `resolveAbsolutePath`'s
+    /// `public/`-serving convention used for `href`/`src`) and resolves directly against the
+    /// project root; `./`/`../` patterns resolve against `sourcePath`'s own directory. Anything
+    /// else (a bare/aliased glob pattern) is left unresolved.
     static func resolveGlobDirectory(_ pattern: String, relativeTo sourcePath: String) -> String? {
-        guard pattern.hasPrefix("./") || pattern.hasPrefix("../") else { return nil }
-        var dir = pattern
-        if let starIndex = dir.firstIndex(of: "*") {
-            dir = String(dir[dir.startIndex..<starIndex])
-            if let lastSlash = dir.lastIndex(of: "/") {
-                dir = String(dir[dir.startIndex...lastSlash])
+        func truncateToDirectory(_ raw: String) -> String {
+            var dir = raw
+            if let starIndex = dir.firstIndex(of: "*") {
+                dir = String(dir[dir.startIndex..<starIndex])
+                if let lastSlash = dir.lastIndex(of: "/") {
+                    dir = String(dir[dir.startIndex...lastSlash])
+                }
             }
+            if dir.hasSuffix("/") { dir.removeLast() }
+            return dir
         }
-        if dir.hasSuffix("/") { dir.removeLast() }
-        return resolveRelativePath(dir, relativeTo: sourcePath)
+        if pattern.hasPrefix("/") {
+            let dir = truncateToDirectory(String(pattern.dropFirst()))
+            return dir.isEmpty ? nil : dir
+        }
+        guard pattern.hasPrefix("./") || pattern.hasPrefix("../") else { return nil }
+        return resolveRelativePath(truncateToDirectory(pattern), relativeTo: sourcePath)
     }
 
     /// A tsconfig/jsconfig's alias-relevant `compilerOptions`, merged across an `extends` chain
@@ -205,12 +237,19 @@ public enum DeadAssetScanner {
         return PathAliasConfig(baseUrl: baseUrl, paths: paths)
     }
 
-    /// Resolves `ref` against `config` (from `loadPathAliases`): finds a `paths` pattern —
-    /// wildcard (single `*`) or exact — matching `ref`, substitutes the corresponding target
-    /// (first target wins, matching TypeScript's own resolution order), then resolves that target
-    /// relative to `baseUrl` (or, when `baseUrl` is unset, relative to the project root directly —
-    /// matching how TypeScript resolves `paths` without an explicit `baseUrl`).
-    static func resolveAlias(_ ref: String, config: PathAliasConfig) -> String? {
+    /// Resolves `ref` against `config` (from `loadPathAliases`): finds every `paths` target —
+    /// wildcard (single `*`) or exact — whose pattern matches `ref`, substituting and resolving
+    /// each one relative to `baseUrl` (or, when `baseUrl` is unset, relative to the project root
+    /// directly — matching how TypeScript resolves `paths` without an explicit `baseUrl`).
+    ///
+    /// A pattern can map to more than one target (a supported TS/Vite fallback-chain shape, e.g.
+    /// `"@utils/*": ["src/utils/*", "src/shared/utils/*"]`); this scanner can't cheaply verify
+    /// which target is the real one without a second filesystem pass, so every target is returned
+    /// and credited as a reference by the caller — crediting a path that doesn't correspond to a
+    /// real file is harmless (it just never matches any real candidate's path), while crediting
+    /// only the first target risks the opposite: a live file under a later target staying
+    /// uncounted and flagged unused.
+    static func resolveAlias(_ ref: String, config: PathAliasConfig) -> [String] {
         for (pattern, targets) in config.paths {
             let starCount = pattern.filter({ $0 == "*" }).count
             if starCount == 1, let starIndex = pattern.firstIndex(of: "*") {
@@ -218,18 +257,19 @@ public enum DeadAssetScanner {
                 let suffix = String(pattern[pattern.index(after: starIndex)...])
                 guard ref.hasPrefix(prefix), ref.hasSuffix(suffix), ref.count >= prefix.count + suffix.count else { continue }
                 let matched = String(ref.dropFirst(prefix.count).dropLast(suffix.count))
+                var resolved: [String] = []
                 for target in targets {
                     guard let targetStar = target.firstIndex(of: "*"), target.filter({ $0 == "*" }).count == 1 else { continue }
                     let targetPrefix = String(target[target.startIndex..<targetStar])
                     let targetSuffix = String(target[target.index(after: targetStar)...])
-                    let resolved = targetPrefix + matched + targetSuffix
-                    return applyBaseURL(resolved, config.baseUrl)
+                    resolved.append(applyBaseURL(targetPrefix + matched + targetSuffix, config.baseUrl))
                 }
-            } else if starCount == 0, pattern == ref, let target = targets.first {
-                return applyBaseURL(target, config.baseUrl)
+                if !resolved.isEmpty { return resolved }
+            } else if starCount == 0, pattern == ref, !targets.isEmpty {
+                return targets.map { applyBaseURL($0, config.baseUrl) }
             }
         }
-        return nil
+        return []
     }
 
     /// Prefixes `target` (a `paths`-substituted specifier, possibly still `./`-relative) with
@@ -260,11 +300,12 @@ public enum DeadAssetScanner {
     // MARK: - Full-project scan
 
     private static let referenceScanExtensions: Set<String> = [
-        ".astro", ".md", ".mdx", ".mdoc", ".markdown", ".css",
+        ".astro", ".md", ".mdx", ".mdoc", ".markdown", ".css", ".ts", ".tsx", ".js", ".jsx",
     ]
     private static let excludedDirNames: Set<String> = ["node_modules", "dist", ".astro", ".git"]
 
-    /// Scans every `.astro`/`.md`/`.mdx`/`.mdoc`/`.markdown`/`.css` file under `projectRoot` for
+    /// Scans every `.astro`/`.md`/`.mdx`/`.mdoc`/`.markdown`/`.css`/`.ts`/`.tsx`/`.js`/`.jsx` file
+    /// under `projectRoot` (excluding the top-level `scripts/` — see the type doc comment) for
     /// references, then returns every unused `src/components/**/*.astro`, `src/layouts/**/*.astro`,
     /// and unused entry in `images` (typically `SiteContentGraph.images(for:)`, scoped to
     /// `public/images/**`). Pure over the filesystem snapshot at call time.
@@ -276,15 +317,19 @@ public enum DeadAssetScanner {
         for abs in walk(projectRoot) {
             let ext = "." + abs.pathExtension.lowercased()
             guard referenceScanExtensions.contains(ext) else { continue }
+            let relPath = relativePosix(abs, from: projectRoot)
+            // Top-level `scripts/` only (dev tooling: the Component Editor's preview harness,
+            // pre-deploy checks) — not a nested directory like `src/scripts/`, which real sites
+            // commonly use for client-side JS and which should still be scanned.
+            guard !relPath.hasPrefix("scripts/") else { continue }
             guard let size = fileSize(abs), size <= 512_000 else { continue }
             guard let source = try? String(contentsOf: abs, encoding: .utf8) else { continue }
-            let relPath = relativePosix(abs, from: projectRoot)
 
             let refs = extractReferences(source: source, path: relPath)
             for ref in refs.fileReferences { fileReferenceCounts[ref.lowercased(), default: 0] += 1 }
             globDirectories.formUnion(refs.globDirectories.map { $0.lowercased() })
             for raw in refs.unresolvedReferences {
-                if let aliasResolved = resolveAlias(raw, config: aliasConfig) {
+                for aliasResolved in resolveAlias(raw, config: aliasConfig) {
                     fileReferenceCounts[aliasResolved.lowercased(), default: 0] += 1
                 }
             }
