@@ -64,4 +64,23 @@ struct DevServerControlsTests {
             #expect(!DevServerControls.canRestart(state: state, siteOpen: false))
         }
     }
+
+    // MARK: - Command in flight
+
+    @Test("Everything is disabled while a dispatched command awaits the runtime's acknowledgement")
+    func allDisabledWhileCommandInFlight() {
+        // The mirrored `state` is stale by definition during this window (that's why the flag
+        // exists — PR #542 review), so the rules must reject every state, not just the ones a
+        // fresh read would reject.
+        for state: SiteRuntimeState in [
+            .idle,
+            .starting(siteID: "s"),
+            .ready(siteID: "s", url: url),
+            .failed(siteID: "s", message: "boom"),
+        ] {
+            #expect(!DevServerControls.canStart(state: state, siteOpen: true, commandInFlight: true))
+            #expect(!DevServerControls.canStop(state: state, siteOpen: true, commandInFlight: true))
+            #expect(!DevServerControls.canRestart(state: state, siteOpen: true, commandInFlight: true))
+        }
+    }
 }

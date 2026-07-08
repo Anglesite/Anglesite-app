@@ -184,42 +184,49 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     /// are idempotent; in-flight bytes are not drained by design.
     public func stop() async {
         generation += 1
+        let gen = generation
         await teardown()
+        // Actors are reentrant, so a start()/stop() issued while teardown() was suspended has
+        // superseded this stop and owns the state now — emitting `.idle` here would clobber its
+        // `.starting`/`.ready` (the rapid Stop → Restart race, PR #542 review): the UI would show
+        // the boot spinner forever while the dev server is actually running.
+        guard gen == generation else { return }
         setState(.idle)
     }
 
     // MARK: Internals
 
     private func teardown() async {
-        await mcpClient.stop()
+        // Snapshot-and-clear all bookkeeping before the first suspension: actors are reentrant,
+        // so a superseding start()'s/stop()'s teardown can interleave while this one is suspended,
+        // and a successful boot from a superseding start() can complete and install fresh
+        // bookkeeping before this teardown resumes. Clearing first means each resource is stopped
+        // by exactly one teardown, and a straggling teardown can't stop the newer boot's
+        // container, kill its file watcher, or finish its live boot-log stream (PR #542 review).
         stopFileWatcher()
-        if let siteID = loadedKnowledgeSiteID {
+        let knowledgeSiteID = loadedKnowledgeSiteID
+        loadedKnowledgeSiteID = nil
+        let containerSiteID = activeSiteID
+        activeSiteID = nil
+        let bootLogContinuation = self.bootLogContinuation
+        let bootLogDrainTask = self.bootLogDrainTask
+        self.bootLogContinuation = nil
+        self.bootLogDrainTask = nil
+
+        await mcpClient.stop()
+        if let siteID = knowledgeSiteID {
             await knowledgeIndex?.unload(siteID: siteID)
             await semanticRanker?.unload(siteID: siteID)
             await conventionsEngine?.unload(siteID: siteID)
-            loadedKnowledgeSiteID = nil
         }
-        if let id = activeSiteID {
+        if let id = containerSiteID {
             try? await control.stop(siteID: id)
-            activeSiteID = nil
         }
         // Stop the container first (above) so no more guest output can arrive, then finish the
-        // stream — see finishBootLogStream().
-        await finishBootLogStream()
-    }
-
-    /// Finishes the boot-log continuation and awaits its drain task so any already-buffered lines
-    /// land in `LogCenter` before returning — mirrors `ContainerDeployExecutor`'s finish-then-await-
-    /// drain discipline. Idempotent (safe to call when nothing is running). Called from both
-    /// `teardown()` and `start()`'s catch block, so a failed start cleans up its own stream
-    /// immediately rather than leaking it to whatever the next `start()`/`stop()` happens to be.
-    private func finishBootLogStream() async {
-        if let continuation = bootLogContinuation {
-            continuation.finish()
-            bootLogContinuation = nil
-        }
+        // stream and await the drain so already-buffered lines land in LogCenter — mirrors
+        // `ContainerDeployExecutor`'s finish-then-await-drain discipline.
+        bootLogContinuation?.finish()
         await bootLogDrainTask?.value
-        bootLogDrainTask = nil
     }
 
     private func startFileWatcher(siteID: String, projectRoot: URL, generation gen: Int) {

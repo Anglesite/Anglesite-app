@@ -29,6 +29,45 @@ actor FakeSandboxControlClient: SandboxControlClient {
     func stop(siteID: String) async throws { stopped.append(siteID) }
 }
 
+/// The mirror image of `GatedFakeSandboxControlClient`: `start` succeeds immediately, while the
+/// FIRST `stop` suspends until `releaseStop()` — for deterministically interleaving a superseding
+/// `start()` while a `stop()`'s teardown is parked inside `control.stop(...)` (the rapid
+/// Stop → Restart race from the PR #542 review). Subsequent `stop` calls pass straight through so
+/// the superseding path can't deadlock on the gate.
+actor StopGatedFakeSandboxControlClient: SandboxControlClient {
+    private let result: Result<SandboxSession, SandboxControlError>
+    private(set) var stopped: [String] = []
+    private var parkedContinuation: CheckedContinuation<Void, Never>?
+    private var gateContinuation: CheckedContinuation<Void, Never>?
+    private var gateArmed = true
+
+    init(result: Result<SandboxSession, SandboxControlError>) { self.result = result }
+
+    func waitUntilStopParked() async {
+        await withCheckedContinuation { cont in parkedContinuation = cont }
+    }
+    func releaseStop() { gateContinuation?.resume(); gateContinuation = nil }
+
+    func start(siteID: String, gitRemote: URL, gitRef: String, token: SessionToken) async throws -> SandboxSession {
+        try result.get()
+    }
+
+    func status(siteID: String) async throws -> SandboxStatus {
+        SandboxStatus(siteID: siteID, previewReady: true, mcpReady: true)
+    }
+
+    func stop(siteID: String) async throws {
+        stopped.append(siteID)
+        guard gateArmed else { return }
+        gateArmed = false
+        await withCheckedContinuation { cont in
+            parkedContinuation?.resume()
+            parkedContinuation = nil
+            gateContinuation = cont
+        }
+    }
+}
+
 /// A `SandboxControlClient` whose `start` suspends until `release()` is called.
 /// Use this to deterministically interleave a concurrent `stop()` or second `start()`
 /// while the first `start()` is parked inside `control.start(...)`.

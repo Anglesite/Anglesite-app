@@ -82,17 +82,29 @@ public actor RemoteSandboxSiteRuntime: SiteRuntime {
 
     public func stop() async {
         generation += 1
+        let gen = generation
         await teardown()
+        // Actors are reentrant, so a start()/stop() issued while teardown() was suspended has
+        // superseded this stop and owns the state now — emitting `.idle` here would clobber its
+        // `.starting`/`.ready` (the rapid Stop → Restart race, PR #542 review): the UI would show
+        // the boot spinner forever while the dev server is actually running.
+        guard gen == generation else { return }
         setState(.idle)
     }
 
     // MARK: Internals
 
     private func teardown() async {
+        // Clear `activeSiteID` before the suspensions, not after: a superseding start() can
+        // complete a new boot (and re-assign `activeSiteID`) while this teardown is suspended in
+        // `control.stop`, and nilling on resume would clobber the newer boot's bookkeeping —
+        // orphaning its session. Clearing first also means overlapping teardowns stop the
+        // session exactly once (PR #542 review).
+        let sessionSiteID = activeSiteID
+        activeSiteID = nil
         await mcpClient.stop()
-        if let id = activeSiteID {
+        if let id = sessionSiteID {
             try? await control.stop(siteID: id)
-            activeSiteID = nil
         }
     }
 
