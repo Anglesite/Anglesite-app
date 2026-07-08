@@ -27,6 +27,9 @@ struct SiteWindow: View {
     @Environment(\.dismissWindow) private var dismissWindow
     /// Reduce Motion → fade the chat panel and deploy drawer in/out instead of sliding them.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The window's undo manager, published into the model so app-applied edits register with
+    /// Edit ▸ Undo (⌘Z) — see `ChatModel.editUndoCoordinator` (#527).
+    @Environment(\.undoManager) private var undoManager
 
     init(
         siteID: String?,
@@ -71,6 +74,11 @@ struct SiteWindow: View {
             if let id = model.site?.id { model.applyPendingNavigation(for: id) }
         }
         .onChange(of: model.site?.id) { _, _ in model.handleSiteChanged() }
+        // `initial: true` covers the common case where the environment value is already set on
+        // first render; the change handler covers SwiftUI delivering/replacing it later.
+        .onChange(of: undoManager, initial: true) { _, newValue in
+            model.windowUndoManager = newValue
+        }
         .onChange(of: model.preview.state) { _, newState in
             model.startup.ingest(state: newState)
         }

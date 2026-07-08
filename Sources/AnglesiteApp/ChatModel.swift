@@ -108,6 +108,14 @@ final class ChatModel {
     /// Optional. Wired to the per-site `MCPClient` in production; nil in tests where the
     /// chat has no MCP backing yet.
     private let undoCommand: UndoCommand?
+    /// Bridges applied edits into the window's `UndoManager` so Edit ▸ Undo (⌘Z) reverses them
+    /// (#527). `recordEdit` registers each applied edit; ⌘Z delegates back to ``undoEdit`` —
+    /// the same inverse-application + conflict-detection path as the per-row Undo button.
+    /// `SiteWindowModel` attaches the window's undo manager (from `@Environment(\.undoManager)`).
+    @ObservationIgnored
+    private(set) lazy var editUndoCoordinator = EditUndoCoordinator { [weak self] record in
+        Task { await self?.undoEdit(messageID: record.editID) }
+    }
     private var streamTask: Task<Void, Never>?
     /// IDs of annotations already surfaced in chat, so repeated calls to `loadAnnotations()`
     /// don't double-post the same sticky note when the user revisits a site mid-session.
@@ -232,6 +240,7 @@ final class ChatModel {
             editMetadata: metadata
         )
         transcript.append(message)
+        editUndoCoordinator.registerApplied(.init(editID: message.id, file: file, commit: commit))
         let entry = ChatHistoryStore.Entry(
             timestamp: message.timestamp,
             role: .edit,
@@ -262,6 +271,9 @@ final class ChatModel {
         switch result {
         case .success(let newCommit):
             transcript.update(id: messageID) { $0.editMetadata?.undone = true }
+            // Drop any still-pending ⌘Z record for this edit (the per-row Undo button path).
+            // No-op when the undo *came from* ⌘Z — the coordinator consumed its record first.
+            editUndoCoordinator.invalidate(editID: messageID)
             Task { [history] in
                 try? await history.appendUndone(messageID: messageID, newCommit: newCommit)
             }
