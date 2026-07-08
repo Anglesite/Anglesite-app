@@ -96,6 +96,13 @@ struct SiteWindow: View {
             isAvailable: model.inspectorContext != nil,
             toggle: { inspectorShown.toggle() }
         ))
+        .onAppear {
+            // Also stash the launcher-opener here (see SitesWindowRoot): window restoration can
+            // relaunch the app with only site windows, so relying on the launcher's onAppear
+            // alone would leave Dock ▸ New Site a silent no-op on such launches (#522 review).
+            let openWindow = openWindow
+            WindowRouter.shared.openSitesWindow = { openWindow(id: "sites") }
+        }
         .onDisappear { model.close() }
     }
 

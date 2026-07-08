@@ -98,7 +98,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openRecentSiteFromDock(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
-        NSWorkspace.shared.open(url)
+        // "Logs are sacred": a declined open (e.g. the package moved since the last registry
+        // revalidation) has no other UI feedback loop from a Dock menu — record it.
+        if !NSWorkspace.shared.open(url) {
+            Task {
+                await LogCenter.shared.append(
+                    source: "dock-menu", stream: .stderr,
+                    text: "open \(url.lastPathComponent) failed: NSWorkspace declined the open"
+                )
+            }
+        }
     }
 
     @objc private func newSiteFromDock() {
