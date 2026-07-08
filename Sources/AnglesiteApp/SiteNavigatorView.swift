@@ -7,8 +7,13 @@ struct SiteNavigatorView: View {
     @Bindable var model: SiteNavigatorModel
     @Bindable var cleanup: ProjectCleanupModel
     var onOpenCleanupCandidate: (DeadAssetScanner.CleanupCandidate) -> Void
+    var onDeleteCleanupCandidate: (DeadAssetScanner.CleanupCandidate) async -> Void
     @FocusState private var editingFocused: Bool
     @State private var candidateToDelete: DeadAssetScanner.CleanupCandidate?
+    /// The title shown in the confirmation dialog. Held separately from `candidateToDelete` so the
+    /// title stays stable through the dismiss animation — reading `candidateToDelete`'s property
+    /// directly would collapse to "" the instant the dialog clears the optional.
+    @State private var candidateToDeleteTitle: String = ""
 
     var body: some View {
         List(selection: $model.selection) {
@@ -66,7 +71,7 @@ struct SiteNavigatorView: View {
             Text(msg)
         }
         .confirmationDialog(
-            candidateToDelete.map(deleteConfirmationTitle) ?? "",
+            candidateToDeleteTitle,
             isPresented: Binding(
                 get: { candidateToDelete != nil },
                 set: { if !$0 { candidateToDelete = nil } }),
@@ -74,7 +79,7 @@ struct SiteNavigatorView: View {
             presenting: candidateToDelete
         ) { candidate in
             Button("Delete", role: .destructive) {
-                Task { await cleanup.delete(candidate) }
+                Task { await onDeleteCleanupCandidate(candidate) }
             }
             Button("Cancel", role: .cancel) {}
         } message: { candidate in
@@ -159,7 +164,10 @@ struct SiteNavigatorView: View {
                     .contextMenu {
                         Button("Open") { onOpenCleanupCandidate(candidate) }
                         Button("Ignore") { cleanup.ignore(candidate) }
-                        Button("Delete", role: .destructive) { candidateToDelete = candidate }
+                        Button("Delete", role: .destructive) {
+                            candidateToDeleteTitle = deleteConfirmationTitle(for: candidate)
+                            candidateToDelete = candidate
+                        }
                     }
             }
             Button {

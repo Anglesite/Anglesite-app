@@ -68,13 +68,17 @@ final class ProjectCleanupModel {
 
     /// Deletes `candidate` via `git rm` + commit. On failure, sets `deleteError` and leaves the
     /// candidate listed and the file untouched — never falls back to a non-git raw delete.
-    func delete(_ candidate: DeadAssetScanner.CleanupCandidate) async {
-        guard let sourceDirectory else { return }
+    /// Returns whether the delete succeeded, so callers (`SiteWindowModel`) can react — e.g.
+    /// closing an editor tab open on the now-deleted file — only on real success.
+    @discardableResult
+    func delete(_ candidate: DeadAssetScanner.CleanupCandidate) async -> Bool {
+        guard let sourceDirectory else { return false }
         let message = "Remove unused \(candidate.kind.rawValue): \(candidate.path)"
         guard await gitDelete(sourceDirectory, candidate.path, message) != nil else {
             deleteError = "Couldn't delete \(candidate.path). Check for uncommitted changes and try again."
-            return
+            return false
         }
         candidates.removeAll { $0.id == candidate.id }
+        return true
     }
 }

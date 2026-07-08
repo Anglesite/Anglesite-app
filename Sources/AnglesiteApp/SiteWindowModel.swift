@@ -402,6 +402,19 @@ final class SiteWindowModel {
         }
     }
 
+    /// Deletes a Cleanup-section candidate and, on success, discards (without saving) any editor
+    /// tab currently open on that same file — flushing it via the normal leave-editor path would
+    /// re-write the buffer to disk and silently resurrect the file `cleanup.delete` just removed.
+    @MainActor
+    func deleteCleanupCandidate(_ candidate: DeadAssetScanner.CleanupCandidate) async {
+        guard let site else { return }
+        let deletedURL = site.sourceDirectory.appendingPathComponent(candidate.path)
+        let succeeded = await cleanup.delete(candidate)
+        guard succeeded, activeEditorFile?.url == deletedURL else { return }
+        activeEditor = nil
+        mainPaneMode = .preview
+    }
+
     /// Build the inspector context for a content navigator id: the typed descriptor form when the
     /// file resolves to a content type, the plain title/description form for a frontmatter-bearing
     /// markdown page, or nil (plain `.astro`/other → preview only, no inspector).

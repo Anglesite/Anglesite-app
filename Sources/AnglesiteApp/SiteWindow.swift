@@ -97,7 +97,8 @@ struct SiteWindow: View {
                 SiteNavigatorView(
                     model: navigator,
                     cleanup: model.cleanup,
-                    onOpenCleanupCandidate: { model.openCleanupCandidate($0) }
+                    onOpenCleanupCandidate: { model.openCleanupCandidate($0) },
+                    onDeleteCleanupCandidate: { await model.deleteCleanupCandidate($0) }
                 )
                     .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
                     .onChange(of: navigator.selection) { _, newID in
