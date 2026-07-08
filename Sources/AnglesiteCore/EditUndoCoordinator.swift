@@ -73,6 +73,13 @@ public final class EditUndoCoordinator {
         guard let undoManager else { return }
         let token = Token(record)
         tokens[record.editID] = token
+        // Explicit group per record: without one, registrations coalesce into whatever group is
+        // open and a single ⌘Z would revert several edits at once. Under `groupsByEvent` (the
+        // app default) this just nests inside the run loop's event group — still one edit per
+        // gesture, since each apply lands in its own main-run-loop turn. It is load-bearing for
+        // run-loop-free consumers (unit tests set `groupsByEvent = false`), where no implicit
+        // event group ever opens or closes around registrations.
+        undoManager.beginUndoGrouping()
         // `token` is captured strongly by the handler on purpose: UndoManager holds its target
         // unsafely-unretained, so the capture pins the token (and nothing else — self is weak)
         // for exactly as long as the stack entry exists.
@@ -83,7 +90,10 @@ public final class EditUndoCoordinator {
                 self.perform(token.record)
             }
         }
+        // Named while the group is still open — the name attaches to the open group; after
+        // `endUndoGrouping` there may be no group left to attach to.
         undoManager.setActionName(Self.actionName(for: record))
+        undoManager.endUndoGrouping()
     }
 
     /// Removes a still-pending record from the undo stack — call after an edit was undone via

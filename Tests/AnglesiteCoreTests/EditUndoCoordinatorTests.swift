@@ -14,6 +14,18 @@ struct EditUndoCoordinatorTests {
         var performed: [EditUndoCoordinator.Record] = []
     }
 
+    /// A run-loop-free `UndoManager`. With the default `groupsByEvent`, the implicit event
+    /// group opens at the first registration and never closes (tests don't spin the run loop),
+    /// so a single `undo()` would pop every registration at once and
+    /// `removeAllActions(withTarget:)` couldn't clear the still-open group. Disabling it makes
+    /// the coordinator's explicit per-record group the top-level group — the same shape
+    /// production gets from one registration per main-run-loop turn.
+    private func makeUndoManager() -> UndoManager {
+        let undoManager = UndoManager()
+        undoManager.groupsByEvent = false
+        return undoManager
+    }
+
     private func makeCoordinator(undoManager: UndoManager?) -> (EditUndoCoordinator, PerformSpy) {
         let spy = PerformSpy()
         let coordinator = EditUndoCoordinator { record in
@@ -32,7 +44,7 @@ struct EditUndoCoordinatorTests {
     }
 
     @Test func registeredEditIsUndoableAndUndoPerformsIt() {
-        let undoManager = UndoManager()
+        let undoManager = makeUndoManager()
         let (coordinator, spy) = makeCoordinator(undoManager: undoManager)
         let record = record()
 
@@ -47,7 +59,7 @@ struct EditUndoCoordinatorTests {
     }
 
     @Test func actionNameCarriesTheEditedFilename() {
-        let undoManager = UndoManager()
+        let undoManager = makeUndoManager()
         let (coordinator, _) = makeCoordinator(undoManager: undoManager)
 
         coordinator.registerApplied(record(file: "src/pages/about.astro"))
@@ -56,7 +68,7 @@ struct EditUndoCoordinatorTests {
     }
 
     @Test func undoDoesNotRegisterARedo() {
-        let undoManager = UndoManager()
+        let undoManager = makeUndoManager()
         let (coordinator, _) = makeCoordinator(undoManager: undoManager)
 
         coordinator.registerApplied(record())
@@ -68,7 +80,7 @@ struct EditUndoCoordinatorTests {
     }
 
     @Test func multipleEditsUndoInLIFOOrder() {
-        let undoManager = UndoManager()
+        let undoManager = makeUndoManager()
         let (coordinator, spy) = makeCoordinator(undoManager: undoManager)
         let first = record(file: "src/pages/index.astro", commit: "c1")
         let second = record(file: "src/pages/about.astro", commit: "c2")
@@ -91,7 +103,7 @@ struct EditUndoCoordinatorTests {
     }
 
     @Test func invalidateRemovesTheRecordFromTheUndoStack() {
-        let undoManager = UndoManager()
+        let undoManager = makeUndoManager()
         let (coordinator, spy) = makeCoordinator(undoManager: undoManager)
         let record = record()
 
@@ -103,7 +115,7 @@ struct EditUndoCoordinatorTests {
     }
 
     @Test func invalidateOnlyRemovesTheMatchingRecord() {
-        let undoManager = UndoManager()
+        let undoManager = makeUndoManager()
         let (coordinator, spy) = makeCoordinator(undoManager: undoManager)
         let kept = record(file: "src/pages/index.astro", commit: "c1")
         let dropped = record(file: "src/pages/about.astro", commit: "c2")
@@ -119,7 +131,7 @@ struct EditUndoCoordinatorTests {
     }
 
     @Test func invalidateAfterUndoFiredIsANoOp() {
-        let undoManager = UndoManager()
+        let undoManager = makeUndoManager()
         let (coordinator, spy) = makeCoordinator(undoManager: undoManager)
         let first = record(commit: "c1")
         let second = record(commit: "c2")
@@ -138,7 +150,7 @@ struct EditUndoCoordinatorTests {
     }
 
     @Test func invalidateForUnknownEditIsANoOp() {
-        let undoManager = UndoManager()
+        let undoManager = makeUndoManager()
         let (coordinator, _) = makeCoordinator(undoManager: undoManager)
 
         coordinator.registerApplied(record())
