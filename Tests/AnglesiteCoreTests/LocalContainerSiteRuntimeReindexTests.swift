@@ -90,9 +90,11 @@ struct LocalContainerSiteRuntimeReindexTests {
         let added = root.appendingPathComponent("src/pages/about.astro")
         try! Data("# About\n".utf8).write(to: added)
         watcher.deliver(FileChangeBatch(paths: [added], needsFullRescan: false))
-        _ = await poll(1.0) {
+        // 5s budget like the knowledge-index test above: the batch applies on an unstructured
+        // Task, and a 1s poll flaked on loaded CI runners once the suite grew (first seen when
+        // #535's suites landed alongside this test).
+        #expect(await poll(5) {
             await conventions.conventions(siteID: "s1")?.writing.headingCapitalization.sampleSize == 2
-        }
-        #expect(await conventions.conventions(siteID: "s1")?.writing.headingCapitalization.sampleSize == 2)
+        })
     }
 }
