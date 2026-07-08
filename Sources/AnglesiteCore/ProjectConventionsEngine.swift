@@ -21,25 +21,28 @@ public actor ProjectConventionsEngine {
             Self.scan(projectRoot: projectRoot)
         }.value
         filesBySite[siteID] = Dictionary(uniqueKeysWithValues: files.map { ($0.path, $0.contents) })
-        recompute(siteID: siteID, projectRoot: projectRoot)
+        await recompute(siteID: siteID, projectRoot: projectRoot)
     }
 
     public func upsertFile(siteID: String, projectRoot: URL, relativePath: String) async {
         guard shouldScan(relativePath) else { return }
         let url = projectRoot.appendingPathComponent(relativePath)
-        guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
-            removeFile(siteID: siteID, relativePath: relativePath)
+        let contents = await Task.detached(priority: .utility) {
+            try? String(contentsOf: url, encoding: .utf8)
+        }.value
+        guard let contents else {
+            await removeFile(siteID: siteID, relativePath: relativePath)
             return
         }
         filesBySite[siteID, default: [:]][relativePath] = contents
-        recompute(siteID: siteID, projectRoot: projectRoot)
+        await recompute(siteID: siteID, projectRoot: projectRoot)
     }
 
-    public func removeFile(siteID: String, relativePath: String) {
+    public func removeFile(siteID: String, relativePath: String) async {
         guard filesBySite[siteID]?.removeValue(forKey: relativePath) != nil else { return }
         // No projectRoot available here (mirrors SiteKnowledgeIndex.removeFile) — frontmatter
         // collections are re-read from disk on the next full `rebuild`, not on every removal.
-        recompute(siteID: siteID, projectRoot: nil)
+        await recompute(siteID: siteID, projectRoot: nil)
     }
 
     public func unload(siteID: String) {
@@ -73,15 +76,16 @@ public actor ProjectConventionsEngine {
 
     // MARK: - Recompute
 
-    private func recompute(siteID: String, projectRoot: URL?) {
+    private func recompute(siteID: String, projectRoot: URL?) async {
         let files = (filesBySite[siteID] ?? [:]).map {
             ProjectConventionsExtractor.ScannedFile(path: $0.key, contents: $0.value)
         }
         var fresh = ProjectConventionsExtractor.extract(files: files)
         if let projectRoot {
-            fresh.frontmatter = FrontmatterConventions(
-                collections: FrontmatterSchemaReader.read(siteDirectory: projectRoot)
-            )
+            let collections = await Task.detached(priority: .utility) {
+                FrontmatterSchemaReader.read(siteDirectory: projectRoot)
+            }.value
+            fresh.frontmatter = FrontmatterConventions(collections: collections)
         } else if let previous = conventionsBySite[siteID] {
             // No projectRoot on this call (a `removeFile` with no disk access) — keep the
             // last-known frontmatter reading rather than blanking it out.
@@ -118,7 +122,7 @@ public actor ProjectConventionsEngine {
             at: dir, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles]
         ) else { return [] }
         var files: [URL] = []
-        for entry in entries {
+        for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             if SiteIndexPaths.skippedDirectoryNames.contains(entry.lastPathComponent) { continue }
             let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             if values?.isSymbolicLink == true { continue }
