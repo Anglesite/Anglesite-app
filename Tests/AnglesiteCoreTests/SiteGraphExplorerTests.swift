@@ -190,6 +190,48 @@ struct SiteGraphExplorerTests {
         })
     }
 
+    @Test("src references with a trailing query string or fragment still resolve")
+    func queryStringAssetReferences() throws {
+        let root = makeSite([
+            "src/pages/index.astro": "<img src=\"/images/hero.png?width=400\" />",
+            "public/images/hero.png": "PNG",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        let page = try #require(graph.nodes.first { $0.kind == .page })
+        let hero = try #require(graph.nodes.first { $0.filePath == "public/images/hero.png" })
+
+        #expect(graph.edges.contains {
+            $0.sourceID == page.id && $0.targetID == hero.id && $0.kind == .referencesAsset
+        })
+        #expect(hero.referencedByCount == 1)
+    }
+
+    @Test("protocol-relative asset URLs are not treated as public-root paths")
+    func protocolRelativeAssetReferences() throws {
+        let root = makeSite([
+            "src/pages/index.astro": "<img src=\"//cdn.example.com/hero.png\" />",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+
+        #expect(!graph.edges.contains { $0.kind == .referencesAsset })
+    }
+
     @Test("@ alias imports resolve to src-relative nodes")
     func aliasImports() throws {
         let root = makeSite([

@@ -84,11 +84,11 @@ public enum SiteGraphExplorer {
         pattern: #"import\(\s*['"]([^'"]+)['"]\s*\)"#
     )
     private static let srcHrefRegex = try! NSRegularExpression(
-        pattern: #"\b(?:src|href)\s*=\s*["']([^"']+\.(?:jpg|jpeg|png|webp|gif|svg|avif))["']"#,
+        pattern: #"\b(?:src|href)\s*=\s*["']([^"']+\.(?:jpg|jpeg|png|webp|gif|svg|avif))(?:[?#][^"']*)?["']"#,
         options: [.caseInsensitive]
     )
     private static let urlAssetRegex = try! NSRegularExpression(
-        pattern: #"url\(\s*['"]?([^'")]+\.(?:jpg|jpeg|png|webp|gif|svg|avif))['"]?\s*\)"#,
+        pattern: #"url\(\s*['"]?([^'")]+\.(?:jpg|jpeg|png|webp|gif|svg|avif))(?:[?#][^'")]*)?['"]?\s*\)"#,
         options: [.caseInsensitive]
     )
 
@@ -304,15 +304,14 @@ public enum SiteGraphExplorer {
         nodeIDByRelativePath: [String: String],
         nodeIDByPublicPath: [String: String]
     ) -> String? {
+        if value.hasPrefix("//") {
+            return nil
+        }
         if value.hasPrefix("/") {
             return nodeIDByPublicPath[value]
         }
         if value.hasPrefix("public/") {
             return nodeIDByPublicPath["/" + String(value.dropFirst("public".count + 1))]
-        }
-        if value.hasPrefix("./") || value.hasPrefix("../") {
-            let base = (relativePath as NSString).deletingLastPathComponent
-            return nodeIDByRelativePath[normalizeRelativePath((base as NSString).appendingPathComponent(value))]
         }
         if !value.contains("://") && !value.hasPrefix("#") {
             let base = (relativePath as NSString).deletingLastPathComponent
