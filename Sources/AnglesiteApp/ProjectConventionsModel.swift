@@ -27,13 +27,21 @@ final class ProjectConventionsModel {
         self.store = ProjectConventionsStore(configDirectory: configDirectory)
     }
 
-    /// Seeds the shared engine from disk (once per site-open, so overrides survive an app
-    /// restart) and opens the sheet. Safe to call more than once — `seed` on the engine is
-    /// itself a no-op once a value is present.
-    func presentSheet() async {
+    /// Seeds the shared engine from any persisted override in `Config/conventions.json`.
+    /// Must run before the site runtime's first `rebuild` for this site — `engine.seed(...)` is
+    /// a no-op once any value is already present, so if the runtime's boot-time rebuild runs
+    /// first, a persisted override is silently discarded. Safe to call more than once.
+    func seedFromDisk() async {
         if let persisted = await store.load() {
             await engine.seed(siteID: siteID, with: persisted)
         }
+    }
+
+    /// Opens the sheet. `seedFromDisk()` should already have run before the site's runtime
+    /// booted (see `SiteWindowModel.loadAndStart`); this call is a safety net in case a caller
+    /// opens the sheet through some other path that skipped it.
+    func presentSheet() async {
+        await seedFromDisk()
         conventions = await engine.conventions(siteID: siteID)
         sheetPresented = true
     }

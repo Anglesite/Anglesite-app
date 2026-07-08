@@ -549,6 +549,17 @@ final class SiteWindowModel {
                 }
             }
         }
+        styleGuide = ProjectConventionsModel(
+            engine: conventionsEngine,
+            siteID: resolved.id,
+            siteDirectory: resolved.sourceDirectory,
+            configDirectory: resolved.configDirectory
+        )
+        // Seed the shared engine from any persisted override BEFORE preview.open() below
+        // triggers the runtime's own boot-time rebuild — engine.seed(...) is a no-op once a
+        // value is present, so seeding order matters: seed first, or a restored override is
+        // silently discarded by the runtime's fresh scan (#313).
+        await styleGuide?.seedFromDisk()
         preview.open(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
         // Scan from the package ROOT (not Source/): SiteFileTree's adaptive layout detects the
         // `.anglesite` package here and resolves Source/ for Components/Styles plus the sibling
@@ -585,12 +596,6 @@ final class SiteWindowModel {
             integrationService: integrationOps
         )
         chat = assistantSession.chat
-        styleGuide = ProjectConventionsModel(
-            engine: conventionsEngine,
-            siteID: resolved.id,
-            siteDirectory: resolved.sourceDirectory,
-            configDirectory: resolved.configDirectory
-        )
         preview.setEditObserver(
             assistantSession.editObserver,
             postProcess: assistantSession.editPostProcessor
