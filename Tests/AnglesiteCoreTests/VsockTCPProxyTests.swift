@@ -58,7 +58,12 @@ struct VsockTCPProxyTests {
     /// Polling against a generous deadline never fails on scheduling jitter, yet still bounds a
     /// genuinely-stuck splice instead of hanging CI forever. Requires SO_RCVTIMEO on `fh` so each
     /// `read` returns promptly to let the loop spin.
-    private func readExactly(_ count: Int, from fh: FileHandle, timeout: Duration = .seconds(10)) async -> Data {
+    ///
+    /// 20s default: a 10s budget still flaked on a loaded CI runner (`clientToGuest` timed out at
+    /// 10.7s with 0 bytes ever received, on an unmodified commit — see PR #558's CI run). Match
+    /// `fullPayloadDrainsBeforeTeardown`'s already-proven 20s budget rather than inventing a new
+    /// number.
+    private func readExactly(_ count: Int, from fh: FileHandle, timeout: Duration = .seconds(20)) async -> Data {
         let deadline = ContinuousClock.now + timeout
         var acc = Data()
         while acc.count < count && ContinuousClock.now < deadline {
