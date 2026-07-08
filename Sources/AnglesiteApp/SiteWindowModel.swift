@@ -33,6 +33,7 @@ final class SiteWindowModel {
     private let contentGraph: SiteContentGraph
     private let knowledgeIndex: SiteKnowledgeIndex
     private let semanticRanker: SemanticRanker?
+    private let conventionsEngine: ProjectConventionsEngine
     private let contentIndexerStore: ContentIndexerStore
     private let integrationOps = IntegrationOperations.live()
     private let contentCreation: ContentCreationWorkflow
@@ -64,6 +65,10 @@ final class SiteWindowModel {
     // the panel UI is target-agnostic.
     var chat: ChatModel?
     var chatPresented = false
+    /// Created once the site resolves in `loadAndStart` (needs `siteDirectory`/`configDirectory`),
+    /// same lifecycle as `chat`. Its own `sheetPresented` drives the `.sheet(isPresented:)` in
+    /// `SiteWindow`, following `AuditModel`'s pattern rather than the item-based sheets.
+    var styleGuide: ProjectConventionsModel?
     var relatedPages: RelatedPagesModel
     var relatedPagesPresented = false
     var harden = HardenModel()
@@ -102,17 +107,20 @@ final class SiteWindowModel {
         contentGraph: SiteContentGraph,
         knowledgeIndex: SiteKnowledgeIndex,
         semanticRanker: SemanticRanker?,
+        conventionsEngine: ProjectConventionsEngine,
         runtimeFactory: any SiteRuntimeFactory,
         contentIndexerStore: ContentIndexerStore
     ) {
         self.contentGraph = contentGraph
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
+        self.conventionsEngine = conventionsEngine
         self.contentIndexerStore = contentIndexerStore
         self.preview = PreviewModel(
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
+            conventionsEngine: conventionsEngine,
             runtimeFactory: runtimeFactory
         )
         self.contentCreation = ContentCreationWorkflow.native(
@@ -168,6 +176,11 @@ final class SiteWindowModel {
         integrationWizardModel = IntegrationWizardModel(service: integrationOps, siteID: site.id)
     }
 
+    func openStyleGuide() {
+        guard let styleGuide else { return }
+        Task { await styleGuide.presentSheet() }
+    }
+
     func retryPreview() {
         guard let site else { return }
         preview.open(siteID: site.id, siteDirectory: site.sourceDirectory)
@@ -197,6 +210,7 @@ final class SiteWindowModel {
             annotationProvider = nil
         }
         chat = nil
+        styleGuide = nil
         navigator?.stop()
         navigator = nil
         graphExplorer.stop()
@@ -691,6 +705,17 @@ final class SiteWindowModel {
                 }
             }
         }
+        styleGuide = ProjectConventionsModel(
+            engine: conventionsEngine,
+            siteID: resolved.id,
+            siteDirectory: resolved.sourceDirectory,
+            configDirectory: resolved.configDirectory
+        )
+        // Seed the shared engine from any persisted override BEFORE preview.open() below
+        // triggers the runtime's own boot-time rebuild — engine.seed(...) is a no-op once a
+        // value is present, so seeding order matters: seed first, or a restored override is
+        // silently discarded by the runtime's fresh scan (#313).
+        await styleGuide?.seedFromDisk()
         preview.open(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
         // Scan from the package ROOT (not Source/): SiteFileTree's adaptive layout detects the
         // `.anglesite` package here and resolves Source/ for Components/Styles plus the sibling
@@ -723,6 +748,7 @@ final class SiteWindowModel {
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
+            conventionsEngine: conventionsEngine,
             integrationService: integrationOps
         )
         chat = assistantSession.chat

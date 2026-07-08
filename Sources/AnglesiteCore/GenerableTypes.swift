@@ -120,4 +120,15 @@ public struct GeneratedPageCopySuggestion: Equatable, Sendable {
     @Guide(description: "A single concise SEO meta description sentence, under 160 characters, that does not repeat the title verbatim.")
     public var description: String
 }
+
+/// On-device guided-generation result for the throttled project-conventions enrichment pass
+/// (tone/brand-term fields the deterministic extractor can't compute from text alone).
+@Generable
+public struct GeneratedProjectConventions: Equatable, Sendable {
+    @Guide(description: "Three to five adjectives describing this site's writing tone, e.g. ['concise', 'playful', 'technical'].")
+    public var toneDescriptors: [String]
+
+    @Guide(description: "Up to five brand or product terms with their canonical capitalization as used in the text, e.g. ['Anglesite', 'Astro'].")
+    public var brandTerms: [String]
+}
 #endif

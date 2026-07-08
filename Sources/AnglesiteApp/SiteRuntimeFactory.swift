@@ -5,7 +5,8 @@ protocol SiteRuntimeFactory: Sendable {
     func makeRuntime(
         contentGraph: SiteContentGraph?,
         knowledgeIndex: SiteKnowledgeIndex?,
-        semanticRanker: SemanticRanker?
+        semanticRanker: SemanticRanker?,
+        conventionsEngine: ProjectConventionsEngine?
     ) -> any SiteRuntime
 }
 
@@ -26,7 +27,8 @@ struct LiveSiteRuntimeFactory: SiteRuntimeFactory {
     func makeRuntime(
         contentGraph: SiteContentGraph?,
         knowledgeIndex: SiteKnowledgeIndex?,
-        semanticRanker: SemanticRanker?
+        semanticRanker: SemanticRanker?,
+        conventionsEngine: ProjectConventionsEngine?
     ) -> any SiteRuntime {
         let support = LocalContainerSupport.availability(
             hasVirtualizationEntitlement: VirtualizationEntitlement.isPresent
@@ -39,7 +41,8 @@ struct LiveSiteRuntimeFactory: SiteRuntimeFactory {
                 control: ContainerizationControl(),
                 mcpClient: MCPClient(supervisor: .shared),
                 knowledgeIndex: knowledgeIndex,
-                semanticRanker: semanticRanker
+                semanticRanker: semanticRanker,
+                conventionsEngine: conventionsEngine
             )
         }
         logRuntimeSelection(Self.fallbackReason(support: support, provisioning: provisioning))

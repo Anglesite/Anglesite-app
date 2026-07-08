@@ -66,4 +66,33 @@ struct LocalContainerSiteRuntimeReindexTests {
         await runtime.stop()
         #expect(watcher.stopCount >= 1)
     }
+
+    @Test("container runtime rebuilds and re-scans project conventions the same way it does the knowledge index")
+    func routesBatchToConventionsEngine() async {
+        let root = makeSite(["src/pages/index.astro": "# Home\n"])
+        let index = SiteKnowledgeIndex()
+        let conventions = ProjectConventionsEngine()
+        let watcher = ControllableWatcher()
+        let fake = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let runtime = LocalContainerSiteRuntime(
+            ref: "HEAD",
+            control: fake,
+            mcpClient: mcp,
+            knowledgeIndex: index,
+            conventionsEngine: conventions,
+            connect: { _, _ in },
+            makeFileWatcher: { watcher })
+
+        await runtime.start(siteID: "s1", siteDirectory: root)
+        #expect(await conventions.conventions(siteID: "s1")?.writing.headingCapitalization.sampleSize == 1)
+
+        let added = root.appendingPathComponent("src/pages/about.astro")
+        try! Data("# About\n".utf8).write(to: added)
+        watcher.deliver(FileChangeBatch(paths: [added], needsFullRescan: false))
+        _ = await poll(1.0) {
+            await conventions.conventions(siteID: "s1")?.writing.headingCapitalization.sampleSize == 2
+        }
+        #expect(await conventions.conventions(siteID: "s1")?.writing.headingCapitalization.sampleSize == 2)
+    }
 }
