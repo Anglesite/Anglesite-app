@@ -267,6 +267,28 @@ struct NativeContentOperationsTests {
         let status = try await ProcessSupervisor.shared.run(executable: git, arguments: ["status", "--porcelain"], currentDirectoryURL: repo)
         #expect(status.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
+
+    @Test("processGitDelete refuses a staged-but-never-committed file (no HEAD copy to roll back to)")
+    func refusesUncommittedFile() async throws {
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        for args in [["init"], ["config", "user.email", "t@t.io"], ["config", "user.name", "t"]] {
+            _ = try await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: repo)
+        }
+        // A first commit so the repo has a HEAD at all.
+        try "root".write(to: repo.appendingPathComponent("root.txt"), atomically: true, encoding: .utf8)
+        _ = await NativeContentOperations.processGitCommit(repo, "root.txt", "initial")
+
+        // Staged via `git add`, but never committed.
+        let filePath = repo.appendingPathComponent("staged-only.astro")
+        try "<div></div>".write(to: filePath, atomically: true, encoding: .utf8)
+        _ = try await ProcessSupervisor.shared.run(executable: git, arguments: ["add", "staged-only.astro"], currentDirectoryURL: repo)
+
+        let sha = await NativeContentOperations.processGitDelete(repo, "staged-only.astro", "Remove staged-only.astro")
+        #expect(sha == nil)
+        #expect(FileManager.default.fileExists(atPath: filePath.path))
+    }
 }
 
 private struct StubPageCopyGenerator: PageCopyGenerating {

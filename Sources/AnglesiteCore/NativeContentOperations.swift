@@ -233,8 +233,9 @@ public struct NativeContentOperations: ContentOperationsService {
 
     /// Stage-delete and commit exactly `relPath` on the current branch (`git rm` + `git commit`).
     /// Returns the new HEAD SHA, or nil on any failure (not a repo, dirty tree, rejecting hook,
-    /// git missing) — best-effort, mirroring `processGitCommit`'s shape exactly. Git history is
-    /// the sole undo/archive mechanism for this delete; there is no separate trash/archive path.
+    /// git missing, no HEAD copy) — best-effort, mirroring `processGitCommit`'s shape exactly.
+    /// Git history is the sole undo/archive mechanism for this delete; there is no separate
+    /// trash/archive path.
     @Sendable public static func processGitDelete(_ projectRoot: URL, _ relPath: String, _ message: String) async -> String? {
         let git = URL(fileURLWithPath: "/usr/bin/git")
         func run(_ args: [String]) async -> ProcessSupervisor.RunResult? {
@@ -243,6 +244,12 @@ public struct NativeContentOperations: ContentOperationsService {
             return result
         }
         guard await run(["rev-parse", "--git-dir"]) != nil else { return nil }
+        // Require a HEAD copy before touching anything: if `git commit` fails after `git rm`
+        // already succeeds, the only safe rollback is `git checkout HEAD -- relPath`, which needs
+        // HEAD to actually have the file. A staged-but-never-committed file (`git add`ed, no
+        // commit yet) would otherwise risk ending up gone from both the index and the working
+        // tree with no way back — refusing up front is a clean, side-effect-free failure instead.
+        guard await run(["cat-file", "-e", "HEAD:" + relPath]) != nil else { return nil }
         guard await run(["rm", "--", relPath]) != nil else { return nil }
         guard await run(["commit", "-m", message, "--", relPath]) != nil else {
             // `git rm` already removed the file from the index and working tree before the
