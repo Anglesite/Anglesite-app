@@ -51,6 +51,58 @@ struct ProjectConventionsExtractorTests {
         #expect(conventions.naming.slugStyle.value == .kebabCase)
     }
 
+    @Test("detects sentence-case headings")
+    func detectsSentenceCase() {
+        let files = [
+            file("src/pages/start.astro", "# Getting started with your site\n"),
+            file("src/pages/build.astro", "# Building your first page\n"),
+            file("src/pages/manage.astro", "# Managing your content library\n"),
+        ]
+        let conventions = ProjectConventionsExtractor.extract(files: files)
+        #expect(conventions.writing.headingCapitalization.value == .sentenceCase)
+        #expect(conventions.writing.headingCapitalization.sampleSize == 3)
+    }
+
+    @Test("detects snake_case content slugs")
+    func detectsSnakeCaseSlugs() {
+        let files = [
+            file("src/content/blog/welcome_to_your_blog.md", "# Welcome"),
+            file("src/content/blog/our_second_post.md", "# Second post"),
+        ]
+        let conventions = ProjectConventionsExtractor.extract(files: files)
+        #expect(conventions.naming.slugStyle.value == .snakeCase)
+    }
+
+    @Test("falls back to mixed heading capitalization when styles split evenly")
+    func headingCapitalizationMixedFallback() {
+        let files = [
+            file("src/pages/about.astro", "# About Our Team\n"),
+            file("src/pages/pricing.astro", "# Simple Pricing Plans\n"),
+            file("src/pages/support.astro", "# Contact Our Support\n"),
+            file("src/pages/start.astro", "# Getting started with your site\n"),
+            file("src/pages/build.astro", "# Building your first page\n"),
+            file("src/pages/manage.astro", "# Managing your content library\n"),
+        ]
+        let conventions = ProjectConventionsExtractor.extract(files: files)
+        #expect(conventions.writing.headingCapitalization.value == .mixed)
+        #expect(conventions.writing.headingCapitalization.sampleSize == 6)
+    }
+
+    @Test("falls back to mixed slug style when kebab and snake_case split evenly")
+    func slugStyleMixedFallback() {
+        let files = [
+            file("src/content/blog/welcome-to-your-blog.md", "# Welcome"),
+            file("src/content/blog/our-second-post.md", "# Second post"),
+            file("src/content/blog/how-to-guide.md", "# Guide"),
+            file("src/content/blog/release_notes.md", "# Release notes"),
+            file("src/content/blog/product_launch.md", "# Product launch"),
+            file("src/content/blog/setup_guide.md", "# Setup guide"),
+        ]
+        let conventions = ProjectConventionsExtractor.extract(files: files)
+        #expect(conventions.naming.slugStyle.value == .mixed)
+        #expect(conventions.naming.slugStyle.sampleSize == 6)
+    }
+
     @Test("computes average meta description length from frontmatter")
     func computesMetaDescriptionLength() {
         let files = [
