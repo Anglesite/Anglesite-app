@@ -76,10 +76,12 @@ public enum BundledImage {
     }
 
     /// The reference under which the imported app image is addressed in the on-disk `ImageStore`.
-    /// Docker buildx normalizes bare names to `docker.io/library/<name>:<tag>` when writing
-    /// `io.containerd.image.name` into the OCI layout — so this must match that canonical form
-    /// so `ImageStore.get(reference:)` finds the image after `load(from:)`.
-    public static let imageReference = "docker.io/library/anglesite-dev:latest"
+    /// Apple `container image save` (scripts/vendor-container-image.sh) records the reference
+    /// unqualified — `anglesite-dev:latest`, not Docker buildx's `docker.io/library/…` canonical
+    /// form — in the layout's `io.containerd.image.name` annotation. This constant must match
+    /// that recorded form exactly so `ImageStore.get(reference:)` finds the image after
+    /// `load(from:)`.
+    public static let imageReference = "anglesite-dev:latest"
 
     /// Path to the Linux kernel binary the VM boots.
     ///
