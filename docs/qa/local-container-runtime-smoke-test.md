@@ -23,7 +23,9 @@ This smoke intentionally exercises the real substrate. It is not expected to run
 - macOS 26 or newer.
 - Xcode 27 or newer.
 - Docker Desktop or another Docker buildx-compatible runtime with `linux/arm64` support.
-- A signing setup that grants `com.apple.security.virtualization` to the DevID `Anglesite` app.
+- A build signed with `Resources/Anglesite.entitlements` (any identity — the default ad-hoc
+  Debug signing carries `com.apple.security.virtualization` and boots VMs; the entitlement is
+  unrestricted).
 - The sibling plugin checkout exists at `/Users/dwk/Developer/github.com/Anglesite/anglesite`, or `ANGLESITE_PLUGIN_SRC` points at it.
 - A test `.anglesite` package whose `Source/` directory is a git repo.
 
@@ -82,7 +84,7 @@ export ANGLESITE_CONTAINER_INITFS=/absolute/path/to/container-initfs
 
 ## Build
 
-Regenerate the project and build the DevID scheme with the real plugin source:
+Regenerate the project and build the app with the real plugin source:
 
 ```sh
 xcodegen generate
@@ -97,7 +99,7 @@ For the boot smoke, use a signed run of the app that actually carries `com.apple
 | Case | Result | Notes |
 |---|---|---|
 | 1. Artifacts are provisioned |  |  |
-| 2. DevID app has virtualization entitlement |  |  |
+| 2. App signature has virtualization entitlement |  |  |
 | 3. Runtime selection chooses `LocalContainerSiteRuntime` |  |  |
 | 4. VM boots and guest clone succeeds |  |  |
 | 5. Preview loads through loopback proxy |  |  |
@@ -129,7 +131,7 @@ Fail if any artifact is missing or empty.
 
 ### 2. Verify Entitlement
 
-Launch the signed DevID app and confirm the runtime gate can see `com.apple.security.virtualization`.
+Launch the app (ad-hoc Debug signing is fine) and confirm the runtime gate can see `com.apple.security.virtualization`.
 
 Expected:
 
@@ -140,7 +142,7 @@ Fail if the app is signed but the entitlement probe returns false.
 
 ### 3. Confirm Runtime Selection
 
-1. Launch the signed DevID app with provisioned artifacts.
+1. Launch the signed app (ad-hoc Debug is fine) with provisioned artifacts.
 2. Open a test `.anglesite` package.
 3. Watch the debug pane during preview startup.
 
@@ -271,7 +273,7 @@ Record:
 
 The local runtime smoke is complete when:
 
-- The signed DevID app selects `LocalContainerSiteRuntime` with provisioned artifacts.
+- The signed app selects `LocalContainerSiteRuntime` with provisioned artifacts.
 - Preview and MCP both run through loopback vsock proxies.
 - `apply_edit` writes through the in-container sidecar.
 - Window close tears down the VM/proxies.

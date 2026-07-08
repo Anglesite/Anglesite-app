@@ -1,7 +1,10 @@
 /// Decides whether `LocalContainerSiteRuntime` can run on this build/host. The entitlement is the
-/// real gate (it's unforgeable — an un-entitled build is SIGKILL'd by `amfid` at launch, see the
-/// #60 spike), so no feature flag is needed: a build without it simply reports `false` and the app
-/// falls back to `UnavailableSiteRuntime` / `RemoteSandboxSiteRuntime`.
+/// real gate (it's unforgeable — Virtualization.framework rejects VM configurations from a process
+/// whose signature lacks it, loudly, at `validate()`), so no feature flag is needed: a build
+/// without it simply reports `false` and the app falls back to `UnavailableSiteRuntime` /
+/// `RemoteSandboxSiteRuntime`. The entitlement itself is unrestricted — any signature works,
+/// including ad-hoc Debug builds; no Apple approval or provisioning-profile grant is involved
+/// (verified 2026-07-07 via `scripts/run-container-probe.sh` under `codesign --sign -`).
 public enum LocalContainerSupport {
     public enum Availability: Sendable, Equatable {
         case available

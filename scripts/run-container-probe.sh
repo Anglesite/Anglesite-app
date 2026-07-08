@@ -14,10 +14,10 @@
 #   scripts/run-container-probe.sh echo   # THE Task 4b decision gate (vsock round-trip)
 #   scripts/run-container-probe.sh boot    # Task 5's gate (full boot + preview HTTP poll)
 #
-# On an ad-hoc-signing environment where the Virtualization entitlement still isn't honored at
-# runtime (e.g. no provisioning profile trusts an ad-hoc identity for the restricted
-# entitlement), retry with SIGN_IDENTITY set to a real Apple Development identity for the app's
-# team, e.g.:
+# The default ad-hoc signing is sufficient: `com.apple.security.virtualization` is an
+# unrestricted entitlement, honored under `codesign --sign -` with no provisioning profile
+# (verified 2026-07-07: the echo gate passed ad-hoc). SIGN_IDENTITY remains as an override for
+# signing-shape experiments, e.g.:
 #   SIGN_IDENTITY="Apple Development: you@example.com (TEAMID)" scripts/run-container-probe.sh echo
 
 set -euo pipefail
@@ -45,8 +45,8 @@ swift build --package-path "${ROOT_DIR}" --product anglesite-container-probe
 BIN_PATH="$(swift build --package-path "${ROOT_DIR}" --product anglesite-container-probe --show-bin-path)/anglesite-container-probe"
 [[ -x "${BIN_PATH}" ]] || { echo "run-container-probe: built binary not found at ${BIN_PATH}" >&2; exit 1; }
 
-# Default to ad-hoc; the caller can override with a real Apple Development identity (team
-# KH7H8Y25RT) if ad-hoc signing doesn't get the Virtualization entitlement honored at runtime.
+# Ad-hoc works (the entitlement is unrestricted); SIGN_IDENTITY overrides for
+# signing-shape experiments.
 IDENTITY="${SIGN_IDENTITY:--}"
 
 echo "==> run-container-probe: signing ${BIN_PATH} with identity '${IDENTITY}' + ${ENTITLEMENTS}"

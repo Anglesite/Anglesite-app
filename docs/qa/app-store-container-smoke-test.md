@@ -8,18 +8,19 @@
 
 Validate the release-signing shape that CI cannot exercise:
 
-- the App Store-sandboxed app carries the granted `com.apple.security.virtualization` entitlement;
+- the App Store-sandboxed app carries the `com.apple.security.virtualization` entitlement;
 - the app selects `LocalContainerSiteRuntime`, not any retired host Node preview path;
 - preview, MCP/edit, image writes, build/preflight, deploy prompting, and teardown all work through the package security-scoped grant;
 - sandbox denials and container failures are visible in logs.
 
-This is an interactive author-run smoke. A no-signing or ad-hoc build is not sufficient.
+This is an interactive author-run smoke. An ad-hoc build boots containers fine (the virtualization entitlement is unrestricted), but is not sufficient here — this smoke validates the *release signing shape* (Team ID, profile embedding, sandbox under a real identity), which only a real-signed build exercises.
 
 ## Preconditions
 
 - Apple Silicon Mac on the supported macOS/Xcode versions.
 - Apple Development or distribution signing identity for the app team.
-- Provisioning profile that grants `com.apple.security.virtualization`.
+- Standard Mac App Store (or Development) provisioning profile for the app id. No
+  entitlement grant is involved — `com.apple.security.virtualization` is unrestricted.
 - Container artifacts provisioned in the app bundle, or equivalent release artifact path:
   - `Resources/container-image/index.json`
   - `Resources/container-kernel/vmlinux`
@@ -29,9 +30,11 @@ This is an interactive author-run smoke. A no-signing or ad-hoc build is not suf
 Run the local runtime probes first:
 
 ```sh
-SIGN_IDENTITY="Apple Development: <name> (<TEAMID>)" scripts/run-container-probe.sh echo
-SIGN_IDENTITY="Apple Development: <name> (<TEAMID>)" scripts/run-container-probe.sh boot
+scripts/run-container-probe.sh echo
+scripts/run-container-probe.sh boot
 ```
+
+(The probe's default ad-hoc signing is sufficient — the entitlement needs no real identity.)
 
 Both must pass, or the App Store smoke is expected to fail at runtime startup.
 
@@ -51,7 +54,7 @@ The script prints the built app path and the interactive steps. Copy the built a
 |---|---|---|
 | Real-signed app launches from `~/Applications` |  |  |
 | App signature has expected Team ID |  |  |
-| Provisioning profile grants `com.apple.security.virtualization` |  |  |
+| App signature carries `com.apple.security.virtualization` |  |  |
 | Imported fixture package opens with a security-scoped grant |  |  |
 | Runtime selection logs `LocalContainerSiteRuntime` |  |  |
 | No host Node preview fallback starts |  |  |
