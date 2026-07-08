@@ -13,11 +13,13 @@ public enum AltTextPromptBuilder {
 
     private static func guidance(from conventions: ProjectConventions) -> String? {
         var lines: [String] = []
-        if conventions.images.altTextAverageLength.sampleSize.map({ $0 > 0 }) == true {
-            lines.append("Aim for around \(conventions.images.altTextAverageLength.value) characters, matching this site's existing alt text.")
+        let altLength = conventions.images.altTextAverageLength
+        if altLength.isOverridden || altLength.sampleSize.map({ $0 > 0 }) == true {
+            lines.append("Aim for around \(altLength.value) characters, matching this site's existing alt text.")
         }
-        if conventions.images.altTextEndsWithPunctuation.sampleSize.map({ $0 > 0 }) == true,
-           conventions.images.altTextEndsWithPunctuation.value {
+        let endsWithPunctuation = conventions.images.altTextEndsWithPunctuation
+        if (endsWithPunctuation.isOverridden || endsWithPunctuation.sampleSize.map({ $0 > 0 }) == true),
+           endsWithPunctuation.value {
             lines.append("This site's existing alt text tends toward full sentences ending with punctuation.")
         }
         if !conventions.writing.brandTerms.value.isEmpty {

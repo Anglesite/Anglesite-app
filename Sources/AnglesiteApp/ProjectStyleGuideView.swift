@@ -49,24 +49,24 @@ struct ProjectStyleGuideView: View {
     @ViewBuilder
     private func writingSection(_ conventions: ProjectConventions) -> some View {
         Section("Writing") {
-            learnedRow(
-                "Heading style",
-                display: conventions.writing.headingCapitalization.value.rawValue,
+            PickerConventionRow(
+                label: "Heading style",
                 learned: conventions.writing.headingCapitalization,
+                onSet: { value in Task { await model.setOverride(.headingCapitalization(value)) } },
                 onClear: { Task { await model.clearOverride(.headingCapitalization) } }
             )
-            learnedRow(
-                "Tone",
-                display: conventions.writing.toneDescriptors.value.isEmpty
-                    ? "Not learned yet" : conventions.writing.toneDescriptors.value.joined(separator: ", "),
+            TokenListConventionRow(
+                label: "Tone",
+                placeholder: "Not learned yet",
                 learned: conventions.writing.toneDescriptors,
+                onSet: { value in Task { await model.setOverride(.toneDescriptors(value)) } },
                 onClear: { Task { await model.clearOverride(.toneDescriptors) } }
             )
-            learnedRow(
-                "Brand terms",
-                display: conventions.writing.brandTerms.value.isEmpty
-                    ? "Not learned yet" : conventions.writing.brandTerms.value.joined(separator: ", "),
+            TokenListConventionRow(
+                label: "Brand terms",
+                placeholder: "Not learned yet",
                 learned: conventions.writing.brandTerms,
+                onSet: { value in Task { await model.setOverride(.brandTerms(value)) } },
                 onClear: { Task { await model.clearOverride(.brandTerms) } }
             )
         }
@@ -75,16 +75,17 @@ struct ProjectStyleGuideView: View {
     @ViewBuilder
     private func imagesSection(_ conventions: ProjectConventions) -> some View {
         Section("Images") {
-            learnedRow(
-                "Average alt text length",
-                display: "\(conventions.images.altTextAverageLength.value) characters",
+            NumberConventionRow(
+                label: "Average alt text length",
+                suffix: "characters",
                 learned: conventions.images.altTextAverageLength,
+                onSet: { value in Task { await model.setOverride(.altTextAverageLength(value)) } },
                 onClear: { Task { await model.clearOverride(.altTextAverageLength) } }
             )
-            learnedRow(
-                "Ends with punctuation",
-                display: conventions.images.altTextEndsWithPunctuation.value ? "Yes" : "No",
+            ToggleConventionRow(
+                label: "Ends with punctuation",
                 learned: conventions.images.altTextEndsWithPunctuation,
+                onSet: { value in Task { await model.setOverride(.altTextEndsWithPunctuation(value)) } },
                 onClear: { Task { await model.clearOverride(.altTextEndsWithPunctuation) } }
             )
         }
@@ -106,10 +107,10 @@ struct ProjectStyleGuideView: View {
     @ViewBuilder
     private func namingSection(_ conventions: ProjectConventions) -> some View {
         Section("Naming") {
-            learnedRow(
-                "Slug style",
-                display: conventions.naming.slugStyle.value.rawValue,
+            PickerConventionRow(
+                label: "Slug style",
                 learned: conventions.naming.slugStyle,
+                onSet: { value in Task { await model.setOverride(.slugStyle(value)) } },
                 onClear: { Task { await model.clearOverride(.slugStyle) } }
             )
         }
@@ -118,10 +119,11 @@ struct ProjectStyleGuideView: View {
     @ViewBuilder
     private func seoSection(_ conventions: ProjectConventions) -> some View {
         Section("SEO") {
-            learnedRow(
-                "Average meta description length",
-                display: "\(conventions.seo.metaDescriptionAverageLength.value) characters",
+            NumberConventionRow(
+                label: "Average meta description length",
+                suffix: "characters",
                 learned: conventions.seo.metaDescriptionAverageLength,
+                onSet: { value in Task { await model.setOverride(.metaDescriptionAverageLength(value)) } },
                 onClear: { Task { await model.clearOverride(.metaDescriptionAverageLength) } }
             )
         }
@@ -143,22 +145,147 @@ struct ProjectStyleGuideView: View {
         }
     }
 
-    // MARK: Row helper
+    // MARK: Row status (shared by every editable row type)
 
+    /// Shared trailing status indicator: "edited" + Revert when the field is a `.userOverride`,
+    /// or a "low confidence" note when it's inferred from very few files.
     @ViewBuilder
-    private func learnedRow<Value>(
-        _ label: String, display: String, learned: Learned<Value>, onClear: @escaping () -> Void
-    ) -> some View {
+    fileprivate static func statusIndicator<Value>(_ learned: Learned<Value>, onClear: @escaping () -> Void) -> some View {
+        if learned.isOverridden {
+            Text("edited").font(.caption2).foregroundStyle(.secondary)
+            Button("Revert", action: onClear).font(.caption2)
+        } else if let sampleSize = learned.sampleSize, sampleSize > 0, sampleSize < 3 {
+            Text("low confidence").font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - Editable row types
+
+/// A row for an enum-valued `Learned` field, editable via a menu `Picker` over every case.
+/// Selecting a value calls `onSet` immediately — a menu choice is a discrete action, not
+/// per-keystroke typing, so there's no need to buffer/debounce it.
+private struct PickerConventionRow<Option: Hashable & CaseIterable & RawRepresentable & Sendable & Codable>: View
+where Option.RawValue == String, Option.AllCases: RandomAccessCollection {
+    let label: String
+    let learned: Learned<Option>
+    let onSet: (Option) -> Void
+    let onClear: () -> Void
+
+    var body: some View {
         LabeledContent(label) {
             HStack(spacing: 6) {
-                Text(display)
-                if learned.isOverridden {
-                    Text("edited").font(.caption2).foregroundStyle(.secondary)
-                    Button("Revert", action: onClear).font(.caption2)
-                } else if let sampleSize = learned.sampleSize, sampleSize > 0, sampleSize < 3 {
-                    Text("low confidence").font(.caption2).foregroundStyle(.secondary)
+                Picker("", selection: Binding(get: { learned.value }, set: onSet)) {
+                    ForEach(Array(Option.allCases), id: \.self) { option in
+                        Text(option.rawValue).tag(option)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+                ProjectStyleGuideView.statusIndicator(learned, onClear: onClear)
             }
         }
+    }
+}
+
+/// A row for a `Bool`-valued `Learned` field, editable via a `Toggle`. Fires `onSet` immediately
+/// on flip — a toggle is a discrete action, same reasoning as the picker row.
+private struct ToggleConventionRow: View {
+    let label: String
+    let learned: Learned<Bool>
+    let onSet: (Bool) -> Void
+    let onClear: () -> Void
+
+    var body: some View {
+        LabeledContent(label) {
+            HStack(spacing: 6) {
+                Toggle("", isOn: Binding(get: { learned.value }, set: onSet)).labelsHidden()
+                ProjectStyleGuideView.statusIndicator(learned, onClear: onClear)
+            }
+        }
+    }
+}
+
+/// A row for an `Int`-valued `Learned` field (a character-count length), editable via a numeric
+/// `TextField`. Buffers typed text locally in `text` and commits to `onSet` only on Return or
+/// focus loss — never per keystroke. Reverts the buffer to the last known value on invalid or
+/// unchanged input so a bad edit can't silently corrupt the model.
+private struct NumberConventionRow: View {
+    let label: String
+    let suffix: String
+    let learned: Learned<Int>
+    let onSet: (Int) -> Void
+    let onClear: () -> Void
+
+    @State private var text: String = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        LabeledContent(label) {
+            HStack(spacing: 6) {
+                TextField("", text: $text)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 60)
+                    .multilineTextAlignment(.trailing)
+                    .focused($isFocused)
+                    .onAppear { text = String(learned.value) }
+                    .onChange(of: learned.value) { _, newValue in
+                        if !isFocused { text = String(newValue) }
+                    }
+                    .onSubmit { commit() }
+                    .onChange(of: isFocused) { wasFocused, nowFocused in
+                        if wasFocused, !nowFocused { commit() }
+                    }
+                Text(suffix).foregroundStyle(.secondary)
+                ProjectStyleGuideView.statusIndicator(learned, onClear: onClear)
+            }
+        }
+    }
+
+    private func commit() {
+        guard let value = Int(text), value >= 0, value != learned.value else {
+            text = String(learned.value)
+            return
+        }
+        onSet(value)
+    }
+}
+
+/// A row for a `[String]`-valued `Learned` field (tone descriptors, brand terms), editable as a
+/// comma-separated `TextField`. Same buffer/commit discipline as `NumberConventionRow`.
+private struct TokenListConventionRow: View {
+    let label: String
+    let placeholder: String
+    let learned: Learned<[String]>
+    let onSet: ([String]) -> Void
+    let onClear: () -> Void
+
+    @State private var text: String = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        LabeledContent(label) {
+            HStack(spacing: 6) {
+                TextField(placeholder, text: $text)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($isFocused)
+                    .onAppear { text = learned.value.joined(separator: ", ") }
+                    .onChange(of: learned.value) { _, newValue in
+                        if !isFocused { text = newValue.joined(separator: ", ") }
+                    }
+                    .onSubmit { commit() }
+                    .onChange(of: isFocused) { wasFocused, nowFocused in
+                        if wasFocused, !nowFocused { commit() }
+                    }
+                ProjectStyleGuideView.statusIndicator(learned, onClear: onClear)
+            }
+        }
+    }
+
+    private func commit() {
+        let parsed = text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard parsed != learned.value else { return }
+        onSet(parsed)
     }
 }

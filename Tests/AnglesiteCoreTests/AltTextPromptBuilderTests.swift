@@ -30,4 +30,16 @@ struct AltTextPromptBuilderTests {
         #expect(prompt.contains("Anglesite"))
         #expect(prompt.contains("Astro"))
     }
+
+    @Test("an overridden image field is included even with a nil sampleSize")
+    func includesOverriddenFieldWithNilSampleSize() {
+        var conventions = ProjectConventions.empty
+        conventions.apply(.altTextAverageLength(42))
+        conventions.apply(.altTextEndsWithPunctuation(true))
+
+        let prompt = AltTextPromptBuilder.build(basePrompt: "Generate alt text.", conventions: conventions)
+
+        #expect(prompt.contains("42 characters"))
+        #expect(prompt.contains("ending with punctuation"))
+    }
 }

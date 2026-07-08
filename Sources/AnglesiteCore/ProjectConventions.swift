@@ -28,13 +28,13 @@ public struct Learned<Value: Sendable & Codable & Equatable>: Sendable, Codable,
     }
 }
 
-public enum HeadingCapitalization: String, Sendable, Codable, Equatable {
+public enum HeadingCapitalization: String, Sendable, Codable, Equatable, CaseIterable {
     case titleCase
     case sentenceCase
     case mixed
 }
 
-public enum SlugStyle: String, Sendable, Codable, Equatable {
+public enum SlugStyle: String, Sendable, Codable, Equatable, CaseIterable {
     case kebabCase
     case snakeCase
     case mixed
