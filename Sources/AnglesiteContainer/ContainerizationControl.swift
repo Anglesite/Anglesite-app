@@ -49,13 +49,21 @@ public struct ContainerizationControl: LocalContainerControl {
         //    check out ref. Cloning from the read-only share (not in place) keeps /workspace writable
         //    and preserves full git history — native, no network. Two steps because `git clone
         //    --branch` rejects "HEAD"/bare SHAs; `git checkout` accepts both.
+        // The image ships no /etc/hosts: docker/containerd write one at container create, but
+        // Apple Containerization boots the rootfs as-is — without it even `localhost` becomes a
+        // real DNS query (vite does dns.lookup("localhost") at astro config load → EAI_AGAIN,
+        // astro exits, and the preview never becomes ready). Write the standard entries first.
+        // Wrapped separately from the clone below so a hosts failure reads as a boot problem,
+        // not a misleading `cloneFailed`.
         do {
-            // The image ships no /etc/hosts: docker/containerd write one at container create, but
-            // Apple Containerization boots the rootfs as-is — without it even `localhost` becomes a
-            // real DNS query (vite does dns.lookup("localhost") at astro config load → EAI_AGAIN,
-            // astro exits, and the preview never becomes ready). Write the standard entries first.
             try await runToCompletion(container, id: "hosts", onOutput: onOutput,
                 ["sh", "-c", "printf '127.0.0.1\\tlocalhost\\n::1\\tlocalhost\\n' > /etc/hosts"])
+        } catch {
+            await stopBareContainer(container, siteID: siteID)
+            throw LocalContainerError.bootFailed("guest /etc/hosts setup failed: \(error)")
+        }
+
+        do {
             try await runToCompletion(container, id: "clone", onOutput: onOutput,
                 ["git", "clone", Self.repoSharePath, "/workspace/site"])
             try await runToCompletion(container, id: "checkout", onOutput: onOutput,
@@ -626,6 +634,10 @@ public struct ContainerizationControl: LocalContainerControl {
         }
         try await proc.start()
         let status = try await proc.wait()
+        // `wait()` returns only after the IO streams have drained — flush any trailing partial
+        // (unterminated) line on each stream, same as `exec()` below.
+        stdoutSink?.flush()
+        stderrSink?.flush()
         try? await proc.delete()
         guard status.exitCode == 0 else {
             throw LocalContainerError.cloneFailed("`\(argv.joined(separator: " "))` exited \(status.exitCode)")
