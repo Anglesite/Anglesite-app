@@ -20,14 +20,27 @@ final class SiteGraphExplorerModel {
     }
 
     var filteredNodes: [SiteGraphNode] {
+        snapshot.nodes.filter { enabledKinds.contains($0.kind) && matchesSearch($0) }
+    }
+
+    private func matchesSearch(_ node: SiteGraphNode) -> Bool {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return snapshot.nodes.filter { node in
-            guard enabledKinds.contains(node.kind) else { return false }
-            guard !query.isEmpty else { return true }
-            return node.title.lowercased().contains(query)
-                || node.detail?.lowercased().contains(query) == true
-                || node.filePath?.lowercased().contains(query) == true
-        }
+        guard !query.isEmpty else { return true }
+        return node.title.lowercased().contains(query)
+            || node.detail?.lowercased().contains(query) == true
+            || node.filePath?.lowercased().contains(query) == true
+    }
+
+    /// Selects a node navigated to from the Impact section. Impact is computed over the *full*
+    /// snapshot, so the target may currently be hidden by the toolbar kind filter or the search
+    /// query — a plain `selectedNodeID = …` would then leave the explorer visibly inconsistent:
+    /// no canvas highlight, and `selectedIncoming`/`selectedOutgoing` silently empty because
+    /// `filteredEdges` drops edges touching hidden nodes. Re-enable the node's kind and clear a
+    /// search that hides it, so the rest of the explorer can actually show the new selection.
+    func revealNode(_ node: SiteGraphNode) {
+        enabledKinds.insert(node.kind)
+        if !matchesSearch(node) { searchText = "" }
+        selectedNodeID = node.id
     }
 
     var filteredEdges: [SiteGraphEdge] {

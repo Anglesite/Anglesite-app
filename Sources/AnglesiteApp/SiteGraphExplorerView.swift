@@ -245,15 +245,9 @@ private struct SiteGraphImpactSection: View {
             Label("Impact", systemImage: "dot.radiowaves.left.and.right")
                 .font(.subheadline)
                 .fontWeight(.semibold)
-            if impact.hasDependents {
-                Text(summary)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Nothing else on this site depends on it — editing it affects only this file.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+            Text(summary)
+                .font(.callout)
+                .foregroundStyle(.secondary)
             SiteGraphImpactNodeList(
                 title: "Affects \(count(impact.affectedPages.count, "Page"))",
                 nodes: impact.affectedPages, model: model)
@@ -281,12 +275,21 @@ private struct SiteGraphImpactSection: View {
     }
 
     /// "This change would affect 18 pages." — the issue's headline number, pages + entries.
+    /// The zero-dependents copy acknowledges a non-empty collection membership shown right
+    /// below it (membership isn't a dependency, but "nothing else depends on it" directly above
+    /// an "Included in 1 Collection" list reads as self-contradictory).
     private var summary: String {
         let routes = impact.affectedPages.count + impact.affectedEntries.count
         if routes > 0 {
             return "Editing this would affect \(count(routes, "page"))."
         }
-        return "Editing this would affect other site files, but no rendered pages."
+        if impact.hasDependents {
+            return "Editing this would affect other site files, but no rendered pages."
+        }
+        if !impact.affectedCollections.isEmpty {
+            return "Nothing else on this site depends on it — editing it affects only this entry within its collection."
+        }
+        return "Nothing else on this site depends on it — editing it affects only this file."
     }
 
     private func count(_ n: Int, _ singular: String, plural: String? = nil) -> String {
@@ -310,7 +313,11 @@ private struct SiteGraphImpactNodeList: View {
                     .foregroundStyle(.secondary)
                 ForEach(nodes) { node in
                     Button {
-                        model.selectedNodeID = node.id
+                        // Not a plain `selectedNodeID = …`: the impact list is computed over the
+                        // full snapshot, so the node may be hidden by the toolbar kind filter or
+                        // search — revealNode un-hides it so the canvas and edge lists can show
+                        // the new selection (PR #545 review).
+                        model.revealNode(node)
                     } label: {
                         HStack {
                             Label(node.title, systemImage: node.kind.systemImage)

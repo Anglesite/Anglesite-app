@@ -57,7 +57,9 @@ public enum ImpactAnalysis {
             dependents[edge.targetID, default: []].append(edge.sourceID)
         }
 
-        // Breadth-first reverse reachability from the target.
+        // Iterative reverse reachability from the target. `popLast()` makes `frontier` a stack,
+        // so this walks depth-first — traversal order is irrelevant to the output (the visited
+        // set counts each dependent exactly once, and groups are title-sorted before returning).
         var visited: Set<String> = [targetID]
         var frontier = [targetID]
         var affected: [SiteGraphNode] = []
