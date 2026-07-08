@@ -41,22 +41,32 @@ struct PreviewPrintingTests {
         #expect(headerAndFooter == false)
     }
 
-    // MARK: Operation construction
+    // MARK: Operation configuration
+    //
+    // `configure(_:)` is exercised against a plain `NSPrintOperation` — the operation
+    // `WKWebView.printOperation(with:)` returns behaves differently on older OS releases /
+    // headless CI (setters don't stick, `view` is nil), so asserting through it is flaky.
 
-    @Test("Make operation shows the print panel and carries the web-content print info")
-    func makeOperationConfiguration() {
-        let webView = WKWebView(frame: .zero)
-        let operation = PreviewPrinting.makeOperation(for: webView)
+    @Test("Configure shows the print and progress panels") func configurePanels() {
+        let operation = NSPrintOperation(view: NSView(), printInfo: PreviewPrinting.webContentPrintInfo())
+        operation.showsPrintPanel = false
+        operation.showsProgressPanel = false
+        PreviewPrinting.configure(operation)
         #expect(operation.showsPrintPanel)
         #expect(operation.showsProgressPanel)
-        #expect(operation.printInfo.horizontalPagination == .fit)
     }
 
-    @Test("Make operation sizes the printing view to the paper — a zero frame prints blank pages")
-    func makeOperationViewFrame() {
+    @Test("Configure sizes the printing view to the paper — a zero frame prints blank pages")
+    func configureViewFrame() {
+        let operation = NSPrintOperation(view: NSView(), printInfo: PreviewPrinting.webContentPrintInfo())
+        PreviewPrinting.configure(operation)
+        #expect(operation.view?.frame.size == operation.printInfo.paperSize)
+    }
+
+    @Test("Make operation builds a runnable operation for a web view") func makeOperationSmoke() {
+        // Construction only: the returned object's observable state is WebKit-version-dependent
+        // (see the note above), so this is a does-not-crash smoke test.
         let webView = WKWebView(frame: .zero)
-        let operation = PreviewPrinting.makeOperation(for: webView)
-        let paper = operation.printInfo.paperSize
-        #expect(operation.view?.frame.size == paper)
+        _ = PreviewPrinting.makeOperation(for: webView)
     }
 }

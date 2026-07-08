@@ -32,19 +32,31 @@ public enum PreviewPrinting {
         return info
     }
 
-    /// Builds the print operation for the previewed page. Shows the standard print panel (the
-    /// user picks printer/PDF/preview there) and a progress panel while WebKit paginates.
+    /// Builds the print operation for the previewed page: `WKWebView.printOperation(with:)`
+    /// against `webContentPrintInfo()`, then `configure(_:)`.
     ///
     /// The caller runs it — `runModal(for:...)` as a window sheet, or `run()` without one.
     @MainActor
     public static func makeOperation(for webView: WKWebView) -> NSPrintOperation {
-        let info = webContentPrintInfo()
-        let operation = webView.printOperation(with: info)
+        let operation = webView.printOperation(with: webContentPrintInfo())
+        configure(operation)
+        return operation
+    }
+
+    /// Applies the app's presentation defaults to a print operation: show the standard print
+    /// panel (the user picks printer/PDF/preview there), show a progress panel while WebKit
+    /// paginates, and size the printing view to the paper — WKWebView's internal printing view
+    /// starts zero-sized, and with a zero frame the operation paginates nothing and every page
+    /// prints blank (long-standing WebKit quirk).
+    ///
+    /// Split from `makeOperation(for:)` so this half is testable against a plain
+    /// `NSPrintOperation`: the operation WebKit returns behaves differently on older OS
+    /// releases/headless CI (setters don't stick, `view` is nil), so tests exercise this
+    /// function directly rather than asserting through WebKit's object.
+    @MainActor
+    public static func configure(_ operation: NSPrintOperation) {
         operation.showsPrintPanel = true
         operation.showsProgressPanel = true
-        // WKWebView's internal printing view starts zero-sized; without a nonzero frame the
-        // operation paginates nothing and every page prints blank (long-standing WebKit quirk).
-        operation.view?.frame = NSRect(origin: .zero, size: info.paperSize)
-        return operation
+        operation.view?.frame = NSRect(origin: .zero, size: operation.printInfo.paperSize)
     }
 }
