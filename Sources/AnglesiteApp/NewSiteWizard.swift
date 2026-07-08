@@ -335,7 +335,7 @@ struct NewSiteWizard: View {
     @MainActor private func saveWebsite() {
         let panel = NSSavePanel()
         panel.title = "Save Your Website"
-        panel.prompt = "Save"
+        panel.prompt = String(localized: "Save")
         panel.allowedContentTypes = [.anglesiteSite]
         panel.canCreateDirectories = true
         panel.directoryURL = model.draft.saveDirectory ?? model.defaultSaveDirectory
@@ -357,7 +357,7 @@ struct NewSiteWizard: View {
     @MainActor private func chooseLogo() {
         let panel = NSOpenPanel()
         panel.title = "Choose Logo"
-        panel.prompt = "Choose"
+        panel.prompt = String(localized: "Choose")
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
