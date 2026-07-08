@@ -221,9 +221,10 @@ public struct ContainerizationControl: LocalContainerControl {
         try? FileManager.default.removeItem(at: initfsURL)
 
         // 1. Import the bundled OCI layouts into the on-disk ImageStore and unpack to bootable mounts.
-        //    `load(from:)` is idempotent against an existing store (re-import returns the same image),
-        //    but it also needs to write into the layout directory itself (not just the store), so both
-        //    layouts are staged to a writable copy first — the bundled originals are read-only.
+        //    `loadOrGet` re-imports whenever the bundled layout changed since the last import (#549),
+        //    so app updates that ship a new image actually take effect. `load(from:)` also needs to
+        //    write into the layout directory itself (not just the store), so both layouts are staged
+        //    to a writable copy first — the bundled originals are read-only.
         let rootfs: Containerization.Mount
         let initfs: Containerization.Mount
         do {
@@ -232,7 +233,9 @@ public struct ContainerizationControl: LocalContainerControl {
 
             // App image -> ext4 rootfs mount.
             let stagedImageLayout = try BundledImage.stagedLayoutURL(source: imageLayoutURL, name: "app-image")
-            let appImage = try await loadOrGet(store, layout: stagedImageLayout, reference: BundledImage.imageReference)
+            let appImage = try await loadOrGet(
+                store, layout: stagedImageLayout, reference: BundledImage.imageReference,
+                artifactName: "app-image", storeRoot: storeURL)
             onOutput("[boot] unpacking app image to ext4 rootfs", .stdout)
             rootfs = try await EXT4Unpacker(blockSizeInBytes: 8 * 1024 * 1024 * 1024)
                 .unpack(appImage, for: .current, at: rootfsURL)
@@ -240,7 +243,9 @@ public struct ContainerizationControl: LocalContainerControl {
             // vminit initfs OCI layout -> ext4 init mount (the guest-agent root filesystem).
             let stagedInitfsLayout = try BundledImage.stagedLayoutURL(source: initfsLayoutURL, name: "vminit-initfs")
             let initImageRef = "vminit:latest"
-            let initImage = InitImage(image: try await loadOrGet(store, layout: stagedInitfsLayout, reference: initImageRef))
+            let initImage = InitImage(image: try await loadOrGet(
+                store, layout: stagedInitfsLayout, reference: initImageRef,
+                artifactName: "vminit-initfs", storeRoot: storeURL))
             onOutput("[boot] unpacking vminit initfs to ext4", .stdout)
             initfs = try await initImage.initBlock(at: initfsURL, for: .linuxArm)
         } catch {
@@ -499,13 +504,29 @@ public struct ContainerizationControl: LocalContainerControl {
 
     // MARK: - Helpers
 
-    /// Import an OCI layout into the store, tolerating a prior import (idempotent): if `load` fails
-    /// because the reference already resolves, fall back to `get`.
-    private func loadOrGet(_ store: ImageStore, layout: URL, reference: String) async throws -> Containerization.Image {
-        if let existing = try? await store.get(reference: reference) {
+    /// Resolve `reference` from the store, importing (or re-importing) the OCI layout as needed.
+    ///
+    /// The `get(reference:)` fast path is taken only while `OCILayoutImportMarker` confirms the
+    /// store's import came from this exact layout. Without that check the first-ever import is
+    /// served forever: an app update that ships a new bundled image never reaches the store, and
+    /// the guest keeps booting the old rootfs (#549). On mismatch `load(from:)` re-imports —
+    /// `ImageStore`'s reference state is an overwrite-on-create map, so loading repoints the tag
+    /// to the new image. `artifactName` must match the staging name so marker and staged copy
+    /// describe the same artifact.
+    private func loadOrGet(
+        _ store: ImageStore,
+        layout: URL,
+        reference: String,
+        artifactName: String,
+        storeRoot: URL
+    ) async throws -> Containerization.Image {
+        if OCILayoutImportMarker.isCurrent(layout: layout, name: artifactName, storeRoot: storeRoot),
+            let existing = try? await store.get(reference: reference) {
             return existing
         }
         let loaded = try await store.load(from: layout)
+        // Best-effort: a failed marker write only costs a redundant re-import next boot.
+        try? OCILayoutImportMarker.recordImported(layout: layout, name: artifactName, storeRoot: storeRoot)
         if let match = try? await store.get(reference: reference) {
             return match
         }
