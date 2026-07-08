@@ -152,7 +152,7 @@ struct SiteNavigatorView: View {
                     cleanup.isScanning ? "Scanning…" : "Scan for Cleanup Opportunities",
                     systemImage: "sparkle.magnifyingglass")
             }
-            .disabled(cleanup.isScanning)
+            .disabled(cleanup.isBusy)
         } else if cleanup.candidates.isEmpty {
             Text("No unused files found")
                 .foregroundStyle(.secondary)
@@ -175,7 +175,7 @@ struct SiteNavigatorView: View {
             } label: {
                 Label(cleanup.isScanning ? "Scanning…" : "Rescan", systemImage: "arrow.clockwise")
             }
-            .disabled(cleanup.isScanning)
+            .disabled(cleanup.isBusy)
         }
     }
 

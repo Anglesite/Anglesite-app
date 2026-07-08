@@ -13,6 +13,15 @@ final class ProjectCleanupModel {
     private(set) var hasScanned = false
     var deleteError: String?
 
+    /// True while a scan or delete is in flight. Serializes this model's git/filesystem
+    /// operations: without it, a fast user (or a second call site) could trigger a concurrent
+    /// scan + delete, or two deletes, racing on the same `Source/` git repo and producing
+    /// confusing spurious `.git/index.lock` failures. Everything here is already
+    /// `@MainActor`-isolated, so this is defense-in-depth rather than a correctness fix for a
+    /// data race — but it closes the "nothing actually prevents this" gap outright rather than
+    /// relying solely on the UI's own button-disabled state.
+    private(set) var isBusy = false
+
     /// Ids ignored this session only — matches `RelatedPagesModel.ignored`'s "not persisted in
     /// v0" precedent. A fresh app launch re-surfaces a still-unreferenced file.
     private var ignored = Set<String>()
@@ -41,10 +50,12 @@ final class ProjectCleanupModel {
     }
 
     /// Runs (or re-runs) the full cleanup scan. On-demand only — never called automatically.
+    /// No-ops (rather than queuing) if a scan or delete is already in flight.
     func scan() async {
-        guard let siteID, let sourceDirectory else { return }
+        guard let siteID, let sourceDirectory, !isBusy else { return }
+        isBusy = true
         isScanning = true
-        defer { isScanning = false }
+        defer { isBusy = false; isScanning = false }
 
         await knowledgeIndex.rebuild(siteID: siteID, projectRoot: sourceDirectory)
         let documents = await knowledgeIndex.documents(siteID: siteID)
@@ -67,15 +78,26 @@ final class ProjectCleanupModel {
     }
 
     /// Deletes `candidate` via `git rm` + commit. On failure, sets `deleteError` and leaves the
-    /// candidate listed and the file untouched — never falls back to a non-git raw delete.
-    /// Returns whether the delete succeeded, so callers (`SiteWindowModel`) can react — e.g.
-    /// closing an editor tab open on the now-deleted file — only on real success.
+    /// candidate listed — never falls back to a non-git raw delete. Returns whether the delete
+    /// succeeded, so callers (`SiteWindowModel`) can react — e.g. closing an editor tab open on
+    /// the now-deleted file — only on real success. No-ops if a scan or delete is already in
+    /// flight (see `isBusy`).
     @discardableResult
     func delete(_ candidate: DeadAssetScanner.CleanupCandidate) async -> Bool {
-        guard let sourceDirectory else { return false }
+        guard let sourceDirectory, !isBusy else { return false }
+        isBusy = true
+        defer { isBusy = false }
         let message = "Remove unused \(candidate.kind.rawValue): \(candidate.path)"
         guard await gitDelete(sourceDirectory, candidate.path, message) != nil else {
-            deleteError = "Couldn't delete \(candidate.path). Check for uncommitted changes and try again."
+            // Distinguish an ordinary refusal (nothing touched — dirty tree, no HEAD copy, no
+            // git identity) from the rare double-failure case (commit AND its rollback both
+            // failed): if the file is already gone from disk, that's the more urgent state, and
+            // the generic "try again" message would be actively misleading.
+            let stillOnDisk = FileManager.default.fileExists(
+                atPath: sourceDirectory.appendingPathComponent(candidate.path).path)
+            deleteError = stillOnDisk
+                ? "Couldn't delete \(candidate.path). Check for uncommitted changes and try again."
+                : "\(candidate.path) may have been removed from disk without a commit recording it. Check git status in this site's Source folder before continuing."
             return false
         }
         candidates.removeAll { $0.id == candidate.id }
