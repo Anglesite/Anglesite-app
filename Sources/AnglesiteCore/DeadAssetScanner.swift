@@ -249,8 +249,14 @@ public enum DeadAssetScanner {
     /// real file is harmless (it just never matches any real candidate's path), while crediting
     /// only the first target risks the opposite: a live file under a later target staying
     /// uncounted and flagged unused.
+    ///
+    /// Patterns are tried longest-literal-prefix-first (not `config.paths`'s raw `Dictionary`
+    /// order, which is unspecified) so two overlapping patterns that could both match the same
+    /// `ref` (e.g. `"@/*"` and `"@/components/*"`) resolve deterministically to the more specific
+    /// one, matching how bundlers conventionally break this tie.
     static func resolveAlias(_ ref: String, config: PathAliasConfig) -> [String] {
-        for (pattern, targets) in config.paths {
+        let orderedPatterns = config.paths.sorted { literalPrefixLength($0.key) > literalPrefixLength($1.key) }
+        for (pattern, targets) in orderedPatterns {
             let starCount = pattern.filter({ $0 == "*" }).count
             if starCount == 1, let starIndex = pattern.firstIndex(of: "*") {
                 let prefix = String(pattern[pattern.startIndex..<starIndex])
@@ -270,6 +276,16 @@ public enum DeadAssetScanner {
             }
         }
         return []
+    }
+
+    /// Length of `pattern` up to (not including) its first `*`, or the whole pattern's length if
+    /// it has none — a proxy for "how specific is this alias pattern" used to break ties between
+    /// overlapping `paths` entries.
+    private static func literalPrefixLength(_ pattern: String) -> Int {
+        if let starIndex = pattern.firstIndex(of: "*") {
+            return pattern.distance(from: pattern.startIndex, to: starIndex)
+        }
+        return pattern.count
     }
 
     /// Prefixes `target` (a `paths`-substituted specifier, possibly still `./`-relative) with
@@ -312,6 +328,7 @@ public enum DeadAssetScanner {
     public static func scan(projectRoot: URL, images: [SiteContentGraph.Image]) -> [CleanupCandidate] {
         var fileReferenceCounts: [String: Int] = [:]
         var globDirectories: Set<String> = []
+        var skippedOversizedFiles: [String] = []
         let aliasConfig = loadPathAliases(projectRoot: projectRoot)
 
         for abs in walk(projectRoot) {
@@ -322,7 +339,16 @@ public enum DeadAssetScanner {
             // pre-deploy checks) — not a nested directory like `src/scripts/`, which real sites
             // commonly use for client-side JS and which should still be scanned.
             guard !relPath.hasPrefix("scripts/") else { continue }
-            guard let size = fileSize(abs), size <= 512_000 else { continue }
+            let actualSize = fileSize(abs)
+            guard let size = actualSize, size <= 512_000 else {
+                // Missing a reference *source* here is worse than the same skip in a candidate
+                // indexer (SiteKnowledgeIndex): it can leave a live file's inbound count at 0.
+                // Logged (once, batched, at the end of scan()) rather than silently swallowed —
+                // this is the one deliberate side effect in an otherwise pure function, kept out
+                // of the hot per-file path so it never blocks or reorders the scan itself.
+                if let actualSize { skippedOversizedFiles.append("\(relPath) (\(actualSize) bytes)") }
+                continue
+            }
             guard let source = try? String(contentsOf: abs, encoding: .utf8) else { continue }
 
             let refs = extractReferences(source: source, path: relPath)
@@ -334,12 +360,38 @@ public enum DeadAssetScanner {
                 }
             }
 
-            // Frontmatter `layout:` counts as a reference too — extractReferences only looks at
-            // the body, not frontmatter fields.
+            // Frontmatter references count too — extractReferences only looks at the body. Every
+            // string (or array-of-strings) frontmatter value is tried, not just a hardcoded
+            // `layout:`/`image:`-style field-name allowlist — content-collection conventions
+            // (image:, cover:, ogImage:, a gallery array, …) vary per project, and a value that
+            // doesn't look like a real path/alias (titles, tags, slugs — the overwhelming
+            // majority of frontmatter) simply fails to resolve and is silently skipped, same as
+            // everywhere else in this scanner.
             let frontmatter = Frontmatter.parse(source)
-            if case let .string(layoutRef)? = frontmatter["layout"],
-               let resolved = resolve(layoutRef, relativeTo: relPath) {
-                fileReferenceCounts[resolved.lowercased(), default: 0] += 1
+            for value in frontmatter.values {
+                let rawValues: [String]
+                switch value {
+                case .string(let s): rawValues = [s]
+                case .array(let arr): rawValues = arr
+                case .bool, .number, .date: rawValues = []
+                }
+                for raw in rawValues {
+                    if let resolved = resolve(raw, relativeTo: relPath) {
+                        fileReferenceCounts[resolved.lowercased(), default: 0] += 1
+                    } else {
+                        for aliasResolved in resolveAlias(raw, config: aliasConfig) {
+                            fileReferenceCounts[aliasResolved.lowercased(), default: 0] += 1
+                        }
+                    }
+                }
+            }
+        }
+
+        if !skippedOversizedFiles.isEmpty {
+            Task {
+                await LogCenter.shared.append(
+                    source: "dead-assets:scan", stream: .stderr,
+                    text: "DeadAssetScanner: skipped \(skippedOversizedFiles.count) file(s) over the 512,000 byte reference-scan limit — any reference they contain won't be counted: \(skippedOversizedFiles.joined(separator: ", "))")
             }
         }
 

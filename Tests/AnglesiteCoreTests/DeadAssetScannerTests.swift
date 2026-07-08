@@ -285,4 +285,48 @@ struct DeadAssetScannerScanTests {
         let candidates = DeadAssetScanner.scan(projectRoot: root, images: images)
         #expect(!candidates.map(\.path).contains("public/images/hero.png"))
     }
+
+    @Test("layout: frontmatter alias resolves the same way body references do")
+    func layoutFrontmatterAlias() {
+        let root = makeSite([
+            "tsconfig.json": #"{"compilerOptions": {"paths": {"@layouts/*": ["src/layouts/*"]}}}"#,
+            "src/content/posts/hello.md": "---\ntitle: Hello\nlayout: @layouts/Post.astro\n---\nBody",
+            "src/layouts/Post.astro": "<slot />",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/layouts/Post.astro"))
+    }
+
+    @Test("non-layout frontmatter fields (image:, cover:, gallery array) are scanned as references too")
+    func frontmatterImageFieldsScanned() {
+        let root = makeSite([
+            "src/content/posts/hello.md": "---\ntitle: Hello\nimage: /images/cover.png\ngallery: [/images/one.png, /images/two.png]\n---\nBody",
+        ])
+        let images = ["cover.png", "one.png", "two.png", "unused.png"].map { name in
+            SiteContentGraph.Image(
+                id: "s:image:public/images/\(name)", siteID: "s",
+                relativePath: "public/images/\(name)", fileName: name,
+                byteSize: nil, usedOnPages: [], lastModified: Date(timeIntervalSince1970: 0))
+        }
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: images)
+        let paths = Set(candidates.map(\.path))
+        #expect(!paths.contains("public/images/cover.png"))
+        #expect(!paths.contains("public/images/one.png"))
+        #expect(!paths.contains("public/images/two.png"))
+        #expect(paths.contains("public/images/unused.png"))
+    }
+
+    @Test("overlapping alias patterns resolve deterministically to the more specific (longer literal prefix) one")
+    func overlappingAliasPatternsPreferMoreSpecific() {
+        let root = makeSite([
+            "tsconfig.json": #"{"compilerOptions": {"paths": {"@/*": ["src/wrong/*"], "@/components/*": ["src/components/*"]}}}"#,
+            "src/pages/index.astro": "---\nimport Header from '@/components/Header.astro';\n---\n<Header />",
+            "src/components/Header.astro": "<header>Site</header>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        // Both patterns match "@/components/Header.astro"; the general "@/*" would resolve to
+        // src/wrong/components/Header.astro (a dead key that matches nothing), so this only
+        // passes if the more specific "@/components/*" pattern's target is also tried.
+        #expect(!candidates.map(\.path).contains("src/components/Header.astro"))
+    }
 }
