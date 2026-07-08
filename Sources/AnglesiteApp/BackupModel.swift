@@ -25,6 +25,10 @@ final class BackupModel {
     /// worth letting the user see + copy, and on `.noChanges` the user explicitly asked.
     var drawerPresented: Bool = false
 
+    /// Fires on every phase change — start and terminal alike. `SiteWindowModel` wires this to
+    /// the completion notifier (#526); the model stays UserNotifications-free.
+    @ObservationIgnored var onPhaseTransition: ((Phase) -> Void)?
+
     private let command: BackupCommand
     private let logCenter: LogCenter
     private var inFlight: Task<Void, Never>?
@@ -58,9 +62,15 @@ final class BackupModel {
         drawerPresented = false
     }
 
+    /// Set `phase` and notify the transition hook.
+    private func transition(to newPhase: Phase) {
+        phase = newPhase
+        onPhaseTransition?(newPhase)
+    }
+
     private func runBackup(siteID: String, siteDirectory: URL) async {
         let started = Date()
-        phase = .running(siteID: siteID, since: started)
+        transition(to: .running(siteID: siteID, since: started))
         logLines = []
         currentMilestone = nil
         drawerPresented = true
@@ -91,11 +101,11 @@ final class BackupModel {
         let duration = Date().timeIntervalSince(started)
         switch result {
         case .succeeded(let sha, let branch, let remote):
-            phase = .succeeded(commitSHA: sha, branch: branch, remote: remote, duration: duration)
+            transition(to: .succeeded(commitSHA: sha, branch: branch, remote: remote, duration: duration))
         case .noChanges:
-            phase = .noChanges
+            transition(to: .noChanges)
         case .failed(let reason, let exit):
-            phase = .failed(reason: reason, exitCode: exit)
+            transition(to: .failed(reason: reason, exitCode: exit))
         }
     }
 }

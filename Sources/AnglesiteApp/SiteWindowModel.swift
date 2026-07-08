@@ -206,6 +206,11 @@ final class SiteWindowModel {
     func close() {
         preview.close()
         startup.stop()
+        // A deploy abandoned by the closing window never reaches a terminal phase (its task holds
+        // `self` weakly), so its Dock progress would otherwise linger forever (#526).
+        if let id = site?.id {
+            DockProgressController.shared.clear(token: "deploy:\(id)")
+        }
         // Unregister the annotation provider from the shared registry so
         // `ElementEntityQuery` stops resolving stale entity ids for a window that's no
         // longer on screen.
@@ -831,9 +836,111 @@ final class SiteWindowModel {
         deploy.onScanComplete = { [health] outcome in
             health.ingestDeployOutcome(outcome)
         }
+        wireCompletionHooks(siteID: resolved.id)
         #if !ANGLESITE_MAS
         publish.refreshRemote(source: resolved.sourceDirectory)
         #endif
+    }
+
+    /// Wire Deploy/Backup/Audit phase transitions to the completion notifier and the Dock-tile
+    /// progress bar (#526). Thin glue by design: wording lives in `CompletionNoticeBuilder` and
+    /// the milestone→fraction mapping in `DeployDockProgress` (both unit-tested in
+    /// AnglesiteCore); this method only forwards phase data. The site *name* is read live at
+    /// completion time so a rename mid-run notifies under the current name; re-running
+    /// `loadAndStart` (window replay) simply rebinds the hooks for the new site id.
+    private func wireCompletionHooks(siteID: String) {
+        let dockToken = "deploy:\(siteID)"
+
+        deploy.onPhaseTransition = { [weak self] phase in
+            switch phase {
+            case .idle:
+                DockProgressController.shared.clear(token: dockToken)
+            case .running:
+                // Indeterminate until the first structured milestone arrives.
+                DockProgressController.shared.update(fraction: nil, for: dockToken)
+            case .succeeded(let url, let duration):
+                DockProgressController.shared.clear(token: dockToken)
+                self?.postNotice { name in
+                    CompletionNoticeBuilder.deploy(
+                        siteName: name, siteID: siteID,
+                        outcome: .succeeded(url: url.absoluteString, duration: duration)
+                    )
+                }
+            case .failed(let reason, _):
+                // Command-produced reasons already carry the exit code where it matters
+                // ("npm run build failed (exit 1)"), so don't append it again here.
+                DockProgressController.shared.clear(token: dockToken)
+                self?.postNotice { name in
+                    CompletionNoticeBuilder.deploy(siteName: name, siteID: siteID, outcome: .failed(reason: reason))
+                }
+            case .blocked(let failures, _):
+                DockProgressController.shared.clear(token: dockToken)
+                self?.postNotice { name in
+                    CompletionNoticeBuilder.deploy(
+                        siteName: name, siteID: siteID, outcome: .blocked(failureCount: failures.count)
+                    )
+                }
+            }
+        }
+        deploy.onMilestone = { progress in
+            guard progress.kind == .deploy else { return }
+            DockProgressController.shared.update(
+                fraction: DeployDockProgress.fraction(forPhase: progress.phase),
+                for: dockToken
+            )
+        }
+
+        backup.onPhaseTransition = { [weak self] phase in
+            switch phase {
+            case .idle, .running:
+                break
+            case .succeeded(let sha, let branch, let remote, _):
+                self?.postNotice { name in
+                    CompletionNoticeBuilder.backup(
+                        siteName: name, siteID: siteID,
+                        outcome: .succeeded(commitSHA: sha, branch: branch, remote: remote)
+                    )
+                }
+            case .noChanges:
+                self?.postNotice { name in
+                    CompletionNoticeBuilder.backup(siteName: name, siteID: siteID, outcome: .noChanges)
+                }
+            case .failed(let reason, _):
+                self?.postNotice { name in
+                    CompletionNoticeBuilder.backup(siteName: name, siteID: siteID, outcome: .failed(reason: reason))
+                }
+            }
+        }
+
+        audit.onPhaseTransition = { [weak self] phase in
+            switch phase {
+            case .idle, .running:
+                break
+            case .succeeded(let report, _):
+                let counts = Dictionary(grouping: report.findings, by: \.severity).mapValues(\.count)
+                self?.postNotice { name in
+                    CompletionNoticeBuilder.audit(
+                        siteName: name, siteID: siteID,
+                        outcome: .succeeded(
+                            criticalCount: counts[.critical, default: 0],
+                            warningCount: counts[.warning, default: 0],
+                            infoCount: counts[.info, default: 0]
+                        )
+                    )
+                }
+            case .failed(let reason, _, _):
+                self?.postNotice { name in
+                    CompletionNoticeBuilder.audit(siteName: name, siteID: siteID, outcome: .failed(reason: reason))
+                }
+            }
+        }
+    }
+
+    /// Build a notice with the site's *current* display name and hand it to the notifier
+    /// (which applies the settings toggle and the not-frontmost gate).
+    private func postNotice(_ make: (String) -> CompletionNotice) {
+        guard let site else { return }
+        CompletionNotifier.shared.post(make(site.name))
     }
 
     #if ANGLESITE_MAS

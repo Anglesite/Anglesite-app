@@ -77,6 +77,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // and stays current. Idempotent; safe on the main actor.
         Task { @MainActor in RecentSitesModel.shared.start() }
 
+        // Route notification-center activations (clicks on Deploy/Backup/Audit completion
+        // notifications, #526) back to the matching site window. Delegate installation only —
+        // authorization is requested lazily on the first posted notice, not at launch.
+        CompletionNotifier.shared.install()
+
     }
 
     /// Dynamic Dock menu (#522): recent sites + New Site, mirroring File ▸ Open Recent. Recent
