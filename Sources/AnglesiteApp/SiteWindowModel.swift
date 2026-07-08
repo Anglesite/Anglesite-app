@@ -66,6 +66,9 @@ final class SiteWindowModel {
     var chatPresented = false
     var relatedPages: RelatedPagesModel
     var relatedPagesPresented = false
+    /// Drives the Navigator's "Cleanup" section. On-demand only — `scan()` is never called
+    /// automatically, only from the Navigator's "Scan for Cleanup Opportunities" action.
+    var cleanup: ProjectCleanupModel
     var harden = HardenModel()
     var domain = DomainModel()
     var health = HealthModel(runner: DefaultHealthCheckRunner())
@@ -119,6 +122,7 @@ final class SiteWindowModel {
         )
         self.graphExplorer = SiteGraphExplorerModel(graph: contentGraph)
         self.relatedPages = RelatedPagesModel(index: knowledgeIndex, ranker: semanticRanker)
+        self.cleanup = ProjectCleanupModel(knowledgeIndex: knowledgeIndex, contentGraph: contentGraph)
     }
 
     var activeEditorFile: FileRef? {
@@ -380,6 +384,24 @@ final class SiteWindowModel {
         }
     }
 
+    /// Routes a Cleanup-section row: components/layouts/pages open in the existing in-app editor
+    /// (reusing `openFile`, so `.astro` components still get the rich Component Editor via
+    /// `EditorKind.resolve`'s `.components`-group check); images have no in-app editor, so Open
+    /// reveals the file in Finder instead.
+    @MainActor
+    func openCleanupCandidate(_ candidate: DeadAssetScanner.CleanupCandidate) {
+        guard let site else { return }
+        let url = site.sourceDirectory.appendingPathComponent(candidate.path)
+        switch candidate.kind {
+        case .image:
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        case .component, .layout:
+            openFile(FileRef(url: url, group: .components, name: url.lastPathComponent))
+        case .page:
+            openFile(FileRef(url: url, group: .pages, name: url.lastPathComponent))
+        }
+    }
+
     /// Build the inspector context for a content navigator id: the typed descriptor form when the
     /// file resolves to a content type, the plain title/description form for a frontmatter-bearing
     /// markdown page, or nil (plain `.astro`/other → preview only, no inspector).
@@ -553,6 +575,7 @@ final class SiteWindowModel {
         )
         navigator = navModel
         graphExplorer.start(siteID: resolved.id, sourceDirectory: resolved.sourceDirectory)
+        cleanup.configure(siteID: resolved.id, sourceDirectory: resolved.sourceDirectory)
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
         applyPendingNavigation(for: resolved.id)
