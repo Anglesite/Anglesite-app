@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-08
 **Status:** Approved design (desk analysis — no compilation spikes yet)
-**Scope decisions (owner-approved):** platform-native AI; all-Swift per-platform UI bindings; native containers per platform; incremental seams in the existing package (no separate kit repo, no daemon restructuring).
+**Scope decisions (owner-approved):** platform-native AI by default with opt-in external LLMs via Settings; all-Swift per-platform UI bindings; native containers per platform; incremental seams in the existing package (no separate kit repo, no daemon restructuring).
 
 ## 1. Summary
 
@@ -15,7 +15,8 @@ Anglesite's business logic is already substantially portable: `AnglesiteSiteMode
 - One SwiftPM package in this repo where `AnglesiteSiteModel`, `AnglesiteCore`, and a new webview-agnostic `AnglesiteBridgeCore` compile and pass `swift test` on macOS, Linux (Ubuntu CI), and Windows.
 - Per-platform app shells following platform best practices: SwiftUI/AppKit (macOS, unchanged), GTK4/libadwaita via Adwaita for Swift (Linux), WinUI 3 via swift-winrt (Windows).
 - Container-backed site runtimes on every platform (no host Node anywhere, preserving #70).
-- Platform-native on-device AI where the platform provides it; graceful, capability-flagged absence where it doesn't. **No external LLM APIs, ever — on any platform.**
+- Platform-native on-device AI as the **default** where the platform provides it; graceful, capability-flagged degradation where it doesn't.
+- **External LLMs supported as an explicit opt-in in Settings** (never a silent default), so users on less capable machines can still use assistant features. Features that require a frontier-class model are **clearly labeled** as such in the UI (BBEdit-style feature badging), rather than silently failing on on-device models. *This consciously amends the #459 "no external LLM APIs, ever" rule; the roadmap doc and CLAUDE.md need a follow-up edit to match.*
 
 **Non-goals**
 
@@ -65,7 +66,7 @@ Each seam is a protocol with per-platform implementations, following the pattern
 |---|---|---|---|---|
 | 1 | `SecretStore` | Keychain (`KeychainStore`, `SessionToken`) | libsecret / Secret Service (D-Bus) | Credential Manager (`CredRead`/`CredWrite`) |
 | 2 | `SiteFileWatching` | `FSEventsFileWatcher` | inotify watcher | `ReadDirectoryChangesW` watcher |
-| 3 | `AssistantBackend` | FoundationModels (`LanguageModelSession` + FM tools) | none — degrade | Phi Silica (`Microsoft.Windows.AI` via swift-winrt) |
+| 3 | `AssistantBackend` | FoundationModels (`LanguageModelSession` + FM tools); external LLM opt-in | external LLM opt-in; else degrade | Phi Silica (`Microsoft.Windows.AI` via swift-winrt); external LLM opt-in |
 | 4 | `EmbeddingProvider` | `NLEmbedding` / `NLContextualEmbedding` | deterministic lexical fallback | deterministic lexical fallback |
 | 5 | Logging & misc | `os.log`/`OSLog`, `CryptoKit`, `UTType`, `CoreSpotlight`, `Darwin` | swift-log; swift-crypto; `#if`-out UTType/Spotlight | same as Linux |
 
@@ -104,16 +105,18 @@ The edit-overlay TypeScript is already portable. The Swift-side message schema, 
 - **Windows — `WSL2SiteRuntime`:** podman (or containerd) inside WSL2, reached via WSL2's localhost forwarding. WSL2 enablement is real install friction: the runtime detects absence and presents a guided setup flow. Escape hatch: the iOS `RemoteSandboxSiteRuntime` (Cloudflare sandbox) is platform-agnostic and can serve Windows users who cannot enable WSL2 — a product decision deferred to the Windows MVP phase.
 - **`ProcessSupervisor` Windows audit:** Foundation `Process` exists on Windows but differs behaviorally — no POSIX signals (`TerminateProcess` vs SIGTERM/SIGKILL escalation), argument quoting, path separators, process groups/job objects for cleanup. The audit lands as tests in the CI matrix before any Windows runtime work builds on it. Log streaming (stdout/stderr → debug pane) must be preserved on all platforms — logs are sacred.
 
-## 8. AI strategy — platform-native
+## 8. AI strategy — platform-native by default, external LLMs opt-in
 
-`AssistantBackend` abstracts session lifecycle, prompt/system-instruction handling, structured (guided) generation, and tool invocation.
+`AssistantBackend` abstracts session lifecycle, prompt/system-instruction handling, structured (guided) generation, and tool invocation. The **default backend on every platform is the platform-native on-device model**; an **external LLM backend is available on every platform as an explicit opt-in in Settings**.
 
-- **Darwin:** wraps FoundationModels exactly as today (on-device, escalating to Private Cloud Compute).
-- **Windows:** wraps [Phi Silica](https://learn.microsoft.com/en-us/windows/ai/apis/phi-silica) (`Microsoft.Windows.AI`, Windows App SDK), reached through swift-winrt. Structurally similar (sessions, prompts, structured responses). Two first-class caveats:
+- **Darwin (default):** wraps FoundationModels exactly as today (on-device, escalating to Private Cloud Compute).
+- **Windows (default):** wraps [Phi Silica](https://learn.microsoft.com/en-us/windows/ai/apis/phi-silica) (`Microsoft.Windows.AI`, Windows App SDK), reached through swift-winrt. Structurally similar (sessions, prompts, structured responses). Two first-class caveats:
   1. Phi Silica is a **Limited Access Feature** — shipping requires a Microsoft unlock token (request early; it gates the whole phase).
-  2. Hardware coverage is Copilot+ NPUs plus recent NVIDIA GPUs (RTX 30+, 6 GB+) — many Windows machines qualify for neither, so Windows must be fully functional with `hasAssistant == false`.
-- **Linux:** ships assistant-less in v1 — deterministic tools only, assistant UI hidden via `PlatformCapabilities`. Local open models (llama.cpp/ONNX) remain a future option behind the same protocol without re-architecture.
-- **Embeddings:** no NLEmbedding analog off-Darwin. `EmbeddingProvider` gets a deterministic lexical fallback (BM25-style) so knowledge search degrades in quality, not availability. Revisit if Windows App SDK ships embedding APIs.
+  2. Hardware coverage is Copilot+ NPUs plus recent NVIDIA GPUs (RTX 30+, 6 GB+) — many Windows machines qualify for neither; those users either run with `hasAssistant == false` or opt into an external LLM.
+- **Linux (default):** no platform AI — assistant-less by default, deterministic tools only, assistant UI hidden via `PlatformCapabilities`. Opting into an external LLM in Settings lights up the full assistant feature set. Local open models (llama.cpp/ONNX) remain a future *native* option behind the same protocol.
+- **`ExternalLLMBackend` (all platforms, opt-in):** a URLSession-based `AssistantBackend` speaking a standard chat-completions-style protocol against a user-configured endpoint + key (which also covers self-hosted local servers such as Ollama/llama.cpp — "external to the app" need not mean "off the machine"). API keys live in the `SecretStore` seam (§5), so the credential story is uniform across Keychain / libsecret / Credential Manager. Notably this backend is the *cheapest* of the three to build — plain HTTP, no platform bindings — and works identically everywhere, making it the fastest route to assistant parity on Linux.
+- **Model-capability tiers, not just presence flags:** `PlatformCapabilities.hasAssistant` is joined by a model-tier signal (`onDevice` vs `frontier`). Features designed for frontier-class models are **clearly labeled in the UI** (BBEdit-style badging of gated features) and appear disabled-with-explanation rather than hidden, so users understand what opting into an external model unlocks. On-device-designed features run on whichever backend is active.
+- **Embeddings:** no NLEmbedding analog off-Darwin. `EmbeddingProvider` gets a deterministic lexical fallback (BM25-style) so knowledge search degrades in quality, not availability. An external-endpoint embedding provider can piggyback on the same Settings opt-in later; revisit if Windows App SDK ships embedding APIs.
 
 ## 9. Build, CI, distribution
 
@@ -129,7 +132,7 @@ Linux goes first: the Swift toolchain is most mature there, containers are nativ
 2. **Linux MVP.** `AnglesiteBridgeCore` split → `PodmanSiteRuntime` → Adwaita shell with WebKitGTK preview. Exit criterion: open a `.anglesite` package, edit, live-preview, and deploy on Ubuntu.
 3. **Windows toolchain spike.** swift-winrt build pipeline, WinUI hello-world hosting `AnglesiteCore`, `ProcessSupervisor` behavioral audit, Windows CI leg. Explicit go/no-go before committing to the Windows MVP.
 4. **Windows MVP.** `WSL2SiteRuntime` → WinUI shell with WebView2 preview → MSIX packaging.
-5. **AI backends.** Phi Silica `AssistantBackend` (blocked on LAF token — request during phase 3); evaluate Linux local-model backend.
+5. **AI backends.** `ExternalLLMBackend` first (plain HTTP + `SecretStore`, works on all platforms — can land alongside or even before the Linux MVP since it needs no platform bindings); then Phi Silica (blocked on LAF token — request during phase 3); evaluate a Linux local-model backend later.
 
 ## 11. Risks
 
@@ -137,7 +140,7 @@ Linux goes first: the Swift toolchain is most mature there, containers are nativ
 |---|---|---|
 | swift-winrt/WinUI maturity (single-vendor projection, C++ bootstrap, codegen in build) | High | Phase-3 spike with explicit go/no-go before Windows MVP investment |
 | WSL2 install friction on Windows | High | Guided setup flow; remote-sandbox runtime as escape hatch |
-| Phi Silica LAF gating + narrow hardware coverage | Medium | Capability-flagged absence is the baseline; request token early |
+| Phi Silica LAF gating + narrow hardware coverage | Medium | Capability-flagged absence is the baseline; external-LLM opt-in covers less capable machines; request LAF token early |
 | Adwaita-swift is a small-community project | Medium | Thin shell; replaceable with direct GTK4 bindings without touching Core |
 | Foundation behavioral drift (Process on Windows, paths, plist/URL edge cases) | Medium | Full existing test suite runs on both new platforms from phase 1 |
 | Multi-arch image pipeline (amd64 + arm64) | Low | buildx already in the image pipeline; add a platform to the build |
@@ -145,6 +148,9 @@ Linux goes first: the Swift toolchain is most mature there, containers are nativ
 ## 12. Open questions (deferred, non-blocking)
 
 - Whether Windows v1 offers the remote-sandbox runtime as a first-class alternative to WSL2 or only as a fallback (product decision at Windows MVP).
+- External-LLM wire protocol and provider surface: one OpenAI-compatible chat-completions endpoint config (covers Ollama/vLLM/most providers) vs. per-provider adapters (e.g. native Anthropic Messages API). Decide at the `ExternalLLMBackend` slice.
+- Which assistant features get the `frontier` tier label at launch, and the exact UI treatment for gated features (disabled-with-explanation vs. upsell-style badge).
+- Amending the #459 roadmap doc and CLAUDE.md to replace "no external LLM APIs, ever" with the new policy (platform-native default, Settings opt-in, labeled frontier features) — and whether the amended policy also applies to the macOS app before the cross-platform work lands.
 - Flatpak sandbox vs. rootless-podman-from-Flatpak interaction (may require `flatpak-spawn` or a host-side helper; investigate at Linux MVP).
 - Jump lists / D-Bus application actions as `AnglesiteIntents` analogs (post-v1).
 
