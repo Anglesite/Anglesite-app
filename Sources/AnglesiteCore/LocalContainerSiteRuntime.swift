@@ -190,7 +190,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     }
 
     private func startFileWatcher(siteID: String, projectRoot: URL, generation gen: Int) {
-        guard knowledgeIndex != nil else { return }
+        guard knowledgeIndex != nil || conventionsEngine != nil else { return }
         stopFileWatcher()  // defensive: never orphan a running watcher if called while one is active
         let watcher = makeFileWatcher()
         do {
