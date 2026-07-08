@@ -65,6 +65,10 @@ final class SiteWindowModel {
     // the panel UI is target-agnostic.
     var chat: ChatModel?
     var chatPresented = false
+    /// Created once the site resolves in `loadAndStart` (needs `siteDirectory`/`configDirectory`),
+    /// same lifecycle as `chat`. Its own `sheetPresented` drives the `.sheet(isPresented:)` in
+    /// `SiteWindow`, following `AuditModel`'s pattern rather than the item-based sheets.
+    var styleGuide: ProjectConventionsModel?
     var relatedPages: RelatedPagesModel
     var relatedPagesPresented = false
     var harden = HardenModel()
@@ -169,6 +173,11 @@ final class SiteWindowModel {
         integrationWizardModel = IntegrationWizardModel(service: integrationOps, siteID: site.id)
     }
 
+    func openStyleGuide() {
+        guard let styleGuide else { return }
+        Task { await styleGuide.presentSheet() }
+    }
+
     func retryPreview() {
         guard let site else { return }
         preview.open(siteID: site.id, siteDirectory: site.sourceDirectory)
@@ -198,6 +207,7 @@ final class SiteWindowModel {
             annotationProvider = nil
         }
         chat = nil
+        styleGuide = nil
         navigator?.stop()
         navigator = nil
         graphExplorer.stop()
@@ -575,6 +585,12 @@ final class SiteWindowModel {
             integrationService: integrationOps
         )
         chat = assistantSession.chat
+        styleGuide = ProjectConventionsModel(
+            engine: conventionsEngine,
+            siteID: resolved.id,
+            siteDirectory: resolved.sourceDirectory,
+            configDirectory: resolved.configDirectory
+        )
         preview.setEditObserver(
             assistantSession.editObserver,
             postProcess: assistantSession.editPostProcessor

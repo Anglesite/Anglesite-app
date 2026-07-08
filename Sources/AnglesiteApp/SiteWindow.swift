@@ -343,6 +343,16 @@ struct SiteWindow: View {
 
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    model.openStyleGuide()
+                } label: {
+                    Label("Style Guide", systemImage: "textformat.abc")
+                }
+                .help("See and edit this site's learned writing, image, and naming conventions")
+            }
+            .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
+
+            ToolbarItem(placement: .primaryAction) {
+                Button {
                     model.domain.openSheet()
                 } label: {
                     Label("Domain", systemImage: "globe")
@@ -373,6 +383,14 @@ struct SiteWindow: View {
         }
         .sheet(isPresented: $bindableModel.harden.sheetPresented) {
             HardenSheetView(model: model.harden)
+        }
+        .sheet(isPresented: Binding(
+            get: { bindableModel.styleGuide?.sheetPresented ?? false },
+            set: { bindableModel.styleGuide?.sheetPresented = $0 }
+        )) {
+            if let styleGuide = model.styleGuide {
+                ProjectStyleGuideView(model: styleGuide, siteName: site.name)
+            }
         }
         .sheet(isPresented: $bindableModel.domain.sheetPresented) {
             DomainSheetView(model: model.domain)
