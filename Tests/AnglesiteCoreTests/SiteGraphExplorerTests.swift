@@ -167,6 +167,29 @@ struct SiteGraphExplorerTests {
         })
     }
 
+    @Test("bare relative src asset references resolve from source files")
+    func bareRelativeAssetReferences() throws {
+        let root = makeSite([
+            "src/components/Hero.astro": "<img src=\"hero.png\" />",
+            "src/components/hero.png": "PNG",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        let component = try #require(graph.nodes.first { $0.kind == .component })
+        let hero = try #require(graph.nodes.first { $0.kind == .asset && $0.filePath == "src/components/hero.png" })
+
+        #expect(graph.edges.contains {
+            $0.sourceID == component.id && $0.targetID == hero.id && $0.kind == .referencesAsset
+        })
+    }
+
     @Test("@ alias imports resolve to src-relative nodes")
     func aliasImports() throws {
         let root = makeSite([

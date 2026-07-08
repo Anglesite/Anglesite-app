@@ -293,8 +293,6 @@ public enum SiteGraphExplorer {
             regex.matches(in: text, range: range).compactMap { match in
                 guard let found = Range(match.range(at: 1), in: text) else { return nil }
                 let value = String(text[found])
-                if value.hasPrefix("/") { return value }
-                if value.hasPrefix("public/") { return "/" + String(value.dropFirst("public".count + 1)) }
                 return value
             }
         }
@@ -313,6 +311,10 @@ public enum SiteGraphExplorer {
             return nodeIDByPublicPath["/" + String(value.dropFirst("public".count + 1))]
         }
         if value.hasPrefix("./") || value.hasPrefix("../") {
+            let base = (relativePath as NSString).deletingLastPathComponent
+            return nodeIDByRelativePath[normalizeRelativePath((base as NSString).appendingPathComponent(value))]
+        }
+        if !value.contains("://") && !value.hasPrefix("#") {
             let base = (relativePath as NSString).deletingLastPathComponent
             return nodeIDByRelativePath[normalizeRelativePath((base as NSString).appendingPathComponent(value))]
         }
