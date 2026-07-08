@@ -11,14 +11,20 @@ import Foundation
 /// suite's own tests removes its largest source of internal GCD contention so it isn't competing
 /// with itself on top of the rest of the parallel test binary.
 ///
-/// `.timeLimit`: the suite's ONLY wall-clock bound, and deliberately so. The wait helpers below
-/// (`readExactly`, `readUntilEOF`, `waitUntilConnectionCount`) carry NO per-call deadlines: they
-/// wait for the event they assert on (byte count reached, peer EOF, connection count) and exit on
-/// cancellation, which is exactly what the time limit triggers if a splice is genuinely stuck. The
-/// per-helper deadlines this replaces were really encoding "worst-case CI scheduler latency" — an
-/// unknowable — and got bumped every time a busier runner disproved the current guess (a fixed
-/// sleep, then a 10s poll that flaked at 10.7s, then 20s; see #556 and PR #558's CI failure). A
-/// stuck splice now fails as an unambiguous time-limit violation, not a data-assertion mirage.
+/// `.timeLimit`: the ONLY wall-clock bound in this file, and deliberately so. The wait helpers
+/// below (`readExactly`, `readUntilEOF`, `waitUntilConnectionCount`) carry NO per-call deadlines:
+/// they wait for the event they assert on (byte count reached, peer EOF, connection count) and
+/// exit on cancellation, which is exactly what the time limit triggers if a splice is genuinely
+/// stuck. The per-helper deadlines this replaces were really encoding "worst-case CI scheduler
+/// latency" — an unknowable — and got bumped every time a busier runner disproved the current
+/// guess (a fixed sleep, then a 10s poll that flaked at 10.7s, then 20s; see #556 and PR #558's
+/// CI failure). A stuck splice now fails as an unambiguous time-limit violation, not a
+/// data-assertion mirage.
+///
+/// Scope note: a suite-level `TimeLimitTrait` is inherited by each test INDIVIDUALLY, not pooled
+/// into one shared budget — so every test here gets its own 1-minute cap, and the worst case for
+/// a fully wedged `.serialized` run of this suite is ~1 minute per test (currently 9 tests ≈ 9
+/// minutes), still inside build-test's 15-minute job timeout. The healthy suite runs in seconds.
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct VsockTCPProxyTests {
     /// Make a connected pair of FileHandles via socketpair(2). One end is handed to the proxy as
