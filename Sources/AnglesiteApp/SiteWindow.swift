@@ -183,7 +183,8 @@ struct SiteWindow: View {
         // for the .principal pane switcher.
         .toolbarRole(.editor)
         // Customizable toolbar (#519): every item has a STABLE id — saved customizations key off
-        // these strings, so renaming one silently discards users' layouts. Items must also be
+        // these strings, so renaming one silently discards users' layouts (the id set is frozen
+        // by SiteToolbarItemIDTests in AnglesiteCoreTests). Items must also be
         // unconditional (no `if let` wrappers): identity-swapping or appearing/vanishing items
         // fight the customization palette, so state-dependent items render disabled instead.
         // Curated default ≈8 items; episodic setup/maintenance actions ship hidden and live in
@@ -191,7 +192,7 @@ struct SiteWindow: View {
         .toolbar(id: "site") {
             // Fixed center, not movable/removable: the pane switcher is navigation, not a command
             // (Finder/Freeform convention). Replaces the old Picker row above the main pane.
-            ToolbarItem(id: "panes", placement: .principal) {
+            ToolbarItem(id: SiteToolbarItemID.panes.rawValue, placement: .principal) {
                 Picker("View", selection: Binding(
                     get: { model.paneSelection },
                     set: { model.setPaneSelection($0) }
@@ -202,10 +203,11 @@ struct SiteWindow: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .help("Switch between Preview, Editor, and Graph")
             }
             .customizationBehavior(.disabled)
 
-            ToolbarItem(id: "graph", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.graph.rawValue, placement: .primaryAction) {
                 Button {
                     Task { await model.showGraph() }
                 } label: {
@@ -214,7 +216,7 @@ struct SiteWindow: View {
                 .help("Explore pages, layouts, components, collections, and assets")
             }
 
-            ToolbarItem(id: "backup", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.backup.rawValue, placement: .primaryAction) {
                 Button {
                     model.backupSite()
                 } label: {
@@ -226,7 +228,7 @@ struct SiteWindow: View {
                       : "Site is missing required files")
             }
 
-            ToolbarItem(id: "audit", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.audit.rawValue, placement: .primaryAction) {
                 Button {
                     model.auditSite()
                 } label: {
@@ -242,7 +244,7 @@ struct SiteWindow: View {
                       : "Site is missing required files")
             }
 
-            ToolbarItem(id: "openInBrowser", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.openInBrowser.rawValue, placement: .primaryAction) {
                 Button {
                     model.openPreviewInBrowser()
                 } label: {
@@ -254,7 +256,7 @@ struct SiteWindow: View {
 
             // — Palette-only items (View ▸ Customize Toolbar…) —
 
-            ToolbarItem(id: "harden", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.harden.rawValue, placement: .primaryAction) {
                 Button {
                     model.harden.openSheet()
                 } label: {
@@ -271,7 +273,7 @@ struct SiteWindow: View {
             }
             .defaultCustomization(.hidden)
 
-            ToolbarItem(id: "domain", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.domain.rawValue, placement: .primaryAction) {
                 Button {
                     model.domain.openSheet()
                 } label: {
@@ -282,7 +284,7 @@ struct SiteWindow: View {
             }
             .defaultCustomization(.hidden)
 
-            ToolbarItem(id: "integration", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.integration.rawValue, placement: .primaryAction) {
                 Button {
                     model.openIntegrationWizard()
                 } label: {
@@ -293,7 +295,7 @@ struct SiteWindow: View {
             }
             .defaultCustomization(.hidden)
 
-            ToolbarItem(id: "siriReadiness", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.siriReadiness.rawValue, placement: .primaryAction) {
                 Button {
                     model.openSiriReadiness()
                 } label: {
@@ -304,7 +306,7 @@ struct SiteWindow: View {
             }
             .defaultCustomization(.hidden)
 
-            ToolbarItem(id: "relatedPages", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.relatedPages.rawValue, placement: .primaryAction) {
                 Button {
                     model.relatedPagesPresented.toggle()
                 } label: {
@@ -318,7 +320,7 @@ struct SiteWindow: View {
             #if !ANGLESITE_MAS
             // One stable item whose label/action reflects publish state — two swapping items
             // would break saved customizations.
-            ToolbarItem(id: "github", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.github.rawValue, placement: .primaryAction) {
                 if let remote = model.publish.existingRemote {
                     Button {
                         NSWorkspace.shared.open(remote.url)
@@ -343,7 +345,7 @@ struct SiteWindow: View {
 
             // Health badge and Deploy are one item: the badge is the readiness signal for the
             // button it gates, so customization can never separate them.
-            ToolbarItem(id: "deploy", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.deploy.rawValue, placement: .primaryAction) {
                 HStack(spacing: 8) {
                     HealthBadgeView(
                         model: model.health,
@@ -370,7 +372,7 @@ struct SiteWindow: View {
             }
             .customizationBehavior(.reorderable)
 
-            ToolbarItem(id: "chat", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.chat.rawValue, placement: .primaryAction) {
                 Button {
                     model.chatPresented.toggle()
                 } label: {
@@ -384,7 +386,7 @@ struct SiteWindow: View {
             }
 
             // Far trailing, adjacent to the inspector panel it controls (Pages/Freeform convention).
-            ToolbarItem(id: "inspector", placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.inspector.rawValue, placement: .primaryAction) {
                 Button {
                     inspectorShown.toggle()
                 } label: {
