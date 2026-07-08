@@ -203,6 +203,10 @@ private struct SiteGraphInspector: View {
                             }
                             .buttonStyle(.borderedProminent)
                         }
+                        if let impact = model.selectedImpact {
+                            Divider()
+                            SiteGraphImpactSection(impact: impact, model: model)
+                        }
                         Divider()
                         SiteGraphEdgeList(
                             title: "Depends On",
@@ -225,6 +229,108 @@ private struct SiteGraphInspector: View {
             }
         }
         .background(Color(NSColor.controlBackgroundColor))
+    }
+}
+
+/// Project Impact Analysis (#309): shows what editing the selected node would affect — pages
+/// (transitively, through any depth of layouts/components), plus dependent layouts, components,
+/// styles, containing collections, and directly referenced assets. Every row navigates to that
+/// node so the blast radius can be explored in place.
+private struct SiteGraphImpactSection: View {
+    let impact: ImpactAnalysis.Report
+    @Bindable var model: SiteGraphExplorerModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Impact", systemImage: "dot.radiowaves.left.and.right")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+            if impact.hasDependents {
+                Text(summary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Nothing else on this site depends on it — editing it affects only this file.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            SiteGraphImpactNodeList(
+                title: "Affects \(count(impact.affectedPages.count, "Page"))",
+                nodes: impact.affectedPages, model: model)
+            SiteGraphImpactNodeList(
+                title: "Affects \(count(impact.affectedEntries.count, "Entry", plural: "Entries"))",
+                nodes: impact.affectedEntries, model: model)
+            SiteGraphImpactNodeList(
+                title: "Included in \(count(impact.affectedCollections.count, "Collection"))",
+                nodes: impact.affectedCollections, model: model)
+            SiteGraphImpactNodeList(
+                title: "Used by \(count(impact.dependentLayouts.count, "Layout"))",
+                nodes: impact.dependentLayouts, model: model)
+            SiteGraphImpactNodeList(
+                title: "Used by \(count(impact.dependentComponents.count, "Component"))",
+                nodes: impact.dependentComponents, model: model)
+            SiteGraphImpactNodeList(
+                title: "Used by \(count(impact.dependentStyles.count, "Style"))",
+                nodes: impact.dependentStyles, model: model)
+            SiteGraphImpactNodeList(
+                title: "References \(count(impact.referencedAssets.count, "Asset"))",
+                nodes: impact.referencedAssets, model: model)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Impact analysis")
+    }
+
+    /// "This change would affect 18 pages." — the issue's headline number, pages + entries.
+    private var summary: String {
+        let routes = impact.affectedPages.count + impact.affectedEntries.count
+        if routes > 0 {
+            return "Editing this would affect \(count(routes, "page"))."
+        }
+        return "Editing this would affect other site files, but no rendered pages."
+    }
+
+    private func count(_ n: Int, _ singular: String, plural: String? = nil) -> String {
+        "\(n) \(n == 1 ? singular : (plural ?? singular + "s"))"
+    }
+}
+
+/// A titled, clickable node list for one impact group. Hidden entirely when the group is empty —
+/// unlike `SiteGraphEdgeList`, an empty impact group is noise, not information.
+private struct SiteGraphImpactNodeList: View {
+    let title: String
+    let nodes: [SiteGraphNode]
+    @Bindable var model: SiteGraphExplorerModel
+
+    var body: some View {
+        if !nodes.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                ForEach(nodes) { node in
+                    Button {
+                        model.selectedNodeID = node.id
+                    } label: {
+                        HStack {
+                            Label(node.title, systemImage: node.kind.systemImage)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                            if let route = node.route {
+                                Text(route)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help(node.detail ?? node.title)
+                }
+            }
+        }
     }
 }
 

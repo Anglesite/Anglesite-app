@@ -40,6 +40,14 @@ final class SiteGraphExplorerModel {
         return snapshot.nodes.first { $0.id == selectedNodeID }
     }
 
+    /// Impact analysis for the selected node (#309): what on the site changes if this file is
+    /// edited. Computed over the *full* snapshot, not the filtered view — impact is factual and
+    /// must not shrink because a node kind is toggled off in the toolbar.
+    var selectedImpact: ImpactAnalysis.Report? {
+        guard let selectedNodeID else { return nil }
+        return ImpactAnalysis.analyze(snapshot: snapshot, targetID: selectedNodeID)
+    }
+
     var selectedIncoming: [SiteGraphEdge] {
         guard let selectedNodeID else { return [] }
         return filteredEdges.filter { $0.targetID == selectedNodeID }

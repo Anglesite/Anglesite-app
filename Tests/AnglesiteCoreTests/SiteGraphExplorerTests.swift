@@ -166,6 +166,29 @@ struct SiteGraphExplorerTests {
         })
     }
 
+    @Test("markdown frontmatter layout fields create usesLayout edges")
+    func frontmatterLayoutEdges() throws {
+        let root = makeSite([
+            "src/pages/about.md": "---\ntitle: About\nlayout: ../layouts/Base.astro\n---\nBody",
+            "src/layouts/Base.astro": "<slot />",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        let page = try #require(graph.nodes.first { $0.kind == .page })
+        let layout = try #require(graph.nodes.first { $0.kind == .layout })
+
+        #expect(graph.edges.contains {
+            $0.sourceID == page.id && $0.targetID == layout.id && $0.kind == .usesLayout
+        })
+    }
+
     @Test("src styles files become style nodes")
     func styleNodes() {
         let root = makeSite([
