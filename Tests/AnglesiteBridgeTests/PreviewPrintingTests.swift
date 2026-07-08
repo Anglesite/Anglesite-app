@@ -63,6 +63,24 @@ struct PreviewPrintingTests {
         #expect(operation.view?.frame.size == operation.printInfo.paperSize)
     }
 
+    @Test("Configure under a landscape print info yields a landscape-shaped frame")
+    func configureLandscapeFrame() {
+        // Pins the load-bearing AppKit behavior the frame workaround relies on (PR #543 review):
+        // `NSPrintInfo.paperSize` is orientation-adjusted (US Letter landscape → (792, 612)),
+        // so a landscape info must produce a wider-than-tall printing view, not portrait dims.
+        let info = PreviewPrinting.webContentPrintInfo()
+        info.orientation = .landscape
+        let operation = NSPrintOperation(view: NSView(), printInfo: info)
+        PreviewPrinting.configure(operation)
+        let paper = operation.printInfo.paperSize
+        #expect(operation.view?.frame.size == paper)
+        // Headless CI runners with no printers can report a degenerate (0, 0) paper; the
+        // orientation assertion is only meaningful when the environment has a real paper size.
+        if paper != .zero {
+            #expect(paper.width > paper.height)
+        }
+    }
+
     @Test("Make operation builds a runnable operation for a web view") func makeOperationSmoke() {
         // Construction only: the returned object's observable state is WebKit-version-dependent
         // (see the note above), so this is a does-not-crash smoke test.
