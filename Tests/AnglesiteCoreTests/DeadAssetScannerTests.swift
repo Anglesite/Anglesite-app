@@ -254,7 +254,7 @@ struct DeadAssetScannerScanTests {
         #expect(!candidates.map(\.path).contains("src/components/Card.astro"))
     }
 
-    @Test("top-level scripts/ (dev-harness glob) is excluded from the reference scan")
+    @Test("top-level scripts/ (dev-harness glob) does not contribute glob-directory coverage")
     func scriptsDirectoryExcluded() {
         let root = makeSite([
             "scripts/harness/component.astro": "---\nconst modules = import.meta.glob([\"/src/components/**/*.astro\", \"/src/layouts/**/*.astro\"]);\n---\n<div></div>",
@@ -263,6 +263,16 @@ struct DeadAssetScannerScanTests {
         ])
         let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
         #expect(candidates.map(\.path).contains("src/components/Orphan.astro"))
+    }
+
+    @Test("a discrete (non-glob) reference from a top-level scripts/ file is still credited")
+    func scriptsDirectoryDiscreteReferenceStillCredited() {
+        let root = makeSite([
+            "scripts/catalog.ts": "import Header from '../src/components/Header.astro';",
+            "src/components/Header.astro": "<header>Site</header>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/Header.astro"))
     }
 
     @Test("a nested src/scripts/ directory (not the top-level dev-tooling one) is still scanned")

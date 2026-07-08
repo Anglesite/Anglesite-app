@@ -425,6 +425,16 @@ final class SiteWindowModel {
     /// file would stay selectable/openable in the main Navigator tree or the Site Graph explorer —
     /// the same resurrection risk this method just closed for the editor/inspector, reachable
     /// through a different surface.
+    ///
+    /// **Known residual risk:** the guards above only cover editor/inspector state open *at the
+    /// moment this method starts*. Nothing stops a *new* selection on `deletedURL` from
+    /// (re)populating `activeEditor`/`inspectorContext` while `cleanup.delete` is still suspended
+    /// on its git subprocess calls — the Navigator isn't disabled or told a delete is in flight for
+    /// this path. Closing that fully would need a "deleting" set consulted by
+    /// `applyNavigatorSelection`/`openFile`/`openCleanupCandidate`, or disabling Navigator
+    /// selection for the duration; not attempted here given how narrow the window is in practice
+    /// (a `git rm` + `commit` pair, not user-perceptible latency) relative to the scope of that
+    /// change.
     @MainActor
     func deleteCleanupCandidate(_ candidate: DeadAssetScanner.CleanupCandidate) async {
         guard let site else { return }

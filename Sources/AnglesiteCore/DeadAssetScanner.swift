@@ -12,14 +12,15 @@ import Foundation
 /// re-exports, tsconfig `extends` scoping).
 ///
 /// The top-level `scripts/` directory (dev-only tooling — the Component Editor's preview harness,
-/// pre-deploy checks) is excluded from the reference scan entirely — a path-prefix check in
-/// `scan`, not the general `excludedDirNames` set, precisely because a nested directory like
-/// `src/scripts/` (real sites commonly hold client-side JS there) must still be scanned. This
-/// matters beyond just "don't waste time scanning tooling": the bundled template's own
-/// `scripts/harness/component.astro` deliberately blankets *all* of
-/// `src/components/**` and `src/layouts/**` via `import.meta.glob` to power the live component
-/// preview — if that file were scanned, its own blanket glob would suppress unused-component/
-/// layout detection for every site scaffolded from this template.
+/// pre-deploy checks) is scanned as an ordinary reference source (a discrete reference there still
+/// counts — dropping it would risk a false-positive of its own), but never contributes *glob-
+/// directory* coverage — a path-prefix check in `scan`, not the general `excludedDirNames` set,
+/// precisely because a nested directory like `src/scripts/` (real sites commonly hold client-side
+/// JS there) must still contribute both. This matters because the bundled template's own
+/// `scripts/harness/component.astro` deliberately blankets *all* of `src/components/**` and
+/// `src/layouts/**` via `import.meta.glob` to power the live component preview — if that blanket
+/// coverage weren't withheld, it would suppress unused-component/layout detection for every site
+/// scaffolded from this template.
 ///
 /// An unresolvable reference (bare specifier, unconfigured path alias) is never counted as proof
 /// of use *or* disuse — it is simply skipped. This biases the whole scanner toward
@@ -222,6 +223,17 @@ public enum DeadAssetScanner {
     /// Loads one tsconfig/jsconfig file, recursively following a relative `extends` chain (TS
     /// resolves `extends` relative to the extending file's own directory; a depth guard avoids an
     /// accidental cycle). Returns `nil` only if `url` itself can't be read/parsed as JSON.
+    ///
+    /// **Known limitation:** only a plain relative path ending in `.json` is followed (e.g.
+    /// `"./tsconfig.base.json"`). Two real `extends` forms are not: an extensionless relative path
+    /// (`"./tsconfig.base"`, valid since TS 3.2 — the compiler appends `.json` itself) and a bare
+    /// package specifier resolved via node_modules (`"astro/tsconfigs/strict"`, which this app's
+    /// own bundled template uses). Either form just fails to read here and the extended config's
+    /// `paths`/`baseUrl` are silently dropped — harmless *today* only because the specific presets
+    /// in use happen to define no `paths`; a project whose base config (reached either way) does
+    /// define aliases would have those aliases go unresolved. Full Node-style module resolution
+    /// (package.json `main`/`exports` lookup) is a materially larger undertaking than the plain
+    /// relative-path case this closes, and isn't attempted here.
     private static func loadTSConfig(at url: URL, depth: Int) -> PathAliasConfig? {
         guard depth < 5 else { return nil }
         guard let data = try? Data(contentsOf: url) else { return nil }
@@ -349,10 +361,14 @@ public enum DeadAssetScanner {
             let ext = "." + abs.pathExtension.lowercased()
             guard referenceScanExtensions.contains(ext) else { continue }
             let relPath = relativePosix(abs, from: projectRoot)
-            // Top-level `scripts/` only (dev tooling: the Component Editor's preview harness,
-            // pre-deploy checks) — not a nested directory like `src/scripts/`, which real sites
-            // commonly use for client-side JS and which should still be scanned.
-            guard !relPath.lowercased().hasPrefix("scripts/") else { continue }
+            // Top-level `scripts/` (dev tooling: the Component Editor's preview harness,
+            // pre-deploy checks — not a nested directory like `src/scripts/`, which real sites
+            // commonly use for client-side JS) never contributes *glob-directory* coverage below —
+            // that's what stops the harness's own blanket `import.meta.glob` from suppressing
+            // unused-component/layout detection everywhere. It's still scanned as an ordinary
+            // reference *source*: excluding it entirely would also drop any discrete, non-glob
+            // reference some other top-level script might legitimately hold.
+            let isTopLevelScripts = relPath.lowercased().hasPrefix("scripts/")
             let actualSize = fileSize(abs)
             guard let size = actualSize, size <= 512_000 else {
                 // Missing a reference *source* here is worse than the same skip in a candidate
@@ -367,7 +383,9 @@ public enum DeadAssetScanner {
 
             let refs = extractReferences(source: source, path: relPath)
             for ref in refs.fileReferences { fileReferenceCounts[ref.lowercased(), default: 0] += 1 }
-            globDirectories.formUnion(refs.globDirectories.map { $0.lowercased() })
+            if !isTopLevelScripts {
+                globDirectories.formUnion(refs.globDirectories.map { $0.lowercased() })
+            }
             for raw in refs.unresolvedReferences {
                 for aliasResolved in resolveAlias(raw, config: aliasConfig) {
                     fileReferenceCounts[aliasResolved.lowercased(), default: 0] += 1
