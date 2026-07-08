@@ -25,7 +25,9 @@ struct WebInspectorCommands: Commands {
             Button("Show Web Inspector") {
                 focusedPreview?.showWebInspector()
             }
-            .keyboardShortcut("i", modifiers: [.command, .option])
+            // ⌥⇧⌘I, not ⌥⌘I: the HIG-standard inspector shortcut ⌥⌘I is reserved for the page
+            // Inspector toggle (#512); the web developer tool takes the shifted variant (#510).
+            .keyboardShortcut("i", modifiers: [.command, .option, .shift])
             .disabled(focusedPreview == nil)
         }
     }

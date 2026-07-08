@@ -165,6 +165,12 @@ struct AnglesiteApp: App {
             }
 
             NewContentCommands()
+            // File ▸ Save ⌘S / Revert to Saved for the focused window's editors (#509).
+            SaveCommands()
+            // Standard View-menu items: Show/Hide Sidebar ⌃⌘S and Customize Toolbar… (#510).
+            // Customize Toolbar… stays inert until the toolbar adopts .toolbar(id:) — see #519.
+            SidebarCommands()
+            ToolbarCommands()
             CommandGroup(after: .newItem) {
                 Menu("Open Recent") {
                     ForEach(recent.sites) { site in
