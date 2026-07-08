@@ -11,17 +11,38 @@ import Foundation
 /// caller preload a persisted value (so overrides survive an app restart) before the first
 /// `rebuild` runs its merge.
 public actor ProjectConventionsEngine {
+    /// Produces the tone-descriptor/brand-term fields the deterministic extractor can't compute
+    /// from text stats alone. Non-gated (unlike `GeneratedProjectConventions`, which is behind
+    /// `#if compiler(>=6.4)`) so this actor builds on the reduced CI toolchain too — the concrete
+    /// `FoundationModels`-backed closure is only ever supplied by `ProjectConventionsEnricherFactory`.
+    public typealias ConventionsEnricher = @Sendable (
+        _ sampleText: String, _ context: AssistantContext
+    ) async throws -> (toneDescriptors: [String], brandTerms: [String])
+
     private var conventionsBySite: [String: ProjectConventions] = [:]
     private var filesBySite: [String: [String: String]] = [:]
+    private let enrich: ConventionsEnricher?
+    private let enrichmentInterval: TimeInterval
+    private let now: @Sendable () -> Date
+    private var lastEnrichedAt: [String: Date] = [:]
 
-    public init() {}
+    public init(
+        enrich: ConventionsEnricher? = nil,
+        enrichmentInterval: TimeInterval = 300,
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.enrich = enrich
+        self.enrichmentInterval = enrichmentInterval
+        self.now = now
+    }
 
-    public func rebuild(siteID: String, projectRoot: URL) async {
+    public func rebuild(siteID: String, projectRoot: URL, forceEnrichment: Bool = false) async {
         let files = await Task.detached(priority: .utility) {
             Self.scan(projectRoot: projectRoot)
         }.value
         filesBySite[siteID] = Dictionary(uniqueKeysWithValues: files.map { ($0.path, $0.contents) })
         await recompute(siteID: siteID, projectRoot: projectRoot)
+        await maybeEnrich(siteID: siteID, siteDirectory: projectRoot, force: forceEnrichment)
     }
 
     public func upsertFile(siteID: String, projectRoot: URL, relativePath: String) async {
@@ -95,6 +116,38 @@ public actor ProjectConventionsEngine {
             fresh = fresh.merging(overriddenFrom: previous)
         }
         conventionsBySite[siteID] = fresh
+    }
+
+    // MARK: - Enrichment
+
+    /// Runs the (expensive, on-device-model-backed) tone/brand-term enrichment pass for a site,
+    /// throttled to at most once per `enrichmentInterval` unless `force` is set. No-op when no
+    /// `enrich` closure was supplied (e.g. the reduced CI toolchain via
+    /// `ProjectConventionsEnricherFactory.makeDefault()` returning `nil`).
+    private func maybeEnrich(siteID: String, siteDirectory: URL, force: Bool) async {
+        guard let enrich else { return }
+        if !force, let last = lastEnrichedAt[siteID], now().timeIntervalSince(last) < enrichmentInterval {
+            return
+        }
+        guard let sample = sampleText(siteID: siteID) else { return }
+        lastEnrichedAt[siteID] = now()
+        let context = AssistantContext(siteID: siteID, siteDirectory: siteDirectory)
+        guard let result = try? await enrich(sample, context) else { return }
+        guard var conventions = conventionsBySite[siteID] else { return }
+        if !conventions.writing.toneDescriptors.isOverridden {
+            conventions.writing.toneDescriptors = Learned(value: result.toneDescriptors, source: .inferred(confidence: 1))
+        }
+        if !conventions.writing.brandTerms.isOverridden {
+            conventions.writing.brandTerms = Learned(value: result.brandTerms, source: .inferred(confidence: 1))
+        }
+        conventionsBySite[siteID] = conventions
+    }
+
+    /// A bounded sample of the site's scanned text, concatenated for a single guided-generation
+    /// prompt. Capped at 4,000 characters to keep the on-device context window small.
+    private func sampleText(siteID: String) -> String? {
+        guard let files = filesBySite[siteID], !files.isEmpty else { return nil }
+        return String(files.values.joined(separator: "\n\n").prefix(4_000))
     }
 
     // MARK: - Scanning

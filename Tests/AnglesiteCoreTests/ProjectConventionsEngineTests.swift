@@ -113,4 +113,59 @@ struct ProjectConventionsEngineTests {
         let conventions = await engine.conventions(siteID: "site-1")
         #expect(conventions?.frontmatter.collections["blog"] == ["title"])
     }
+
+    @Test("rebuild(forceEnrichment: true) calls the enricher and fills tone/brand fields")
+    func forcedEnrichmentFillsFields() async {
+        let root = makeSite(["src/pages/about.astro": "# About Us\n"])
+        let engine = ProjectConventionsEngine(
+            enrich: { _, _ in (toneDescriptors: ["concise", "friendly"], brandTerms: ["Anglesite"]) },
+            now: { Date(timeIntervalSince1970: 0) }
+        )
+
+        await engine.rebuild(siteID: "site-1", projectRoot: root, forceEnrichment: true)
+
+        let conventions = await engine.conventions(siteID: "site-1")
+        #expect(conventions?.writing.toneDescriptors.value == ["concise", "friendly"])
+        #expect(conventions?.writing.brandTerms.value == ["Anglesite"])
+    }
+
+    @Test("a second rebuild within the throttle window does not call the enricher again")
+    func throttleSkipsSecondCall() async {
+        let root = makeSite(["src/pages/about.astro": "# About Us\n"])
+        let callCount = CallCounter()
+        var currentTime = Date(timeIntervalSince1970: 0)
+        let engine = ProjectConventionsEngine(
+            enrich: { _, _ in
+                await callCount.increment()
+                return (toneDescriptors: ["concise"], brandTerms: [])
+            },
+            now: { currentTime }
+        )
+
+        await engine.rebuild(siteID: "site-1", projectRoot: root, forceEnrichment: true)
+        currentTime = currentTime.addingTimeInterval(1) // well inside the default 300s throttle
+        await engine.rebuild(siteID: "site-1", projectRoot: root)
+
+        #expect(await callCount.value == 1)
+    }
+
+    @Test("an overridden tone/brand field survives enrichment")
+    func enrichmentPreservesOverride() async {
+        let root = makeSite(["src/pages/about.astro": "# About Us\n"])
+        let engine = ProjectConventionsEngine(
+            enrich: { _, _ in (toneDescriptors: ["concise"], brandTerms: ["fresh-from-model"]) },
+            now: { Date(timeIntervalSince1970: 0) }
+        )
+        await engine.applyOverride(siteID: "site-1", value: .brandTerms(["MyBrand"]))
+
+        await engine.rebuild(siteID: "site-1", projectRoot: root, forceEnrichment: true)
+
+        let conventions = await engine.conventions(siteID: "site-1")
+        #expect(conventions?.writing.brandTerms.value == ["MyBrand"])
+    }
+
+    private actor CallCounter {
+        private(set) var value = 0
+        func increment() { value += 1 }
+    }
 }
