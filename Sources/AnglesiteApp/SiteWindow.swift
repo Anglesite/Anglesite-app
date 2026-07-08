@@ -300,7 +300,7 @@ struct SiteWindow: View {
                     } label: {
                         Label("Publish to GitHub", systemImage: "square.and.arrow.up.on.square")
                     }
-                    .disabled(model.publish.isRunning || !site.isValid)
+                    .disabled(!model.canPublishToGitHub)
                     .help(site.isValid ? "Create a private GitHub repo and push this site" : "Site is missing required files")
                 }
             }
@@ -339,6 +339,7 @@ struct SiteWindow: View {
                 } label: {
                     Label("Add Integration…", systemImage: "puzzlepiece.extension")
                 }
+                .disabled(!model.canOpenIntegrationWizard)
                 .help("Set up a third-party integration for this site")
             }
             .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
@@ -350,7 +351,7 @@ struct SiteWindow: View {
                     Label("Domain", systemImage: "globe")
                 }
                 .help("View and manage this domain's DNS records")
-                .disabled(model.domain.isRunning)
+                .disabled(!model.canOpenDomain)
             }
             .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
         }

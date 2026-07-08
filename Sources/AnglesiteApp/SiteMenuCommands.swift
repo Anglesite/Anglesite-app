@@ -17,7 +17,7 @@ struct SiteMenuCommands: Commands {
                 .disabled(model?.canRunDeploy != true)
 
             Button("Recheck Deploy Readiness") { model?.recheckHealth() }
-                .disabled(model?.site == nil)
+                .disabled(model?.canRecheckHealth != true)
 
             Button("Backup") { model?.backupSite() }
                 .disabled(model?.canRunBackup != true)
@@ -34,13 +34,13 @@ struct SiteMenuCommands: Commands {
             Divider()
 
             Button("Domain…") { model?.domain.openSheet() }
-                .disabled(model == nil || model?.domain.isRunning == true)
+                .disabled(model?.canOpenDomain != true)
 
             Button("Add Integration…") { model?.openIntegrationWizard() }
-                .disabled(model?.site == nil)
+                .disabled(model?.canOpenIntegrationWizard != true)
 
             Button("Siri AI Readiness…") { model?.openSiriReadiness() }
-                .disabled(model?.canOpenSiriReadiness != true || model?.site == nil)
+                .disabled(model?.canOpenSiriReadiness != true)
 
             #if !ANGLESITE_MAS
             // Same identity swap as the toolbar: menus rebuild on every open, so a state-dependent
@@ -52,20 +52,20 @@ struct SiteMenuCommands: Commands {
                     guard let model, let site = model.site else { return }
                     model.publish.publish(source: site.sourceDirectory, repoName: site.name)
                 }
-                .disabled(model?.site?.isValid != true || model?.publish.isRunning == true)
+                .disabled(model?.canPublishToGitHub != true)
             }
             #endif
 
             Divider()
 
             Button("Open in Browser") { model?.openPreviewInBrowser() }
-                .disabled(model?.preview.readyURL == nil)
+                .disabled(model?.canOpenPreviewInBrowser != true)
 
             Button("Show Site Graph") {
                 guard let model else { return }
                 Task { await model.showGraph() }
             }
-            .disabled(model?.site == nil)
+            .disabled(model?.canShowGraph != true)
         }
     }
 }

@@ -100,10 +100,16 @@ final class PlistEditorModel {
         }
     }
 
+    /// True while `save()`'s off-main write is in flight — same contract as
+    /// `FileEditorModel.isSaving` (analytics writes have their own `isSavingAnalytics`).
+    private(set) var isSaving = false
+
     @discardableResult
     func save() async -> Bool {
-        guard isDirty else { return true }
+        guard isDirty, !isSaving else { return true }
         guard validationMessage == nil else { return false }
+        isSaving = true
+        defer { isSaving = false }
         let url = file.url
         let entries = entriesForSaving()
         do {

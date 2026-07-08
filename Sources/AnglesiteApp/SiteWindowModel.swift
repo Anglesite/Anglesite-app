@@ -160,7 +160,7 @@ final class SiteWindowModel {
     }
 
     var canOpenSiriReadiness: Bool {
-        contentIndexerStore.indexer != nil
+        contentIndexerStore.indexer != nil && site != nil
     }
 
     func openIntegrationWizard() {
@@ -232,6 +232,14 @@ final class SiteWindowModel {
     var canRunBackup: Bool { site?.isValid == true && !siteOperationRunning }
     var canRunAudit: Bool { site?.isValid == true && !siteOperationRunning }
     var canRunHarden: Bool { site?.isValid == true && !harden.isRunning }
+    var canRecheckHealth: Bool { site != nil }
+    var canOpenDomain: Bool { site != nil && !domain.isRunning }
+    var canOpenIntegrationWizard: Bool { site != nil }
+    var canOpenPreviewInBrowser: Bool { preview.readyURL != nil }
+    var canShowGraph: Bool { site != nil }
+    #if !ANGLESITE_MAS
+    var canPublishToGitHub: Bool { site?.isValid == true && !publish.isRunning }
+    #endif
 
     /// Build, scan, and `wrangler deploy` — resolves the active container control first, like the
     /// toolbar button always has.
@@ -264,23 +272,48 @@ final class SiteWindowModel {
     }
 
     /// True when the main-pane editor or the inspector holds unsaved edits — drives File ▸ Save /
-    /// Revert to Saved enablement (#509).
+    /// Revert to Saved enablement (#509). The `.plist` editor has two independent dirty flags:
+    /// plist entries (`isDirty`) and analytics settings (`isAnalyticsDirty`) — both count, matching
+    /// `PlistEditorModel.flushBeforeLeaving()` (PR #532 review).
     var hasUnsavedEdits: Bool {
         let editorDirty = switch activeEditor {
         case .text(let model): model.isDirty
-        case .plist(let model): model.isDirty
+        case .plist(let model): model.isDirty || model.isAnalyticsDirty
         case nil: false
         }
         return editorDirty || (inspectorContext?.model.isDirty ?? false)
     }
 
+    /// True while any save/revert IO is in flight on either editing surface. File ▸ Save / Revert
+    /// disable during it: none of the editor models guard `load()` against a concurrent in-flight
+    /// `save()`, so a revert racing a slow save could desync the buffer from disk (PR #532 review).
+    var editCommandInFlight: Bool {
+        if menuEditCommandRunning { return true }
+        switch activeEditor {
+        case .text(let model): if model.isSaving { return true }
+        case .plist(let model): if model.isSaving || model.isSavingAnalytics { return true }
+        case nil: break
+        }
+        return inspectorContext?.model.isSaving ?? false
+    }
+
+    /// Serializes File ▸ Save / Revert themselves (the per-model `isSaving` flags only cover each
+    /// model's own write).
+    private var menuEditCommandRunning = false
+
     /// File ▸ Save. Writes every dirty editing surface: a page's content (main-pane editor) and its
     /// metadata (inspector) are one document to the user, so Save covers both. Each model's `save()`
-    /// no-ops when clean.
+    /// no-ops when clean; the plist editor's analytics settings save separately (`saveAnalytics()`).
     func saveAllEdits() async {
+        guard !menuEditCommandRunning else { return }
+        menuEditCommandRunning = true
+        defer { menuEditCommandRunning = false }
         switch activeEditor {
-        case .text(let model): await model.save()
-        case .plist(let model): await model.save()
+        case .text(let model):
+            await model.save()
+        case .plist(let model):
+            await model.save()
+            if model.isAnalyticsDirty { await model.saveAnalytics() }
         case nil: break
         }
         if let model = inspectorContext?.model { await model.save() }
@@ -289,16 +322,21 @@ final class SiteWindowModel {
     /// File ▸ Revert to Saved: present the confirmation alert (no-op when nothing is dirty, so a
     /// stale-enabled menu item can't surface a pointless prompt).
     func requestRevertToSaved() {
-        guard hasUnsavedEdits else { return }
+        guard hasUnsavedEdits, !editCommandInFlight else { return }
         revertConfirmationPresented = true
     }
 
     /// Discard unsaved edits by re-reading each dirty surface from disk. Uses `load()` — not
     /// `reloadFromDisk()`, which is conflict-flow-specific and no-ops without a pending conflict.
+    /// `load()` also re-reads the plist editor's analytics settings, so the `isAnalyticsDirty`
+    /// surface reverts too.
     func confirmRevertToSaved() async {
+        guard !menuEditCommandRunning else { return }
+        menuEditCommandRunning = true
+        defer { menuEditCommandRunning = false }
         switch activeEditor {
         case .text(let model) where model.isDirty: await model.load()
-        case .plist(let model) where model.isDirty: await model.load()
+        case .plist(let model) where model.isDirty || model.isAnalyticsDirty: await model.load()
         default: break
         }
         if let model = inspectorContext?.model, model.isDirty { await model.load() }
