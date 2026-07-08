@@ -29,12 +29,18 @@ final class PreviewModel {
 
     private let runtime: any SiteRuntime
 
-    /// The live preview `WKWebView`, registered by `PreviewView` when it's created. Weak: SwiftUI's
-    /// `NSViewRepresentable` owns the web view's lifetime; the model only borrows it for the
-    /// View-menu commands — Show Web Inspector (`showWebInspector()`) and the preview navigation
-    /// commands (#514: reload, back/forward, zoom). Setting it (re)installs the KVO mirrors for
-    /// `canGoBack`/`canGoForward` and re-applies the persisted `zoomLevel`, so a web view recreated
-    /// across a dev-server restart keeps the user's zoom.
+    /// The live preview `WKWebView`, registered by `PreviewView` when it's created and detached
+    /// via `detachWebView(_:)` when SwiftUI dismantles it. Weak: SwiftUI's `NSViewRepresentable`
+    /// owns the web view's lifetime; the model only borrows it for the View-menu commands — Show
+    /// Web Inspector (`showWebInspector()`) and the preview navigation commands (#514: reload,
+    /// back/forward, zoom). Setting it (re)installs the KVO mirrors for `canGoBack`/`canGoForward`
+    /// and re-applies the persisted `zoomLevel`, so a web view recreated across a dev-server
+    /// restart keeps the user's zoom.
+    ///
+    /// The explicit detach path matters: ARC zeroing a weak var does NOT fire `didSet`, so
+    /// relying on zeroing alone would leave the KVO mirrors frozen at their last values whenever
+    /// the web view is torn down without a replacement (dev-server restart/failure switches
+    /// `previewPane` off the `.ready` branch) — Back/Forward would stay enabled with no web view.
     weak var webView: WKWebView? {
         didSet {
             guard oldValue !== webView else { return }
@@ -44,8 +50,8 @@ final class PreviewModel {
     }
 
     /// Mirrors of `WKWebView.canGoBack`/`.canGoForward`, observable so the View-menu Back/Forward
-    /// items enable/disable live. KVO-fed by `observeNavigationState()`; false whenever no web view
-    /// exists.
+    /// items enable/disable live. KVO-fed by `observeNavigationState()`; reset to false when the
+    /// web view detaches (`detachWebView(_:)`) or is replaced.
     private(set) var canGoBack = false
     private(set) var canGoForward = false
 
@@ -54,7 +60,12 @@ final class PreviewModel {
     /// `PreviewZoom.levels`.
     private(set) var zoomLevel: Double = PreviewZoom.actualSize
 
-    /// KVO tokens for the `canGoBack`/`canGoForward` mirrors; replaced whenever `webView` changes.
+    /// KVO tokens for the `canGoBack`/`canGoForward` mirrors; replaced whenever `webView` changes
+    /// and cleared on `detachWebView(_:)`. Note the modern closure-based `observe(...)` token does
+    /// NOT retain the observed object — it holds it weakly and auto-invalidates when the observed
+    /// object deallocates (verified empirically on the Swift 6.4 toolchain), so a stale token here
+    /// cannot keep a torn-down web view alive; clearing on detach is about resetting the mirrors,
+    /// not about breaking a retain.
     private var webViewObservations: [NSKeyValueObservation] = []
 
     /// The `EditRouter` that the WKWebView's `AnglesiteScriptHandler` forwards overlay edits to.
@@ -187,6 +198,23 @@ final class PreviewModel {
     /// True once the preview web view exists — the enablement gate for the View-menu preview
     /// navigation commands. The web view is created when the dev server first becomes ready.
     var hasWebView: Bool { webView != nil }
+
+    /// Explicit teardown signal from `PreviewView.dismantleNSView` — the counterpart to the
+    /// `onWebView` registration. Required because ARC zeroing the weak `webView` does not fire
+    /// its `didSet`, so without this call the `canGoBack`/`canGoForward` mirrors (and the KVO
+    /// tokens) would outlive the web view they mirror.
+    ///
+    /// Identity-checked: SwiftUI may create a replacement view (`makeNSView` → `onWebView`)
+    /// before dismantling the old one, in which case `webView` already points at the new
+    /// instance and the stale dismantle must not clobber it. The `nil` case is accepted too —
+    /// ARC may have zeroed the reference before the dismantle callback runs, leaving stale
+    /// mirrors that still need the reset (the `didSet` skips its work when old and new are both
+    /// nil, so `observeNavigationState()` is called directly).
+    func detachWebView(_ dismantled: WKWebView) {
+        guard webView === dismantled || webView == nil else { return }
+        webView = nil
+        observeNavigationState()
+    }
 
     /// Reload the current preview page (View ▸ Reload Preview, ⌘R). No-ops when the web view
     /// doesn't exist yet, so it's always safe to call.
