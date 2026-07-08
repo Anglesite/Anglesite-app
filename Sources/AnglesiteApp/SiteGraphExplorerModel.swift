@@ -71,11 +71,21 @@ final class SiteGraphExplorerModel {
         return filteredEdges.filter { $0.sourceID == selectedNodeID }
     }
 
+    /// Incoming-edge counts recomputed from `filteredEdges`, not the global
+    /// `SiteGraphNode.referencedByCount` baked in at `SiteGraphExplorer.build()` time. Badges and
+    /// the "Unused Assets" grouping must reflect the *visible* graph (matching `visibleSummary`'s
+    /// framing) — otherwise an asset referenced only by a currently kind-filtered-out node still
+    /// shows a stale "used" badge (#552).
+    var visibleReferenceCounts: [String: Int] {
+        Dictionary(grouping: filteredEdges, by: \.targetID).mapValues(\.count)
+    }
+
     var groupedFilteredNodes: [(kind: SiteGraphNodeKind, nodes: [SiteGraphNode])] {
+        let referenceCounts = visibleReferenceCounts
         let grouped = Dictionary(grouping: filteredNodes, by: \.kind)
         return SiteGraphNodeKind.allCases.compactMap { kind in
             let visibleNodes = (grouped[kind] ?? []).filter { node in
-                kind != .asset || node.referencedByCount > 0
+                kind != .asset || (referenceCounts[node.id, default: 0]) > 0
             }
             guard !visibleNodes.isEmpty else { return nil }
             return (kind, visibleNodes.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending })
@@ -83,8 +93,9 @@ final class SiteGraphExplorerModel {
     }
 
     var unusedAssets: [SiteGraphNode] {
-        filteredNodes
-            .filter { $0.kind == .asset && $0.referencedByCount == 0 }
+        let referenceCounts = visibleReferenceCounts
+        return filteredNodes
+            .filter { $0.kind == .asset && referenceCounts[$0.id, default: 0] == 0 }
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
