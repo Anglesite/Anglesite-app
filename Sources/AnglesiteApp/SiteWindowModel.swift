@@ -84,6 +84,9 @@ final class SiteWindowModel {
     var dependencyUpdateModel: DependencyUpdateModel?
     var newPagePresented = false
     var newCollectionPresented = false
+    /// File ▸ Revert to Saved is destructive, so it routes through a confirmation alert hosted by
+    /// `SiteWindow` (#509).
+    var revertConfirmationPresented = false
     var navigator: SiteNavigatorModel?
     var graphExplorer: SiteGraphExplorerModel
     var mainPaneMode: MainPaneMode = .preview
@@ -217,6 +220,47 @@ final class SiteWindowModel {
     /// model raises its conflict alert) when the file changed externally — so the caller aborts the
     /// switch instead of clobbering the other tool's edit. Safe to call when not editing. Async
     /// because the save/check IO runs off the main actor.
+    /// True when the main-pane editor or the inspector holds unsaved edits — drives File ▸ Save /
+    /// Revert to Saved enablement (#509).
+    var hasUnsavedEdits: Bool {
+        let editorDirty = switch activeEditor {
+        case .text(let model): model.isDirty
+        case .plist(let model): model.isDirty
+        case nil: false
+        }
+        return editorDirty || (inspectorContext?.model.isDirty ?? false)
+    }
+
+    /// File ▸ Save. Writes every dirty editing surface: a page's content (main-pane editor) and its
+    /// metadata (inspector) are one document to the user, so Save covers both. Each model's `save()`
+    /// no-ops when clean.
+    func saveAllEdits() async {
+        switch activeEditor {
+        case .text(let model): await model.save()
+        case .plist(let model): await model.save()
+        case nil: break
+        }
+        if let model = inspectorContext?.model { await model.save() }
+    }
+
+    /// File ▸ Revert to Saved: present the confirmation alert (no-op when nothing is dirty, so a
+    /// stale-enabled menu item can't surface a pointless prompt).
+    func requestRevertToSaved() {
+        guard hasUnsavedEdits else { return }
+        revertConfirmationPresented = true
+    }
+
+    /// Discard unsaved edits by re-reading each dirty surface from disk. Uses `load()` — not
+    /// `reloadFromDisk()`, which is conflict-flow-specific and no-ops without a pending conflict.
+    func confirmRevertToSaved() async {
+        switch activeEditor {
+        case .text(let model) where model.isDirty: await model.load()
+        case .plist(let model) where model.isDirty: await model.load()
+        default: break
+        }
+        if let model = inspectorContext?.model, model.isDirty { await model.load() }
+    }
+
     func leaveCurrentEditor() async -> Bool {
         guard case .editor = mainPaneMode else { return true }
         switch activeEditor {

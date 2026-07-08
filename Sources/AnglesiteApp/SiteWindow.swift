@@ -72,7 +72,11 @@ struct SiteWindow: View {
         .onChange(of: model.preview.state) { _, newState in
             model.startup.ingest(state: newState)
         }
-        .focusedValue(\.siteID, model.site?.id ?? siteID)
+        // `focusedSceneValue`, not `focusedValue`: keyboard focus often sits in an AppKit responder
+        // (the WKWebView preview) where nothing in SwiftUI's focus system is focused, so a plain
+        // focusedValue resolves to nil and File ▸ Export Site Source… stays disabled even with the
+        // site window frontmost (same trap documented for `\.preview` below).
+        .focusedSceneValue(\.siteID, model.site?.id ?? siteID)
         .focusedSceneValue(\.newContentActions, model.site == nil ? nil : NewContentActions(
             newPage: { model.newPagePresented = true },
             newCollection: { model.newCollectionPresented = true }
@@ -82,6 +86,9 @@ struct SiteWindow: View {
         // responder), so nothing in SwiftUI's focus system is focused and a plain `focusedValue`
         // would resolve to nil — leaving "Show Web Inspector" perpetually disabled.
         .focusedSceneValue(\.preview, model.preview)
+        // Publishes the whole window model so menu commands (File ▸ Save/Revert today, the Site
+        // menu in #511) can reach the focused window's editing surfaces and site operations.
+        .focusedSceneValue(\.siteWindowModel, model)
         .onDisappear { model.close() }
     }
 
@@ -444,6 +451,12 @@ struct SiteWindow: View {
                         }
                     }
             }
+        }
+        .alert("Revert to the last saved version?", isPresented: $bindableModel.revertConfirmationPresented) {
+            Button("Revert", role: .destructive) { Task { await model.confirmRevertToSaved() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Unsaved changes in the editor and inspector will be discarded.")
         }
         .sheet(isPresented: $bindableModel.newPagePresented) {
             NewPageSheet(site: site) { title, route, template in
