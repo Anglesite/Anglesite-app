@@ -620,7 +620,10 @@ struct SiteWindow: View {
                     title: model.preview.isUpdatingDependencies
                         ? "Updating dependencies — this may take a minute…"
                         : "Starting dev server for \(site.name)…",
-                    model: model.startup
+                    model: model.startup,
+                    // Deliberately ungated (unlike the ⌥⌘D menu item): the point of #560 is
+                    // letting non-developers look under the hood while they wait.
+                    onShowLogs: { openWindow(id: "debug") }
                 )
             }
         case .failed(_, let message):

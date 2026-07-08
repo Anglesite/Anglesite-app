@@ -6,6 +6,9 @@ import SwiftUI
 struct StartupProgressView: View {
     let title: String
     let model: StartupProgressModel
+    /// When set, a "Show Logs" button appears beneath the status message so the curious can
+    /// watch the raw subprocess output while they wait (#560).
+    var onShowLogs: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -21,6 +24,12 @@ struct StartupProgressView: View {
                 .foregroundStyle(.secondary)
                 .frame(height: 18)
                 .animation(.easeInOut(duration: 0.2), value: model.message)
+            if let onShowLogs {
+                Button("Show Logs", action: onShowLogs)
+                    .buttonStyle(.link)
+                    .font(.callout)
+                    .accessibilityHint("Opens the live log of the running dev server and dependency install.")
+            }
         }
         .frame(maxWidth: 360)
         .animation(.easeInOut(duration: 0.2), value: model.fraction)
