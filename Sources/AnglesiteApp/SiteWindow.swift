@@ -493,9 +493,13 @@ struct SiteWindow: View {
                             await preview.mcpClient()
                         }),
                         sourceRoot: site.sourceDirectory,
-                        editRouter: MCPApplyEditRouter(mcpClient: { [preview = model.preview] in
-                            await preview.mcpClient()
-                        })
+                        // Reuse the preview canvas's own router rather than building a second,
+                        // unwired MCPApplyEditRouter: model.preview.editRouter is registered in
+                        // EditRouterRegistry (Siri/App Intents) and wired to record chat-history
+                        // rows via setEditObserver (SiteWindowModel.swift) — a fresh instance here
+                        // would silently diverge from that once the Styles panel starts sending
+                        // real edits.
+                        editRouter: model.preview.editRouter
                     )
                 )
             } else if case .plist(let plistEditorModel) = model.activeEditor {

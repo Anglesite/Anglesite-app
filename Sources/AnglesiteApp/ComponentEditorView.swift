@@ -255,7 +255,7 @@ private struct ComponentCanvasView: NSViewRepresentable {
         let onSelection = self.onSelection
         let onComputedStyles = self.onComputedStyles
         let handler = AnglesiteScriptHandler(
-            router: editRouter ?? LoggingEditRouter(),
+            router: resolveEditRouter(editRouter),
             onCanvasSelection: { message in await MainActor.run { onSelection(message) } },
             onComputedStyles: { report in await MainActor.run { onComputedStyles(report) } }
         )
