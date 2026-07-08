@@ -58,14 +58,9 @@ struct SiteMenuCommands: Commands {
 
             Divider()
 
+            // The graph pane itself is View ▸ Graph ⌘3 (#512) — pane modes are View-menu domain.
             Button("Open in Browser") { model?.openPreviewInBrowser() }
                 .disabled(model?.canOpenPreviewInBrowser != true)
-
-            Button("Show Site Graph") {
-                guard let model else { return }
-                Task { await model.showGraph() }
-            }
-            .disabled(model?.canShowGraph != true)
         }
     }
 }

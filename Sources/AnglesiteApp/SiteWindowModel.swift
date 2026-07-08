@@ -271,6 +271,37 @@ final class SiteWindowModel {
         NSWorkspace.shared.open(url)
     }
 
+    // MARK: - File-menu targets (#513)
+
+    var canRevealInFinder: Bool {
+        activeEditorFile != nil || inspectorContext != nil || site != nil
+    }
+
+    /// File ▸ Reveal in Finder: the most specific focused surface wins — the open editor's file,
+    /// else the inspected page's source file, else the site's `Source/` directory (the package
+    /// itself is opaque in Finder, so revealing its contents is the useful target).
+    func revealInFinder() {
+        if let file = activeEditorFile {
+            NSWorkspace.shared.activateFileViewerSelecting([file.url])
+        } else if let model = inspectorContext?.model {
+            NSWorkspace.shared.activateFileViewerSelecting([model.file.url])
+        } else if let site {
+            NSWorkspace.shared.activateFileViewerSelecting([site.sourceDirectory])
+        }
+    }
+
+    var canRenameNavigatorItem: Bool {
+        guard let navigator, let selection = navigator.selection else { return false }
+        return navigator.canRename(selection)
+    }
+
+    /// File ▸ Rename…: begins the navigator's inline-edit flow for the selected item (same path as
+    /// its context menu). Site display-name rename stays in the launcher's context menu.
+    func renameNavigatorItem() {
+        guard let navigator, let selection = navigator.selection, navigator.canRename(selection) else { return }
+        navigator.beginEditing(selection)
+    }
+
     /// True when the main-pane editor or the inspector holds unsaved edits — drives File ▸ Save /
     /// Revert to Saved enablement (#509). The `.plist` editor has two independent dirty flags:
     /// plist entries (`isDirty`) and analytics settings (`isAnalyticsDirty`) — both count, matching
