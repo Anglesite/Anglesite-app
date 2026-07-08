@@ -24,6 +24,12 @@ public final class SharedInstanceCache<Value: Sendable>: @unchecked Sendable {
     public init() {}
 
     /// Returns the cached instance for `key`, constructing and caching it via `make` if absent.
+    ///
+    /// `make` runs synchronously while `lock` is held — if a caller's `make` does blocking I/O
+    /// (the `ImageStore(path:)` constructor above does) from an `async` context, that briefly ties
+    /// up a cooperative-pool thread. Acceptable here: `make` runs at most once per key, and the
+    /// expected key population is one or two store paths. Reconsider this locking strategy if this
+    /// cache ever backs a hot path or a `make` that isn't cheap and one-shot.
     public func instance(forKey key: String, make: () throws -> Value) rethrows -> Value {
         lock.lock()
         defer { lock.unlock() }
