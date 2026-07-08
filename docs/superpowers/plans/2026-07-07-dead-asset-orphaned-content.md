@@ -1230,3 +1230,24 @@ the smoke test caught.
   `SiteNavigatorView`'s context menu (Task 7) all reference the same
   `DeadAssetScanner.CleanupCandidate` type and `.kind`/`.path`/`.id` field names consistently
   throughout — checked task-by-task while drafting, no drift.
+
+## Final whole-branch review fixes (post-Task 8)
+
+The final whole-branch review found two Important issues that only show up once the whole
+feature is viewed together (neither individual task's diff revealed them): (1)
+`processGitDelete` could leave a file deleted from disk with no commit if `git commit` failed
+after `git rm` already succeeded, violating the "file left untouched on any delete failure"
+safety property; (2) deleting a Cleanup candidate open in the in-app editor didn't close that
+tab, risking the editor's save-on-leave flow silently resurrecting the just-deleted file. Both
+were fixed and re-reviewed clean (commits `cb6362f4`, `321ed097`), alongside two cheap Minor
+fixes: the design-mandated 512KB file-size skip guard that had been silently dropped during
+implementation, and a doc-comment caveat about the regex scanner's blind spots (brace-bound
+dynamic references, dynamic `import()`, re-export barrels) (commit `66765fea`).
+
+Explicitly deferred as follow-ups (not fixed in this slice): untracked (never-committed)
+candidates can't be deleted via `git rm` and get a misleading error message; orphan pages open in
+the text editor rather than live preview via Cleanup's "Open" (a deliberate simplification, not a
+bug); `SiteContentGraph` images aren't force-refreshed as part of `scan()`; Cleanup candidate rows
+are selectable/highlightable despite clicks doing nothing (minor UX polish); no dedicated unit
+test exists for `ProjectCleanupModel` (`AnglesiteApp` has no SwiftPM test target at all, matching
+the existing `RelatedPagesModel` precedent).
