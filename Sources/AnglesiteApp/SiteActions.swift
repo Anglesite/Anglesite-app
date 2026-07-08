@@ -19,6 +19,31 @@ enum SiteActions {
         }
     }
 
+    /// Register an existing `.anglesite` package and (on MAS) mint its security-scoped bookmark —
+    /// the ONLY mint call site, shared by every open path: Finder-open (`onOpenURL`), launcher
+    /// drag-drop (#524), the Dock menu, File ▸ Open Site… (`pickAndRegisterSite`), and Import
+    /// (`importPackage`). `record` reads and validates the marker, throwing a legible error for
+    /// non-packages.
+    static func registerPackage(at url: URL) async throws -> SiteStore.Site {
+        try await registerPackage(AnglesitePackage(url: url))
+    }
+
+    /// Variant for callers that already hold a constructed package (Import creates one via
+    /// `PackageTransfer` before registering).
+    static func registerPackage(_ package: AnglesitePackage) async throws -> SiteStore.Site {
+        let site = try await SiteStore.shared.record(package)
+        #if ANGLESITE_MAS
+        // The current access grant (open panel, drag, or LaunchServices open) is the only chance
+        // to mint a scoped bookmark — persist it now so the grant survives relaunch. Mint from
+        // `site.packageURL` (the canonicalized path the store recorded) so the bookmark's path
+        // matches what subprocesses are spawned against. Propagate failures (never `try?`): a
+        // grantless site silently fails to preview at open.
+        let bookmark = try SecurityScopedBookmark.create(for: site.packageURL)
+        try await SiteStore.shared.setBookmark(bookmark, for: site.id)
+        #endif
+        return site
+    }
+
     /// Pick a plain Anglesite directory, choose where to save the new package, copy it in, and
     /// register the package. Returns the new site, or nil if either panel was cancelled.
     static func importPackage() async throws -> SiteStore.Site? {
@@ -50,14 +75,7 @@ enum SiteActions {
             throw ImportError(folderName: sourceDir.lastPathComponent, underlying: error)
         }
         do {
-            let site = try await SiteStore.shared.record(pkg)
-            #if ANGLESITE_MAS
-            // Propagate (don't swallow with try?) — a grantless imported site silently fails to
-            // preview at open. Matches pickAndRegisterSite; mint from the canonicalized packageURL.
-            let bm = try SecurityScopedBookmark.create(for: site.packageURL)
-            try await SiteStore.shared.setBookmark(bm, for: site.id)
-            #endif
-            return site
+            return try await registerPackage(pkg)
         } catch {
             // record/bookmark failed after importDirectory wrote the package — remove the orphan
             // (we created it this call) so it isn't left invisible-and-unopenable on disk.
@@ -107,16 +125,7 @@ enum SiteActions {
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
 
         do {
-            let package = AnglesitePackage(url: url)
-            let site = try await SiteStore.shared.record(package)
-            #if ANGLESITE_MAS
-            // The panel grant is the only chance to mint a scoped bookmark — persist it now so
-            // the grant survives relaunch. Mint from `site.packageURL` (the canonicalized path the
-            // store recorded), so the bookmark's path matches what subprocesses are spawned against.
-            let bookmark = try SecurityScopedBookmark.create(for: site.packageURL)
-            try await SiteStore.shared.setBookmark(bookmark, for: site.id)
-            #endif
-            return site
+            return try await registerPackage(at: url)
         } catch {
             throw ImportError(folderName: url.lastPathComponent, underlying: error)
         }

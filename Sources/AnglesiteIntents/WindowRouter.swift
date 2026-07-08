@@ -47,4 +47,11 @@ public final class WindowRouter {
 
     /// Called by the launcher once it has consumed the request.
     public func clearNewSiteRequest() { newSiteRequested = false }
+
+    /// Opens (or focuses) the "Sites" launcher window. AppKit callers — the Dock menu (#522) —
+    /// can't reach SwiftUI's `openWindow`, so the launcher root stashes a captured
+    /// `OpenWindowAction` here on appear. `OpenWindowAction` is scene-independent, so the closure
+    /// stays valid after the capturing view disappears. Nil only before the launcher's first
+    /// appearance — and the launcher is the app's default first scene.
+    @ObservationIgnored public var openSitesWindow: (@MainActor () -> Void)?
 }

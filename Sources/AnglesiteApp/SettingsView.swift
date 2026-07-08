@@ -5,19 +5,20 @@ import AnglesiteCore
 struct SettingsView: View {
     var body: some View {
         TabView {
-            AdvancedSettingsView()
-                .tabItem { Label("Advanced", systemImage: "gearshape.2") }
+            // General leads (#529): everyday toggles shouldn't hide behind an "Advanced" label.
+            GeneralSettingsView()
+                .tabItem { Label("General", systemImage: "gearshape") }
             SiriReadinessSettingsView()
                 .tabItem { Label("Siri AI", systemImage: "sparkles") }
+            AdvancedSettingsView()
+                .tabItem { Label("Advanced", systemImage: "gearshape.2") }
         }
         .frame(width: 540, height: 360)
     }
 }
 
-private struct AdvancedSettingsView: View {
-    @AppStorage(AppSettings.Key.pluginPathOverride) private var pluginPathOverride: String = ""
-    @AppStorage(AppSettings.Key.sitesRootOverride) private var sitesRootOverride: String = ""
-    @AppStorage(AppSettings.Key.debugPaneEnabled) private var debugPaneEnabled: Bool = false
+/// Everyday preferences: editing assists and accessibility (#529).
+private struct GeneralSettingsView: View {
     @AppStorage(AppSettings.Key.autoGenerateAltText) private var autoGenerateAltText: Bool = true
     @AppStorage(AppSettings.Key.autoGeneratePageCopy) private var autoGeneratePageCopy: Bool = true
     @AppStorage(AppSettings.Key.announcesLiveUpdates) private var announcesLiveUpdates: Bool = true
@@ -41,7 +42,20 @@ private struct AdvancedSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+        .padding()
+    }
+}
 
+/// Development overrides, credentials, and diagnostics — the sharp tools (#529).
+private struct AdvancedSettingsView: View {
+    @AppStorage(AppSettings.Key.pluginPathOverride) private var pluginPathOverride: String = ""
+    @AppStorage(AppSettings.Key.sitesRootOverride) private var sitesRootOverride: String = ""
+    @AppStorage(AppSettings.Key.debugPaneEnabled) private var debugPaneEnabled: Bool = false
+
+    var body: some View {
+        Form {
             Section("Anglesite plugin") {
                 FolderPickerRow(
                     label: "Plugin path override",

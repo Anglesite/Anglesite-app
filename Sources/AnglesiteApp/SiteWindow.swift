@@ -98,6 +98,13 @@ struct SiteWindow: View {
             isAvailable: model.inspectorContext != nil,
             toggle: { inspectorShown.toggle() }
         ))
+        .onAppear {
+            // Also stash the launcher-opener here (see SitesWindowRoot): window restoration can
+            // relaunch the app with only site windows, so relying on the launcher's onAppear
+            // alone would leave Dock ▸ New Site a silent no-op on such launches (#522 review).
+            let openWindow = openWindow
+            WindowRouter.shared.openSitesWindow = { openWindow(id: "sites") }
+        }
         .onDisappear { model.close() }
     }
 
@@ -186,6 +193,9 @@ struct SiteWindow: View {
         }
         .navigationTitle(site.name)
         .navigationSubtitle(model.preview.readyURL?.absoluteString ?? "")
+        // Titlebar proxy icon (#521): ⌘-click shows the package's path, and the icon drags as the
+        // `.anglesite` package itself. The window's security-scoped grant already covers the URL.
+        .navigationDocument(site.packageURL)
         // Leading title, free center — the document-style layout (Pages/Freeform) that makes room
         // for the .principal pane switcher.
         .toolbarRole(.editor)

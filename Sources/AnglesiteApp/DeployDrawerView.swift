@@ -46,6 +46,12 @@ struct DeployDrawerView: View {
             }
             Spacer()
             if case .succeeded(let url, _) = model.phase {
+                // Standard share affordance for the deployed URL (#523) — Copy URL stays for the
+                // clipboard-first workflow.
+                ShareLink(item: url)
+                    .labelStyle(.iconOnly)
+                    .help("Share the deployed site's URL")
+                    .accessibilityLabel("Share deployed URL")
                 Button("Copy URL") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(url.absoluteString, forType: .string)
