@@ -33,6 +33,8 @@ public enum FrontmatterSchemaReader {
     private static let declarationPattern = try! NSRegularExpression(
         pattern: "const\\s+(\\w+)\\s*=\\s*defineCollection\\("
     )
+    /// Matches field names: this flat regex is not nesting-aware, so a hypothetical nested `z.object({...})`
+    /// would have its inner keys over-included alongside the top-level keys (expected for current templates).
     private static let fieldPattern = try! NSRegularExpression(pattern: "(\\w+):\\s*z\\.")
 
     private static func collectionBlocks(in source: String) -> [CollectionBlock] {
