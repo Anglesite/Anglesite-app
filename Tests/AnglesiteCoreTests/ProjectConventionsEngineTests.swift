@@ -83,6 +83,28 @@ struct ProjectConventionsEngineTests {
         #expect(conventions?.images.altTextAverageLength.isOverridden == false)
     }
 
+    @Test("clearOverride followed by a rebuild recomputes the field fresh, not left at the stale overridden value")
+    func clearOverrideThenRebuildRecomputesFresh() async {
+        // "short" is 5 characters — the true learned average once the override is gone.
+        let root = makeSite(["src/pages/about.astro": "![short](x.png)\n"])
+        let engine = ProjectConventionsEngine()
+        await engine.rebuild(siteID: "site-1", projectRoot: root)
+        let learned = await engine.conventions(siteID: "site-1")
+        #expect(learned?.images.altTextAverageLength.value == 5)
+
+        await engine.applyOverride(siteID: "site-1", value: .altTextAverageLength(99))
+        await engine.clearOverride(siteID: "site-1", field: .altTextAverageLength)
+
+        // clearOverride alone only flips `source` — the caller (ProjectConventionsModel) must
+        // also trigger a rebuild for the stale value to actually recompute. This is the exact
+        // sequence that fixes "Revert doesn't restore the learned value" (#313 PR review).
+        await engine.rebuild(siteID: "site-1", projectRoot: root)
+
+        let conventions = await engine.conventions(siteID: "site-1")
+        #expect(conventions?.images.altTextAverageLength.value == 5)
+        #expect(conventions?.images.altTextAverageLength.isOverridden == false)
+    }
+
     @Test("seed sets a starting value that a subsequent rebuild's merge respects")
     func seedIsRespectedByRebuild() async {
         let root = makeSite(["src/pages/about.astro": "# About Us\n"])

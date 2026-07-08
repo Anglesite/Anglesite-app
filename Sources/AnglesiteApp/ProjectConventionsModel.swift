@@ -66,6 +66,13 @@ final class ProjectConventionsModel {
 
     func clearOverride(_ field: OverridableField) async {
         await engine.clearOverride(siteID: siteID, field: field)
+        // `engine.clearOverride` only flips the field's `source` back to `.inferred` — its value
+        // is untouched, so without a rebuild here "Revert" would silently persist the stale
+        // overridden value re-labeled as freshly learned, rather than actually recomputing it. A
+        // full rebuild (not a cache-only recompute) is required because a cleared enrichment
+        // field (tone descriptors/brand terms) has no deterministic fallback — only the forced
+        // re-enrichment pass `rebuild(forceEnrichment:)` runs can give it a genuinely fresh value.
+        await engine.rebuild(siteID: siteID, projectRoot: siteDirectory, forceEnrichment: true)
         conventions = await engine.conventions(siteID: siteID)
         if let conventions {
             await store.save(conventions)
