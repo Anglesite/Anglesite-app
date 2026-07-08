@@ -278,6 +278,73 @@ struct SiteGraphExplorerTests {
         })
     }
 
+    @Test("markdown frontmatter layout fields create usesLayout edges")
+    func frontmatterLayoutEdges() throws {
+        let root = makeSite([
+            "src/pages/about.md": "---\ntitle: About\nlayout: ../layouts/Base.astro\n---\nBody",
+            "src/layouts/Base.astro": "<slot />",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        let page = try #require(graph.nodes.first { $0.kind == .page })
+        let layout = try #require(graph.nodes.first { $0.kind == .layout })
+
+        #expect(graph.edges.contains {
+            $0.sourceID == page.id && $0.targetID == layout.id && $0.kind == .usesLayout
+        })
+    }
+
+    @Test("markdown without frontmatter creates no layout edge")
+    func markdownWithoutFrontmatter() throws {
+        let root = makeSite([
+            "src/pages/plain.md": "Just a body, no frontmatter block.",
+            "src/layouts/Base.astro": "<slot />",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        let page = try #require(graph.nodes.first { $0.kind == .page })
+
+        #expect(!graph.edges.contains { $0.sourceID == page.id })
+    }
+
+    @Test("unresolvable frontmatter layout references are skipped, not guessed")
+    func unresolvableFrontmatterLayout() throws {
+        let root = makeSite([
+            // A bare specifier and a relative path to a file that doesn't exist — neither may
+            // produce an edge (`resolveImport` returns nil for both, never a best-effort guess).
+            "src/pages/bare.md": "---\ntitle: Bare\nlayout: some-package-layout\n---\nBody",
+            "src/pages/missing.md": "---\ntitle: Missing\nlayout: ../layouts/Nope.astro\n---\nBody",
+            "src/layouts/Base.astro": "<slot />",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        let layout = try #require(graph.nodes.first { $0.kind == .layout })
+
+        #expect(!graph.edges.contains { $0.targetID == layout.id })
+        #expect(graph.edges.isEmpty)
+    }
+
     @Test("src styles files become style nodes")
     func styleNodes() {
         let root = makeSite([

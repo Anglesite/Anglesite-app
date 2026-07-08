@@ -226,6 +226,27 @@ public enum SiteGraphExplorer {
                 let edge = SiteGraphEdge(sourceID: node.id, targetID: targetID, kind: .referencesAsset)
                 edgesByID[edge.id] = edge
             }
+            // Markdown pages/entries reference their layout through the frontmatter `layout:`
+            // field, not an import statement — without this, editing a layout under-reports its
+            // impact on markdown content (#309). Markdown-ish files only: an `.astro` frontmatter
+            // block is JS, not YAML, and must not go through the YAML parser.
+            if isMarkdownPath(filePath) {
+                let frontmatter = Frontmatter.parse(text)
+                if case .string(let layoutRef)? = frontmatter["layout"],
+                   let targetID = resolveImport(
+                       layoutRef,
+                       from: filePath,
+                       projectRoot: projectRoot,
+                       nodeIDByRelativePath: nodeIDByRelativePath,
+                       nodeIDByPublicPath: nodeIDByPublicPath,
+                       fileManager: fileManager
+                   ) {
+                    let kind: SiteGraphEdgeKind =
+                        nodesByID[targetID]?.kind == .layout ? .usesLayout : .imports
+                    let edge = SiteGraphEdge(sourceID: node.id, targetID: targetID, kind: kind)
+                    edgesByID[edge.id] = edge
+                }
+            }
         }
 
         let incomingCounts = Dictionary(grouping: edgesByID.values, by: \.targetID)
@@ -252,6 +273,12 @@ public enum SiteGraphExplorer {
 
     private static func kindRank(_ kind: SiteGraphNodeKind) -> Int {
         SiteGraphNodeKind.allCases.firstIndex(of: kind) ?? Int.max
+    }
+
+    private static let markdownExtensions: Set<String> = [".md", ".mdx", ".mdoc", ".markdown"]
+
+    private static func isMarkdownPath(_ relativePath: String) -> Bool {
+        markdownExtensions.contains(fileExtension(relativePath))
     }
 
     private static func kind(for relativePath: String) -> SiteGraphNodeKind? {
