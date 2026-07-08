@@ -77,9 +77,14 @@ struct VsockTCPProxyTests {
         let n = read(fh.fileDescriptor, &buf, max)
         if n > 0 { return .bytes(Data(buf[..<n])) }
         if n == 0 { return .eof }
-        switch errno {
+        // __error().pointee, NOT `errno`: Swift's `errno` accessor is an overlay symbol that lives
+        // in libswift_DarwinFoundation1.dylib on current SDKs, which CI's Xcode 26.2 runner image
+        // does not ship — referencing it makes the whole test bundle fail to dlopen (same class of
+        // breakage as #69's raw-POSIX pump). __error() is the plain C call behind the macro.
+        let err = __error().pointee
+        switch err {
         case EAGAIN, EWOULDBLOCK, EINTR: return .wouldBlock
-        default: return .failed(errno)
+        default: return .failed(err)
         }
     }
 
