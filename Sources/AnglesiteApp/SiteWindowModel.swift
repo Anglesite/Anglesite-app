@@ -185,9 +185,10 @@ final class SiteWindowModel {
         Task { await styleGuide.presentSheet() }
     }
 
+    /// The `.failed`-state pane's Retry button — same recovery as Site ▸ Start Dev Server (#515),
+    /// kept as one code path rather than two that could drift.
     func retryPreview() {
-        guard let site else { return }
-        preview.open(siteID: site.id, siteDirectory: site.sourceDirectory)
+        preview.startDevServer()
     }
 
     func handleSiteChanged() {

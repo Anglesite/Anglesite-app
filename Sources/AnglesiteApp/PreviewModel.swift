@@ -175,6 +175,11 @@ final class PreviewModel {
     func stopDevServer() {
         guard canStopDevServer else { return }
         devServerStoppedByUser = true
+        // Clear here (not just on `.ready`/`.failed`): stopping mid-boot never reaches either of
+        // those, so without this a Stop issued during a dependency-update boot would leave the
+        // flag stuck true — the next Start/Restart would then show "Updating dependencies…" for
+        // what's actually a plain restart.
+        isUpdatingDependencies = false
         Task { await runtime.stop() }
     }
 
