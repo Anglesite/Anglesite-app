@@ -68,6 +68,14 @@ public protocol EditRouter: Sendable {
     func apply(_ message: EditMessage) async -> EditReply
 }
 
+/// Resolves an optional configured router to a router that's always safe to call —
+/// falls back to `LoggingEditRouter` (fails safe, never silently drops an edit) when
+/// nothing was wired. Named and tested separately from `ComponentCanvasView.makeNSView`
+/// so the fallback behavior has coverage independent of the untestable NSViewRepresentable.
+public func resolveEditRouter(_ configured: EditRouter?) -> EditRouter {
+    configured ?? LoggingEditRouter()
+}
+
 /// Development default: logs the message to `LogCenter` (so it shows up in the Debug pane) and
 /// replies `.failed` with a "not wired yet" hint. Lets `PreviewView` ship the bridge end-to-end
 /// before the Phase 5 server-side patcher exists.

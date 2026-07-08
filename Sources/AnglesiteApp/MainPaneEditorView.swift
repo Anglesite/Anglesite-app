@@ -55,9 +55,8 @@ struct MainPaneEditorView: View {
         .onChange(of: controlActiveState) { _, new in
             if new == .key { Task { await model.checkExternalChange() } }
         }
-        .background(
-            Button("") { Task { await model.save() } }.keyboardShortcut("s", modifiers: [.command]).hidden()
-        )
+        // ⌘S is File ▸ Save (SaveCommands), which saves via SiteWindowModel.saveAllEdits() — no
+        // per-view hidden shortcut button (it double-registered ⌘S alongside the inspector's, #509).
         .alert("\(model.file.name) changed on disk", isPresented: conflictBinding) {
             // Each button is solely responsible for resolving the conflict; the binding's setter has
             // NO side effect, so a system-initiated dismissal can't silently pick "Keep" (or race the

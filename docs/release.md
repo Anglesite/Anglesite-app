@@ -25,10 +25,13 @@ is no direct-download update feed, GitHub Release artifact, or notarized zip pat
    `io.dwk.anglesite` tied to the Apple Distribution cert, download it, and
    install it. Note its name; pass it as `PROVISIONING_PROFILE`.
 
-4. **Restricted entitlements.** The app entitlement file includes
-   `com.apple.security.virtualization` for Apple Containerization. The App Store
-   provisioning profile must grant that entitlement before distribution builds can
-   pass signing and upload validation.
+4. **Virtualization entitlement — nothing to request.** The app entitlement file
+   includes `com.apple.security.virtualization` for Apple Containerization. It is an
+   unrestricted entitlement: it is not a portal capability, needs no Apple approval,
+   and is honored under any signature (even ad-hoc Debug builds boot containers —
+   verified 2026-07-07). A standard Mac App Store profile suffices; confirm upload
+   validation accepts it with `scripts/release.sh --validate-only` (precedent: the
+   sandboxed `try-containers/Containers` app ships it on the Mac App Store).
 
 5. **App Store Connect API key.** In App Store Connect -> Users and Access ->
    Integrations -> App Store Connect API, create a key with the App Manager role.

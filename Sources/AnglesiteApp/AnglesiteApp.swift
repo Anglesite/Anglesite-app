@@ -169,6 +169,17 @@ struct AnglesiteApp: App {
             }
 
             NewContentCommands()
+            // Both groups anchor `before: .importExport`; later declarations insert ABOVE earlier
+            // ones, so FileItemCommands is declared first to land BELOW Save/Revert in the menu
+            // (Close · Save · Revert · Rename… · Reveal — TextEdit's File-menu order).
+            // File ▸ Rename… / Reveal in Finder for the focused window (#513).
+            FileItemCommands()
+            // File ▸ Save ⌘S / Revert to Saved for the focused window's editors (#509).
+            SaveCommands()
+            // Standard View-menu items: Show/Hide Sidebar ⌃⌘S and Customize Toolbar… (#510).
+            // Customize Toolbar… stays inert until the toolbar adopts .toolbar(id:) — see #519.
+            SidebarCommands()
+            ToolbarCommands()
             CommandGroup(after: .newItem) {
                 Menu("Open Recent") {
                     ForEach(recent.sites) { site in
@@ -194,6 +205,14 @@ struct AnglesiteApp: App {
             }
             // Export is its own Commands type so @FocusedValue tracks scene focus (see ExportSiteCommands).
             ExportSiteCommands()
+            // Site menu: the site window's primary operations (#511).
+            SiteMenuCommands()
+            // View ▸ pane switching ⌘1–3 + panel toggles (Chat ⌘K, Related Pages, Inspector ⌥⌘I) —
+            // declared before WebInspectorCommands so they sit above the developer tools (#512).
+            // NOTE the anchor asymmetry (verified in the running app): `after:` groups render in
+            // DECLARATION order (this one above Web Inspector/Debug Pane), while `before:` groups
+            // render in REVERSE declaration order (see FileItemCommands/SaveCommands above).
+            ViewMenuCommands()
             // "Show Web Inspector" in the View menu — its own Commands type for the same focus reason.
             WebInspectorCommands()
             // Debug pane lives off the View menu — `⌥⌘D` keeps it discoverable without crowding

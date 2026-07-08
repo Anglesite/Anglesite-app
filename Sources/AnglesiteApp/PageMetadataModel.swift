@@ -18,8 +18,9 @@ final class PageMetadataModel: InspectorEditorModel {
     private var savedMetadata = PageMetadata(title: "", description: "")
     private var fileSession = EditableFileSession()
     private var contents: String { fileSession.savedContents }
-    /// Guards against a concurrent second `save()` capturing a stale `contents` base.
-    private var isSaving = false
+    /// Guards against a concurrent second `save()` capturing a stale `contents` base. `private(set)`
+    /// so `SiteWindowModel.editCommandInFlight` can read it (PR #532 review).
+    private(set) var isSaving = false
     private(set) var loadError: String?
     private(set) var isLoading = false
     var conflictDiskContents: String? {

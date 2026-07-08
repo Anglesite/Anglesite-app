@@ -4,7 +4,8 @@ import AnglesiteCore
 
 /// Right-hand inspector content for the selected page. Renders the typed descriptor form or the
 /// plain title/description form, wrapped in shared chrome (header + dirty/Save, off-main load,
-/// external-change conflict alert, ⌘S). Phase 1 has a single "Page" section; a tab picker for
+/// external-change conflict alert; ⌘S arrives via File ▸ Save, see SaveCommands). Phase 1 has a
+/// single "Page" section; a tab picker for
 /// selection-level editing comes in Phase 3.
 struct PageInspectorView: View {
     let context: InspectorContext
@@ -65,8 +66,8 @@ private struct InspectorChrome<M: InspectorEditorModel & Observable, Form: View>
         .onChange(of: controlActiveState) { _, new in
             if new == .key { Task { await model.checkExternalChange() } }
         }
-        .background(Button("") { Task { await model.save() } }
-            .keyboardShortcut("s", modifiers: [.command]).hidden())
+        // ⌘S is File ▸ Save (SaveCommands), which saves via SiteWindowModel.saveAllEdits() — no
+        // per-view hidden shortcut button (it double-registered ⌘S alongside the editor's, #509).
         .alert("\(model.file.name) changed on disk", isPresented: conflictBinding) {
             Button("Keep My Changes", role: .cancel) { model.keepMyChanges() }
             Button("Reload from Disk") { Task { await model.reloadFromDisk() } }

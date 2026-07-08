@@ -58,4 +58,35 @@ struct EditReplyAndRouterTests {
         #expect(text.contains("replace-text") && text.contains("/about/"),
                 "log line should reflect the op + path — got: \(text)")
     }
+
+    // MARK: resolveEditRouter
+
+    private struct RecordingEditRouter: EditRouter {
+        func apply(_ message: EditMessage) async -> EditReply {
+            EditReply(id: message.id, status: .applied, message: "recorded")
+        }
+    }
+
+    @Test("resolveEditRouter passes through a configured router") func resolveEditRouterPassesThroughConfigured() async {
+        let configured = RecordingEditRouter()
+        let resolved = resolveEditRouter(configured)
+        let msg = EditMessage(
+            id: "e-1", type: .applyEdit, path: "/",
+            selector: .object(["tag": .string("H1"), "classes": .array([]), "nthChild": .int(1)]),
+            op: "replace-text", value: .string("Hi")
+        )
+        let reply = await resolved.apply(msg)
+        #expect(reply.message == "recorded", "expected the configured router to handle the call, not a fallback")
+    }
+
+    @Test("resolveEditRouter falls back to LoggingEditRouter when nil") func resolveEditRouterFallsBackWhenNil() async {
+        let resolved = resolveEditRouter(nil)
+        let msg = EditMessage(
+            id: "e-2", type: .applyEdit, path: "/",
+            selector: .object(["tag": .string("H1"), "classes": .array([]), "nthChild": .int(1)]),
+            op: "replace-text", value: .string("Hi")
+        )
+        let reply = await resolved.apply(msg)
+        #expect(reply.status == .failed, "the fallback should be a LoggingEditRouter, which always replies failed")
+    }
 }

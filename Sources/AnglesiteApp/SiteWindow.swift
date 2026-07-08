@@ -74,7 +74,11 @@ struct SiteWindow: View {
         .onChange(of: model.preview.state) { _, newState in
             model.startup.ingest(state: newState)
         }
-        .focusedValue(\.siteID, model.site?.id ?? siteID)
+        // `focusedSceneValue`, not `focusedValue`: keyboard focus often sits in an AppKit responder
+        // (the WKWebView preview) where nothing in SwiftUI's focus system is focused, so a plain
+        // focusedValue resolves to nil and File ▸ Export Site Source… stays disabled even with the
+        // site window frontmost (same trap documented for `\.preview` below).
+        .focusedSceneValue(\.siteID, model.site?.id ?? siteID)
         .focusedSceneValue(\.newContentActions, model.site == nil ? nil : NewContentActions(
             newPage: { model.newPagePresented = true },
             newCollection: { model.newCollectionPresented = true }
@@ -84,6 +88,16 @@ struct SiteWindow: View {
         // responder), so nothing in SwiftUI's focus system is focused and a plain `focusedValue`
         // would resolve to nil — leaving "Show Web Inspector" perpetually disabled.
         .focusedSceneValue(\.preview, model.preview)
+        // Publishes the whole window model so menu commands (File ▸ Save/Revert today, the Site
+        // menu in #511) can reach the focused window's editing surfaces and site operations.
+        .focusedSceneValue(\.siteWindowModel, model)
+        // Inspector visibility is scene state (@SceneStorage), so the View menu's Show/Hide
+        // Inspector reaches it through its own focused value rather than the window model (#512).
+        .focusedSceneValue(\.inspectorPanel, InspectorPanelActions(
+            isShown: inspectorShown && model.inspectorContext != nil,
+            isAvailable: model.inspectorContext != nil,
+            toggle: { inspectorShown.toggle() }
+        ))
         .onDisappear { model.close() }
     }
 
@@ -167,8 +181,35 @@ struct SiteWindow: View {
         }
         .navigationTitle(site.name)
         .navigationSubtitle(model.preview.readyURL?.absoluteString ?? "")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+        // Leading title, free center — the document-style layout (Pages/Freeform) that makes room
+        // for the .principal pane switcher.
+        .toolbarRole(.editor)
+        // Customizable toolbar (#519): every item has a STABLE id — saved customizations key off
+        // these strings, so renaming one silently discards users' layouts (the id set is frozen
+        // by SiteToolbarItemIDTests in AnglesiteCoreTests). Items must also be
+        // unconditional (no `if let` wrappers): identity-swapping or appearing/vanishing items
+        // fight the customization palette, so state-dependent items render disabled instead.
+        // Curated default ≈8 items; episodic setup/maintenance actions ship hidden and live in
+        // the palette (View ▸ Customize Toolbar…, added in #510).
+        .toolbar(id: "site") {
+            // Fixed center, not movable/removable: the pane switcher is navigation, not a command
+            // (Finder/Freeform convention). Replaces the old Picker row above the main pane.
+            ToolbarItem(id: SiteToolbarItemID.panes.rawValue, placement: .principal) {
+                Picker("View", selection: Binding(
+                    get: { model.paneSelection },
+                    set: { model.setPaneSelection($0) }
+                )) {
+                    Text("Preview").tag(0)
+                    if model.activeEditorFile != nil { Text("Editor").tag(1) }
+                    Text("Graph").tag(2)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .help("Switch between Preview, Editor, and Graph")
+            }
+            .customizationBehavior(.disabled)
+
+            ToolbarItem(id: SiteToolbarItemID.graph.rawValue, placement: .primaryAction) {
                 Button {
                     Task { await model.showGraph() }
                 } label: {
@@ -177,30 +218,47 @@ struct SiteWindow: View {
                 .help("Explore pages, layouts, components, collections, and assets")
             }
 
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.backup.rawValue, placement: .primaryAction) {
                 Button {
-                    inspectorShown.toggle()
-                } label: {
-                    Label("Inspector", systemImage: "sidebar.right")
-                }
-                .disabled(model.inspectorContext == nil)
-                .help("Show or hide the page inspector")
-            }
-
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.backup.backup(siteID: site.id, siteDirectory: site.sourceDirectory)
+                    model.backupSite()
                 } label: {
                     Label("Backup", systemImage: "externaldrive.fill.badge.icloud")
                 }
-                .disabled(model.backup.isRunning || model.audit.isRunning || model.deploy.isRunning || !site.isValid)
+                .disabled(!model.canRunBackup)
                 .help(site.isValid
                       ? "Commit and push working-tree changes to your current branch"
                       : "Site is missing required files")
             }
-            .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
 
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.audit.rawValue, placement: .primaryAction) {
+                Button {
+                    model.auditSite()
+                } label: {
+                    if model.audit.isRunning {
+                        Label("Auditing…", systemImage: "magnifyingglass")
+                    } else {
+                        Label("Audit", systemImage: "checkmark.shield.fill")
+                    }
+                }
+                .disabled(!model.canRunAudit)
+                .help(site.isValid
+                      ? "Run the structured accessibility audit against this site"
+                      : "Site is missing required files")
+            }
+
+            ToolbarItem(id: SiteToolbarItemID.openInBrowser.rawValue, placement: .primaryAction) {
+                Button {
+                    model.openPreviewInBrowser()
+                } label: {
+                    Label("Open in browser", systemImage: "arrow.up.forward.app")
+                }
+                .disabled(!model.canOpenPreviewInBrowser)
+                .help("Open the live preview in your default browser")
+            }
+
+            // — Palette-only items (View ▸ Customize Toolbar…) —
+
+            ToolbarItem(id: SiteToolbarItemID.harden.rawValue, placement: .primaryAction) {
                 Button {
                     model.harden.openSheet()
                 } label: {
@@ -210,43 +268,47 @@ struct SiteWindow: View {
                         Label("Harden", systemImage: "shield.lefthalf.filled")
                     }
                 }
-                .disabled(model.harden.isRunning || !site.isValid)
+                .disabled(!model.canRunHarden)
                 .help(site.isValid
                       ? "Preview and apply Cloudflare security hardening for this site"
                       : "Site is missing required files")
             }
-            .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
+            .defaultCustomization(.hidden)
 
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.domain.rawValue, placement: .primaryAction) {
                 Button {
-                    model.audit.audit(siteID: site.id, siteDirectory: site.sourceDirectory)
+                    model.domain.openSheet()
                 } label: {
-                    if model.audit.isRunning {
-                        Label("Auditing…", systemImage: "magnifyingglass")
-                    } else {
-                        Label("Audit", systemImage: "checkmark.shield.fill")
-                    }
+                    Label("Domain", systemImage: "globe")
                 }
-                .disabled(model.audit.isRunning || model.backup.isRunning || model.deploy.isRunning || !site.isValid)
-                .help(site.isValid
-                      ? "Run the structured accessibility audit against this site"
-                      : "Site is missing required files")
+                .disabled(!model.canOpenDomain)
+                .help("View and manage this domain's DNS records")
             }
-            .visibilityPriority(.low)
+            .defaultCustomization(.hidden)
 
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.integration.rawValue, placement: .primaryAction) {
                 Button {
-                    model.chatPresented.toggle()
+                    model.openIntegrationWizard()
                 } label: {
-                    Label("Chat", systemImage: model.chatPresented
-                        ? "bubble.left.and.bubble.right.fill"
-                        : "bubble.left.and.bubble.right")
+                    Label("Add Integration…", systemImage: "puzzlepiece.extension")
                 }
-                .help(model.chatPresented ? "Hide chat panel" : "Show chat panel")
-                .keyboardShortcut("k", modifiers: [.command])
+                .disabled(!model.canOpenIntegrationWizard)
+                .help("Set up a third-party integration for this site")
             }
+            .defaultCustomization(.hidden)
 
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.siriReadiness.rawValue, placement: .primaryAction) {
+                Button {
+                    model.openSiriReadiness()
+                } label: {
+                    Label("Siri AI Readiness", systemImage: "sparkles")
+                }
+                .disabled(!model.canOpenSiriReadiness)
+                .help("Check whether Siri workflows are ready for this site")
+            }
+            .defaultCustomization(.hidden)
+
+            ToolbarItem(id: SiteToolbarItemID.relatedPages.rawValue, placement: .primaryAction) {
                 Button {
                     model.relatedPagesPresented.toggle()
                 } label: {
@@ -255,33 +317,22 @@ struct SiteWindow: View {
                 }
                 .help(model.relatedPagesPresented ? "Hide related pages" : "Show related pages")
             }
+            .defaultCustomization(.hidden)
 
-            if let url = model.preview.readyURL {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        NSWorkspace.shared.open(url)
-                    } label: {
-                        Label("Open in browser", systemImage: "arrow.up.forward.app")
-                    }
-                    .help("Open the live preview in your default browser")
+            ToolbarItem(id: SiteToolbarItemID.styleGuide.rawValue, placement: .primaryAction) {
+                Button {
+                    model.openStyleGuide()
+                } label: {
+                    Label("Style Guide", systemImage: "textformat.abc")
                 }
+                .help("See and edit this site's learned writing, image, and naming conventions")
             }
-
-            ToolbarItem(placement: .primaryAction) {
-                HealthBadgeView(
-                    model: model.health,
-                    onRecheck: { model.health.recheck(siteID: site.id, siteDirectory: site.sourceDirectory) },
-                    onAskAssistant: {
-                        guard let chat = model.chat else { return }
-                        model.chatPresented = true
-                        chat.send(SiteWindowModel.healthAssistantPrompt)
-                    }
-                )
-            }
-            .visibilityPriority(.high)
+            .defaultCustomization(.hidden)
 
             #if !ANGLESITE_MAS
-            ToolbarItem(placement: .primaryAction) {
+            // One stable item whose label/action reflects publish state — two swapping items
+            // would break saved customizations.
+            ToolbarItem(id: SiteToolbarItemID.github.rawValue, placement: .primaryAction) {
                 if let remote = model.publish.existingRemote {
                     Button {
                         NSWorkspace.shared.open(remote.url)
@@ -295,72 +346,67 @@ struct SiteWindow: View {
                     } label: {
                         Label("Publish to GitHub", systemImage: "square.and.arrow.up.on.square")
                     }
-                    .disabled(model.publish.isRunning || !site.isValid)
+                    .disabled(!model.canPublishToGitHub)
                     .help(site.isValid ? "Create a private GitHub repo and push this site" : "Site is missing required files")
                 }
             }
-            .visibilityPriority(.low)
+            .defaultCustomization(.hidden)
             #endif
 
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task { @MainActor in
-                        let cc = await model.preview.activeContainerControl()
-                        model.deploy.deploy(siteID: site.id, siteDirectory: site.sourceDirectory, containerControl: cc)
+            // — Default trailing cluster —
+
+            // Health badge and Deploy are one item: the badge is the readiness signal for the
+            // button it gates, so customization can never separate them.
+            ToolbarItem(id: SiteToolbarItemID.deploy.rawValue, placement: .primaryAction) {
+                HStack(spacing: 8) {
+                    HealthBadgeView(
+                        model: model.health,
+                        onRecheck: { model.recheckHealth() },
+                        onAskAssistant: {
+                            guard let chat = model.chat else { return }
+                            model.chatPresented = true
+                            chat.send(SiteWindowModel.healthAssistantPrompt)
+                        }
+                    )
+                    Button {
+                        model.deploySite()
+                    } label: {
+                        Label("Deploy", systemImage: "paperplane.fill")
                     }
-                } label: {
-                    Label("Deploy", systemImage: "paperplane.fill")
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.canRunDeploy)
+                    .help(site.isValid && model.preview.canDeploy
+                          ? "Build, scan, and run wrangler deploy on this site"
+                          : site.isValid
+                            ? "Open the preview first to start the runtime before deploying"
+                            : "Site is missing required files")
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.deploy.isRunning || model.backup.isRunning || model.audit.isRunning || !site.isValid || !model.preview.canDeploy)
-                .help(site.isValid && model.preview.canDeploy
-                      ? "Build, scan, and run wrangler deploy on this site"
-                      : site.isValid
-                        ? "Open the preview first to start the runtime before deploying"
-                        : "Site is missing required files")
             }
-            .visibilityPriority(.high)
+            .customizationBehavior(.reorderable)
 
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.chat.rawValue, placement: .primaryAction) {
                 Button {
-                    model.openSiriReadiness()
+                    model.chatPresented.toggle()
                 } label: {
-                    Label("Siri AI Readiness", systemImage: "sparkles")
+                    Label("Chat", systemImage: model.chatPresented
+                        ? "bubble.left.and.bubble.right.fill"
+                        : "bubble.left.and.bubble.right")
                 }
-                .help("Check whether Siri workflows are ready for this site")
-                .disabled(!model.canOpenSiriReadiness)
+                .help(model.chatPresented ? "Hide chat panel" : "Show chat panel")
+                // ⌘K moved to View ▸ Show/Hide Chat (#512) — a second registration here would
+                // recreate the duplicate-shortcut ambiguity #509 removed for ⌘S.
             }
 
-            ToolbarItem(placement: .primaryAction) {
+            // Far trailing, adjacent to the inspector panel it controls (Pages/Freeform convention).
+            ToolbarItem(id: SiteToolbarItemID.inspector.rawValue, placement: .primaryAction) {
                 Button {
-                    model.openIntegrationWizard()
+                    inspectorShown.toggle()
                 } label: {
-                    Label("Add Integration…", systemImage: "puzzlepiece.extension")
+                    Label("Inspector", systemImage: "sidebar.right")
                 }
-                .help("Set up a third-party integration for this site")
+                .disabled(model.inspectorContext == nil)
+                .help("Show or hide the page inspector")
             }
-            .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
-
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.openStyleGuide()
-                } label: {
-                    Label("Style Guide", systemImage: "textformat.abc")
-                }
-                .help("See and edit this site's learned writing, image, and naming conventions")
-            }
-            .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
-
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.domain.openSheet()
-                } label: {
-                    Label("Domain", systemImage: "globe")
-                }
-                .help("View and manage this domain's DNS records")
-                .disabled(model.domain.isRunning)
-            }
-            .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
         }
         .sheet(isPresented: $bindableModel.deploy.blockedPresented) {
             if case .blocked(let failures, let warnings) = model.deploy.phase {
@@ -465,6 +511,12 @@ struct SiteWindow: View {
                     }
             }
         }
+        .alert("Revert to the last saved version?", isPresented: $bindableModel.revertConfirmationPresented) {
+            Button("Revert", role: .destructive) { Task { await model.confirmRevertToSaved() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Unsaved changes in the editor and inspector will be discarded.")
+        }
         .sheet(isPresented: $bindableModel.newPagePresented) {
             NewPageSheet(site: site) { title, route, template in
                 await model.createPage(title: title, route: route, template: template)
@@ -482,22 +534,9 @@ struct SiteWindow: View {
 
     @ViewBuilder
     private func mainPane(for site: SiteStore.Site) -> some View {
-        VStack(spacing: 0) {
-            Picker("", selection: Binding(
-                get: { model.paneSelection },
-                set: { model.setPaneSelection($0) }
-            )) {
-                Text("Preview").tag(0)
-                if model.activeEditorFile != nil { Text("Editor").tag(1) }
-                Text("Graph").tag(2)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: model.activeEditorFile == nil ? 220 : 270)
-            .padding(6)
-            Divider()
-            mainPaneContent(for: site)
-        }
+        // The Preview/Editor/Graph switcher lives in the toolbar (`id: "panes"`, .principal) and
+        // the View menu (⌘1–3) — no in-content picker row (#519).
+        mainPaneContent(for: site)
     }
 
     @ViewBuilder
@@ -512,7 +551,14 @@ struct SiteWindow: View {
                         modelClient: ComponentModelClient(mcpClient: { [preview = model.preview] in
                             await preview.mcpClient()
                         }),
-                        sourceRoot: site.sourceDirectory
+                        sourceRoot: site.sourceDirectory,
+                        // Reuse the preview canvas's own router rather than building a second,
+                        // unwired MCPApplyEditRouter: model.preview.editRouter is registered in
+                        // EditRouterRegistry (Siri/App Intents) and wired to record chat-history
+                        // rows via setEditObserver (SiteWindowModel.swift) — a fresh instance here
+                        // would silently diverge from that once the Styles panel starts sending
+                        // real edits.
+                        editRouter: model.preview.editRouter
                     )
                 )
             } else if case .plist(let plistEditorModel) = model.activeEditor {
