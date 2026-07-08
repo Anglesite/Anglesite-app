@@ -89,6 +89,13 @@ struct SiteWindow: View {
         // Publishes the whole window model so menu commands (File ▸ Save/Revert today, the Site
         // menu in #511) can reach the focused window's editing surfaces and site operations.
         .focusedSceneValue(\.siteWindowModel, model)
+        // Inspector visibility is scene state (@SceneStorage), so the View menu's Show/Hide
+        // Inspector reaches it through its own focused value rather than the window model (#512).
+        .focusedSceneValue(\.inspectorPanel, InspectorPanelActions(
+            isShown: inspectorShown && model.inspectorContext != nil,
+            isAvailable: model.inspectorContext != nil,
+            toggle: { inspectorShown.toggle() }
+        ))
         .onDisappear { model.close() }
     }
 
@@ -248,7 +255,8 @@ struct SiteWindow: View {
                         : "bubble.left.and.bubble.right")
                 }
                 .help(model.chatPresented ? "Hide chat panel" : "Show chat panel")
-                .keyboardShortcut("k", modifiers: [.command])
+                // ⌘K moved to View ▸ Show/Hide Chat (#512) — a second registration here would
+                // recreate the duplicate-shortcut ambiguity #509 removed for ⌘S.
             }
 
             ToolbarItem(placement: .primaryAction) {
