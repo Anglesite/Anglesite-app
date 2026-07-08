@@ -257,6 +257,14 @@ public struct NativeContentOperations: ContentOperationsService {
             // restore both from HEAD so a failed delete never leaves the file gone without a
             // commit. Same "never a raw non-git-recoverable delete" safety property the happy
             // path relies on, applied to the failure path too.
+            // This second failure (the rollback itself also failing) has no regression test: by
+            // this point the `cat-file -e HEAD:relPath` guard above has already confirmed HEAD
+            // has the file, so `checkout HEAD --` failing here means something environmental went
+            // wrong between that check and this line (disk full, permissions revoked mid-flight)
+            // — genuinely hard to construct reliably/portably in a test, and narrower than it
+            // looks since the precondition above already rules out the most common cause (no HEAD
+            // copy). Logged rather than silently swallowed so it's at least diagnosable if it
+            // ever fires for real.
             let restored = await run(["checkout", "HEAD", "--", relPath])
             if restored == nil {
                 await LogCenter.shared.append(

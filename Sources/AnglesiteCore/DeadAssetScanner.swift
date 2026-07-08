@@ -316,9 +316,13 @@ public enum DeadAssetScanner {
     // MARK: - Full-project scan
 
     private static let referenceScanExtensions: Set<String> = [
-        ".astro", ".md", ".mdx", ".mdoc", ".markdown", ".css", ".ts", ".tsx", ".js", ".jsx",
+        ".astro", ".md", ".mdx", ".mdoc", ".markdown", ".css",
+        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts",
     ]
-    private static let excludedDirNames: Set<String> = ["node_modules", "dist", ".astro", ".git"]
+    /// Reuses `SiteIndexPaths`' shared skip list (build artifacts, dependency dirs, and
+    /// host-specific build caches like `.netlify`/`.vercel`) rather than a second, independently
+    /// drifting copy of the same rules.
+    private static let excludedDirNames = SiteIndexPaths.skippedDirectoryNames
 
     /// Scans every `.astro`/`.md`/`.mdx`/`.mdoc`/`.markdown`/`.css`/`.ts`/`.tsx`/`.js`/`.jsx` file
     /// under `projectRoot` (excluding the top-level `scripts/` — see the type doc comment) for
