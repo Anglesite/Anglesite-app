@@ -571,6 +571,7 @@ final class SiteWindowModel {
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
+            conventionsEngine: conventionsEngine,
             integrationService: integrationOps
         )
         chat = assistantSession.chat
