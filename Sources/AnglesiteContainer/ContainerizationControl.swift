@@ -50,9 +50,15 @@ public struct ContainerizationControl: LocalContainerControl {
         //    and preserves full git history — native, no network. Two steps because `git clone
         //    --branch` rejects "HEAD"/bare SHAs; `git checkout` accepts both.
         do {
-            try await runToCompletion(container, id: "clone",
+            // The image ships no /etc/hosts: docker/containerd write one at container create, but
+            // Apple Containerization boots the rootfs as-is — without it even `localhost` becomes a
+            // real DNS query (vite does dns.lookup("localhost") at astro config load → EAI_AGAIN,
+            // astro exits, and the preview never becomes ready). Write the standard entries first.
+            try await runToCompletion(container, id: "hosts", onOutput: onOutput,
+                ["sh", "-c", "printf '127.0.0.1\\tlocalhost\\n::1\\tlocalhost\\n' > /etc/hosts"])
+            try await runToCompletion(container, id: "clone", onOutput: onOutput,
                 ["git", "clone", Self.repoSharePath, "/workspace/site"])
-            try await runToCompletion(container, id: "checkout",
+            try await runToCompletion(container, id: "checkout", onOutput: onOutput,
                 ["git", "-C", "/workspace/site", "checkout", ref])
         } catch {
             await stopBareContainer(container, siteID: siteID)
@@ -593,10 +599,30 @@ public struct ContainerizationControl: LocalContainerControl {
         return nil
     }
 
-    /// Run a guest process to completion, throwing if it exits non-zero.
-    private func runToCompletion(_ container: LinuxContainer, id: String, _ argv: [String]) async throws {
+    /// Run a guest process to completion, throwing if it exits non-zero. When `onOutput` is
+    /// provided, the process's stdout/stderr stream to it line-by-line tagged `[id]` — without
+    /// this, a failing step (e.g. `git clone`) dies with only an exit code and no diagnostic.
+    private func runToCompletion(
+        _ container: LinuxContainer, id: String,
+        onOutput: (@Sendable (String, LogCenter.Stream) -> Void)? = nil,
+        _ argv: [String]
+    ) async throws {
+        let stdoutSink: LineStreamingWriter?
+        let stderrSink: LineStreamingWriter?
+        if let onOutput {
+            let tag: @Sendable (String, LogCenter.Stream) -> Void = { line, stream in
+                onOutput("[\(id)] \(line)", stream)
+            }
+            stdoutSink = LineStreamingWriter(stream: .stdout, onLine: tag)
+            stderrSink = LineStreamingWriter(stream: .stderr, onLine: tag)
+        } else {
+            stdoutSink = nil
+            stderrSink = nil
+        }
         let proc = try await container.exec(id) { config in
             config.arguments = argv
+            if let stdoutSink { config.stdout = stdoutSink }
+            if let stderrSink { config.stderr = stderrSink }
         }
         try await proc.start()
         let status = try await proc.wait()
