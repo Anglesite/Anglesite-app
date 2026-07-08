@@ -15,5 +15,11 @@ struct SitesWindowRoot: View {
                 openWindow(value: id)   // WindowGroup(for: String.self) focuses or opens the site
                 router.requested = nil
             }
+            .onAppear {
+                // Stash a launcher-opener for AppKit callers (Dock menu, #522). OpenWindowAction
+                // is scene-independent, so this stays valid after the launcher closes.
+                let openWindow = openWindow
+                router.openSitesWindow = { openWindow(id: "sites") }
+            }
     }
 }

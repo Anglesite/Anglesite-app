@@ -165,6 +165,26 @@ struct SitesLauncherView: View {
             }
         }
         .listStyle(.inset)
+        // Accept `.anglesite` packages dragged from Finder (#524) — same register path as
+        // Finder double-click (`onOpenURL`), including the MAS bookmark mint (a user drag
+        // conveys sandbox access to the dragged item).
+        .dropDestination(for: URL.self) { urls, _ in
+            let packages = urls.filter { $0.pathExtension == AnglesitePackage.packageExtension }
+            guard !packages.isEmpty else { return false }
+            Task { @MainActor in
+                for url in packages {
+                    do {
+                        let site = try await SiteActions.registerPackage(at: url)
+                        openWindow(value: site.id)
+                    } catch {
+                        NSAlert(error: SiteActions.ImportError(
+                            folderName: url.lastPathComponent, underlying: error
+                        )).runModal()
+                    }
+                }
+            }
+            return true
+        }
         .confirmationDialog(
             "Remove “\(siteToRemoveName)” from Anglesite?",
             isPresented: Binding(

@@ -19,6 +19,20 @@ enum SiteActions {
         }
     }
 
+    /// Register an existing `.anglesite` package and (on MAS) mint its security-scoped bookmark —
+    /// the shared tail of Finder-open (`onOpenURL`), launcher drag-drop (#524), and the Dock menu.
+    /// `record` reads and validates the marker, throwing a legible error for non-packages.
+    static func registerPackage(at url: URL) async throws -> SiteStore.Site {
+        let site = try await SiteStore.shared.record(AnglesitePackage(url: url))
+        #if ANGLESITE_MAS
+        // Mint from the canonicalized recorded path; let a failure propagate rather than
+        // silently leaving the site grantless.
+        let bookmark = try SecurityScopedBookmark.create(for: site.packageURL)
+        try await SiteStore.shared.setBookmark(bookmark, for: site.id)
+        #endif
+        return site
+    }
+
     /// Pick a plain Anglesite directory, choose where to save the new package, copy it in, and
     /// register the package. Returns the new site, or nil if either panel was cancelled.
     static func importPackage() async throws -> SiteStore.Site? {

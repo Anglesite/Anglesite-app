@@ -179,6 +179,9 @@ struct SiteWindow: View {
         }
         .navigationTitle(site.name)
         .navigationSubtitle(model.preview.readyURL?.absoluteString ?? "")
+        // Titlebar proxy icon (#521): ⌘-click shows the package's path, and the icon drags as the
+        // `.anglesite` package itself. The window's security-scoped grant already covers the URL.
+        .navigationDocument(site.packageURL)
         // Leading title, free center — the document-style layout (Pages/Freeform) that makes room
         // for the .principal pane switcher.
         .toolbarRole(.editor)

@@ -75,6 +75,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     }
 
+    /// Dynamic Dock menu (#522): recent sites + New Site, mirroring File ▸ Open Recent. Recent
+    /// sites open via `NSWorkspace.open` on the package URL — the same LaunchServices → `onOpenURL`
+    /// path as a Finder double-click, so it works (and mints MAS bookmarks) regardless of which
+    /// windows exist. AppKit calls this on the main thread, matching `RecentSitesModel`'s actor.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for site in RecentSitesModel.shared.sites {
+            let item = NSMenuItem(title: site.name, action: #selector(openRecentSiteFromDock(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = site.packageURL
+            item.isEnabled = site.isValid
+            menu.addItem(item)
+        }
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        let newSite = NSMenuItem(title: "New Site", action: #selector(newSiteFromDock), keyEquivalent: "")
+        newSite.target = self
+        menu.addItem(newSite)
+        return menu
+    }
+
+    @objc private func openRecentSiteFromDock(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func newSiteFromDock() {
+        NSApp.activate()
+        // Surface the launcher (it hosts the wizard sheet), then request the wizard — the same
+        // two-step used by File ▸ New ▸ Site (FocusedSite.swift).
+        WindowRouter.shared.openSitesWindow?()
+        WindowRouter.shared.requestNewSite()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task {
             await ProcessSupervisor.shared.shutdownAll(timeout: 5)
@@ -144,13 +178,9 @@ struct AnglesiteApp: App {
                     guard url.pathExtension == AnglesitePackage.packageExtension else { return }
                     Task { @MainActor in
                         do {
-                            let site = try await SiteStore.shared.record(AnglesitePackage(url: url))
-                            #if ANGLESITE_MAS
-                            // Mint from the canonicalized recorded path; let a failure surface to the
-                            // catch (logged) rather than silently leaving the site grantless.
-                            let bm = try SecurityScopedBookmark.create(for: site.packageURL)
-                            try await SiteStore.shared.setBookmark(bm, for: site.id)
-                            #endif
+                            // Shared with launcher drag-drop and the Dock menu (#524/#522);
+                            // includes the MAS bookmark mint.
+                            let site = try await SiteActions.registerPackage(at: url)
                             openWindow(value: site.id)
                         } catch {
                             await LogCenter.shared.append(source: "open-url", stream: .stderr, text: "open \(url.lastPathComponent) failed: \(error.localizedDescription)")
