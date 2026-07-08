@@ -69,6 +69,15 @@ final class SiteWindowModel {
     /// same lifecycle as `chat`. Its own `sheetPresented` drives the `.sheet(isPresented:)` in
     /// `SiteWindow`, following `AuditModel`'s pattern rather than the item-based sheets.
     var styleGuide: ProjectConventionsModel?
+    /// The window's `UndoManager`, published down from `SiteWindow`'s
+    /// `@Environment(\.undoManager)` so applied edits register for Edit ▸ Undo (#527). Weak +
+    /// `@ObservationIgnored`: the window owns it and it isn't render state. Forwarded on set
+    /// (environment arrives/changes) and again in `loadAndStart` (chat is created after the
+    /// first set on cold open).
+    @ObservationIgnored
+    weak var windowUndoManager: UndoManager? {
+        didSet { chat?.editUndoCoordinator.undoManager = windowUndoManager }
+    }
     var relatedPages: RelatedPagesModel
     var relatedPagesPresented = false
     /// Drives the Navigator's "Cleanup" section. On-demand only — `scan()` is never called
@@ -838,6 +847,9 @@ final class SiteWindowModel {
             integrationService: integrationOps
         )
         chat = assistantSession.chat
+        // The environment undo manager usually lands before the chat exists (cold open) —
+        // attach it now so edits applied with the chat panel closed still register for ⌘Z.
+        assistantSession.chat.editUndoCoordinator.undoManager = windowUndoManager
         preview.setEditObserver(
             assistantSession.editObserver,
             postProcess: assistantSession.editPostProcessor
