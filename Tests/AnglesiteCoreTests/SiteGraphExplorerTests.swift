@@ -120,6 +120,118 @@ struct SiteGraphExplorerTests {
         #expect(unused.referencedByCount == 0)
     }
 
+    @Test("source image imports create asset reference edges")
+    func sourceImageImportEdges() throws {
+        let root = makeSite([
+            "src/pages/index.astro": "---\nimport hero from '../assets/hero.png';\n---\n<img src={hero.src} />",
+            "src/assets/hero.png": "PNG",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        let page = try #require(graph.nodes.first { $0.kind == .page })
+        let hero = try #require(graph.nodes.first { $0.kind == .asset && $0.filePath == "src/assets/hero.png" })
+
+        #expect(graph.edges.contains {
+            $0.sourceID == page.id && $0.targetID == hero.id && $0.kind == .referencesAsset
+        })
+        #expect(hero.referencedByCount == 1)
+    }
+
+    @Test("relative src asset references resolve from source files")
+    func relativeAssetReferences() throws {
+        let root = makeSite([
+            "src/components/Hero.astro": "<img src=\"../assets/hero.webp\" />",
+            "src/assets/hero.webp": "WEBP",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        let component = try #require(graph.nodes.first { $0.kind == .component })
+        let hero = try #require(graph.nodes.first { $0.kind == .asset && $0.filePath == "src/assets/hero.webp" })
+
+        #expect(graph.edges.contains {
+            $0.sourceID == component.id && $0.targetID == hero.id && $0.kind == .referencesAsset
+        })
+    }
+
+    @Test("bare relative src asset references resolve from source files")
+    func bareRelativeAssetReferences() throws {
+        let root = makeSite([
+            "src/components/Hero.astro": "<img src=\"hero.png\" />",
+            "src/components/hero.png": "PNG",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        let component = try #require(graph.nodes.first { $0.kind == .component })
+        let hero = try #require(graph.nodes.first { $0.kind == .asset && $0.filePath == "src/components/hero.png" })
+
+        #expect(graph.edges.contains {
+            $0.sourceID == component.id && $0.targetID == hero.id && $0.kind == .referencesAsset
+        })
+    }
+
+    @Test("src references with a trailing query string or fragment still resolve")
+    func queryStringAssetReferences() throws {
+        let root = makeSite([
+            "src/pages/index.astro": "<img src=\"/images/hero.png?width=400\" />",
+            "public/images/hero.png": "PNG",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+        let page = try #require(graph.nodes.first { $0.kind == .page })
+        let hero = try #require(graph.nodes.first { $0.filePath == "public/images/hero.png" })
+
+        #expect(graph.edges.contains {
+            $0.sourceID == page.id && $0.targetID == hero.id && $0.kind == .referencesAsset
+        })
+        #expect(hero.referencedByCount == 1)
+    }
+
+    @Test("protocol-relative asset URLs are not treated as public-root paths")
+    func protocolRelativeAssetReferences() throws {
+        let root = makeSite([
+            "src/pages/index.astro": "<img src=\"//cdn.example.com/hero.png\" />",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
+        let graph = SiteGraphExplorer.build(
+            projectRoot: root,
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images
+        )
+
+        #expect(!graph.edges.contains { $0.kind == .referencesAsset })
+    }
+
     @Test("@ alias imports resolve to src-relative nodes")
     func aliasImports() throws {
         let root = makeSite([

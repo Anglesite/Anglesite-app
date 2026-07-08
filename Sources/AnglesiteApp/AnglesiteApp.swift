@@ -40,6 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// can derive, which is a follow-up.
     var semanticRanker: SemanticRanker?
 
+    /// Shared project-conventions index, learned from each open site's content and consumed by
+    /// on-device generation (starting with alt text, #313). Mirrors `knowledgeIndex`'s lifecycle.
+    let conventionsEngine = ProjectConventionsEngine(enrich: ProjectConventionsEnricherFactory.makeDefault())
+
     /// On-device embedding provider, best-first: the multilingual transformer
     /// (`NLContextualEmbedding`), then the lighter `NLEmbedding.sentenceEmbedding`, then `nil`
     /// (→ pure-lexical retrieval). Never the test-double fake. Runs the model load, so call it off
@@ -276,6 +280,7 @@ struct AnglesiteApp: App {
                 contentGraph: appDelegate.contentGraph,
                 knowledgeIndex: appDelegate.knowledgeIndex,
                 semanticRanker: appDelegate.semanticRanker,
+                conventionsEngine: appDelegate.conventionsEngine,
                 runtimeFactory: LiveSiteRuntimeFactory(),
                 contentIndexerStore: appDelegate.contentIndexerStore
             )

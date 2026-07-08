@@ -22,6 +22,7 @@ struct SiteToolbarItemIDTests {
             "deploy",
             "chat",
             "inspector",
+            "styleGuide",
         ])
     }
 }

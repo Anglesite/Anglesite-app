@@ -8,6 +8,7 @@ import Foundation
 public struct NativeContentOperations: ContentOperationsService {
 
     public typealias GitCommit = @Sendable (_ projectRoot: URL, _ relPath: String, _ message: String) async -> String?
+    public typealias GitDelete = @Sendable (_ projectRoot: URL, _ relPath: String, _ message: String) async -> String?
 
     private let siteDirectory: @Sendable (_ siteID: String) async -> URL?
     private let gitCommit: GitCommit
@@ -227,6 +228,52 @@ public struct NativeContentOperations: ContentOperationsService {
               await run(["add", "--", relPath]) != nil,
               await run(["commit", "-m", message, "--", relPath]) != nil,
               let head = await run(["rev-parse", "HEAD"]) else { return nil }
+        return head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Stage-delete and commit exactly `relPath` on the current branch (`git rm` + `git commit`).
+    /// Returns the new HEAD SHA, or nil on any failure (not a repo, dirty tree, rejecting hook,
+    /// git missing, no HEAD copy) — best-effort, mirroring `processGitCommit`'s shape exactly.
+    /// Git history is the sole undo/archive mechanism for this delete; there is no separate
+    /// trash/archive path.
+    @Sendable public static func processGitDelete(_ projectRoot: URL, _ relPath: String, _ message: String) async -> String? {
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        func run(_ args: [String]) async -> ProcessSupervisor.RunResult? {
+            let result = try? await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: projectRoot)
+            guard let result, result.exitCode == 0 else { return nil }
+            return result
+        }
+        guard await run(["rev-parse", "--git-dir"]) != nil else { return nil }
+        // Require a HEAD copy before touching anything: if `git commit` fails after `git rm`
+        // already succeeds, the only safe rollback is `git checkout HEAD -- relPath`, which needs
+        // HEAD to actually have the file. A staged-but-never-committed file (`git add`ed, no
+        // commit yet) would otherwise risk ending up gone from both the index and the working
+        // tree with no way back — refusing up front is a clean, side-effect-free failure instead.
+        guard await run(["cat-file", "-e", "HEAD:" + relPath]) != nil else { return nil }
+        guard await run(["rm", "--", relPath]) != nil else { return nil }
+        guard await run(["commit", "-m", message, "--", relPath]) != nil else {
+            // `git rm` already removed the file from the index and working tree before the
+            // commit failed (no identity configured, a rejecting pre-commit hook, etc.) —
+            // restore both from HEAD so a failed delete never leaves the file gone without a
+            // commit. Same "never a raw non-git-recoverable delete" safety property the happy
+            // path relies on, applied to the failure path too.
+            // This second failure (the rollback itself also failing) has no regression test: by
+            // this point the `cat-file -e HEAD:relPath` guard above has already confirmed HEAD
+            // has the file, so `checkout HEAD --` failing here means something environmental went
+            // wrong between that check and this line (disk full, permissions revoked mid-flight)
+            // — genuinely hard to construct reliably/portably in a test, and narrower than it
+            // looks since the precondition above already rules out the most common cause (no HEAD
+            // copy). Logged rather than silently swallowed so it's at least diagnosable if it
+            // ever fires for real.
+            let restored = await run(["checkout", "HEAD", "--", relPath])
+            if restored == nil {
+                await LogCenter.shared.append(
+                    source: "dead-assets:delete", stream: .stderr,
+                    text: "processGitDelete: commit failed for \(relPath) AND rollback (git checkout HEAD --) also failed — the file may be missing from disk with no commit recording its removal. Manual recovery may be needed in \(projectRoot.path).")
+            }
+            return nil
+        }
+        guard let head = await run(["rev-parse", "HEAD"]) else { return nil }
         return head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

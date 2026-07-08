@@ -33,6 +33,7 @@ struct SiteWindow: View {
         contentGraph: SiteContentGraph,
         knowledgeIndex: SiteKnowledgeIndex,
         semanticRanker: SemanticRanker?,
+        conventionsEngine: ProjectConventionsEngine,
         runtimeFactory: any SiteRuntimeFactory,
         contentIndexerStore: ContentIndexerStore
     ) {
@@ -41,6 +42,7 @@ struct SiteWindow: View {
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
+            conventionsEngine: conventionsEngine,
             runtimeFactory: runtimeFactory,
             contentIndexerStore: contentIndexerStore
         ))
@@ -115,7 +117,12 @@ struct SiteWindow: View {
             set: { sidebarVisible = ($0 != .detailOnly) }
         )) {
             if let navigator = model.navigator {
-                SiteNavigatorView(model: navigator)
+                SiteNavigatorView(
+                    model: navigator,
+                    cleanup: model.cleanup,
+                    onOpenCleanupCandidate: { model.openCleanupCandidate($0) },
+                    onDeleteCleanupCandidate: { await model.deleteCleanupCandidate($0) }
+                )
                     .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
                     .onChange(of: navigator.selection) { _, newID in
                         model.applyNavigatorSelection(newID)
@@ -327,6 +334,16 @@ struct SiteWindow: View {
             }
             .defaultCustomization(.hidden)
 
+            ToolbarItem(id: SiteToolbarItemID.styleGuide.rawValue, placement: .primaryAction) {
+                Button {
+                    model.openStyleGuide()
+                } label: {
+                    Label("Style Guide", systemImage: "textformat.abc")
+                }
+                .help("See and edit this site's learned writing, image, and naming conventions")
+            }
+            .defaultCustomization(.hidden)
+
             #if !ANGLESITE_MAS
             // One stable item whose label/action reflects publish state — two swapping items
             // would break saved customizations.
@@ -427,6 +444,14 @@ struct SiteWindow: View {
         }
         .sheet(isPresented: $bindableModel.harden.sheetPresented) {
             HardenSheetView(model: model.harden)
+        }
+        .sheet(isPresented: Binding(
+            get: { bindableModel.styleGuide?.sheetPresented ?? false },
+            set: { bindableModel.styleGuide?.sheetPresented = $0 }
+        )) {
+            if let styleGuide = model.styleGuide {
+                ProjectStyleGuideView(model: styleGuide, siteName: site.name)
+            }
         }
         .sheet(isPresented: $bindableModel.domain.sheetPresented) {
             DomainSheetView(model: model.domain)
