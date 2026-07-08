@@ -140,4 +140,25 @@ struct DeadAssetScannerScanTests {
         let root = makeSite([:])
         #expect(DeadAssetScanner.scan(projectRoot: root, images: []).isEmpty)
     }
+
+    @Test("path alias from tsconfig.json paths resolves to the real file, suppressing a false-unused flag")
+    func tsconfigPathAlias() {
+        let root = makeSite([
+            "tsconfig.json": #"{"compilerOptions": {"paths": {"@components/*": ["src/components/*"]}}}"#,
+            "src/pages/index.astro": "---\nimport Header from '@components/Header.astro';\n---\n<Header />",
+            "src/components/Header.astro": "<header>Site</header>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/Header.astro"))
+    }
+
+    @Test("no tsconfig paths means alias-style imports remain unresolved and unused files are still flagged")
+    func noAliasConfig() {
+        let root = makeSite([
+            "src/pages/index.astro": "---\nimport Header from '@components/Header.astro';\n---\n<Header />",
+            "src/components/Header.astro": "<header>Site</header>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(candidates.map(\.path).contains("src/components/Header.astro"))
+    }
 }

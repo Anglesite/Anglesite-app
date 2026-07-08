@@ -37,6 +37,7 @@ public enum DeadAssetScanner {
         let path: String
         let fileReferences: Set<String>
         let globDirectories: Set<String>
+        let unresolvedReferences: Set<String>
     }
 
     // MARK: - Regexes (compiled once, matching the style of ContentScanner/SiteKnowledgeIndex)
@@ -60,9 +61,14 @@ public enum DeadAssetScanner {
             + matches(cssURLRegex, in: source, group: 1)
 
         var fileRefs = Set<String>()
+        var unresolved = Set<String>()
         for candidate in raw {
             let cleaned = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let resolved = resolve(cleaned, relativeTo: path) { fileRefs.insert(resolved) }
+            if let resolved = resolve(cleaned, relativeTo: path) {
+                fileRefs.insert(resolved)
+            } else {
+                unresolved.insert(cleaned)
+            }
         }
 
         var globDirs = Set<String>()
@@ -70,7 +76,9 @@ public enum DeadAssetScanner {
             if let dir = resolveGlobDirectory(pattern, relativeTo: path) { globDirs.insert(dir) }
         }
 
-        return ReferenceSource(path: path, fileReferences: fileRefs, globDirectories: globDirs)
+        return ReferenceSource(
+            path: path, fileReferences: fileRefs, globDirectories: globDirs,
+            unresolvedReferences: unresolved)
     }
 
     // MARK: - Path resolution
@@ -130,6 +138,51 @@ public enum DeadAssetScanner {
         return resolveRelativePath(dir, relativeTo: sourcePath)
     }
 
+    /// Alias pattern → target patterns, both retaining their single `*` wildcard, e.g.
+    /// `"@components/*" → ["src/components/*"]`. Read from the site's own `tsconfig.json`/
+    /// `jsconfig.json` `compilerOptions.paths` (not `extends` chains — Astro's own base configs
+    /// never define `paths`). Malformed/missing/commented JSON safely degrades to an empty map,
+    /// matching this scanner's "never guess" resolution philosophy.
+    static func loadPathAliases(projectRoot: URL) -> [String: [String]] {
+        for name in ["tsconfig.json", "jsconfig.json"] {
+            let url = projectRoot.appendingPathComponent(name)
+            guard let data = try? Data(contentsOf: url) else { continue }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            guard let compilerOptions = json["compilerOptions"] as? [String: Any] else { continue }
+            guard let paths = compilerOptions["paths"] as? [String: Any] else { continue }
+            var result: [String: [String]] = [:]
+            for (pattern, targets) in paths {
+                guard let targetList = targets as? [String] else { continue }
+                result[pattern] = targetList
+            }
+            if !result.isEmpty { return result }
+        }
+        return [:]
+    }
+
+    /// Resolves `ref` against `aliases` (from `loadPathAliases`): finds an alias pattern whose
+    /// `*`-stripped prefix/suffix matches `ref`, substitutes the corresponding target pattern's
+    /// prefix/suffix. Only single-`*` patterns are handled — matching the common
+    /// `"@foo/*": ["src/foo/*"]` shape; anything else is skipped (never guessed at).
+    static func resolveAlias(_ ref: String, aliases: [String: [String]]) -> String? {
+        for (pattern, targets) in aliases {
+            guard let starIndex = pattern.firstIndex(of: "*"), pattern.filter({ $0 == "*" }).count == 1 else { continue }
+            let prefix = String(pattern[pattern.startIndex..<starIndex])
+            let suffix = String(pattern[pattern.index(after: starIndex)...])
+            guard ref.hasPrefix(prefix), ref.hasSuffix(suffix), ref.count >= prefix.count + suffix.count else { continue }
+            let matched = String(ref.dropFirst(prefix.count).dropLast(suffix.count))
+            for target in targets {
+                guard let targetStar = target.firstIndex(of: "*"), target.filter({ $0 == "*" }).count == 1 else { continue }
+                let targetPrefix = String(target[target.startIndex..<targetStar])
+                let targetSuffix = String(target[target.index(after: targetStar)...])
+                var resolved = targetPrefix + matched + targetSuffix
+                if resolved.hasPrefix("./") { resolved.removeFirst(2) }
+                return resolved
+            }
+        }
+        return nil
+    }
+
     private static func matches(_ regex: NSRegularExpression, in source: String, group: Int) -> [String] {
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
         var out: [String] = []
@@ -154,6 +207,7 @@ public enum DeadAssetScanner {
     public static func scan(projectRoot: URL, images: [SiteContentGraph.Image]) -> [CleanupCandidate] {
         var fileReferenceCounts: [String: Int] = [:]
         var globDirectories: Set<String> = []
+        let aliases = loadPathAliases(projectRoot: projectRoot)
 
         for abs in walk(projectRoot) {
             let ext = "." + abs.pathExtension.lowercased()
@@ -164,6 +218,11 @@ public enum DeadAssetScanner {
             let refs = extractReferences(source: source, path: relPath)
             for ref in refs.fileReferences { fileReferenceCounts[ref, default: 0] += 1 }
             globDirectories.formUnion(refs.globDirectories)
+            for raw in refs.unresolvedReferences {
+                if let aliasResolved = resolveAlias(raw, aliases: aliases) {
+                    fileReferenceCounts[aliasResolved, default: 0] += 1
+                }
+            }
 
             // Frontmatter `layout:` counts as a reference too — extractReferences only looks at
             // the body, not frontmatter fields.
