@@ -168,13 +168,19 @@ struct CompletionNoticeTests {
 /// the Dock bar is determinate per-phase; unknown phases fall back to indeterminate.
 struct DeployDockProgressTests {
 
+    /// The `OperationProgress` deploy milestones in `DeployCommand`'s emission order (build →
+    /// preflight scan → wrangler → finalize). NOTE: that order lives in `DeployCommand`'s control
+    /// flow and is not statically derivable here — if the pipeline is ever reordered, update this
+    /// list (and `DeployDockProgress`'s table) to match, or the Dock bar will move backwards.
+    private static let pipelineOrder = [
+        OperationProgress.deployBuilding, .deployPreflight, .deployDeploying, .deployFinalizing,
+    ]
+
     @Test("Known milestones map to monotonically increasing fractions in pipeline order")
     func monotonicPipeline() throws {
-        // Pipeline order per DeployCommand: build → preflight scan → wrangler → finalize.
-        let phases = ["building", "preflightScan", "deploying", "finalizing"]
-        let fractions = phases.map { DeployDockProgress.fraction(forPhase: $0) }
+        let fractions = Self.pipelineOrder.map { DeployDockProgress.fraction(forPhase: $0.phase) }
         for fraction in fractions {
-            let value = try #require(fraction)
+            let value = try #require(fraction, "every DeployCommand milestone must resolve to a determinate fraction")
             #expect(value > 0 && value < 1)
         }
         let values = fractions.compactMap { $0 }
@@ -186,12 +192,5 @@ struct DeployDockProgressTests {
     func unknownPhaseIndeterminate() {
         #expect(DeployDockProgress.fraction(forPhase: "warpingSpacetime") == nil)
         #expect(DeployDockProgress.fraction(forPhase: "") == nil)
-    }
-
-    @Test("Milestone constants used by DeployCommand all resolve")
-    func milestoneConstantsResolve() {
-        for milestone in [OperationProgress.deployBuilding, .deployPreflight, .deployDeploying, .deployFinalizing] {
-            #expect(DeployDockProgress.fraction(forPhase: milestone.phase) != nil)
-        }
     }
 }

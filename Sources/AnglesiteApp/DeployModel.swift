@@ -58,13 +58,15 @@ final class DeployModel {
     /// cases that don't surface through `phase`.
     var onScanComplete: ((PreDeployCheck.Outcome) -> Void)?
 
-    /// Fires on every phase change — start and terminal alike. `SiteWindowModel` wires this to
-    /// the completion notifier and Dock progress (#526); the model stays UserNotifications- and
-    /// AppKit-free.
-    @ObservationIgnored var onPhaseTransition: ((Phase) -> Void)?
-    /// Fires (on the main actor) for each structured deploy milestone, after `currentMilestone`
-    /// updates. Drives the determinate Dock-tile progress bar (#526).
-    @ObservationIgnored var onMilestone: ((OperationProgress) -> Void)?
+    /// Fires on every phase change — start and terminal alike — with the site id of the run the
+    /// transition belongs to. The id is delivered per-run (not captured at wiring time) so a
+    /// window replayed onto a different site can't mis-attribute a still-in-flight deploy's
+    /// outcome. `SiteWindowModel` wires this to the completion notifier and Dock progress
+    /// (#526); the model stays UserNotifications- and AppKit-free.
+    @ObservationIgnored var onPhaseTransition: ((_ siteID: String, _ phase: Phase) -> Void)?
+    /// Fires (on the main actor) for each structured milestone of the identified run, after
+    /// `currentMilestone` updates. Drives the determinate Dock-tile progress bar (#526).
+    @ObservationIgnored var onMilestone: ((_ siteID: String, _ progress: OperationProgress) -> Void)?
 
     private let command: DeployCommand
     private let logCenter: LogCenter
@@ -212,9 +214,9 @@ final class DeployModel {
     /// through here; the synchronous pre-Task `.running` set in `deploy(...)` intentionally does
     /// not (it exists only to close a re-entrancy race and is immediately superseded by
     /// `runDeploy`'s own `.running`), so consumers see exactly one start transition per run.
-    private func transition(to newPhase: Phase) {
+    private func transition(siteID: String, to newPhase: Phase) {
         phase = newPhase
-        onPhaseTransition?(newPhase)
+        onPhaseTransition?(siteID, newPhase)
     }
 
     private func runDeploy(
@@ -222,7 +224,7 @@ final class DeployModel {
         siteDirectory: URL,
         containerControl: (siteID: String, control: any LocalContainerControl)? = nil
     ) async {
-        transition(to: .running(siteID: siteID, since: Date()))
+        transition(siteID: siteID, to: .running(siteID: siteID, since: Date()))
         logLines = []
         currentMilestone = nil
         failureSummary = nil
@@ -278,7 +280,7 @@ final class DeployModel {
                 // last-write-wins: each milestone fully replaces the label, so out-of-order delivery across these hops is benign
                 Task { @MainActor in
                     self?.currentMilestone = progress.label
-                    self?.onMilestone?(progress)
+                    self?.onMilestone?(siteID, progress)
                 }
             }
         )
@@ -289,9 +291,9 @@ final class DeployModel {
         currentMilestone = nil
         switch result {
         case .succeeded(let url, let duration):
-            transition(to: .succeeded(url: url, duration: duration))
+            transition(siteID: siteID, to: .succeeded(url: url, duration: duration))
         case .failed(let reason, let exit):
-            transition(to: .failed(reason: reason, exitCode: exit))
+            transition(siteID: siteID, to: .failed(reason: reason, exitCode: exit))
             let capturedLog = logText   // snapshot before the suspension; a later deploy clears logLines
             summarizing = true
             let summary = await DeployFailureSummaryRequest.run(
@@ -306,7 +308,7 @@ final class DeployModel {
             failureSummary = summary
             summarizing = false
         case .blocked(let failures, let warnings):
-            transition(to: .blocked(failures: failures, warnings: warnings))
+            transition(siteID: siteID, to: .blocked(failures: failures, warnings: warnings))
             // For the blocked outcome the modal sheet carries the actionable info; the
             // streaming-log drawer would just be noise.
             drawerPresented = false

@@ -25,9 +25,12 @@ final class AuditModel {
     /// owner gets the report (or failure) without a second click.
     var sheetPresented: Bool = false
 
-    /// Fires on every phase change — start and terminal alike. `SiteWindowModel` wires this to
-    /// the completion notifier (#526); the model stays UserNotifications-free.
-    @ObservationIgnored var onPhaseTransition: ((Phase) -> Void)?
+    /// Fires on every phase change — start and terminal alike — with the site id of the run the
+    /// transition belongs to (delivered per-run, not captured at wiring time, so a window
+    /// replayed onto a different site can't mis-attribute an in-flight audit's outcome).
+    /// `SiteWindowModel` wires this to the completion notifier (#526); the model stays
+    /// UserNotifications-free.
+    @ObservationIgnored var onPhaseTransition: ((_ siteID: String, _ phase: Phase) -> Void)?
 
     private let command: AuditCommand
     private var inFlight: Task<Void, Never>?
@@ -62,14 +65,14 @@ final class AuditModel {
     }
 
     /// Set `phase` and notify the transition hook.
-    private func transition(to newPhase: Phase) {
+    private func transition(siteID: String, to newPhase: Phase) {
         phase = newPhase
-        onPhaseTransition?(newPhase)
+        onPhaseTransition?(siteID, newPhase)
     }
 
     private func runAudit(siteID: String, siteDirectory: URL) async {
         let started = Date()
-        transition(to: .running(siteID: siteID, since: started))
+        transition(siteID: siteID, to: .running(siteID: siteID, since: started))
         // Don't open the sheet during the build/audit — the running spinner lives in the
         // toolbar button. Sheet opens on terminal state so the owner sees the result.
         sheetPresented = false
@@ -77,9 +80,9 @@ final class AuditModel {
         let result = await command.audit(siteID: siteID, siteDirectory: siteDirectory)
         switch result {
         case .succeeded(let report, let duration):
-            transition(to: .succeeded(report: report, duration: duration))
+            transition(siteID: siteID, to: .succeeded(report: report, duration: duration))
         case .failed(let reason, let exit, let logTail):
-            transition(to: .failed(reason: reason, exitCode: exit, logTail: logTail))
+            transition(siteID: siteID, to: .failed(reason: reason, exitCode: exit, logTail: logTail))
         }
         sheetPresented = true
     }

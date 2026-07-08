@@ -102,13 +102,19 @@ final class CompletionNotifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    /// If a notice is delivered while the app is frontmost (we raced an activation), suppress
-    /// the banner — the in-app surface is already visible.
+    /// On macOS this fires for every notification delivered while the app *process* is running —
+    /// not just while it's frontmost — which is the normal case for this feature (the user
+    /// backgrounded the app and a deploy finished). So presentation must be decided here, not
+    /// blanket-suppressed: present the banner while the app is inactive, and suppress it only
+    /// for the actual race where the app was reactivated between `post()`'s `!isActive` check
+    /// and delivery (the in-app drawer/sheet is visible again by then).
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([])
+        Task { @MainActor in
+            completionHandler(NSApp.isActive ? [] : [.banner, .sound, .list])
+        }
     }
 }
