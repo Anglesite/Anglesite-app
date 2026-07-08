@@ -8,6 +8,14 @@ struct ComponentEditorContext {
     let baseURL: URL?
     let modelClient: ComponentModelClient?
     let sourceRoot: URL
+    /// Routes canvas-originated edits (e.g. a style tweak from the Styles
+    /// panel) to the running site's MCP server. At the production call site
+    /// (`SiteWindow`) this is always `model.preview.editRouter` — the same
+    /// registered, chat-history-wired router the preview canvas uses — so
+    /// edits made through either canvas behave identically. `nil` only for
+    /// tests/previews that construct a context without write capability;
+    /// `ComponentCanvasView` falls back to `LoggingEditRouter()` in that case.
+    let editRouter: EditRouter?
 }
 
 @MainActor
