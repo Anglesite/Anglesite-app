@@ -9,6 +9,14 @@ import Foundation
 /// of use *or* disuse — it is simply skipped. This biases the whole scanner toward
 /// under-flagging: the failure mode is "missed a dead file," never "recommended deleting
 /// something in use."
+///
+/// **Known limitation:** brace-bound dynamic references (`<img src={heroPath}>`,
+/// `<Image src={imported} />`), dynamic `import(...)` calls, and re-export barrels
+/// (`export … from`) are not matched by the regex-based extraction below — a file referenced
+/// *only* through one of these patterns can be incorrectly flagged as unused. This is an
+/// inherent tradeoff of regex-based scanning versus a full AST parse and is not closed here;
+/// Delete always requires explicit user confirmation and is git-tracked/recoverable, which is
+/// this scanner's primary mitigation for this class of false positive.
 public enum DeadAssetScanner {
     public struct CleanupCandidate: Sendable, Equatable, Identifiable {
         public let id: String
@@ -212,6 +220,7 @@ public enum DeadAssetScanner {
         for abs in walk(projectRoot) {
             let ext = "." + abs.pathExtension.lowercased()
             guard referenceScanExtensions.contains(ext) else { continue }
+            guard let size = fileSize(abs), size <= 512_000 else { continue }
             guard let source = try? String(contentsOf: abs, encoding: .utf8) else { continue }
             let relPath = relativePosix(abs, from: projectRoot)
 
@@ -304,5 +313,10 @@ public enum DeadAssetScanner {
     private static func mtime(_ url: URL) -> Date {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
             ?? Date(timeIntervalSince1970: 0)
+    }
+
+    private static func fileSize(_ url: URL) -> Int64? {
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else { return nil }
+        return Int64(size)
     }
 }
