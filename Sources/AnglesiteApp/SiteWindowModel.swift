@@ -289,6 +289,19 @@ final class SiteWindowModel {
         NSWorkspace.shared.open(url)
     }
 
+    // MARK: - Dev-server commands (Site menu, #515)
+
+    /// Thin pass-throughs so `SiteMenuCommands` reads one focused model, like every other Site
+    /// item. Enablement rules live in `DevServerControls` (AnglesiteCore, CI-tested); the state
+    /// plumbing lives in `PreviewModel`.
+    var canStartDevServer: Bool { preview.canStartDevServer }
+    var canStopDevServer: Bool { preview.canStopDevServer }
+    var canRestartDevServer: Bool { preview.canRestartDevServer }
+
+    func startDevServer() { preview.startDevServer() }
+    func stopDevServer() { preview.stopDevServer() }
+    func restartDevServer() { preview.restartDevServer() }
+
     // MARK: - File-menu targets (#513)
 
     var canRevealInFinder: Bool {

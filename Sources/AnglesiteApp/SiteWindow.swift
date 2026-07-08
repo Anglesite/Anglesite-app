@@ -626,7 +626,25 @@ struct SiteWindow: View {
                 }
             }
         case .idle:
-            centeredStatus { ProgressView() }
+            if model.preview.devServerStoppedByUser {
+                // Site ▸ Stop Dev Server (#515) parks the runtime at `.idle` on purpose — show a
+                // real stopped state with a restart affordance, not the pre-boot spinner.
+                centeredStatus {
+                    VStack(spacing: 12) {
+                        Image(systemName: "stop.circle")
+                            .font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Dev server stopped").font(.headline)
+                        Text("The preview is paused for \(site.name). Start the dev server to resume.")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center).frame(maxWidth: 420)
+                        Button("Start Dev Server") {
+                            model.startDevServer()
+                        }
+                    }
+                }
+            } else {
+                centeredStatus { ProgressView() }
+            }
         }
     }
 

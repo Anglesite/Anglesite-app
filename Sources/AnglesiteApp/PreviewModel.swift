@@ -15,6 +15,16 @@ final class PreviewModel {
     /// the runtime is still `.starting`.
     private(set) var openSiteID: String?
 
+    /// The `Source/` directory of the last-opened site, kept so the Site ▸ Start/Restart Dev
+    /// Server commands (#515) can re-launch the runtime without re-resolving the site. Cleared
+    /// in `close()` alongside `openSiteID`.
+    private(set) var openSiteDirectory: URL?
+
+    /// True after Site ▸ Stop Dev Server: distinguishes an owner-stopped `.idle` (show the
+    /// stopped pane with a Start button) from the transient pre-boot `.idle` (show the spinner).
+    /// Cleared by every start path (`open`/`startDevServer`/`restartDevServer`).
+    private(set) var devServerStoppedByUser = false
+
     /// Set by SiteWindowModel right before calling `open()` following an accepted
     /// dependency update (Task 9) — that boot will hit the slow `npm install` path
     /// instead of the instant hardlink path (the lockfile was just deleted), so the
@@ -110,6 +120,8 @@ final class PreviewModel {
 
     func open(siteID: String, siteDirectory: URL) {
         openSiteID = siteID
+        openSiteDirectory = siteDirectory
+        devServerStoppedByUser = false
         let router = self.editRouter
         Task {
             // Register before starting the runtime so a Siri edit fired during dev-server boot
@@ -123,12 +135,56 @@ final class PreviewModel {
     func close() {
         let previousSiteID = openSiteID
         openSiteID = nil
+        openSiteDirectory = nil
+        devServerStoppedByUser = false
         Task {
             if let previousSiteID {
                 await EditRouterRegistry.shared.unregister(siteID: previousSiteID)
             }
             await runtime.stop()
         }
+    }
+
+    // MARK: - Dev-server controls (Site menu, #515)
+
+    /// Whether a site is open enough to (re)start its dev server: both fields are captured by
+    /// `open(siteID:siteDirectory:)`, so this is true from first open until `close()`.
+    private var siteOpenForDevServer: Bool {
+        openSiteID != nil && openSiteDirectory != nil
+    }
+
+    /// Enablement mirrors `DevServerControls` (AnglesiteCore) — the CI-tested rules — so the
+    /// menu, the stopped pane's Start button, and any future toolbar affordance stay consistent.
+    var canStartDevServer: Bool { DevServerControls.canStart(state: state, siteOpen: siteOpenForDevServer) }
+    var canStopDevServer: Bool { DevServerControls.canStop(state: state, siteOpen: siteOpenForDevServer) }
+    var canRestartDevServer: Bool { DevServerControls.canRestart(state: state, siteOpen: siteOpenForDevServer) }
+
+    /// Site ▸ Start Dev Server: relaunch the runtime for the already-open site (after an explicit
+    /// Stop, or as a recovery from `.failed` — same effect as the preview pane's Retry button).
+    /// The edit router stays registered across a stop, so no re-registration is needed here.
+    func startDevServer() {
+        guard canStartDevServer, let siteID = openSiteID, let siteDirectory = openSiteDirectory else { return }
+        devServerStoppedByUser = false
+        Task { await runtime.start(siteID: siteID, siteDirectory: siteDirectory) }
+    }
+
+    /// Site ▸ Stop Dev Server: tear down the runtime but keep the site open in the window
+    /// (unlike `close()`, which also unregisters the edit router and forgets the site). Frees
+    /// the container/dev-server resources for a backgrounded site window; the runtime settles
+    /// to `.idle` and the preview pane shows the stopped state with a Start button.
+    func stopDevServer() {
+        guard canStopDevServer else { return }
+        devServerStoppedByUser = true
+        Task { await runtime.stop() }
+    }
+
+    /// Site ▸ Restart Dev Server: for a wedged Astro process that hasn't died. `SiteRuntime.start`
+    /// tears down any previous run first (protocol contract), so restart is a plain re-start —
+    /// works identically for the local-container and remote runtimes.
+    func restartDevServer() {
+        guard canRestartDevServer, let siteID = openSiteID, let siteDirectory = openSiteDirectory else { return }
+        devServerStoppedByUser = false
+        Task { await runtime.start(siteID: siteID, siteDirectory: siteDirectory) }
     }
 
     /// The ready preview URL, if the session is currently `.ready`.
