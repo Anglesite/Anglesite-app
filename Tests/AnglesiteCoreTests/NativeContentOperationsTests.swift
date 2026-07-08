@@ -214,6 +214,81 @@ struct NativeContentOperationsTests {
         let sha = await NativeContentOperations.processGitCommit(repo, "p.astro", "anglesite: add page /p")
         #expect(sha?.count == 40)
     }
+
+    @Test("processGitDelete removes and commits the file, nil outside a repo")
+    func realGitDelete() async throws {
+        // Outside a repo → nil (best-effort), file untouched.
+        let bare = FileManager.default.temporaryDirectory.appendingPathComponent("nogit-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: bare, withIntermediateDirectories: true)
+        try "hi".write(to: bare.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8)
+        let none = await NativeContentOperations.processGitDelete(bare, "f.txt", "msg")
+        #expect(none == nil)
+        #expect(FileManager.default.fileExists(atPath: bare.appendingPathComponent("f.txt").path))
+
+        // Inside a repo with a committed file → delete succeeds, returns a 40-char SHA, file gone.
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        for args in [["init"], ["config", "user.email", "t@t.io"], ["config", "user.name", "t"]] {
+            _ = try await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: repo)
+        }
+        let filePath = repo.appendingPathComponent("unused.astro")
+        try "<div></div>".write(to: filePath, atomically: true, encoding: .utf8)
+        _ = await NativeContentOperations.processGitCommit(repo, "unused.astro", "add unused.astro")
+
+        let sha = await NativeContentOperations.processGitDelete(repo, "unused.astro", "Remove unused component: unused.astro")
+        #expect(sha?.count == 40)
+        #expect(!FileManager.default.fileExists(atPath: filePath.path))
+    }
+
+    @Test("processGitDelete restores the file from HEAD when commit fails after rm succeeds")
+    func rollbackOnCommitFailure() async throws {
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        for args in [["init"], ["config", "user.email", "t@t.io"], ["config", "user.name", "t"]] {
+            _ = try await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: repo)
+        }
+        let filePath = repo.appendingPathComponent("unused.astro")
+        try "<div>original</div>".write(to: filePath, atomically: true, encoding: .utf8)
+        _ = await NativeContentOperations.processGitCommit(repo, "unused.astro", "add unused.astro")
+
+        // Install a pre-commit hook that always rejects, so `git commit` fails after `git rm`
+        // has already removed the file from the index and working tree.
+        let hookPath = repo.appendingPathComponent(".git/hooks/pre-commit")
+        try "#!/bin/sh\nexit 1\n".write(to: hookPath, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookPath.path)
+
+        let sha = await NativeContentOperations.processGitDelete(repo, "unused.astro", "Remove unused.astro")
+        #expect(sha == nil)
+        #expect(FileManager.default.fileExists(atPath: filePath.path))
+        #expect(try String(contentsOf: filePath, encoding: .utf8) == "<div>original</div>")
+
+        let status = try await ProcessSupervisor.shared.run(executable: git, arguments: ["status", "--porcelain"], currentDirectoryURL: repo)
+        #expect(status.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    @Test("processGitDelete refuses a staged-but-never-committed file (no HEAD copy to roll back to)")
+    func refusesUncommittedFile() async throws {
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        for args in [["init"], ["config", "user.email", "t@t.io"], ["config", "user.name", "t"]] {
+            _ = try await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: repo)
+        }
+        // A first commit so the repo has a HEAD at all.
+        try "root".write(to: repo.appendingPathComponent("root.txt"), atomically: true, encoding: .utf8)
+        _ = await NativeContentOperations.processGitCommit(repo, "root.txt", "initial")
+
+        // Staged via `git add`, but never committed.
+        let filePath = repo.appendingPathComponent("staged-only.astro")
+        try "<div></div>".write(to: filePath, atomically: true, encoding: .utf8)
+        _ = try await ProcessSupervisor.shared.run(executable: git, arguments: ["add", "staged-only.astro"], currentDirectoryURL: repo)
+
+        let sha = await NativeContentOperations.processGitDelete(repo, "staged-only.astro", "Remove staged-only.astro")
+        #expect(sha == nil)
+        #expect(FileManager.default.fileExists(atPath: filePath.path))
+    }
 }
 
 private struct StubPageCopyGenerator: PageCopyGenerating {

@@ -71,6 +71,9 @@ final class SiteWindowModel {
     var styleGuide: ProjectConventionsModel?
     var relatedPages: RelatedPagesModel
     var relatedPagesPresented = false
+    /// Drives the Navigator's "Cleanup" section. On-demand only — `scan()` is never called
+    /// automatically, only from the Navigator's "Scan for Cleanup Opportunities" action.
+    var cleanup: ProjectCleanupModel
     var harden = HardenModel()
     var domain = DomainModel()
     var health = HealthModel(runner: DefaultHealthCheckRunner())
@@ -130,6 +133,7 @@ final class SiteWindowModel {
         )
         self.graphExplorer = SiteGraphExplorerModel(graph: contentGraph)
         self.relatedPages = RelatedPagesModel(index: knowledgeIndex, ranker: semanticRanker)
+        self.cleanup = ProjectCleanupModel(knowledgeIndex: knowledgeIndex, contentGraph: contentGraph)
     }
 
     var activeEditorFile: FileRef? {
@@ -550,6 +554,73 @@ final class SiteWindowModel {
         }
     }
 
+    /// Routes a Cleanup-section row: components/layouts/pages open in the existing in-app editor
+    /// (reusing `openFile`, so `.astro` components still get the rich Component Editor via
+    /// `EditorKind.resolve`'s `.components`-group check); images have no in-app editor, so Open
+    /// reveals the file in Finder instead.
+    @MainActor
+    func openCleanupCandidate(_ candidate: DeadAssetScanner.CleanupCandidate) {
+        guard let site else { return }
+        let url = site.sourceDirectory.appendingPathComponent(candidate.path)
+        switch candidate.kind {
+        case .image:
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        case .component, .layout:
+            openFile(FileRef(url: url, group: .components, name: url.lastPathComponent))
+        case .page:
+            openFile(FileRef(url: url, group: .pages, name: url.lastPathComponent))
+        }
+    }
+
+    /// Deletes a Cleanup-section candidate, discarding (without saving) any editor tab *or*
+    /// Inspector context open on that same file — flushing either via its normal leave path would
+    /// re-write the buffer to disk and silently resurrect the file `cleanup.delete` removes. A
+    /// page selected via the navigator's `.route` branch populates `inspectorContext` (not
+    /// `activeEditor`), so both are checked independently.
+    ///
+    /// Discarded *before* calling `cleanup.delete`, not after: `delete` suspends across two
+    /// awaited git subprocess calls, and Swift frees the `@MainActor` during that suspension — any
+    /// other main-actor action (the Preview/Editor toggle, closing the window) could otherwise
+    /// flush a still-open dirty buffer back to disk while the delete is in flight or immediately
+    /// after, resurrecting the file. Discarding first closes that window entirely. Tradeoff: if
+    /// the delete subsequently fails, an unsaved edit in that editor/inspector is already gone —
+    /// in the ordinary failure case (dirty tree, no HEAD copy, rejecting hook) the file itself is
+    /// still untouched, though not in the rare double-failure case `processGitDelete` itself logs
+    /// (commit *and* its rollback both fail). Either way this is accepted as strictly preferable
+    /// to a silent, undetected resurrection of a file git already recorded as removed.
+    ///
+    /// On success, also force-refreshes `navigator` and `graphExplorer`: neither observes anything
+    /// that fires for a component/layout/page deleted this way (the only thing that does,
+    /// `SiteContentGraph`, is never touched here), so without this a stale entry for the deleted
+    /// file would stay selectable/openable in the main Navigator tree or the Site Graph explorer —
+    /// the same resurrection risk this method just closed for the editor/inspector, reachable
+    /// through a different surface.
+    ///
+    /// **Known residual risk:** the guards above only cover editor/inspector state open *at the
+    /// moment this method starts*. Nothing stops a *new* selection on `deletedURL` from
+    /// (re)populating `activeEditor`/`inspectorContext` while `cleanup.delete` is still suspended
+    /// on its git subprocess calls — the Navigator isn't disabled or told a delete is in flight for
+    /// this path. Closing that fully would need a "deleting" set consulted by
+    /// `applyNavigatorSelection`/`openFile`/`openCleanupCandidate`, or disabling Navigator
+    /// selection for the duration; not attempted here given how narrow the window is in practice
+    /// (a `git rm` + `commit` pair, not user-perceptible latency) relative to the scope of that
+    /// change.
+    @MainActor
+    func deleteCleanupCandidate(_ candidate: DeadAssetScanner.CleanupCandidate) async {
+        guard let site else { return }
+        let deletedURL = site.sourceDirectory.appendingPathComponent(candidate.path)
+        if activeEditorFile?.url == deletedURL {
+            activeEditor = nil
+            mainPaneMode = .preview
+        }
+        if inspectorContext?.model.file.url == deletedURL {
+            inspectorContext = nil
+        }
+        guard await cleanup.delete(candidate) else { return }
+        await navigator?.refreshNow()
+        await graphExplorer.refreshNow()
+    }
+
     /// Build the inspector context for a content navigator id: the typed descriptor form when the
     /// file resolves to a content type, the plain title/description form for a frontmatter-bearing
     /// markdown page, or nil (plain `.astro`/other → preview only, no inspector).
@@ -734,6 +805,7 @@ final class SiteWindowModel {
         )
         navigator = navModel
         graphExplorer.start(siteID: resolved.id, sourceDirectory: resolved.sourceDirectory)
+        cleanup.configure(siteID: resolved.id, sourceDirectory: resolved.sourceDirectory)
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
         applyPendingNavigation(for: resolved.id)

@@ -110,7 +110,12 @@ struct SiteWindow: View {
             set: { sidebarVisible = ($0 != .detailOnly) }
         )) {
             if let navigator = model.navigator {
-                SiteNavigatorView(model: navigator)
+                SiteNavigatorView(
+                    model: navigator,
+                    cleanup: model.cleanup,
+                    onOpenCleanupCandidate: { model.openCleanupCandidate($0) },
+                    onDeleteCleanupCandidate: { await model.deleteCleanupCandidate($0) }
+                )
                     .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
                     .onChange(of: navigator.selection) { _, newID in
                         model.applyNavigatorSelection(newID)
