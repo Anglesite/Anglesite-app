@@ -58,6 +58,22 @@ struct SiteMenuCommands: Commands {
 
             Divider()
 
+            // Dev-server lifecycle (#515). Start covers the stopped and failed states (the same
+            // recovery as the preview pane's Retry button); Restart is for a wedged Astro process
+            // that hasn't died. Enablement rules are `DevServerControls` in AnglesiteCore.
+            Button("Start Dev Server") { model?.startDevServer() }
+                .disabled(model?.canStartDevServer != true)
+
+            Button("Stop Dev Server") { model?.stopDevServer() }
+                .disabled(model?.canStopDevServer != true)
+
+            // ⌥⌘R: plain ⌘R stays reserved for preview reload (#514).
+            Button("Restart Dev Server") { model?.restartDevServer() }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+                .disabled(model?.canRestartDevServer != true)
+
+            Divider()
+
             // The graph pane itself is View ▸ Graph ⌘3 (#512) — pane modes are View-menu domain.
             Button("Open in Browser") { model?.openPreviewInBrowser() }
                 .disabled(model?.canOpenPreviewInBrowser != true)

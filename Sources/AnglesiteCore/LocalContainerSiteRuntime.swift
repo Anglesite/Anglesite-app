@@ -92,6 +92,15 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         await teardown()
         generation += 1
         let gen = generation
+        // `setState` dedups against the current value, so re-entering `.starting(siteID:)` for the
+        // same site (Restart while already `.starting` — the "wedged boot" case this command exists
+        // for) would otherwise be silently dropped: observers never see a change, so the progress
+        // bar stays frozen on the superseded attempt. Force a transient `.idle` first only in that
+        // specific case — `.ready`/`.failed`/`.idle` already differ from the new `.starting` value
+        // and don't need it.
+        if case .starting(let existingSiteID) = current, existingSiteID == siteID {
+            setState(.idle)
+        }
         setState(.starting(siteID: siteID))
 
         // Wire the container's boot/guest-process output (repo clone, npm install + astro dev, the
@@ -102,24 +111,41 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         bootLogContinuation = continuation
         let logCenter = self.logCenter
         let source = "container:\(siteID)"
-        bootLogDrainTask = Task.detached(priority: .utility) {
+        let drainTask = Task.detached(priority: .utility) {
             for await (line, stream) in lines {
                 await logCenter.append(source: source, stream: stream, text: line)
             }
+        }
+        bootLogDrainTask = drainTask
+
+        // Tears down this attempt's own container and finishes its own (locally-captured, not
+        // instance-var) boot log stream. Instance vars aren't used here because by the time an
+        // abandoned attempt resumes past a `gen == generation` check, a superseding start()/stop()
+        // may already have overwritten `bootLogContinuation`/`bootLogDrainTask` with its own —
+        // finishing those would tear down the wrong stream. Actors are reentrant at `await` points,
+        // so a superseding call's `teardown()` can run to completion while this attempt is still
+        // suspended inside `control.start()`/`connect(...)`, before `activeSiteID` is assigned —
+        // `teardown()` alone can't find this attempt's container in that window. Every exit path
+        // that discovers it has been superseded must clean up after itself.
+        func abandonSupersededAttempt() async {
+            try? await control.stop(siteID: siteID)
+            continuation.finish()
+            await drainTask.value
         }
 
         do {
             let session = try await control.start(
                 siteID: siteID, sourceRepo: siteDirectory, ref: ref,
                 onOutput: { line, stream in continuation.yield((line, stream)) })
-            guard gen == generation else { return }
+            guard gen == generation else { await abandonSupersededAttempt(); return }
             try await connect(mcpClient, session.mcpURL)
-            guard gen == generation else { return }
+            guard gen == generation else { await abandonSupersededAttempt(); return }
             await knowledgeIndex?.rebuild(siteID: siteID, projectRoot: siteDirectory)
             await conventionsEngine?.rebuild(siteID: siteID, projectRoot: siteDirectory)
             guard gen == generation else {
                 await knowledgeIndex?.unload(siteID: siteID)
                 await conventionsEngine?.unload(siteID: siteID)
+                await abandonSupersededAttempt()
                 return
             }
             if let documents = await knowledgeIndex?.documents(siteID: siteID) {
@@ -129,6 +155,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
                 await knowledgeIndex?.unload(siteID: siteID)
                 await semanticRanker?.unload(siteID: siteID)
                 await conventionsEngine?.unload(siteID: siteID)
+                await abandonSupersededAttempt()
                 return
             }
             loadedKnowledgeSiteID = siteID
@@ -136,12 +163,18 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             activeSiteID = siteID
             setState(.ready(siteID: siteID, url: session.previewURL))
         } catch {
-            // Finish the boot log stream immediately rather than leaving it for the next start()/
-            // stop() call to clean up via teardown() — every other exit path in this method is
-            // scrupulous about this, and control.start() has already stopped the container on its
-            // own failure paths, so no further guest output can arrive here.
-            await finishBootLogStream()
+            // Finish this attempt's own (locally-captured) boot log stream immediately rather than
+            // leaving it for the next start()/stop() call to clean up via teardown() — control.start()
+            // has already stopped the container on its own failure paths, so no further guest output
+            // can arrive here. Using the local capture, not the instance vars, matters if this attempt
+            // was itself superseded while `control.start()` was in flight: a newer attempt may already
+            // have overwritten `bootLogContinuation`/`bootLogDrainTask` with its own, and finishing
+            // those would tear down the wrong stream.
+            continuation.finish()
+            await drainTask.value
             guard gen == generation else { return }
+            bootLogContinuation = nil
+            bootLogDrainTask = nil
             setState(.failed(siteID: siteID, message: Self.friendlyMessage(for: error)))
         }
     }
@@ -151,42 +184,49 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     /// are idempotent; in-flight bytes are not drained by design.
     public func stop() async {
         generation += 1
+        let gen = generation
         await teardown()
+        // Actors are reentrant, so a start()/stop() issued while teardown() was suspended has
+        // superseded this stop and owns the state now — emitting `.idle` here would clobber its
+        // `.starting`/`.ready` (the rapid Stop → Restart race, PR #542 review): the UI would show
+        // the boot spinner forever while the dev server is actually running.
+        guard gen == generation else { return }
         setState(.idle)
     }
 
     // MARK: Internals
 
     private func teardown() async {
-        await mcpClient.stop()
+        // Snapshot-and-clear all bookkeeping before the first suspension: actors are reentrant,
+        // so a superseding start()'s/stop()'s teardown can interleave while this one is suspended,
+        // and a successful boot from a superseding start() can complete and install fresh
+        // bookkeeping before this teardown resumes. Clearing first means each resource is stopped
+        // by exactly one teardown, and a straggling teardown can't stop the newer boot's
+        // container, kill its file watcher, or finish its live boot-log stream (PR #542 review).
         stopFileWatcher()
-        if let siteID = loadedKnowledgeSiteID {
+        let knowledgeSiteID = loadedKnowledgeSiteID
+        loadedKnowledgeSiteID = nil
+        let containerSiteID = activeSiteID
+        activeSiteID = nil
+        let bootLogContinuation = self.bootLogContinuation
+        let bootLogDrainTask = self.bootLogDrainTask
+        self.bootLogContinuation = nil
+        self.bootLogDrainTask = nil
+
+        await mcpClient.stop()
+        if let siteID = knowledgeSiteID {
             await knowledgeIndex?.unload(siteID: siteID)
             await semanticRanker?.unload(siteID: siteID)
             await conventionsEngine?.unload(siteID: siteID)
-            loadedKnowledgeSiteID = nil
         }
-        if let id = activeSiteID {
+        if let id = containerSiteID {
             try? await control.stop(siteID: id)
-            activeSiteID = nil
         }
         // Stop the container first (above) so no more guest output can arrive, then finish the
-        // stream — see finishBootLogStream().
-        await finishBootLogStream()
-    }
-
-    /// Finishes the boot-log continuation and awaits its drain task so any already-buffered lines
-    /// land in `LogCenter` before returning — mirrors `ContainerDeployExecutor`'s finish-then-await-
-    /// drain discipline. Idempotent (safe to call when nothing is running). Called from both
-    /// `teardown()` and `start()`'s catch block, so a failed start cleans up its own stream
-    /// immediately rather than leaking it to whatever the next `start()`/`stop()` happens to be.
-    private func finishBootLogStream() async {
-        if let continuation = bootLogContinuation {
-            continuation.finish()
-            bootLogContinuation = nil
-        }
+        // stream and await the drain so already-buffered lines land in LogCenter — mirrors
+        // `ContainerDeployExecutor`'s finish-then-await-drain discipline.
+        bootLogContinuation?.finish()
         await bootLogDrainTask?.value
-        bootLogDrainTask = nil
     }
 
     private func startFileWatcher(siteID: String, projectRoot: URL, generation gen: Int) {

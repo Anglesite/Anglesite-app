@@ -15,6 +15,16 @@ final class PreviewModel {
     /// the runtime is still `.starting`.
     private(set) var openSiteID: String?
 
+    /// The `Source/` directory of the last-opened site, kept so the Site ▸ Start/Restart Dev
+    /// Server commands (#515) can re-launch the runtime without re-resolving the site. Cleared
+    /// in `close()` alongside `openSiteID`.
+    private(set) var openSiteDirectory: URL?
+
+    /// True after Site ▸ Stop Dev Server: distinguishes an owner-stopped `.idle` (show the
+    /// stopped pane with a Start button) from the transient pre-boot `.idle` (show the spinner).
+    /// Cleared by every start path (`open`/`startDevServer`/`restartDevServer`).
+    private(set) var devServerStoppedByUser = false
+
     /// Set by SiteWindowModel right before calling `open()` following an accepted
     /// dependency update (Task 9) — that boot will hit the slow `npm install` path
     /// instead of the instant hardlink path (the lockfile was just deleted), so the
@@ -103,6 +113,9 @@ final class PreviewModel {
         Task { @MainActor [weak self] in
             for await newState in await runtime.observe() {
                 self?.state = newState
+                // Any transition acknowledges the last dispatched dev-server command — every
+                // accepted start/stop produces at least one (see `devServerCommandInFlight`).
+                self?.devServerCommandInFlight = false
                 switch newState {
                 case .ready, .failed:
                     self?.isUpdatingDependencies = false
@@ -144,6 +157,12 @@ final class PreviewModel {
 
     func open(siteID: String, siteDirectory: URL) {
         openSiteID = siteID
+        openSiteDirectory = siteDirectory
+        devServerStoppedByUser = false
+        // `open` dispatches a boot just like the menu commands do, and `siteOpenForDevServer`
+        // just became true while `state` may still read `.idle` — without this, Site ▸ Start
+        // would be enabled during the dispatch gap and could race the opening boot.
+        let token = markDevServerCommandInFlight()
         let router = self.editRouter
         Task {
             // Register before starting the runtime so a Siri edit fired during dev-server boot
@@ -151,17 +170,116 @@ final class PreviewModel {
             // returning the bridge's no-router fallback message.
             await EditRouterRegistry.shared.register(router, for: siteID)
             await runtime.start(siteID: siteID, siteDirectory: siteDirectory)
+            clearDevServerCommandInFlight(token: token)
         }
     }
 
     func close() {
         let previousSiteID = openSiteID
         openSiteID = nil
+        openSiteDirectory = nil
+        devServerStoppedByUser = false
         Task {
             if let previousSiteID {
                 await EditRouterRegistry.shared.unregister(siteID: previousSiteID)
             }
             await runtime.stop()
+        }
+    }
+
+    // MARK: - Dev-server controls (Site menu, #515)
+
+    /// True from dispatching a Start/Stop/Restart command (or `open`'s initial boot) until the
+    /// runtime acknowledges it. `canStart…`/`canStop…`/`canRestart…` read `state`, which only
+    /// updates asynchronously via the `observe()` stream — without this flag, a rapid
+    /// double-click (or a second command fired before the first's transition lands) would pass
+    /// the stale-state guard and dispatch two racing runtime calls (PR #542 review).
+    ///
+    /// Cleared by whichever acknowledgement arrives first:
+    /// - any observed state transition (the wedged-boot case: `start` emits `.starting` long
+    ///   before it returns, so Restart re-enables while the boot is still in flight), or
+    /// - the dispatched runtime call returning (the no-transition case: e.g.
+    ///   `UnavailableSiteRuntime` re-settling into an identical `.failed`, which `setState`
+    ///   dedups — without this, the flag would stick and permanently disable Start/Retry).
+    ///   Token-guarded so a superseded call's late return can't clear a newer command's flag.
+    private(set) var devServerCommandInFlight = false
+
+    /// Monotonic token identifying the latest dispatched dev-server command — see
+    /// `devServerCommandInFlight`'s completion-clear path.
+    @ObservationIgnored private var devServerCommandToken = 0
+
+    private func markDevServerCommandInFlight() -> Int {
+        devServerCommandToken += 1
+        devServerCommandInFlight = true
+        return devServerCommandToken
+    }
+
+    private func clearDevServerCommandInFlight(token: Int) {
+        if token == devServerCommandToken { devServerCommandInFlight = false }
+    }
+
+    /// Whether a site is open enough to (re)start its dev server: both fields are captured by
+    /// `open(siteID:siteDirectory:)`, so this is true from first open until `close()`.
+    private var siteOpenForDevServer: Bool {
+        openSiteID != nil && openSiteDirectory != nil
+    }
+
+    /// Enablement mirrors `DevServerControls` (AnglesiteCore) — the CI-tested rules — so the
+    /// menu, the stopped pane's Start button, and any future toolbar affordance stay consistent.
+    var canStartDevServer: Bool {
+        DevServerControls.canStart(state: state, siteOpen: siteOpenForDevServer, commandInFlight: devServerCommandInFlight)
+    }
+    var canStopDevServer: Bool {
+        DevServerControls.canStop(state: state, siteOpen: siteOpenForDevServer, commandInFlight: devServerCommandInFlight)
+    }
+    var canRestartDevServer: Bool {
+        DevServerControls.canRestart(state: state, siteOpen: siteOpenForDevServer, commandInFlight: devServerCommandInFlight)
+    }
+
+    /// Site ▸ Start Dev Server: relaunch the runtime for the already-open site (after an explicit
+    /// Stop, or as a recovery from `.failed` — same effect as the preview pane's Retry button).
+    func startDevServer() {
+        guard canStartDevServer else { return }
+        relaunchDevServer()
+    }
+
+    /// Site ▸ Restart Dev Server: for a wedged Astro process that hasn't died. Same body as
+    /// Start — `SiteRuntime.start` tears down any previous run first (protocol contract), so a
+    /// restart is a plain re-start on every runtime; only the enablement differs (see
+    /// `DevServerControls`). Both funnel into `relaunchDevServer()` so the two can't drift.
+    func restartDevServer() {
+        guard canRestartDevServer else { return }
+        relaunchDevServer()
+    }
+
+    /// Shared Start/Restart dispatch. The edit router stays registered across a stop, so no
+    /// re-registration is needed here (unlike `open(siteID:siteDirectory:)`).
+    private func relaunchDevServer() {
+        guard let siteID = openSiteID, let siteDirectory = openSiteDirectory else { return }
+        devServerStoppedByUser = false
+        let token = markDevServerCommandInFlight()
+        Task {
+            await runtime.start(siteID: siteID, siteDirectory: siteDirectory)
+            clearDevServerCommandInFlight(token: token)
+        }
+    }
+
+    /// Site ▸ Stop Dev Server: tear down the runtime but keep the site open in the window
+    /// (unlike `close()`, which also unregisters the edit router and forgets the site). Frees
+    /// the container/dev-server resources for a backgrounded site window; the runtime settles
+    /// to `.idle` and the preview pane shows the stopped state with a Start button.
+    func stopDevServer() {
+        guard canStopDevServer else { return }
+        devServerStoppedByUser = true
+        // Clear here (not just on `.ready`/`.failed`): stopping mid-boot never reaches either of
+        // those, so without this a Stop issued during a dependency-update boot would leave the
+        // flag stuck true — the next Start/Restart would then show "Updating dependencies…" for
+        // what's actually a plain restart.
+        isUpdatingDependencies = false
+        let token = markDevServerCommandInFlight()
+        Task {
+            await runtime.stop()
+            clearDevServerCommandInFlight(token: token)
         }
     }
 

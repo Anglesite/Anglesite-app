@@ -61,6 +61,56 @@ actor FakeLocalContainerControl: LocalContainerControl {
 /// Note: the park/release rendezvous relies on Swift's cooperative executor not running the
 /// spawned `start()` Task before `waitUntilParked()` installs its continuation. This matches the
 /// pattern in `GatedFakeSandboxControlClient` and is sufficient for Swift Testing's executor.
+/// The mirror image of `GatedFakeLocalContainerControl`: `start` succeeds immediately, while the
+/// FIRST `stop` suspends until `releaseStop()` — for deterministically interleaving a superseding
+/// `start()` while a `stop()`'s teardown is parked inside `control.stop(...)` (the rapid
+/// Stop → Restart race from the PR #542 review). Subsequent `stop` calls pass straight through so
+/// the superseding path can't deadlock on the gate.
+actor StopGatedFakeLocalContainerControl: LocalContainerControl {
+    private let result: Result<LocalContainerSession, LocalContainerError>
+    private(set) var stopped: [String] = []
+    private var parkedContinuation: CheckedContinuation<Void, Never>?
+    private var gateContinuation: CheckedContinuation<Void, Never>?
+    private var gateArmed = true
+
+    init(result: Result<LocalContainerSession, LocalContainerError>) { self.result = result }
+
+    func waitUntilStopParked() async {
+        await withCheckedContinuation { cont in parkedContinuation = cont }
+    }
+    func releaseStop() { gateContinuation?.resume(); gateContinuation = nil }
+
+    func start(
+        siteID: String,
+        sourceRepo: URL,
+        ref: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> LocalContainerSession {
+        try result.get()
+    }
+
+    func stop(siteID: String) async throws {
+        stopped.append(siteID)
+        guard gateArmed else { return }
+        gateArmed = false
+        await withCheckedContinuation { cont in
+            parkedContinuation?.resume()
+            parkedContinuation = nil
+            gateContinuation = cont
+        }
+    }
+
+    func exec(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> ContainerExecResult {
+        ContainerExecResult(exitCode: 0, stdout: "", stderr: "")
+    }
+}
+
 actor GatedFakeLocalContainerControl: LocalContainerControl {
     private let result: Result<LocalContainerSession, LocalContainerError>
     private(set) var stopped: [String] = []
