@@ -402,17 +402,24 @@ final class SiteWindowModel {
         }
     }
 
-    /// Deletes a Cleanup-section candidate and, on success, discards (without saving) any editor
-    /// tab *or* Inspector context currently open on that same file — flushing either via its
-    /// normal leave path would re-write the buffer to disk and silently resurrect the file
-    /// `cleanup.delete` just removed. A page selected via the navigator's `.route` branch
-    /// populates `inspectorContext` (not `activeEditor`), so both must be checked independently.
+    /// Deletes a Cleanup-section candidate, discarding (without saving) any editor tab *or*
+    /// Inspector context open on that same file — flushing either via its normal leave path would
+    /// re-write the buffer to disk and silently resurrect the file `cleanup.delete` removes. A
+    /// page selected via the navigator's `.route` branch populates `inspectorContext` (not
+    /// `activeEditor`), so both are checked independently.
+    ///
+    /// Discarded *before* calling `cleanup.delete`, not after: `delete` suspends across two
+    /// awaited git subprocess calls, and Swift frees the `@MainActor` during that suspension — any
+    /// other main-actor action (the Preview/Editor toggle, closing the window) could otherwise
+    /// flush a still-open dirty buffer back to disk while the delete is in flight or immediately
+    /// after, resurrecting the file. Discarding first closes that window entirely. Tradeoff: if
+    /// the delete subsequently fails, an unsaved edit in that editor/inspector is already gone
+    /// even though the file itself is untouched — accepted as strictly preferable to a silent,
+    /// undetected resurrection of a file git already recorded as removed.
     @MainActor
     func deleteCleanupCandidate(_ candidate: DeadAssetScanner.CleanupCandidate) async {
         guard let site else { return }
         let deletedURL = site.sourceDirectory.appendingPathComponent(candidate.path)
-        let succeeded = await cleanup.delete(candidate)
-        guard succeeded else { return }
         if activeEditorFile?.url == deletedURL {
             activeEditor = nil
             mainPaneMode = .preview
@@ -420,6 +427,7 @@ final class SiteWindowModel {
         if inspectorContext?.model.file.url == deletedURL {
             inspectorContext = nil
         }
+        _ = await cleanup.delete(candidate)
     }
 
     /// Build the inspector context for a content navigator id: the typed descriptor form when the
