@@ -150,7 +150,7 @@ Linux goes first: the Swift toolchain is most mature there, containers are nativ
 - Whether Windows v1 offers the remote-sandbox runtime as a first-class alternative to WSL2 or only as a fallback (product decision at Windows MVP).
 - External-LLM wire protocol and provider surface: one OpenAI-compatible chat-completions endpoint config (covers Ollama/vLLM/most providers) vs. per-provider adapters (e.g. native Anthropic Messages API). Decide at the `ExternalLLMBackend` slice.
 - Which assistant features get the `frontier` tier label at launch, and the exact UI treatment for gated features (disabled-with-explanation vs. upsell-style badge).
-- Amending the #459 roadmap doc and CLAUDE.md to replace "no external LLM APIs, ever" with the new policy (platform-native default, Settings opt-in, labeled frontier features) — and whether the amended policy also applies to the macOS app before the cross-platform work lands.
+- Whether the amended LLM policy (platform-native default, Settings opt-in, labeled frontier features) also applies to the macOS app *before* the cross-platform work lands — i.e. does the macOS app grow the external-LLM Settings opt-in ahead of the port. (The #459 roadmap doc and CLAUDE.md were amended with the new policy on 2026-07-08.)
 - Flatpak sandbox vs. rootless-podman-from-Flatpak interaction (may require `flatpak-spawn` or a host-side helper; investigate at Linux MVP).
 - Jump lists / D-Bus application actions as `AnglesiteIntents` analogs (post-v1).
 
