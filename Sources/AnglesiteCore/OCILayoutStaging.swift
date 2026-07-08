@@ -31,11 +31,12 @@ public enum OCILayoutStaging {
     /// double-install is at worst a same-content replace.)
     public static func stagedLayoutURL(source: URL, name: String, storeRoot: URL) throws -> URL {
         let staged = storeRoot.appendingPathComponent("layout-staging/\(name)", isDirectory: true)
-        let sourceIndexData = try Data(contentsOf: source.appendingPathComponent("index.json"))
+        let sourceIndex = OCILayoutIdentity.indexURL(of: source)
+        // A missing/unreadable source index is a hard error (there is nothing valid to stage) —
+        // unlike the staleness checks below, which fail soft toward re-staging.
+        _ = try Data(contentsOf: sourceIndex)
         func stagedIsCurrent() -> Bool {
-            guard let stagedIndexData = try? Data(contentsOf: staged.appendingPathComponent("index.json"))
-            else { return false }
-            return stagedIndexData == sourceIndexData
+            OCILayoutIdentity.contentsMatch(OCILayoutIdentity.indexURL(of: staged), sourceIndex)
         }
         if stagedIsCurrent() {
             return staged

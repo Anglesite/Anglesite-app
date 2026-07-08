@@ -17,11 +17,9 @@ public enum OCILayoutImportMarker {
     /// and the import can be skipped. False on first boot, after an app update that ships a
     /// changed layout, or when either `index.json` is unreadable (fail toward re-importing).
     public static func isCurrent(layout: URL, name: String, storeRoot: URL) -> Bool {
-        guard
-            let recorded = try? Data(contentsOf: markerURL(name: name, storeRoot: storeRoot)),
-            let current = try? Data(contentsOf: layout.appendingPathComponent("index.json"))
-        else { return false }
-        return recorded == current
+        OCILayoutIdentity.contentsMatch(
+            markerURL(name: name, storeRoot: storeRoot),
+            OCILayoutIdentity.indexURL(of: layout))
     }
 
     /// Records that the layout at `layout` was just imported into the store for `name`.
@@ -32,7 +30,7 @@ public enum OCILayoutImportMarker {
         let marker = markerURL(name: name, storeRoot: storeRoot)
         try FileManager.default.createDirectory(
             at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(contentsOf: layout.appendingPathComponent("index.json"))
+        try Data(contentsOf: OCILayoutIdentity.indexURL(of: layout))
             .write(to: marker, options: .atomic)
     }
 
