@@ -3,8 +3,9 @@ import SwiftUI
 /// File ▸ Rename… / Reveal in Finder for the focused site window (#513). Rename targets the
 /// navigator's selected item (the same inline-edit flow as its context menu); Reveal targets the
 /// most specific focused surface — the open editor's file, else the inspected page's file, else
-/// the site's `Source/` directory. Declared after `SaveCommands`, so these land between
-/// Save/Revert and Export Site Source… in the File menu.
+/// the site's `Source/` directory. Declared BEFORE `SaveCommands` in AnglesiteApp.swift: groups
+/// sharing a `before:` anchor insert above earlier declarations, so declaring this one first is
+/// what lands Rename/Reveal below Save/Revert (between them and Export Site Source…).
 struct FileItemCommands: Commands {
     @FocusedValue(\.siteWindowModel) private var model
 
