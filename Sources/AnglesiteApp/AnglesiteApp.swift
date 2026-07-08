@@ -252,6 +252,10 @@ struct AnglesiteApp: App {
             // DECLARATION order (this one above Web Inspector/Debug Pane), while `before:` groups
             // render in REVERSE declaration order (see FileItemCommands/SaveCommands above).
             ViewMenuCommands()
+            // Preview navigation — Reload ⌘R, Back/Forward, zoom (#514) — between the pane/panel
+            // toggles above and the developer tools below (`after:` groups render in declaration
+            // order, see the note above).
+            PreviewNavigationCommands()
             // "Show Web Inspector" in the View menu — its own Commands type for the same focus reason.
             WebInspectorCommands()
             // Debug pane lives off the View menu — `⌥⌘D` keeps it discoverable without crowding
