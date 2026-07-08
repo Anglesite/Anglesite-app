@@ -77,6 +77,9 @@ public enum SiteGraphExplorer {
     private static let sourceExtensions: Set<String> = [
         ".astro", ".md", ".mdx", ".markdown", ".js", ".jsx", ".ts", ".tsx", ".css"
     ]
+    private static let assetExtensions: Set<String> = [
+        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".avif"
+    ]
     private static let dynamicImportRegex = try! NSRegularExpression(
         pattern: #"import\(\s*['"]([^'"]+)['"]\s*\)"#
     )
@@ -165,9 +168,17 @@ public enum SiteGraphExplorer {
 
         for file in walk(projectRoot, fileManager: fileManager) {
             let relativePath = relativePosix(file, from: projectRoot)
-            guard sourceExtensions.contains(fileExtension(file)) else { continue }
             guard nodesByID[nodeIDByRelativePath[relativePath] ?? ""] == nil else { continue }
-            guard let kind = kind(for: relativePath) else { continue }
+            let ext = fileExtension(file)
+            let nodeKind: SiteGraphNodeKind?
+            if sourceExtensions.contains(ext) {
+                nodeKind = kind(for: relativePath)
+            } else if assetExtensions.contains(ext) {
+                nodeKind = .asset
+            } else {
+                nodeKind = nil
+            }
+            guard let kind = nodeKind else { continue }
             addNode(SiteGraphNode(
                 id: "\(siteID):file:\(relativePath)",
                 kind: kind,
@@ -194,12 +205,24 @@ public enum SiteGraphExplorer {
                     fileManager: fileManager
                 ) else { continue }
                 let targetKind = nodesByID[targetID]?.kind
-                let edgeKind: SiteGraphEdgeKind = targetKind == .layout ? .usesLayout : .imports
+                let edgeKind: SiteGraphEdgeKind
+                if targetKind == .layout {
+                    edgeKind = .usesLayout
+                } else if targetKind == .asset {
+                    edgeKind = .referencesAsset
+                } else {
+                    edgeKind = .imports
+                }
                 let edge = SiteGraphEdge(sourceID: node.id, targetID: targetID, kind: edgeKind)
                 edgesByID[edge.id] = edge
             }
             for assetPath in assetReferences(in: text) {
-                guard let targetID = nodeIDByPublicPath[assetPath] else { continue }
+                guard let targetID = resolveAssetReference(
+                    assetPath,
+                    from: filePath,
+                    nodeIDByRelativePath: nodeIDByRelativePath,
+                    nodeIDByPublicPath: nodeIDByPublicPath
+                ) else { continue }
                 let edge = SiteGraphEdge(sourceID: node.id, targetID: targetID, kind: .referencesAsset)
                 edgesByID[edge.id] = edge
             }
@@ -272,9 +295,28 @@ public enum SiteGraphExplorer {
                 let value = String(text[found])
                 if value.hasPrefix("/") { return value }
                 if value.hasPrefix("public/") { return "/" + String(value.dropFirst("public".count + 1)) }
-                return nil
+                return value
             }
         }
+    }
+
+    private static func resolveAssetReference(
+        _ value: String,
+        from relativePath: String,
+        nodeIDByRelativePath: [String: String],
+        nodeIDByPublicPath: [String: String]
+    ) -> String? {
+        if value.hasPrefix("/") {
+            return nodeIDByPublicPath[value]
+        }
+        if value.hasPrefix("public/") {
+            return nodeIDByPublicPath["/" + String(value.dropFirst("public".count + 1))]
+        }
+        if value.hasPrefix("./") || value.hasPrefix("../") {
+            let base = (relativePath as NSString).deletingLastPathComponent
+            return nodeIDByRelativePath[normalizeRelativePath((base as NSString).appendingPathComponent(value))]
+        }
+        return nil
     }
 
     private static func resolveImport(

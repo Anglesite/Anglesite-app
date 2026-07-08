@@ -50,6 +50,27 @@ final class SiteGraphExplorerModel {
         return filteredEdges.filter { $0.sourceID == selectedNodeID }
     }
 
+    var groupedFilteredNodes: [(kind: SiteGraphNodeKind, nodes: [SiteGraphNode])] {
+        let grouped = Dictionary(grouping: filteredNodes, by: \.kind)
+        return SiteGraphNodeKind.allCases.compactMap { kind in
+            let visibleNodes = (grouped[kind] ?? []).filter { node in
+                kind != .asset || node.referencedByCount > 0
+            }
+            guard !visibleNodes.isEmpty else { return nil }
+            return (kind, visibleNodes.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending })
+        }
+    }
+
+    var unusedAssets: [SiteGraphNode] {
+        filteredNodes
+            .filter { $0.kind == .asset && $0.referencedByCount == 0 }
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    var visibleSummary: String {
+        "\(filteredNodes.count) nodes, \(filteredEdges.count) links"
+    }
+
     func start(siteID: String, sourceDirectory: URL) {
         self.siteID = siteID
         self.sourceDirectory = sourceDirectory
