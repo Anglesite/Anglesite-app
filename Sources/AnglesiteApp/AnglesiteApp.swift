@@ -94,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
         if !menu.items.isEmpty { menu.addItem(.separator()) }
-        let newSite = NSMenuItem(title: "New Site", action: #selector(newSiteFromDock), keyEquivalent: "")
+        let newSite = NSMenuItem(title: String(localized: "New Site"), action: #selector(newSiteFromDock), keyEquivalent: "")
         newSite.target = self
         menu.addItem(newSite)
         return menu

@@ -258,7 +258,7 @@ struct PlistEditorView: View {
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = WebsiteIconInstaller.allowedContentTypes
-        panel.prompt = model.hasWebsiteIcons ? "Change" : "Choose"
+        panel.prompt = model.hasWebsiteIcons ? String(localized: "Change") : String(localized: "Choose")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         Task { await model.installWebsiteIcons(from: url) }
     }

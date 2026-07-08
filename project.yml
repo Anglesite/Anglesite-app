@@ -53,6 +53,10 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Resources/Anglesite.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         MACOSX_DEPLOYMENT_TARGET: "27.0"
+        # String Catalog scaffolding (#528): the compiler extracts SwiftUI/String(localized:)
+        # literals into Sources/AnglesiteApp/Localizable.xcstrings during Xcode builds.
+        SWIFT_EMIT_LOC_STRINGS: YES
+        LOCALIZATION_PREFERS_STRING_CATALOGS: YES
         SWIFT_VERSION: "5.10"
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: "0.1.0"

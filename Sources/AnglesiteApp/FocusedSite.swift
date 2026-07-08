@@ -65,7 +65,7 @@ struct NewContentCommands: Commands {
             openWindow(value: site.id)
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Couldn't open that site"
+            alert.messageText = String(localized: "Couldn't open that site")
             alert.informativeText = error.localizedDescription
             alert.alertStyle = .warning
             alert.runModal()

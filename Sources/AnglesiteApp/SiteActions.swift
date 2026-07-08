@@ -15,7 +15,7 @@ enum SiteActions {
         let folderName: String
         let underlying: Error
         var errorDescription: String? {
-            "Couldn't add “\(folderName)”: \(underlying.localizedDescription)"
+            String(localized: "Couldn't add “\(folderName)”: \(underlying.localizedDescription)")
         }
     }
 
@@ -51,13 +51,13 @@ enum SiteActions {
         picker.canChooseDirectories = true
         picker.canChooseFiles = false
         picker.allowsMultipleSelection = false
-        picker.prompt = "Choose"
-        picker.message = "Choose an existing Anglesite site folder to import."
+        picker.prompt = String(localized: "Choose")
+        picker.message = String(localized: "Choose an existing Anglesite site folder to import.")
         guard picker.runModal() == .OK, let sourceDir = picker.url else { return nil }
 
         let name = sourceDir.deletingPathExtension().lastPathComponent
         let save = NSSavePanel()
-        save.message = "Save the imported site package."
+        save.message = String(localized: "Save the imported site package.")
         save.nameFieldStringValue = "\(name).anglesite"
         save.directoryURL = AppSettings.shared.sitesRoot
         guard save.runModal() == .OK, let dest = save.url else { return nil }
@@ -87,9 +87,9 @@ enum SiteActions {
     /// Export the given site's source tree to a chosen folder, with an opt-in for `.git` history.
     static func exportSource(of site: SiteStore.Site) {
         let save = NSSavePanel()
-        save.message = "Export this site's source files to a folder."
+        save.message = String(localized: "Export this site's source files to a folder.")
         save.nameFieldStringValue = site.name
-        let gitToggle = NSButton(checkboxWithTitle: "Include Git history (.git)", target: nil, action: nil)
+        let gitToggle = NSButton(checkboxWithTitle: String(localized: "Include Git history (.git)"), target: nil, action: nil)
         gitToggle.state = .off
         let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 28))
         gitToggle.frame = NSRect(x: 12, y: 4, width: 256, height: 20)
@@ -120,8 +120,8 @@ enum SiteActions {
         panel.allowedContentTypes = [.anglesiteSite]
         panel.treatsFilePackagesAsDirectories = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Open"
-        panel.message = "Choose an Anglesite site package."
+        panel.prompt = String(localized: "Open")
+        panel.message = String(localized: "Choose an Anglesite site package.")
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
 
         do {

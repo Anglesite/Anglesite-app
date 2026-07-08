@@ -400,8 +400,8 @@ struct SitesLauncherView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.directoryURL = sitesRoot
-        panel.prompt = "Grant Access"
-        panel.message = "Choose your Sites folder so Anglesite can create the new site there."
+        panel.prompt = String(localized: "Grant Access")
+        panel.message = String(localized: "Choose your Sites folder so Anglesite can create the new site there.")
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         if let data = try? SecurityScopedBookmark.create(for: url) {
             AppSettings.shared.sitesRootBookmark = data
