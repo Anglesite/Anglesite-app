@@ -8,6 +8,7 @@ import Foundation
 public struct NativeContentOperations: ContentOperationsService {
 
     public typealias GitCommit = @Sendable (_ projectRoot: URL, _ relPath: String, _ message: String) async -> String?
+    public typealias GitDelete = @Sendable (_ projectRoot: URL, _ relPath: String, _ message: String) async -> String?
 
     private let siteDirectory: @Sendable (_ siteID: String) async -> URL?
     private let gitCommit: GitCommit
@@ -225,6 +226,24 @@ public struct NativeContentOperations: ContentOperationsService {
         }
         guard await run(["rev-parse", "--git-dir"]) != nil,
               await run(["add", "--", relPath]) != nil,
+              await run(["commit", "-m", message, "--", relPath]) != nil,
+              let head = await run(["rev-parse", "HEAD"]) else { return nil }
+        return head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Stage-delete and commit exactly `relPath` on the current branch (`git rm` + `git commit`).
+    /// Returns the new HEAD SHA, or nil on any failure (not a repo, dirty tree, rejecting hook,
+    /// git missing) — best-effort, mirroring `processGitCommit`'s shape exactly. Git history is
+    /// the sole undo/archive mechanism for this delete; there is no separate trash/archive path.
+    @Sendable public static func processGitDelete(_ projectRoot: URL, _ relPath: String, _ message: String) async -> String? {
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        func run(_ args: [String]) async -> ProcessSupervisor.RunResult? {
+            let result = try? await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: projectRoot)
+            guard let result, result.exitCode == 0 else { return nil }
+            return result
+        }
+        guard await run(["rev-parse", "--git-dir"]) != nil,
+              await run(["rm", "--", relPath]) != nil,
               await run(["commit", "-m", message, "--", relPath]) != nil,
               let head = await run(["rev-parse", "HEAD"]) else { return nil }
         return head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
