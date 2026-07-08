@@ -403,16 +403,23 @@ final class SiteWindowModel {
     }
 
     /// Deletes a Cleanup-section candidate and, on success, discards (without saving) any editor
-    /// tab currently open on that same file — flushing it via the normal leave-editor path would
-    /// re-write the buffer to disk and silently resurrect the file `cleanup.delete` just removed.
+    /// tab *or* Inspector context currently open on that same file — flushing either via its
+    /// normal leave path would re-write the buffer to disk and silently resurrect the file
+    /// `cleanup.delete` just removed. A page selected via the navigator's `.route` branch
+    /// populates `inspectorContext` (not `activeEditor`), so both must be checked independently.
     @MainActor
     func deleteCleanupCandidate(_ candidate: DeadAssetScanner.CleanupCandidate) async {
         guard let site else { return }
         let deletedURL = site.sourceDirectory.appendingPathComponent(candidate.path)
         let succeeded = await cleanup.delete(candidate)
-        guard succeeded, activeEditorFile?.url == deletedURL else { return }
-        activeEditor = nil
-        mainPaneMode = .preview
+        guard succeeded else { return }
+        if activeEditorFile?.url == deletedURL {
+            activeEditor = nil
+            mainPaneMode = .preview
+        }
+        if inspectorContext?.model.file.url == deletedURL {
+            inspectorContext = nil
+        }
     }
 
     /// Build the inspector context for a content navigator id: the typed descriptor form when the
