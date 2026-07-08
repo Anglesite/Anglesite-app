@@ -413,9 +413,11 @@ final class SiteWindowModel {
     /// other main-actor action (the Preview/Editor toggle, closing the window) could otherwise
     /// flush a still-open dirty buffer back to disk while the delete is in flight or immediately
     /// after, resurrecting the file. Discarding first closes that window entirely. Tradeoff: if
-    /// the delete subsequently fails, an unsaved edit in that editor/inspector is already gone
-    /// even though the file itself is untouched — accepted as strictly preferable to a silent,
-    /// undetected resurrection of a file git already recorded as removed.
+    /// the delete subsequently fails, an unsaved edit in that editor/inspector is already gone —
+    /// in the ordinary failure case (dirty tree, no HEAD copy, rejecting hook) the file itself is
+    /// still untouched, though not in the rare double-failure case `processGitDelete` itself logs
+    /// (commit *and* its rollback both fail). Either way this is accepted as strictly preferable
+    /// to a silent, undetected resurrection of a file git already recorded as removed.
     ///
     /// On success, also force-refreshes `navigator` and `graphExplorer`: neither observes anything
     /// that fires for a component/layout/page deleted this way (the only thing that does,

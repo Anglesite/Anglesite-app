@@ -82,9 +82,22 @@ final class ProjectCleanupModel {
     /// succeeded, so callers (`SiteWindowModel`) can react — e.g. closing an editor tab open on
     /// the now-deleted file — only on real success. No-ops if a scan or delete is already in
     /// flight (see `isBusy`).
+    ///
+    /// Also refuses if `candidate` is no longer in the current `candidates` list: the Cleanup
+    /// section's confirmation dialog captures a `CleanupCandidate` snapshot at the moment the user
+    /// opens it, but a rescan can complete while that dialog is still showing (rows stay
+    /// interactive during a scan; only the Scan/Rescan button disables) — and the dialog has no
+    /// way to know its snapshot is stale. Re-validating against the live list here, right before
+    /// the destructive action, means a confirm on a since-rescanned-out candidate (no longer
+    /// flagged unused, already deleted, already ignored) is refused instead of deleting a file the
+    /// latest scan says is actually still in use.
     @discardableResult
     func delete(_ candidate: DeadAssetScanner.CleanupCandidate) async -> Bool {
         guard let sourceDirectory, !isBusy else { return false }
+        guard candidates.contains(where: { $0.id == candidate.id }) else {
+            deleteError = "\(candidate.path) is no longer in the Cleanup list — it may have been rescanned, ignored, or already deleted. Rescan and try again."
+            return false
+        }
         isBusy = true
         defer { isBusy = false }
         let message = "Remove unused \(candidate.kind.rawValue): \(candidate.path)"
