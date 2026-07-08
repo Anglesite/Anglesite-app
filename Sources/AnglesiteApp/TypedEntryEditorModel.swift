@@ -23,8 +23,9 @@ final class TypedEntryEditorModel: InspectorEditorModel {
     private var contents: String { fileSession.savedContents } // last-loaded/saved file text (verbatim base)
     private var numberDrafts: [String: String] = [:]
     /// Guards against a concurrent second `save()` capturing a stale `contents` base while an
-    /// earlier save is still in flight (e.g. ⌘S mash, or a teardown flush racing a save).
-    private var isSaving = false
+    /// earlier save is still in flight (e.g. ⌘S mash, or a teardown flush racing a save). `private(set)`
+    /// so `SiteWindowModel.editCommandInFlight` can read it (PR #532 review).
+    private(set) var isSaving = false
     private(set) var loadError: String?
     private(set) var isLoading = false
     var conflictDiskContents: String? {

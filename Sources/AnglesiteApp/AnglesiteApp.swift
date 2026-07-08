@@ -196,6 +196,8 @@ struct AnglesiteApp: App {
             }
             // Export is its own Commands type so @FocusedValue tracks scene focus (see ExportSiteCommands).
             ExportSiteCommands()
+            // Site menu: the site window's primary operations (#511).
+            SiteMenuCommands()
             // "Show Web Inspector" in the View menu — its own Commands type for the same focus reason.
             WebInspectorCommands()
             // Debug pane lives off the View menu — `⌥⌘D` keeps it discoverable without crowding

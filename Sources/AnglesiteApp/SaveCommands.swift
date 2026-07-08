@@ -27,17 +27,19 @@ struct SaveCommands: Commands {
         // `before:` puts Save/Revert between Close and Export Site Source…, matching the
         // File-menu order of Apple's document apps.
         CommandGroup(before: .importExport) {
+            // Both items also disable while a save/revert is already in flight — a revert racing a
+            // slow in-flight save would desync the buffer from disk (PR #532 review).
             Button("Save") {
                 guard let model = siteWindowModel else { return }
                 Task { await model.saveAllEdits() }
             }
             .keyboardShortcut("s")
-            .disabled(siteWindowModel?.hasUnsavedEdits != true)
+            .disabled(siteWindowModel?.hasUnsavedEdits != true || siteWindowModel?.editCommandInFlight == true)
 
             Button("Revert to Saved") {
                 siteWindowModel?.requestRevertToSaved()
             }
-            .disabled(siteWindowModel?.hasUnsavedEdits != true)
+            .disabled(siteWindowModel?.hasUnsavedEdits != true || siteWindowModel?.editCommandInFlight == true)
         }
     }
 }

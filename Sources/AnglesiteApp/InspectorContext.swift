@@ -8,6 +8,9 @@ import AnglesiteCore
 protocol InspectorEditorModel: AnyObject {
     var file: FileRef { get }
     var isDirty: Bool { get }
+    /// True while a save's off-main write is in flight — File ▸ Save / Revert disable during it
+    /// rather than racing the write with a concurrent `load()` (PR #532 review).
+    var isSaving: Bool { get }
     var loadError: String? { get }
     var isLoading: Bool { get }
     var conflictDiskContents: String? { get set }

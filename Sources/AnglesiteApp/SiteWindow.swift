@@ -194,11 +194,11 @@ struct SiteWindow: View {
 
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    model.backup.backup(siteID: site.id, siteDirectory: site.sourceDirectory)
+                    model.backupSite()
                 } label: {
                     Label("Backup", systemImage: "externaldrive.fill.badge.icloud")
                 }
-                .disabled(model.backup.isRunning || model.audit.isRunning || model.deploy.isRunning || !site.isValid)
+                .disabled(!model.canRunBackup)
                 .help(site.isValid
                       ? "Commit and push working-tree changes to your current branch"
                       : "Site is missing required files")
@@ -215,7 +215,7 @@ struct SiteWindow: View {
                         Label("Harden", systemImage: "shield.lefthalf.filled")
                     }
                 }
-                .disabled(model.harden.isRunning || !site.isValid)
+                .disabled(!model.canRunHarden)
                 .help(site.isValid
                       ? "Preview and apply Cloudflare security hardening for this site"
                       : "Site is missing required files")
@@ -224,7 +224,7 @@ struct SiteWindow: View {
 
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    model.audit.audit(siteID: site.id, siteDirectory: site.sourceDirectory)
+                    model.auditSite()
                 } label: {
                     if model.audit.isRunning {
                         Label("Auditing…", systemImage: "magnifyingglass")
@@ -232,7 +232,7 @@ struct SiteWindow: View {
                         Label("Audit", systemImage: "checkmark.shield.fill")
                     }
                 }
-                .disabled(model.audit.isRunning || model.backup.isRunning || model.deploy.isRunning || !site.isValid)
+                .disabled(!model.canRunAudit)
                 .help(site.isValid
                       ? "Run the structured accessibility audit against this site"
                       : "Site is missing required files")
@@ -300,7 +300,7 @@ struct SiteWindow: View {
                     } label: {
                         Label("Publish to GitHub", systemImage: "square.and.arrow.up.on.square")
                     }
-                    .disabled(model.publish.isRunning || !site.isValid)
+                    .disabled(!model.canPublishToGitHub)
                     .help(site.isValid ? "Create a private GitHub repo and push this site" : "Site is missing required files")
                 }
             }
@@ -309,15 +309,12 @@ struct SiteWindow: View {
 
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    Task { @MainActor in
-                        let cc = await model.preview.activeContainerControl()
-                        model.deploy.deploy(siteID: site.id, siteDirectory: site.sourceDirectory, containerControl: cc)
-                    }
+                    model.deploySite()
                 } label: {
                     Label("Deploy", systemImage: "paperplane.fill")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(model.deploy.isRunning || model.backup.isRunning || model.audit.isRunning || !site.isValid || !model.preview.canDeploy)
+                .disabled(!model.canRunDeploy)
                 .help(site.isValid && model.preview.canDeploy
                       ? "Build, scan, and run wrangler deploy on this site"
                       : site.isValid
@@ -342,6 +339,7 @@ struct SiteWindow: View {
                 } label: {
                     Label("Add Integration…", systemImage: "puzzlepiece.extension")
                 }
+                .disabled(!model.canOpenIntegrationWizard)
                 .help("Set up a third-party integration for this site")
             }
             .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
@@ -353,7 +351,7 @@ struct SiteWindow: View {
                     Label("Domain", systemImage: "globe")
                 }
                 .help("View and manage this domain's DNS records")
-                .disabled(model.domain.isRunning)
+                .disabled(!model.canOpenDomain)
             }
             .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
         }
