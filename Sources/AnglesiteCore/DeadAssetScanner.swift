@@ -139,4 +139,111 @@ public enum DeadAssetScanner {
         }
         return out
     }
+
+    // MARK: - Full-project scan
+
+    private static let referenceScanExtensions: Set<String> = [
+        ".astro", ".md", ".mdx", ".mdoc", ".markdown", ".css",
+    ]
+    private static let excludedDirNames: Set<String> = ["node_modules", "dist", ".astro", ".git"]
+
+    /// Scans every `.astro`/`.md`/`.mdx`/`.mdoc`/`.markdown`/`.css` file under `projectRoot` for
+    /// references, then returns every unused `src/components/**/*.astro`, `src/layouts/**/*.astro`,
+    /// and unused entry in `images` (typically `SiteContentGraph.images(for:)`, scoped to
+    /// `public/images/**`). Pure over the filesystem snapshot at call time.
+    public static func scan(projectRoot: URL, images: [SiteContentGraph.Image]) -> [CleanupCandidate] {
+        var fileReferenceCounts: [String: Int] = [:]
+        var globDirectories: Set<String> = []
+
+        for abs in walk(projectRoot) {
+            let ext = "." + abs.pathExtension.lowercased()
+            guard referenceScanExtensions.contains(ext) else { continue }
+            guard let source = try? String(contentsOf: abs, encoding: .utf8) else { continue }
+            let relPath = relativePosix(abs, from: projectRoot)
+
+            let refs = extractReferences(source: source, path: relPath)
+            for ref in refs.fileReferences { fileReferenceCounts[ref, default: 0] += 1 }
+            globDirectories.formUnion(refs.globDirectories)
+
+            // Frontmatter `layout:` counts as a reference too — extractReferences only looks at
+            // the body, not frontmatter fields.
+            let frontmatter = Frontmatter.parse(source)
+            if case let .string(layoutRef)? = frontmatter["layout"],
+               let resolved = resolve(layoutRef, relativeTo: relPath) {
+                fileReferenceCounts[resolved, default: 0] += 1
+            }
+        }
+
+        func referenceCount(for path: String) -> Int {
+            if globDirectories.contains(where: { path.hasPrefix($0 + "/") }) {
+                return max(1, fileReferenceCounts[path] ?? 0)
+            }
+            return fileReferenceCounts[path] ?? 0
+        }
+
+        var candidates: [CleanupCandidate] = []
+
+        for abs in walk(projectRoot.appendingPathComponent("src/components"))
+        where abs.pathExtension.lowercased() == "astro" {
+            let rel = relativePosix(abs, from: projectRoot)
+            let count = referenceCount(for: rel)
+            if count == 0 {
+                candidates.append(CleanupCandidate(
+                    id: rel, path: rel, kind: .component, lastModified: mtime(abs), referenceCount: count))
+            }
+        }
+        for abs in walk(projectRoot.appendingPathComponent("src/layouts"))
+        where abs.pathExtension.lowercased() == "astro" {
+            let rel = relativePosix(abs, from: projectRoot)
+            let count = referenceCount(for: rel)
+            if count == 0 {
+                candidates.append(CleanupCandidate(
+                    id: rel, path: rel, kind: .layout, lastModified: mtime(abs), referenceCount: count))
+            }
+        }
+        for image in images {
+            let count = referenceCount(for: image.relativePath)
+            if count == 0 {
+                candidates.append(CleanupCandidate(
+                    id: image.relativePath, path: image.relativePath, kind: .image,
+                    lastModified: image.lastModified, referenceCount: count))
+            }
+        }
+
+        return candidates.sorted { $0.path < $1.path }
+    }
+
+    /// Recursively collects files under `dir` in sorted order, skipping excluded directories and
+    /// symlinks. Missing `dir` → empty. Mirrors `ContentScanner.walk`/`SiteKnowledgeIndex.walk`.
+    private static func walk(_ dir: URL) -> [URL] {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: []
+        ) else { return [] }
+        var files: [URL] = []
+        for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            let name = entry.lastPathComponent
+            let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            if values?.isSymbolicLink == true { continue }
+            if values?.isDirectory == true {
+                if excludedDirNames.contains(name) { continue }
+                files.append(contentsOf: walk(entry))
+            } else {
+                files.append(entry)
+            }
+        }
+        return files
+    }
+
+    private static func relativePosix(_ url: URL, from base: URL) -> String {
+        let urlComponents = url.standardizedFileURL.pathComponents
+        let baseComponents = base.standardizedFileURL.pathComponents
+        guard urlComponents.starts(with: baseComponents) else { return url.path }
+        return urlComponents.dropFirst(baseComponents.count).joined(separator: "/")
+    }
+
+    private static func mtime(_ url: URL) -> Date {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            ?? Date(timeIntervalSince1970: 0)
+    }
 }

@@ -64,3 +64,80 @@ struct DeadAssetScannerExtractionTests {
         #expect(refs.fileReferences.contains("src/layouts/Base.astro"))
     }
 }
+
+@Suite("DeadAssetScanner full scan")
+struct DeadAssetScannerScanTests {
+    private func makeSite(_ files: [String: String]) -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dead-asset-scan-\(UUID().uuidString)", isDirectory: true)
+        for (rel, contents) in files {
+            let url = root.appendingPathComponent(rel)
+            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try! Data(contents.utf8).write(to: url)
+        }
+        return root
+    }
+
+    @Test("dead component is flagged, imported component is not")
+    func componentDetection() {
+        let root = makeSite([
+            "src/pages/index.astro": "---\nimport Header from '../components/Header.astro';\n---\n<Header />",
+            "src/components/Header.astro": "<header>Site</header>",
+            "src/components/Orphan.astro": "<div>never imported</div>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        let paths = Set(candidates.map(\.path))
+        #expect(paths.contains("src/components/Orphan.astro"))
+        #expect(!paths.contains("src/components/Header.astro"))
+    }
+
+    @Test("layout referenced only via frontmatter is not flagged")
+    func layoutFrontmatterReference() {
+        let root = makeSite([
+            "src/content/posts/hello.md": "---\ntitle: Hello\nlayout: ../../layouts/Post.astro\n---\nBody",
+            "src/layouts/Post.astro": "<slot />",
+            "src/layouts/Unused.astro": "<slot />",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        let paths = Set(candidates.map(\.path))
+        #expect(!paths.contains("src/layouts/Post.astro"))
+        #expect(paths.contains("src/layouts/Unused.astro"))
+    }
+
+    @Test("Astro.glob-covered directory suppresses false positives for every file inside it")
+    func globCoveredDirectory() {
+        let root = makeSite([
+            "src/pages/index.astro": "---\nconst widgets = await Astro.glob('../components/widgets/*.astro');\n---\n<div></div>",
+            "src/components/widgets/Card.astro": "<div>card</div>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/widgets/Card.astro"))
+    }
+
+    @Test("unused image (public path) is flagged; referenced image is not")
+    func imageDetection() {
+        let root = makeSite([
+            "src/pages/index.astro": #"<img src="/images/hero.png">"#,
+        ])
+        let images = [
+            SiteContentGraph.Image(
+                id: "s:image:public/images/hero.png", siteID: "s",
+                relativePath: "public/images/hero.png", fileName: "hero.png",
+                byteSize: nil, usedOnPages: [], lastModified: Date(timeIntervalSince1970: 0)),
+            SiteContentGraph.Image(
+                id: "s:image:public/images/unused.png", siteID: "s",
+                relativePath: "public/images/unused.png", fileName: "unused.png",
+                byteSize: nil, usedOnPages: [], lastModified: Date(timeIntervalSince1970: 0)),
+        ]
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: images)
+        let paths = Set(candidates.map(\.path))
+        #expect(paths.contains("public/images/unused.png"))
+        #expect(!paths.contains("public/images/hero.png"))
+    }
+
+    @Test("empty project produces no candidates")
+    func emptyProject() {
+        let root = makeSite([:])
+        #expect(DeadAssetScanner.scan(projectRoot: root, images: []).isEmpty)
+    }
+}
