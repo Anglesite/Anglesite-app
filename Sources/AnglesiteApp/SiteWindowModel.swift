@@ -33,6 +33,7 @@ final class SiteWindowModel {
     private let contentGraph: SiteContentGraph
     private let knowledgeIndex: SiteKnowledgeIndex
     private let semanticRanker: SemanticRanker?
+    private let conventionsEngine: ProjectConventionsEngine
     private let contentIndexerStore: ContentIndexerStore
     private let integrationOps = IntegrationOperations.live()
     private let contentCreation: ContentCreationWorkflow
@@ -99,17 +100,20 @@ final class SiteWindowModel {
         contentGraph: SiteContentGraph,
         knowledgeIndex: SiteKnowledgeIndex,
         semanticRanker: SemanticRanker?,
+        conventionsEngine: ProjectConventionsEngine,
         runtimeFactory: any SiteRuntimeFactory,
         contentIndexerStore: ContentIndexerStore
     ) {
         self.contentGraph = contentGraph
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
+        self.conventionsEngine = conventionsEngine
         self.contentIndexerStore = contentIndexerStore
         self.preview = PreviewModel(
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
+            conventionsEngine: conventionsEngine,
             runtimeFactory: runtimeFactory
         )
         self.contentCreation = ContentCreationWorkflow.native(

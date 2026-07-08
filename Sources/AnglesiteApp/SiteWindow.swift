@@ -33,6 +33,7 @@ struct SiteWindow: View {
         contentGraph: SiteContentGraph,
         knowledgeIndex: SiteKnowledgeIndex,
         semanticRanker: SemanticRanker?,
+        conventionsEngine: ProjectConventionsEngine,
         runtimeFactory: any SiteRuntimeFactory,
         contentIndexerStore: ContentIndexerStore
     ) {
@@ -41,6 +42,7 @@ struct SiteWindow: View {
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
+            conventionsEngine: conventionsEngine,
             runtimeFactory: runtimeFactory,
             contentIndexerStore: contentIndexerStore
         ))

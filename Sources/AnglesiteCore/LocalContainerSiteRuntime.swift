@@ -10,6 +10,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     public let mcpClient: MCPClient
     private let knowledgeIndex: SiteKnowledgeIndex?
     private let semanticRanker: SemanticRanker?
+    private let conventionsEngine: ProjectConventionsEngine?
     private let logCenter: LogCenter
     private let connect: @Sendable (MCPClient, URL) async throws -> Void
     private let makeFileWatcher: @Sendable () -> any SiteFileWatching
@@ -33,6 +34,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         mcpClient: MCPClient,
         knowledgeIndex: SiteKnowledgeIndex? = nil,
         semanticRanker: SemanticRanker? = nil,
+        conventionsEngine: ProjectConventionsEngine? = nil,
         logCenter: LogCenter = .shared,
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) },
         makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { FSEventsFileWatcher() }
@@ -42,6 +44,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         self.mcpClient = mcpClient
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
+        self.conventionsEngine = conventionsEngine
         self.logCenter = logCenter
         self.connect = connect
         self.makeFileWatcher = makeFileWatcher
@@ -113,8 +116,10 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             try await connect(mcpClient, session.mcpURL)
             guard gen == generation else { return }
             await knowledgeIndex?.rebuild(siteID: siteID, projectRoot: siteDirectory)
+            await conventionsEngine?.rebuild(siteID: siteID, projectRoot: siteDirectory)
             guard gen == generation else {
                 await knowledgeIndex?.unload(siteID: siteID)
+                await conventionsEngine?.unload(siteID: siteID)
                 return
             }
             if let documents = await knowledgeIndex?.documents(siteID: siteID) {
@@ -123,6 +128,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             guard gen == generation else {
                 await knowledgeIndex?.unload(siteID: siteID)
                 await semanticRanker?.unload(siteID: siteID)
+                await conventionsEngine?.unload(siteID: siteID)
                 return
             }
             loadedKnowledgeSiteID = siteID
@@ -157,6 +163,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         if let siteID = loadedKnowledgeSiteID {
             await knowledgeIndex?.unload(siteID: siteID)
             await semanticRanker?.unload(siteID: siteID)
+            await conventionsEngine?.unload(siteID: siteID)
             loadedKnowledgeSiteID = nil
         }
         if let id = activeSiteID {
@@ -206,15 +213,45 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     }
 
     private func applyFileChanges(_ batch: FileChangeBatch, siteID: String, projectRoot: URL, generation gen: Int) async {
-        guard gen == generation, let knowledgeIndex else { return }
-        await KnowledgeReindex.apply(batch, to: knowledgeIndex, ranker: semanticRanker, siteID: siteID, projectRoot: projectRoot)
+        guard gen == generation else { return }
+        if let knowledgeIndex {
+            await KnowledgeReindex.apply(batch, to: knowledgeIndex, ranker: semanticRanker, siteID: siteID, projectRoot: projectRoot)
+        }
+        if let conventionsEngine {
+            await Self.applyToConventions(batch, engine: conventionsEngine, siteID: siteID, projectRoot: projectRoot)
+        }
         // A stop()/site-switch may have superseded us during the apply above; if so, drop anything
         // we re-added for a site this runtime no longer owns — mirroring populateSharedIndexes'
         // post-await unload discipline.
         guard gen == generation else {
-            await knowledgeIndex.unload(siteID: siteID)
+            await knowledgeIndex?.unload(siteID: siteID)
             await semanticRanker?.unload(siteID: siteID)
+            await conventionsEngine?.unload(siteID: siteID)
             return
+        }
+    }
+
+    /// Mirrors `KnowledgeReindex.apply`'s batch-translation logic for `ProjectConventionsEngine`.
+    /// Kept as a small static helper (not a shared type with `KnowledgeReindex`) since the two
+    /// indexes have different upsert/remove signatures and no shared ranker to keep in sync.
+    private static func applyToConventions(
+        _ batch: FileChangeBatch, engine: ProjectConventionsEngine, siteID: String, projectRoot: URL
+    ) async {
+        if batch.needsFullRescan {
+            await engine.rebuild(siteID: siteID, projectRoot: projectRoot)
+            return
+        }
+        var seen = Set<String>()
+        for url in batch.paths {
+            guard let relativePath = SiteIndexPaths.relativePOSIXPath(of: url, under: projectRoot),
+                  !SiteIndexPaths.isSkipped(relativePath: relativePath),
+                  seen.insert(relativePath).inserted
+            else { continue }
+            if FileManager.default.fileExists(atPath: url.path) {
+                await engine.upsertFile(siteID: siteID, projectRoot: projectRoot, relativePath: relativePath)
+            } else {
+                await engine.removeFile(siteID: siteID, relativePath: relativePath)
+            }
         }
     }
 
