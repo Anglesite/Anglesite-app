@@ -63,6 +63,20 @@ struct DeadAssetScannerExtractionTests {
         let refs = DeadAssetScanner.extractReferences(source: source, path: "src/components/cards/Card.astro")
         #expect(refs.fileReferences.contains("src/layouts/Base.astro"))
     }
+
+    @Test("glob pattern with no subdirectory (./*.astro) resolves to the source file's own directory")
+    func globSameDirectory() {
+        let source = "const modules = import.meta.glob('./*.astro');"
+        let refs = DeadAssetScanner.extractReferences(source: source, path: "src/pages/blog.astro")
+        #expect(refs.globDirectories.contains("src/pages"))
+    }
+
+    @Test("glob pattern with parent-directory-only (../*.astro) resolves to the parent directory")
+    func globParentDirectoryOnly() {
+        let source = "const modules = import.meta.glob('../*.astro');"
+        let refs = DeadAssetScanner.extractReferences(source: source, path: "src/pages/nested/blog.astro")
+        #expect(refs.globDirectories.contains("src/pages"))
+    }
 }
 
 @Suite("DeadAssetScanner full scan")
@@ -328,5 +342,26 @@ struct DeadAssetScannerScanTests {
         // src/wrong/components/Header.astro (a dead key that matches nothing), so this only
         // passes if the more specific "@/components/*" pattern's target is also tried.
         #expect(!candidates.map(\.path).contains("src/components/Header.astro"))
+    }
+
+    @Test("a same-directory glob pattern (./*.astro) suppresses false positives for files beside it")
+    func globSameDirectorySuppressesCandidate() {
+        let root = makeSite([
+            "src/components/index.astro": "---\nconst modules = import.meta.glob('./*.astro');\n---\n<div></div>",
+            "src/components/Card.astro": "<div>card</div>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/Card.astro"))
+    }
+
+    @Test("top-level scripts/ exclusion is case-insensitive")
+    func scriptsDirectoryExclusionCaseInsensitive() {
+        let root = makeSite([
+            "Scripts/harness/component.astro": "---\nconst modules = import.meta.glob([\"/src/components/**/*.astro\", \"/src/layouts/**/*.astro\"]);\n---\n<div></div>",
+            "src/pages/index.astro": "<div>no imports here</div>",
+            "src/components/Orphan.astro": "<div>never imported</div>",
+        ])
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(candidates.map(\.path).contains("src/components/Orphan.astro"))
     }
 }

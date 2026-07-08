@@ -34,6 +34,13 @@ import Foundation
 /// Delete always requires explicit user confirmation and is git-tracked/recoverable, which is
 /// this scanner's primary mitigation for this class of false positive.
 ///
+/// **Known limitation:** an `Astro.glob`/`import.meta.glob` root written through a path alias
+/// (e.g. `import.meta.glob("@content/*.md")`) is not resolved — `resolveGlobDirectory` only
+/// handles a literal `/`-rooted or `./`/`../`-relative pattern, not one requiring an alias lookup
+/// first. Matching an alias's own `*` against a glob pattern that has its *own* `*`/`**` wildcards
+/// is a materially more complex problem than the plain-specifier alias matching `resolveAlias`
+/// already does, and isn't attempted here. Same mitigation as above.
+///
 /// **Alias resolution scope:** `tsconfig.json`/`jsconfig.json` `compilerOptions.paths` (wildcard,
 /// exact, and multi-target entries), `baseUrl`, and a same-project `extends` chain are resolved
 /// (see `loadPathAliases`/`resolveAlias`). Aliases declared *only* via `astro.config.mjs`'s
@@ -143,9 +150,12 @@ public enum DeadAssetScanner {
     }
 
     /// Resolves `./`/`../`-prefixed `ref` against `sourcePath`'s own directory. Strips a trailing
-    /// `?query`/`#fragment` first.
+    /// `?query`/`#fragment` first. Also accepts a bare `.`/`..` (no path after it) — not a real
+    /// import specifier anyone writes, but exactly what `resolveGlobDirectory`'s truncation
+    /// produces for a same-directory or parent-directory-only glob pattern (`./*.astro`), so this
+    /// guard has to admit it or that degenerate case silently fails to resolve at all.
     static func resolveRelativePath(_ ref: String, relativeTo sourcePath: String) -> String? {
-        guard ref.hasPrefix("./") || ref.hasPrefix("../") else { return nil }
+        guard ref == "." || ref == ".." || ref.hasPrefix("./") || ref.hasPrefix("../") else { return nil }
         var clean = ref
         if let cut = clean.firstIndex(where: { $0 == "?" || $0 == "#" }) {
             clean = String(clean[clean.startIndex..<cut])
@@ -342,7 +352,7 @@ public enum DeadAssetScanner {
             // Top-level `scripts/` only (dev tooling: the Component Editor's preview harness,
             // pre-deploy checks) — not a nested directory like `src/scripts/`, which real sites
             // commonly use for client-side JS and which should still be scanned.
-            guard !relPath.hasPrefix("scripts/") else { continue }
+            guard !relPath.lowercased().hasPrefix("scripts/") else { continue }
             let actualSize = fileSize(abs)
             guard let size = actualSize, size <= 512_000 else {
                 // Missing a reference *source* here is worse than the same skip in a candidate
