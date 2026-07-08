@@ -5,7 +5,10 @@ import AnglesiteCore
 /// changes and either navigates the preview or opens the editor.
 struct SiteNavigatorView: View {
     @Bindable var model: SiteNavigatorModel
+    @Bindable var cleanup: ProjectCleanupModel
+    var onOpenCleanupCandidate: (DeadAssetScanner.CleanupCandidate) -> Void
     @FocusState private var editingFocused: Bool
+    @State private var candidateToDelete: DeadAssetScanner.CleanupCandidate?
 
     var body: some View {
         List(selection: $model.selection) {
@@ -20,6 +23,13 @@ struct SiteNavigatorView: View {
                     ForEach(section.items) { item in
                         row(for: item, in: section)
                     }
+                }
+            }
+            // Only shown once the site has real content — an empty new site keeps the plain
+            // "No content yet" overlay rather than stacking a Cleanup prompt underneath it.
+            if !model.sections.isEmpty {
+                Section("Cleanup") {
+                    cleanupContent
                 }
             }
         }
@@ -52,6 +62,34 @@ struct SiteNavigatorView: View {
             presenting: model.renameError
         ) { _ in
             Button("OK", role: .cancel) { model.renameError = nil }
+        } message: { msg in
+            Text(msg)
+        }
+        .confirmationDialog(
+            candidateToDelete.map(deleteConfirmationTitle) ?? "",
+            isPresented: Binding(
+                get: { candidateToDelete != nil },
+                set: { if !$0 { candidateToDelete = nil } }),
+            titleVisibility: .visible,
+            presenting: candidateToDelete
+        ) { candidate in
+            Button("Delete", role: .destructive) {
+                Task { await cleanup.delete(candidate) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { candidate in
+            Text(candidate.kind == .page
+                ? "This page has no incoming links. Its content will be removed from the working tree. This can be undone via git."
+                : "This file appears unused. It will be removed from the working tree. This can be undone via git.")
+        }
+        .alert(
+            "Delete failed",
+            isPresented: Binding(
+                get: { cleanup.deleteError != nil },
+                set: { if !$0 { cleanup.deleteError = nil } }),
+            presenting: cleanup.deleteError
+        ) { _ in
+            Button("OK", role: .cancel) { cleanup.deleteError = nil }
         } message: { msg in
             Text(msg)
         }
@@ -97,5 +135,54 @@ struct SiteNavigatorView: View {
         case .styles: return "paintbrush"
         case .metadata: return "globe"
         }
+    }
+
+    @ViewBuilder
+    private var cleanupContent: some View {
+        if !cleanup.hasScanned {
+            Button {
+                Task { await cleanup.scan() }
+            } label: {
+                Label(
+                    cleanup.isScanning ? "Scanning…" : "Scan for Cleanup Opportunities",
+                    systemImage: "sparkle.magnifyingglass")
+            }
+            .disabled(cleanup.isScanning)
+        } else if cleanup.candidates.isEmpty {
+            Text("No unused files found")
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(cleanup.candidates) { candidate in
+                Label(candidate.path, systemImage: cleanupIcon(for: candidate.kind))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .contextMenu {
+                        Button("Open") { onOpenCleanupCandidate(candidate) }
+                        Button("Ignore") { cleanup.ignore(candidate) }
+                        Button("Delete", role: .destructive) { candidateToDelete = candidate }
+                    }
+            }
+            Button {
+                Task { await cleanup.scan() }
+            } label: {
+                Label(cleanup.isScanning ? "Scanning…" : "Rescan", systemImage: "arrow.clockwise")
+            }
+            .disabled(cleanup.isScanning)
+        }
+    }
+
+    private func cleanupIcon(for kind: DeadAssetScanner.CleanupCandidate.Kind) -> String {
+        switch kind {
+        case .component: return "square.stack.3d.up"
+        case .layout: return "rectangle.stack"
+        case .image: return "photo"
+        case .page: return "doc.richtext"
+        }
+    }
+
+    private func deleteConfirmationTitle(for candidate: DeadAssetScanner.CleanupCandidate) -> String {
+        candidate.kind == .page
+            ? "Delete “\(candidate.path)”?"
+            : "Delete unused \(candidate.kind.rawValue) “\(candidate.path)”?"
     }
 }
