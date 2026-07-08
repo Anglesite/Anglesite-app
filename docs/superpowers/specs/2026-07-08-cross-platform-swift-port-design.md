@@ -2,6 +2,7 @@
 
 **Date:** 2026-07-08
 **Status:** Approved design (desk analysis — no compilation spikes yet)
+**Tracking:** epic #571; phases P1–P5 = #566–#570
 **Scope decisions (owner-approved):** platform-native AI by default with opt-in external LLMs via Settings; all-Swift per-platform UI bindings; native containers per platform; incremental seams in the existing package (no separate kit repo, no daemon restructuring).
 
 ## 1. Summary
