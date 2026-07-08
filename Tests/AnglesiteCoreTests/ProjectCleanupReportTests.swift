@@ -16,14 +16,18 @@ struct ProjectCleanupReportTests {
     func mergeSorted() {
         let deadAssets = [
             DeadAssetScanner.CleanupCandidate(
-                id: "src/components/Orphan.astro", path: "src/components/Orphan.astro",
+                id: "src/pages/zzz-widget.astro", path: "src/pages/zzz-widget.astro",
                 kind: .component, lastModified: Date(timeIntervalSince1970: 0), referenceCount: 0),
         ]
-        let orphanPages = [doc("src/pages/hidden.astro")]
+        let orphanPages = [doc("src/components/aaa-orphan.astro")]
         let report = ProjectCleanupReport.build(deadAssets: deadAssets, orphanPages: orphanPages)
-        #expect(report.map(\.path) == ["src/components/Orphan.astro", "src/pages/hidden.astro"])
-        #expect(report.last?.kind == .page)
-        #expect(report.last?.referenceCount == 0)
+        // Input order was [component, page]; correct output requires real sorting to
+        // [page, component] since "src/components/…" < "src/pages/…" lexicographically —
+        // this would fail if `.sorted` were ever removed from `build`.
+        #expect(report.map(\.path) == ["src/components/aaa-orphan.astro", "src/pages/zzz-widget.astro"])
+        #expect(report.first?.kind == .page)
+        #expect(report.first?.referenceCount == 0)
+        #expect(report.last?.kind == .component)
     }
 
     @Test("empty inputs produce an empty report")
