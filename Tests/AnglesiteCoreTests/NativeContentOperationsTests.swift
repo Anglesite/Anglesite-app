@@ -240,6 +240,33 @@ struct NativeContentOperationsTests {
         #expect(sha?.count == 40)
         #expect(!FileManager.default.fileExists(atPath: filePath.path))
     }
+
+    @Test("processGitDelete restores the file from HEAD when commit fails after rm succeeds")
+    func rollbackOnCommitFailure() async throws {
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        for args in [["init"], ["config", "user.email", "t@t.io"], ["config", "user.name", "t"]] {
+            _ = try await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: repo)
+        }
+        let filePath = repo.appendingPathComponent("unused.astro")
+        try "<div>original</div>".write(to: filePath, atomically: true, encoding: .utf8)
+        _ = await NativeContentOperations.processGitCommit(repo, "unused.astro", "add unused.astro")
+
+        // Install a pre-commit hook that always rejects, so `git commit` fails after `git rm`
+        // has already removed the file from the index and working tree.
+        let hookPath = repo.appendingPathComponent(".git/hooks/pre-commit")
+        try "#!/bin/sh\nexit 1\n".write(to: hookPath, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookPath.path)
+
+        let sha = await NativeContentOperations.processGitDelete(repo, "unused.astro", "Remove unused.astro")
+        #expect(sha == nil)
+        #expect(FileManager.default.fileExists(atPath: filePath.path))
+        #expect(try String(contentsOf: filePath, encoding: .utf8) == "<div>original</div>")
+
+        let status = try await ProcessSupervisor.shared.run(executable: git, arguments: ["status", "--porcelain"], currentDirectoryURL: repo)
+        #expect(status.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
 }
 
 private struct StubPageCopyGenerator: PageCopyGenerating {

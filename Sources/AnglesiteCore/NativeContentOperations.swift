@@ -242,10 +242,18 @@ public struct NativeContentOperations: ContentOperationsService {
             guard let result, result.exitCode == 0 else { return nil }
             return result
         }
-        guard await run(["rev-parse", "--git-dir"]) != nil,
-              await run(["rm", "--", relPath]) != nil,
-              await run(["commit", "-m", message, "--", relPath]) != nil,
-              let head = await run(["rev-parse", "HEAD"]) else { return nil }
+        guard await run(["rev-parse", "--git-dir"]) != nil else { return nil }
+        guard await run(["rm", "--", relPath]) != nil else { return nil }
+        guard await run(["commit", "-m", message, "--", relPath]) != nil else {
+            // `git rm` already removed the file from the index and working tree before the
+            // commit failed (no identity configured, a rejecting pre-commit hook, etc.) —
+            // restore both from HEAD so a failed delete never leaves the file gone without a
+            // commit. Same "never a raw non-git-recoverable delete" safety property the happy
+            // path relies on, applied to the failure path too.
+            _ = await run(["checkout", "HEAD", "--", relPath])
+            return nil
+        }
+        guard let head = await run(["rev-parse", "HEAD"]) else { return nil }
         return head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
