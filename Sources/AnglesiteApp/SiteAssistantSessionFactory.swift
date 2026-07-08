@@ -32,7 +32,8 @@ enum SiteAssistantSessionFactory {
         var altTextGenerator: @Sendable (
             _ siteID: String,
             _ sourceDirectory: URL,
-            _ mcpClient: @escaping MCPClientProvider
+            _ mcpClient: @escaping MCPClientProvider,
+            _ conventionsEngine: ProjectConventionsEngine?
         ) -> AltTextGenerator
 
         static let live: Dependencies = {
@@ -67,14 +68,19 @@ enum SiteAssistantSessionFactory {
                 undoCommand: undoCommand,
                 editRouterProvider: editRouterProvider,
                 assistant: assistant,
-                altTextGenerator: { siteID, sourceDirectory, mcpClient in
+                altTextGenerator: { siteID, sourceDirectory, mcpClient, conventionsEngine in
                     AltTextGenerator(
                         siteID: siteID,
                         siteDirectory: sourceDirectory,
                         isEnabled: { AppSettings.shared.autoGenerateAltText },
                         produce: { imageURL, context in
-                            try await FoundationModelAssistant(tier: .onDevice).generateStructured(
-                                prompt: "Generate concise, descriptive alt text for this image as it would appear on a website. If the image is purely decorative, mark it decorative and use empty alt text.",
+                            let conventions = await conventionsEngine?.conventions(siteID: siteID)
+                            let prompt = AltTextPromptBuilder.build(
+                                basePrompt: "Generate concise, descriptive alt text for this image as it would appear on a website. If the image is purely decorative, mark it decorative and use empty alt text.",
+                                conventions: conventions
+                            )
+                            return try await FoundationModelAssistant(tier: .onDevice).generateStructured(
+                                prompt: prompt,
                                 imageURL: imageURL,
                                 context: context,
                                 resultType: GeneratedAltText.self
@@ -107,6 +113,7 @@ enum SiteAssistantSessionFactory {
         contentGraph: SiteContentGraph,
         knowledgeIndex: SiteKnowledgeIndex,
         semanticRanker: SemanticRanker?,
+        conventionsEngine: ProjectConventionsEngine?,
         integrationService: any IntegrationOperationsService,
         dependencies: Dependencies = .live
     ) -> SiteAssistantSession {
@@ -129,7 +136,7 @@ enum SiteAssistantSessionFactory {
             undoCommand: dependencies.undoCommand(mcpClient)
         )
 
-        let altTextGenerator = dependencies.altTextGenerator(siteID, sourceDirectory, mcpClient)
+        let altTextGenerator = dependencies.altTextGenerator(siteID, sourceDirectory, mcpClient, conventionsEngine)
         let postProcessor: MCPApplyEditRouter.PostProcessor? = { reply, message in
             await altTextGenerator.postProcess(reply: reply, message: message)
         }

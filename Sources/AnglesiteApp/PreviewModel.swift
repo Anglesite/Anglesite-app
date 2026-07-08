@@ -47,12 +47,14 @@ final class PreviewModel {
         contentGraph: SiteContentGraph? = nil,
         knowledgeIndex: SiteKnowledgeIndex? = nil,
         semanticRanker: SemanticRanker? = nil,
+        conventionsEngine: ProjectConventionsEngine? = nil,
         runtimeFactory: any SiteRuntimeFactory
     ) {
         self.init(runtime: runtimeFactory.makeRuntime(
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
-            semanticRanker: semanticRanker
+            semanticRanker: semanticRanker,
+            conventionsEngine: conventionsEngine
         ))
     }
 

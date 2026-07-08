@@ -24,4 +24,5 @@ public enum SiteToolbarItemID: String, CaseIterable, Sendable {
     case deploy
     case chat
     case inspector
+    case styleGuide
 }

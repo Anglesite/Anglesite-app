@@ -7,6 +7,9 @@ struct SiteGraphExplorerView: View {
 
     var body: some View {
         HSplitView {
+            SiteGraphTree(model: model)
+                .frame(minWidth: 220, idealWidth: 260, maxWidth: 340)
+
             VStack(spacing: 0) {
                 SiteGraphToolbar(model: model)
                 Divider()
@@ -37,6 +40,9 @@ private struct SiteGraphToolbar: View {
             HStack(spacing: 8) {
                 Label("Site Graph", systemImage: "point.3.connected.trianglepath.dotted")
                     .font(.headline)
+                Text(model.visibleSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 TextField("Search graph", text: $model.searchText)
                     .textFieldStyle(.roundedBorder)
@@ -60,6 +66,82 @@ private struct SiteGraphToolbar: View {
             .scrollIndicators(.hidden)
         }
         .padding(12)
+    }
+}
+
+private struct SiteGraphTree: View {
+    @Bindable var model: SiteGraphExplorerModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Label("Explorer", systemImage: "list.bullet.indent")
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            Divider()
+            List(selection: $model.selectedNodeID) {
+                ForEach(model.groupedFilteredNodes, id: \.kind) { group in
+                    Section {
+                        ForEach(group.nodes) { node in
+                            SiteGraphTreeRow(node: node)
+                                .tag(Optional(node.id))
+                        }
+                    } header: {
+                        Label(group.kind.title, systemImage: group.kind.systemImage)
+                    }
+                }
+                if !model.unusedAssets.isEmpty {
+                    Section {
+                        ForEach(model.unusedAssets) { node in
+                            SiteGraphTreeRow(node: node, badge: "unused")
+                                .tag(Optional(node.id))
+                        }
+                    } header: {
+                        Label("Unused Assets", systemImage: "exclamationmark.triangle")
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+        }
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+}
+
+private struct SiteGraphTreeRow: View {
+    let node: SiteGraphNode
+    var badge: String?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: node.kind.systemImage)
+                .foregroundStyle(node.kind.tint)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(node.title)
+                    .lineLimit(1)
+                if let detail = node.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 4)
+            if let badge {
+                Text(badge)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else if node.referencedByCount > 0 {
+                Text("\(node.referencedByCount)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .help("\(node.referencedByCount) incoming references")
+            }
+        }
+        .help(node.filePath ?? node.detail ?? node.title)
     }
 }
 

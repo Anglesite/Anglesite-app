@@ -66,4 +66,35 @@ struct LocalContainerSiteRuntimeReindexTests {
         await runtime.stop()
         #expect(watcher.stopCount >= 1)
     }
+
+    @Test("container runtime rebuilds and re-scans project conventions the same way it does the knowledge index")
+    func routesBatchToConventionsEngine() async {
+        let root = makeSite(["src/pages/index.astro": "# Home\n"])
+        let index = SiteKnowledgeIndex()
+        let conventions = ProjectConventionsEngine()
+        let watcher = ControllableWatcher()
+        let fake = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let runtime = LocalContainerSiteRuntime(
+            ref: "HEAD",
+            control: fake,
+            mcpClient: mcp,
+            knowledgeIndex: index,
+            conventionsEngine: conventions,
+            connect: { _, _ in },
+            makeFileWatcher: { watcher })
+
+        await runtime.start(siteID: "s1", siteDirectory: root)
+        #expect(await conventions.conventions(siteID: "s1")?.writing.headingCapitalization.sampleSize == 1)
+
+        let added = root.appendingPathComponent("src/pages/about.astro")
+        try! Data("# About\n".utf8).write(to: added)
+        watcher.deliver(FileChangeBatch(paths: [added], needsFullRescan: false))
+        // 5s budget like the knowledge-index test above: the batch applies on an unstructured
+        // Task, and a 1s poll flaked on loaded CI runners once the suite grew (first seen when
+        // #535's suites landed alongside this test).
+        #expect(await poll(5) {
+            await conventions.conventions(siteID: "s1")?.writing.headingCapitalization.sampleSize == 2
+        })
+    }
 }
