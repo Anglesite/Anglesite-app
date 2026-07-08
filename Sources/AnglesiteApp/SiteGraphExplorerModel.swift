@@ -71,6 +71,17 @@ final class SiteGraphExplorerModel {
         observeTask = nil
     }
 
+    /// Forces an immediate re-scan using the already-stored `siteID`/`sourceDirectory` from the
+    /// last `start(...)`, without touching the observe-task subscription. Used after a mutation
+    /// this model has no other way to learn about — e.g. a Cleanup delete, which doesn't touch
+    /// `SiteContentGraph` for component/layout candidates, so nothing would otherwise trigger a
+    /// refresh and a deleted node would stay open-able (and, if edited and saved, resurrect the
+    /// file via a raw non-git write).
+    func refreshNow() async {
+        guard let siteID, let sourceDirectory else { return }
+        await refresh(siteID: siteID, sourceDirectory: sourceDirectory)
+    }
+
     func setKind(_ kind: SiteGraphNodeKind, enabled: Bool) {
         if enabled {
             enabledKinds.insert(kind)

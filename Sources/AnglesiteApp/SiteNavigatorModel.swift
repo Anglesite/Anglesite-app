@@ -19,6 +19,8 @@ final class SiteNavigatorModel {
 
     private var sourceDirectory: URL?
     private var websiteTitle: String?
+    private var siteID: String?
+    private var siteRoot: URL?
     private let renameService = NavigatorRenameService()
 
     private let graph: SiteContentGraph
@@ -31,6 +33,8 @@ final class SiteNavigatorModel {
     func start(siteID: String, siteRoot: URL, sourceDirectory: URL, websiteTitle: String) {
         self.sourceDirectory = sourceDirectory
         self.websiteTitle = websiteTitle
+        self.siteID = siteID
+        self.siteRoot = siteRoot
         // Cancel any prior observer (window reuse: SwiftUI can replay a different site into the
         // same window) BEFORE starting the new one, so a stale refresh can't overwrite the new
         // site's sections. The initial load runs as the new task's first step, so it is tracked
@@ -51,6 +55,17 @@ final class SiteNavigatorModel {
     func stop() {
         observeTask?.cancel()
         observeTask = nil
+    }
+
+    /// Forces an immediate re-scan using the already-stored `siteID`/`siteRoot` from the last
+    /// `start(...)`, without touching the observe-task subscription. Used after a mutation this
+    /// model has no other way to learn about — e.g. a Cleanup delete, which doesn't touch
+    /// `SiteContentGraph` for component/layout candidates, so nothing would otherwise trigger a
+    /// refresh and a deleted file would stay selectable/openable (and, if edited and saved,
+    /// resurrect the file via a raw non-git write).
+    func refreshNow() async {
+        guard let siteID, let siteRoot else { return }
+        await refresh(siteID: siteID, siteRoot: siteRoot)
     }
 
     func target(for id: String) -> NavigatorTarget? {

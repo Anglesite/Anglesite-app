@@ -416,6 +416,13 @@ final class SiteWindowModel {
     /// the delete subsequently fails, an unsaved edit in that editor/inspector is already gone
     /// even though the file itself is untouched — accepted as strictly preferable to a silent,
     /// undetected resurrection of a file git already recorded as removed.
+    ///
+    /// On success, also force-refreshes `navigator` and `graphExplorer`: neither observes anything
+    /// that fires for a component/layout/page deleted this way (the only thing that does,
+    /// `SiteContentGraph`, is never touched here), so without this a stale entry for the deleted
+    /// file would stay selectable/openable in the main Navigator tree or the Site Graph explorer —
+    /// the same resurrection risk this method just closed for the editor/inspector, reachable
+    /// through a different surface.
     @MainActor
     func deleteCleanupCandidate(_ candidate: DeadAssetScanner.CleanupCandidate) async {
         guard let site else { return }
@@ -427,7 +434,9 @@ final class SiteWindowModel {
         if inspectorContext?.model.file.url == deletedURL {
             inspectorContext = nil
         }
-        _ = await cleanup.delete(candidate)
+        guard await cleanup.delete(candidate) else { return }
+        await navigator?.refreshNow()
+        await graphExplorer.refreshNow()
     }
 
     /// Build the inspector context for a content navigator id: the typed descriptor form when the
