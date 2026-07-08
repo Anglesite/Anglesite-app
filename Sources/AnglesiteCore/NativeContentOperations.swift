@@ -250,7 +250,12 @@ public struct NativeContentOperations: ContentOperationsService {
             // restore both from HEAD so a failed delete never leaves the file gone without a
             // commit. Same "never a raw non-git-recoverable delete" safety property the happy
             // path relies on, applied to the failure path too.
-            _ = await run(["checkout", "HEAD", "--", relPath])
+            let restored = await run(["checkout", "HEAD", "--", relPath])
+            if restored == nil {
+                await LogCenter.shared.append(
+                    source: "dead-assets:delete", stream: .stderr,
+                    text: "processGitDelete: commit failed for \(relPath) AND rollback (git checkout HEAD --) also failed — the file may be missing from disk with no commit recording its removal. Manual recovery may be needed in \(projectRoot.path).")
+            }
             return nil
         }
         guard let head = await run(["rev-parse", "HEAD"]) else { return nil }
