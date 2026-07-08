@@ -638,6 +638,12 @@ struct SiteWindow: View {
                     Button("Retry") {
                         model.retryPreview()
                     }
+                    // Same deliberately-ungated affordance as the .starting screen (#560/#562):
+                    // the message above is a one-liner, but the *why* is in the subprocess log.
+                    Button("Show Logs") { openWindow(id: "debug") }
+                        .buttonStyle(.link)
+                        .font(.callout)
+                        .accessibilityHint("Opens the log of the failed dev server launch.")
                 }
             }
         case .idle:
