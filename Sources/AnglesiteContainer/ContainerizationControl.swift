@@ -229,7 +229,10 @@ public struct ContainerizationControl: LocalContainerControl {
         let initfs: Containerization.Mount
         do {
             onOutput("[boot] importing OCI layouts into image store", .stdout)
-            let store = try ImageStore(path: storeURL)
+            // Process-shared, NOT constructed per boot: ImageStore's internal AsyncLock is
+            // per-instance, and the orphaned-blob cleanup below is only safe against another
+            // window's concurrent import if both go through the same lock (#573).
+            let store = try SharedImageStore.store(at: storeURL)
 
             // App image -> ext4 rootfs mount.
             let stagedImageLayout = try BundledImage.stagedLayoutURL(source: imageLayoutURL, name: "app-image")
@@ -248,6 +251,26 @@ public struct ContainerizationControl: LocalContainerControl {
                 artifactName: "vminit-initfs", storeRoot: storeURL))
             onOutput("[boot] unpacking vminit initfs to ext4", .stdout)
             initfs = try await initImage.initBlock(at: initfsURL, for: .linuxArm)
+
+            // Reclaim blobs orphaned by a #549 re-import — after one, the previous image's whole
+            // blob set (hundreds of MB) sits unreferenced in the content store forever (#573).
+            // Runs every boot (not just after a re-import) so it also self-heals orphans left by
+            // app updates that predate this cleanup, and a failed pass just retries next boot.
+            // Safe while other windows boot concurrently: the shared store above means this
+            // serializes on the same AsyncLock as their imports, so it can never delete blobs an
+            // in-flight load has ingested but not yet referenced — and it never touches running
+            // containers, which read from unpacked ext4 files, not the blob store. Best-effort:
+            // a cleanup failure must not fail the boot.
+            do {
+                let (deleted, freed) = try await store.cleanUpOrphanedBlobs()
+                if !deleted.isEmpty {
+                    let freedText = ByteCountFormatter.string(
+                        fromByteCount: Int64(clamping: freed), countStyle: .file)
+                    onOutput("[boot] reclaimed \(deleted.count) orphaned image blob(s), \(freedText)", .stdout)
+                }
+            } catch {
+                onOutput("[boot] orphaned-blob cleanup failed (will retry next boot): \(error)", .stderr)
+            }
         } catch {
             // Unpacking may have created partial ext4 files before failing; don't leak them.
             try? FileManager.default.removeItem(at: rootfsURL)
