@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import AnglesiteBridge
 import AnglesiteCore
 
 /// SwiftUI-facing wrapper over a `SiteRuntime` actor: mirrors the runtime's `SiteRuntimeState` into
@@ -277,6 +278,27 @@ final class PreviewModel {
                 MainActor.assumeIsolated { self?.canGoForward = value }
             },
         ]
+    }
+
+    /// Whether File ▸ Print… has something to print: the preview web view exists and the runtime
+    /// is ready with a page to show. The rule itself lives in `PreviewPrinting` (AnglesiteBridge)
+    /// so it's covered by `swift test` — this is just the glue reading this model's fields (#525).
+    var canPrintPreview: Bool {
+        PreviewPrinting.isAvailable(webView: webView, displayURL: displayURL)
+    }
+
+    /// Print the previewed page (File ▸ Print ⌘P, #525). Runs the operation as a sheet on the
+    /// preview's window when it has one, else app-modal. No-ops when the preview isn't printable
+    /// yet (weak `webView` nil or runtime not ready), so this is always safe to call.
+    @MainActor
+    func printPreview() {
+        guard canPrintPreview, let webView else { return }
+        let operation = PreviewPrinting.makeOperation(for: webView)
+        if let window = webView.window {
+            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        } else {
+            operation.run()
+        }
     }
 
     /// Exposes the runtime's `MCPClient` via the same weak-getter pattern `editRouter` uses,

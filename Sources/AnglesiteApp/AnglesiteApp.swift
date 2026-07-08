@@ -244,6 +244,9 @@ struct AnglesiteApp: App {
             }
             // Export is its own Commands type so @FocusedValue tracks scene focus (see ExportSiteCommands).
             ExportSiteCommands()
+            // File ▸ Print… ⌘P for the previewed page — declared after ExportSiteCommands so it
+            // renders below Export Site Source… (`after:` groups render in declaration order, #525).
+            PrintCommands()
             // Site menu: the site window's primary operations (#511).
             SiteMenuCommands()
             // View ▸ pane switching ⌘1–3 + panel toggles (Chat ⌘K, Related Pages, Inspector ⌥⌘I) —
