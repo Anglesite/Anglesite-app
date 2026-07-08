@@ -220,6 +220,49 @@ final class SiteWindowModel {
     /// model raises its conflict alert) when the file changed externally — so the caller aborts the
     /// switch instead of clobbering the other tool's edit. Safe to call when not editing. Async
     /// because the save/check IO runs off the main actor.
+    // MARK: - Site operations (shared by the toolbar and the Site menu, #511)
+
+    /// Deploy, Backup, and Audit are mutually exclusive: each is unavailable while any of the
+    /// three runs (matches the long-standing toolbar behavior).
+    private var siteOperationRunning: Bool {
+        deploy.isRunning || backup.isRunning || audit.isRunning
+    }
+
+    var canRunDeploy: Bool { site?.isValid == true && !siteOperationRunning && preview.canDeploy }
+    var canRunBackup: Bool { site?.isValid == true && !siteOperationRunning }
+    var canRunAudit: Bool { site?.isValid == true && !siteOperationRunning }
+    var canRunHarden: Bool { site?.isValid == true && !harden.isRunning }
+
+    /// Build, scan, and `wrangler deploy` — resolves the active container control first, like the
+    /// toolbar button always has.
+    func deploySite() {
+        guard let site, canRunDeploy else { return }
+        Task { @MainActor in
+            let containerControl = await preview.activeContainerControl()
+            deploy.deploy(siteID: site.id, siteDirectory: site.sourceDirectory, containerControl: containerControl)
+        }
+    }
+
+    func backupSite() {
+        guard let site, canRunBackup else { return }
+        backup.backup(siteID: site.id, siteDirectory: site.sourceDirectory)
+    }
+
+    func auditSite() {
+        guard let site, canRunAudit else { return }
+        audit.audit(siteID: site.id, siteDirectory: site.sourceDirectory)
+    }
+
+    func recheckHealth() {
+        guard let site else { return }
+        health.recheck(siteID: site.id, siteDirectory: site.sourceDirectory)
+    }
+
+    func openPreviewInBrowser() {
+        guard let url = preview.readyURL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     /// True when the main-pane editor or the inspector holds unsaved edits — drives File ▸ Save /
     /// Revert to Saved enablement (#509).
     var hasUnsavedEdits: Bool {
