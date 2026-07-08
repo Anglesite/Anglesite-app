@@ -107,6 +107,19 @@ final class AppSettingsTests {
         #expect(settings.announcesLiveUpdates)
     }
 
+    @Test("notifiesOnCompletion defaults to true (on)") func notifiesOnCompletionDefaultsToTrue() {
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.notifiesOnCompletion)
+    }
+
+    @Test("notifiesOnCompletion round trip") func notifiesOnCompletionRoundTrip() {
+        let settings = AppSettings(defaults: defaults)
+        settings.notifiesOnCompletion = false
+        #expect(!settings.notifiesOnCompletion)
+        settings.notifiesOnCompletion = true
+        #expect(settings.notifiesOnCompletion)
+    }
+
     @Test("legacy chat backend defaults are cleaned once") func legacyChatBackendDefaultsCleanedOnce() {
         defaults.set(false, forKey: "anglesite.preferFoundationModels")
         defaults.set(true, forKey: "anglesite.didMigrateAssistantDefault")

@@ -21,6 +21,7 @@ public final class AppSettings: @unchecked Sendable {
         public static let autoGenerateAltText = "anglesite.autoGenerateAltText"
         public static let autoGeneratePageCopy = "anglesite.autoGeneratePageCopy"
         public static let announcesLiveUpdates = "anglesite.announcesLiveUpdates"
+        public static let notifiesOnCompletion = "anglesite.notifiesOnCompletion"
         public static let didCleanLegacyChatBackendDefaults = "anglesite.didCleanLegacyChatBackendDefaults"
     }
 
@@ -143,6 +144,19 @@ public final class AppSettings: @unchecked Sendable {
             return defaults.bool(forKey: Key.announcesLiveUpdates)
         }
         set { defaults.set(newValue, forKey: Key.announcesLiveUpdates) }
+    }
+
+    /// Whether the app posts a completion notification (Notification Center) when a
+    /// long-running site operation — Deploy, Backup, Audit — finishes while the app is in the
+    /// background (#526). On by default; delivery starts quietly via provisional authorization,
+    /// so the user manages prominence from System Settings. Stored inverted-from-absent so an
+    /// untouched install defaults to `true`.
+    public var notifiesOnCompletion: Bool {
+        get {
+            guard defaults.object(forKey: Key.notifiesOnCompletion) != nil else { return true }
+            return defaults.bool(forKey: Key.notifiesOnCompletion)
+        }
+        set { defaults.set(newValue, forKey: Key.notifiesOnCompletion) }
     }
 
     /// The site that was most-recently focused. Used by the Sites launcher to auto-open

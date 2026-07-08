@@ -22,6 +22,7 @@ private struct GeneralSettingsView: View {
     @AppStorage(AppSettings.Key.autoGenerateAltText) private var autoGenerateAltText: Bool = true
     @AppStorage(AppSettings.Key.autoGeneratePageCopy) private var autoGeneratePageCopy: Bool = true
     @AppStorage(AppSettings.Key.announcesLiveUpdates) private var announcesLiveUpdates: Bool = true
+    @AppStorage(AppSettings.Key.notifiesOnCompletion) private var notifiesOnCompletion: Bool = true
 
     var body: some View {
         Form {
@@ -32,6 +33,13 @@ private struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
                 Toggle("Auto-suggest descriptions for new pages and posts", isOn: $autoGeneratePageCopy)
                 Text("When you create a page or post, Anglesite uses Apple's on-device model to suggest a short SEO description. Runs locally; requires Apple Intelligence to be enabled. Falls back to a title-derived description when off or unavailable.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Notifications") {
+                Toggle("Notify when site operations finish", isOn: $notifiesOnCompletion)
+                Text("Posts a notification when a Deploy, Backup, or Audit finishes while Anglesite is in the background — success or failure. Clicking the notification brings the site's window to the front. Delivery starts quietly; promote or silence Anglesite in System Settings › Notifications.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
