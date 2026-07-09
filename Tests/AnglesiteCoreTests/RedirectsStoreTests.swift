@@ -75,7 +75,7 @@ struct RedirectsStoreTests {
             RedirectsStore.RedirectEntry(source: "/a", destination: "/b", code: .permanent),
             RedirectsStore.RedirectEntry(source: "/b", destination: "/a", code: .permanent),
         ]
-        #expect(throws: RedirectsStore.ValidationError.cycle("/b", "/a")) {
+        #expect(throws: RedirectsStore.ValidationError.cycle("/a", "/b")) {
             try store.save(entries)
         }
     }
