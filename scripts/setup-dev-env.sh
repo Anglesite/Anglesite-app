@@ -111,7 +111,9 @@ setup_linux() {
     if ldconfig -p 2>/dev/null | grep -qF 'libxml2.so.2 '; then
         ok "libxml2.so.2 present (no shim needed)"
     else
-        LIBXML2_NEW=$(ldconfig -p 2>/dev/null | awk '/libxml2\.so\.[0-9]+ /{ print $NF; exit }')
+        # `|| true`: under set -e/pipefail a failed pipeline inside $() aborts the whole
+        # script (e.g. ldconfig not on a non-root PATH); fall through to the todo below instead.
+        LIBXML2_NEW=$(ldconfig -p 2>/dev/null | awk '/libxml2\.so\.[0-9]+ /{ print $NF; exit }' || true)
         if [[ -n "$LIBXML2_NEW" ]]; then
             mkdir -p "$SHIM_DIR"
             ln -sf "$LIBXML2_NEW" "$SHIM_DIR/libxml2.so.2"
