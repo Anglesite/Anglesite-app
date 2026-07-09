@@ -1,3 +1,5 @@
+// Exercises the Darwin SecretStore implementation; compiles out with it off-Darwin.
+#if canImport(Security)
 import XCTest
 @testable import AnglesiteCore
 
@@ -98,3 +100,4 @@ final class KeychainStoreTests: XCTestCase {
         XCTAssertNil(try store.readCloudflareToken())
     }
 }
+#endif
