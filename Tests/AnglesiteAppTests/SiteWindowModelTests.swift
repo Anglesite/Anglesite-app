@@ -3,9 +3,13 @@ import Foundation
 import AnglesiteCore
 @testable import AnglesiteAppCore
 
-/// Never actually starts a runtime — `makeRuntime` isn't invoked by any test in this file, since
-/// none of them call `preview.startDevServer()`. If a future test needs a working fake runtime,
-/// extend this rather than adding a second fake type.
+/// `PreviewModel`'s convenience init constructs its runtime eagerly via `makeRuntime` (not lazily
+/// on `startDevServer()`), so this factory must hand back a real, safe-to-construct `SiteRuntime`
+/// rather than fatal-erroring. `UnavailableSiteRuntime` is the same inert runtime
+/// `LiveSiteRuntimeFactory` falls back to in production when no container runtime is available:
+/// its `start()` just settles to `.failed` rather than spawning anything, so it stays inert for
+/// every test in this file — none of them call `preview.startDevServer()`. If a future test needs
+/// a working fake runtime, extend this rather than adding a second fake type.
 struct NeverStartedSiteRuntimeFactory: SiteRuntimeFactory {
     func makeRuntime(
         contentGraph: SiteContentGraph?,
@@ -13,7 +17,7 @@ struct NeverStartedSiteRuntimeFactory: SiteRuntimeFactory {
         semanticRanker: SemanticRanker?,
         conventionsEngine: ProjectConventionsEngine?
     ) -> any SiteRuntime {
-        fatalError("NeverStartedSiteRuntimeFactory.makeRuntime should not be called in this test suite")
+        UnavailableSiteRuntime(reason: "NeverStartedSiteRuntimeFactory should not be started in this test suite")
     }
 }
 
