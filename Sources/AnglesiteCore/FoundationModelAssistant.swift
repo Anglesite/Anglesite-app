@@ -31,6 +31,10 @@ import CoreSpotlight
 /// Compiled into AnglesiteCore on both build targets; it needs no subprocess, so it is the
 /// on-device path usable from the sandboxed MAS build.
 public actor FoundationModelAssistant: ConversationalAssistant {
+    // TODO(#541): this hardcoded mangled-symbol check is a workaround for a beta Xcode/macOS SDK-OS
+    // skew. Re-verify the symbol name against the shipping GA SDK and delete this guard (and the
+    // weak-link linker settings in Package.swift/project.yml) once Xcode 27 and macOS 27 are both
+    // out of beta and the toolchain/OS pair is guaranteed to match.
     /// Whether `Attachment(imageURL:orientation:)` actually resolves on this host. FoundationModels
     /// is weak-linked (#541), so a mangled name the installed OS doesn't export binds to a NULL
     /// pointer rather than failing to load — `dlsym` against the already-loaded image is the way to
@@ -194,6 +198,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         // export binds to NULL, so calling it directly would still crash. Guard with dlsym so a
         // mismatched pair degrades to `.unavailable` instead.
         guard Self.imageAttachmentInitializerIsAvailable else {
+            // Expected on a skewed beta host (#541); if this fires on a matched SDK/OS pair the
+            // hardcoded mangled symbol has gone stale and needs re-verifying against the current SDK.
+            logger.error("Attachment(imageURL:orientation:) unresolved at runtime — vision path degraded to .unavailable (#541)")
             throw AssistantError.unavailable("FoundationModels vision API unavailable on this OS/SDK pair")
         }
         let oneShotSession = try makeSession(context: context)
