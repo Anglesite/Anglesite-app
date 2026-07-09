@@ -46,6 +46,9 @@ struct SecretStoreTests {
         let store = UnavailableSecretStore()
         #expect(try store.read(account: "anything") == nil)
         try store.delete(account: "anything")  // must not throw
+        // Empty write means delete (protocol contract), so it must succeed as a no-op
+        // even though persisting is unsupported.
+        try store.write("", account: "anything")
         #expect(throws: UnavailableSecretStore.WriteUnsupported.self) {
             try store.write("secret", account: "anything")
         }

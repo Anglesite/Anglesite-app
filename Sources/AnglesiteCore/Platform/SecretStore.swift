@@ -58,7 +58,14 @@ public struct UnavailableSecretStore: SecretStore {
     public init() {}
 
     public func read(account: String) throws -> String? { nil }
-    public func write(_ value: String, account: String) throws { throw WriteUnsupported() }
+
+    public func write(_ value: String, account: String) throws {
+        // Uphold the protocol contract: an empty write means delete, and deleting from a
+        // store that holds nothing is a successful no-op. Only persisting is unsupported.
+        if value.isEmpty { return }
+        throw WriteUnsupported()
+    }
+
     public func delete(account: String) throws {}
 }
 
