@@ -97,3 +97,37 @@ extension SiteWindowModelTests {
         #expect(model.cleanup.deleteError?.contains("no longer in the Cleanup list") == true)
     }
 }
+
+extension SiteWindowModelTests {
+    @Test("createPost no-ops safely when there is no open site")
+    func createPostNoSiteReturnsSiteNotFound() async {
+        let model = makeModel()
+        let result = await model.createPost(title: "Hello")
+        #expect(result == .siteNotFound)
+    }
+
+    @Test("createComponent no-ops safely when there is no open site")
+    func createComponentNoSiteReturnsSiteNotFound() async {
+        let model = makeModel()
+        let result = await model.createComponent(name: "Widget")
+        #expect(result == .siteNotFound)
+    }
+
+    @Test("confirmDelete clears deleteConfirmation and no-ops when there is no open site")
+    func confirmDeleteNoSiteIsNoOp() async {
+        let model = makeModel()
+        model.deleteConfirmation = NavigatorItem(id: "site-1:page:/about", title: "About", target: .route("/about"))
+
+        await model.confirmDelete()
+
+        #expect(model.deleteConfirmation == nil)
+    }
+
+    @Test("duplicate no-ops safely when there is no open site")
+    func duplicateNoSiteIsNoOp() async {
+        let model = makeModel()
+        await model.duplicate(id: "site-1:page:/about")
+        // No crash, no error surfaced — there's nothing to duplicate without an open site.
+        #expect(model.contentActionError == nil)
+    }
+}
