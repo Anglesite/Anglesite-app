@@ -34,15 +34,33 @@ RESOURCES="$REPO_ROOT/Resources"
 
 # Per-artifact runtime overrides (BundledImage honors these at runtime, so a dev
 # running against external artifacts shouldn't be nagged about unvendored dirs).
+# Mirror BundledImage.swift exactly: a set override still gets its own
+# file-existence check, not a free pass — a stale/mistyped override must fail
+# here too, or this guard can't be trusted (it would print "provisioned — OK"
+# and pass a Release build that still hits NotProvisioned at runtime).
 missing=()
 
-if [[ -z "${ANGLESITE_CONTAINER_IMAGE:-}" && ! -f "$RESOURCES/container-image/index.json" ]]; then
+if [[ -n "${ANGLESITE_CONTAINER_IMAGE:-}" ]]; then
+    if [[ ! -f "$ANGLESITE_CONTAINER_IMAGE/index.json" ]]; then
+        missing+=("ANGLESITE_CONTAINER_IMAGE=$ANGLESITE_CONTAINER_IMAGE has no index.json — fix or unset the override")
+    fi
+elif [[ ! -f "$RESOURCES/container-image/index.json" ]]; then
     missing+=("Resources/container-image is unvendored (no index.json) — run scripts/vendor-container-image.sh")
 fi
-if [[ -z "${ANGLESITE_CONTAINER_KERNEL:-}" && ! -f "$RESOURCES/container-kernel/vmlinux" ]]; then
+
+if [[ -n "${ANGLESITE_CONTAINER_KERNEL:-}" ]]; then
+    if [[ ! -f "$ANGLESITE_CONTAINER_KERNEL" ]]; then
+        missing+=("ANGLESITE_CONTAINER_KERNEL=$ANGLESITE_CONTAINER_KERNEL does not exist — fix or unset the override")
+    fi
+elif [[ ! -f "$RESOURCES/container-kernel/vmlinux" ]]; then
     missing+=("Resources/container-kernel is unvendored (no vmlinux) — run scripts/vendor-container-kernel.sh")
 fi
-if [[ -z "${ANGLESITE_CONTAINER_INITFS:-}" && ! -f "$RESOURCES/container-initfs/index.json" ]]; then
+
+if [[ -n "${ANGLESITE_CONTAINER_INITFS:-}" ]]; then
+    if [[ ! -f "$ANGLESITE_CONTAINER_INITFS/index.json" ]]; then
+        missing+=("ANGLESITE_CONTAINER_INITFS=$ANGLESITE_CONTAINER_INITFS has no index.json — fix or unset the override")
+    fi
+elif [[ ! -f "$RESOURCES/container-initfs/index.json" ]]; then
     missing+=("Resources/container-initfs is unvendored (no index.json) — run scripts/vendor-container-kernel.sh")
 fi
 
