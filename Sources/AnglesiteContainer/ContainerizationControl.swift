@@ -43,14 +43,7 @@ public struct ContainerizationControl: LocalContainerControl {
         ref: String,
         onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> LocalContainerSession {
-        // Fail fast with a clear reason instead of a raw `git clone ... exited 128`: hydration
-        // hard-depends on `sourceRepo` being a real git repo, and a `Source/` without `.git` (e.g.
-        // a scaffold whose `git init` step failed, or a pre-#548 site created before that failure
-        // became loud) would otherwise die inside the guest with no indication why (#548).
-        guard FileManager.default.fileExists(atPath: sourceRepo.appendingPathComponent(".git").path) else {
-            throw LocalContainerError.cloneFailed(
-                "this site has no git repository — recreate it, or run `git init` in its Source folder")
-        }
+        try SourceRepoPrecondition.requireGitRepo(at: sourceRepo)
 
         let container = try await makeBareContainer(siteID: siteID, sourceRepo: sourceRepo, onOutput: onOutput)
 
