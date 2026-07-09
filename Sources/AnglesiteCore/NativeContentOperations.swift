@@ -12,6 +12,7 @@ public struct NativeContentOperations: ContentOperationsService {
 
     private let siteDirectory: @Sendable (_ siteID: String) async -> URL?
     private let gitCommit: GitCommit
+    private let gitDelete: GitDelete
     private let now: @Sendable () -> Date
     private let copyGenerator: any PageCopyGenerating
     // FileManager is a thread-safe singleton but not Sendable; nonisolated(unsafe) preserves the
@@ -22,12 +23,14 @@ public struct NativeContentOperations: ContentOperationsService {
     public init(
         siteDirectory: @escaping @Sendable (_ siteID: String) async -> URL?,
         gitCommit: @escaping GitCommit = NativeContentOperations.processGitCommit,
+        gitDelete: @escaping GitDelete = NativeContentOperations.processGitDelete,
         now: @escaping @Sendable () -> Date = { Date() },
         copyGenerator: any PageCopyGenerating = NoopPageCopyGenerator(),
         fileManager: FileManager = .default
     ) {
         self.siteDirectory = siteDirectory
         self.gitCommit = gitCommit
+        self.gitDelete = gitDelete
         self.now = now
         self.copyGenerator = copyGenerator
         self.fileManager = fileManager
@@ -207,6 +210,133 @@ public struct NativeContentOperations: ContentOperationsService {
         onProgress?(.createFinalizing)
         _ = await gitCommit(root, relPath, "anglesite: add \(descriptor.id)")
         return .created(filePath: relPath, identifier: slot)
+    }
+
+    /// Delete a page/post/component file: `git rm` + commit via the injected `gitDelete` closure
+    /// (default `processGitDelete`). No Trash involved — git history is the sole undo mechanism,
+    /// matching `ProjectCleanupModel.delete`'s existing precedent for dead-asset deletion.
+    public func deleteContent(siteID: String, relativePath: String) async -> ContentDeleteResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        let abs = root.appendingPathComponent(relativePath)
+        guard fileManager.fileExists(atPath: abs.path) else {
+            return .failed(reason: "No file exists at \(relativePath)")
+        }
+        guard await gitDelete(root, relativePath, "anglesite: delete \(relativePath)") != nil else {
+            return .failed(reason: "Couldn't delete \(relativePath). Check for uncommitted changes and try again.")
+        }
+        return .deleted(filePath: relativePath)
+    }
+
+    /// Duplicate an existing page: read its contents, retitle to `"<title> Copy"` (bumping to
+    /// `"<title> Copy 2"`, `"<title> Copy 3"`… on route collision — which slugifies to the
+    /// `-copy`/`-copy-2` file-name convention), write the new file, commit. Title rewrite reuses
+    /// `PageTitleEditor` (same transform `NavigatorRenameService` uses for Rename); if the source
+    /// has no editable title location, the contents are duplicated verbatim.
+    public func duplicatePage(siteID: String, relativePath: String, title: String) async -> ContentCreateResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        let sourceAbs = root.appendingPathComponent(relativePath)
+        guard fileManager.fileExists(atPath: sourceAbs.path) else {
+            return .failed(reason: "No page exists at \(relativePath)")
+        }
+        let contents: String
+        do { contents = try FileDocumentIO.load(sourceAbs, fileManager: fileManager).contents }
+        catch { return .failed(reason: "\(error)") }
+
+        let baseTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let copyTitle = baseTitle.isEmpty ? "Copy" : "\(baseTitle) Copy"
+        var attempt = 1
+        var route = ContentScaffold.normalizeRoute(ContentScaffold.slugify(copyTitle))
+        var relPath = ContentScaffold.pageRelativePath(normalizedRoute: route)
+        while attempt < 1000, fileManager.fileExists(atPath: root.appendingPathComponent(relPath).path) {
+            attempt += 1
+            route = ContentScaffold.normalizeRoute(ContentScaffold.slugify("\(copyTitle) \(attempt)"))
+            relPath = ContentScaffold.pageRelativePath(normalizedRoute: route)
+        }
+        guard !fileManager.fileExists(atPath: root.appendingPathComponent(relPath).path) else {
+            return .failed(reason: "Couldn't find an available name for the duplicate after 1000 attempts")
+        }
+
+        let ext = (relativePath as NSString).pathExtension
+        let rewritten: String
+        switch PageTitleEditor.rewrite(contents: contents, fileExtension: ext, newTitle: copyTitle) {
+        case .success(let s): rewritten = s
+        case .failure: rewritten = contents
+        }
+
+        do { try write(rewritten, to: root.appendingPathComponent(relPath)) }
+        catch { return .failed(reason: "\(error)") }
+
+        _ = await gitCommit(root, relPath, "anglesite: duplicate page \(route)")
+        return .created(filePath: relPath, identifier: route)
+    }
+
+    /// Duplicate an existing post within the same `collection`. Same retitle/collision/commit
+    /// shape as `duplicatePage`, but derives a slug (not a route) and writes via
+    /// `ContentScaffold.postRelativePath`.
+    public func duplicatePost(siteID: String, relativePath: String, collection: String, title: String) async -> ContentCreateResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        let sourceAbs = root.appendingPathComponent(relativePath)
+        guard fileManager.fileExists(atPath: sourceAbs.path) else {
+            return .failed(reason: "No \(collection) entry exists at \(relativePath)")
+        }
+        let contents: String
+        do { contents = try FileDocumentIO.load(sourceAbs, fileManager: fileManager).contents }
+        catch { return .failed(reason: "\(error)") }
+
+        let baseTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let copyTitle = baseTitle.isEmpty ? "Copy" : "\(baseTitle) Copy"
+        var attempt = 1
+        var slug = ContentScaffold.slugify(copyTitle)
+        var relPath = ContentScaffold.postRelativePath(collection: collection, slug: slug)
+        while attempt < 1000, fileManager.fileExists(atPath: root.appendingPathComponent(relPath).path) {
+            attempt += 1
+            slug = ContentScaffold.slugify("\(copyTitle) \(attempt)")
+            relPath = ContentScaffold.postRelativePath(collection: collection, slug: slug)
+        }
+        guard !fileManager.fileExists(atPath: root.appendingPathComponent(relPath).path) else {
+            return .failed(reason: "Couldn't find an available name for the duplicate after 1000 attempts")
+        }
+
+        let ext = (relativePath as NSString).pathExtension
+        let rewritten: String
+        switch PageTitleEditor.rewrite(contents: contents, fileExtension: ext, newTitle: copyTitle) {
+        case .success(let s): rewritten = s
+        case .failure: rewritten = contents
+        }
+
+        do { try write(rewritten, to: root.appendingPathComponent(relPath)) }
+        catch { return .failed(reason: "\(error)") }
+
+        _ = await gitCommit(root, relPath, "anglesite: duplicate \(collection) \(slug)")
+        return .created(filePath: relPath, identifier: slug)
+    }
+
+    /// Scaffold a minimal blank `.astro` component into `src/components/`. Derives a PascalCase
+    /// file name from `name` (Astro convention) via the same `ContentScaffold.slugify` used for
+    /// pages/posts, then title-cases each hyphenated segment.
+    public func createComponent(siteID: String, name: String) async -> ContentCreateResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { return .failed(reason: "New Component requires a non-empty name") }
+
+        let slug = ContentScaffold.slugify(cleanName)
+        guard !slug.isEmpty else { return .failed(reason: "Couldn't derive a file name from \"\(cleanName)\"") }
+        let fileName = slug.split(separator: "-")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined()
+
+        let relPath = "src/components/\(fileName).astro"
+        let abs = root.appendingPathComponent(relPath)
+        if fileManager.fileExists(atPath: abs.path) {
+            return .failed(reason: "A component already exists at \(relPath)")
+        }
+
+        let contents = ContentScaffold.renderComponent(name: fileName)
+        do { try write(contents, to: abs) }
+        catch { return .failed(reason: "\(error)") }
+
+        _ = await gitCommit(root, relPath, "anglesite: add component \(fileName)")
+        return .created(filePath: relPath, identifier: fileName)
     }
 
     private func write(_ contents: String, to abs: URL) throws {

@@ -22,6 +22,10 @@ public struct ContentCreationWorkflow: ContentOperationsService {
         _ slug: String?,
         _ onProgress: ProgressHandler?
     ) async -> ContentCreateResult
+    public typealias ContentDeleter = @Sendable (_ siteID: String, _ relativePath: String) async -> ContentDeleteResult
+    public typealias PageDuplicator = @Sendable (_ siteID: String, _ relativePath: String, _ title: String) async -> ContentCreateResult
+    public typealias PostDuplicator = @Sendable (_ siteID: String, _ relativePath: String, _ collection: String, _ title: String) async -> ContentCreateResult
+    public typealias ComponentCreator = @Sendable (_ siteID: String, _ name: String) async -> ContentCreateResult
 
     private let operations: any ContentOperationsService
     private let contentGraph: SiteContentGraph?
@@ -29,6 +33,10 @@ public struct ContentCreationWorkflow: ContentOperationsService {
     private let siteDirectory: SiteDirectoryResolver
     private let pageTemplateCreator: PageTemplateCreator?
     private let typedSlugCreator: TypedSlugCreator?
+    private let contentDeleter: ContentDeleter?
+    private let pageDuplicator: PageDuplicator?
+    private let postDuplicator: PostDuplicator?
+    private let componentCreator: ComponentCreator?
 
     public init(
         operations: any ContentOperationsService,
@@ -36,7 +44,11 @@ public struct ContentCreationWorkflow: ContentOperationsService {
         knowledgeIndex: SiteKnowledgeIndex? = nil,
         siteDirectory: @escaping SiteDirectoryResolver,
         pageTemplateCreator: PageTemplateCreator? = nil,
-        typedSlugCreator: TypedSlugCreator? = nil
+        typedSlugCreator: TypedSlugCreator? = nil,
+        contentDeleter: ContentDeleter? = nil,
+        pageDuplicator: PageDuplicator? = nil,
+        postDuplicator: PostDuplicator? = nil,
+        componentCreator: ComponentCreator? = nil
     ) {
         self.operations = operations
         self.contentGraph = contentGraph
@@ -44,6 +56,10 @@ public struct ContentCreationWorkflow: ContentOperationsService {
         self.siteDirectory = siteDirectory
         self.pageTemplateCreator = pageTemplateCreator
         self.typedSlugCreator = typedSlugCreator
+        self.contentDeleter = contentDeleter
+        self.pageDuplicator = pageDuplicator
+        self.postDuplicator = postDuplicator
+        self.componentCreator = componentCreator
     }
 
     public static func native(
@@ -78,6 +94,18 @@ public struct ContentCreationWorkflow: ContentOperationsService {
                     slug: slug,
                     onProgress: onProgress
                 )
+            },
+            contentDeleter: { siteID, relativePath in
+                await native.deleteContent(siteID: siteID, relativePath: relativePath)
+            },
+            pageDuplicator: { siteID, relativePath, title in
+                await native.duplicatePage(siteID: siteID, relativePath: relativePath, title: title)
+            },
+            postDuplicator: { siteID, relativePath, collection, title in
+                await native.duplicatePost(siteID: siteID, relativePath: relativePath, collection: collection, title: title)
+            },
+            componentCreator: { siteID, name in
+                await native.createComponent(siteID: siteID, name: name)
             }
         )
     }
@@ -177,9 +205,15 @@ public struct ContentCreationWorkflow: ContentOperationsService {
     }
 
     private func refreshContentGraphIfCreated(_ result: ContentCreateResult, siteID: String) async {
-        guard case let .created(filePath, _) = result, let root = await siteDirectory(siteID) else {
-            return
-        }
+        guard case let .created(filePath, _) = result else { return }
+        await refreshContentGraph(siteID: siteID, indexFilePath: filePath)
+    }
+
+    /// Rescan and publish the site's content graph. Shared by every successful create *and*
+    /// `deleteContent` — a delete has no `filePath` to index (nothing to add to the knowledge
+    /// index for a file that's gone), so `indexFilePath` is optional and only creates pass it.
+    private func refreshContentGraph(siteID: String, indexFilePath: String? = nil) async {
+        guard let root = await siteDirectory(siteID) else { return }
         if let contentGraph {
             let listing = await Task.detached(priority: .utility) {
                 ContentScanner.scan(projectRoot: root, siteID: siteID)
@@ -191,6 +225,40 @@ public struct ContentCreationWorkflow: ContentOperationsService {
                 images: listing.images
             )
         }
-        await knowledgeIndex?.upsertFile(siteID: siteID, projectRoot: root, relativePath: filePath)
+        if let indexFilePath {
+            await knowledgeIndex?.upsertFile(siteID: siteID, projectRoot: root, relativePath: indexFilePath)
+        }
+    }
+
+    public func deleteContent(siteID: String, relativePath: String) async -> ContentDeleteResult {
+        guard let contentDeleter else { return .failed(reason: "Delete is not configured for this workflow") }
+        let result = await contentDeleter(siteID, relativePath)
+        if case .deleted = result {
+            await refreshContentGraph(siteID: siteID)
+        }
+        return result
+    }
+
+    public func duplicatePage(siteID: String, relativePath: String, title: String) async -> ContentCreateResult {
+        guard let pageDuplicator else { return .failed(reason: "Duplicate is not configured for this workflow") }
+        let result = await pageDuplicator(siteID, relativePath, title)
+        await refreshContentGraphIfCreated(result, siteID: siteID)
+        return result
+    }
+
+    public func duplicatePost(siteID: String, relativePath: String, collection: String, title: String) async -> ContentCreateResult {
+        guard let postDuplicator else { return .failed(reason: "Duplicate is not configured for this workflow") }
+        let result = await postDuplicator(siteID, relativePath, collection, title)
+        await refreshContentGraphIfCreated(result, siteID: siteID)
+        return result
+    }
+
+    /// Components aren't part of `SiteContentGraph` (pages/posts/images only), so — matching the
+    /// existing precedent for dead-asset Cleanup deletes, which also don't touch the graph — no
+    /// graph refresh happens here. The app-layer caller is responsible for refreshing the
+    /// Navigator's filesystem-backed sections (`SiteNavigatorModel.refreshNow()`).
+    public func createComponent(siteID: String, name: String) async -> ContentCreateResult {
+        guard let componentCreator else { return .failed(reason: "Component creation is not configured for this workflow") }
+        return await componentCreator(siteID, name)
     }
 }

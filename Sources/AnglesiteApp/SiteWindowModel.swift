@@ -101,6 +101,20 @@ final class SiteWindowModel {
     var dependencyUpdateModel: DependencyUpdateModel?
     var newPagePresented = false
     var newCollectionPresented = false
+    var newPostPresented = false
+    var newComponentPresented = false
+    /// Non-nil ⟺ the Delete confirmation dialog is showing for this navigator item (#516).
+    /// Hosted in `SiteWindow` (mirrors `revertConfirmationPresented`'s alert-hosting pattern) —
+    /// set from both the navigator's row context menu and the Edit ▸ Delete menu command.
+    var deleteConfirmation: NavigatorItem?
+    /// Surfaces a Delete/Duplicate failure — mirrors `cleanup.deleteError`, but for content
+    /// (page/post) delete/duplicate rather than Cleanup's dead-asset delete.
+    var contentActionError: String?
+    /// Non-nil ⟺ the "Add Redirect?" prompt is showing (#530), holding the route that was just
+    /// deleted. Set by `confirmDelete()` only when the deleted item was a page (posts carry no
+    /// `route`) and the delete actually succeeded — never break an inbound URL a user didn't
+    /// choose to abandon.
+    var pendingRedirectOfferRoute: String?
     /// File ▸ Revert to Saved is destructive, so it routes through a confirmation alert hosted by
     /// `SiteWindow` (#509).
     var revertConfirmationPresented = false
@@ -732,6 +746,120 @@ final class SiteWindowModel {
             title: title,
             slug: slug
         )
+    }
+
+    func createPost(title: String) async -> ContentCreateResult {
+        guard let site else { return .siteNotFound }
+        return await contentCreation.createPost(siteID: site.id, title: title, collection: nil, slug: nil)
+    }
+
+    /// Components aren't tracked in `SiteContentGraph`, so — unlike `createPage`/`createPost`/
+    /// `createCollectionEntry`, whose graph rescan already triggers the Navigator's own
+    /// change-stream refresh — this force-refreshes the Navigator directly on success. Same
+    /// reasoning as `deleteCleanupCandidate`'s force-refresh for non-graph-tracked files.
+    func createComponent(name: String) async -> ContentCreateResult {
+        guard let site else { return .siteNotFound }
+        let result = await contentCreation.createComponent(siteID: site.id, name: name)
+        if case .created = result {
+            await navigator?.refreshNow()
+        }
+        return result
+    }
+
+    /// Resolves `deleteConfirmation` to its page/post record, deletes via
+    /// `contentCreation.deleteContent`, and clears the confirmation. Mirrors
+    /// `deleteCleanupCandidate`'s ordering: editor/inspector state open on the file being deleted
+    /// is discarded *before* the delete call (not after), so a suspended flush across the git
+    /// subprocess calls can't resurrect the file. Unlike `deleteCleanupCandidate` (dead assets,
+    /// rarely under active edit), pages/posts routinely are — so the discarded state is snapshotted
+    /// and restored on `.failed`, rather than silently dropped, since a failed delete never
+    /// actually touched the file (PR #585 review).
+    @MainActor
+    func confirmDelete() async {
+        guard let item = deleteConfirmation else { return }
+        deleteConfirmation = nil
+        guard let site, case .route = item.target else { return }
+
+        let relPath: String
+        // Captured before the delete call, not derived after: `.deleted(filePath:)` doesn't carry
+        // a route, and posts have none to carry regardless (#530) — only a page's route is ever a
+        // redirect-offer candidate.
+        var deletedPageRoute: String?
+        if let page = await contentGraph.page(id: item.id) {
+            relPath = page.filePath
+            deletedPageRoute = page.route
+        } else if let post = await contentGraph.post(id: item.id) {
+            relPath = post.filePath
+        } else {
+            return
+        }
+
+        let deletedURL = site.sourceDirectory.appendingPathComponent(relPath)
+        var savedEditor: (mode: MainPaneMode, editor: ActiveEditor)?
+        if activeEditorFile?.url == deletedURL, let editor = activeEditor {
+            savedEditor = (mainPaneMode, editor)
+            activeEditor = nil
+            mainPaneMode = .preview
+        }
+        let savedInspector = inspectorContext?.model.file.url == deletedURL ? inspectorContext : nil
+        if savedInspector != nil {
+            inspectorContext = nil
+        }
+
+        let result = await contentCreation.deleteContent(siteID: site.id, relativePath: relPath)
+        switch result {
+        case .deleted:
+            if navigator?.selection == item.id { navigator?.selection = nil }
+            if let deletedPageRoute {
+                pendingRedirectOfferRoute = deletedPageRoute
+            }
+        case .failed(let reason):
+            contentActionError = reason
+            if let savedEditor {
+                activeEditor = savedEditor.editor
+                mainPaneMode = savedEditor.mode
+            }
+            if let savedInspector {
+                inspectorContext = savedInspector
+            }
+        case .siteNotFound:
+            break
+        }
+    }
+
+    /// Duplicates the page/post at `id`. Non-destructive, so no confirmation. On success, refreshes
+    /// the Navigator (deterministic — doesn't rely on `SiteContentGraph`'s change-stream having
+    /// already been drained by the time this returns) and selects the new item, whose id follows
+    /// the documented `SiteContentGraph.Page`/`Post` format (`"{siteID}:page:{route}"` /
+    /// `"{siteID}:post:{slug}"`) — `identifier` in `ContentCreateResult.created` is exactly the
+    /// route (page) or slug (post) per that type's own doc comment.
+    @MainActor
+    func duplicate(id: String) async {
+        guard let site else { return }
+
+        let result: ContentCreateResult
+        let isPost: Bool
+        if let page = await contentGraph.page(id: id) {
+            isPost = false
+            result = await contentCreation.duplicatePage(
+                siteID: site.id, relativePath: page.filePath, title: page.title ?? page.route)
+        } else if let post = await contentGraph.post(id: id) {
+            isPost = true
+            result = await contentCreation.duplicatePost(
+                siteID: site.id, relativePath: post.filePath, collection: post.collection, title: post.title)
+        } else {
+            return
+        }
+
+        switch result {
+        case .created(_, let identifier):
+            await navigator?.refreshNow()
+            navigator?.selection = isPost ? "\(site.id):post:\(identifier)" : "\(site.id):page:\(identifier)"
+        case .failed(let reason):
+            contentActionError = reason
+        case .siteNotFound:
+            break
+        }
     }
 
     func loadAndStart(siteID: String?, openSitesWindow: () -> Void, dismissSiteWindow: @escaping () -> Void) async {
