@@ -132,6 +132,14 @@ final class SiteWindowModel {
     /// instruction: the delete dialog no longer mentions git at all, so this is the only way a user
     /// gets the file back.
     var pendingDeleteUndo: DeleteUndoOffer?
+    /// Editor/inspector state open on the file `pendingDeleteUndo` covers, snapshotted by
+    /// `confirmDelete()` at the same moment as the `.failed`-path snapshot below it. Consumed by
+    /// `undoDelete()` (restored, mirroring the `.failed` path) or discarded by
+    /// `dismissDeleteUndo()` (the file stays deleted, so there's nothing to reopen). Not stored on
+    /// `DeleteUndoOffer` itself: `ActiveEditor`/`InspectorContext` aren't `Equatable`, which
+    /// `DeleteUndoOffer` needs for the alert's `onChange(of:)` title capture.
+    private var pendingDeleteUndoEditor: (mode: MainPaneMode, editor: ActiveEditor)?
+    private var pendingDeleteUndoInspector: InspectorContext?
     /// File ▸ Revert to Saved is destructive, so it routes through a confirmation alert hosted by
     /// `SiteWindow` (#509).
     var revertConfirmationPresented = false
@@ -866,6 +874,8 @@ final class SiteWindowModel {
                 pendingDeleteUndo = DeleteUndoOffer(
                     id: relPath, title: item.title, relativePath: relPath,
                     contents: savedContents, redirectRoute: deletedRoute)
+                pendingDeleteUndoEditor = savedEditor
+                pendingDeleteUndoInspector = savedInspector
             } else if let deletedRoute {
                 pendingRedirectOfferRoute = deletedRoute
             }
@@ -886,10 +896,21 @@ final class SiteWindowModel {
     /// Restores the file captured by `pendingDeleteUndo` — the app-level "recover the last version"
     /// affordance (#586) the delete dialog's copy now points to instead of git. Re-writes the exact
     /// captured contents and re-commits, mirroring every other content mutation in this model.
+    /// Also reopens the editor/inspector `confirmDelete()` snapshotted, same as its own `.failed`
+    /// path restores them — an undo that brings the file back but leaves the user staring at
+    /// Preview would be only half a restore (PR #608 review).
     @MainActor
     func undoDelete() async {
-        guard let offer = pendingDeleteUndo, let site else { return }
+        guard let offer = pendingDeleteUndo else { return }
         pendingDeleteUndo = nil
+        let savedEditor = pendingDeleteUndoEditor
+        let savedInspector = pendingDeleteUndoInspector
+        pendingDeleteUndoEditor = nil
+        pendingDeleteUndoInspector = nil
+        // Cleared above regardless of `site`, mirroring `confirmDelete()`'s
+        // clear-before-guard ordering — an offer for a site that's since closed shouldn't linger.
+        guard let site else { return }
+
         let result = await contentCreation.restoreContent(
             siteID: site.id, relativePath: offer.relativePath, contents: offer.contents)
         switch result {
@@ -900,15 +921,31 @@ final class SiteWindowModel {
         case .siteNotFound:
             break
         }
+
+        // Reopen iff the file is actually back on disk — true both when `restoreContent` fully
+        // succeeds and when only its best-effort recommit fails (the write itself still landed);
+        // not true if the write itself failed, in which case there's nothing to reopen.
+        let restoredURL = site.sourceDirectory.appendingPathComponent(offer.relativePath)
+        guard FileManager.default.fileExists(atPath: restoredURL.path) else { return }
+        if let savedEditor {
+            activeEditor = savedEditor.editor
+            mainPaneMode = savedEditor.mode
+        }
+        if let savedInspector {
+            inspectorContext = savedInspector
+        }
     }
 
     /// Dismisses the Undo offer without restoring — the deferred half of `confirmDelete()`'s
     /// mutual-exclusion with the redirect offer: only now (Undo declined) does a deleted page/post
-    /// get its "Add Redirect?" prompt.
+    /// get its "Add Redirect?" prompt. The snapshotted editor/inspector state is discarded, not
+    /// restored: the file stays deleted, so there's nothing valid to reopen it onto.
     @MainActor
     func dismissDeleteUndo() {
         guard let offer = pendingDeleteUndo else { return }
         pendingDeleteUndo = nil
+        pendingDeleteUndoEditor = nil
+        pendingDeleteUndoInspector = nil
         if let route = offer.redirectRoute {
             pendingRedirectOfferRoute = route
         }

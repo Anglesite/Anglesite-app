@@ -327,6 +327,78 @@ struct ContentCreationWorkflowTests {
 
         guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
     }
+
+    @Test("successful restoreContent reloads content graph so the restored page reappears")
+    func restoreContentRefreshesGraph() async throws {
+        let root = try makeSite()
+        let graph = SiteContentGraph()
+        let operations = FakeCreateOperations { _, _, _ in
+            .failed(reason: "unexpected")
+        } createPost: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        } createTyped: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        }
+        let workflow = ContentCreationWorkflow(
+            operations: operations,
+            contentGraph: graph,
+            siteDirectory: { _ in root },
+            contentRestorer: { _, relPath, contents in
+                let url = root.appendingPathComponent(relPath)
+                try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? contents.write(to: url, atomically: true, encoding: .utf8)
+                return .created(filePath: relPath, identifier: "/about")
+            }
+        )
+
+        let result = await workflow.restoreContent(
+            siteID: Self.siteID, relativePath: "src/pages/about.astro",
+            contents: ContentScaffold.renderPage(title: "About", layoutImport: "../layouts/BaseLayout.astro"))
+
+        #expect(result == .created(filePath: "src/pages/about.astro", identifier: "/about"))
+        #expect(await graph.pages(for: Self.siteID).map(\.route) == ["/about"])
+    }
+
+    @Test("failed restoreContent leaves content graph unchanged")
+    func failedRestoreContentDoesNotRefreshGraph() async throws {
+        let root = try makeSite()
+        let graph = SiteContentGraph()
+        let operations = FakeCreateOperations { _, _, _ in
+            .failed(reason: "unexpected")
+        } createPost: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        } createTyped: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        }
+        let workflow = ContentCreationWorkflow(
+            operations: operations,
+            contentGraph: graph,
+            siteDirectory: { _ in root },
+            contentRestorer: { _, _, _ in .failed(reason: "couldn't save it to your site's history") }
+        )
+
+        let result = await workflow.restoreContent(siteID: Self.siteID, relativePath: "src/pages/about.astro", contents: "x")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+        #expect(await graph.pages(for: Self.siteID).isEmpty)
+    }
+
+    @Test("restoreContent reports failed when the workflow has no contentRestorer configured")
+    func restoreContentUnconfigured() async throws {
+        let root = try makeSite()
+        let operations = FakeCreateOperations { _, _, _ in
+            .failed(reason: "unexpected")
+        } createPost: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        } createTyped: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        }
+        let workflow = ContentCreationWorkflow(operations: operations, contentGraph: nil, siteDirectory: { _ in root })
+
+        let result = await workflow.restoreContent(siteID: Self.siteID, relativePath: "src/pages/about.astro", contents: "x")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
 }
 
 private struct FakeCreateOperations: ContentOperationsService {
