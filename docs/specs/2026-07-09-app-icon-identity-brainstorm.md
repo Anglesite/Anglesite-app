@@ -130,10 +130,17 @@ what makes the 16 px read work — the silhouette carries everything.
 
 ## Open questions / next steps
 
-1. Produce rough facet-geometry studies (SVG or Icon Composer) for concepts 1–3
-   and evaluate the bracket easter egg at 32 px.
-2. Decide whether the beam in concept 3 stays champagne or deliberately echoes the
-   old icon's blue for one release of continuity.
+1. ~~Produce rough facet-geometry studies (SVG or Icon Composer) for concepts 1–3
+   and evaluate the bracket easter egg at 32 px.~~ **Done 2026-07-09** — see
+   [`assets/icon-studies/`](assets/icon-studies/) (`study-1-prism.svg`,
+   `study-2-bracket-facet.svg`, `study-3-slash-of-light.svg`). These are
+   geometry/light studies, not final art. When production starts, verify the
+   "Production notes" above against Apple's current Icon Composer documentation —
+   they were written from memory of the macOS 26/27 icon pipeline and are
+   speculative until checked.
+2. ~~Decide whether the beam in concept 3 stays champagne or deliberately echoes
+   the old icon's blue for one release of continuity.~~ **Resolved 2026-07-09:
+   the beam stays champagne** — mineral-true throughout, no blue continuity nod.
 3. Pick the winner, then commission/produce the final layered render and export
    the `.icon` document + appiconset.
 4. Follow-up pass for accent-color adoption in `AnglesiteApp` (tint, edit-overlay
