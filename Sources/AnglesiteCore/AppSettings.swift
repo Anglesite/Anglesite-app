@@ -15,6 +15,9 @@ public final class AppSettings: @unchecked Sendable {
         public static let pluginPathOverride   = "anglesite.pluginPathOverride"
         public static let templatePathOverride = "anglesite.templatePathOverride"
         public static let sitesRootOverride    = "anglesite.sitesRootOverride"
+        public static let lanRuntimeHost        = "anglesite.lanRuntimeHost"
+        public static let lanRuntimePreviewPort = "anglesite.lanRuntimePreviewPort"
+        public static let lanRuntimeMCPPort     = "anglesite.lanRuntimeMCPPort"
         public static let debugPaneEnabled   = "anglesite.debugPaneEnabled"
         public static let lastOpenedSiteID   = "anglesite.lastOpenedSiteID"
         public static let sitesRootBookmark  = "anglesite.sitesRootBookmark"
@@ -83,6 +86,27 @@ public final class AppSettings: @unchecked Sendable {
                 defaults.removeObject(forKey: Key.sitesRootOverride)
             }
         }
+    }
+
+    /// Optional dev/test override pointing preview + MCP at a LAN-hosted runtime (#589/#601):
+    /// `nil` (the default) unless a host is configured, so runtime selection is untouched for
+    /// real users. Ports fall back to the container-guest convention when blank or invalid.
+    /// See `LANRuntimeConfiguration` and `docs/specs/2026-07-09-lan-site-runtime-design.md`.
+    public var lanRuntimeConfiguration: LANRuntimeConfiguration? {
+        guard let host = defaults.string(forKey: Key.lanRuntimeHost)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !host.isEmpty else { return nil }
+        return LANRuntimeConfiguration(
+            host: host,
+            previewPort: port(forKey: Key.lanRuntimePreviewPort, default: LANRuntimeConfiguration.defaultPreviewPort),
+            mcpPort: port(forKey: Key.lanRuntimeMCPPort, default: LANRuntimeConfiguration.defaultMCPPort))
+    }
+
+    /// Ports are stored as strings (the Settings UI uses plain text fields whose empty state
+    /// means "default"); `UserDefaults.string(forKey:)` also coerces a number if one was stored.
+    private func port(forKey key: String, default defaultPort: Int) -> Int {
+        guard let raw = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespaces),
+              let port = Int(raw), (1...65535).contains(port) else { return defaultPort }
+        return port
     }
 
     /// Effective root for site discovery. Returns the override when set, otherwise `~/Sites/`.

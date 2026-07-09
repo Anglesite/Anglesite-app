@@ -61,6 +61,20 @@ private struct AdvancedSettingsView: View {
     @AppStorage(AppSettings.Key.pluginPathOverride) private var pluginPathOverride: String = ""
     @AppStorage(AppSettings.Key.sitesRootOverride) private var sitesRootOverride: String = ""
     @AppStorage(AppSettings.Key.debugPaneEnabled) private var debugPaneEnabled: Bool = false
+    @AppStorage(AppSettings.Key.lanRuntimeHost) private var lanRuntimeHost: String = ""
+    @AppStorage(AppSettings.Key.lanRuntimePreviewPort) private var lanRuntimePreviewPort: String = ""
+    @AppStorage(AppSettings.Key.lanRuntimeMCPPort) private var lanRuntimeMCPPort: String = ""
+
+    /// Same visibility rule as the Debug pane (`DebugPaneVisibility`): always present in Debug
+    /// builds; in Release only after the diagnostics opt-in. The LAN runtime is dev/test
+    /// infrastructure (#589/#601), not a user-facing feature.
+    private var showsLANRuntimeSection: Bool {
+        #if DEBUG
+        return true
+        #else
+        return debugPaneEnabled
+        #endif
+    }
 
     var body: some View {
         Form {
@@ -108,6 +122,34 @@ private struct AdvancedSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 #endif
+            }
+
+            if showsLANRuntimeSection {
+                Section("LAN site runtime") {
+                    LabeledContent("Runtime host") {
+                        TextField("", text: $lanRuntimeHost, prompt: Text("mac-studio.local"))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(minWidth: 240)
+                            .accessibilityLabel("LAN runtime host")
+                    }
+                    LabeledContent("Preview port") {
+                        TextField("", text: $lanRuntimePreviewPort,
+                                  prompt: Text("\(LANRuntimeConfiguration.defaultPreviewPort)"))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 100)
+                            .accessibilityLabel("LAN runtime preview port")
+                    }
+                    LabeledContent("MCP port") {
+                        TextField("", text: $lanRuntimeMCPPort,
+                                  prompt: Text("\(LANRuntimeConfiguration.defaultMCPPort)"))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 100)
+                            .accessibilityLabel("LAN runtime MCP port")
+                    }
+                    Text("Dev/test only: when this Mac can't boot the local container runtime (e.g. inside a VM without nested virtualization), Anglesite connects preview and editing to a dev server already running on the named host over the trusted local network. Leave the host blank to disable. Takes effect the next time a site window opens.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Diagnostics") {
