@@ -23,6 +23,16 @@ let weakLinkFoundationModels: [LinkerSetting] = [
     .unsafeFlags(["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"])
 ]
 
+// AnglesiteCore is the only target that `import`s FoundationModels. Swift embeds a *hard*
+// `-framework FoundationModels` autolink hint in its compiled object code, which wins over the
+// app target's explicit `-weak_framework FoundationModels` (project.yml) when the final app
+// binary is linked — so the app still hard-links FoundationModels despite that flag. Disabling
+// the autolink hint at the source makes the app target's weak-link flag the only (and effective)
+// link request. See #541.
+let disableFoundationModelsAutolink: [SwiftSetting] = [
+    .unsafeFlags(["-Xfrontend", "-disable-autolink-framework", "-Xfrontend", "FoundationModels"])
+]
+
 // AnglesiteContainer imports apple/containerization — a Swift 6.2, macOS-15+ package that pulls in
 // the native NIO/gRPC/protobuf graph and only links on Apple-Silicon machines with the
 // virtualization entitlement. `swift build` / `swift test` compile ALL of a package's products, so
@@ -50,7 +60,7 @@ var packageTargets: [Target] = [
         name: "AnglesiteCore",
         dependencies: ["AnglesiteSiteModel"],
         path: "Sources/AnglesiteCore",
-        swiftSettings: strictConcurrency
+        swiftSettings: strictConcurrency + disableFoundationModelsAutolink
     ),
     .target(
         name: "AnglesiteBridge",
