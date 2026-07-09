@@ -51,9 +51,33 @@ struct ProjectCleanupModelTests {
         defer { try? FileManager.default.removeItem(at: root) }
         try Data().write(to: root.appendingPathComponent("public/images/orphan.png"))
 
+        let contentGraph = SiteContentGraph()
+        // `scan()` sources image candidates from `contentGraph.images(for:)`, not from its own
+        // filesystem walk (`DeadAssetScanner.scan` only evaluates entries in the `images` array
+        // it's given) — the graph is normally populated by `ContentScanner.scan` +
+        // `contentGraph.load(...)` when a site opens. A bare `SiteContentGraph()` stays empty
+        // forever, so the on-disk `orphan.png` must be registered here or it can never appear in
+        // `candidates` regardless of what `DeadAssetScanner` finds.
+        await contentGraph.load(
+            siteID: "site-a",
+            pages: [],
+            posts: [],
+            images: [
+                SiteContentGraph.Image(
+                    id: "site-a:image:public/images/orphan.png",
+                    siteID: "site-a",
+                    relativePath: "public/images/orphan.png",
+                    fileName: "orphan.png",
+                    byteSize: 0,
+                    usedOnPages: [],
+                    lastModified: Date(timeIntervalSince1970: 0)
+                )
+            ]
+        )
+
         let model = ProjectCleanupModel(
             knowledgeIndex: SiteKnowledgeIndex(),
-            contentGraph: SiteContentGraph(),
+            contentGraph: contentGraph,
             // Blocks until the test opens the gate, giving the test a controllable window in
             // which delete() is provably mid-flight (isBusy == true) — the seam the prior version
             // of this test lacked.
