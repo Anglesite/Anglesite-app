@@ -374,4 +374,36 @@ struct DeadAssetScannerScanTests {
         let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
         #expect(candidates.map(\.path).contains("src/components/Orphan.astro"))
     }
+
+    @Test("referencedPaths attributes a shared asset to every referencing source file")
+    func referencedPathsAttributesMultipleSources() throws {
+        let root = makeSite([
+            "src/pages/index.astro": #"<img src="/images/hero.png" />"#,
+            "src/pages/about.astro": #"<img src="/images/hero.png" />"#,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let index = DeadAssetScanner.referencedPaths(projectRoot: root)
+        let referrers = try #require(index["public/images/hero.png"])
+
+        #expect(referrers == ["src/pages/index.astro", "src/pages/about.astro"])
+    }
+
+    @Test("referencedPaths attributes a glob-only-covered file to the file that declared the glob — matching scan()'s glob-directory floor instead of contradicting it")
+    func referencedPathsIncludesGlobCoveredFiles() throws {
+        let root = makeSite([
+            "src/pages/index.astro": "---\nconst widgets = await Astro.glob('../components/widgets/*.astro');\n---\n<div></div>",
+            "src/components/widgets/Card.astro": "<div>card</div>",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // scan() does not flag Card.astro as unused (globCoveredDirectory, above) — referencedPaths
+        // must agree that Card.astro is used, not silently report it as unreferenced.
+        let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
+        #expect(!candidates.map(\.path).contains("src/components/widgets/Card.astro"))
+
+        let index = DeadAssetScanner.referencedPaths(projectRoot: root)
+        let referrers = try #require(index["src/components/widgets/card.astro"])
+        #expect(referrers == ["src/pages/index.astro"])
+    }
 }

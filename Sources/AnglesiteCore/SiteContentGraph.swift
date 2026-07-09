@@ -82,6 +82,9 @@ public actor SiteContentGraph {
         public let relativePath: String
         public let fileName: String
         public let byteSize: Int64?
+        /// Project-relative source paths that reference this image, sorted. Populated by
+        /// `ContentScanner.scanImages` from `DeadAssetScanner.referencedPaths(projectRoot:)`
+        /// (#140/#553) — `DeadAssetScanner` is the canonical usage authority for this field.
         public let usedOnPages: [String]
         public let lastModified: Date
 

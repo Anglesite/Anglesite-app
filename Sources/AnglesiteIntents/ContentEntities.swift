@@ -208,9 +208,11 @@ public struct ImageEntity: AppEntity, IndexedEntity, Identifiable, Sendable {
     public let id: String            // "{siteID}:image:{relativePath}"
     public let displayName: String   // fileName
     @Property(title: "Path") public var relativePath: String
-    /// Page routes that reference this image. Carried in the struct (not surfaced in
-    /// `displayRepresentation` today) so adding it later isn't a source-breaking AppEntity
-    /// schema change for Shortcuts persistence / donated interactions.
+    /// Project-relative source file paths that reference this image (per `DeadAssetScanner`,
+    /// not routes — may include non-page files like `.css`/`.ts` alongside actual pages).
+    /// Carried in the struct (not surfaced in `displayRepresentation` today) so adding it later
+    /// isn't a source-breaking AppEntity schema change for Shortcuts persistence / donated
+    /// interactions.
     public let usedOnPages: [String]
     @Property(title: "Site") public var siteID: String
 
