@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Study 4 — the winner (2026-07-09): Study 3's Slash of Light plus
+       Study 2's specular chevrons, on a field tinted further toward blue
+       to complement the champagne gem. Facet-geometry study, not final art.
+       The chevrons are a large-size flourish: they melt into sparkle below
+       ~48px while the beam and silhouette carry the small-size read. -->
+  <defs>
+    <radialGradient id="s4-bg" cx="0.38" cy="0.26" r="1.05">
+      <stop offset="0" stop-color="#4A5C74"/>
+      <stop offset="0.55" stop-color="#2B3850"/>
+      <stop offset="1" stop-color="#172030"/>
+    </radialGradient>
+    <linearGradient id="s4-gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="s4-innerGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#EFD9A0" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#EFD9A0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="s4-topL" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#FBF5E3"/>
+      <stop offset="1" stop-color="#EFD9A0"/>
+    </linearGradient>
+    <linearGradient id="s4-topR" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#EDD8A2"/>
+      <stop offset="1" stop-color="#D3B370"/>
+    </linearGradient>
+    <linearGradient id="s4-bodyL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E9D49E"/>
+      <stop offset="1" stop-color="#C7A356"/>
+    </linearGradient>
+    <linearGradient id="s4-bodyR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D5B876"/>
+      <stop offset="1" stop-color="#A9853B"/>
+    </linearGradient>
+    <linearGradient id="s4-botL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#C2A052"/>
+      <stop offset="1" stop-color="#8F6E2C"/>
+    </linearGradient>
+    <linearGradient id="s4-botR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B08F3E"/>
+      <stop offset="1" stop-color="#7A5C22"/>
+    </linearGradient>
+    <linearGradient id="s4-beamOut" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8F2E0" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#F8F2E0" stop-opacity="0.02"/>
+    </linearGradient>
+    <linearGradient id="s4-beamIn" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF3D0" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#F0CE7E" stop-opacity="0.45"/>
+    </linearGradient>
+    <clipPath id="s4-tile">
+      <rect x="50" y="50" width="412" height="412" rx="92"/>
+    </clipPath>
+    <clipPath id="s4-crystal">
+      <polygon points="256,118 336,198 336,314 256,394 176,314 176,198"/>
+    </clipPath>
+    <filter id="s4-soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <filter id="s4-soft2" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+    <filter id="s4-beamBlur" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <linearGradient id="s4-chev" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF9E8"/>
+      <stop offset="1" stop-color="#E3C273"/>
+    </linearGradient>
+    <filter id="s4-glint" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="1.4"/>
+    </filter>
+  </defs>
+
+  <!-- galena field -->
+  <rect x="50" y="50" width="412" height="412" rx="92" fill="url(#s4-bg)"/>
+  <rect x="50" y="50" width="412" height="412" rx="92" fill="none" stroke="#FFFFFF" stroke-opacity="0.06" stroke-width="2"/>
+
+  <ellipse cx="256" cy="262" rx="170" ry="190" fill="url(#s4-innerGlow)" filter="url(#s4-soft)"/>
+
+  <!-- incoming beam, faint, across the tile -->
+  <g clip-path="url(#s4-tile)">
+    <polygon points="429.2,67.7 101.2,459.7 82.8,444.3 410.8,52.3"
+             fill="url(#s4-beamOut)" filter="url(#s4-beamBlur)"/>
+  </g>
+
+  <!-- crystal -->
+  <g>
+    <polygon points="256,118 176,198 256,214" fill="url(#s4-topL)"/>
+    <polygon points="256,118 336,198 256,214" fill="url(#s4-topR)"/>
+    <polygon points="176,198 256,214 256,298 176,314" fill="url(#s4-bodyL)"/>
+    <polygon points="336,198 256,214 256,298 336,314" fill="url(#s4-bodyR)"/>
+    <polygon points="176,314 256,298 256,394" fill="url(#s4-botL)"/>
+    <polygon points="336,314 256,298 256,394" fill="url(#s4-botR)"/>
+  </g>
+
+  <!-- the beam inside the body: kinked ~8°, hot champagne -->
+  <g clip-path="url(#s4-crystal)">
+    <g transform="rotate(8 256 256)">
+      <polygon points="433.8,71.6 105.8,463.6 78.2,440.4 406.2,48.4"
+               fill="url(#s4-beamIn)" filter="url(#s4-beamBlur)"/>
+      <line x1="420" y1="60" x2="92" y2="452" stroke="#FFFBEA" stroke-width="5"
+            stroke-linecap="round" opacity="0.55" filter="url(#s4-beamBlur)"/>
+    </g>
+  </g>
+
+  <!-- specular chevrons on the facet junctions (from Study 2) -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="238,212 200,256 238,300" stroke="url(#s4-chev)" stroke-width="8" opacity="0.8" filter="url(#s4-glint)"/>
+    <polyline points="238,212 200,256 238,300" stroke="#FFFDF4" stroke-width="2.5" opacity="0.85"/>
+    <polyline points="274,212 312,256 274,300" stroke="url(#s4-chev)" stroke-width="8" opacity="0.8" filter="url(#s4-glint)"/>
+    <polyline points="274,212 312,256 274,300" stroke="#FFFDF4" stroke-width="2.5" opacity="0.85"/>
+  </g>
+
+  <!-- edges over the beam so the stone keeps its geometry -->
+  <line x1="256" y1="214" x2="256" y2="298" stroke="#FDF8E9" stroke-opacity="0.7" stroke-width="3" stroke-linecap="round"/>
+  <line x1="256" y1="118" x2="176" y2="198" stroke="#FDF8E9" stroke-opacity="0.55" stroke-width="2" stroke-linecap="round"/>
+  <line x1="176" y1="314" x2="256" y2="394" stroke="#F3E7C2" stroke-opacity="0.45" stroke-width="2" stroke-linecap="round"/>
+  <polygon points="256,118 336,198 336,314 256,394 176,314 176,198"
+           fill="none" stroke="#FBF3DC" stroke-opacity="0.25" stroke-width="1.5"/>
+
+  <!-- single caustic pool, stretched toward the beam exit at lower left -->
+  <ellipse cx="228" cy="401" rx="110" ry="20" fill="#EFD9A0" opacity="0.4" filter="url(#s4-soft2)"/>
+
+  <rect x="50" y="50" width="412" height="412" rx="92" fill="url(#s4-gloss)"/>
+</svg>

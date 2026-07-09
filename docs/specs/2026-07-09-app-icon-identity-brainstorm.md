@@ -87,6 +87,14 @@ plus a light beam), keep **2** as the stretch goal if the renders support it, an
 fold 4's galena *material* into whichever wins as the background treatment rather
 than a literal rock bed.
 
+**Winner (decided 2026-07-09): Slash of Light + Bracket Facet's chevrons.**
+Study 3's beam-through-prism carries the mark; study 2's specular chevrons graft
+on as a large-size flourish (they melt into sparkle below ~48 px, which is the
+intended behavior); and the galena field is tinted further toward blue
+(`#4A5C74 → #2B3850 → #172030`) so the complementary blue/gold pairing does the
+dock-pop work. Composite study:
+[`assets/icon-studies/study-4-winner.svg`](assets/icon-studies/study-4-winner.svg).
+
 ## Palette (working values)
 
 | Role | Hex | Notes |
@@ -141,7 +149,8 @@ what makes the 16 px read work — the silhouette carries everything.
 2. ~~Decide whether the beam in concept 3 stays champagne or deliberately echoes
    the old icon's blue for one release of continuity.~~ **Resolved 2026-07-09:
    the beam stays champagne** — mineral-true throughout, no blue continuity nod.
-3. Pick the winner, then commission/produce the final layered render and export
-   the `.icon` document + appiconset.
+3. ~~Pick the winner~~ **Picked 2026-07-09** (study 4, see above) — remaining:
+   produce the final layered render from it and export the `.icon` document +
+   appiconset.
 4. Follow-up pass for accent-color adoption in `AnglesiteApp` (tint, edit-overlay
    active state, empty-state art).
