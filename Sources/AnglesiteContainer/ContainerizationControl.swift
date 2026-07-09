@@ -43,6 +43,8 @@ public struct ContainerizationControl: LocalContainerControl {
         ref: String,
         onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> LocalContainerSession {
+        try SourceRepoPrecondition.requireGitRepo(at: sourceRepo)
+
         let container = try await makeBareContainer(siteID: siteID, sourceRepo: sourceRepo, onOutput: onOutput)
 
         // 3. Hydrate from the repo: clone the virtio-fs-shared host repo into /workspace/site, then
