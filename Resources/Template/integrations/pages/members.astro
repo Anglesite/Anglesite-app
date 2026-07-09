@@ -1,7 +1,7 @@
 ---
 import { getCollection } from "astro:content";
 import BaseLayout from "../../src/layouts/BaseLayout.astro";
-import MemberCard from "../../src/components/MemberCard.astro";
+import MemberCard from "../components/MemberCard.astro";
 import { readConfig } from "../../scripts/config";
 
 const members = (await getCollection("members")).sort(
