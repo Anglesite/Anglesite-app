@@ -587,7 +587,7 @@ struct SiteWindow: View {
             Text("This content will be removed from the working tree. This can be undone via git.")
         }
         .alert(
-            "Delete failed",
+            "Couldn't complete that action",
             isPresented: Binding(
                 get: { model.contentActionError != nil },
                 set: { if !$0 { model.contentActionError = nil } }),
