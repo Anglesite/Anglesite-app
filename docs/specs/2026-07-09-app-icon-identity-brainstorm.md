@@ -123,11 +123,27 @@ what makes the 16 px read work — the silhouette carries everything.
   The system's dynamic glass lighting then works *with* the refraction story
   instead of fighting a baked render. Keep the current `AppIcon.appiconset` PNGs
   as the fallback export from the same source.
+  **Done 2026-07-09** — `Resources/AppIcon.icon` (three groups/layers: `field`,
+  `crystal`, `beam-chevrons`, both glass layers with `specular`/`translucency`/
+  `shadow` on the group), source SVGs at
+  [`assets/icon-studies/layers/`](assets/icon-studies/layers/). Wired into
+  `project.yml` (`options.fileTypes.icon.file: true` — XcodeGen otherwise unpacks
+  the package's `icon.json`/`Assets/` as loose resources) and confirmed with a
+  real `xcodebuild` build: `LinkAssetCatalog` compiles it straight to
+  `AppIcon.icns` alongside the existing `Assets.xcassets`. The
+  `AppIcon.appiconset` PNGs (all 10 legacy mac slots) are re-exported from the
+  same `.icon` document via `ictool --export-image` (Icon Composer's own CLI
+  renderer, ground-truth — not a re-implementation) rather than hand-drawn, so
+  the two never drift.
 - Provide explicit **dark and tinted variants**: dark mode inverts nothing here
   (the field is already dark), but the tinted/clear variants should reduce to the
-  crystal silhouette alone.
+  crystal silhouette alone. **Not yet done** — the shipped `.icon` only has a
+  default (light) appearance; dark/tinted `-specializations` are follow-up work.
 - Test gates: 16 px dock/Finder read (silhouette-only), 32 px (facet lines must
-  survive or be dropped per-size), 512 px marketing (full refraction).
+  survive or be dropped per-size), 512 px marketing (full refraction). Checked
+  2026-07-09 via `ictool` renders at 16/32/128/512 pt: the silhouette reads at
+  16 px, the chevrons melt to a faint texture below ~32 px as intended, full
+  refraction detail holds at 512 px.
 
 ## In-app accents (identity beyond the icon)
 
@@ -157,8 +173,10 @@ what makes the 16 px read work — the silhouette carries everything.
 2. ~~Decide whether the beam in concept 3 stays champagne or deliberately echoes
    the old icon's blue for one release of continuity.~~ **Resolved 2026-07-09:
    the beam stays champagne** — mineral-true throughout, no blue continuity nod.
-3. ~~Pick the winner~~ **Picked 2026-07-09** (study 4, see above) — remaining:
+3. ~~Pick the winner~~ **Picked 2026-07-09** (study 4, see above). ~~remaining:
    produce the final layered render from it and export the `.icon` document +
-   appiconset.
+   appiconset.~~ **Done 2026-07-09** — see the "Production notes" entry above.
 4. Follow-up pass for accent-color adoption in `AnglesiteApp` (tint, edit-overlay
    active state, empty-state art).
+5. Dark/tinted/clear appearance `-specializations` for `Resources/AppIcon.icon`
+   (currently default-appearance only).

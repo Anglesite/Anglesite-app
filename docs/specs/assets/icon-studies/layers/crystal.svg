@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- crystal layer: the anglesite gem, liquid-glass body. Transparent outside
+       the stone; meant to sit above the field layer with glass:true. -->
+  <defs>
+    <linearGradient id="s4-glassBase" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#EED9A4"/>
+      <stop offset="0.6" stop-color="#CFAD5F"/>
+      <stop offset="1" stop-color="#A9873C"/>
+    </linearGradient>
+    <linearGradient id="s4-topL" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#FBF5E3"/>
+      <stop offset="1" stop-color="#EFD9A0"/>
+    </linearGradient>
+    <linearGradient id="s4-topR" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#EDD8A2"/>
+      <stop offset="1" stop-color="#D3B370"/>
+    </linearGradient>
+    <linearGradient id="s4-bodyL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E3CC94"/>
+      <stop offset="1" stop-color="#C2A054"/>
+    </linearGradient>
+    <linearGradient id="s4-bodyR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#DCC284"/>
+      <stop offset="1" stop-color="#B49148"/>
+    </linearGradient>
+    <linearGradient id="s4-botL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#BB9A4E"/>
+      <stop offset="1" stop-color="#8C6C2C"/>
+    </linearGradient>
+    <linearGradient id="s4-botR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B0913F"/>
+      <stop offset="1" stop-color="#82632A"/>
+    </linearGradient>
+    <clipPath id="s4-crystal">
+      <polygon points="512,236 672,396 672,628 512,788 352,628 352,396"/>
+    </clipPath>
+    <filter id="s4-melt" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3.2"/>
+    </filter>
+    <filter id="s4-soft2" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <filter id="s4-rim" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2"/>
+    </filter>
+  </defs>
+
+  <g>
+    <!-- rounded under-layer carries the silhouette; wide round-joined
+         stroke rounds every corner of the stone -->
+    <polygon points="512,236 672,396 672,628 512,788 352,628 352,396"
+             fill="url(#s4-glassBase)" stroke="url(#s4-glassBase)"
+             stroke-width="28" stroke-linejoin="round" opacity="0.92"/>
+    <!-- facets, melted together and slightly translucent -->
+    <g filter="url(#s4-melt)" opacity="0.9">
+      <polygon points="512,236 352,396 512,428" fill="url(#s4-topL)"/>
+      <polygon points="512,236 672,396 512,428" fill="url(#s4-topR)"/>
+      <polygon points="352,396 512,428 512,596 352,628" fill="url(#s4-bodyL)"/>
+      <polygon points="672,396 512,428 512,596 672,628" fill="url(#s4-bodyR)"/>
+      <polygon points="352,628 512,596 512,788" fill="url(#s4-botL)"/>
+      <polygon points="672,628 512,596 512,788" fill="url(#s4-botR)"/>
+    </g>
+    <!-- internal environment reflection: the blue field seen through
+         the lower-right of the stone -->
+    <g clip-path="url(#s4-crystal)">
+      <polygon points="672,440 672,628 512,788 600,788 672,700"
+               fill="#9FB6D9" opacity="0.2" filter="url(#s4-soft2)"/>
+    </g>
+    <!-- wet specular: soft blob riding the upper-left shoulder -->
+    <g clip-path="url(#s4-crystal)">
+      <ellipse cx="432" cy="364" rx="88" ry="48" transform="rotate(-38 432 364)"
+               fill="#FFFFFF" opacity="0.4" filter="url(#s4-soft2)"/>
+      <ellipse cx="392" cy="460" rx="20" ry="44" transform="rotate(-12 392 460)"
+               fill="#FFFFFF" opacity="0.22" filter="url(#s4-soft2)"/>
+    </g>
+  </g>
+
+  <!-- light kiss on the upper edges only — no full rim, it reads as a
+       medallion border -->
+  <polyline points="352,396 512,236 672,396"
+            fill="none" stroke="#FFFFFF" stroke-opacity="0.3" stroke-width="6"
+            stroke-linecap="round" stroke-linejoin="round"
+            transform="translate(0,-12)" filter="url(#s4-rim)"/>
+</svg>

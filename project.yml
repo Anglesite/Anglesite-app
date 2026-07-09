@@ -7,6 +7,12 @@ options:
   createIntermediateGroups: true
   generateEmptyDirectories: true
   groupSortPosition: top
+  # Icon Composer's `.icon` documents (#582) are directory packages; without this,
+  # XcodeGen unpacks icon.json/Assets/ as separate resources instead of treating
+  # the package as one file, and Xcode fails to recognize it as an app icon.
+  fileTypes:
+    icon:
+      file: true
 
 packages:
   Anglesite:
@@ -19,6 +25,8 @@ targets:
     sources:
       - path: Sources/AnglesiteApp
       - path: Resources/Assets.xcassets
+      - path: Resources/AppIcon.icon
+        buildPhase: resources
       - path: Resources/Template
         type: folder
         buildPhase: resources
