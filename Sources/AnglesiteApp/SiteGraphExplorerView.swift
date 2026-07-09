@@ -74,6 +74,7 @@ private struct SiteGraphTree: View {
     @Bindable var model: SiteGraphExplorerModel
 
     var body: some View {
+        let referenceCounts = model.visibleReferenceCounts
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Label("Explorer", systemImage: "list.bullet.indent")
@@ -89,7 +90,7 @@ private struct SiteGraphTree: View {
                         ForEach(group.nodes) { node in
                             SiteGraphTreeRow(
                                 node: node,
-                                referenceCount: model.visibleReferenceCounts[node.id, default: 0]
+                                referenceCount: referenceCounts[node.id, default: 0]
                             )
                             .tag(Optional(node.id))
                         }
