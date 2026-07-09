@@ -252,6 +252,9 @@ public struct NativeContentOperations: ContentOperationsService {
             route = ContentScaffold.normalizeRoute(ContentScaffold.slugify("\(copyTitle) \(attempt)"))
             relPath = ContentScaffold.pageRelativePath(normalizedRoute: route)
         }
+        guard !fileManager.fileExists(atPath: root.appendingPathComponent(relPath).path) else {
+            return .failed(reason: "Couldn't find an available name for the duplicate after 1000 attempts")
+        }
 
         let ext = (relativePath as NSString).pathExtension
         let rewritten: String
@@ -289,6 +292,9 @@ public struct NativeContentOperations: ContentOperationsService {
             attempt += 1
             slug = ContentScaffold.slugify("\(copyTitle) \(attempt)")
             relPath = ContentScaffold.postRelativePath(collection: collection, slug: slug)
+        }
+        guard !fileManager.fileExists(atPath: root.appendingPathComponent(relPath).path) else {
+            return .failed(reason: "Couldn't find an available name for the duplicate after 1000 attempts")
         }
 
         let ext = (relativePath as NSString).pathExtension

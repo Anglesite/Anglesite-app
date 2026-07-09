@@ -454,6 +454,30 @@ struct NativeContentOperationsDuplicateTests {
         #expect(copied.contains("title: \"Hello World Copy\""))
     }
 
+    @Test("duplicatePage falls back to a verbatim copy when the extension has no editable title location")
+    func duplicatesPageWithUnrecognizedExtensionVerbatim() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/notes.txt"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let original = "Just some plain notes.\nNo frontmatter, no title attribute.\n"
+        try original.write(to: abs, atomically: true, encoding: .utf8)
+
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.duplicatePage(siteID: "site-1", relativePath: relPath, title: "Notes")
+
+        guard case .created(let filePath, _) = result else {
+            Issue.record("expected .created, got \(result)"); return
+        }
+        let copied = try String(contentsOf: root.appendingPathComponent(filePath), encoding: .utf8)
+        #expect(copied == original)
+    }
+
     @Test("duplicatePage fails when the source file does not exist")
     func duplicateMissingSourceFails() async throws {
         let root = try makeRoot()
