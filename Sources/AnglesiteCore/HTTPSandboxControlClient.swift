@@ -1,4 +1,9 @@
 import Foundation
+// URLSession/URLRequest/HTTPURLResponse live in FoundationNetworking on non-Darwin
+// platforms (swift-corelibs-foundation); this import is a no-op on macOS.
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// `SandboxControlClient` that calls the user's deployed Control Worker over HTTPS. No Cloudflare
 /// SDK — plain JSON. Used by the iOS app once onboarding has stored the Worker URL + API token.

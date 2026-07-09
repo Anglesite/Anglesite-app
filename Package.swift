@@ -42,7 +42,14 @@ let disableFoundationModelsAutolink: [SwiftSetting] = [
 // inject env, gets the product to link — and dropped only when ANGLESITE_SKIP_CONTAINER=1, which
 // CI sets at the workflow level. The virtualization entitlement, not this flag, gates the runtime
 // at launch (see the #69 design §3 / §2.6).
+#if canImport(Darwin)
 let includeContainer = ProcessInfo.processInfo.environment["ANGLESITE_SKIP_CONTAINER"] != "1"
+#else
+// Apple Containerization is the macOS substrate; off-Darwin platforms get their own
+// SiteRuntime implementations (cross-platform port design §7), so the container target —
+// and its apple/containerization dependency — never enter the manifest there.
+let includeContainer = false
+#endif
 
 // AnglesiteIntentsTests is conditionally included only on Swift 6.4+ (Xcode 27).
 // The test binary loads `AnglesiteIntents` whose AppIntent metadata references
@@ -156,7 +163,10 @@ if includeContainer {
     )
 }
 
-#if compiler(>=6.4)
+// canImport(Darwin) joins the compiler gate: these targets depend on AnglesiteBridge /
+// AnglesiteIntents (WKWebView / AppIntents), so a future Swift 6.4 Linux toolchain must
+// not pull them in.
+#if compiler(>=6.4) && canImport(Darwin)
 packageTargets.append(
     .target(
         name: "AnglesiteAppCore",
@@ -224,6 +234,27 @@ if includeContainer {
         .package(url: "https://github.com/apple/containerization.git", .upToNextMinor(from: "0.35.0"))
     )
 }
+
+// Cross-platform port, phase 1 "purity" (docs/superpowers/specs/2026-07-08-cross-platform-
+// swift-port-design.md §10): off-Darwin, expose only the targets that actually compile
+// there, so `swift build && swift test` stays green on the Linux CI leg and the compiler is
+// the purity lint as seam PRs expand the portable set. Today that's AnglesiteSiteModel
+// (pure Foundation). AnglesiteCore still has Apple-only imports (FoundationModels, OSLog,
+// Security, …); ANGLESITE_PORT_WIP=1 opts it back in so in-flight seam work can
+// compile-check it locally before the final purity PR flips it on unconditionally.
+// Filtering by name here (rather than duplicating target definitions in per-platform
+// lists) keeps the single source of truth above.
+#if !canImport(Darwin)
+var portableTargets: Set<String> = ["AnglesiteSiteModel", "AnglesiteSiteModelTests"]
+if ProcessInfo.processInfo.environment["ANGLESITE_PORT_WIP"] == "1" {
+    portableTargets.insert("AnglesiteCore")
+}
+packageTargets.removeAll { !portableTargets.contains($0.name) }
+// Every library product above is named after its single target, so the same name set
+// filters products. (The container probe executable breaks that convention, but it is
+// Darwin-only and already excluded via includeContainer.)
+packageProducts.removeAll { !portableTargets.contains($0.name) }
+#endif
 
 let package = Package(
     name: "Anglesite",

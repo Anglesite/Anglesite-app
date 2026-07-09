@@ -1,5 +1,7 @@
 import Foundation
-#if compiler(>=6.4)
+// canImport joins the compiler gate: >=6.4 alone was a proxy for "the Xcode 27 SDK is
+// present", which a Swift 6.4 Linux toolchain will satisfy without having FoundationModels.
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 #endif
 
@@ -80,7 +82,7 @@ public struct FoundationModelsProbe: ReadinessProbe {
 /// Case names below must match the `FoundationModels` SDK; `@unknown default` absorbs drift.
 public enum LiveFoundationModelsAvailability {
     public static func current() -> FoundationModelsAvailability {
-        #if compiler(>=6.4)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         switch SystemLanguageModel.default.availability {
         case .available:
             return .available

@@ -46,6 +46,30 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: scripts/check-help-links.sh
 
+  linux-build-test:
+    name: Linux (portable SwiftPM targets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Cross-platform port, phase 1 "purity" (2026-07-08 design §9/§10): the compiler is the
+    # purity lint. Off-Darwin, Package.swift exposes only the targets that compile there
+    # (AnglesiteSiteModel today); each seam PR that purifies more of AnglesiteCore expands
+    # that set until `swift build && swift test` covers the whole portable core. The official
+    # Swift image pins the toolchain (and ships the right libxml2), so this lane is immune to
+    # runner-image drift.
+    container:
+      image: swift:6.3.3-noble
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Show toolchain versions
+        run: swift --version
+
+      - name: Build (debug)
+        run: swift build -c debug
+
+      - name: Test
+        run: swift test -c debug --parallel
+
   build-test:
     runs-on: macos-15
     timeout-minutes: 15

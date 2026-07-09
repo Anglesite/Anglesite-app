@@ -322,14 +322,14 @@ public actor DeployCommand {
     }
 
     /// Default `TokenSource` for production: env var first (so a developer's shell still wins),
-    /// then the user's Keychain. A Keychain error is surfaced to the caller — we'd rather show
-    /// the user "couldn't read token" than silently fall through to `nil` and prompt for a
-    /// re-paste of a token that's actually stored fine.
+    /// then the platform secret store (the user's Keychain on macOS). A store error is surfaced
+    /// to the caller — we'd rather show the user "couldn't read token" than silently fall
+    /// through to `nil` and prompt for a re-paste of a token that's actually stored fine.
     public static let keychainTokenSource: TokenSource = {
         if let env = ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"], !env.isEmpty {
             return env
         }
-        return try KeychainStore().readCloudflareToken()
+        return try PlatformSecretStore.make().readCloudflareToken()
     }
 
     /// Default `PreflightChecker`: host-side preflight was retired with embedded Node. Container

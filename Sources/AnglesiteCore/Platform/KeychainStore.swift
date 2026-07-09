@@ -1,3 +1,6 @@
+// Darwin implementation of the SecretStore seam. The whole file compiles out on
+// platforms without the Security framework.
+#if canImport(Security)
 import Foundation
 import Security
 
@@ -18,7 +21,7 @@ import Security
 ///   inaccessible while the Mac is locked.
 /// - The token must never be logged. `DeployCommand` passes it via `environment` (which is opaque
 ///   to the supervisor's stdout/stderr pump), so it does not end up in `LogCenter`.
-public struct KeychainStore: Sendable {
+public struct KeychainStore: SecretStore {
     public enum Error: Swift.Error, Equatable {
         /// `SecItemCopyMatching` / `SecItemAdd` / `SecItemUpdate` / `SecItemDelete` returned a
         /// non-success `OSStatus`. The raw value is carried so test assertions can pin it down.
@@ -31,10 +34,9 @@ public struct KeychainStore: Sendable {
     /// Default service identifier. Matches the app's bundle id.
     public static let defaultService = "io.dwk.anglesite"
 
-    /// Account key under the default service for the Cloudflare API token used by
-    /// `wrangler deploy`. Centralized here so the Settings UI and `DeployCommand` refer to the
-    /// same slot.
-    public static let cloudflareTokenAccount = "cloudflare-api-token"
+    /// Account key for the Cloudflare API token. Forwarded from the portable
+    /// `SecretAccounts` namespace (the shared slot definition since the SecretStore seam).
+    public static let cloudflareTokenAccount = SecretAccounts.cloudflareToken
 
     public let service: String
 
@@ -106,22 +108,8 @@ public struct KeychainStore: Sendable {
         }
     }
 
-    // MARK: Cloudflare convenience
-
-    /// Read the Cloudflare API token under the default account.
-    public func readCloudflareToken() throws -> String? {
-        try read(account: Self.cloudflareTokenAccount)
-    }
-
-    /// Store the Cloudflare API token under the default account. Empty string clears.
-    public func writeCloudflareToken(_ token: String) throws {
-        try write(token, account: Self.cloudflareTokenAccount)
-    }
-
-    /// Clear the Cloudflare API token slot.
-    public func clearCloudflareToken() throws {
-        try delete(account: Self.cloudflareTokenAccount)
-    }
+    // Cloudflare token convenience (readCloudflareToken()/writeCloudflareToken(_:)/
+    // clearCloudflareToken()) comes from the SecretStore protocol extension.
 
     // MARK: Internals
 
@@ -134,3 +122,4 @@ public struct KeychainStore: Sendable {
         ]
     }
 }
+#endif
