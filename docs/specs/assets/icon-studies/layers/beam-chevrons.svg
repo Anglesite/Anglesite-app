@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- beam+chevrons layer: the refraction beam and etched bracket chevrons,
+       both clipped to the crystal's silhouette. Sits above the crystal layer. -->
+  <defs>
+    <linearGradient id="s4-beamIn" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF3D0" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#F0CE7E" stop-opacity="0.45"/>
+    </linearGradient>
+    <clipPath id="s4-crystal">
+      <polygon points="512,236 672,396 672,628 512,788 352,628 352,396"/>
+    </clipPath>
+    <filter id="s4-beamBlur" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+
+  <!-- the beam inside the body: kinked ~8°, hot champagne -->
+  <g clip-path="url(#s4-crystal)">
+    <g transform="rotate(8 512 512)">
+      <polygon points="972.2,8.8 97.8,1053.6 51.8,1015.2 926.2,-29.6"
+               fill="url(#s4-beamIn)" filter="url(#s4-beamBlur)"/>
+      <line x1="840" y1="120" x2="184" y2="904" stroke="#FFFBEA" stroke-width="12"
+            stroke-linecap="round" opacity="0.7" filter="url(#s4-beamBlur)"/>
+    </g>
+  </g>
+
+  <!-- chevrons etched into the stone: shadow wall up-left, lit wall
+       down-right, groove base between -->
+  <g clip-path="url(#s4-crystal)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g>
+      <polyline points="476,424 400,512 476,600" stroke="#9A7930" stroke-width="12" opacity="0.5"/>
+      <polyline points="476,424 400,512 476,600" stroke="#6E521C" stroke-width="8" opacity="0.7" transform="translate(-3.2,-3.2)"/>
+      <polyline points="476,424 400,512 476,600" stroke="#FFF6DC" stroke-width="6" opacity="0.85" transform="translate(3.2,3.2)"/>
+    </g>
+    <g>
+      <polyline points="548,424 624,512 548,600" stroke="#9A7930" stroke-width="12" opacity="0.5"/>
+      <polyline points="548,424 624,512 548,600" stroke="#6E521C" stroke-width="8" opacity="0.7" transform="translate(-3.2,-3.2)"/>
+      <polyline points="548,424 624,512 548,600" stroke="#FFF6DC" stroke-width="6" opacity="0.85" transform="translate(3.2,3.2)"/>
+    </g>
+  </g>
+</svg>
