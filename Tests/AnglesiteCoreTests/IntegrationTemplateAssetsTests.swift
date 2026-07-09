@@ -53,7 +53,8 @@ import Foundation
                   "integrations/pages/store.astro", "integrations/pages/products.astro",
                   "integrations/public/sw.js",
                   "integrations/worker/subscribe-worker.js", "integrations/worker/subscribe-wrangler.toml",
-                  "integrations/docs/newsletter-setup.md", "integrations/docs/pwa-setup.md"] {
+                  "integrations/docs/newsletter-setup.md", "integrations/docs/pwa-setup.md",
+                  "integrations/docs/inbox-setup.md"] {
             #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "missing staged \(p)")
         }
         // NOT base-scaffolded: every staged asset must be absent from src/ (covers all five —
@@ -75,7 +76,7 @@ import Foundation
                   "src/pages/buy.astro", "src/pages/shop.astro", "src/pages/pricing.astro",
                   "src/pages/store.astro", "src/pages/products.astro",
                   "worker/subscribe-worker.js", "worker/subscribe-wrangler.toml",
-                  "docs/newsletter-setup.md", "docs/pwa-setup.md"] {
+                  "docs/newsletter-setup.md", "docs/pwa-setup.md", "docs/inbox-setup.md"] {
             #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "should be staged, not in src: \(p)")
         }
     }

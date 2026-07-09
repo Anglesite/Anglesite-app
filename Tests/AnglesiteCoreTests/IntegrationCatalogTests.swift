@@ -220,6 +220,32 @@ import Testing
         #expect(copiesInstallPromptUnconditionally)
     }
 
+    @Test func inboxHasNoProvidersAndInjectsKeystaticCollection() {
+        let inbox = IntegrationCatalog.descriptor(for: .inbox)
+        #expect(inbox.providers.isEmpty)
+        let hasKeystaticInject = inbox.operations.contains {
+            if case .injectAtAnchor(let file, let anchor, let snippet, _, let style) = $0 {
+                return file.raw == "keystatic.config.ts"
+                    && anchor == "// anglesite:keystatic-collections"
+                    && style == .line
+                    && snippet.raw.contains("path: \"src/content/inbox/*\"")
+            }
+            return false
+        }
+        #expect(hasKeystaticInject)
+    }
+
+    @Test func inboxCopiesSetupDocs() {
+        let inbox = IntegrationCatalog.descriptor(for: .inbox)
+        let copiesDocs = inbox.operations.contains {
+            if case .copyFile(let from, let to, let when) = $0 {
+                return from.path == "integrations/docs/inbox-setup.md" && to.raw == "docs/inbox-setup.md" && when == .always
+            }
+            return false
+        }
+        #expect(copiesDocs)
+    }
+
     @Test func redirectsHasNoProvidersAndAppendsToRedirectsFile() {
         let redirects = IntegrationCatalog.descriptor(for: .redirects)
         #expect(redirects.providers.isEmpty)

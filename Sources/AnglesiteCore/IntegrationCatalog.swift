@@ -656,7 +656,13 @@ public enum IntegrationCatalog {
         summary: "Review and curate visitor messages through a built-in admin UI (Keystatic).",
         providers: [],
         fields: [],
-        operations: [])
+        operations: [
+            .injectAtAnchor(file: "keystatic.config.ts", anchor: "// anglesite:keystatic-collections",
+                            snippet: "inbox: collection({\n  label: \"Inbox\",\n  path: \"src/content/inbox/*\",\n  format: { contentField: \"message\" },\n  schema: {\n    subject: fields.text({ label: \"Subject\" }),\n    from: fields.text({ label: \"From\" }),\n    receivedDate: fields.date({ label: \"Received\" }),\n    status: fields.select({\n      label: \"Status\",\n      options: [\n        { label: \"New\", value: \"new\" },\n        { label: \"Reviewed\", value: \"reviewed\" },\n        { label: \"Archived\", value: \"archived\" },\n      ],\n      defaultValue: \"new\",\n    }),\n    message: fields.markdoc({ label: \"Message\" }),\n  },\n}),",
+                            when: .always, style: .line),
+            .copyFile(from: TemplateRef("integrations/docs/inbox-setup.md"),
+                      to: "docs/inbox-setup.md", when: .always),
+        ])
 
     // MARK: membership
     static let membership = IntegrationDescriptor(
