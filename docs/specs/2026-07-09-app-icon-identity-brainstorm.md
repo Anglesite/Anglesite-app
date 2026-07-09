@@ -91,9 +91,11 @@ than a literal rock bed.
 Study 3's beam-through-prism carries the mark; study 2's specular chevrons graft
 on as a large-size flourish (they melt into sparkle below ~48 px, which is the
 intended behavior); and the galena field is a brighter steel blue
-(`#5B7192 → #364764 → #202C40`) so the complementary blue/gold pairing does the
-dock-pop work. Refined same day: the beam runs **edge to edge** across the frame
-and the caustic pool is gone — the gem's own glow grounds it. Composite study:
+(`#6E86AB → #45587A → #2A3A55`) so the complementary blue/gold pairing does the
+dock-pop work. Refined same day: the beam runs **edge to edge** across the frame,
+the caustic pool is gone — the gem's own glow grounds it — and the center
+vertical ridge is softened (body-face gradients pulled closer, highlight quieted)
+so the two front faces read as one glassy volume. Composite study:
 [`assets/icon-studies/study-4-winner.svg`](assets/icon-studies/study-4-winner.svg).
 
 ## Palette (working values)

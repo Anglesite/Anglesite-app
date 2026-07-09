@@ -8,9 +8,9 @@
        silhouette carry the small-size read. -->
   <defs>
     <radialGradient id="s4-bg" cx="0.38" cy="0.26" r="1.05">
-      <stop offset="0" stop-color="#5B7192"/>
-      <stop offset="0.55" stop-color="#364764"/>
-      <stop offset="1" stop-color="#202C40"/>
+      <stop offset="0" stop-color="#6E86AB"/>
+      <stop offset="0.55" stop-color="#45587A"/>
+      <stop offset="1" stop-color="#2A3A55"/>
     </radialGradient>
     <linearGradient id="s4-gloss" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.10"/>
@@ -29,20 +29,20 @@
       <stop offset="1" stop-color="#D3B370"/>
     </linearGradient>
     <linearGradient id="s4-bodyL" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#E9D49E"/>
-      <stop offset="1" stop-color="#C7A356"/>
+      <stop offset="0" stop-color="#E3CC94"/>
+      <stop offset="1" stop-color="#C2A054"/>
     </linearGradient>
     <linearGradient id="s4-bodyR" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#D5B876"/>
-      <stop offset="1" stop-color="#A9853B"/>
+      <stop offset="0" stop-color="#DCC284"/>
+      <stop offset="1" stop-color="#B49148"/>
     </linearGradient>
     <linearGradient id="s4-botL" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#C2A052"/>
-      <stop offset="1" stop-color="#8F6E2C"/>
+      <stop offset="0" stop-color="#BB9A4E"/>
+      <stop offset="1" stop-color="#8C6C2C"/>
     </linearGradient>
     <linearGradient id="s4-botR" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#B08F3E"/>
-      <stop offset="1" stop-color="#7A5C22"/>
+      <stop offset="0" stop-color="#B0913F"/>
+      <stop offset="1" stop-color="#82632A"/>
     </linearGradient>
     <linearGradient id="s4-beamOut" x1="1" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#F8F2E0" stop-opacity="0.22"/>
@@ -117,7 +117,7 @@
   </g>
 
   <!-- edges over the beam so the stone keeps its geometry -->
-  <line x1="256" y1="214" x2="256" y2="298" stroke="#FDF8E9" stroke-opacity="0.7" stroke-width="3" stroke-linecap="round"/>
+  <line x1="256" y1="214" x2="256" y2="298" stroke="#FDF8E9" stroke-opacity="0.35" stroke-width="2" stroke-linecap="round"/>
   <line x1="256" y1="118" x2="176" y2="198" stroke="#FDF8E9" stroke-opacity="0.55" stroke-width="2" stroke-linecap="round"/>
   <line x1="176" y1="314" x2="256" y2="394" stroke="#F3E7C2" stroke-opacity="0.45" stroke-width="2" stroke-linecap="round"/>
   <polygon points="256,118 336,198 336,314 256,394 176,314 176,198"
