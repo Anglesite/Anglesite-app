@@ -658,7 +658,7 @@ public enum IntegrationCatalog {
         fields: [],
         operations: [
             .injectAtAnchor(file: "keystatic.config.ts", anchor: "// anglesite:keystatic-collections",
-                            snippet: "inbox: collection({\n  label: \"Inbox\",\n  path: \"src/content/inbox/*\",\n  format: { contentField: \"message\" },\n  schema: {\n    subject: fields.text({ label: \"Subject\" }),\n    from: fields.text({ label: \"From\" }),\n    receivedDate: fields.date({ label: \"Received\" }),\n    status: fields.select({\n      label: \"Status\",\n      options: [\n        { label: \"New\", value: \"new\" },\n        { label: \"Reviewed\", value: \"reviewed\" },\n        { label: \"Archived\", value: \"archived\" },\n      ],\n      defaultValue: \"new\",\n    }),\n    message: fields.markdoc({ label: \"Message\" }),\n  },\n}),",
+                            snippet: "inbox: collection({\n  label: \"Inbox\",\n  path: \"src/content/inbox/*\",\n  format: { contentField: \"message\" },\n  slugField: \"subject\",\n  schema: {\n    subject: fields.slug({ name: { label: \"Subject\" } }),\n    from: fields.text({ label: \"From\" }),\n    receivedDate: fields.date({ label: \"Received\" }),\n    status: fields.select({\n      label: \"Status\",\n      options: [\n        { label: \"New\", value: \"new\" },\n        { label: \"Reviewed\", value: \"reviewed\" },\n        { label: \"Archived\", value: \"archived\" },\n      ],\n      defaultValue: \"new\",\n    }),\n    message: fields.markdoc({ label: \"Message\" }),\n  },\n}),",
                             when: .always, style: .line),
             .copyFile(from: TemplateRef("integrations/docs/inbox-setup.md"),
                       to: "docs/inbox-setup.md", when: .always),
