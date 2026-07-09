@@ -60,6 +60,50 @@ struct SiteNavigatorModelDeleteTests {
         #expect(model.pendingDelete == nil)
         #expect(await graph.page(id: pageID) != nil)
     }
+
+    // MARK: - saveRedirect (#530)
+
+    /// `saveRedirect` writes through `RedirectsStore` to `Source/redirects.json`, so unlike the
+    /// delete-focused tests above (which use `makeModel`'s fake `/site` path — fine since those
+    /// never touch the filesystem) these tests need a real, writable `sourceDirectory`.
+    private func tempSourceDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SiteNavigatorModelTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func makeModel(sourceDirectory: URL) -> SiteNavigatorModel {
+        let graph = SiteContentGraph()
+        let model = SiteNavigatorModel(graph: graph, gitDelete: { _, _, _ in "sha" })
+        model.start(siteID: "site1", siteRoot: sourceDirectory,
+                     sourceDirectory: sourceDirectory, websiteTitle: "Test")
+        return model
+    }
+
+    @Test("saveRedirect on success writes the entry to redirects.json")
+    func saveRedirectSuccess() async throws {
+        let dir = try tempSourceDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = makeModel(sourceDirectory: dir)
+
+        let saved = await model.saveRedirect(source: "/old", destination: "/new", code: .permanent)
+        #expect(saved == true)
+
+        let loaded = try RedirectsStore(sourceDirectory: dir).load()
+        #expect(loaded == [RedirectsStore.RedirectEntry(source: "/old", destination: "/new", code: .permanent)])
+    }
+
+    @Test("saveRedirect on validation failure (self-cycle) returns false and sets deleteError")
+    func saveRedirectFailure() async throws {
+        let dir = try tempSourceDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = makeModel(sourceDirectory: dir)
+
+        let saved = await model.saveRedirect(source: "/a", destination: "/a", code: .permanent)
+        #expect(saved == false)
+        #expect(model.deleteError != nil)
+    }
 }
 
 /// Minimal thread-safe box so the @Sendable injection closures can record calls.

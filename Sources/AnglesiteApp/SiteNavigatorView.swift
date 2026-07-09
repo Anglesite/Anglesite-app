@@ -139,7 +139,7 @@ struct SiteNavigatorView: View {
                     Button("Cancel") { redirectSheetSource = nil; redirectDestination = "" }
                     Button("Save") {
                         Task {
-                            if await model.saveRedirect(source: source.value, destination: redirectDestination, code: redirectCode) {
+                            if await model.saveRedirect(source: source.value, destination: redirectDestination.trimmingCharacters(in: .whitespacesAndNewlines), code: redirectCode) {
                                 redirectSheetSource = nil
                                 redirectDestination = ""
                             }

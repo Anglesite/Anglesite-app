@@ -35,6 +35,7 @@ final class PlistEditorModel {
     private(set) var savedRedirectEntries: [RedirectsStore.RedirectEntry] = []
     private(set) var redirectsError: String?
     private(set) var isSavingRedirects = false
+    private(set) var redirectsLoadFailed = false
     var conflictDiskContents: String?
 
     var isDirty: Bool { entries != savedEntries && loadError == nil && !isLoading }
@@ -100,10 +101,18 @@ final class PlistEditorModel {
             analyticsSettings = analytics
             savedAnalyticsSettings = analytics
             analyticsError = nil
-            let redirects = (try? RedirectsStore(sourceDirectory: sourceDirectory).load()) ?? []
-            redirectEntries = redirects
-            savedRedirectEntries = redirects
-            redirectsError = nil
+            do {
+                let redirects = try RedirectsStore(sourceDirectory: sourceDirectory).load()
+                redirectEntries = redirects
+                savedRedirectEntries = redirects
+                redirectsError = nil
+                redirectsLoadFailed = false
+            } catch {
+                redirectEntries = []
+                savedRedirectEntries = []
+                redirectsError = "Couldn't load existing redirects.json — it may be corrupted or hand-edited with invalid entries. Fix it externally or your next save will discard it. (\(error.localizedDescription))"
+                redirectsLoadFailed = true
+            }
         } catch {
             loadError = error.localizedDescription
         }
@@ -236,6 +245,10 @@ final class PlistEditorModel {
     func saveRedirects() async -> Bool {
         guard isRedirectsDirty else { return true }
         guard !isSavingRedirects else { return false }
+        guard !redirectsLoadFailed else {
+            redirectsError = "Refusing to save: the existing redirects.json failed to load and may contain valid entries this save would discard. Fix or back up the file, then reload this site's settings."
+            return false
+        }
         isSavingRedirects = true
         redirectsError = nil
         defer { isSavingRedirects = false }
