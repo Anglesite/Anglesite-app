@@ -201,6 +201,8 @@ struct AnglesiteApp: App {
             }
 
             NewContentCommands()
+            // Edit ▸ Delete ⌘⌫ / Duplicate ⌘D for the focused window's Navigator selection (#516).
+            NavigatorEditCommands()
             // Both groups anchor `before: .importExport`; later declarations insert ABOVE earlier
             // ones, so FileItemCommands is declared first to land BELOW Save/Revert in the menu
             // (Close · Save · Revert · Rename… · Reveal — TextEdit's File-menu order).
