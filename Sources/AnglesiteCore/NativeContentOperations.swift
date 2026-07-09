@@ -12,6 +12,7 @@ public struct NativeContentOperations: ContentOperationsService {
 
     private let siteDirectory: @Sendable (_ siteID: String) async -> URL?
     private let gitCommit: GitCommit
+    private let gitDelete: GitDelete
     private let now: @Sendable () -> Date
     private let copyGenerator: any PageCopyGenerating
     // FileManager is a thread-safe singleton but not Sendable; nonisolated(unsafe) preserves the
@@ -22,12 +23,14 @@ public struct NativeContentOperations: ContentOperationsService {
     public init(
         siteDirectory: @escaping @Sendable (_ siteID: String) async -> URL?,
         gitCommit: @escaping GitCommit = NativeContentOperations.processGitCommit,
+        gitDelete: @escaping GitDelete = NativeContentOperations.processGitDelete,
         now: @escaping @Sendable () -> Date = { Date() },
         copyGenerator: any PageCopyGenerating = NoopPageCopyGenerator(),
         fileManager: FileManager = .default
     ) {
         self.siteDirectory = siteDirectory
         self.gitCommit = gitCommit
+        self.gitDelete = gitDelete
         self.now = now
         self.copyGenerator = copyGenerator
         self.fileManager = fileManager
@@ -207,6 +210,21 @@ public struct NativeContentOperations: ContentOperationsService {
         onProgress?(.createFinalizing)
         _ = await gitCommit(root, relPath, "anglesite: add \(descriptor.id)")
         return .created(filePath: relPath, identifier: slot)
+    }
+
+    /// Delete a page/post/component file: `git rm` + commit via the injected `gitDelete` closure
+    /// (default `processGitDelete`). No Trash involved — git history is the sole undo mechanism,
+    /// matching `ProjectCleanupModel.delete`'s existing precedent for dead-asset deletion.
+    public func deleteContent(siteID: String, relativePath: String) async -> ContentDeleteResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        let abs = root.appendingPathComponent(relativePath)
+        guard fileManager.fileExists(atPath: abs.path) else {
+            return .failed(reason: "No file exists at \(relativePath)")
+        }
+        guard await gitDelete(root, relativePath, "anglesite: delete \(relativePath)") != nil else {
+            return .failed(reason: "Couldn't delete \(relativePath). Check for uncommitted changes and try again.")
+        }
+        return .deleted(filePath: relativePath)
     }
 
     private func write(_ contents: String, to abs: URL) throws {

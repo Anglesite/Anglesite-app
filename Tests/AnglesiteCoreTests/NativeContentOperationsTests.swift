@@ -291,6 +291,85 @@ struct NativeContentOperationsTests {
     }
 }
 
+@Suite("NativeContentOperations.deleteContent")
+struct NativeContentOperationsDeleteTests {
+    private func makeRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("native-content-ops-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test("deletes an existing file via the injected gitDelete closure")
+    func deletesExistingFile() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/about.astro"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("stub".utf8).write(to: abs)
+
+        var deletedArgs: (URL, String, String)?
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitDelete: { projectRoot, path, message in
+                deletedArgs = (projectRoot, path, message)
+                return "deadbeef"
+            }
+        )
+
+        let result = await ops.deleteContent(siteID: "site-1", relativePath: relPath)
+
+        #expect(result == .deleted(filePath: relPath))
+        #expect(deletedArgs?.0 == root)
+        #expect(deletedArgs?.1 == relPath)
+    }
+
+    @Test("fails when the file does not exist")
+    func failsWhenMissing() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitDelete: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.deleteContent(siteID: "site-1", relativePath: "src/pages/missing.astro")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
+
+    @Test("fails when gitDelete refuses (dirty tree, no HEAD copy, etc.)")
+    func failsWhenGitDeleteRefuses() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/about.astro"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("stub".utf8).write(to: abs)
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitDelete: { _, _, _ in nil }
+        )
+
+        let result = await ops.deleteContent(siteID: "site-1", relativePath: relPath)
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
+
+    @Test("reports siteNotFound when siteDirectory resolves nil")
+    func siteNotFound() async {
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in nil },
+            gitDelete: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.deleteContent(siteID: "missing-site", relativePath: "src/pages/about.astro")
+
+        #expect(result == .siteNotFound)
+    }
+}
+
 private struct StubPageCopyGenerator: PageCopyGenerating {
     let suggestion: PageCopySuggestion?
     func suggestDescription(title: String, siteID: String, siteDirectory: URL) async -> PageCopySuggestion? {

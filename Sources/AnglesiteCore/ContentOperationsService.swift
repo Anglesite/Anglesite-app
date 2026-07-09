@@ -37,3 +37,13 @@ public enum ContentCreateResult: Sendable, Equatable {
     /// The plugin reported an error, the MCP server couldn't start, or the reply was unparseable.
     case failed(reason: String)
 }
+
+/// Outcome of a `delete_content` call.
+public enum ContentDeleteResult: Sendable, Equatable {
+    case deleted(filePath: String)
+    /// The site id didn't resolve to a known site directory.
+    case siteNotFound
+    /// The file didn't exist, or the git delete+commit failed (dirty tree, no HEAD copy,
+    /// rejecting hook, git missing).
+    case failed(reason: String)
+}
