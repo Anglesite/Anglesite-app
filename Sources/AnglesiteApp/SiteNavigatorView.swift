@@ -8,6 +8,8 @@ struct SiteNavigatorView: View {
     @Bindable var cleanup: ProjectCleanupModel
     var onOpenCleanupCandidate: (DeadAssetScanner.CleanupCandidate) -> Void
     var onDeleteCleanupCandidate: (DeadAssetScanner.CleanupCandidate) async -> Void
+    var onDeleteRequested: (NavigatorItem) -> Void
+    var onDuplicateRequested: (NavigatorItem) -> Void
     @FocusState private var editingFocused: Bool
     @State private var candidateToDelete: DeadAssetScanner.CleanupCandidate?
     /// The title shown in the confirmation dialog. Held separately from `candidateToDelete` so the
@@ -127,6 +129,12 @@ struct SiteNavigatorView: View {
                 .contextMenu {
                     if model.canRename(item.id) {
                         Button("Rename") { model.beginEditing(item.id) }
+                    }
+                    if model.canDuplicate(item.id) {
+                        Button("Duplicate") { onDuplicateRequested(item) }
+                    }
+                    if model.canDelete(item.id) {
+                        Button("Delete", role: .destructive) { onDeleteRequested(item) }
                     }
                 }
         }

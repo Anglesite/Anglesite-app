@@ -90,14 +90,21 @@ final class SiteNavigatorModel {
         }
     }
 
-    /// A row is renamable iff it is a page or post (route target). File rows (components/styles/
-    /// metadata) carry a `.file` target and are out of scope. The astro-without-title case is
-    /// caught at commit, not pre-disabled (pre-checking would read every page file per refresh).
-    func canRename(_ id: String) -> Bool {
+    /// A row is renamable/deletable/duplicable iff it is a page or post (route target). File rows
+    /// (components/styles/metadata) carry a `.file` target and are out of scope. The
+    /// astro-without-title case is caught at commit, not pre-disabled (pre-checking would read
+    /// every page file per refresh).
+    private func isContentRow(_ id: String) -> Bool {
         guard let target = target(for: id) else { return false }
         if case .route = target { return true }
         return false
     }
+
+    func canRename(_ id: String) -> Bool { isContentRow(id) }
+
+    /// Delete/Duplicate (#516) share Rename's gating exactly — pages and posts only.
+    func canDelete(_ id: String) -> Bool { isContentRow(id) }
+    func canDuplicate(_ id: String) -> Bool { isContentRow(id) }
 
     func beginEditing(_ id: String) {
         guard canRename(id) else { return }
