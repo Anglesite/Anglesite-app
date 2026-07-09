@@ -285,7 +285,11 @@ final class SiteWindowModel {
         guard let site, canRunDeploy else { return }
         Task { @MainActor in
             let containerControl = await preview.activeContainerControl()
-            deploy.deploy(siteID: site.id, siteDirectory: site.sourceDirectory, containerControl: containerControl)
+            let currentRoutes = await contentGraph.pages(for: site.id).map(\.route)
+            deploy.deploy(
+                siteID: site.id, siteDirectory: site.sourceDirectory,
+                configDirectory: site.configDirectory, currentRoutes: currentRoutes,
+                containerControl: containerControl)
         }
     }
 
