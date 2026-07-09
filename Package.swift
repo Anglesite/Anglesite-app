@@ -135,6 +135,23 @@ if includeContainer {
 
 #if compiler(>=6.4)
 packageTargets.append(
+    .target(
+        name: "AnglesiteAppCore",
+        dependencies: ["AnglesiteCore", "AnglesiteBridge", "AnglesiteIntents"],
+        path: "Sources/AnglesiteApp",
+        exclude: ["AnglesiteApp.swift", "LiveSiteRuntimeFactory.swift"],
+        swiftSettings: strictConcurrency + [.define("ANGLESITE_MAS")]
+    )
+)
+packageTargets.append(
+    .testTarget(
+        name: "AnglesiteAppTests",
+        dependencies: ["AnglesiteAppCore", "AnglesiteTestSupport"],
+        path: "Tests/AnglesiteAppTests",
+        swiftSettings: strictConcurrency
+    )
+)
+packageTargets.append(
     .testTarget(
         name: "AnglesiteIntentsTests",
         dependencies: ["AnglesiteIntents", "AnglesiteCore"],
