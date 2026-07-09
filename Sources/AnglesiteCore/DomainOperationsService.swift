@@ -36,12 +36,13 @@ public struct DomainOperations: DomainOperationsService {
         self.tokenProvider = tokenProvider
     }
 
-    /// Env var first (matches `HardenModel.apiToken()`), then the Keychain-stored token.
+    /// Env var first (matches `HardenModel.apiToken()`), then the platform secret store
+    /// (the user's Keychain on macOS).
     public static let defaultTokenProvider: @Sendable () -> String? = {
         if let env = ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"], !env.isEmpty {
             return env
         }
-        return try? KeychainStore().readCloudflareToken()
+        return try? PlatformSecretStore.make().readCloudflareToken()
     }
 
     private func resolveZone(domain: String, token: String) async -> Result<String, DomainOperationError> {
