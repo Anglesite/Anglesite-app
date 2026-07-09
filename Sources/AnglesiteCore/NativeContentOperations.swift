@@ -213,8 +213,9 @@ public struct NativeContentOperations: ContentOperationsService {
     }
 
     /// Delete a page/post/component file: `git rm` + commit via the injected `gitDelete` closure
-    /// (default `processGitDelete`). No Trash involved — git history is the sole undo mechanism,
-    /// matching `ProjectCleanupModel.delete`'s existing precedent for dead-asset deletion.
+    /// (default `processGitDelete`). Git is the underlying mechanism, but not a user-facing
+    /// concept: the in-app "Undo" affordance (`restoreContent`, driven by the caller holding the
+    /// pre-delete contents) is what recovers a deleted file, not an instruction to use git.
     public func deleteContent(siteID: String, relativePath: String) async -> ContentDeleteResult {
         guard let root = await siteDirectory(siteID) else { return .siteNotFound }
         let abs = root.appendingPathComponent(relativePath)
@@ -222,9 +223,32 @@ public struct NativeContentOperations: ContentOperationsService {
             return .failed(reason: "No file exists at \(relativePath)")
         }
         guard await gitDelete(root, relativePath, "anglesite: delete \(relativePath)") != nil else {
-            return .failed(reason: "Couldn't delete \(relativePath). Check for uncommitted changes and try again.")
+            return .failed(reason: "Couldn't delete \(relativePath). Try again in a moment.")
         }
         return .deleted(filePath: relativePath)
+    }
+
+    /// Re-writes `contents` back to `relativePath` and commits — the "Undo" half of `deleteContent`
+    /// (#586). The caller is responsible for having captured `contents` before the delete; this
+    /// method doesn't itself know what was deleted.
+    ///
+    /// Unlike the best-effort `_ = await gitCommit(...)` elsewhere in this file (a freshly-created
+    /// file simply has no prior git history to protect), a failed recommit here is reported as
+    /// `.failed` rather than silently swallowed: `processGitDelete`'s `cat-file -e HEAD:relPath`
+    /// guard requires a committed HEAD copy, so an uncommitted restore would leave the file
+    /// existing on disk (and reported to the user as "undone") while any *later* delete of it keeps
+    /// failing opaquely — the file is back but the app's own recovery mechanism can no longer touch
+    /// it. Surfacing the failure here at least tells the user restoration is incomplete (PR #608
+    /// review).
+    public func restoreContent(siteID: String, relativePath: String, contents: String) async -> ContentCreateResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        let abs = root.appendingPathComponent(relativePath)
+        do { try write(contents, to: abs) }
+        catch { return .failed(reason: "\(error)") }
+        guard await gitCommit(root, relativePath, "anglesite: restore \(relativePath)") != nil else {
+            return .failed(reason: "Restored \(relativePath), but couldn't save it to your site's history. Try again in a moment.")
+        }
+        return .created(filePath: relativePath, identifier: relativePath)
     }
 
     /// Duplicate an existing page: read its contents, retitle to `"<title> Copy"` (bumping to

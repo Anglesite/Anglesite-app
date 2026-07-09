@@ -8,7 +8,7 @@ import AnglesiteSiteModel
 /// Roots are resolved adaptively: an `.anglesite` package (#242) exposes `Source/` and `Config/`;
 /// a plain directory (the current pre-package layout) is treated as the project root directly.
 public enum FileGroup: String, Sendable, CaseIterable {
-    case pages, posts, components, styles, metadata
+    case pages, posts, collections, components, styles, metadata
 }
 
 public struct FileRef: Sendable, Equatable, Identifiable {

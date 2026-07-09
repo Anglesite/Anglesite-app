@@ -368,6 +368,60 @@ struct NativeContentOperationsDeleteTests {
 
         #expect(result == .siteNotFound)
     }
+
+    @Test("restoreContent writes the given contents back and commits via the injected closure")
+    func restoresContent() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/about.astro"
+
+        var committedArgs: (URL, String, String)?
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { projectRoot, path, message in
+                committedArgs = (projectRoot, path, message)
+                return "deadbeef"
+            }
+        )
+
+        let result = await ops.restoreContent(siteID: "site-1", relativePath: relPath, contents: "restored body")
+
+        #expect(result == .created(filePath: relPath, identifier: relPath))
+        let written = try String(contentsOf: root.appendingPathComponent(relPath), encoding: .utf8)
+        #expect(written == "restored body")
+        #expect(committedArgs?.1 == relPath)
+    }
+
+    @Test("restoreContent reports .failed when the recommit fails, even though the write itself landed")
+    func restoreContentFailsWhenCommitFails() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/about.astro"
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { _, _, _ in nil }
+        )
+
+        let result = await ops.restoreContent(siteID: "site-1", relativePath: relPath, contents: "restored body")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+        // The write itself is not rolled back on a commit failure — the caller (SiteWindowModel)
+        // relies on this to decide whether to reopen the editor/inspector on the restored file.
+        let written = try String(contentsOf: root.appendingPathComponent(relPath), encoding: .utf8)
+        #expect(written == "restored body")
+    }
+
+    @Test("restoreContent reports siteNotFound when siteDirectory resolves nil")
+    func restoreContentSiteNotFound() async {
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in nil },
+            gitCommit: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.restoreContent(siteID: "missing-site", relativePath: "src/pages/about.astro", contents: "x")
+
+        #expect(result == .siteNotFound)
+    }
 }
 
 @Suite("NativeContentOperations.duplicatePage/duplicatePost")

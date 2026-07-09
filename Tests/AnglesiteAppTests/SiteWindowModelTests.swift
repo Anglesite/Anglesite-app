@@ -172,4 +172,43 @@ extension SiteWindowModelTests {
         #expect(model.pendingRedirectOfferRoute == nil)
         #expect(model.contentActionError == nil)
     }
+
+    @Test("dismissDeleteUndo declines the restore and surfaces the deferred redirect offer")
+    func dismissDeleteUndoSurfacesRedirectOffer() {
+        let model = makeModel()
+        model.pendingDeleteUndo = DeleteUndoOffer(
+            id: "src/pages/about.astro", title: "About", relativePath: "src/pages/about.astro",
+            contents: "stub", redirectRoute: "/about/")
+
+        model.dismissDeleteUndo()
+
+        #expect(model.pendingDeleteUndo == nil)
+        #expect(model.pendingRedirectOfferRoute == "/about/")
+    }
+
+    @Test("dismissDeleteUndo with no redirect route just clears the offer")
+    func dismissDeleteUndoWithoutRedirectRoute() {
+        let model = makeModel()
+        model.pendingDeleteUndo = DeleteUndoOffer(
+            id: "src/components/Widget.astro", title: "Widget", relativePath: "src/components/Widget.astro",
+            contents: "stub", redirectRoute: nil)
+
+        model.dismissDeleteUndo()
+
+        #expect(model.pendingDeleteUndo == nil)
+        #expect(model.pendingRedirectOfferRoute == nil)
+    }
+
+    @Test("undoDelete no-ops safely when there is no open site, clearing the offer rather than leaving it stale")
+    func undoDeleteNoSiteClearsOffer() async {
+        let model = makeModel()
+        model.pendingDeleteUndo = DeleteUndoOffer(
+            id: "src/pages/about.astro", title: "About", relativePath: "src/pages/about.astro",
+            contents: "stub", redirectRoute: nil)
+
+        await model.undoDelete()
+
+        #expect(model.pendingDeleteUndo == nil)
+        #expect(model.contentActionError == nil)
+    }
 }
