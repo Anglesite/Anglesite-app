@@ -51,9 +51,32 @@ struct ProjectCleanupModelTests {
         defer { try? FileManager.default.removeItem(at: root) }
         try Data().write(to: root.appendingPathComponent("public/images/orphan.png"))
 
+        // `DeadAssetScanner.scan(projectRoot:images:)` only ever proposes an `.image` candidate
+        // from the `images` list it's handed — it does not scan `public/images` on disk itself.
+        // `SiteContentGraph` is a pure in-memory cache with no filesystem awareness of its own
+        // (populated externally via `load`/`upsertImage`), so the orphan file on disk is invisible
+        // to `scan()` unless it's also registered here.
+        let contentGraph = SiteContentGraph()
+        await contentGraph.load(
+            siteID: "site-a",
+            pages: [],
+            posts: [],
+            images: [
+                SiteContentGraph.Image(
+                    id: "site-a:image:public/images/orphan.png",
+                    siteID: "site-a",
+                    relativePath: "public/images/orphan.png",
+                    fileName: "orphan.png",
+                    byteSize: 0,
+                    usedOnPages: [],
+                    lastModified: Date(timeIntervalSince1970: 0)
+                )
+            ]
+        )
+
         let model = ProjectCleanupModel(
             knowledgeIndex: SiteKnowledgeIndex(),
-            contentGraph: SiteContentGraph(),
+            contentGraph: contentGraph,
             // Blocks until the test opens the gate, giving the test a controllable window in
             // which delete() is provably mid-flight (isBusy == true) — the seam the prior version
             // of this test lacked.
