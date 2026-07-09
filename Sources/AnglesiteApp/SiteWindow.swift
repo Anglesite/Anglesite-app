@@ -597,6 +597,17 @@ struct SiteWindow: View {
         } message: { msg in
             Text(msg)
         }
+        .sheet(item: Binding(
+            get: { model.pendingRedirectOfferRoute.map { IdentifiableRoute($0) } },
+            set: { model.pendingRedirectOfferRoute = $0?.value }
+        )) { route in
+            if let navigator = model.navigator {
+                AddRedirectSheet(source: route.value) { destination, code in
+                    let saved = await navigator.saveRedirect(source: route.value, destination: destination, code: code)
+                    return saved ? nil : navigator.redirectSaveError
+                }
+            }
+        }
         .sheet(isPresented: $bindableModel.newPagePresented) {
             NewPageSheet(site: site) { title, route, template in
                 await model.createPage(title: title, route: route, template: template)

@@ -110,6 +110,11 @@ final class SiteWindowModel {
     /// Surfaces a Delete/Duplicate failure — mirrors `cleanup.deleteError`, but for content
     /// (page/post) delete/duplicate rather than Cleanup's dead-asset delete.
     var contentActionError: String?
+    /// Non-nil ⟺ the "Add Redirect?" prompt is showing (#530), holding the route that was just
+    /// deleted. Set by `confirmDelete()` only when the deleted item was a page (posts carry no
+    /// `route`) and the delete actually succeeded — never break an inbound URL a user didn't
+    /// choose to abandon.
+    var pendingRedirectOfferRoute: String?
     /// File ▸ Revert to Saved is destructive, so it routes through a confirmation alert hosted by
     /// `SiteWindow` (#509).
     var revertConfirmationPresented = false
@@ -294,7 +299,11 @@ final class SiteWindowModel {
         guard let site, canRunDeploy else { return }
         Task { @MainActor in
             let containerControl = await preview.activeContainerControl()
-            deploy.deploy(siteID: site.id, siteDirectory: site.sourceDirectory, containerControl: containerControl)
+            let currentRoutes = await contentGraph.pages(for: site.id).map(\.route)
+            deploy.deploy(
+                siteID: site.id, siteDirectory: site.sourceDirectory,
+                configDirectory: site.configDirectory, currentRoutes: currentRoutes,
+                containerControl: containerControl)
         }
     }
 
@@ -772,8 +781,13 @@ final class SiteWindowModel {
         guard let site, case .route = item.target else { return }
 
         let relPath: String
+        // Captured before the delete call, not derived after: `.deleted(filePath:)` doesn't carry
+        // a route, and posts have none to carry regardless (#530) — only a page's route is ever a
+        // redirect-offer candidate.
+        var deletedPageRoute: String?
         if let page = await contentGraph.page(id: item.id) {
             relPath = page.filePath
+            deletedPageRoute = page.route
         } else if let post = await contentGraph.post(id: item.id) {
             relPath = post.filePath
         } else {
@@ -796,6 +810,9 @@ final class SiteWindowModel {
         switch result {
         case .deleted:
             if navigator?.selection == item.id { navigator?.selection = nil }
+            if let deletedPageRoute {
+                pendingRedirectOfferRoute = deletedPageRoute
+            }
         case .failed(let reason):
             contentActionError = reason
             if let savedEditor {

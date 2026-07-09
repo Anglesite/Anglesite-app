@@ -154,6 +154,13 @@ import Foundation
         }
     }
 
+    @Test func astroConfigRegistersRedirectsIntegration() throws {
+        let configURL = templateRoot().appendingPathComponent("astro.config.ts")
+        let source = try String(contentsOf: configURL, encoding: .utf8)
+        #expect(source.contains("import redirects from \"./scripts/redirects.ts\""))
+        #expect(source.contains("redirects()"))
+    }
+
     /// Guard test: config keys referenced by each integration page must be a subset of the
     /// keys that its descriptor writes via .writeConfig operations.
     /// This catches mismatches like DONATIONS_LABEL (page) vs DONATIONS_BUTTON_TEXT (descriptor).
