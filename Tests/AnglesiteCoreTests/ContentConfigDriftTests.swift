@@ -60,6 +60,11 @@ struct ContentConfigDriftTests {
         }
     }
 
+    @Test("member content type is registered")
+    func memberIsRegistered() {
+        #expect(ContentTypeRegistry.builtIns.contains { $0.id == "member" })
+    }
+
     @Test("collectionNames parses the export line, including key: value form")
     func parsesExportLine() {
         let line = "export const collections = { blog, notes: notes, articles };"

@@ -1,0 +1,30 @@
+---
+interface Props {
+  name: string;
+  role?: string;
+  photo?: string;
+  links?: string[];
+}
+const { name, role, photo, links } = Astro.props;
+---
+<article class="member-card">
+  {photo && <img src={photo} alt={name} width="96" height="96" />}
+  <h3>{name}</h3>
+  {role && <p class="role">{role}</p>}
+  <div class="bio">
+    <slot />
+  </div>
+  {links && links.length > 0 && (
+    <ul class="links">
+      {links.map((link) => <li><a href={link}>{link}</a></li>)}
+    </ul>
+  )}
+</article>
+
+<style>
+  .member-card { display: flex; flex-direction: column; gap: 0.25rem; }
+  .member-card img { border-radius: 50%; object-fit: cover; }
+  .role { color: var(--color-text-muted, #666); margin: 0; }
+  .bio { font-size: 0.9rem; }
+  .links { list-style: none; padding: 0; margin: 0; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+</style>

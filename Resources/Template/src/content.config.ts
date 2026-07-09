@@ -107,4 +107,15 @@ const reviews = defineCollection({
   }).strict(),
 });
 
-export const collections = { blog, notes, articles, photos, albums, bookmarks, replies, likes, announcements, events, reviews };
+const members = defineCollection({
+  loader: glob({ pattern: "**/*.md", base: "./src/content/members" }),
+  schema: z.object({
+    name: z.string(),
+    role: z.string().optional(),
+    joinedDate: z.coerce.date(),
+    photo: z.string().optional(),
+    links: z.array(z.string()).optional(),
+  }).strict(),
+});
+
+export const collections = { blog, notes, articles, photos, albums, bookmarks, replies, likes, announcements, events, reviews, members };

@@ -187,7 +187,7 @@ struct ContentTypeRegistryTests {
     func collectionBackedIDs() {
         #expect(ContentTypeRegistry.default.collectionBackedTypeIDs == [
             "note", "article", "photo", "album", "bookmark", "reply", "like",
-            "announcement", "event", "review",
+            "announcement", "event", "review", "member",
         ])
     }
 
