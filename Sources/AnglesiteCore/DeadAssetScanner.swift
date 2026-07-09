@@ -346,14 +346,21 @@ public enum DeadAssetScanner {
     /// drifting copy of the same rules.
     private static let excludedDirNames = SiteIndexPaths.skippedDirectoryNames
 
-    /// Scans every `.astro`/`.md`/`.mdx`/`.mdoc`/`.markdown`/`.css`/`.ts`/`.tsx`/`.js`/`.jsx` file
-    /// under `projectRoot` (excluding the top-level `scripts/` — see the type doc comment) for
-    /// references, then returns every unused `src/components/**/*.astro`, `src/layouts/**/*.astro`,
-    /// and unused entry in `images` (typically `SiteContentGraph.images(for:)`, scoped to
-    /// `public/images/**`). Pure over the filesystem snapshot at call time.
-    public static func scan(projectRoot: URL, images: [SiteContentGraph.Image]) -> [CleanupCandidate] {
-        var fileReferenceCounts: [String: Int] = [:]
+    /// Per-file attribution of every resolved reference discovered by a full-project walk: which
+    /// project-relative source paths reference each (lowercased) referenced-file path, plus the
+    /// set of directories covered by an `Astro.glob`/`import.meta.glob` call. Shared by `scan` and
+    /// `referencedPaths` so the extraction/alias/glob logic lives in exactly one place.
+    private struct ReferenceIndex {
+        var referencingPaths: [String: Set<String>] = [:]
         var globDirectories: Set<String> = []
+    }
+
+    /// Walks every `.astro`/`.md`/`.mdx`/`.mdoc`/`.markdown`/`.css`/`.ts`/`.tsx`/`.js`/`.jsx` file
+    /// under `projectRoot` (excluding the top-level `scripts/` — see the type doc comment) and
+    /// attributes every resolved reference to its source file. Pure over the filesystem snapshot
+    /// at call time.
+    private static func buildReferenceIndex(projectRoot: URL) -> ReferenceIndex {
+        var index = ReferenceIndex()
         var skippedOversizedFiles: [String] = []
         let aliasConfig = loadPathAliases(projectRoot: projectRoot)
 
@@ -382,13 +389,15 @@ public enum DeadAssetScanner {
             guard let source = try? String(contentsOf: abs, encoding: .utf8) else { continue }
 
             let refs = extractReferences(source: source, path: relPath)
-            for ref in refs.fileReferences { fileReferenceCounts[ref.lowercased(), default: 0] += 1 }
+            for ref in refs.fileReferences {
+                index.referencingPaths[ref.lowercased(), default: []].insert(relPath)
+            }
             if !isTopLevelScripts {
-                globDirectories.formUnion(refs.globDirectories.map { $0.lowercased() })
+                index.globDirectories.formUnion(refs.globDirectories.map { $0.lowercased() })
             }
             for raw in refs.unresolvedReferences {
                 for aliasResolved in resolveAlias(raw, config: aliasConfig) {
-                    fileReferenceCounts[aliasResolved.lowercased(), default: 0] += 1
+                    index.referencingPaths[aliasResolved.lowercased(), default: []].insert(relPath)
                 }
             }
 
@@ -409,10 +418,10 @@ public enum DeadAssetScanner {
                 }
                 for raw in rawValues {
                     if let resolved = resolve(raw, relativeTo: relPath) {
-                        fileReferenceCounts[resolved.lowercased(), default: 0] += 1
+                        index.referencingPaths[resolved.lowercased(), default: []].insert(relPath)
                     } else {
                         for aliasResolved in resolveAlias(raw, config: aliasConfig) {
-                            fileReferenceCounts[aliasResolved.lowercased(), default: 0] += 1
+                            index.referencingPaths[aliasResolved.lowercased(), default: []].insert(relPath)
                         }
                     }
                 }
@@ -427,12 +436,23 @@ public enum DeadAssetScanner {
             }
         }
 
+        return index
+    }
+
+    /// Scans every `.astro`/`.md`/`.mdx`/`.mdoc`/`.markdown`/`.css`/`.ts`/`.tsx`/`.js`/`.jsx` file
+    /// under `projectRoot` (excluding the top-level `scripts/` — see the type doc comment) for
+    /// references, then returns every unused `src/components/**/*.astro`, `src/layouts/**/*.astro`,
+    /// and unused entry in `images` (typically `SiteContentGraph.images(for:)`, scoped to
+    /// `public/images/**`). Pure over the filesystem snapshot at call time.
+    public static func scan(projectRoot: URL, images: [SiteContentGraph.Image]) -> [CleanupCandidate] {
+        let index = buildReferenceIndex(projectRoot: projectRoot)
+
         func referenceCount(for path: String) -> Int {
             let key = path.lowercased()
-            if globDirectories.contains(where: { key.hasPrefix($0 + "/") }) {
-                return max(1, fileReferenceCounts[key] ?? 0)
+            if index.globDirectories.contains(where: { key.hasPrefix($0 + "/") }) {
+                return max(1, index.referencingPaths[key]?.count ?? 0)
             }
-            return fileReferenceCounts[key] ?? 0
+            return index.referencingPaths[key]?.count ?? 0
         }
 
         var candidates: [CleanupCandidate] = []
@@ -465,6 +485,14 @@ public enum DeadAssetScanner {
         }
 
         return candidates.sorted { $0.path < $1.path }
+    }
+
+    /// Every referenced-file path (lowercased) mapped to the set of project-relative source paths
+    /// that reference it. Reuses the exact same extraction/alias/glob logic as `scan` — this is the
+    /// canonical "what references this file" answer for the whole app; `ContentScanner.scanImages`
+    /// uses it to populate `SiteContentGraph.Image.usedOnPages` (#140/#553).
+    public static func referencedPaths(projectRoot: URL) -> [String: Set<String>] {
+        buildReferenceIndex(projectRoot: projectRoot).referencingPaths
     }
 
     /// Recursively collects files under `dir` in sorted order, skipping excluded directories and

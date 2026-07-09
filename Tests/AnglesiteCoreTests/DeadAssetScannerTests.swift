@@ -374,4 +374,18 @@ struct DeadAssetScannerScanTests {
         let candidates = DeadAssetScanner.scan(projectRoot: root, images: [])
         #expect(candidates.map(\.path).contains("src/components/Orphan.astro"))
     }
+
+    @Test("referencedPaths attributes a shared asset to every referencing source file")
+    func referencedPathsAttributesMultipleSources() throws {
+        let root = makeSite([
+            "src/pages/index.astro": #"<img src="/images/hero.png" />"#,
+            "src/pages/about.astro": #"<img src="/images/hero.png" />"#,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let index = DeadAssetScanner.referencedPaths(projectRoot: root)
+        let referrers = try #require(index["public/images/hero.png"])
+
+        #expect(referrers == ["src/pages/index.astro", "src/pages/about.astro"])
+    }
 }
