@@ -90,9 +90,10 @@ than a literal rock bed.
 **Winner (decided 2026-07-09): Slash of Light + Bracket Facet's chevrons.**
 Study 3's beam-through-prism carries the mark; study 2's specular chevrons graft
 on as a large-size flourish (they melt into sparkle below ~48 px, which is the
-intended behavior); and the galena field is tinted further toward blue
-(`#4A5C74 → #2B3850 → #172030`) so the complementary blue/gold pairing does the
-dock-pop work. Composite study:
+intended behavior); and the galena field is a brighter steel blue
+(`#5B7192 → #364764 → #202C40`) so the complementary blue/gold pairing does the
+dock-pop work. Refined same day: the beam runs **edge to edge** across the frame
+and the caustic pool is gone — the gem's own glow grounds it. Composite study:
 [`assets/icon-studies/study-4-winner.svg`](assets/icon-studies/study-4-winner.svg).
 
 ## Palette (working values)
