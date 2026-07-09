@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Study 4 — the winner (2026-07-09): Study 3's Slash of Light plus
+       Study 2's chevrons, on a bright steel-blue field. Liquid Glass pass:
+       rounded silhouette, melted facet junctions, translucent body with a
+       wet specular and an internal environment reflection, soft rim light
+       instead of drawn edges. Chevrons are etched into the stone (shadow
+       wall up-left, lit wall down-right), not glowing on top of it.
+       Facet-geometry study, not final art. -->
+  <defs>
+    <radialGradient id="s4-bg" cx="0.38" cy="0.26" r="1.05">
+      <stop offset="0" stop-color="#6E86AB"/>
+      <stop offset="0.55" stop-color="#45587A"/>
+      <stop offset="1" stop-color="#2A3A55"/>
+    </radialGradient>
+    <linearGradient id="s4-gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="s4-innerGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#EFD9A0" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#EFD9A0" stop-opacity="0"/>
+    </radialGradient>
+    <!-- rounded glass under-layer: one blended body gradient -->
+    <linearGradient id="s4-glassBase" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#EED9A4"/>
+      <stop offset="0.6" stop-color="#CFAD5F"/>
+      <stop offset="1" stop-color="#A9873C"/>
+    </linearGradient>
+    <linearGradient id="s4-topL" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#FBF5E3"/>
+      <stop offset="1" stop-color="#EFD9A0"/>
+    </linearGradient>
+    <linearGradient id="s4-topR" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#EDD8A2"/>
+      <stop offset="1" stop-color="#D3B370"/>
+    </linearGradient>
+    <linearGradient id="s4-bodyL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E3CC94"/>
+      <stop offset="1" stop-color="#C2A054"/>
+    </linearGradient>
+    <linearGradient id="s4-bodyR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#DCC284"/>
+      <stop offset="1" stop-color="#B49148"/>
+    </linearGradient>
+    <linearGradient id="s4-botL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#BB9A4E"/>
+      <stop offset="1" stop-color="#8C6C2C"/>
+    </linearGradient>
+    <linearGradient id="s4-botR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B0913F"/>
+      <stop offset="1" stop-color="#82632A"/>
+    </linearGradient>
+    <linearGradient id="s4-beamOut" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8F2E0" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#F8F2E0" stop-opacity="0.08"/>
+    </linearGradient>
+    <linearGradient id="s4-beamIn" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF3D0" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#F0CE7E" stop-opacity="0.45"/>
+    </linearGradient>
+    <clipPath id="s4-tile">
+      <rect x="50" y="50" width="412" height="412" rx="92"/>
+    </clipPath>
+    <clipPath id="s4-crystal">
+      <polygon points="256,118 336,198 336,314 256,394 176,314 176,198"/>
+    </clipPath>
+    <filter id="s4-soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <filter id="s4-soft2" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+    <filter id="s4-beamBlur" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <filter id="s4-melt" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1.6"/>
+    </filter>
+    <filter id="s4-rim" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="1"/>
+    </filter>
+  </defs>
+
+  <!-- bright steel-blue field -->
+  <rect x="50" y="50" width="412" height="412" rx="92" fill="url(#s4-bg)"/>
+  <rect x="50" y="50" width="412" height="412" rx="92" fill="none" stroke="#FFFFFF" stroke-opacity="0.06" stroke-width="2"/>
+
+  <!-- the gem's glow -->
+  <ellipse cx="256" cy="262" rx="170" ry="190" fill="url(#s4-innerGlow)" filter="url(#s4-soft)"/>
+
+  <!-- incoming beam, edge to edge across the frame -->
+  <g clip-path="url(#s4-tile)">
+    <polygon points="486.1,4.4 48.9,526.8 25.9,507.6 463.1,-14.8"
+             fill="url(#s4-beamOut)" filter="url(#s4-beamBlur)"/>
+  </g>
+
+  <!-- crystal: liquid glass -->
+  <g>
+    <!-- rounded under-layer carries the silhouette; wide round-joined
+         stroke rounds every corner of the stone -->
+    <polygon points="256,118 336,198 336,314 256,394 176,314 176,198"
+             fill="url(#s4-glassBase)" stroke="url(#s4-glassBase)"
+             stroke-width="14" stroke-linejoin="round" opacity="0.92"/>
+    <!-- facets, melted together and slightly translucent -->
+    <g filter="url(#s4-melt)" opacity="0.9">
+      <polygon points="256,118 176,198 256,214" fill="url(#s4-topL)"/>
+      <polygon points="256,118 336,198 256,214" fill="url(#s4-topR)"/>
+      <polygon points="176,198 256,214 256,298 176,314" fill="url(#s4-bodyL)"/>
+      <polygon points="336,198 256,214 256,298 336,314" fill="url(#s4-bodyR)"/>
+      <polygon points="176,314 256,298 256,394" fill="url(#s4-botL)"/>
+      <polygon points="336,314 256,298 256,394" fill="url(#s4-botR)"/>
+    </g>
+    <!-- internal environment reflection: the blue field seen through
+         the lower-right of the stone -->
+    <g clip-path="url(#s4-crystal)">
+      <polygon points="336,220 336,314 256,394 300,394 336,350"
+               fill="#9FB6D9" opacity="0.2" filter="url(#s4-soft2)"/>
+    </g>
+    <!-- wet specular: soft blob riding the upper-left shoulder -->
+    <g clip-path="url(#s4-crystal)">
+      <ellipse cx="216" cy="182" rx="44" ry="24" transform="rotate(-38 216 182)"
+               fill="#FFFFFF" opacity="0.4" filter="url(#s4-soft2)"/>
+      <ellipse cx="196" cy="230" rx="10" ry="22" transform="rotate(-12 196 230)"
+               fill="#FFFFFF" opacity="0.22" filter="url(#s4-soft2)"/>
+    </g>
+  </g>
+
+  <!-- the beam inside the body: kinked ~8°, hot champagne -->
+  <g clip-path="url(#s4-crystal)">
+    <g transform="rotate(8 256 256)">
+      <polygon points="486.1,4.4 48.9,526.8 25.9,507.6 463.1,-14.8"
+               fill="url(#s4-beamIn)" filter="url(#s4-beamBlur)"/>
+      <line x1="420" y1="60" x2="92" y2="452" stroke="#FFFBEA" stroke-width="6"
+            stroke-linecap="round" opacity="0.7" filter="url(#s4-beamBlur)"/>
+    </g>
+  </g>
+
+  <!-- chevrons etched into the stone: shadow wall up-left, lit wall
+       down-right, groove base between -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g>
+      <polyline points="238,212 200,256 238,300" stroke="#9A7930" stroke-width="6" opacity="0.5"/>
+      <polyline points="238,212 200,256 238,300" stroke="#6E521C" stroke-width="4" opacity="0.7" transform="translate(-1.6,-1.6)"/>
+      <polyline points="238,212 200,256 238,300" stroke="#FFF6DC" stroke-width="3" opacity="0.85" transform="translate(1.6,1.6)"/>
+    </g>
+    <g>
+      <polyline points="274,212 312,256 274,300" stroke="#9A7930" stroke-width="6" opacity="0.5"/>
+      <polyline points="274,212 312,256 274,300" stroke="#6E521C" stroke-width="4" opacity="0.7" transform="translate(-1.6,-1.6)"/>
+      <polyline points="274,212 312,256 274,300" stroke="#FFF6DC" stroke-width="3" opacity="0.85" transform="translate(1.6,1.6)"/>
+    </g>
+  </g>
+
+  <!-- light kiss on the upper edges only — no full rim, it reads as a
+       medallion border -->
+  <polyline points="176,198 256,118 336,198"
+            fill="none" stroke="#FFFFFF" stroke-opacity="0.3" stroke-width="3"
+            stroke-linecap="round" stroke-linejoin="round"
+            transform="translate(0,-6)" filter="url(#s4-rim)"/>
+
+  <!-- glass gloss over the whole tile -->
+  <rect x="50" y="50" width="412" height="412" rx="92" fill="url(#s4-gloss)"/>
+</svg>

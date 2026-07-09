@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Study 1 — "The Prism". Facet-geometry study, not final art.
+       Single anglesite prism, chisel terminations, viewed corner-on.
+       Brackets live in the negative space beside the 45° tapers. -->
+  <defs>
+    <radialGradient id="s1-bg" cx="0.38" cy="0.26" r="1.05">
+      <stop offset="0" stop-color="#3A4756"/>
+      <stop offset="0.55" stop-color="#232B36"/>
+      <stop offset="1" stop-color="#141A22"/>
+    </radialGradient>
+    <linearGradient id="s1-gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="s1-innerGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#EFD9A0" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#EFD9A0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="s1-topL" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#FBF5E3"/>
+      <stop offset="1" stop-color="#EFD9A0"/>
+    </linearGradient>
+    <linearGradient id="s1-topR" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#EDD8A2"/>
+      <stop offset="1" stop-color="#D3B370"/>
+    </linearGradient>
+    <linearGradient id="s1-bodyL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E9D49E"/>
+      <stop offset="1" stop-color="#C7A356"/>
+    </linearGradient>
+    <linearGradient id="s1-bodyR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D5B876"/>
+      <stop offset="1" stop-color="#A9853B"/>
+    </linearGradient>
+    <linearGradient id="s1-botL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#C2A052"/>
+      <stop offset="1" stop-color="#8F6E2C"/>
+    </linearGradient>
+    <linearGradient id="s1-botR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B08F3E"/>
+      <stop offset="1" stop-color="#7A5C22"/>
+    </linearGradient>
+    <linearGradient id="s1-ridge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDF8E9" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#FDF8E9" stop-opacity="0.15"/>
+    </linearGradient>
+    <filter id="s1-soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <filter id="s1-soft2" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+  </defs>
+
+  <!-- galena field -->
+  <rect x="50" y="50" width="412" height="412" rx="92" fill="url(#s1-bg)"/>
+  <rect x="50" y="50" width="412" height="412" rx="92" fill="none" stroke="#FFFFFF" stroke-opacity="0.06" stroke-width="2"/>
+
+  <!-- lit-from-within glow -->
+  <ellipse cx="256" cy="262" rx="170" ry="190" fill="url(#s1-innerGlow)" filter="url(#s1-soft)"/>
+
+  <!-- caustic pool -->
+  <ellipse cx="256" cy="400" rx="88" ry="20" fill="#EFD9A0" opacity="0.35" filter="url(#s1-soft2)"/>
+
+  <!-- crystal: hexagonal prism, chisel top + bottom, front edge at x=256 -->
+  <g>
+    <polygon points="256,118 176,198 256,214" fill="url(#s1-topL)"/>
+    <polygon points="256,118 336,198 256,214" fill="url(#s1-topR)"/>
+    <polygon points="176,198 256,214 256,298 176,314" fill="url(#s1-bodyL)"/>
+    <polygon points="336,198 256,214 256,298 336,314" fill="url(#s1-bodyR)"/>
+    <polygon points="176,314 256,298 256,394" fill="url(#s1-botL)"/>
+    <polygon points="336,314 256,298 256,394" fill="url(#s1-botR)"/>
+    <!-- specular ridge + apex glints -->
+    <line x1="256" y1="214" x2="256" y2="298" stroke="url(#s1-ridge)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="256" y1="118" x2="176" y2="198" stroke="#FDF8E9" stroke-opacity="0.55" stroke-width="2" stroke-linecap="round"/>
+    <line x1="176" y1="314" x2="256" y2="394" stroke="#F3E7C2" stroke-opacity="0.45" stroke-width="2" stroke-linecap="round"/>
+    <line x1="256" y1="394" x2="336" y2="314" stroke="#F3E7C2" stroke-opacity="0.3" stroke-width="2" stroke-linecap="round"/>
+    <!-- silhouette pull-away -->
+    <polygon points="256,118 336,198 336,314 256,394 176,314 176,198"
+             fill="none" stroke="#FBF3DC" stroke-opacity="0.22" stroke-width="1.5"/>
+  </g>
+
+  <!-- glass gloss over the whole tile -->
+  <rect x="50" y="50" width="412" height="412" rx="92" fill="url(#s1-gloss)"/>
+</svg>
