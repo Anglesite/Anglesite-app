@@ -152,7 +152,7 @@ public struct ContainerizationControl: LocalContainerControl {
         //    doesn't get connection-refused. Poll the preview URL through the host proxy until it
         //    answers (or time out). Cancellation-friendly: `Task.sleep` throws on cancel.
         do {
-            try await waitUntilServing(previewURL)
+            try await waitUntilServing(previewURL, timeout: Self.previewReadyTimeout)
         } catch {
             await previewProxy.stop()
             await mcpProxy.stop()
@@ -368,6 +368,14 @@ public struct ContainerizationControl: LocalContainerControl {
 
     /// Bound on `container.create()`/`.start()` — see the call site's comment on why this exists.
     private static let vmBootTimeout: Duration = .seconds(30)
+
+    /// Bound on `waitUntilServing`'s poll of the preview URL after `astro dev` is launched. Covers
+    /// `anglesite-hydrate` rsyncing baked `node_modules` into the freshly-cloned workspace plus astro's
+    /// own cold start — the rootfs is recreated per start (#59), so every boot pays this in full, not
+    /// just the first. #550's field data: a *minimal* throwaway site took 186s wall-clock; a real
+    /// template site with more integrations took 220s. 90s (the old default) failed both. 300s keeps
+    /// meaningful margin over the worst observed case without masking a truly hung guest for minutes.
+    private static let previewReadyTimeout: Duration = .seconds(300)
 
     /// Races `operation` against a `timeout`, resolving to whichever finishes first. Unlike a
     /// `withThrowingTaskGroup`-based race, this does NOT wait for `operation` to finish once the
