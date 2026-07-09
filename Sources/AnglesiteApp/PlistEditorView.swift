@@ -238,29 +238,42 @@ struct PlistEditorView: View {
         }
     }
 
+    /// Stable per-row identity for the in-progress editing table below: `RedirectsStore.RedirectEntry.id`
+    /// is `source`, which two freshly-added blank rows both share until the user types something, so it
+    /// can't be used as SwiftUI row identity here. The array index is stable for the lifetime of a single
+    /// render pass and doesn't collide, so every binding and the delete action key off it instead.
+    private struct RedirectRow: Identifiable {
+        let id: Int
+        let entry: RedirectsStore.RedirectEntry
+    }
+
+    private var redirectRows: [RedirectRow] {
+        model.redirectEntries.enumerated().map { RedirectRow(id: $0.offset, entry: $0.element) }
+    }
+
     private var redirectsTab: some View {
         VStack(alignment: .leading, spacing: 10) {
             if model.redirectEntries.isEmpty {
                 Text("No redirects yet. Add one below.")
                     .foregroundStyle(.secondary)
             } else {
-                Table(model.redirectEntries) {
-                    TableColumn("Source") { entry in
-                        TextField("/old-path", text: sourceBinding(for: entry))
+                Table(redirectRows) {
+                    TableColumn("Source") { row in
+                        TextField("/old-path", text: sourceBinding(at: row.id))
                     }
-                    TableColumn("Destination") { entry in
-                        TextField("/new-path", text: destinationBinding(for: entry))
+                    TableColumn("Destination") { row in
+                        TextField("/new-path", text: destinationBinding(at: row.id))
                     }
-                    TableColumn("Type") { entry in
-                        Picker("Type", selection: codeBinding(for: entry)) {
+                    TableColumn("Type") { row in
+                        Picker("Type", selection: codeBinding(at: row.id)) {
                             Text("301").tag(RedirectsStore.RedirectEntry.Code.permanent)
                             Text("302").tag(RedirectsStore.RedirectEntry.Code.temporary)
                         }
                         .labelsHidden()
                     }
-                    TableColumn("") { entry in
+                    TableColumn("") { row in
                         Button(role: .destructive) {
-                            model.redirectEntries.removeAll { $0.id == entry.id }
+                            model.redirectEntries.remove(at: row.id)
                         } label: {
                             Image(systemName: "trash")
                         }
@@ -282,32 +295,32 @@ struct PlistEditorView: View {
         }
     }
 
-    private func sourceBinding(for entry: RedirectsStore.RedirectEntry) -> Binding<String> {
+    private func sourceBinding(at index: Int) -> Binding<String> {
         Binding(
-            get: { model.redirectEntries.first { $0.id == entry.id }?.source ?? entry.source },
+            get: { model.redirectEntries.indices.contains(index) ? model.redirectEntries[index].source : "" },
             set: { newValue in
-                if let idx = model.redirectEntries.firstIndex(where: { $0.id == entry.id }) {
-                    model.redirectEntries[idx].source = newValue
+                if model.redirectEntries.indices.contains(index) {
+                    model.redirectEntries[index].source = newValue
                 }
             })
     }
 
-    private func destinationBinding(for entry: RedirectsStore.RedirectEntry) -> Binding<String> {
+    private func destinationBinding(at index: Int) -> Binding<String> {
         Binding(
-            get: { model.redirectEntries.first { $0.id == entry.id }?.destination ?? entry.destination },
+            get: { model.redirectEntries.indices.contains(index) ? model.redirectEntries[index].destination : "" },
             set: { newValue in
-                if let idx = model.redirectEntries.firstIndex(where: { $0.id == entry.id }) {
-                    model.redirectEntries[idx].destination = newValue
+                if model.redirectEntries.indices.contains(index) {
+                    model.redirectEntries[index].destination = newValue
                 }
             })
     }
 
-    private func codeBinding(for entry: RedirectsStore.RedirectEntry) -> Binding<RedirectsStore.RedirectEntry.Code> {
+    private func codeBinding(at index: Int) -> Binding<RedirectsStore.RedirectEntry.Code> {
         Binding(
-            get: { model.redirectEntries.first { $0.id == entry.id }?.code ?? entry.code },
+            get: { model.redirectEntries.indices.contains(index) ? model.redirectEntries[index].code : .permanent },
             set: { newValue in
-                if let idx = model.redirectEntries.firstIndex(where: { $0.id == entry.id }) {
-                    model.redirectEntries[idx].code = newValue
+                if model.redirectEntries.indices.contains(index) {
+                    model.redirectEntries[index].code = newValue
                 }
             })
     }

@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AstroIntegration } from "astro";
 
 export interface RedirectEntry {
@@ -47,20 +48,16 @@ export default function redirects(): AstroIntegration {
     name: "anglesite-redirects",
     hooks: {
       "astro:config:setup": ({ config, updateConfig }) => {
-        const entries = readRedirects(fileURLToPathSafe(config.root));
+        const entries = readRedirects(fileURLToPath(config.root));
         if (entries.length === 0) return;
         updateConfig({ redirects: toAstroRedirectsConfig(entries) });
       },
       "astro:build:done": ({ dir }) => {
-        const siteRoot = fileURLToPathSafe(dir).replace(/dist\/?$/, "");
+        const siteRoot = fileURLToPath(dir).replace(/dist\/?$/, "");
         const entries = readRedirects(siteRoot);
         if (entries.length === 0) return;
-        writeFileSync(resolve(fileURLToPathSafe(dir), "_redirects"), buildCloudflareRedirectsFile(entries));
+        writeFileSync(resolve(fileURLToPath(dir), "_redirects"), buildCloudflareRedirectsFile(entries));
       },
     },
   };
-}
-
-function fileURLToPathSafe(url: URL): string {
-  return url.pathname;
 }
