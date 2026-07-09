@@ -14,6 +14,9 @@ struct SiteNavigatorView: View {
     /// title stays stable through the dismiss animation — reading `candidateToDelete`'s property
     /// directly would collapse to "" the instant the dialog clears the optional.
     @State private var candidateToDeleteTitle: String = ""
+    @State private var redirectSheetSource: String?
+    @State private var redirectDestination: String = ""
+    @State private var redirectCode: RedirectsStore.RedirectEntry.Code = .permanent
 
     var body: some View {
         List(selection: $model.selection) {
@@ -87,6 +90,68 @@ struct SiteNavigatorView: View {
                 ? "This page has no incoming links. Its content will be removed from the working tree. This can be undone via git."
                 : "This file appears unused. It will be removed from the working tree. This can be undone via git.")
         }
+        .confirmationDialog(
+            "Delete “\(model.pendingDelete?.displayTitle ?? "")”?",
+            isPresented: Binding(
+                get: { model.pendingDelete != nil },
+                set: { if !$0 { model.cancelDelete() } }),
+            titleVisibility: .visible,
+            presenting: model.pendingDelete
+        ) { candidate in
+            if let route = candidate.route {
+                Button("Add Redirect") {
+                    Task {
+                        if let removedRoute = await model.confirmDelete() {
+                            redirectSheetSource = removedRoute
+                        }
+                    }
+                }
+                Button("Delete Without Redirect", role: .destructive) {
+                    Task { await model.confirmDelete() }
+                }
+            } else {
+                Button("Delete", role: .destructive) {
+                    Task { await model.confirmDelete() }
+                }
+            }
+            Button("Cancel", role: .cancel) { model.cancelDelete() }
+        } message: { candidate in
+            Text(candidate.route.map { "Deleting this page removes \($0). Create a redirect so old links still work?" }
+                ?? "This will be removed from the working tree. This can be undone via git.")
+        }
+        .sheet(item: Binding(
+            get: { redirectSheetSource.map { IdentifiableString($0) } },
+            set: { redirectSheetSource = $0?.value }
+        )) { source in
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Add Redirect").font(.headline)
+                Text("From \(source.value)")
+                    .foregroundStyle(.secondary)
+                TextField("Destination path (e.g. /new-page)", text: $redirectDestination)
+                    .textFieldStyle(.roundedBorder)
+                Picker("Type", selection: $redirectCode) {
+                    Text("Permanent (301)").tag(RedirectsStore.RedirectEntry.Code.permanent)
+                    Text("Temporary (302)").tag(RedirectsStore.RedirectEntry.Code.temporary)
+                }
+                .pickerStyle(.segmented)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { redirectSheetSource = nil; redirectDestination = "" }
+                    Button("Save") {
+                        Task {
+                            if await model.saveRedirect(source: source.value, destination: redirectDestination, code: redirectCode) {
+                                redirectSheetSource = nil
+                                redirectDestination = ""
+                            }
+                        }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(redirectDestination.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .padding()
+            .frame(minWidth: 360)
+        }
         .alert(
             "Delete failed",
             isPresented: Binding(
@@ -95,6 +160,17 @@ struct SiteNavigatorView: View {
             presenting: cleanup.deleteError
         ) { _ in
             Button("OK", role: .cancel) { cleanup.deleteError = nil }
+        } message: { msg in
+            Text(msg)
+        }
+        .alert(
+            "Delete failed",
+            isPresented: Binding(
+                get: { model.deleteError != nil },
+                set: { if !$0 { model.deleteError = nil } }),
+            presenting: model.deleteError
+        ) { _ in
+            Button("OK", role: .cancel) { model.deleteError = nil }
         } message: { msg in
             Text(msg)
         }
@@ -127,6 +203,11 @@ struct SiteNavigatorView: View {
                 .contextMenu {
                     if model.canRename(item.id) {
                         Button("Rename") { model.beginEditing(item.id) }
+                    }
+                    if model.canDelete(item.id) {
+                        Button("Delete", role: .destructive) {
+                            Task { await model.requestDelete(item.id) }
+                        }
                     }
                 }
         }
@@ -193,4 +274,10 @@ struct SiteNavigatorView: View {
             ? "Delete “\(candidate.path)”?"
             : "Delete unused \(candidate.kind.rawValue) “\(candidate.path)”?"
     }
+}
+
+private struct IdentifiableString: Identifiable {
+    let value: String
+    var id: String { value }
+    init(_ value: String) { self.value = value }
 }
