@@ -202,10 +202,10 @@ final class SiteNavigatorModel {
 
     /// Appends a redirect for `source` → `destination` to `Source/redirects.json` (#530). Used by
     /// the "Add Redirect?" prompt `SiteWindow` shows after `SiteWindowModel.confirmDelete()`
-    /// successfully deletes a page — that method captures the deleted page's route before the
-    /// delete call and, on success, offers this via a sheet hosted in `SiteWindow` (not here:
-    /// delete itself is owned by `SiteWindowModel`/`NativeContentOperations` since #516, not this
-    /// model). Returns whether the save succeeded; on failure sets `redirectSaveError`.
+    /// successfully deletes a page or post (#584) — that method captures the deleted item's route
+    /// before the delete call and, on success, offers this via a sheet hosted in `SiteWindow` (not
+    /// here: delete itself is owned by `SiteWindowModel`/`NativeContentOperations` since #516, not
+    /// this model). Returns whether the save succeeded; on failure sets `redirectSaveError`.
     @discardableResult
     func saveRedirect(source: String, destination: String, code: RedirectsStore.RedirectEntry.Code) async -> Bool {
         guard let sourceDirectory else { return false }

@@ -29,9 +29,9 @@ struct NeverStartedSiteRuntimeFactory: SiteRuntimeFactory {
 @Suite("SiteWindowModel")
 @MainActor
 struct SiteWindowModelTests {
-    private func makeModel() -> SiteWindowModel {
+    private func makeModel(contentGraph: SiteContentGraph = SiteContentGraph()) -> SiteWindowModel {
         SiteWindowModel(
-            contentGraph: SiteContentGraph(),
+            contentGraph: contentGraph,
             knowledgeIndex: SiteKnowledgeIndex(),
             semanticRanker: nil,
             conventionsEngine: ProjectConventionsEngine(),
@@ -132,6 +132,44 @@ extension SiteWindowModelTests {
         let model = makeModel()
         await model.duplicate(id: "site-1:page:/about")
         // No crash, no error surfaced — there's nothing to duplicate without an open site.
+        #expect(model.contentActionError == nil)
+    }
+
+    /// `confirmDelete`'s post branch now resolves `deletedRoute` via `postRoute(for:)` (#584)
+    /// instead of leaving it `nil` — this exercises that the lookup + route derivation for a real,
+    /// graph-registered post runs cleanly (finds the post, computes its route, proceeds to the
+    /// delete call) rather than crashing or mis-typing. It stops short of proving the route reaches
+    /// `pendingRedirectOfferRoute`, because that only happens on a real `.deleted` result, and
+    /// `ContentCreationWorkflow.native`'s `siteDirectory` resolver is hardwired to `SiteStore.shared`
+    /// (`SiteWindowModel.swift`'s `contentCreation` init) — a real process-wide singleton that
+    /// persists to the developer's actual `recents.json`. There's no test seam to redirect it to a
+    /// throwaway location, and registering a fake site into the real one would risk corrupting real
+    /// user data. That's a pre-existing gap shared with the page case (#530 never had this coverage
+    /// either), not one #584 introduces; `postRoute(for:)` itself is covered in `NavigatorTreeTests`,
+    /// and the full end-to-end behavior is left to manual GUI verification (#586).
+    @Test("confirmDelete resolves a registered post's route without crashing, even though delete itself can't succeed here")
+    func confirmDeletePostRouteResolvesCleanly() async {
+        let graph = SiteContentGraph()
+        let model = makeModel(contentGraph: graph)
+        model.site = SiteStore.Site(
+            id: "site-a", name: "Test", packageURL: URL(fileURLWithPath: "/tmp/nonexistent.anglesite"),
+            isValid: true, missingSentinels: [], lastSeen: Date(), bookmarkData: nil
+        )
+        let post = SiteContentGraph.Post(
+            id: "site-a:post:hello-world", siteID: "site-a", collection: "blog", slug: "hello-world",
+            title: "Hello World", draft: false, publishDate: nil, tags: [],
+            filePath: "src/content/blog/hello-world.md", lastModified: Date()
+        )
+        await graph.upsertPost(post)
+        model.deleteConfirmation = NavigatorItem(id: post.id, title: "Hello World", target: .route(postRoute(for: post)))
+
+        await model.confirmDelete()
+
+        #expect(model.deleteConfirmation == nil)
+        // `SiteStore.shared` doesn't know "site-a" — `deleteContent` resolves `.siteNotFound`, so no
+        // redirect offer (correctly: nothing was actually deleted) and no error surfaced (`.siteNotFound`
+        // is a silent no-op in confirmDelete, matching `duplicateNoSiteIsNoOp`'s established expectation).
+        #expect(model.pendingRedirectOfferRoute == nil)
         #expect(model.contentActionError == nil)
     }
 }

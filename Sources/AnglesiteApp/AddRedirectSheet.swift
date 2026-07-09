@@ -1,9 +1,10 @@
 import SwiftUI
 import AnglesiteCore
 
-/// "Add Redirect?" prompt shown after a page delete succeeds (#530) — `SiteWindowModel.confirmDelete()`
-/// sets `pendingRedirectOfferRoute` to the deleted page's route (never for posts, which carry no
-/// route), and `SiteWindow` presents this sheet pre-filled with that route as the source. Saving
+/// "Add Redirect?" prompt shown after a page or post delete succeeds (#530, #584) —
+/// `SiteWindowModel.confirmDelete()` sets `pendingRedirectOfferRoute` to the deleted item's route
+/// (a page's `route`, or a post's `postRoute(for:)`), and `SiteWindow` presents this sheet
+/// pre-filled with that route as the source. Saving
 /// appends to `Source/redirects.json` via the injected `onSave` closure
 /// (`SiteNavigatorModel.saveRedirect(source:destination:code:)`); dismissing without saving is a
 /// no-op, matching the delete's "you can always add one later in Site Settings → Redirects" framing.
