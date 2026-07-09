@@ -16,6 +16,7 @@ struct SiteGraphExplorerView: View {
                 SiteGraphCanvas(
                     nodes: model.filteredNodes,
                     edges: model.filteredEdges,
+                    referenceCounts: model.visibleReferenceCounts,
                     selectedNodeID: model.selectedNodeID,
                     onSelect: { model.selectedNodeID = $0 }
                 )
@@ -73,6 +74,7 @@ private struct SiteGraphTree: View {
     @Bindable var model: SiteGraphExplorerModel
 
     var body: some View {
+        let referenceCounts = model.visibleReferenceCounts
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Label("Explorer", systemImage: "list.bullet.indent")
@@ -86,8 +88,11 @@ private struct SiteGraphTree: View {
                 ForEach(model.groupedFilteredNodes, id: \.kind) { group in
                     Section {
                         ForEach(group.nodes) { node in
-                            SiteGraphTreeRow(node: node)
-                                .tag(Optional(node.id))
+                            SiteGraphTreeRow(
+                                node: node,
+                                referenceCount: referenceCounts[node.id, default: 0]
+                            )
+                            .tag(Optional(node.id))
                         }
                     } header: {
                         Label(group.kind.title, systemImage: group.kind.systemImage)
@@ -96,7 +101,7 @@ private struct SiteGraphTree: View {
                 if !model.unusedAssets.isEmpty {
                     Section {
                         ForEach(model.unusedAssets) { node in
-                            SiteGraphTreeRow(node: node, badge: "unused")
+                            SiteGraphTreeRow(node: node, referenceCount: 0, badge: "unused")
                                 .tag(Optional(node.id))
                         }
                     } header: {
@@ -112,6 +117,7 @@ private struct SiteGraphTree: View {
 
 private struct SiteGraphTreeRow: View {
     let node: SiteGraphNode
+    var referenceCount: Int
     var badge: String?
 
     var body: some View {
@@ -134,11 +140,11 @@ private struct SiteGraphTreeRow: View {
                 Text(badge)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-            } else if node.referencedByCount > 0 {
-                Text("\(node.referencedByCount)")
+            } else if referenceCount > 0 {
+                Text("\(referenceCount)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .help("\(node.referencedByCount) incoming references")
+                    .help("\(referenceCount) incoming references")
             }
         }
         .help(node.filePath ?? node.detail ?? node.title)
@@ -148,6 +154,7 @@ private struct SiteGraphTreeRow: View {
 private struct SiteGraphCanvas: View {
     let nodes: [SiteGraphNode]
     let edges: [SiteGraphEdge]
+    let referenceCounts: [String: Int]
     let selectedNodeID: String?
     let onSelect: (String) -> Void
 
@@ -177,6 +184,7 @@ private struct SiteGraphCanvas: View {
                     if let point = positions[node.id] {
                         SiteGraphNodeButton(
                             node: node,
+                            referenceCount: referenceCounts[node.id, default: 0],
                             selected: node.id == selectedNodeID,
                             related: isRelated(node.id, selectedNodeID: selectedNodeID)
                         ) {
@@ -221,6 +229,7 @@ private struct SiteGraphCanvas: View {
 
 private struct SiteGraphNodeButton: View {
     let node: SiteGraphNode
+    let referenceCount: Int
     let selected: Bool
     let related: Bool
     let action: () -> Void
@@ -235,8 +244,8 @@ private struct SiteGraphNodeButton: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .frame(width: 112)
-                if node.referencedByCount > 0 {
-                    Text("\(node.referencedByCount) refs")
+                if referenceCount > 0 {
+                    Text("\(referenceCount) refs")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
