@@ -91,4 +91,69 @@ struct RedirectsStoreTests {
         #expect(throws: (any Error).self) { try store.save(bad) }
         #expect(try store.load() == good)
     }
+
+    @Test("save rejects a source containing an embedded space")
+    func rejectsSourceWithEmbeddedSpace() throws {
+        let dir = try tempSourceDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = RedirectsStore(sourceDirectory: dir)
+        let entries = [RedirectsStore.RedirectEntry(source: "/old page", destination: "/new", code: .permanent)]
+        #expect(throws: RedirectsStore.ValidationError.sourceContainsWhitespace("/old page")) {
+            try store.save(entries)
+        }
+    }
+
+    @Test("save rejects a destination containing an embedded space")
+    func rejectsDestinationWithEmbeddedSpace() throws {
+        let dir = try tempSourceDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = RedirectsStore(sourceDirectory: dir)
+        let entries = [RedirectsStore.RedirectEntry(source: "/old", destination: "/new page", code: .permanent)]
+        #expect(throws: RedirectsStore.ValidationError.destinationContainsWhitespace("/new page")) {
+            try store.save(entries)
+        }
+    }
+
+    @Test("save rejects a destination containing a newline")
+    func rejectsDestinationWithNewline() throws {
+        let dir = try tempSourceDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = RedirectsStore(sourceDirectory: dir)
+        let entries = [RedirectsStore.RedirectEntry(source: "/old", destination: "/new\n/injected 302", code: .permanent)]
+        #expect(throws: RedirectsStore.ValidationError.destinationContainsWhitespace("/new\n/injected 302")) {
+            try store.save(entries)
+        }
+    }
+
+    @Test("save rejects an empty-string destination")
+    func rejectsEmptyDestination() throws {
+        let dir = try tempSourceDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = RedirectsStore(sourceDirectory: dir)
+        let entries = [RedirectsStore.RedirectEntry(source: "/old", destination: "", code: .permanent)]
+        #expect(throws: RedirectsStore.ValidationError.destinationMustBeAbsolutePathOrURL("")) {
+            try store.save(entries)
+        }
+    }
+
+    @Test("save rejects a destination with no leading slash and no scheme")
+    func rejectsDestinationWithoutSlashOrScheme() throws {
+        let dir = try tempSourceDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = RedirectsStore(sourceDirectory: dir)
+        let entries = [RedirectsStore.RedirectEntry(source: "/old", destination: "new", code: .permanent)]
+        #expect(throws: RedirectsStore.ValidationError.destinationMustBeAbsolutePathOrURL("new")) {
+            try store.save(entries)
+        }
+    }
+
+    @Test("save accepts an absolute https:// URL destination")
+    func acceptsAbsoluteHTTPSDestination() throws {
+        let dir = try tempSourceDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = RedirectsStore(sourceDirectory: dir)
+        let entries = [RedirectsStore.RedirectEntry(source: "/old", destination: "https://example.com/new", code: .permanent)]
+        try store.save(entries)
+        #expect(try store.load() == entries)
+    }
 }

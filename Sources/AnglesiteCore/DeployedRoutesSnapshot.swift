@@ -17,7 +17,7 @@ public enum DeployedRoutesSnapshot {
 
     public static func save(_ routes: [String], to configDirectory: URL) throws {
         let url = configDirectory.appendingPathComponent(filename)
-        let data = try JSONEncoder().encode(routes.sorted())
+        let data = try JSONEncoder().encode(Array(Set(routes)).sorted())
         try data.write(to: url, options: .atomic)
     }
 }

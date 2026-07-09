@@ -34,6 +34,9 @@ public struct RedirectsStore: Sendable {
         /// this entry's source and vice versa. Deep chains (A→B→C) are not resolved or rejected —
         /// matches Cloudflare's own behavior of following each hop independently.
         case cycle(String, String)
+        case sourceContainsWhitespace(String)
+        case destinationContainsWhitespace(String)
+        case destinationMustBeAbsolutePathOrURL(String)
     }
 
     private let fileURL: URL
@@ -66,6 +69,15 @@ public struct RedirectsStore: Sendable {
         for entry in entries {
             guard entry.source.hasPrefix("/") else {
                 throw ValidationError.sourceMustStartWithSlash(entry.source)
+            }
+            guard entry.source.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
+                throw ValidationError.sourceContainsWhitespace(entry.source)
+            }
+            guard entry.destination.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
+                throw ValidationError.destinationContainsWhitespace(entry.destination)
+            }
+            guard entry.destination.hasPrefix("/") || entry.destination.hasPrefix("http://") || entry.destination.hasPrefix("https://") else {
+                throw ValidationError.destinationMustBeAbsolutePathOrURL(entry.destination)
             }
             guard !seenSources.contains(entry.source) else {
                 throw ValidationError.duplicateSource(entry.source)

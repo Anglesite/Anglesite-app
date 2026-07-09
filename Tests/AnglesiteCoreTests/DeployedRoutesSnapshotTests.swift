@@ -27,4 +27,12 @@ struct DeployedRoutesSnapshotTests {
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("last-deployed-routes.json").path))
         #expect(DeployedRoutesSnapshot.load(from: dir) == ["/about", "/blog/post-1"])
     }
+
+    @Test("save dedupes routes before persisting")
+    func saveDedupesRoutes() throws {
+        let dir = try tempConfigDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try DeployedRoutesSnapshot.save(["/a", "/a", "/b"], to: dir)
+        #expect(DeployedRoutesSnapshot.load(from: dir) == ["/a", "/b"])
+    }
 }

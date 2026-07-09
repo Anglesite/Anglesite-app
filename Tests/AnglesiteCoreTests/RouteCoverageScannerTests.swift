@@ -40,4 +40,11 @@ struct RouteCoverageScannerTests {
         #expect(warnings.count == 2)
         #expect(Set(warnings.map(\.category)) == [.orphanedRoute])
     }
+
+    @Test("a duplicate route in previousRoutes produces only one warning")
+    func duplicateInPreviousRoutesProducesOneWarning() {
+        let warnings = RouteCoverageScanner.scan(
+            currentRoutes: [], previousRoutes: ["/old-page", "/old-page"], redirectSources: [])
+        #expect(warnings.count == 1)
+    }
 }

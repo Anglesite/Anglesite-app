@@ -12,8 +12,8 @@ public enum RouteCoverageScanner {
     ) -> [PreDeployCheck.ScanWarning] {
         guard let previousRoutes else { return [] }
         let current = Set(currentRoutes)
-        let vanished = previousRoutes.filter { !current.contains($0) && !redirectSources.contains($0) }
-        return vanished.map { route in
+        let vanished = Set(previousRoutes).subtracting(current).subtracting(redirectSources)
+        return vanished.sorted().map { route in
             PreDeployCheck.ScanWarning(
                 category: .orphanedRoute,
                 detail: "\(route) is no longer published and has no redirect covering it.",
