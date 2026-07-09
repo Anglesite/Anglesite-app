@@ -1,3 +1,9 @@
+// Compiled out off-Darwin (cross-platform port design §5): there is no package-UTI concept
+// on Linux/Windows — `.anglesite` is a plain directory there, and identity comes from the
+// Info.plist UUID (AnglesiteSiteModel), which is fully portable. No AnglesiteCore code
+// references this extension; its consumers (NSOpenPanel, Finder integration) live in the
+// Darwin-only app shell.
+#if canImport(UniformTypeIdentifiers)
 import UniformTypeIdentifiers
 
 public extension UTType {
@@ -11,3 +17,4 @@ public extension UTType {
     /// call sites should use `.anglesiteSite`.
     static let anglesiteSite = UTType(exportedAs: "io.dwk.anglesite.site")
 }
+#endif
