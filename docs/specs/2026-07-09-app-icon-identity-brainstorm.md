@@ -95,7 +95,12 @@ intended behavior); and the galena field is a brighter steel blue
 dock-pop work. Refined same day: the beam runs **edge to edge** across the frame,
 the caustic pool is gone — the gem's own glow grounds it — and the center
 vertical ridge is softened (body-face gradients pulled closer, highlight quieted)
-so the two front faces read as one glassy volume. Composite study:
+so the two front faces read as one glassy volume. A **Liquid Glass pass**
+followed: rounded silhouette, melted facet junctions, translucent body with a
+wet specular and an internal blue environment reflection, a light kiss on the
+top edges instead of a drawn rim, and the chevrons **etched into** the stone
+(shadow wall up-left, lit wall down-right) rather than glowing on it.
+Composite study:
 [`assets/icon-studies/study-4-winner.svg`](assets/icon-studies/study-4-winner.svg).
 
 ## Palette (working values)
