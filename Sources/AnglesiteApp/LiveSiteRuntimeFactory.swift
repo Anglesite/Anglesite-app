@@ -3,9 +3,11 @@ import AnglesiteCore
 
 struct LiveSiteRuntimeFactory: SiteRuntimeFactory {
     private let logCenter: LogCenter
+    private let settings: AppSettings
 
-    init(logCenter: LogCenter = .shared) {
+    init(logCenter: LogCenter = .shared, settings: AppSettings = .shared) {
         self.logCenter = logCenter
+        self.settings = settings
     }
 
     /// Pick the runtime by capability (no feature flag): a local Apple-Containerization VM when the
@@ -34,6 +36,26 @@ struct LiveSiteRuntimeFactory: SiteRuntimeFactory {
                 knowledgeIndex: knowledgeIndex,
                 semanticRanker: semanticRanker,
                 conventionsEngine: conventionsEngine
+            )
+        }
+        // LAN runtime (#589/#601): dev/test-only fallback for hosts that can't boot the local
+        // container (e.g. a UTM guest VM, where kern.hv_support == 0). Only reachable when the
+        // Settings → Advanced override is set — absent that, behavior is unchanged below.
+        if let lan = settings.lanRuntimeConfiguration {
+            logRuntimeSelection(
+                "selected RemoteSandboxSiteRuntime via LAN host \(lan.host) "
+                + "(preview :\(lan.previewPort), mcp :\(lan.mcpPort)); "
+                + Self.fallbackReason(support: support, provisioning: provisioning))
+            return RemoteSandboxSiteRuntime(
+                gitRemote: LANControlClient.unusedGitRemote,
+                gitRef: "HEAD",
+                control: LANControlClient(configuration: lan),
+                mcpClient: MCPClient(supervisor: .shared),
+                connect: { client, url, _ in
+                    // Trusted-LAN path: the host process doesn't know the guest-minted token,
+                    // so connect without a bearer (design note 2026-07-09, non-goals).
+                    try await client.connect(httpEndpoint: url)
+                }
             )
         }
         logRuntimeSelection(Self.fallbackReason(support: support, provisioning: provisioning))
