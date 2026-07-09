@@ -603,7 +603,8 @@ struct SiteWindow: View {
         )) { route in
             if let navigator = model.navigator {
                 AddRedirectSheet(source: route.value) { destination, code in
-                    await navigator.saveRedirect(source: route.value, destination: destination, code: code)
+                    let saved = await navigator.saveRedirect(source: route.value, destination: destination, code: code)
+                    return saved ? nil : navigator.redirectSaveError
                 }
             }
         }

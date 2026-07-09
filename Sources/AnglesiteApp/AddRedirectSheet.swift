@@ -9,7 +9,10 @@ import AnglesiteCore
 /// no-op, matching the delete's "you can always add one later in Site Settings → Redirects" framing.
 struct AddRedirectSheet: View {
     let source: String
-    let onSave: (_ destination: String, _ code: RedirectsStore.RedirectEntry.Code) async -> Bool
+    /// Returns `nil` on success, or the underlying error message to display on failure — so a
+    /// validation rejection (e.g. a duplicate source) surfaces its real reason here rather than a
+    /// generic message.
+    let onSave: (_ destination: String, _ code: RedirectsStore.RedirectEntry.Code) async -> String?
 
     @Environment(\.dismiss) private var dismiss
     @State private var destination: String = ""
@@ -39,10 +42,10 @@ struct AddRedirectSheet: View {
                 Button("Save") {
                     Task {
                         let trimmed = destination.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if await onSave(trimmed, code) {
-                            dismiss()
+                        if let error = await onSave(trimmed, code) {
+                            saveError = error
                         } else {
-                            saveError = "Couldn't save the redirect. Check the destination and try again."
+                            dismiss()
                         }
                     }
                 }
