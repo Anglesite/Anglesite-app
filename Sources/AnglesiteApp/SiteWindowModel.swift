@@ -111,9 +111,9 @@ final class SiteWindowModel {
     /// (page/post) delete/duplicate rather than Cleanup's dead-asset delete.
     var contentActionError: String?
     /// Non-nil ⟺ the "Add Redirect?" prompt is showing (#530), holding the route that was just
-    /// deleted. Set by `confirmDelete()` only when the deleted item was a page (posts carry no
-    /// `route`) and the delete actually succeeded — never break an inbound URL a user didn't
-    /// choose to abandon.
+    /// deleted (a page's `route`, or a post's `postRoute(for:)`) — set by `confirmDelete()` only
+    /// when the delete actually succeeded. Never break an inbound URL a user didn't choose to
+    /// abandon (#584).
     var pendingRedirectOfferRoute: String?
     /// File ▸ Revert to Saved is destructive, so it routes through a confirmation alert hosted by
     /// `SiteWindow` (#509).
@@ -299,7 +299,11 @@ final class SiteWindowModel {
         guard let site, canRunDeploy else { return }
         Task { @MainActor in
             let containerControl = await preview.activeContainerControl()
-            let currentRoutes = await contentGraph.pages(for: site.id).map(\.route)
+            // Posts are routed too (#584) — a vanished post's URL must trip the same
+            // orphaned-route scan as a vanished page's, not vanish silently from the snapshot.
+            let pageRoutes = await contentGraph.pages(for: site.id).map(\.route)
+            let postRoutes = await contentGraph.posts(for: site.id).map(postRoute(for:))
+            let currentRoutes = pageRoutes + postRoutes
             deploy.deploy(
                 siteID: site.id, siteDirectory: site.sourceDirectory,
                 configDirectory: site.configDirectory, currentRoutes: currentRoutes,
@@ -782,14 +786,16 @@ final class SiteWindowModel {
 
         let relPath: String
         // Captured before the delete call, not derived after: `.deleted(filePath:)` doesn't carry
-        // a route, and posts have none to carry regardless (#530) — only a page's route is ever a
-        // redirect-offer candidate.
-        var deletedPageRoute: String?
+        // a route. Both pages and posts are redirect-offer candidates (#584) — a post's route is
+        // derived via `postRoute(for:)`, the same helper the navigator uses to give posts a
+        // `.route` target in the first place.
+        var deletedRoute: String?
         if let page = await contentGraph.page(id: item.id) {
             relPath = page.filePath
-            deletedPageRoute = page.route
+            deletedRoute = page.route
         } else if let post = await contentGraph.post(id: item.id) {
             relPath = post.filePath
+            deletedRoute = postRoute(for: post)
         } else {
             return
         }
@@ -810,8 +816,8 @@ final class SiteWindowModel {
         switch result {
         case .deleted:
             if navigator?.selection == item.id { navigator?.selection = nil }
-            if let deletedPageRoute {
-                pendingRedirectOfferRoute = deletedPageRoute
+            if let deletedRoute {
+                pendingRedirectOfferRoute = deletedRoute
             }
         case .failed(let reason):
             contentActionError = reason
