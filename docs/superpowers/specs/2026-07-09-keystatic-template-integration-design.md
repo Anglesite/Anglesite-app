@@ -5,6 +5,21 @@ integrations are merged; `inbox` and `membership` are the last two, deferred bec
 Keystatic-backed and Keystatic was never wired into `Resources/Template`. This spec adds that
 foundation, then builds `inbox`/`membership` on top of it.
 
+> **Post-implementation note (PR #590):** two things below shipped differently than planned, both
+> discovered mid-implementation and confirmed against the real installed packages (see the
+> implementation plan's Self-Review Notes for the full account):
+> - `astro.config.ts` does **not** mount `keystatic()`/`react()` unconditionally as §1 describes.
+>   Astro's real integration registers server routes at build time, which would have silently
+>   broken the static Cloudflare Workers deploy — the shipped version gates both behind
+>   `process.argv[2] === "dev"` so they're never registered outside `astro dev`.
+> - `content.config.ts` does **not** gain wizard-toggled anchors for `inbox` as §2 describes.
+>   `inbox` has no Astro collection at all (nothing renders it publicly, so it doesn't need one);
+>   only `membership`'s `members` collection was added, and unconditionally (like
+>   `blog`/`events`/`reviews`), not via anchor injection. See §3/§4 below for the schema each
+>   integration's Keystatic `collection()` actually uses, which also required a `slugField` +
+>   `fields.slug()` on the entry's slug field and `isRequired: true` on both date fields — neither
+>   anticipated below.
+
 ## Context
 
 - Keystatic is explicitly a **Bucket 2** tool in the Claude-removal roadmap

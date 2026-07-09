@@ -85,6 +85,8 @@ final class DeployModel {
     private var pendingDeploy: (
         siteID: String,
         siteDirectory: URL,
+        configDirectory: URL,
+        currentRoutes: [String],
         containerControl: (siteID: String, control: any LocalContainerControl)?
     )?
 
@@ -126,11 +128,13 @@ final class DeployModel {
     func deploy(
         siteID: String,
         siteDirectory: URL,
+        configDirectory: URL,
+        currentRoutes: [String],
         containerControl: (siteID: String, control: any LocalContainerControl)? = nil
     ) {
         guard !isRunning else { return }
         if !hasUsableToken() {
-            pendingDeploy = (siteID, siteDirectory, containerControl)
+            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl)
             tokenVerification = .idle
             tokenPromptPresented = true
             return
@@ -140,7 +144,10 @@ final class DeployModel {
         // sees `isRunning == true` and bails via the guard above instead of racing runDeploy.
         phase = .running(siteID: siteID, since: Date())
         inFlight = Task { @MainActor [weak self] in
-            await self?.runDeploy(siteID: siteID, siteDirectory: siteDirectory, containerControl: containerControl)
+            await self?.runDeploy(
+                siteID: siteID, siteDirectory: siteDirectory,
+                configDirectory: configDirectory, currentRoutes: currentRoutes,
+                containerControl: containerControl)
         }
     }
 
@@ -175,7 +182,10 @@ final class DeployModel {
             pendingDeploy = nil
             tokenPromptPresented = false
             tokenVerification = .idle
-            deploy(siteID: pending.siteID, siteDirectory: pending.siteDirectory, containerControl: pending.containerControl)
+            deploy(
+                siteID: pending.siteID, siteDirectory: pending.siteDirectory,
+                configDirectory: pending.configDirectory, currentRoutes: pending.currentRoutes,
+                containerControl: pending.containerControl)
         case .stay(let message):
             tokenVerification = .failed(message: message)
         case .abort:
@@ -222,6 +232,8 @@ final class DeployModel {
     private func runDeploy(
         siteID: String,
         siteDirectory: URL,
+        configDirectory: URL,
+        currentRoutes: [String],
         containerControl: (siteID: String, control: any LocalContainerControl)? = nil
     ) async {
         transition(siteID: siteID, to: .running(siteID: siteID, since: Date()))
@@ -268,6 +280,8 @@ final class DeployModel {
         let result = await activeCommand.deploy(
             siteID: siteID,
             siteDirectory: siteDirectory,
+            configDirectory: configDirectory,
+            currentRoutes: currentRoutes,
             onPreflight: { [weak self] outcome in
                 // The callback fires inside DeployCommand's actor isolation; hop to
                 // MainActor before touching our @Observable state or the consumer's

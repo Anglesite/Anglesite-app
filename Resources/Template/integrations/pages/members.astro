@@ -1,5 +1,5 @@
 ---
-import { getCollection } from "astro:content";
+import { getCollection, render } from "astro:content";
 import BaseLayout from "../../src/layouts/BaseLayout.astro";
 import MemberCard from "../components/MemberCard.astro";
 import { readConfig } from "../../scripts/config";
@@ -7,19 +7,27 @@ import { readConfig } from "../../scripts/config";
 const members = (await getCollection("members")).sort(
   (a, b) => a.data.joinedDate.valueOf() - b.data.joinedDate.valueOf()
 );
+// Bio is captured as each entry's markdown body (Keystatic's `contentField: "bio"`), not a
+// frontmatter field — render() resolves it to a renderable <Content /> per entry.
+const rendered = await Promise.all(members.map((member) => render(member)));
 const title = readConfig("MEMBERSHIP_DIRECTORY_TITLE") ?? "Our Members";
 ---
 <BaseLayout title={title}>
   <h1>{title}</h1>
   <div class="member-grid">
-    {members.map((member) => (
-      <MemberCard
-        name={member.data.name}
-        role={member.data.role}
-        photo={member.data.photo}
-        links={member.data.links}
-      />
-    ))}
+    {members.map((member, i) => {
+      const { Content } = rendered[i];
+      return (
+        <MemberCard
+          name={member.data.name}
+          role={member.data.role}
+          photo={member.data.photo}
+          links={member.data.links}
+        >
+          <Content />
+        </MemberCard>
+      );
+    })}
   </div>
 </BaseLayout>
 

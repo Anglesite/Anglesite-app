@@ -230,6 +230,7 @@ import Testing
                     && style == .line
                     && snippet.raw.contains("path: \"src/content/inbox/*\"")
                     && snippet.raw.contains("slugField:")
+                    && snippet.raw.contains("receivedDate: fields.date({ label: \"Received\", validation: { isRequired: true } })")
             }
             return false
         }

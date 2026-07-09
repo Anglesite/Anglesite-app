@@ -202,6 +202,20 @@ public enum ContentScaffold {
         return "{\n" + entries.map { "  \($0)" }.joined(separator: ",\n") + "\n}\n"
     }
 
+    /// A minimal blank `.astro` component scaffold (V-1 of New Component…, #516). No props, no
+    /// markup beyond a placeholder — semantic authoring arrives with the Component Editor (#496).
+    public static func renderComponent(name: String) -> String {
+        """
+        ---
+        export interface Props {}
+        ---
+
+        <div>
+          <!-- \(escapeHTML(name)) -->
+        </div>
+        """ + "\n"
+    }
+
     // MARK: - Escaping (order matters: `&` first)
 
     static func escapeAttr(_ s: String) -> String {

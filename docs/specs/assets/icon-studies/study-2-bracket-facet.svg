@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Study 2 — "Bracket Facet". Facet-geometry study, not final art.
+       Same prism, rotated a few degrees; specular light breaks along the
+       facet junctions as a lit chevron pair — the brackets are how the
+       light hits the stone. Face contrast is pulled back so the chevrons
+       carry the highlight. -->
+  <defs>
+    <radialGradient id="s2-bg" cx="0.38" cy="0.26" r="1.05">
+      <stop offset="0" stop-color="#3A4756"/>
+      <stop offset="0.55" stop-color="#232B36"/>
+      <stop offset="1" stop-color="#141A22"/>
+    </radialGradient>
+    <linearGradient id="s2-gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="s2-innerGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#EFD9A0" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#EFD9A0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="s2-topL" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#F3E2B4"/>
+      <stop offset="1" stop-color="#E0C384"/>
+    </linearGradient>
+    <linearGradient id="s2-topR" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#E4CB90"/>
+      <stop offset="1" stop-color="#CFAF66"/>
+    </linearGradient>
+    <linearGradient id="s2-bodyL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#DDC488"/>
+      <stop offset="1" stop-color="#BC9A4E"/>
+    </linearGradient>
+    <linearGradient id="s2-bodyR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#CFB170"/>
+      <stop offset="1" stop-color="#A6823A"/>
+    </linearGradient>
+    <linearGradient id="s2-botL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#BC9A4E"/>
+      <stop offset="1" stop-color="#8A6A2B"/>
+    </linearGradient>
+    <linearGradient id="s2-botR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#AA8A3C"/>
+      <stop offset="1" stop-color="#775A21"/>
+    </linearGradient>
+    <linearGradient id="s2-chev" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF9E8"/>
+      <stop offset="1" stop-color="#E3C273"/>
+    </linearGradient>
+    <filter id="s2-soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <filter id="s2-soft2" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+    <filter id="s2-glint" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="1.4"/>
+    </filter>
+  </defs>
+
+  <!-- galena field -->
+  <rect x="50" y="50" width="412" height="412" rx="92" fill="url(#s2-bg)"/>
+  <rect x="50" y="50" width="412" height="412" rx="92" fill="none" stroke="#FFFFFF" stroke-opacity="0.06" stroke-width="2"/>
+
+  <ellipse cx="256" cy="262" rx="170" ry="190" fill="url(#s2-innerGlow)" filter="url(#s2-soft)"/>
+  <ellipse cx="250" cy="402" rx="88" ry="20" fill="#EFD9A0" opacity="0.3" filter="url(#s2-soft2)"/>
+
+  <!-- crystal, rotated a few degrees so the light finds the junctions -->
+  <g transform="rotate(-6 256 256)">
+    <polygon points="256,118 176,198 256,214" fill="url(#s2-topL)"/>
+    <polygon points="256,118 336,198 256,214" fill="url(#s2-topR)"/>
+    <polygon points="176,198 256,214 256,298 176,314" fill="url(#s2-bodyL)"/>
+    <polygon points="336,198 256,214 256,298 336,314" fill="url(#s2-bodyR)"/>
+    <polygon points="176,314 256,298 256,394" fill="url(#s2-botL)"/>
+    <polygon points="336,314 256,298 256,394" fill="url(#s2-botR)"/>
+
+    <!-- the easter egg: specular chevrons on the facet junctions -->
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="238,212 200,256 238,300" stroke="url(#s2-chev)" stroke-width="8" opacity="0.85" filter="url(#s2-glint)"/>
+      <polyline points="238,212 200,256 238,300" stroke="#FFFDF4" stroke-width="2.5" opacity="0.9"/>
+      <polyline points="274,212 312,256 274,300" stroke="url(#s2-chev)" stroke-width="8" opacity="0.7" filter="url(#s2-glint)"/>
+      <polyline points="274,212 312,256 274,300" stroke="#FFFDF4" stroke-width="2.5" opacity="0.75"/>
+    </g>
+
+    <line x1="256" y1="118" x2="176" y2="198" stroke="#FDF8E9" stroke-opacity="0.45" stroke-width="2" stroke-linecap="round"/>
+    <line x1="176" y1="314" x2="256" y2="394" stroke="#F3E7C2" stroke-opacity="0.35" stroke-width="2" stroke-linecap="round"/>
+    <polygon points="256,118 336,198 336,314 256,394 176,314 176,198"
+             fill="none" stroke="#FBF3DC" stroke-opacity="0.2" stroke-width="1.5"/>
+  </g>
+
+  <rect x="50" y="50" width="412" height="412" rx="92" fill="url(#s2-gloss)"/>
+</svg>

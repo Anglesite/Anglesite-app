@@ -22,6 +22,10 @@ struct SiteWindow: View {
     /// Inspector visibility, persisted per window. Defaults to shown (auto-open); the toolbar toggle
     /// flips it and the choice persists across selections.
     @SceneStorage("siteInspector.shown") private var inspectorShown = true
+    /// The title shown in the content-delete confirmation dialog. Held separately from
+    /// `model.deleteConfirmation` so the title stays stable through the dismiss animation —
+    /// mirrors `SiteNavigatorView`'s `candidateToDeleteTitle` for the same reason.
+    @State private var contentDeleteTitle: String = ""
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -52,6 +56,21 @@ struct SiteWindow: View {
     }
 
     var body: some View {
+        focusedValues(for: coreBody)
+            .onAppear {
+                // Also stash the launcher-opener here (see SitesWindowRoot): window restoration can
+                // relaunch the app with only site windows, so relying on the launcher's onAppear
+                // alone would leave Dock ▸ New Site a silent no-op on such launches (#522 review).
+                let openWindow = openWindow
+                WindowRouter.shared.openSitesWindow = { openWindow(id: "sites") }
+            }
+            .onDisappear { model.close() }
+    }
+
+    /// The Group + lifecycle-task/onChange chain, factored out of `body` as its own type-checking
+    /// unit — see `focusedValues(for:)` for why.
+    @ViewBuilder
+    private var coreBody: some View {
         Group {
             if let site = model.site {
                 siteUI(for: site)
@@ -82,38 +101,46 @@ struct SiteWindow: View {
         .onChange(of: model.preview.state) { _, newState in
             model.startup.ingest(state: newState)
         }
-        // `focusedSceneValue`, not `focusedValue`: keyboard focus often sits in an AppKit responder
-        // (the WKWebView preview) where nothing in SwiftUI's focus system is focused, so a plain
-        // focusedValue resolves to nil and File ▸ Export Site Source… stays disabled even with the
-        // site window frontmost (same trap documented for `\.preview` below).
-        .focusedSceneValue(\.siteID, model.site?.id ?? siteID)
-        .focusedSceneValue(\.newContentActions, model.site == nil ? nil : NewContentActions(
-            newPage: { model.newPagePresented = true },
-            newCollection: { model.newCollectionPresented = true }
-        ))
-        // `focusedSceneValue` (not `focusedValue`): publishes while this site window is the active
-        // scene, regardless of where keyboard focus sits. The preview pane is a WKWebView (an AppKit
-        // responder), so nothing in SwiftUI's focus system is focused and a plain `focusedValue`
-        // would resolve to nil — leaving "Show Web Inspector" perpetually disabled.
-        .focusedSceneValue(\.preview, model.preview)
-        // Publishes the whole window model so menu commands (File ▸ Save/Revert today, the Site
-        // menu in #511) can reach the focused window's editing surfaces and site operations.
-        .focusedSceneValue(\.siteWindowModel, model)
-        // Inspector visibility is scene state (@SceneStorage), so the View menu's Show/Hide
-        // Inspector reaches it through its own focused value rather than the window model (#512).
-        .focusedSceneValue(\.inspectorPanel, InspectorPanelActions(
-            isShown: inspectorShown && model.inspectorContext != nil,
-            isAvailable: model.inspectorContext != nil,
-            toggle: { inspectorShown.toggle() }
-        ))
-        .onAppear {
-            // Also stash the launcher-opener here (see SitesWindowRoot): window restoration can
-            // relaunch the app with only site windows, so relying on the launcher's onAppear
-            // alone would leave Dock ▸ New Site a silent no-op on such launches (#522 review).
-            let openWindow = openWindow
-            WindowRouter.shared.openSitesWindow = { openWindow(id: "sites") }
-        }
-        .onDisappear { model.close() }
+    }
+
+    /// Publishes all `focusedSceneValue`s onto `content`. Factored out of `body` as its own
+    /// function (rather than inlined into one long modifier chain) so the type checker solves it
+    /// as an independent unit — `navigatorSelectionActions(for:)` pushed the combined `body`
+    /// expression over Swift's type-check-in-reasonable-time budget once added inline (#516).
+    @ViewBuilder
+    private func focusedValues<Content: View>(for content: Content) -> some View {
+        content
+            // `focusedSceneValue`, not `focusedValue`: keyboard focus often sits in an AppKit
+            // responder (the WKWebView preview) where nothing in SwiftUI's focus system is
+            // focused, so a plain focusedValue resolves to nil and File ▸ Export Site Source…
+            // stays disabled even with the site window frontmost (same trap documented for
+            // `\.preview` below).
+            .focusedSceneValue(\.siteID, model.site?.id ?? siteID)
+            .focusedSceneValue(\.newContentActions, model.site == nil ? nil : NewContentActions(
+                newPage: { model.newPagePresented = true },
+                newCollection: { model.newCollectionPresented = true },
+                newPost: { model.newPostPresented = true },
+                newComponent: { model.newComponentPresented = true }
+            ))
+            .focusedSceneValue(\.navigatorSelectionActions, navigatorSelectionActions(for: model))
+            // `focusedSceneValue` (not `focusedValue`): publishes while this site window is the
+            // active scene, regardless of where keyboard focus sits. The preview pane is a
+            // WKWebView (an AppKit responder), so nothing in SwiftUI's focus system is focused and
+            // a plain `focusedValue` would resolve to nil — leaving "Show Web Inspector"
+            // perpetually disabled.
+            .focusedSceneValue(\.preview, model.preview)
+            // Publishes the whole window model so menu commands (File ▸ Save/Revert today, the
+            // Site menu in #511) can reach the focused window's editing surfaces and site
+            // operations.
+            .focusedSceneValue(\.siteWindowModel, model)
+            // Inspector visibility is scene state (@SceneStorage), so the View menu's Show/Hide
+            // Inspector reaches it through its own focused value rather than the window model
+            // (#512).
+            .focusedSceneValue(\.inspectorPanel, InspectorPanelActions(
+                isShown: inspectorShown && model.inspectorContext != nil,
+                isAvailable: model.inspectorContext != nil,
+                toggle: { inspectorShown.toggle() }
+            ))
     }
 
     @ViewBuilder
@@ -129,7 +156,14 @@ struct SiteWindow: View {
                     model: navigator,
                     cleanup: model.cleanup,
                     onOpenCleanupCandidate: { model.openCleanupCandidate($0) },
-                    onDeleteCleanupCandidate: { await model.deleteCleanupCandidate($0) }
+                    onDeleteCleanupCandidate: { await model.deleteCleanupCandidate($0) },
+                    onDeleteRequested: { item in
+                        contentDeleteTitle = "Delete “\(item.title)”?"
+                        model.deleteConfirmation = item
+                    },
+                    onDuplicateRequested: { item in
+                        Task { await model.duplicate(id: item.id) }
+                    }
                 )
                     .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
                     .onChange(of: navigator.selection) { _, newID in
@@ -540,6 +574,40 @@ struct SiteWindow: View {
         } message: {
             Text("Unsaved changes in the editor and inspector will be discarded.")
         }
+        .confirmationDialog(
+            contentDeleteTitle,
+            isPresented: Binding(
+                get: { bindableModel.deleteConfirmation != nil },
+                set: { if !$0 { model.deleteConfirmation = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { Task { await model.confirmDelete() } }
+            Button("Cancel", role: .cancel) { model.deleteConfirmation = nil }
+        } message: {
+            Text("This content will be removed from the working tree. This can be undone via git.")
+        }
+        .alert(
+            "Couldn't complete that action",
+            isPresented: Binding(
+                get: { model.contentActionError != nil },
+                set: { if !$0 { model.contentActionError = nil } }),
+            presenting: model.contentActionError
+        ) { _ in
+            Button("OK", role: .cancel) { model.contentActionError = nil }
+        } message: { msg in
+            Text(msg)
+        }
+        .sheet(item: Binding(
+            get: { model.pendingRedirectOfferRoute.map { IdentifiableRoute($0) } },
+            set: { model.pendingRedirectOfferRoute = $0?.value }
+        )) { route in
+            if let navigator = model.navigator {
+                AddRedirectSheet(source: route.value) { destination, code in
+                    let saved = await navigator.saveRedirect(source: route.value, destination: destination, code: code)
+                    return saved ? nil : navigator.redirectSaveError
+                }
+            }
+        }
         .sheet(isPresented: $bindableModel.newPagePresented) {
             NewPageSheet(site: site) { title, route, template in
                 await model.createPage(title: title, route: route, template: template)
@@ -550,6 +618,16 @@ struct SiteWindow: View {
                 descriptors: contentTypeRegistry.all.filter { $0.collection != nil }
             ) { title, slug, descriptor in
                 await model.createCollectionEntry(title: title, slug: slug, descriptor: descriptor)
+            }
+        }
+        .sheet(isPresented: $bindableModel.newPostPresented) {
+            NewPostSheet { title in
+                await model.createPost(title: title)
+            }
+        }
+        .sheet(isPresented: $bindableModel.newComponentPresented) {
+            NewComponentSheet { name in
+                await model.createComponent(name: name)
             }
         }
         .annotatedAsSite(site)
@@ -673,5 +751,34 @@ struct SiteWindow: View {
         content()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    /// Builds the Edit-menu Delete/Duplicate actions for the current Navigator selection, or nil
+    /// when there's no site or no selection. `delete`/`duplicate` are individually nil when the
+    /// selected row isn't a page/post (`canDelete`/`canDuplicate`), which is what disables the
+    /// individual menu items rather than hiding the whole group.
+    private func navigatorSelectionActions(for model: SiteWindowModel) -> NavigatorSelectionActions? {
+        guard model.site != nil, let navigator = model.navigator, let id = navigator.selection else {
+            return nil
+        }
+        let deleteAction: (() -> Void)?
+        if navigator.canDelete(id) {
+            deleteAction = {
+                guard let item = navigator.sections.flatMap(\.items).first(where: { $0.id == id }) else { return }
+                contentDeleteTitle = "Delete “\(item.title)”?"
+                model.deleteConfirmation = item
+            }
+        } else {
+            deleteAction = nil
+        }
+        let duplicateAction: (() -> Void)?
+        if navigator.canDuplicate(id) {
+            duplicateAction = {
+                Task { await model.duplicate(id: id) }
+            }
+        } else {
+            duplicateAction = nil
+        }
+        return NavigatorSelectionActions(delete: deleteAction, duplicate: duplicateAction)
     }
 }

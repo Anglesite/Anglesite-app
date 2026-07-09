@@ -16,6 +16,9 @@ final class SiteNavigatorModel {
     var editingItemID: String?
     var draftTitle: String = ""
     var renameError: String?
+    /// Error surface for `saveRedirect` (#530) — distinct from `renameError` since it's a
+    /// different action, not a rename failure.
+    var redirectSaveError: String?
 
     private var sourceDirectory: URL?
     private var websiteTitle: String?
@@ -90,14 +93,21 @@ final class SiteNavigatorModel {
         }
     }
 
-    /// A row is renamable iff it is a page or post (route target). File rows (components/styles/
-    /// metadata) carry a `.file` target and are out of scope. The astro-without-title case is
-    /// caught at commit, not pre-disabled (pre-checking would read every page file per refresh).
-    func canRename(_ id: String) -> Bool {
+    /// A row is renamable/deletable/duplicable iff it is a page or post (route target). File rows
+    /// (components/styles/metadata) carry a `.file` target and are out of scope. The
+    /// astro-without-title case is caught at commit, not pre-disabled (pre-checking would read
+    /// every page file per refresh).
+    private func isContentRow(_ id: String) -> Bool {
         guard let target = target(for: id) else { return false }
         if case .route = target { return true }
         return false
     }
+
+    func canRename(_ id: String) -> Bool { isContentRow(id) }
+
+    /// Delete/Duplicate (#516) share Rename's gating exactly — pages and posts only.
+    func canDelete(_ id: String) -> Bool { isContentRow(id) }
+    func canDuplicate(_ id: String) -> Bool { isContentRow(id) }
 
     func beginEditing(_ id: String) {
         guard canRename(id) else { return }
@@ -188,5 +198,26 @@ final class SiteNavigatorModel {
             fileGroups: fileGroups,
             websiteTitle: websiteTitle
         )
+    }
+
+    /// Appends a redirect for `source` → `destination` to `Source/redirects.json` (#530). Used by
+    /// the "Add Redirect?" prompt `SiteWindow` shows after `SiteWindowModel.confirmDelete()`
+    /// successfully deletes a page — that method captures the deleted page's route before the
+    /// delete call and, on success, offers this via a sheet hosted in `SiteWindow` (not here:
+    /// delete itself is owned by `SiteWindowModel`/`NativeContentOperations` since #516, not this
+    /// model). Returns whether the save succeeded; on failure sets `redirectSaveError`.
+    @discardableResult
+    func saveRedirect(source: String, destination: String, code: RedirectsStore.RedirectEntry.Code) async -> Bool {
+        guard let sourceDirectory else { return false }
+        let store = RedirectsStore(sourceDirectory: sourceDirectory)
+        do {
+            var entries = try store.load()
+            entries.append(RedirectsStore.RedirectEntry(source: source, destination: destination, code: code))
+            try store.save(entries)
+            return true
+        } catch {
+            redirectSaveError = "Couldn't save the redirect: \(error.localizedDescription)"
+            return false
+        }
     }
 }
