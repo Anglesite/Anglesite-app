@@ -10,13 +10,18 @@ struct SiteGraphExplorerGroupingTests {
         )
     }
 
-    @Test("an asset referenced from two files counts once, not twice")
-    func referencedFromTwoFilesNotDoubleCounted() {
+    // Actual de-duplication across multiple referencing files happens wherever
+    // `referenceCounts` is computed (e.g. `SiteGraphExplorerModel.visibleReferenceCounts`),
+    // not here — `grouped` just trusts whatever count it's given. This test only verifies
+    // that a positive count (however it was arrived at) surfaces the node exactly once,
+    // never duplicated by `grouped` itself.
+    @Test("an asset with a positive reference count appears exactly once, not duplicated")
+    func positiveReferenceCountAppearsOnce() throws {
         let hero = asset("hero", title: "hero.png")
         let grouped = SiteGraphExplorerGrouping.grouped(
             nodes: [hero], referenceCounts: ["hero": 2]
         )
-        let assetGroup = try! #require(grouped.first { $0.kind == .asset })
+        let assetGroup = try #require(grouped.first { $0.kind == .asset })
         #expect(assetGroup.nodes.count == 1)
         #expect(assetGroup.nodes[0].id == "hero")
     }
