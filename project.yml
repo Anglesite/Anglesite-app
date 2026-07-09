@@ -38,7 +38,7 @@ targets:
       # Guard first so a Release build with unvendored container resources fails
       # before the (slow) plugin copy/npm install phases run. Debug only warns.
       - name: Check container resources
-        script: "${PROJECT_DIR}/scripts/check-container-resources.sh"
+        script: "\"${PROJECT_DIR}/scripts/check-container-resources.sh\""
         basedOnDependencyAnalysis: false
       - name: Bundle Anglesite plugin
         script: "\"${PROJECT_DIR}/scripts/copy-plugin.sh\""
