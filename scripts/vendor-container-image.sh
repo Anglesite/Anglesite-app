@@ -11,6 +11,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/lib/container-cli.sh"
+# Fail fast, before staging work: no point copying the sidecar/template if the CLI is missing.
+ensure_container_cli
 CTX="$ROOT/Containers/anglesite-dev"
 OUT="$ROOT/Resources/container-image"
 
@@ -69,7 +71,6 @@ cleanup_sidecar() { rm -rf "$SIDECAR_STAGE" "$TEMPLATE_STAGE" "$CTX/hydrate.sh";
 trap cleanup_sidecar EXIT
 
 echo "Building anglesite-dev:latest (linux/arm64)…"
-ensure_container_cli
 
 echo "Exporting OCI layout → $OUT"
 # Wipe any stale layout contents but preserve the committed .gitkeep placeholder so

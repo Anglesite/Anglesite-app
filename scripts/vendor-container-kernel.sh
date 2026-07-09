@@ -14,6 +14,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/lib/container-cli.sh"
+# Fail fast, before the ~290 MB kernel download: the initfs half needs the CLI regardless.
+ensure_container_cli
 KERNEL_OUT="$ROOT/Resources/container-kernel"
 INITFS_OUT="$ROOT/Resources/container-initfs"
 
@@ -85,8 +87,6 @@ file "$KERNEL_OUT/vmlinux" || true
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== Vendoring vminit initfs (${VMINIT_IMAGE}) ==="
-
-ensure_container_cli
 
 # Wipe stale layout but preserve .gitkeep.
 find "$INITFS_OUT" -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
