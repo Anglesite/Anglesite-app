@@ -24,6 +24,16 @@ struct ProjectCleanupModelTests {
             referenceCount: 0
         )
 
+        // `delete(_:)`'s first guard is `guard let sourceDirectory, !isBusy else { return false }`
+        // — without a `configure()` call, `sourceDirectory` is nil and that guard alone would
+        // short-circuit before ever reaching the stale-candidate check this test targets. Give
+        // the model a real (if empty) temp directory so execution actually reaches the
+        // `candidates.contains(where:)` guard below.
+        let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+        model.configure(siteID: "site-a", sourceDirectory: tempDirectory)
+
         // `candidates` starts empty (no scan() has run), so `staleCandidate` is not in the
         // live list — delete must refuse rather than calling gitDelete.
         let succeeded = await model.delete(staleCandidate)
