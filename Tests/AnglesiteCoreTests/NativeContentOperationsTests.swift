@@ -370,6 +370,102 @@ struct NativeContentOperationsDeleteTests {
     }
 }
 
+@Suite("NativeContentOperations.duplicatePage/duplicatePost")
+struct NativeContentOperationsDuplicateTests {
+    private func makeRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("native-content-ops-dup-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test("duplicatePage writes a -copy suffixed file with the retitled contents")
+    func duplicatesPage() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/about.astro"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let original = ContentScaffold.renderPage(title: "About", layoutImport: "../layouts/BaseLayout.astro")
+        try original.write(to: abs, atomically: true, encoding: .utf8)
+
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.duplicatePage(siteID: "site-1", relativePath: relPath, title: "About")
+
+        guard case .created(let filePath, let identifier) = result else {
+            Issue.record("expected .created, got \(result)"); return
+        }
+        #expect(filePath == "src/pages/about-copy.astro")
+        #expect(identifier == "/about-copy")
+        let copied = try String(contentsOf: root.appendingPathComponent(filePath), encoding: .utf8)
+        #expect(copied.contains("title=\"About Copy\""))
+    }
+
+    @Test("duplicatePage bumps the suffix on collision")
+    func duplicatesPageWithCollision() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/about.astro"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try ContentScaffold.renderPage(title: "About", layoutImport: "../layouts/BaseLayout.astro")
+            .write(to: abs, atomically: true, encoding: .utf8)
+        try ContentScaffold.renderPage(title: "About Copy", layoutImport: "../layouts/BaseLayout.astro")
+            .write(to: root.appendingPathComponent("src/pages/about-copy.astro"), atomically: true, encoding: .utf8)
+
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.duplicatePage(siteID: "site-1", relativePath: relPath, title: "About")
+
+        guard case .created(let filePath, _) = result else { Issue.record("expected .created, got \(result)"); return }
+        #expect(filePath == "src/pages/about-copy-2.astro")
+    }
+
+    @Test("duplicatePost writes into the same collection with a -copy slug")
+    func duplicatesPost() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/content/posts/hello-world.md"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try ContentScaffold.renderPost(title: "Hello World", now: Date(timeIntervalSince1970: 0))
+            .write(to: abs, atomically: true, encoding: .utf8)
+
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.duplicatePost(siteID: "site-1", relativePath: relPath, collection: "posts", title: "Hello World")
+
+        guard case .created(let filePath, let identifier) = result else {
+            Issue.record("expected .created, got \(result)"); return
+        }
+        #expect(filePath == "src/content/posts/hello-world-copy.md")
+        #expect(identifier == "hello-world-copy")
+        let copied = try String(contentsOf: root.appendingPathComponent(filePath), encoding: .utf8)
+        #expect(copied.contains("title: \"Hello World Copy\""))
+    }
+
+    @Test("duplicatePage fails when the source file does not exist")
+    func duplicateMissingSourceFails() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ops = NativeContentOperations(siteDirectory: { _ in root })
+
+        let result = await ops.duplicatePage(siteID: "site-1", relativePath: "src/pages/missing.astro", title: "Missing")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
+}
+
 private struct StubPageCopyGenerator: PageCopyGenerating {
     let suggestion: PageCopySuggestion?
     func suggestDescription(title: String, siteID: String, siteDirectory: URL) async -> PageCopySuggestion? {

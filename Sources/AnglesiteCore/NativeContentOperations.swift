@@ -227,6 +227,84 @@ public struct NativeContentOperations: ContentOperationsService {
         return .deleted(filePath: relativePath)
     }
 
+    /// Duplicate an existing page: read its contents, retitle to `"<title> Copy"` (bumping to
+    /// `"<title> Copy 2"`, `"<title> Copy 3"`… on route collision — which slugifies to the
+    /// `-copy`/`-copy-2` file-name convention), write the new file, commit. Title rewrite reuses
+    /// `PageTitleEditor` (same transform `NavigatorRenameService` uses for Rename); if the source
+    /// has no editable title location, the contents are duplicated verbatim.
+    public func duplicatePage(siteID: String, relativePath: String, title: String) async -> ContentCreateResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        let sourceAbs = root.appendingPathComponent(relativePath)
+        guard fileManager.fileExists(atPath: sourceAbs.path) else {
+            return .failed(reason: "No page exists at \(relativePath)")
+        }
+        let contents: String
+        do { contents = try FileDocumentIO.load(sourceAbs, fileManager: fileManager).contents }
+        catch { return .failed(reason: "\(error)") }
+
+        let baseTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let copyTitle = baseTitle.isEmpty ? "Copy" : "\(baseTitle) Copy"
+        var attempt = 1
+        var route = ContentScaffold.normalizeRoute(ContentScaffold.slugify(copyTitle))
+        var relPath = ContentScaffold.pageRelativePath(normalizedRoute: route)
+        while attempt < 1000, fileManager.fileExists(atPath: root.appendingPathComponent(relPath).path) {
+            attempt += 1
+            route = ContentScaffold.normalizeRoute(ContentScaffold.slugify("\(copyTitle) \(attempt)"))
+            relPath = ContentScaffold.pageRelativePath(normalizedRoute: route)
+        }
+
+        let ext = (relativePath as NSString).pathExtension
+        let rewritten: String
+        switch PageTitleEditor.rewrite(contents: contents, fileExtension: ext, newTitle: copyTitle) {
+        case .success(let s): rewritten = s
+        case .failure: rewritten = contents
+        }
+
+        do { try write(rewritten, to: root.appendingPathComponent(relPath)) }
+        catch { return .failed(reason: "\(error)") }
+
+        _ = await gitCommit(root, relPath, "anglesite: duplicate page \(route)")
+        return .created(filePath: relPath, identifier: route)
+    }
+
+    /// Duplicate an existing post within the same `collection`. Same retitle/collision/commit
+    /// shape as `duplicatePage`, but derives a slug (not a route) and writes via
+    /// `ContentScaffold.postRelativePath`.
+    public func duplicatePost(siteID: String, relativePath: String, collection: String, title: String) async -> ContentCreateResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        let sourceAbs = root.appendingPathComponent(relativePath)
+        guard fileManager.fileExists(atPath: sourceAbs.path) else {
+            return .failed(reason: "No \(collection) entry exists at \(relativePath)")
+        }
+        let contents: String
+        do { contents = try FileDocumentIO.load(sourceAbs, fileManager: fileManager).contents }
+        catch { return .failed(reason: "\(error)") }
+
+        let baseTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let copyTitle = baseTitle.isEmpty ? "Copy" : "\(baseTitle) Copy"
+        var attempt = 1
+        var slug = ContentScaffold.slugify(copyTitle)
+        var relPath = ContentScaffold.postRelativePath(collection: collection, slug: slug)
+        while attempt < 1000, fileManager.fileExists(atPath: root.appendingPathComponent(relPath).path) {
+            attempt += 1
+            slug = ContentScaffold.slugify("\(copyTitle) \(attempt)")
+            relPath = ContentScaffold.postRelativePath(collection: collection, slug: slug)
+        }
+
+        let ext = (relativePath as NSString).pathExtension
+        let rewritten: String
+        switch PageTitleEditor.rewrite(contents: contents, fileExtension: ext, newTitle: copyTitle) {
+        case .success(let s): rewritten = s
+        case .failure: rewritten = contents
+        }
+
+        do { try write(rewritten, to: root.appendingPathComponent(relPath)) }
+        catch { return .failed(reason: "\(error)") }
+
+        _ = await gitCommit(root, relPath, "anglesite: duplicate \(collection) \(slug)")
+        return .created(filePath: relPath, identifier: slug)
+    }
+
     private func write(_ contents: String, to abs: URL) throws {
         try fileManager.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
         try contents.write(to: abs, atomically: true, encoding: .utf8)
