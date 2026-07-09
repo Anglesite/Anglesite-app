@@ -1,4 +1,9 @@
 import Foundation
+// URLSession/URLRequest/HTTPURLResponse live in FoundationNetworking on non-Darwin
+// platforms (swift-corelibs-foundation); this import is a no-op on macOS.
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Verifies a Cloudflare API token by calling the Cloudflare REST API directly — no Node, no
 /// wrangler. `GET /user/tokens/verify` confirms the token is valid and active; a best-effort

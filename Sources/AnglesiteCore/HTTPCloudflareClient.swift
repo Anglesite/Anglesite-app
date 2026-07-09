@@ -1,4 +1,9 @@
 import Foundation
+// URLSession/URLRequest/HTTPURLResponse live in FoundationNetworking on non-Darwin
+// platforms (swift-corelibs-foundation); this import is a no-op on macOS.
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Pagination metadata returned alongside list results.
 private struct CFResultInfo: Decodable, Sendable {
