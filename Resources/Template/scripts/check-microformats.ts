@@ -1,6 +1,6 @@
 import { validateDist } from "./microformats.ts";
 
-const distDir = process.argv[2] ?? "dist/client";
+const distDir = process.argv[2] ?? "dist";
 const problems = validateDist(distDir);
 
 if (problems.length > 0) {
