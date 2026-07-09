@@ -9,6 +9,7 @@ struct PlistEditorView: View {
     private enum SettingsTab: String, CaseIterable, Identifiable {
         case website = "Website"
         case analytics = "Analytics"
+        case redirects = "Redirects"
         var id: Self { self }
     }
 
@@ -32,6 +33,8 @@ struct PlistEditorView: View {
         .onChange(of: selectedTab) { oldValue, _ in
             if oldValue == .analytics {
                 Task { await model.saveAnalytics() }
+            } else if oldValue == .redirects {
+                Task { await model.saveRedirects() }
             }
         }
         .onChange(of: controlActiveState) { _, new in
@@ -49,7 +52,7 @@ struct PlistEditorView: View {
         HStack {
             Label("Settings", systemImage: "gearshape")
                 .font(.headline)
-            if model.isDirty || model.isAnalyticsDirty {
+            if model.isDirty || model.isAnalyticsDirty || model.isRedirectsDirty {
                 Circle().fill(.secondary).frame(width: 7, height: 7)
                     .help("Unsaved changes")
             }
@@ -98,12 +101,19 @@ struct PlistEditorView: View {
                             .foregroundStyle(.orange)
                             .font(.callout)
                     }
+                    if selectedTab != .redirects, let redirectsError = model.redirectsError {
+                        Label(redirectsError, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+                    }
 
                     switch selectedTab {
                     case .website:
                         websiteTab
                     case .analytics:
                         analyticsTab
+                    case .redirects:
+                        redirectsTab
                     }
                 }
                 .padding()
@@ -226,6 +236,80 @@ struct PlistEditorView: View {
             }
             .padding()
         }
+    }
+
+    private var redirectsTab: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if model.redirectEntries.isEmpty {
+                Text("No redirects yet. Add one below.")
+                    .foregroundStyle(.secondary)
+            } else {
+                Table(model.redirectEntries) {
+                    TableColumn("Source") { entry in
+                        TextField("/old-path", text: sourceBinding(for: entry))
+                    }
+                    TableColumn("Destination") { entry in
+                        TextField("/new-path", text: destinationBinding(for: entry))
+                    }
+                    TableColumn("Type") { entry in
+                        Picker("Type", selection: codeBinding(for: entry)) {
+                            Text("301").tag(RedirectsStore.RedirectEntry.Code.permanent)
+                            Text("302").tag(RedirectsStore.RedirectEntry.Code.temporary)
+                        }
+                        .labelsHidden()
+                    }
+                    TableColumn("") { entry in
+                        Button(role: .destructive) {
+                            model.redirectEntries.removeAll { $0.id == entry.id }
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(minHeight: 120)
+            }
+            HStack(spacing: 8) {
+                Button {
+                    model.redirectEntries.append(RedirectsStore.RedirectEntry(source: "", destination: "", code: .permanent))
+                } label: {
+                    Label("Add Redirect", systemImage: "plus")
+                }
+                if model.isSavingRedirects {
+                    ProgressView().controlSize(.small)
+                }
+            }
+        }
+    }
+
+    private func sourceBinding(for entry: RedirectsStore.RedirectEntry) -> Binding<String> {
+        Binding(
+            get: { model.redirectEntries.first { $0.id == entry.id }?.source ?? entry.source },
+            set: { newValue in
+                if let idx = model.redirectEntries.firstIndex(where: { $0.id == entry.id }) {
+                    model.redirectEntries[idx].source = newValue
+                }
+            })
+    }
+
+    private func destinationBinding(for entry: RedirectsStore.RedirectEntry) -> Binding<String> {
+        Binding(
+            get: { model.redirectEntries.first { $0.id == entry.id }?.destination ?? entry.destination },
+            set: { newValue in
+                if let idx = model.redirectEntries.firstIndex(where: { $0.id == entry.id }) {
+                    model.redirectEntries[idx].destination = newValue
+                }
+            })
+    }
+
+    private func codeBinding(for entry: RedirectsStore.RedirectEntry) -> Binding<RedirectsStore.RedirectEntry.Code> {
+        Binding(
+            get: { model.redirectEntries.first { $0.id == entry.id }?.code ?? entry.code },
+            set: { newValue in
+                if let idx = model.redirectEntries.firstIndex(where: { $0.id == entry.id }) {
+                    model.redirectEntries[idx].code = newValue
+                }
+            })
     }
 
     private var conflictBinding: Binding<Bool> {
