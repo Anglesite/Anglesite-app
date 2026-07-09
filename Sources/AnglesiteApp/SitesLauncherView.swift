@@ -366,8 +366,17 @@ struct SitesLauncherView: View {
                 try await ProcessSupervisor.shared.run(executable: exe, arguments: args, currentDirectoryURL: cwd)
             },
             gitInit: { sourceDir in
-                let git = URL(fileURLWithPath: "/usr/bin/git")
-                _ = try await ProcessSupervisor.shared.run(executable: git, arguments: ["init"], currentDirectoryURL: sourceDir)
+                // Route through GitInitRunner so a nonzero exit throws (with stderr) instead of
+                // being discarded — see #548, where this used to `_ = try await ...run(...)` and
+                // silently kept a Source/ with no .git that could never preview.
+                try await GitInitRunner.run(in: sourceDir) { exe, args, cwd in
+                    let result = try await ProcessSupervisor.shared.run(executable: exe, arguments: args, currentDirectoryURL: cwd)
+                    // Logs are sacred: this is a one-shot `run`, not a streamed `launch`, so forward
+                    // its captured output to the debug pane ourselves.
+                    if !result.stdout.isEmpty { await LogCenter.shared.append(source: "git-init", stream: .stdout, text: result.stdout) }
+                    if !result.stderr.isEmpty { await LogCenter.shared.append(source: "git-init", stream: .stderr, text: result.stderr) }
+                    return result
+                }
             },
             register: { package in
                 let site = try await SiteStore.shared.record(package)
