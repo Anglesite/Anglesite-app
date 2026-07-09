@@ -3,6 +3,7 @@ public enum IntegrationID: String, Sendable, CaseIterable {
     case tracking, share, podcast
     case indieweb, menu
     case buyButton, lemonSqueezy, paddle, snipcart, shopifyBuyButton
+    case inbox, membership
 }
 
 public struct Template: Sendable, Equatable, ExpressibleByStringLiteral {

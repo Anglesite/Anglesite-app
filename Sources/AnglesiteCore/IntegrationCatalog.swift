@@ -52,6 +52,7 @@ public enum IntegrationCatalog {
         tracking, share, podcast,
         indieweb, menu,
         buyButton, lemonSqueezy, paddle, snipcart, shopifyBuyButton,
+        inbox, membership,
     ]
 
     public static func descriptor(for id: IntegrationID) -> IntegrationDescriptor {
@@ -647,4 +648,22 @@ public enum IntegrationCatalog {
                            extra: ["sdks.shopifycdn.com", "cdn.shopify.com"],
                            fromFieldHost: nil, when: .always),
         ])
+
+    // MARK: inbox
+    static let inbox = IntegrationDescriptor(
+        id: .inbox,
+        displayName: "Inbox",
+        summary: "Review and curate visitor messages through a built-in admin UI (Keystatic).",
+        providers: [],
+        fields: [],
+        operations: [])
+
+    // MARK: membership
+    static let membership = IntegrationDescriptor(
+        id: .membership,
+        displayName: "Member Directory",
+        summary: "A public list of members you curate through a built-in admin UI (Keystatic).",
+        providers: [],
+        fields: [],
+        operations: [])
 }

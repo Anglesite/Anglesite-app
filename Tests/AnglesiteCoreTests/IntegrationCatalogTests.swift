@@ -9,6 +9,7 @@ import Testing
             .tracking, .share, .podcast,
             .indieweb, .menu,
             .buyButton, .lemonSqueezy, .paddle, .snipcart, .shopifyBuyButton,
+            .inbox, .membership,
         ]))
     }
 
