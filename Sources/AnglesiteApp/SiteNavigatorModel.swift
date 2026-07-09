@@ -17,17 +17,34 @@ final class SiteNavigatorModel {
     var draftTitle: String = ""
     var renameError: String?
 
+    // Minimal delete (#530): removes a page/post's file via git and, for pages (which carry a
+    // route — posts don't), returns the route so the caller can offer to cover it with a
+    // redirect. `NavigatorRenameService`'s title-rewrite never changes a route, so this is the
+    // only in-app action that can actually break an inbound URL.
+    struct DeleteCandidate: Equatable {
+        enum Kind: Equatable { case page, post }
+        let id: String
+        let filePath: String
+        let route: String?
+        let displayTitle: String
+        let kind: Kind
+    }
+    var pendingDelete: DeleteCandidate?
+    var deleteError: String?
+
     private var sourceDirectory: URL?
     private var websiteTitle: String?
     private var siteID: String?
     private var siteRoot: URL?
     private let renameService = NavigatorRenameService()
+    private let gitDelete: NativeContentOperations.GitDelete
 
     private let graph: SiteContentGraph
     private var observeTask: Task<Void, Never>?
 
-    init(graph: SiteContentGraph) {
+    init(graph: SiteContentGraph, gitDelete: @escaping NativeContentOperations.GitDelete = NativeContentOperations.processGitDelete) {
         self.graph = graph
+        self.gitDelete = gitDelete
     }
 
     func start(siteID: String, siteRoot: URL, sourceDirectory: URL, websiteTitle: String) {
@@ -97,6 +114,68 @@ final class SiteNavigatorModel {
         guard let target = target(for: id) else { return false }
         if case .route = target { return true }
         return false
+    }
+
+    /// Same eligibility as `canRename` — pages and posts (route targets) are deletable; file rows
+    /// (components/styles/metadata) are not.
+    func canDelete(_ id: String) -> Bool { canRename(id) }
+
+    /// Resolves `id` to a page or post and stages it as `pendingDelete` for the confirmation
+    /// dialog. No-ops if `id` isn't deletable.
+    func requestDelete(_ id: String) async {
+        guard canDelete(id) else { return }
+        if let page = await graph.page(id: id) {
+            pendingDelete = DeleteCandidate(
+                id: id, filePath: page.filePath, route: page.route,
+                displayTitle: page.title ?? page.route, kind: .page)
+        } else if let post = await graph.post(id: id) {
+            pendingDelete = DeleteCandidate(
+                id: id, filePath: post.filePath, route: nil,
+                displayTitle: post.title ?? post.slug, kind: .post)
+        }
+    }
+
+    func cancelDelete() {
+        pendingDelete = nil
+    }
+
+    /// Stage-delete + commit the pending candidate's file via git, then remove it from the
+    /// content graph. Returns the removed page's route (for the caller to offer a redirect for),
+    /// or `nil` on failure or when deleting a post (posts carry no route). Always clears
+    /// `pendingDelete`.
+    @discardableResult
+    func confirmDelete() async -> String? {
+        guard let candidate = pendingDelete, let sourceDirectory else { pendingDelete = nil; return nil }
+        pendingDelete = nil
+        let message = "anglesite: delete \(candidate.filePath)"
+        guard await gitDelete(sourceDirectory, candidate.filePath, message) != nil else {
+            deleteError = "Couldn't delete \(candidate.filePath). Check for uncommitted changes and try again."
+            return nil
+        }
+        switch candidate.kind {
+        case .page: await graph.removePage(id: candidate.id)
+        case .post: await graph.removePost(id: candidate.id)
+        }
+        return candidate.route
+    }
+
+    /// Appends a redirect for `source` → `destination` to `Source/redirects.json`, used by the
+    /// "Add Redirect" button in the delete-confirmation flow. Returns whether the save succeeded;
+    /// on failure sets `deleteError` (reused as the general navigator-action error surface) so the
+    /// existing "Delete failed" alert can show it.
+    @discardableResult
+    func saveRedirect(source: String, destination: String, code: RedirectsStore.RedirectEntry.Code) async -> Bool {
+        guard let sourceDirectory else { return false }
+        let store = RedirectsStore(sourceDirectory: sourceDirectory)
+        do {
+            var entries = try store.load()
+            entries.append(RedirectsStore.RedirectEntry(source: source, destination: destination, code: code))
+            try store.save(entries)
+            return true
+        } catch {
+            deleteError = "Couldn't save the redirect: \(error.localizedDescription)"
+            return false
+        }
     }
 
     func beginEditing(_ id: String) {
