@@ -80,6 +80,10 @@ struct MCPClientTests {
         sys.stdout.flush()
     """
 
+    /// Generous initialize-handshake timeout for the python fake server: interpreter startup can
+    /// exceed `MCPClient.start`'s 10s default on a contended CI runner (same class of flake as #177).
+    private static let initializeTimeout: TimeInterval = 30
+
     private static let pythonURL: URL = {
         for path in ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/opt/anaconda3/bin/python3"] {
             if FileManager.default.isExecutableFile(atPath: path) {
@@ -101,7 +105,8 @@ struct MCPClientTests {
         try await client.start(
             executable: Self.pythonURL,
             arguments: ["-u", "-c", Self.fakeServerScript],
-            source: "mcp-handshake"
+            source: "mcp-handshake",
+            initializeTimeout: Self.initializeTimeout
         )
         let running = await client.isRunning
         #expect(running)
@@ -115,7 +120,8 @@ struct MCPClientTests {
         try await client.start(
             executable: Self.pythonURL,
             arguments: ["-u", "-c", Self.fakeServerScript],
-            source: "mcp-list"
+            source: "mcp-list",
+            initializeTimeout: Self.initializeTimeout
         )
         defer { Task { await client.stop() } }
 
@@ -131,7 +137,8 @@ struct MCPClientTests {
         try await client.start(
             executable: Self.pythonURL,
             arguments: ["-u", "-c", Self.fakeServerScript],
-            source: "mcp-call"
+            source: "mcp-call",
+            initializeTimeout: Self.initializeTimeout
         )
         defer { Task { await client.stop() } }
 
@@ -150,7 +157,8 @@ struct MCPClientTests {
         try await client.start(
             executable: Self.pythonURL,
             arguments: ["-u", "-c", Self.fakeServerScript],
-            source: "mcp-error"
+            source: "mcp-error",
+            initializeTimeout: Self.initializeTimeout
         )
         defer { Task { await client.stop() } }
 
@@ -174,7 +182,8 @@ struct MCPClientTests {
             executable: Self.pythonURL,
             arguments: ["-u", "-c", Self.crashOnceServerScript],
             source: "mcp-reconnect",
-            restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.05)
+            restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.05),
+            initializeTimeout: Self.initializeTimeout
         )
         defer { Task { await client.stop() } }
 
@@ -186,7 +195,7 @@ struct MCPClientTests {
         // Poll instead of a fixed sleep: respawn + handshake comfortably fits in a few hundred ms
         // locally but can take seconds on a loaded CI runner. .notInitialized / .reconnecting are
         // the documented transient errors during a supervised respawn; anything else is real.
-        let tools = try await Self.listToolsAwaitingReconnect(client, timeout: 10)
+        let tools = try await Self.listToolsAwaitingReconnect(client, timeout: Self.initializeTimeout)
         #expect(tools.first?.name == "echo")
 
         let echoed = try await client.callTool(name: "echo", arguments: .object(["text": .string("after-reconnect")]))
