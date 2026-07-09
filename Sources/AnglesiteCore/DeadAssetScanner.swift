@@ -352,7 +352,14 @@ public enum DeadAssetScanner {
     /// `referencedPaths` so the extraction/alias/glob logic lives in exactly one place.
     private struct ReferenceIndex {
         var referencingPaths: [String: Set<String>] = [:]
-        var globDirectories: Set<String> = []
+        /// Directory (lowercased, project-relative) covered by an `Astro.glob`/`import.meta.glob`
+        /// call, mapped to the source file(s) that declared the covering glob call. `scan()`
+        /// floors a covered path's reference count at 1 — a glob call is itself a real reference
+        /// to everything under the directory, even without a per-file explicit reference — and
+        /// `referencedPaths()` attributes every real file under a covered directory to the same
+        /// declaring source file(s), so the two stay in agreement instead of one flagging a
+        /// glob-only-covered asset as used and the other reporting it as unreferenced.
+        var globDirectorySources: [String: Set<String>] = [:]
     }
 
     /// Walks every `.astro`/`.md`/`.mdx`/`.mdoc`/`.markdown`/`.css`/`.ts`/`.tsx`/`.js`/`.jsx` file
@@ -393,7 +400,9 @@ public enum DeadAssetScanner {
                 index.referencingPaths[ref.lowercased(), default: []].insert(relPath)
             }
             if !isTopLevelScripts {
-                index.globDirectories.formUnion(refs.globDirectories.map { $0.lowercased() })
+                for dir in refs.globDirectories {
+                    index.globDirectorySources[dir.lowercased(), default: []].insert(relPath)
+                }
             }
             for raw in refs.unresolvedReferences {
                 for aliasResolved in resolveAlias(raw, config: aliasConfig) {
@@ -449,7 +458,7 @@ public enum DeadAssetScanner {
 
         func referenceCount(for path: String) -> Int {
             let key = path.lowercased()
-            if index.globDirectories.contains(where: { key.hasPrefix($0 + "/") }) {
+            if index.globDirectorySources.keys.contains(where: { key.hasPrefix($0 + "/") }) {
                 return max(1, index.referencingPaths[key]?.count ?? 0)
             }
             return index.referencingPaths[key]?.count ?? 0
@@ -491,8 +500,21 @@ public enum DeadAssetScanner {
     /// that reference it. Reuses the exact same extraction/alias/glob logic as `scan` — this is the
     /// canonical "what references this file" answer for the whole app; `ContentScanner.scanImages`
     /// uses it to populate `SiteContentGraph.Image.usedOnPages` (#140/#553).
+    ///
+    /// Includes glob-covered files: every real file found under a directory covered by an
+    /// `Astro.glob`/`import.meta.glob` call is attributed to the source file(s) that declared
+    /// the covering glob, even when no other explicit reference exists — matching `scan()`'s
+    /// glob-directory floor so the two never contradict each other for a glob-only-covered file.
     public static func referencedPaths(projectRoot: URL) -> [String: Set<String>] {
-        buildReferenceIndex(projectRoot: projectRoot).referencingPaths
+        let index = buildReferenceIndex(projectRoot: projectRoot)
+        var result = index.referencingPaths
+        for (dir, sources) in index.globDirectorySources {
+            for abs in walk(projectRoot.appendingPathComponent(dir)) {
+                let rel = relativePosix(abs, from: projectRoot).lowercased()
+                result[rel, default: []].formUnion(sources)
+            }
+        }
+        return result
     }
 
     /// Recursively collects files under `dir` in sorted order, skipping excluded directories and

@@ -36,14 +36,21 @@ struct SiteGraphExplorerGroupingTests {
         #expect(unused.map(\.id) == ["ghost"])
     }
 
-    @Test("toggling a kind off (by excluding it from `nodes`) hides it from unusedAssets too")
-    func excludedKindHiddenFromUnusedAssetsToo() {
+    @Test("unusedAssets only returns zero-reference asset nodes, ignoring non-asset kinds")
+    func unusedAssetsFiltersByKind() {
+        let ghost = asset("ghost", title: "ghost.png")
+        let page = SiteGraphNode(
+            id: "page-1", kind: .page, title: "Home", detail: nil,
+            filePath: "src/pages/index.astro", route: "/", referencedByCount: 0
+        )
         // SiteGraphExplorerModel implements "toggle kind off" by filtering `snapshot.nodes` down
-        // to `enabledKinds` before either function ever sees them (that's `filteredNodes`) — so
-        // the contract these pure functions must uphold is: an asset absent from `nodes` never
-        // appears in `unusedAssets`, even if `referenceCounts` still has a zero-count entry for it.
-        let unused = SiteGraphExplorerGrouping.unusedAssets(nodes: [], referenceCounts: ["ghost": 0])
-        #expect(unused.isEmpty)
+        // to `enabledKinds` before either function ever sees them (that's `filteredNodes`), so an
+        // excluded asset simply never appears in `nodes`. This fixture instead proves
+        // `unusedAssets` actively filters by `kind == .asset` — `page` has a zero reference count
+        // too (per `referenceCounts`'s default), so it would incorrectly show up here if the
+        // kind check were dropped.
+        let unused = SiteGraphExplorerGrouping.unusedAssets(nodes: [ghost, page], referenceCounts: [:])
+        #expect(unused.map(\.id) == ["ghost"])
     }
 
     @Test("summary reports node and edge counts")

@@ -104,6 +104,20 @@ struct ContentScannerTests {
         #expect(hero?.usedOnPages == [])
     }
 
+    @Test("images: usedOnPages is populated from real references, not left empty")
+    func usedOnPagesPopulatedFromReferences() {
+        let root = makeSite([
+            "public/images/hero.png": "PNGDATA",
+            "public/images/orphan.png": "PNGDATA",
+            "src/pages/index.astro": #"<img src="/images/hero.png" />"#,
+        ])
+        let images = ContentScanner.scan(projectRoot: root, siteID: siteID).images
+        let hero = images.first { $0.fileName == "hero.png" }
+        let orphan = images.first { $0.fileName == "orphan.png" }
+        #expect(hero?.usedOnPages == ["src/pages/index.astro"])
+        #expect(orphan?.usedOnPages == [])
+    }
+
     @Test("missing directories yield empty lists, not errors")
     func emptySite() {
         let root = makeSite(["README.md": "nothing here"])

@@ -42,29 +42,62 @@ struct ProjectCleanupModelTests {
         #expect(model.deleteError?.contains("no longer in the Cleanup list") == true)
     }
 
-    @Test("delete refuses to run while a scan or delete is already in flight")
-    func deleteRefusesWhileBusy() async {
+    @Test("scan() is refused while delete() is in flight, and isBusy survives the refused attempt")
+    func scanRefusedWhileDeleteInFlight() async throws {
+        let gate = AsyncGate()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("public/images"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data().write(to: root.appendingPathComponent("public/images/orphan.png"))
+
         let model = ProjectCleanupModel(
             knowledgeIndex: SiteKnowledgeIndex(),
             contentGraph: SiteContentGraph(),
-            gitDelete: { _, _, _ in "deadbeef" }
+            // Blocks until the test opens the gate, giving the test a controllable window in
+            // which delete() is provably mid-flight (isBusy == true) — the seam the prior version
+            // of this test lacked.
+            gitDelete: { _, _, _ in await gate.waitUntilOpen(); return "deadbeef" }
         )
-        // Prime `candidates` via the model's own internal state isn't possible from outside
-        // (no public setter) — so this test targets the *scan* busy-guard instead, which is
-        // externally observable: kick off two scans concurrently and confirm both complete
-        // without racing (the second sees `isBusy == true` and no-ops before awaiting
-        // `knowledgeIndex.rebuild`, per `ProjectCleanupModel.scan()`'s guard). We can't assert
-        // `isBusy` mid-flight without a controllable seam (no gate hook exists on `scan()`'s
-        // internals), so the guard's regression signal here is: `scan()` remains idempotent and
-        // safe under concurrent invocation — `hasScanned` ends true and the model does not
-        // corrupt/crash under the race, which is the property `isBusy` exists to protect.
-        model.configure(siteID: "site-a", sourceDirectory: FileManager.default.temporaryDirectory)
+        model.configure(siteID: "site-a", sourceDirectory: root)
+        await model.scan()
+        let candidate = try #require(model.candidates.first { $0.path == "public/images/orphan.png" })
 
-        async let first: Void = model.scan()
-        async let second: Void = model.scan()
-        _ = await (first, second)
+        async let deleteResult: Bool = model.delete(candidate)
+        // delete() sets isBusy = true before calling gitDelete (which is now blocked on `gate`),
+        // so once this loop exits, delete() is provably mid-flight.
+        while !model.isBusy { await Task.yield() }
 
-        #expect(model.hasScanned == true)
+        // scan()'s guard (`guard ..., !isBusy else { return }`) fires before scan() ever touches
+        // isBusy itself, so isBusy should still read exactly what delete() left it at. If that
+        // guard were removed, this scan() would run to completion (fast — an empty temp-dir
+        // knowledgeIndex.rebuild) and its own `defer { isBusy = false }` would flip isBusy back to
+        // false before this await returns, failing the assertion below — a real positive signal
+        // for the guard, not just idempotency.
+        await model.scan()
+        #expect(model.isBusy == true)
+
+        await gate.open()
+        let succeeded = await deleteResult
+        #expect(succeeded == true)
         #expect(model.isBusy == false)
+    }
+}
+
+/// Minimal manually-resettable async gate: lets a test hold an awaited closure open until it
+/// explicitly releases it, to create a controllable "still in flight" window.
+private actor AsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func open() {
+        isOpen = true
+        waiters.forEach { $0.resume() }
+        waiters.removeAll()
+    }
+
+    func waitUntilOpen() async {
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
     }
 }
