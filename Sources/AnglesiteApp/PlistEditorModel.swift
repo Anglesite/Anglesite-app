@@ -31,10 +31,15 @@ final class PlistEditorModel {
         }
     }
     private(set) var savedAnalyticsSettings = WebsiteAnalyticsAsset.Settings()
+    var redirectEntries: [RedirectsStore.RedirectEntry] = []
+    private(set) var savedRedirectEntries: [RedirectsStore.RedirectEntry] = []
+    private(set) var redirectsError: String?
+    private(set) var isSavingRedirects = false
     var conflictDiskContents: String?
 
     var isDirty: Bool { entries != savedEntries && loadError == nil && !isLoading }
     var isAnalyticsDirty: Bool { analyticsSettings != savedAnalyticsSettings && loadError == nil && !isLoading }
+    var isRedirectsDirty: Bool { redirectEntries != savedRedirectEntries && loadError == nil && !isLoading }
     var cloudflareAnalyticsEnabled: Bool { !analyticsSettings.cloudflareToken.isEmpty }
     var customAnalyticsValidationMessage: String? {
         WebsiteAnalyticsAsset.customHeadTagValidationMessage(analyticsSettings.customHeadTag)
@@ -95,6 +100,10 @@ final class PlistEditorModel {
             analyticsSettings = analytics
             savedAnalyticsSettings = analytics
             analyticsError = nil
+            let redirects = (try? RedirectsStore(sourceDirectory: sourceDirectory).load()) ?? []
+            redirectEntries = redirects
+            savedRedirectEntries = redirects
+            redirectsError = nil
         } catch {
             loadError = error.localizedDescription
         }
@@ -140,7 +149,10 @@ final class PlistEditorModel {
             guard await save() else { return false }
         }
         if isAnalyticsDirty {
-            return await saveAnalytics()
+            guard await saveAnalytics() else { return false }
+        }
+        if isRedirectsDirty {
+            return await saveRedirects()
         }
         return true
     }
@@ -216,6 +228,27 @@ final class PlistEditorModel {
             return true
         } catch {
             analyticsError = error.localizedDescription
+            return false
+        }
+    }
+
+    @discardableResult
+    func saveRedirects() async -> Bool {
+        guard isRedirectsDirty else { return true }
+        guard !isSavingRedirects else { return false }
+        isSavingRedirects = true
+        redirectsError = nil
+        defer { isSavingRedirects = false }
+        let sourceDirectory = sourceDirectory
+        let entries = redirectEntries
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try RedirectsStore(sourceDirectory: sourceDirectory).save(entries)
+            }.value
+            savedRedirectEntries = entries
+            return true
+        } catch {
+            redirectsError = "Couldn't save redirects: \(error.localizedDescription)"
             return false
         }
     }
