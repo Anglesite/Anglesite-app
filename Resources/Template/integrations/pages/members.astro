@@ -1,0 +1,32 @@
+---
+import { getCollection } from "astro:content";
+import BaseLayout from "../../src/layouts/BaseLayout.astro";
+import MemberCard from "../../src/components/MemberCard.astro";
+import { readConfig } from "../../scripts/config";
+
+const members = (await getCollection("members")).sort(
+  (a, b) => a.data.joinedDate.valueOf() - b.data.joinedDate.valueOf()
+);
+const title = readConfig("MEMBERSHIP_DIRECTORY_TITLE") ?? "Our Members";
+---
+<BaseLayout title={title}>
+  <h1>{title}</h1>
+  <div class="member-grid">
+    {members.map((member) => (
+      <MemberCard
+        name={member.data.name}
+        role={member.data.role}
+        photo={member.data.photo}
+        links={member.data.links}
+      />
+    ))}
+  </div>
+</BaseLayout>
+
+<style>
+  .member-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1.5rem;
+  }
+</style>

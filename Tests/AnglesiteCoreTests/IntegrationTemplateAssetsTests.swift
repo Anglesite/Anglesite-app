@@ -51,6 +51,7 @@ import Foundation
                   "integrations/pages/podcast.astro",
                   "integrations/pages/buy.astro", "integrations/pages/shop.astro", "integrations/pages/pricing.astro",
                   "integrations/pages/store.astro", "integrations/pages/products.astro",
+                  "integrations/pages/members.astro", "integrations/components/MemberCard.astro",
                   "integrations/public/sw.js",
                   "integrations/worker/subscribe-worker.js", "integrations/worker/subscribe-wrangler.toml",
                   "integrations/docs/newsletter-setup.md", "integrations/docs/pwa-setup.md",
@@ -75,6 +76,7 @@ import Foundation
                   "src/pages/podcast.astro",
                   "src/pages/buy.astro", "src/pages/shop.astro", "src/pages/pricing.astro",
                   "src/pages/store.astro", "src/pages/products.astro",
+                  "src/pages/members.astro", "src/components/MemberCard.astro",
                   "worker/subscribe-worker.js", "worker/subscribe-wrangler.toml",
                   "docs/newsletter-setup.md", "docs/pwa-setup.md", "docs/inbox-setup.md"] {
             #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "should be staged, not in src: \(p)")

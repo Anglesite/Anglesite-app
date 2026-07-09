@@ -246,6 +246,44 @@ import Testing
         #expect(copiesDocs)
     }
 
+    @Test func membershipHasNoProvidersAndInjectsKeystaticCollection() {
+        let membership = IntegrationCatalog.descriptor(for: .membership)
+        #expect(membership.providers.isEmpty)
+        let hasKeystaticInject = membership.operations.contains {
+            if case .injectAtAnchor(let file, let anchor, let snippet, _, let style) = $0 {
+                return file.raw == "keystatic.config.ts"
+                    && anchor == "// anglesite:keystatic-collections"
+                    && style == .line
+                    && snippet.raw.contains("path: \"src/content/members/*\"")
+            }
+            return false
+        }
+        #expect(hasKeystaticInject)
+    }
+
+    @Test func membershipCopiesDirectoryPageAndCard() {
+        let membership = IntegrationCatalog.descriptor(for: .membership)
+        let copiesPage = membership.operations.contains {
+            if case .copyFile(let from, let to, let when) = $0 {
+                return from.path == "integrations/pages/members.astro" && to.raw == "src/pages/members.astro" && when == .always
+            }
+            return false
+        }
+        let copiesCard = membership.operations.contains {
+            if case .copyFile(let from, let to, let when) = $0 {
+                return from.path == "integrations/components/MemberCard.astro" && to.raw == "src/components/MemberCard.astro" && when == .always
+            }
+            return false
+        }
+        #expect(copiesPage)
+        #expect(copiesCard)
+    }
+
+    @Test func membershipWritesDirectoryTitle() {
+        let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .membership))
+        #expect(keys.contains("MEMBERSHIP_DIRECTORY_TITLE"))
+    }
+
     @Test func redirectsHasNoProvidersAndAppendsToRedirectsFile() {
         let redirects = IntegrationCatalog.descriptor(for: .redirects)
         #expect(redirects.providers.isEmpty)

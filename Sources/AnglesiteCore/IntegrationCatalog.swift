@@ -670,6 +670,19 @@ public enum IntegrationCatalog {
         displayName: "Member Directory",
         summary: "A public list of members you curate through a built-in admin UI (Keystatic).",
         providers: [],
-        fields: [],
-        operations: [])
+        fields: [
+            Field(key: "directoryTitle", label: "Directory title", kind: .text, isOptional: true, defaultValue: "Our Members"),
+        ],
+        operations: [
+            .injectAtAnchor(file: "keystatic.config.ts", anchor: "// anglesite:keystatic-collections",
+                            snippet: "members: collection({\n  label: \"Members\",\n  path: \"src/content/members/*\",\n  format: { contentField: \"bio\" },\n  slugField: \"name\",\n  schema: {\n    name: fields.slug({ name: { label: \"Name\" } }),\n    role: fields.text({ label: \"Role\" }),\n    joinedDate: fields.date({ label: \"Joined\" }),\n    photo: fields.image({ label: \"Photo\", directory: \"src/content/members\" }),\n    links: fields.array(fields.url({ label: \"Link\" }), { label: \"Links\", itemLabel: (props) => props.value || \"Link\" }),\n    bio: fields.markdoc({ label: \"Bio\" }),\n  },\n}),",
+                            when: .always, style: .line),
+            .copyFile(from: TemplateRef("integrations/pages/members.astro"),
+                      to: "src/pages/members.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/components/MemberCard.astro"),
+                      to: "src/components/MemberCard.astro", when: .always),
+            .writeConfig([
+                ConfigEntry(key: "MEMBERSHIP_DIRECTORY_TITLE", value: "{{directoryTitle}}"),
+            ], when: .always),
+        ])
 }
