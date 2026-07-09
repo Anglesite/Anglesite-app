@@ -13,6 +13,16 @@ let strictConcurrency: [SwiftSetting] = [
     .enableUpcomingFeature("StrictConcurrency")
 ]
 
+// #541: an Xcode 27 beta SDK can add symbols (e.g. FoundationModels' `Attachment(imageURL:orientation:)`)
+// that the installed macOS 27 beta seed doesn't yet export. Without this, dyld aborts at process
+// launch for *any* binary that transitively links AnglesiteCore — including every `swift test`
+// bundle — since the missing symbol is resolved eagerly at load time. Weak-linking the framework
+// defers that resolution: the binary launches, and only the (narrow, vision-only) code path that
+// actually calls the missing symbol would fail if invoked on a mismatched OS/SDK pair.
+let weakLinkFoundationModels: [LinkerSetting] = [
+    .unsafeFlags(["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"])
+]
+
 // AnglesiteContainer imports apple/containerization — a Swift 6.2, macOS-15+ package that pulls in
 // the native NIO/gRPC/protobuf graph and only links on Apple-Silicon machines with the
 // virtualization entitlement. `swift build` / `swift test` compile ALL of a package's products, so
@@ -79,13 +89,15 @@ var packageTargets: [Target] = [
         name: "AnglesiteCoreTests",
         dependencies: ["AnglesiteCore", "AnglesiteSiteModel", "AnglesiteTestSupport"],
         path: "Tests/AnglesiteCoreTests",
-        swiftSettings: strictConcurrency
+        swiftSettings: strictConcurrency,
+        linkerSettings: weakLinkFoundationModels
     ),
     .testTarget(
         name: "AnglesiteBridgeTests",
         dependencies: ["AnglesiteBridge", "AnglesiteTestSupport"],
         path: "Tests/AnglesiteBridgeTests",
-        swiftSettings: strictConcurrency
+        swiftSettings: strictConcurrency,
+        linkerSettings: weakLinkFoundationModels
     )
 ]
 
@@ -128,7 +140,8 @@ if includeContainer {
                 .product(name: "Containerization", package: "containerization")
             ],
             path: "Sources/AnglesiteContainerProbe",
-            swiftSettings: strictConcurrency
+            swiftSettings: strictConcurrency,
+            linkerSettings: weakLinkFoundationModels
         )
     )
 }
@@ -156,7 +169,8 @@ packageTargets.append(
         name: "AnglesiteIntentsTests",
         dependencies: ["AnglesiteIntents", "AnglesiteCore"],
         path: "Tests/AnglesiteIntentsTests",
-        swiftSettings: strictConcurrency
+        swiftSettings: strictConcurrency,
+        linkerSettings: weakLinkFoundationModels
     )
 )
 #endif
@@ -174,7 +188,8 @@ if includeContainer && ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_
             name: "AnglesiteContainerLocalTests",
             dependencies: ["AnglesiteContainer", "AnglesiteCore"],
             path: "Tests/AnglesiteContainerLocalTests",
-            swiftSettings: strictConcurrency
+            swiftSettings: strictConcurrency,
+            linkerSettings: weakLinkFoundationModels
         )
     )
 }
