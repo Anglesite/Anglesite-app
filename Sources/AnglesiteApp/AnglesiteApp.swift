@@ -4,18 +4,6 @@ import AnglesiteCore
 import AnglesiteBridge
 import AnglesiteIntents
 
-/// Owns process-level lifecycle that SwiftUI's `App` value type can't: drain every supervised
-/// child on quit so nothing outlives the app.
-/// Holds the app-lifetime `ContentSpotlightIndexer` once `bootstrap` finishes populating it.
-/// `@Observable` so a `SiteWindow` constructed *before* bootstrap completes still reacts when the
-/// indexer arrives (enabling its Siri AI Readiness button) — passing the bare optional through the
-/// `WindowGroup` constructor would freeze whatever value existed at body-eval time.
-@MainActor
-@Observable
-final class ContentIndexerStore {
-    var indexer: ContentSpotlightIndexer?
-}
-
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Single shared `SiteContentGraph` for the app's lifetime. Passed into
