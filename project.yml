@@ -36,13 +36,13 @@ targets:
         optional: true
     preBuildScripts:
       - name: Bundle Anglesite plugin
-        script: "${PROJECT_DIR}/scripts/copy-plugin.sh"
+        script: "\"${PROJECT_DIR}/scripts/copy-plugin.sh\""
         basedOnDependencyAnalysis: false
       - name: Build edit overlay
-        script: "${PROJECT_DIR}/scripts/build-overlay.sh"
+        script: "\"${PROJECT_DIR}/scripts/build-overlay.sh\""
         basedOnDependencyAnalysis: false
       - name: Build Help index
-        script: "${PROJECT_DIR}/scripts/build-help-index.sh"
+        script: "\"${PROJECT_DIR}/scripts/build-help-index.sh\""
         basedOnDependencyAnalysis: false
     settings:
       base:
