@@ -675,7 +675,7 @@ public enum IntegrationCatalog {
         ],
         operations: [
             .injectAtAnchor(file: "keystatic.config.ts", anchor: "// anglesite:keystatic-collections",
-                            snippet: "members: collection({\n  label: \"Members\",\n  path: \"src/content/members/*\",\n  format: { contentField: \"bio\" },\n  slugField: \"name\",\n  schema: {\n    name: fields.slug({ name: { label: \"Name\" } }),\n    role: fields.text({ label: \"Role\" }),\n    joinedDate: fields.date({ label: \"Joined\" }),\n    photo: fields.image({ label: \"Photo\", directory: \"src/content/members\" }),\n    links: fields.array(fields.url({ label: \"Link\" }), { label: \"Links\", itemLabel: (props) => props.value || \"Link\" }),\n    bio: fields.markdoc({ label: \"Bio\" }),\n  },\n}),",
+                            snippet: "members: collection({\n  label: \"Members\",\n  path: \"src/content/members/*\",\n  format: { contentField: \"bio\" },\n  slugField: \"name\",\n  schema: {\n    name: fields.slug({ name: { label: \"Name\" } }),\n    role: fields.text({ label: \"Role\" }),\n    joinedDate: fields.date({ label: \"Joined\", validation: { isRequired: true } }),\n    photo: fields.image({ label: \"Photo\", directory: \"src/content/members\" }),\n    links: fields.array(fields.url({ label: \"Link\" }), { label: \"Links\", itemLabel: (props) => props.value || \"Link\" }),\n    bio: fields.markdoc({ label: \"Bio\" }),\n  },\n}),",
                             when: .always, style: .line),
             .copyFile(from: TemplateRef("integrations/pages/members.astro"),
                       to: "src/pages/members.astro", when: .always),

@@ -229,6 +229,7 @@ import Testing
                     && anchor == "// anglesite:keystatic-collections"
                     && style == .line
                     && snippet.raw.contains("path: \"src/content/inbox/*\"")
+                    && snippet.raw.contains("slugField:")
             }
             return false
         }
@@ -255,6 +256,7 @@ import Testing
                     && anchor == "// anglesite:keystatic-collections"
                     && style == .line
                     && snippet.raw.contains("path: \"src/content/members/*\"")
+                    && snippet.raw.contains("slugField:")
             }
             return false
         }
