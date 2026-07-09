@@ -27,10 +27,11 @@ public enum ContentScanner {
     )).sorted()
 
     public static func scan(projectRoot: URL, siteID: String) -> ContentListing {
-        ContentListing(
+        let referencedPaths = DeadAssetScanner.referencedPaths(projectRoot: projectRoot)
+        return ContentListing(
             pages: scanPages(projectRoot, siteID: siteID),
             posts: scanPosts(projectRoot, siteID: siteID),
-            images: scanImages(projectRoot, siteID: siteID)
+            images: scanImages(projectRoot, siteID: siteID, referencedPaths: referencedPaths)
         )
     }
 
@@ -141,19 +142,22 @@ public enum ContentScanner {
 
     // MARK: - Images
 
-    private static func scanImages(_ projectRoot: URL, siteID: String) -> [SiteContentGraph.Image] {
+    private static func scanImages(
+        _ projectRoot: URL, siteID: String, referencedPaths: [String: Set<String>]
+    ) -> [SiteContentGraph.Image] {
         let imagesDir = projectRoot.appendingPathComponent("public/images")
         var out: [SiteContentGraph.Image] = []
         for abs in walk(imagesDir) {
             if !imageExtensions.contains(fileExtension(abs)) { continue }
             let relPosix = relativePosix(abs, from: projectRoot)
+            let usedOnPages = (referencedPaths[relPosix.lowercased()] ?? []).sorted()
             out.append(SiteContentGraph.Image(
                 id: "\(siteID):image:\(relPosix)",
                 siteID: siteID,
                 relativePath: relPosix,
                 fileName: abs.lastPathComponent,
                 byteSize: fileSize(abs),
-                usedOnPages: [],  // reverse "which pages use this image" is deferred (#140)
+                usedOnPages: usedOnPages,
                 lastModified: mtime(abs)
             ))
         }
