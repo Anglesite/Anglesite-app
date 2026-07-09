@@ -1,6 +1,6 @@
 # LAN-reachable local runtime — design note
 
-**Status:** Draft
+**Status:** Draft — approach decided (extend `RemoteSandboxSiteRuntime` via a new `SandboxControlClient` conformer, not a new `SiteRuntime` type); implementation not yet scheduled
 **Relates to:** #589 (UTM-VM dev/test rig), #59 (containerization epic), #64 (HTTP/Streamable MCP transport), #66/#67/#71/#342 (remote runtime + billing)
 
 ## Problem
@@ -17,29 +17,32 @@ Confirmed directly in a macOS UTM/VZ guest VM (this environment): `sysctl kern.h
 - **`PreviewView`** (`Sources/AnglesiteApp/PreviewView.swift`) loads whatever `previewURL` the runtime reports via `SiteRuntimeState.ready(siteID:, url:)` into a `WKWebView` — no vsock/tunnel assumption baked in.
 - **`SessionToken`** (`Sources/AnglesiteCore/SessionToken.swift`) is already optional on the connect path — a trusted-LAN runtime can pass `nil` and skip auth, or mint a token for parity with the sandbox path.
 
-Conclusion: no new transport or protocol work is needed. This is a thin new `SiteRuntime` conformer plus a small server-side piece to run on the Mac Studio.
+Conclusion: no new transport, protocol, or `SiteRuntime` conformer is needed — `RemoteSandboxSiteRuntime` already is the generic "drive a control client, get a `previewURL`/`mcpURL` pair, connect" runtime. **Decided:** extend it with a new `SandboxControlClient` conformer rather than writing a second, parallel `SiteRuntime` type — one remote-runtime code path, not two.
 
-## Proposed shape: `LANSiteRuntime`
+## Proposed shape: `LANControlClient: SandboxControlClient`
 
-A `SiteRuntime` conformer structurally like `RemoteSandboxSiteRuntime`, but against a much thinner control surface than `SandboxControlClient` (which mints Cloudflare Worker tokens and does start/stop RPCs a trusted LAN doesn't need):
+`SandboxControlClient` (`Sources/AnglesiteCore/SandboxControlClient.swift:37-45`) is the only thing `RemoteSandboxSiteRuntime` depends on, and it has zero Cloudflare-specific requirements in its own signature — Cloudflare specifics live entirely in `HTTPSandboxControlClient`. So a LAN conformer is a peer of `HTTPSandboxControlClient`, not a peer of `RemoteSandboxSiteRuntime`:
 
 ```swift
-actor LANSiteRuntime: SiteRuntime {
-    private let host: String   // e.g. "mac-studio.local" or a configured IP, Settings-configurable
-    private let previewPort: Int
-    private let mcpPort: Int
-    let mcpClient: MCPClient
+struct LANControlClient: SandboxControlClient {
+    let host: String   // e.g. "mac-studio.local" or a configured IP, Settings-configurable
+    let previewPort: Int
+    let mcpPort: Int
 
-    func start(siteID: String, siteDirectory: URL) async {
-        // No remote lifecycle call — the host-side server process is assumed already running
-        // and serving `siteID` (or the single site it was launched against). Construct the two
-        // URLs directly and connect, exactly as RemoteSandboxSiteRuntime.start() does today:
-        //   connect(mcpClient, URL(string: "http://\(host):\(mcpPort)/mcp")!, bearerToken: nil)
-        // then publish .ready(siteID:, url: previewURL) via the state stream.
+    func start(siteID: String, gitRemote: String, gitRef: String, token: SessionToken?) async throws -> SandboxSession {
+        // No real RPC — the host-side server process is assumed already running and serving
+        // this site. Just construct the pair of LAN URLs RemoteSandboxSiteRuntime expects:
+        SandboxSession(
+            previewURL: URL(string: "http://\(host):\(previewPort)/")!,
+            mcpURL: URL(string: "http://\(host):\(mcpPort)/mcp")!
+        )
     }
-    // stop(), observe() mirror RemoteSandboxSiteRuntime's bookkeeping.
+    func status(siteID: String) async throws -> SandboxStatus { .ready }  // static host, always up
+    func stop(siteID: String) async throws {}  // no-op; the host process isn't guest-owned
 }
 ```
+
+Wiring: `RemoteSandboxSiteRuntime(control: LANControlClient(...), mcpClient: ...)` — no changes to `RemoteSandboxSiteRuntime` itself. `SessionToken` stays optional on the connect path, so `token` can be `nil` for the trusted-LAN case.
 
 No new proxying: the guest connects straight to `http://<mac-studio>:<port>` for both MCP and preview — no vsock, no tunnel. (`VsockTCPProxy`'s `dial`/`ProxyConnection` splice machinery in `Sources/AnglesiteCore/VsockTCPProxy.swift` is genuinely reusable if a future variant needs an app-side proxy — the vsock dependency is confined to its `VsockDialer` closure — but a plain LAN runtime doesn't need a local proxy at all, since the guest can reach the Mac Studio's TCP ports directly over the bridged/shared network.)
 
@@ -54,7 +57,7 @@ This piece has no existing conformer to reuse (`AstroDevServer`/`ProcessSupervis
 
 ## Wiring point
 
-`LiveSiteRuntimeFactory.makeRuntime` (`Sources/AnglesiteApp/LiveSiteRuntimeFactory.swift:18-41`) needs a third branch: when `LocalContainerSupport.availability` is `.unavailable` (e.g. `kern.hv_support == 0`) **and** a LAN runtime host is configured (new Settings field, analogous to the existing "Plugin path" / "Sites root" dev overrides in Settings → Advanced), select `LANSiteRuntime` instead of falling through to `UnavailableSiteRuntime`. Absent that setting, today's behavior (hard failure) is unchanged — this is additive, dev/test-only wiring, not a change to the shipping runtime-selection policy for real users.
+`LiveSiteRuntimeFactory.makeRuntime` (`Sources/AnglesiteApp/LiveSiteRuntimeFactory.swift:18-41`) needs a third branch: when `LocalContainerSupport.availability` is `.unavailable` (e.g. `kern.hv_support == 0`) **and** a LAN runtime host is configured (new Settings field, analogous to the existing "Plugin path" / "Sites root" dev overrides in Settings → Advanced), return `RemoteSandboxSiteRuntime(control: LANControlClient(...), mcpClient: ...)` instead of falling through to `UnavailableSiteRuntime`. Absent that setting, today's behavior (hard failure) is unchanged — this is additive, dev/test-only wiring, not a change to the shipping runtime-selection policy for real users.
 
 ## Non-goals (for this note)
 
@@ -65,5 +68,4 @@ This piece has no existing conformer to reuse (`AstroDevServer`/`ProcessSupervis
 ## Open questions before implementation
 
 1. Does the Mac-Studio-side dev-server process need to support multiple concurrent sites (one per guest), or is one site per LAN-runtime instance acceptable for v1? (#587's "runtime inbox capture" work may want the same host-side process — worth checking for overlap before building a second one.)
-2. Should `LANSiteRuntime` be a permanent `AnglesiteCore` type or a dev-only type kept out of Release builds entirely (like the Debug-only pane)? Given it's guarded behind a Settings override already, probably fine to ship the type but keep the Settings entry hidden unless a diagnostics/dev flag is set — consistent with the Debug-pane precedent (`CLAUDE.md` Phase 3 notes).
-3. Confirm whether `RemoteSandboxSiteRuntime` (#66/#71/#342) is a better model to *extend* (add a `SandboxControlClient` conformer that talks to a bare LAN host instead of a Cloudflare Worker) rather than writing a new `LANSiteRuntime` type from scratch — that would keep exactly one remote-runtime code path instead of two. Leaning toward this on a closer read: `RemoteSandboxSiteRuntime` never touches Cloudflare types directly, so a `LocalLANControlClient: SandboxControlClient` that just returns a static `SandboxSession` (constructed from Settings host/port, no real start/stop RPC) may be strictly less code than a parallel `LANSiteRuntime`.
+2. Should `LANControlClient` be a permanent `AnglesiteCore` type or a dev-only type kept out of Release builds entirely (like the Debug-only pane)? Given it's guarded behind a Settings override already, probably fine to ship the type but keep the Settings entry hidden unless a diagnostics/dev flag is set — consistent with the Debug-pane precedent (`CLAUDE.md` Phase 3 notes).
