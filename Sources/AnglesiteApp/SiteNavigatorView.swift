@@ -86,8 +86,8 @@ struct SiteNavigatorView: View {
             Button("Cancel", role: .cancel) {}
         } message: { candidate in
             Text(candidate.kind == .page
-                ? "This page has no incoming links. Its content will be removed from the working tree. This can be undone via git."
-                : "This file appears unused. It will be removed from the working tree. This can be undone via git.")
+                ? "This page has no incoming links and will be permanently removed."
+                : "This file appears unused and will be permanently removed.")
         }
         .alert(
             "Delete failed",
@@ -144,6 +144,7 @@ struct SiteNavigatorView: View {
         switch group {
         case .pages: return "doc.richtext"
         case .posts: return "text.document"
+        case .collections: return "rectangle.stack"
         case .components: return "square.stack.3d.up"
         case .styles: return "paintbrush"
         case .metadata: return "globe"

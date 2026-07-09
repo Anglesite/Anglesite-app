@@ -213,8 +213,9 @@ public struct NativeContentOperations: ContentOperationsService {
     }
 
     /// Delete a page/post/component file: `git rm` + commit via the injected `gitDelete` closure
-    /// (default `processGitDelete`). No Trash involved — git history is the sole undo mechanism,
-    /// matching `ProjectCleanupModel.delete`'s existing precedent for dead-asset deletion.
+    /// (default `processGitDelete`). Git is the underlying mechanism, but not a user-facing
+    /// concept: the in-app "Undo" affordance (`restoreContent`, driven by the caller holding the
+    /// pre-delete contents) is what recovers a deleted file, not an instruction to use git.
     public func deleteContent(siteID: String, relativePath: String) async -> ContentDeleteResult {
         guard let root = await siteDirectory(siteID) else { return .siteNotFound }
         let abs = root.appendingPathComponent(relativePath)
@@ -222,9 +223,21 @@ public struct NativeContentOperations: ContentOperationsService {
             return .failed(reason: "No file exists at \(relativePath)")
         }
         guard await gitDelete(root, relativePath, "anglesite: delete \(relativePath)") != nil else {
-            return .failed(reason: "Couldn't delete \(relativePath). Check for uncommitted changes and try again.")
+            return .failed(reason: "Couldn't delete \(relativePath). Try again in a moment.")
         }
         return .deleted(filePath: relativePath)
+    }
+
+    /// Re-writes `contents` back to `relativePath` and commits — the "Undo" half of `deleteContent`
+    /// (#586). The caller is responsible for having captured `contents` before the delete; this
+    /// method doesn't itself know what was deleted.
+    public func restoreContent(siteID: String, relativePath: String, contents: String) async -> ContentCreateResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        let abs = root.appendingPathComponent(relativePath)
+        do { try write(contents, to: abs) }
+        catch { return .failed(reason: "\(error)") }
+        _ = await gitCommit(root, relativePath, "anglesite: restore \(relativePath)")
+        return .created(filePath: relativePath, identifier: relativePath)
     }
 
     /// Duplicate an existing page: read its contents, retitle to `"<title> Copy"` (bumping to

@@ -23,6 +23,7 @@ public struct ContentCreationWorkflow: ContentOperationsService {
         _ onProgress: ProgressHandler?
     ) async -> ContentCreateResult
     public typealias ContentDeleter = @Sendable (_ siteID: String, _ relativePath: String) async -> ContentDeleteResult
+    public typealias ContentRestorer = @Sendable (_ siteID: String, _ relativePath: String, _ contents: String) async -> ContentCreateResult
     public typealias PageDuplicator = @Sendable (_ siteID: String, _ relativePath: String, _ title: String) async -> ContentCreateResult
     public typealias PostDuplicator = @Sendable (_ siteID: String, _ relativePath: String, _ collection: String, _ title: String) async -> ContentCreateResult
     public typealias ComponentCreator = @Sendable (_ siteID: String, _ name: String) async -> ContentCreateResult
@@ -34,6 +35,7 @@ public struct ContentCreationWorkflow: ContentOperationsService {
     private let pageTemplateCreator: PageTemplateCreator?
     private let typedSlugCreator: TypedSlugCreator?
     private let contentDeleter: ContentDeleter?
+    private let contentRestorer: ContentRestorer?
     private let pageDuplicator: PageDuplicator?
     private let postDuplicator: PostDuplicator?
     private let componentCreator: ComponentCreator?
@@ -46,6 +48,7 @@ public struct ContentCreationWorkflow: ContentOperationsService {
         pageTemplateCreator: PageTemplateCreator? = nil,
         typedSlugCreator: TypedSlugCreator? = nil,
         contentDeleter: ContentDeleter? = nil,
+        contentRestorer: ContentRestorer? = nil,
         pageDuplicator: PageDuplicator? = nil,
         postDuplicator: PostDuplicator? = nil,
         componentCreator: ComponentCreator? = nil
@@ -57,6 +60,7 @@ public struct ContentCreationWorkflow: ContentOperationsService {
         self.pageTemplateCreator = pageTemplateCreator
         self.typedSlugCreator = typedSlugCreator
         self.contentDeleter = contentDeleter
+        self.contentRestorer = contentRestorer
         self.pageDuplicator = pageDuplicator
         self.postDuplicator = postDuplicator
         self.componentCreator = componentCreator
@@ -97,6 +101,9 @@ public struct ContentCreationWorkflow: ContentOperationsService {
             },
             contentDeleter: { siteID, relativePath in
                 await native.deleteContent(siteID: siteID, relativePath: relativePath)
+            },
+            contentRestorer: { siteID, relativePath, contents in
+                await native.restoreContent(siteID: siteID, relativePath: relativePath, contents: contents)
             },
             pageDuplicator: { siteID, relativePath, title in
                 await native.duplicatePage(siteID: siteID, relativePath: relativePath, title: title)
@@ -236,6 +243,15 @@ public struct ContentCreationWorkflow: ContentOperationsService {
         if case .deleted = result {
             await refreshContentGraph(siteID: siteID)
         }
+        return result
+    }
+
+    /// Undo half of `deleteContent` (#586) — re-writes previously-captured contents and rescans the
+    /// graph on success, same as every other successful create.
+    public func restoreContent(siteID: String, relativePath: String, contents: String) async -> ContentCreateResult {
+        guard let contentRestorer else { return .failed(reason: "Restore is not configured for this workflow") }
+        let result = await contentRestorer(siteID, relativePath, contents)
+        await refreshContentGraphIfCreated(result, siteID: siteID)
         return result
     }
 

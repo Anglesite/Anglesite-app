@@ -48,6 +48,27 @@ struct NavigatorTreeTests {
         #expect(item.target == .file(ref))
     }
 
+    @Test("blog posts and collection entries land in separate sections (#586)")
+    func collectionEntriesSeparateFromPosts() throws {
+        let sections = buildNavigatorTree(
+            pages: [],
+            posts: [post("posts", "hello-world", "Hello World"), post("notes", "aside", "An aside")],
+            fileGroups: [:]
+        )
+        let posts = try #require(sections.first { $0.id == .posts })
+        #expect(posts.items.map(\.title) == ["Hello World"])
+
+        let collections = try #require(sections.first { $0.id == .collections })
+        #expect(collections.items.map(\.title) == ["Note: An aside"])
+    }
+
+    @Test("collection section omitted when every post is a blog post")
+    func noCollectionSectionWhenOnlyBlogPosts() {
+        let sections = buildNavigatorTree(
+            pages: [], posts: [post("posts", "hello-world", "Hello World")], fileGroups: [:])
+        #expect(sections.map(\.id) == [.posts])
+    }
+
     @Test("package Info.plist appears as the headerless first website item")
     func packageMetadataAppearsAsWebsiteItem() throws {
         let info = FileRef(url: URL(fileURLWithPath: "/tmp/Site.anglesite/Info.plist"), group: .metadata, name: "Info.plist")

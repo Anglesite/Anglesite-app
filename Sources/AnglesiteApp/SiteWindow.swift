@@ -26,6 +26,10 @@ struct SiteWindow: View {
     /// `model.deleteConfirmation` so the title stays stable through the dismiss animation —
     /// mirrors `SiteNavigatorView`'s `candidateToDeleteTitle` for the same reason.
     @State private var contentDeleteTitle: String = ""
+    /// The title shown in the post-delete Undo alert. Held separately from
+    /// `model.pendingDeleteUndo` for the same dismiss-animation-stability reason as
+    /// `contentDeleteTitle` above.
+    @State private var deleteUndoTitle: String = ""
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -584,7 +588,21 @@ struct SiteWindow: View {
             Button("Delete", role: .destructive) { Task { await model.confirmDelete() } }
             Button("Cancel", role: .cancel) { model.deleteConfirmation = nil }
         } message: {
-            Text("This content will be removed from the working tree. This can be undone via git.")
+            Text("This will remove the file from your site. You can undo it right after deleting.")
+        }
+        .onChange(of: bindableModel.pendingDeleteUndo) { _, offer in
+            if let offer { deleteUndoTitle = "Deleted \u{201C}\(offer.title)\u{201D}" }
+        }
+        .alert(
+            deleteUndoTitle,
+            isPresented: Binding(
+                get: { bindableModel.pendingDeleteUndo != nil },
+                set: { if !$0 { model.dismissDeleteUndo() } })
+        ) {
+            Button("Undo") { Task { await model.undoDelete() } }
+            Button("OK") { model.dismissDeleteUndo() }
+        } message: {
+            Text("Choose Undo now to bring it back, or OK to keep it deleted.")
         }
         .alert(
             "Couldn't complete that action",

@@ -24,6 +24,17 @@ enum ActiveEditor {
     }
 }
 
+/// A just-deleted page/post's contents, held so `SiteWindowModel.undoDelete()` can restore it
+/// (#586). `redirectRoute` carries the "Add Redirect?" offer through — deferred until the user
+/// declines to undo, see `dismissDeleteUndo()`.
+struct DeleteUndoOffer: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let relativePath: String
+    let contents: String
+    let redirectRoute: String?
+}
+
 /// Per-site coordinator for `SiteWindow`. Owns runtime startup, child model wiring,
 /// selection transitions, editor persistence, and teardown; `SiteWindow` owns only
 /// SwiftUI layout and scene storage.
@@ -115,6 +126,12 @@ final class SiteWindowModel {
     /// when the delete actually succeeded. Never break an inbound URL a user didn't choose to
     /// abandon (#584).
     var pendingRedirectOfferRoute: String?
+    /// Non-nil ⟺ the post-delete "Undo" affordance is showing (#586) — set by `confirmDelete()`
+    /// only when the delete actually succeeded and the deleted file's contents were captured before
+    /// the delete call. Deliberately app-level recovery (re-write + re-commit), not a "use git"
+    /// instruction: the delete dialog no longer mentions git at all, so this is the only way a user
+    /// gets the file back.
+    var pendingDeleteUndo: DeleteUndoOffer?
     /// File ▸ Revert to Saved is destructive, so it routes through a confirmation alert hosted by
     /// `SiteWindow` (#509).
     var revertConfirmationPresented = false
@@ -724,43 +741,61 @@ final class SiteWindowModel {
         }
     }
 
+    /// `contentCreation`'s successful create already rescans `SiteContentGraph` and publishes a
+    /// change event, but the Navigator consumes that event on its own long-running observer `Task`
+    /// (`SiteNavigatorModel.start()`) — decoupled from this call, so nothing guarantees it has
+    /// drained and rebuilt `sections` before the New-content sheet reads `.created` and dismisses
+    /// itself. Force-refreshing here closes that race, same as `createComponent` already did (#586).
     func createPage(
         title: String,
         route: String?,
         template: ContentScaffold.PageTemplate
     ) async -> ContentCreateResult {
         guard let site else { return .siteNotFound }
-        return await contentCreation.createPage(
+        let result = await contentCreation.createPage(
             siteID: site.id,
             title: title,
             route: route,
             template: template
         )
+        if case .created = result {
+            await navigator?.refreshNow()
+        }
+        return result
     }
 
+    /// See `createPage`'s force-refresh note (#586) — same race, same fix.
     func createCollectionEntry(
         title: String,
         slug: String?,
         descriptor: ContentTypeDescriptor
     ) async -> ContentCreateResult {
         guard let site else { return .siteNotFound }
-        return await contentCreation.createTyped(
+        let result = await contentCreation.createTyped(
             siteID: site.id,
             typeID: descriptor.id,
             title: title,
             slug: slug
         )
+        if case .created = result {
+            await navigator?.refreshNow()
+        }
+        return result
     }
 
+    /// See `createPage`'s force-refresh note (#586) — same race, same fix.
     func createPost(title: String) async -> ContentCreateResult {
         guard let site else { return .siteNotFound }
-        return await contentCreation.createPost(siteID: site.id, title: title, collection: nil, slug: nil)
+        let result = await contentCreation.createPost(siteID: site.id, title: title, collection: nil, slug: nil)
+        if case .created = result {
+            await navigator?.refreshNow()
+        }
+        return result
     }
 
-    /// Components aren't tracked in `SiteContentGraph`, so — unlike `createPage`/`createPost`/
-    /// `createCollectionEntry`, whose graph rescan already triggers the Navigator's own
-    /// change-stream refresh — this force-refreshes the Navigator directly on success. Same
-    /// reasoning as `deleteCleanupCandidate`'s force-refresh for non-graph-tracked files.
+    /// Components aren't tracked in `SiteContentGraph` at all, so there's no change-stream event to
+    /// race with — this force-refresh is the *only* way the Navigator learns about a new component.
+    /// Same reasoning as `deleteCleanupCandidate`'s force-refresh for non-graph-tracked files.
     func createComponent(name: String) async -> ContentCreateResult {
         guard let site else { return .siteNotFound }
         let result = await contentCreation.createComponent(siteID: site.id, name: name)
@@ -801,6 +836,10 @@ final class SiteWindowModel {
         }
 
         let deletedURL = site.sourceDirectory.appendingPathComponent(relPath)
+        // Read before the delete call, not after: the file is gone from disk once the delete
+        // succeeds. Best-effort — a read failure (unreadable encoding, permissions) just means no
+        // Undo offer, not a blocked delete.
+        let savedContents = try? String(contentsOf: deletedURL, encoding: .utf8)
         var savedEditor: (mode: MainPaneMode, editor: ActiveEditor)?
         if activeEditorFile?.url == deletedURL, let editor = activeEditor {
             savedEditor = (mainPaneMode, editor)
@@ -816,7 +855,18 @@ final class SiteWindowModel {
         switch result {
         case .deleted:
             if navigator?.selection == item.id { navigator?.selection = nil }
-            if let deletedRoute {
+            // `deleteContent` only rescans `SiteContentGraph`; the Navigator's own consumption of
+            // that change is a decoupled async observer task, so nothing guarantees it has rebuilt
+            // `sections` yet — force it, same race/fix as the create paths (#586).
+            await navigator?.refreshNow()
+            // The Undo offer and the "Add Redirect?" offer are mutually exclusive at any one
+            // moment (both are presented as modal UI): Undo takes priority, and choosing not to
+            // undo (`dismissDeleteUndo()`) is what surfaces the redirect offer instead.
+            if let savedContents {
+                pendingDeleteUndo = DeleteUndoOffer(
+                    id: relPath, title: item.title, relativePath: relPath,
+                    contents: savedContents, redirectRoute: deletedRoute)
+            } else if let deletedRoute {
                 pendingRedirectOfferRoute = deletedRoute
             }
         case .failed(let reason):
@@ -830,6 +880,37 @@ final class SiteWindowModel {
             }
         case .siteNotFound:
             break
+        }
+    }
+
+    /// Restores the file captured by `pendingDeleteUndo` — the app-level "recover the last version"
+    /// affordance (#586) the delete dialog's copy now points to instead of git. Re-writes the exact
+    /// captured contents and re-commits, mirroring every other content mutation in this model.
+    @MainActor
+    func undoDelete() async {
+        guard let offer = pendingDeleteUndo, let site else { return }
+        pendingDeleteUndo = nil
+        let result = await contentCreation.restoreContent(
+            siteID: site.id, relativePath: offer.relativePath, contents: offer.contents)
+        switch result {
+        case .created:
+            await navigator?.refreshNow()
+        case .failed(let reason):
+            contentActionError = reason
+        case .siteNotFound:
+            break
+        }
+    }
+
+    /// Dismisses the Undo offer without restoring — the deferred half of `confirmDelete()`'s
+    /// mutual-exclusion with the redirect offer: only now (Undo declined) does a deleted page/post
+    /// get its "Add Redirect?" prompt.
+    @MainActor
+    func dismissDeleteUndo() {
+        guard let offer = pendingDeleteUndo else { return }
+        pendingDeleteUndo = nil
+        if let route = offer.redirectRoute {
+            pendingRedirectOfferRoute = route
         }
     }
 
