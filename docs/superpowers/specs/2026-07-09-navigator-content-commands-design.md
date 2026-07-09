@@ -6,7 +6,7 @@
 
 The navigator context menu only has **Rename** (`SiteNavigatorView.swift:127-131`), and `NewContentActions` (`FocusedSite.swift:9-12`) only wires up New Page / New Collection to the File menu. Four content-management verbs are missing:
 
-- **Delete Page/Post…** — move to Trash, with confirmation
+- **Delete Page/Post…** — remove from the working tree via git, with confirmation
 - **Duplicate Page/Post** — copy in place
 - **New Post…** — the navigator already displays a Posts group (built from `SiteContentGraph.Post` in `NavigatorTree.swift:52-54`), and `NativeContentOperations.createPost` already exists as a callable service, but nothing in the UI triggers it
 - **New Component…** — pairs with the Component Editor epic (#496), which is still "approved design, pre-implementation." This PR ships a minimal blank-file scaffold; semantic editing arrives later with #496.
@@ -19,18 +19,20 @@ Every current mutation (`createPage`, `createPost`, `createTyped`, rename) is a 
 
 The issue text says to "let Backup commit" for delete/duplicate — this design intentionally **does not** follow that wording. It keeps the existing auto-commit-per-op precedent instead, so the working tree never has to explain itself to the user, and so Delete/Duplicate/New Post/New Component behave identically to today's New Page and Rename. `BackupModel` remains what it is: a manual full-repo commit+push, unaffected by this change.
 
+Delete also follows an existing precedent this issue's own wording didn't anticipate: `ProjectCleanupModel.delete` (dead-asset Cleanup) already established a pure `git rm` + commit deletion via `NativeContentOperations.processGitDelete`, with an explicit design comment that it deliberately never falls back to a non-git raw delete. Delete Page/Post reuses that exact function rather than introducing `FileManager.trashItem`/Trash — one delete mechanism across the app, consistent with "git is the source of truth."
+
 ## Architecture
 
 Four new operations on `AnglesiteCore/NativeContentOperations`, each following the exact shape of `createPage`/`createPost`:
 
-- `deleteContent(target:)` — `FileManager.trashItem(at:resultingItemURL:)` moves the file to the macOS Trash (recoverable via Finder, no new entitlement needed — the site's `Source/` directory is already covered by the site's security-scoped bookmark), then `git rm` + commit.
+- `deleteContent(target:)` — `git rm` + commit via `NativeContentOperations.processGitDelete` (the same function `ProjectCleanupModel` already uses for dead-asset deletion). No Trash — git history is the sole undo path.
 - `duplicatePage(from:)` / `duplicatePost(from:)` — read the source file, derive a `"<Title> Copy"` title and a `-copy`/`-copy-2`/… slug via the existing `ContentScaffold.slugify` collision loop, write the new file, commit.
 - `createComponent(name:)` — mirrors `createTyped`: writes a minimal blank `.astro` file into `src/components/`, with the same collision handling, commits. No AI-assisted description step (not applicable to a blank scaffold).
 
 Model layer:
 
 - `SiteWindowModel` adds `newPostPresented` / `newComponentPresented` (mirroring `newPagePresented`), a `deleteConfirmation: NavigatorItem?` published property driving a confirmation dialog, and a `duplicate(id:)` method.
-- `SiteNavigatorModel` adds `canDelete(_:)` / `canDuplicate(_:)`, following the existing `canRename(_:)` pattern — both `false` for the site root, folders, and `.metadata` items (e.g. `.site-config`); `true` for page/post/component file items.
+- `SiteNavigatorModel` adds `canDelete(_:)` / `canDuplicate(_:)`, sharing `canRename(_:)`'s exact gating: `true` only for `.route` targets (pages/posts), `false` for everything else — the site root, folders, `.metadata` items, and file-backed rows including components. A component created via New Component… can't be deleted or duplicated from the Navigator in this scope (Rename can't touch it either); that's intentional, not a gap.
 - `FocusedSite.swift`: `NewContentActions` gains `newPost` / `newComponent` closures (published the same way as `newPage`/`newCollection` in `SiteWindow.swift:90-93`). A new `NavigatorSelectionActions` focused value carries `delete` / `duplicate` closures, `nil` when the current selection isn't deletable/duplicable — this is what lets the File menu items enable/disable correctly without the menu needing to know navigator internals.
 
 UI surfaces:
@@ -40,7 +42,7 @@ UI surfaces:
 
 ## Data flow & error handling
 
-**Delete**: context-menu/Edit-menu action → `SiteNavigatorModel.canDelete(id)` gates availability → `SiteWindowModel.deleteConfirmation = item` → `SiteNavigatorView` shows a `.confirmationDialog` ("Move “Foo” to Trash?") → on confirm, `SiteWindowModel.delete(id)` resolves the `NavigatorItem` to its `FileRef`/route and calls `contentCreation.deleteContent(target:)`. Trash happens before the git op; if the subsequent `git rm`/commit fails, the file is still safely trashed and the working tree is simply left with an uncommitted deletion — the same best-effort tolerance the existing `gitCommit` calls already have elsewhere. On success, the navigator tree rebuilds via the existing `SiteContentGraph`/`SiteFileTree.scan` path and selection clears. On failure (e.g. `FileManager.trashItem` throws), an alert surfaces the error with no partial UI state.
+**Delete**: context-menu/Edit-menu action → `SiteNavigatorModel.canDelete(id)` gates availability → `SiteWindowModel.deleteConfirmation = item` → `SiteNavigatorView`/`SiteWindow` shows a `.confirmationDialog` → on confirm, `SiteWindowModel.confirmDelete()` resolves the `NavigatorItem` to its page/post record and calls `contentCreation.deleteContent(siteID:relativePath:)`, which delegates to `processGitDelete` (`git rm` + commit). If that fails (dirty tree, no HEAD copy, rejecting hook), nothing on disk changes — `processGitDelete` refuses up front rather than leaving a partial state — and an alert surfaces the reason. Any editor/inspector state open on the file being deleted is discarded before the delete call (to prevent a suspended flush from resurrecting a file git just removed) and restored if the delete fails, since a failed delete never touched the file. On success, the navigator tree rebuilds via the existing `SiteContentGraph`/`SiteFileTree.scan` path and selection clears.
 
 **Duplicate**: no confirmation (non-destructive). Resolves the source `FileRef`, calls `duplicatePage`/`duplicatePost`, then sets the navigator selection to the newly created item so the user can immediately see and rename it. The slug-suffix collision loop reuses `ContentScaffold`'s existing logic, bounded and consistent with page creation.
 
@@ -54,7 +56,7 @@ UI surfaces:
 - `SiteNavigatorModel`: `canDelete`/`canDuplicate` gating tests (root/folder/`.metadata` excluded; page/post/component included), mirroring existing `canRename` tests.
 - `SiteWindowModel`: confirmation-flow and selection-after-duplicate tests, following the existing `newPagePresented`/`createPage` sheet-flow test patterns.
 - No new hosted-app (`xcodebuild test`) coverage needed — per CLAUDE.md, this logic lives in testable `AnglesiteCore`/`AnglesiteApp` model types, not view code, so `swift test` covers it on CI.
-- Manual GUI verification before calling this done: open a site, exercise Delete (confirmation dialog, Trash arrival, tree update), Duplicate, New Post…, New Component… end to end in the running app.
+- Manual GUI verification before calling this done: open a site, exercise Delete (confirmation dialog, git-tracked removal, tree update), Duplicate, New Post…, New Component… end to end in the running app.
 
 ## Non-goals
 

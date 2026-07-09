@@ -759,9 +759,12 @@ final class SiteWindowModel {
 
     /// Resolves `deleteConfirmation` to its page/post record, deletes via
     /// `contentCreation.deleteContent`, and clears the confirmation. Mirrors
-    /// `deleteCleanupCandidate`'s ordering exactly: editor/inspector state open on the file being
-    /// deleted is discarded *before* the delete call (not after), so a suspended flush across the
-    /// git subprocess calls can't resurrect the file.
+    /// `deleteCleanupCandidate`'s ordering: editor/inspector state open on the file being deleted
+    /// is discarded *before* the delete call (not after), so a suspended flush across the git
+    /// subprocess calls can't resurrect the file. Unlike `deleteCleanupCandidate` (dead assets,
+    /// rarely under active edit), pages/posts routinely are — so the discarded state is snapshotted
+    /// and restored on `.failed`, rather than silently dropped, since a failed delete never
+    /// actually touched the file (PR #585 review).
     @MainActor
     func confirmDelete() async {
         guard let item = deleteConfirmation else { return }
@@ -778,11 +781,14 @@ final class SiteWindowModel {
         }
 
         let deletedURL = site.sourceDirectory.appendingPathComponent(relPath)
-        if activeEditorFile?.url == deletedURL {
+        var savedEditor: (mode: MainPaneMode, editor: ActiveEditor)?
+        if activeEditorFile?.url == deletedURL, let editor = activeEditor {
+            savedEditor = (mainPaneMode, editor)
             activeEditor = nil
             mainPaneMode = .preview
         }
-        if inspectorContext?.model.file.url == deletedURL {
+        let savedInspector = inspectorContext?.model.file.url == deletedURL ? inspectorContext : nil
+        if savedInspector != nil {
             inspectorContext = nil
         }
 
@@ -792,6 +798,13 @@ final class SiteWindowModel {
             if navigator?.selection == item.id { navigator?.selection = nil }
         case .failed(let reason):
             contentActionError = reason
+            if let savedEditor {
+                activeEditor = savedEditor.editor
+                mainPaneMode = savedEditor.mode
+            }
+            if let savedInspector {
+                inspectorContext = savedInspector
+            }
         case .siteNotFound:
             break
         }
