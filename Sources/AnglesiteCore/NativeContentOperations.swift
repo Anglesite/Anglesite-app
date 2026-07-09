@@ -311,6 +311,34 @@ public struct NativeContentOperations: ContentOperationsService {
         return .created(filePath: relPath, identifier: slug)
     }
 
+    /// Scaffold a minimal blank `.astro` component into `src/components/`. Derives a PascalCase
+    /// file name from `name` (Astro convention) via the same `ContentScaffold.slugify` used for
+    /// pages/posts, then title-cases each hyphenated segment.
+    public func createComponent(siteID: String, name: String) async -> ContentCreateResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { return .failed(reason: "New Component requires a non-empty name") }
+
+        let slug = ContentScaffold.slugify(cleanName)
+        guard !slug.isEmpty else { return .failed(reason: "Couldn't derive a file name from \"\(cleanName)\"") }
+        let fileName = slug.split(separator: "-")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined()
+
+        let relPath = "src/components/\(fileName).astro"
+        let abs = root.appendingPathComponent(relPath)
+        if fileManager.fileExists(atPath: abs.path) {
+            return .failed(reason: "A component already exists at \(relPath)")
+        }
+
+        let contents = ContentScaffold.renderComponent(name: fileName)
+        do { try write(contents, to: abs) }
+        catch { return .failed(reason: "\(error)") }
+
+        _ = await gitCommit(root, relPath, "anglesite: add component \(fileName)")
+        return .created(filePath: relPath, identifier: fileName)
+    }
+
     private func write(_ contents: String, to abs: URL) throws {
         try fileManager.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
         try contents.write(to: abs, atomically: true, encoding: .utf8)

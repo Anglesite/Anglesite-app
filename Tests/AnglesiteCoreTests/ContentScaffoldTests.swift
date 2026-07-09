@@ -14,6 +14,13 @@ struct ContentScaffoldTests {
         #expect(ContentScaffold.slugify("\"Quoted\"") == "quoted")
     }
 
+    @Test("renderComponent produces a minimal blank .astro component")
+    func renderComponentIsMinimal() {
+        let rendered = ContentScaffold.renderComponent(name: "MyWidget")
+        #expect(rendered.contains("MyWidget"))
+        #expect(rendered.hasPrefix("---"))
+    }
+
     @Test("normalizeRoute slugifies each segment and joins with slash")
     func normalizeRouteSegments() {
         #expect(ContentScaffold.normalizeRoute("/About//Us/") == "/about/us")

@@ -490,6 +490,57 @@ struct NativeContentOperationsDuplicateTests {
     }
 }
 
+@Suite("NativeContentOperations.createComponent")
+struct NativeContentOperationsComponentTests {
+    private func makeRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("native-content-ops-component-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test("creates a PascalCase-named blank component")
+    func createsComponent() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ops = NativeContentOperations(siteDirectory: { _ in root }, gitCommit: { _, _, _ in "deadbeef" })
+
+        let result = await ops.createComponent(siteID: "site-1", name: "call to action")
+
+        guard case .created(let filePath, let identifier) = result else {
+            Issue.record("expected .created, got \(result)"); return
+        }
+        #expect(filePath == "src/components/CallToAction.astro")
+        #expect(identifier == "CallToAction")
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(filePath).path))
+    }
+
+    @Test("fails when a component already exists at that path")
+    func failsOnCollision() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let existing = root.appendingPathComponent("src/components/CallToAction.astro")
+        try FileManager.default.createDirectory(at: existing.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("stub".utf8).write(to: existing)
+        let ops = NativeContentOperations(siteDirectory: { _ in root })
+
+        let result = await ops.createComponent(siteID: "site-1", name: "Call To Action")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
+
+    @Test("fails on an empty name")
+    func failsOnEmptyName() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ops = NativeContentOperations(siteDirectory: { _ in root })
+
+        let result = await ops.createComponent(siteID: "site-1", name: "   ")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
+}
+
 private struct StubPageCopyGenerator: PageCopyGenerating {
     let suggestion: PageCopySuggestion?
     func suggestDescription(title: String, siteID: String, siteDirectory: URL) async -> PageCopySuggestion? {
