@@ -190,6 +190,143 @@ struct ContentCreationWorkflowTests {
         let document = await knowledgeIndex.document(siteID: Self.siteID, relativePath: "src/content/notes/hello-typed.md")
         #expect(document?.title == "Hello Typed")
     }
+
+    @Test("successful delete reloads content graph so the deleted page is gone")
+    func deleteContentRefreshesGraph() async throws {
+        let root = try makeSite([
+            "src/pages/about.astro": ContentScaffold.renderPage(title: "About", layoutImport: "../layouts/BaseLayout.astro"),
+        ])
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: Self.siteID,
+            pages: ContentScanner.scan(projectRoot: root, siteID: Self.siteID).pages,
+            posts: [],
+            images: []
+        )
+        #expect(await graph.pages(for: Self.siteID).count == 1)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("src/pages/about.astro"))
+
+        let operations = FakeCreateOperations { _, _, _ in
+            .failed(reason: "unexpected")
+        } createPost: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        } createTyped: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        }
+        let workflow = ContentCreationWorkflow(
+            operations: operations,
+            contentGraph: graph,
+            siteDirectory: { _ in root },
+            contentDeleter: { _, relPath in .deleted(filePath: relPath) }
+        )
+
+        let result = await workflow.deleteContent(siteID: Self.siteID, relativePath: "src/pages/about.astro")
+
+        #expect(result == .deleted(filePath: "src/pages/about.astro"))
+        #expect(await graph.pages(for: Self.siteID).isEmpty)
+    }
+
+    @Test("failed delete leaves content graph unchanged")
+    func failedDeleteDoesNotRefreshGraph() async throws {
+        let root = try makeSite([
+            "src/pages/about.astro": ContentScaffold.renderPage(title: "About", layoutImport: "../layouts/BaseLayout.astro"),
+        ])
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: Self.siteID,
+            pages: ContentScanner.scan(projectRoot: root, siteID: Self.siteID).pages,
+            posts: [],
+            images: []
+        )
+        let operations = FakeCreateOperations { _, _, _ in
+            .failed(reason: "unexpected")
+        } createPost: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        } createTyped: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        }
+        let workflow = ContentCreationWorkflow(
+            operations: operations,
+            contentGraph: graph,
+            siteDirectory: { _ in root },
+            contentDeleter: { _, _ in .failed(reason: "dirty tree") }
+        )
+
+        let result = await workflow.deleteContent(siteID: Self.siteID, relativePath: "src/pages/about.astro")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+        #expect(await graph.pages(for: Self.siteID).count == 1)
+    }
+
+    @Test("duplicatePage reloads content graph with the new page")
+    func duplicatePageRefreshesGraph() async throws {
+        let root = try makeSite()
+        let graph = SiteContentGraph()
+        let operations = FakeCreateOperations { _, _, _ in
+            .failed(reason: "unexpected")
+        } createPost: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        } createTyped: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        }
+        let workflow = ContentCreationWorkflow(
+            operations: operations,
+            contentGraph: graph,
+            siteDirectory: { _ in root },
+            pageDuplicator: { _, _, _ in
+                let relPath = "src/pages/about-copy.astro"
+                let url = root.appendingPathComponent(relPath)
+                try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? ContentScaffold.renderPage(title: "About Copy", layoutImport: "../layouts/BaseLayout.astro")
+                    .write(to: url, atomically: true, encoding: .utf8)
+                return .created(filePath: relPath, identifier: "/about-copy")
+            }
+        )
+
+        let result = await workflow.duplicatePage(siteID: Self.siteID, relativePath: "src/pages/about.astro", title: "About")
+
+        #expect(result == .created(filePath: "src/pages/about-copy.astro", identifier: "/about-copy"))
+        #expect(await graph.pages(for: Self.siteID).map(\.route) == ["/about-copy"])
+    }
+
+    @Test("createComponent does not require content graph access and returns the operation's result")
+    func createComponentPassesThrough() async throws {
+        let root = try makeSite()
+        let operations = FakeCreateOperations { _, _, _ in
+            .failed(reason: "unexpected")
+        } createPost: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        } createTyped: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        }
+        let workflow = ContentCreationWorkflow(
+            operations: operations,
+            contentGraph: nil,
+            siteDirectory: { _ in root },
+            componentCreator: { _, name in .created(filePath: "src/components/\(name).astro", identifier: name) }
+        )
+
+        let result = await workflow.createComponent(siteID: Self.siteID, name: "Widget")
+
+        #expect(result == .created(filePath: "src/components/Widget.astro", identifier: "Widget"))
+    }
+
+    @Test("deleteContent reports failed when the workflow has no contentDeleter configured")
+    func deleteContentUnconfigured() async throws {
+        let root = try makeSite()
+        let operations = FakeCreateOperations { _, _, _ in
+            .failed(reason: "unexpected")
+        } createPost: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        } createTyped: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        }
+        let workflow = ContentCreationWorkflow(operations: operations, contentGraph: nil, siteDirectory: { _ in root })
+
+        let result = await workflow.deleteContent(siteID: Self.siteID, relativePath: "src/pages/about.astro")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
 }
 
 private struct FakeCreateOperations: ContentOperationsService {
