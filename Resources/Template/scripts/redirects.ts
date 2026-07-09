@@ -48,7 +48,7 @@ export default function redirects(): AstroIntegration {
     hooks: {
       "astro:config:setup": ({ config, updateConfig }) => {
         const entries = readRedirects(fileURLToPathSafe(config.root));
-        if (Object.keys(entries).length === 0) return;
+        if (entries.length === 0) return;
         updateConfig({ redirects: toAstroRedirectsConfig(entries) });
       },
       "astro:build:done": ({ dir }) => {
