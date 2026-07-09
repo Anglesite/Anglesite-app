@@ -6,6 +6,11 @@ import Foundation
 /// run concurrently with each other under `swift test --parallel`. With ~6 subprocess suites each
 /// spawning serially, peak concurrent Node/Python spawns stays low enough that the `initialize`
 /// handshake doesn't time out on a CPU-saturated CI runner (the flake). See CI-flakiness fix.
+///
+/// Even serialized, the default 10s `initializeTimeout` still flaked under CI CPU contention
+/// (#609). `AppliesEditEndToEndTests`/`ComponentModelEndToEndTests` already proved a 15s budget
+/// is enough headroom for this same spawn-then-handshake shape against a heavier real Node
+/// server — match that sibling value here rather than inventing a new number.
 @Suite(.serialized)
 struct MCPClientTests {
     /// Python fake MCP server speaking JSON-RPC 2.0 over stdio. `-u` keeps it unbuffered.
@@ -101,7 +106,8 @@ struct MCPClientTests {
         try await client.start(
             executable: Self.pythonURL,
             arguments: ["-u", "-c", Self.fakeServerScript],
-            source: "mcp-handshake"
+            source: "mcp-handshake",
+            initializeTimeout: 15
         )
         let running = await client.isRunning
         #expect(running)
@@ -115,7 +121,8 @@ struct MCPClientTests {
         try await client.start(
             executable: Self.pythonURL,
             arguments: ["-u", "-c", Self.fakeServerScript],
-            source: "mcp-list"
+            source: "mcp-list",
+            initializeTimeout: 15
         )
         defer { Task { await client.stop() } }
 
@@ -131,7 +138,8 @@ struct MCPClientTests {
         try await client.start(
             executable: Self.pythonURL,
             arguments: ["-u", "-c", Self.fakeServerScript],
-            source: "mcp-call"
+            source: "mcp-call",
+            initializeTimeout: 15
         )
         defer { Task { await client.stop() } }
 
@@ -150,7 +158,8 @@ struct MCPClientTests {
         try await client.start(
             executable: Self.pythonURL,
             arguments: ["-u", "-c", Self.fakeServerScript],
-            source: "mcp-error"
+            source: "mcp-error",
+            initializeTimeout: 15
         )
         defer { Task { await client.stop() } }
 
@@ -174,7 +183,8 @@ struct MCPClientTests {
             executable: Self.pythonURL,
             arguments: ["-u", "-c", Self.crashOnceServerScript],
             source: "mcp-reconnect",
-            restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.05)
+            restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.05),
+            initializeTimeout: 15
         )
         defer { Task { await client.stop() } }
 
