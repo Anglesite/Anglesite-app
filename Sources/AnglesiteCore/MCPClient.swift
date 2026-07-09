@@ -1,4 +1,9 @@
 import Foundation
+// URLSession/URLRequest/HTTPURLResponse live in FoundationNetworking on non-Darwin
+// platforms (swift-corelibs-foundation); this import is a no-op on macOS.
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Minimal JSON value used at the MCP boundary so request/response shapes stay `Sendable` and
 /// `Equatable` without forcing every caller to define a `Codable` model.
