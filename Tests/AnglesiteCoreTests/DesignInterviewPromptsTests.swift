@@ -45,4 +45,27 @@ import Testing
             #expect(prompt.count < 2000)
         }
     }
+
+    @Test func promptsTruncatePathologicallyLongUserMessage() {
+        let draft = DesignInterviewDraft(businessType: "restaurant")
+        let pathologicalMessage = String(repeating: "word ", count: 2_000) // 10,000 characters
+        for stage in ConversationStage.allCases where stage != .done {
+            let prompt = DesignInterviewPrompts.prompt(for: stage, draft: draft, userMessage: pathologicalMessage)
+            // A genuinely pathological input must still be capped well under the on-device
+            // context budget, not just the fixed-size input the estimate test above uses.
+            #expect(prompt.count < 2000)
+        }
+    }
+
+    @Test func truncatedUserMessageCapsLengthAndMarksTruncation() {
+        let longMessage = String(repeating: "a", count: 5_000)
+        let truncated = DesignInterviewPrompts.truncatedUserMessage(longMessage)
+        #expect(truncated.count == DesignInterviewPrompts.maxUserMessageCharacters + 1)
+        #expect(truncated.hasSuffix("…"))
+    }
+
+    @Test func truncatedUserMessageLeavesShortMessageUnchanged() {
+        let shortMessage = "our brand color is #ff6600"
+        #expect(DesignInterviewPrompts.truncatedUserMessage(shortMessage) == shortMessage)
+    }
 }
