@@ -1110,7 +1110,11 @@ final class SiteWindowModel {
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
             conventionsEngine: conventionsEngine,
-            integrationService: integrationOps
+            integrationService: integrationOps,
+            graphSnapshotProvider: { [weak self] in
+                guard let self else { return SiteGraphExplorerSnapshot(nodes: [], edges: []) }
+                return await MainActor.run { self.graphExplorer.snapshot }
+            }
         )
         chat = assistantSession.chat
         // The environment undo manager usually lands before the chat exists (cold open) —
