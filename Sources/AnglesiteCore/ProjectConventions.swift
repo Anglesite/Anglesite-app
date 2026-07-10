@@ -44,15 +44,41 @@ public struct WritingConventions: Sendable, Codable, Equatable {
     public var headingCapitalization: Learned<HeadingCapitalization>
     public var toneDescriptors: Learned<[String]>
     public var brandTerms: Learned<[String]>
+    /// Who the site speaks to, in the owner's words. `""` = unset. Set by the brand-voice
+    /// interview (#465); never inferred by the extractor.
+    public var audience: Learned<String>
+    /// Words/phrases generation must avoid. `[]` = unset. Set by the brand-voice interview.
+    public var avoidPhrases: Learned<[String]>
 
     public init(
         headingCapitalization: Learned<HeadingCapitalization>,
         toneDescriptors: Learned<[String]>,
-        brandTerms: Learned<[String]>
+        brandTerms: Learned<[String]>,
+        audience: Learned<String> = Learned(value: "", source: .inferred(confidence: 0), sampleSize: 0),
+        avoidPhrases: Learned<[String]> = Learned(value: [], source: .inferred(confidence: 0), sampleSize: 0)
     ) {
         self.headingCapitalization = headingCapitalization
         self.toneDescriptors = toneDescriptors
         self.brandTerms = brandTerms
+        self.audience = audience
+        self.avoidPhrases = avoidPhrases
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case headingCapitalization, toneDescriptors, brandTerms, audience, avoidPhrases
+    }
+
+    // Pre-#465 conventions.json has no voice fields; default them instead of failing the decode
+    // (a decode failure would silently drop the user's whole learned state).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        headingCapitalization = try c.decode(Learned<HeadingCapitalization>.self, forKey: .headingCapitalization)
+        toneDescriptors = try c.decode(Learned<[String]>.self, forKey: .toneDescriptors)
+        brandTerms = try c.decode(Learned<[String]>.self, forKey: .brandTerms)
+        audience = try c.decodeIfPresent(Learned<String>.self, forKey: .audience)
+            ?? Learned(value: "", source: .inferred(confidence: 0), sampleSize: 0)
+        avoidPhrases = try c.decodeIfPresent(Learned<[String]>.self, forKey: .avoidPhrases)
+            ?? Learned(value: [], source: .inferred(confidence: 0), sampleSize: 0)
     }
 }
 
@@ -162,6 +188,8 @@ public enum OverridableField: String, Sendable, Codable, CaseIterable {
     case headingCapitalization
     case toneDescriptors
     case brandTerms
+    case audience
+    case avoidPhrases
     case altTextAverageLength
     case altTextEndsWithPunctuation
     case slugStyle
@@ -174,6 +202,8 @@ public enum OverrideValue: Sendable, Equatable {
     case headingCapitalization(HeadingCapitalization)
     case toneDescriptors([String])
     case brandTerms([String])
+    case audience(String)
+    case avoidPhrases([String])
     case altTextAverageLength(Int)
     case altTextEndsWithPunctuation(Bool)
     case slugStyle(SlugStyle)
@@ -190,6 +220,10 @@ extension ProjectConventions {
             writing.toneDescriptors = Learned(value: v, source: .userOverride)
         case .brandTerms(let v):
             writing.brandTerms = Learned(value: v, source: .userOverride)
+        case .audience(let v):
+            writing.audience = Learned(value: v, source: .userOverride)
+        case .avoidPhrases(let v):
+            writing.avoidPhrases = Learned(value: v, source: .userOverride)
         case .altTextAverageLength(let v):
             images.altTextAverageLength = Learned(value: v, source: .userOverride)
         case .altTextEndsWithPunctuation(let v):
@@ -211,6 +245,10 @@ extension ProjectConventions {
             writing.toneDescriptors.source = .inferred(confidence: 0)
         case .brandTerms:
             writing.brandTerms.source = .inferred(confidence: 0)
+        case .audience:
+            writing.audience.source = .inferred(confidence: 0)
+        case .avoidPhrases:
+            writing.avoidPhrases.source = .inferred(confidence: 0)
         case .altTextAverageLength:
             images.altTextAverageLength.source = .inferred(confidence: 0)
         case .altTextEndsWithPunctuation:
@@ -236,6 +274,12 @@ extension ProjectConventions {
         }
         if previous.writing.brandTerms.isOverridden {
             merged.writing.brandTerms = previous.writing.brandTerms
+        }
+        if previous.writing.audience.isOverridden {
+            merged.writing.audience = previous.writing.audience
+        }
+        if previous.writing.avoidPhrases.isOverridden {
+            merged.writing.avoidPhrases = previous.writing.avoidPhrases
         }
         if previous.images.altTextAverageLength.isOverridden {
             merged.images.altTextAverageLength = previous.images.altTextAverageLength
