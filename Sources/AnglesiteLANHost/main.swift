@@ -111,7 +111,9 @@ struct AnglesiteLANHost {
 
     private static func waitForShutdownSignal() async {
         await withCheckedContinuation { continuation in
-            signal(SIGINT, SIG_IGN)
+            // Use a no-op handler instead of SIG_IGN to avoid pulling in libswift_DarwinFoundation3
+            // (which some macOS runners don't ship), making the process fail to load at dyld time.
+            signal(SIGINT, { _ in })
             let source = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
             source.setEventHandler { continuation.resume() }
             source.resume()
