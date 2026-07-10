@@ -1,7 +1,9 @@
 import Cocoa
 import Quartz
+import SwiftUI
+import AnglesiteSiteModel
+import AnglesiteQuickLookSupport
 
-/// Real preview logic lands in Task 4 of docs/superpowers/plans/2026-07-10-quicklook-extension.md.
 final class PreviewViewController: NSViewController, QLPreviewingController {
     override var nibName: NSNib.Name? { nil }
 
@@ -10,6 +12,15 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
     }
 
     func preparePreviewOfFile(at url: URL, completionHandler handler: @escaping (Error?) -> Void) {
+        let package = AnglesitePackage(url: url)
+        let summary = try? PackagePreviewSummary.summarize(package)
+
+        let hosting = NSHostingController(rootView: PreviewContentView(summary: summary))
+        addChild(hosting)
+        hosting.view.frame = view.bounds
+        hosting.view.autoresizingMask = [.width, .height]
+        view.addSubview(hosting.view)
+
         handler(nil)
     }
 }
