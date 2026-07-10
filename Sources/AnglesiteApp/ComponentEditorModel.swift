@@ -40,6 +40,11 @@ final class ComponentEditorModel {
     var selectedNodeID: String?
     var computedStyles: [String: String] = [:]
     var knobValues: [String: String] = [:]
+    /// Set when a write op is refused as stale (the source changed outside Anglesite since
+    /// `model` was fetched) — drives the "changed outside Anglesite — Reload" banner (design
+    /// doc §5). `load()` is triggered automatically to refetch; the flag stays set until the
+    /// caller acknowledges it (e.g. the panel dismisses it once the refreshed model renders).
+    private(set) var conflict = false
 
     init(file: FileRef, context: ComponentEditorContext) {
         self.file = file
@@ -120,5 +125,89 @@ final class ComponentEditorModel {
             return
         }
         selectedNodeID = ComponentOutline.node(atLine: line, column: column, in: model.template)?.id
+    }
+
+    // MARK: - Style writes
+
+    /// Set (or add) a CSS declaration's value within a `<style>` rule identified by `ruleSpan`.
+    func setStyleProperty(ruleSpan: [Int?], property: String, value: String) async {
+        await applyComponentStyleEdit(
+            ComponentStyleEditBuilder.setStyleProperty(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                ruleSpan: ruleSpan,
+                property: property,
+                value: value
+            )
+        )
+    }
+
+    /// Remove a CSS declaration from a rule identified by `ruleSpan`.
+    func removeStyleProperty(ruleSpan: [Int?], property: String) async {
+        await applyComponentStyleEdit(
+            ComponentStyleEditBuilder.removeStyleProperty(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                ruleSpan: ruleSpan,
+                property: property
+            )
+        )
+    }
+
+    /// Rewrite a rule's selector.
+    func setRuleSelector(ruleSpan: [Int?], newSelector: String) async {
+        await applyComponentStyleEdit(
+            ComponentStyleEditBuilder.setRuleSelector(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                ruleSpan: ruleSpan,
+                newSelector: newSelector
+            )
+        )
+    }
+
+    /// Add a new CSS rule to the component's `<style>` block.
+    func addStyleRule(selector: String, media: String?, declarations: [(property: String, value: String)]) async {
+        await applyComponentStyleEdit(
+            ComponentStyleEditBuilder.addStyleRule(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                selector: selector,
+                media: media,
+                declarations: declarations
+            )
+        )
+    }
+
+    /// Routes a built `EditMessage` to `context.editRouter` and reconciles the result:
+    /// - `.applied` with a piggybacked `reply.model` adopts it directly (no second fetch).
+    /// - `.applied` without one falls back to `load()`.
+    /// - `.failed` whose message indicates the base version went stale triggers a `load()`
+    ///   refetch and flips `conflict` so the UI can surface a "changed outside Anglesite —
+    ///   Reload" banner.
+    /// - Any other `.failed` (or `.ambiguous`/`.preview`, which these ops never return) is
+    ///   surfaced via `loadErrorReason`.
+    private func applyComponentStyleEdit(_ message: EditMessage) async {
+        guard let editRouter = context.editRouter else { return }
+        let reply = await editRouter.apply(message)
+        switch reply.status {
+        case .applied:
+            conflict = false
+            if let freshModel = reply.model {
+                model = freshModel
+            } else {
+                await load()
+            }
+        case .failed where (reply.message ?? "").contains("stale"):
+            conflict = true
+            await load()
+        default:
+            loadError = reply.message
+            loadErrorReason = .other
+        }
     }
 }
