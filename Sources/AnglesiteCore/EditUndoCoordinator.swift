@@ -1,3 +1,8 @@
+// UndoManager is a Darwin-only Foundation type, so this bridge — used only by the app target's
+// ChatModel — compiles out elsewhere. No non-Darwin consumer exists yet (see the cross-platform
+// port design doc §5); a portable in-memory undo stack can slot in behind the same public API
+// if/when a Linux/Windows GUI shell needs one.
+#if canImport(Darwin)
 import Foundation
 
 /// Bridges app-applied edits into a window's `UndoManager` so Edit ▸ Undo (⌘Z) reverses them (#527).
@@ -152,3 +157,4 @@ public final class EditUndoCoordinator {
         return "Edit \(filename)"
     }
 }
+#endif

@@ -417,6 +417,7 @@ public actor BundleSync {
         return "`\(label)` failed (exit \(result.exitCode))" + (detail.isEmpty ? "" : ": \(detail)")
     }
 
+    #if canImport(Darwin)
     /// Replaces `destination` with `source` under `NSFileCoordinator` — the documented way to mutate
     /// an item that may be syncing through iCloud, so peers see an atomic swap rather than a torn file.
     private func coordinatedReplace(at destination: URL, withItemAt source: URL) throws {
@@ -436,6 +437,17 @@ public actor BundleSync {
         if let coordinationError { throw coordinationError }
         if let ioError { throw ioError }
     }
+    #else
+    /// `NSFileCoordinator` (and the iCloud Drive sync it coordinates with) doesn't exist off
+    /// Darwin, so there's no peer to race against — a direct atomic replace is equivalent.
+    private func coordinatedReplace(at destination: URL, withItemAt source: URL) throws {
+        if fileManager.fileExists(atPath: destination.path) {
+            _ = try fileManager.replaceItemAt(destination, withItemAt: source)
+        } else {
+            try fileManager.moveItem(at: source, to: destination)
+        }
+    }
+    #endif
 
     /// A failed git step, ready to be projected into either result type so the early-return helpers
     /// don't have to know which operation called them. Conforms to `Error` only to satisfy
