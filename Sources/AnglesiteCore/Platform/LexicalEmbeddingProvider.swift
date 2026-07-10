@@ -22,6 +22,11 @@ public struct LexicalEmbeddingProvider: EmbeddingProvider {
             vector[Self.bucket(for: word, dimension: dimension)] += 1
         }
         let magnitude = (vector.reduce(0) { $0 + $1 * $1 }).squareRoot()
+        // Reachable, not just defensive: `tokens(of:)` filters to alphanumeric words, so
+        // non-empty, non-whitespace input that's entirely punctuation/symbols/emoji (e.g. "—",
+        // "😀😀") tokenizes to `[]` and lands here. `.modelUnavailable` is the closest existing
+        // case for "no lexical content found to embed" — there's no separate case for it and
+        // adding one isn't worth it for a fallback provider that's never the sole embedding path.
         guard magnitude > 0 else { throw EmbeddingError.modelUnavailable }
         return vector.map { $0 / magnitude }
     }
@@ -36,7 +41,6 @@ public struct LexicalEmbeddingProvider: EmbeddingProvider {
     }
 
     static func bucket(for word: String, dimension: Int) -> Int {
-        let hash = UInt64(VectorMath.stableHash(word), radix: 16) ?? 0
-        return Int(hash % UInt64(dimension))
+        Int(VectorMath.stableHashValue(word) % UInt64(dimension))
     }
 }

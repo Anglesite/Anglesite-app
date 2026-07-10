@@ -16,14 +16,21 @@ public enum VectorMath {
         return dot / (magA.squareRoot() * magB.squareRoot())
     }
 
-    /// FNV-1a 64-bit hash as hex. Stable across process runs (unlike `Hasher`), so it is safe
-    /// as a cache-invalidation key for embedded text.
-    public static func stableHash(_ text: String) -> String {
+    /// FNV-1a 64-bit hash. Stable across process runs (unlike `Hasher`). Callers that need the
+    /// raw numeric hash (e.g. `LexicalEmbeddingProvider`'s bucketing) should use this directly
+    /// rather than round-tripping through `stableHash`'s hex `String`.
+    public static func stableHashValue(_ text: String) -> UInt64 {
         var hash: UInt64 = 0xcbf29ce484222325
         for byte in text.utf8 {
             hash ^= UInt64(byte)
             hash = hash &* 0x100000001b3
         }
-        return String(hash, radix: 16)
+        return hash
+    }
+
+    /// FNV-1a 64-bit hash as hex. Stable across process runs (unlike `Hasher`), so it is safe
+    /// as a cache-invalidation key for embedded text.
+    public static func stableHash(_ text: String) -> String {
+        String(stableHashValue(text), radix: 16)
     }
 }
