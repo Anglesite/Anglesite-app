@@ -7,6 +7,7 @@
 
 const HARNESS_PREFIX = "/_anglesite/component/";
 const RING_CLASS = "anglesite-canvas-ring";
+const SCRUB_STYLE_ID = "anglesite-scrub";
 
 // Curated list shown in the inspector's Computed section.
 const REPORTED_PROPERTIES = [
@@ -51,7 +52,23 @@ export function installComponentCanvas(): void {
       if (el) drawRing(el);
     },
     clear: clearRing,
+    scrub,
+    clearScrub,
   };
+}
+
+function scrub(selector: string, property: string, value: string): void {
+  let style = document.getElementById(SCRUB_STYLE_ID) as HTMLStyleElement | null;
+  if (!style) {
+    style = document.createElement("style");
+    style.id = SCRUB_STYLE_ID;
+    document.head.appendChild(style);
+  }
+  style.textContent = `${selector} { ${property}: ${value}; }`;
+}
+
+function clearScrub(): void {
+  document.getElementById(SCRUB_STYLE_ID)?.remove();
 }
 
 /// Astro's dev server stamps `data-astro-source-loc` at the END of an
