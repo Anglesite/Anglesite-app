@@ -23,7 +23,7 @@ let weakLinkFoundationModels: [LinkerSetting] = [
     .unsafeFlags(["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"])
 ]
 
-// AnglesiteCore is the only target that `import`s FoundationModels. Swift embeds a *hard*
+// AnglesiteCore and AnglesiteAppCore (ChatView.swift) `import` FoundationModels. Swift embeds a *hard*
 // `-framework FoundationModels` autolink hint in its compiled object code, which wins over the
 // app target's explicit `-weak_framework FoundationModels` (project.yml) when the final app
 // binary is linked — so the app still hard-links FoundationModels despite that flag. Disabling
