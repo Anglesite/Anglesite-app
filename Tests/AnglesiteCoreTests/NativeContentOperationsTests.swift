@@ -253,11 +253,16 @@ struct NativeContentOperationsTests {
         try "<div>original</div>".write(to: filePath, atomically: true, encoding: .utf8)
         _ = await NativeContentOperations.processGitCommit(repo, "unused.astro", "add unused.astro")
 
-        // Install a pre-commit hook that always rejects, so `git commit` fails after `git rm`
-        // has already removed the file from the index and working tree.
-        let hookPath = repo.appendingPathComponent(".git/hooks/pre-commit")
-        try "#!/bin/sh\nexit 1\n".write(to: hookPath, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookPath.path)
+        // Force the commit step to fail after the remove already succeeds: make the object
+        // database unwritable, so writing the new tree/commit objects fails. This used to be a
+        // rejecting `.git/hooks/pre-commit` hook, but SwiftGit2/libgit2 never runs shell hooks —
+        // a documented, accepted difference from the subprocess-git implementation this replaced
+        // (see processGitCommit's doc comment) — so a hook no longer exercises this path at all.
+        // Read access is untouched (0o555), so the rollback's restore-from-HEAD (which only reads
+        // existing objects, not writes new ones) still works.
+        let objectsDir = repo.appendingPathComponent(".git/objects")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: objectsDir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: objectsDir.path) }
 
         let sha = await NativeContentOperations.processGitDelete(repo, "unused.astro", "Remove unused.astro")
         #expect(sha == nil)

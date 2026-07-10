@@ -273,7 +273,7 @@ var packageDependencies: [Package.Dependency] = []
 // pinning to anglesite/main's tip would silently pick up unreviewed future commits. Bump
 // deliberately.
 packageDependencies.append(
-    .package(url: "https://github.com/Anglesite/SwiftGit2.git", revision: "ac0acfed2fe1b963005663821e96e1464a178854")
+    .package(url: "https://github.com/Anglesite/SwiftGit2.git", revision: "838fd896027a83731297e965a2ba879371d32719")
 )
 #endif
 

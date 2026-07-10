@@ -416,32 +416,59 @@ public struct NativeContentOperations: ContentOperationsService {
     }
     #endif
 
+    #if canImport(Darwin)
+    /// Stage-delete and commit exactly `relPath` on the current branch (`git rm` + `git commit`
+    /// equivalent). Returns the new HEAD SHA, or nil on any failure (not a repo, no configured
+    /// git identity, no HEAD copy) — best-effort, mirroring `processGitCommit`'s shape exactly.
+    /// Git history is the sole undo/archive mechanism for this delete; there is no separate
+    /// trash/archive path. Via SwiftGit2 (in-process libgit2, #640): `/usr/bin/git` cannot
+    /// execute at all under App Sandbox. Uses three fork-specific additions —
+    /// `headHasEntry(atPath:)`, `remove(path:)`, `restorePathFromHEAD(_:)` — landed on
+    /// `anglesite/SwiftGit2` specifically for this conversion.
+    @Sendable public static func processGitDelete(_ projectRoot: URL, _ relPath: String, _ message: String) async -> String? {
+        SwiftGit2Bootstrap.ensureInitialized
+        guard case .success(let repo) = Repository.at(projectRoot) else { return nil }
+        // Require a HEAD copy before touching anything: if the commit below fails after the
+        // remove already succeeds, the only safe rollback is restoring from HEAD, which needs
+        // HEAD to actually have the file. A staged-but-never-committed file would otherwise risk
+        // ending up gone from both the index and the working tree with no way back — refusing up
+        // front is a clean, side-effect-free failure instead.
+        guard repo.headHasEntry(atPath: relPath) else { return nil }
+        guard case .success = repo.remove(path: relPath) else { return nil }
+
+        let commitResult = repo.defaultSignature().flatMap { signature in
+            repo.commit(message: message, signature: signature)
+        }
+        guard case .success(let commit) = commitResult else {
+            // remove(path:) already removed the file from the index and working tree before the
+            // commit failed (no identity configured, etc.) — restore both from HEAD so a failed
+            // delete never leaves the file gone without a commit. Same "never a raw
+            // non-git-recoverable delete" safety property the happy path relies on, applied to
+            // the failure path too.
+            // This second failure (the rollback itself also failing) has no regression test: by
+            // this point the `headHasEntry` guard above has already confirmed HEAD has the file,
+            // so the restore failing here means something environmental went wrong between that
+            // check and this line (disk full, permissions revoked mid-flight) — genuinely hard to
+            // construct reliably/portably in a test, and narrower than it looks since the
+            // precondition above already rules out the most common cause (no HEAD copy). Logged
+            // rather than silently swallowed so it's at least diagnosable if it ever fires for
+            // real.
+            if case .failure = repo.restorePathFromHEAD(relPath) {
+                await LogCenter.shared.append(
+                    source: "dead-assets:delete", stream: .stderr,
+                    text: "processGitDelete: commit failed for \(relPath) AND rollback (restorePathFromHEAD) also failed — the file may be missing from disk with no commit recording its removal. Manual recovery may be needed in \(projectRoot.path).")
+            }
+            return nil
+        }
+        return commit.oid.description
+    }
+    #else
     /// Stage-delete and commit exactly `relPath` on the current branch (`git rm` + `git commit`).
     /// Returns the new HEAD SHA, or nil on any failure (not a repo, dirty tree, rejecting hook,
     /// git missing, no HEAD copy) — best-effort, mirroring `processGitCommit`'s shape exactly.
     /// Git history is the sole undo/archive mechanism for this delete; there is no separate
-    /// trash/archive path.
-    ///
-    /// STILL SUBPROCESS-GIT ON DARWIN TOO (#640 follow-up) — deliberately not yet converted to
-    /// SwiftGit2 alongside `processGitCommit`, unlike everything else in this file. Converting it
-    /// safely needs three capabilities SwiftGit2's public API doesn't have yet, all upstream of
-    /// this method's actual safety property (a failed commit after a successful `rm` must roll
-    /// back cleanly — there's no separate trash, so a bug here is a silent, permanent data-loss
-    /// path):
-    ///   1. `git rm` equivalent — `git_index_remove_bypath` + unlinking the working-tree file.
-    ///      No `Repository.remove(path:)` exists (mirror of `add(path:)`, which does exist).
-    ///   2. The `cat-file -e HEAD:relPath` precondition — checking a path exists in HEAD's tree
-    ///      without a full checkout. Needs `git_object_lookup_bypath`, unwrapped anywhere.
-    ///   3. The `checkout HEAD -- relPath` rollback — restoring exactly one path from a tree,
-    ///      not the whole working copy. `Repository.checkout` only takes a whole-repo strategy;
-    ///      libgit2's `git_checkout_options.paths` (a path-scoped `git_strarray` filter) isn't
-    ///      exposed.
-    /// Each is a small, self-contained libgit2 wrapper addition (same shape as `add(path:)` /
-    /// `defaultSignature()` on anglesite/SwiftGit2), but rolling all three into one commit-message-
-    /// sized patch and getting the rollback interaction right deserves its own change, not a
-    /// footnote inside this one. Until then: deletes still fail under App Sandbox exactly as
-    /// #640 originally found (creates now work; deletes remain broken there) — an incomplete but
-    /// honest intermediate state, not a silent regression.
+    /// trash/archive path. Off-Darwin there's no App Sandbox to route around, so plain subprocess
+    /// git remains correct here rather than a gap to fill.
     @Sendable public static func processGitDelete(_ projectRoot: URL, _ relPath: String, _ message: String) async -> String? {
         let git = URL(fileURLWithPath: "/usr/bin/git")
         func run(_ args: [String]) async -> ProcessSupervisor.RunResult? {
@@ -482,4 +509,5 @@ public struct NativeContentOperations: ContentOperationsService {
         guard let head = await run(["rev-parse", "HEAD"]) else { return nil }
         return head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+    #endif
 }
