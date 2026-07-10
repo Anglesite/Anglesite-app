@@ -2,6 +2,9 @@ import Foundation
 
 /// Pure chat rendering of repurposed variants, non-gated for CI tests.
 public enum RepurposeReply {
+    /// Prepended to the reply when the site has no configured domain — links would be wrong.
+    public static let missingDomainWarning = "Note: this site has no domain configured, so links below use example.com — set your domain before posting."
+
     public static func text(postTitle: String, variants: [PlatformPostVariant]) -> String {
         var lines = ["Platform posts for \"\(postTitle)\" — copy-paste what you like (Anglesite never posts for you):", ""]
         for v in variants {
@@ -51,16 +54,19 @@ public struct RepurposePostTool: Tool, Sendable {
             return "I couldn't find a post with the slug \"\(arguments.slug)\"."
         }
         let configURL = siteDirectory.appendingPathComponent(".site-config")
-        let domain = (try? String(contentsOf: configURL, encoding: .utf8))
-            .flatMap { SiteConfigFile.value(forKey: "SITE_DOMAIN", in: $0) } ?? "example.com"
-        let postURL = PostSource.postURL(domain: domain, collection: post.collection, slug: post.slug)
+        let config = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+        let domain = WebsiteAnalyticsAsset.bestHost(from: config, fallback: "")
+        let postURL = PostSource.postURL(
+            domain: domain.isEmpty ? "example.com" : domain,
+            collection: post.collection, slug: post.slug)
         let conventions = await conventionsStore?.load()
         let preamble = BrandVoiceGuidance.preamble(
             conventions: conventions, businessType: SiteBusinessType.read(sourceDirectory: siteDirectory))
         let variants = await repurposer.variants(
             post: post, postURL: postURL, specs: RepurposePlatformSpecs.all,
             preamble: preamble, siteID: siteID, siteDirectory: siteDirectory)
-        return RepurposeReply.text(postTitle: post.title, variants: variants)
+        let reply = RepurposeReply.text(postTitle: post.title, variants: variants)
+        return domain.isEmpty ? RepurposeReply.missingDomainWarning + "\n\n" + reply : reply
     }
 }
 

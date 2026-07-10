@@ -45,4 +45,9 @@ import Foundation
         #expect(text.contains("300-character"))
         #expect(text.contains("saveSyndication")) // instructs the follow-up write-back
     }
+
+    @Test func missingDomainWarningNamesTheProblem() {
+        #expect(RepurposeReply.missingDomainWarning.contains("example.com"))
+        #expect(RepurposeReply.missingDomainWarning.contains("domain"))
+    }
 }
