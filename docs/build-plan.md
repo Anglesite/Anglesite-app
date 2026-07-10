@@ -139,9 +139,9 @@ The v1 architecture replaces the in-process Node subprocess with a container-bac
 
 ---
 
-## Phase 10.2+ — macOS 27 platform features (open)
+## Phase 10.2+ — macOS 27 platform features
 
-These issues target macOS 27 APIs available with Xcode 27 / Swift 6.4:
+These issues target macOS 27 APIs available with Xcode 27 / Swift 6.4 (all landed; follow-ups noted inline):
 
 - ✅ **Native chat on Foundation Models** (#105) — chat now uses `FoundationModelAssistant` through the provider-agnostic `ConversationalAssistant` seam in the App Store target.
 - ✅ **System-wide MCP** (#101) — expose Anglesite actions to system AI via macOS 27's system-wide MCP.
@@ -155,6 +155,23 @@ These issues target macOS 27 APIs available with Xcode 27 / Swift 6.4:
 - ✅ **On-device summarization** (#93), **Image Playground** (#92), **Writing Tools** (#91).
 - ✅ **Accessibility** — VoiceOver pass (#80), Dynamic Type audit (#79).
 - ✅ **Misc** — oxlint for JS overlay (#73), reframe "filesystem is source of truth" → "Git is source of truth" (#72).
+- ✅ **Menu bar + toolbar completeness** (#518, swept 2026-07-08/09) — File ▸ Save ⌘S/Revert (#509), Sidebar/Toolbar commands (#510), Site menu (#511), View menu with Preview–Editor–Graph ⌘1–3 (#512), File ▸ Reveal in Finder/Rename (#513), customizable `.toolbar(id:)` toolbar (#519), macOS conventions (proxy icon #521, Dock menu #522, ShareLink #523, launcher drops #524, Settings General-first #529 — via #540), preview navigation (#514), dev-server Start/Stop/Restart (#515), navigator content commands Delete/Duplicate/New Post…/New Component… (#516, PR #585 — manual GUI verification tracked in #586), Print ⌘P (#525), completion notifications + Dock progress (#526), UndoManager ⌘Z (#527), String Catalog scaffolding (#528). *Remaining:* Edit ▸ Find + Format menu (#517, needs editor work), toolbar search field (#520, needs a search backend).
+- ✅ **Visual Site Graph Explorer** (#308, PR #508 + follow-ups) and **Project Impact Analysis** (#309, PR #545) — interactive graph/tree of pages, components, and assets with dependency edges, filtering, search, and blast-radius reporting for a selected file. *Follow-ups:* mini-map for large sites (#613), AI explanations of selected nodes (#614 — on-device FM per the LLM policy; the broader free-form Q&A ask in #314 builds on this).
+- ✅ **Redirect/permalink management** (#530, PR #583) — git-tracked `RedirectsStore` (`Source/redirects.json`) + Astro integration emitting dev-server redirects and `dist/_redirects`, delete-triggered "offer a redirect" flow, `RouteCoverageScanner` pre-deploy diff against the last deploy's route snapshot, Redirects tab in Site Settings; blog-post coverage extended in #584.
+
+---
+
+## Active epics (status 2026-07-10)
+
+`gh issue list` remains the source of truth; this is the snapshot of open tracks beyond Phase 10 release work.
+
+- **Claude Code removal (#459)** — Slices 1–4 (#460–463) landed; Slices 5–7 (#464–466) queued: theme/design on PCC, content help on FM/PCC, then the cleanup slice that deletes `ClaudeAgent` and converts the plugin repo. Runtime inbox capture (#587) split out of Slice 3, blocked on `@dwk/workers`.
+- **Component Editor (#496)** — slice 1 (read-only editor, plugin v1.3.0) landed; next: slice-1 manual GUI smoke (#491) and slice 2 Styles panel (#492), then structure ops (#493), props/zone code editors (#494), extract-to-component (#495). Fast-follows: #489, #490.
+- **Personal Publishing OS pivot (#334)** — V-1 typed content + feeds (#335) shipped. V-2 outbound social (#336: #354–357), V-3 inbound (#337: #358–362), V-4 federation + reader (#338: #363–366), V-5 communities (#339: #367–371) are all gated on a stable, conformant `@dwk/workers` release.
+- **Cross-platform Swift port (#571)** — Windows/Linux v2 in five phases (#566–570), Linux first; P5 carries `ExternalLLMBackend` + Phi Silica under the revised LLM policy.
+- **UTM-VM dev/test rig (#589)** — Phase-1 LAN runtime (#601): guest side + wiring landed, host-side LAN-bound dev-server process remains. Later phases pull in iOS and (unscoped) Android validation.
+- **v2.0 / deferred:** Cloudflare remote runtime (#66, needs Workers Paid plan for boot smoke), iOS thin client (#71) under the iOS/iPadOS epic (#342), multi-editor collaboration (#399), quick-capture posting flow (#531).
+- **Blocked / external:** Safari MCP preview debugging (#453), CI `#if compiler(>=6.4)` cleanup once GH runners ship Xcode 27 (#128).
 
 ---
 
