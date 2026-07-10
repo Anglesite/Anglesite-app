@@ -22,7 +22,7 @@ public enum SetupThemeArguments {
     }
 }
 
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 public struct SetupThemeTool: Tool, Sendable {

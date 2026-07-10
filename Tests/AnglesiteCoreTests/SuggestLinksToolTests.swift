@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import AnglesiteCore
 
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 @Suite("SuggestLinksTool")
 struct SuggestLinksToolTests {
     private func doc(

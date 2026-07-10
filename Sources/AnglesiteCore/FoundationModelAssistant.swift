@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 /// Which Apple model substrate a ``FoundationModelAssistant`` targets.
 ///
@@ -59,11 +58,13 @@ public enum FoundationModelContextBudget {
     }
 }
 
-// Gated to the Xcode-27 toolchain — FoundationModels is absent at runtime on CI (#128).
-// See ContentAssistant.swift for the same pattern.
-#if compiler(>=6.4)
+// Gated to the Xcode-27 toolchain — FoundationModels is absent at runtime on CI (#128) — and to
+// canImport for genuine off-Darwin portability (cross-platform port design §5). See
+// ContentAssistant.swift for the same pattern.
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 import CoreSpotlight
+import OSLog
 
 /// A ``ContentAssistant`` backed by Apple's on-device `FoundationModels`. Streams free-form text
 /// and produces ``Generable`` structured output via guided generation.

@@ -21,7 +21,7 @@ public protocol SiteGraphNodeExplaining: Sendable {
 /// ``AssistantError/unavailable(_:)`` ("backend exists, Apple Intelligence is off").
 public enum SiteGraphExplainerFactory {
     public static func makeDefault() -> (any SiteGraphNodeExplaining)? {
-        #if compiler(>=6.4)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         return FoundationModelSiteGraphExplainer()
         #else
         return nil
@@ -133,9 +133,10 @@ public enum SiteGraphExplainPrompt {
     }
 }
 
-// Gated to the Xcode-27 toolchain — FoundationModels is absent at runtime on CI (#128).
+// Gated to the Xcode-27 toolchain (FoundationModels absent at runtime on CI, #128) and to
+// canImport for genuine off-Darwin portability (cross-platform port design §5).
 // See FoundationModelAssistant.swift for the pattern.
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 /// On-device explainer: streams ``FoundationModelAssistant``'s one-shot `generate` output. A host
 /// without Apple Intelligence throws ``AssistantError/unavailable(_:)`` from `generate` before
 /// the stream opens — surfaced by the UI as its "unavailable" state, never a cloud fallback.

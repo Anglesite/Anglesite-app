@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 /// A minimal `Generable` value for exercising `generateStructured`'s prompt-enrichment path.
@@ -45,7 +45,7 @@ private actor CapturingConversationalAssistant: ConversationalAssistant {
         }
     }
 
-    #if compiler(>=6.4)
+    #if compiler(>=6.4) && canImport(FoundationModels)
     func generateStructured<T: Generable & Sendable>(
         prompt: String,
         context: AssistantContext,
@@ -275,7 +275,7 @@ struct CombinedAugmentedAssistantTests {
         #expect(prompt?.contains("DepNotes.astro") == false)
     }
 
-    #if compiler(>=6.4)
+    #if compiler(>=6.4) && canImport(FoundationModels)
     /// Same guarantee as `generateUsesOriginalPrompt`, for the third `ContentAssistant` entry
     /// point (review finding — `generateStructured` also independently calls `enrichedContext`).
     @Test("generateStructured grounds the prompt against the original question, not a polluted one")

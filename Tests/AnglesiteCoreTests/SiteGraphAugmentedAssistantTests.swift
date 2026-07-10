@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 #endif
 
@@ -38,7 +38,7 @@ private actor CapturingConversationalAssistant: ConversationalAssistant {
         }
     }
 
-    #if compiler(>=6.4)
+    #if compiler(>=6.4) && canImport(FoundationModels)
     func generateStructured<T: Generable & Sendable>(
         prompt: String,
         context: AssistantContext,

@@ -125,7 +125,7 @@ public extension DesignInterviewModel {
     }
 }
 
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 @Generable

@@ -515,9 +515,15 @@ struct DeployCommandTests {
         try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: configDir) }
         try? DeployedRoutesSnapshot.save(["/about", "/old-page"], to: configDir)
-        try? RedirectsStore(sourceDirectory: tmpDir).save(
+        // A private site directory, NOT the shared `tmpDir`: this test's redirects.json must not
+        // be visible to `orphanedRouteAddsWarning`, which reads redirects from its own
+        // `siteDirectory` concurrently (suite tests run in parallel).
+        let siteDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DeployCommandTests-site-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        try? RedirectsStore(sourceDirectory: siteDir).save(
             [RedirectsStore.RedirectEntry(source: "/old-page", destination: "/about", code: .permanent)])
-        defer { try? FileManager.default.removeItem(at: tmpDir.appendingPathComponent("redirects.json")) }
 
         let exec = FakeExecutor()
             .set(.build, exitCode: 0, output: "building…")
@@ -526,7 +532,7 @@ struct DeployCommandTests {
         let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
         let outcomes = Locked<[PreDeployCheck.Outcome]>([])
         _ = await cmd.deploy(
-            siteID: "s", siteDirectory: tmpDir,
+            siteID: "s", siteDirectory: siteDir,
             configDirectory: configDir, currentRoutes: ["/about"],
             onPreflight: { outcomes.append($0) })
 

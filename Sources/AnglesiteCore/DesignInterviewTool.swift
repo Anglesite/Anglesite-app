@@ -1,7 +1,7 @@
 // Sources/AnglesiteCore/DesignInterviewTool.swift
 import Foundation
 
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 /// Chat entry point for the design interview. Unlike `SetupIntegrationTool`/`SetupThemeTool`
