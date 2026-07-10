@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 import AnglesiteCore
 
 /// Lifecycle of the AI explanation for the selected node (#614). `unavailable` is deliberately
@@ -32,6 +33,7 @@ final class SiteGraphExplorerModel {
 
     private let graph: SiteContentGraph
     private let explainer: (any SiteGraphNodeExplaining)?
+    private let logger = Logger(subsystem: "dev.anglesite.app", category: "SiteGraphExplorer")
     private var observeTask: Task<Void, Never>?
     private var explainTask: Task<Void, Never>?
     private var siteID: String?
@@ -170,12 +172,14 @@ final class SiteGraphExplorerModel {
 
     // MARK: AI explanation (#614)
 
-    /// Whether the Explain action can run: a backend exists on this toolchain *and* a node is
-    /// selected. Runtime unavailability (Apple Intelligence off) is not gated here — the action
-    /// stays offered and resolves to ``SiteGraphExplainState/unavailable(_:)``, which tells the
-    /// user how to fix it.
+    /// Whether the Explain action can run — mirrors every precondition `explainSelectedNode()`
+    /// itself guards on, so the two can't drift apart if `start()`'s sequencing ever changes.
+    /// Runtime unavailability (Apple Intelligence off) is not gated here — the action stays
+    /// offered and resolves to ``SiteGraphExplainState/unavailable(_:)``, which tells the user how
+    /// to fix it.
     var canExplain: Bool {
-        explainer != nil && selectedNode != nil
+        explainer != nil && selectedNode != nil && selectedImpact != nil
+            && siteID != nil && sourceDirectory != nil
     }
 
     /// Streams an on-device AI explanation of the selected node into ``explainState``, grounded
@@ -202,23 +206,31 @@ final class SiteGraphExplorerModel {
             referencedBy: referencedBy
         )
         explainState = .generating("")
-        explainTask = Task { [explainer] in
+        // Weak self: a live FoundationModels stream is deliberately never cancelled mid-iteration
+        // (see resetExplain()), so this task can outlive the model (e.g. the window closes while
+        // streaming) — it must not keep the whole model alive for that duration, matching the
+        // observeTask pattern in start() above.
+        explainTask = Task { [weak self, explainer] in
             do {
                 var text = ""
                 let stream = try await explainer.explain(prompt: prompt, siteID: siteID, siteDirectory: sourceDirectory)
                 for try await chunk in stream {
                     if Task.isCancelled { return }
                     text += chunk
-                    explainState = .generating(text)
+                    guard let self else { return }
+                    self.explainState = .generating(text)
                 }
-                guard !Task.isCancelled else { return }
-                explainState = .complete(text)
+                guard !Task.isCancelled, let self else { return }
+                self.explainState = .complete(text)
             } catch AssistantError.unavailable(let message) {
-                guard !Task.isCancelled else { return }
-                explainState = .unavailable(message)
+                guard !Task.isCancelled, let self else { return }
+                self.explainState = .unavailable(message)
             } catch {
-                guard !Task.isCancelled else { return }
-                explainState = .failed(error.localizedDescription)
+                guard !Task.isCancelled, let self else { return }
+                // The site owner, not a developer, reads this — a raw NSError/Foundation
+                // description isn't actionable for them. Keep it in the debug log only.
+                self.logger.error("Site graph explanation failed: \(error.localizedDescription, privacy: .public)")
+                self.explainState = .failed("Something went wrong generating this explanation. Please try again.")
             }
         }
     }
