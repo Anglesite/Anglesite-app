@@ -34,7 +34,9 @@ public struct FoundationModelCopyEditAuditor: CopyEditAuditing {
         // Heavy generation requests the PCC tier through the shared seam (#464); today that is
         // backed on-device, and chunking keeps each call correct at 4K regardless.
         guard let assistant = ContentAssistantFactory.make(tier: .privateCloudCompute) else {
-            return CopyEditReportBuilder.report(results: chunks.map { ($0, nil) })
+            return CopyEditReportBuilder.report(
+                results: chunks.map { ($0, nil) },
+                unavailableMessage: ContentHelpDialogs.assistantUnavailable(feature: "Copy review"))
         }
         var results: [(chunk: ContentChunk, drafts: [CopyFindingDraft]?)] = []
         for chunk in chunks {

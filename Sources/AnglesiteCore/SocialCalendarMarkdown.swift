@@ -13,11 +13,14 @@ public enum SocialCalendarMarkdown {
         return f
     }()
 
-    /// FM-generated text goes into table cells — escape pipes and flatten newlines so a
-    /// stray "|" can't split the row.
+    /// FM-generated text goes into table cells — escape pipes and flatten line endings (`\n`,
+    /// `\r\n`, and a lone `\r` are all line endings per CommonMark) so a stray "|" or newline
+    /// can't split the row.
     private static func cell(_ text: String) -> String {
         text.replacingOccurrences(of: "|", with: "\\|")
+            .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
     }
 
     public static func render(plan: SocialMediaPlan, siteName: String) -> String {

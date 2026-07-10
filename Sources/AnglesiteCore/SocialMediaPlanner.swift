@@ -75,10 +75,16 @@ public struct FoundationModelSocialMediaPlanner: SocialMediaPlanning {
                                           businessType: businessType, preamble: preamble)
         guard let first = try? await assistant.generateStructured(
             prompt: prompt, context: context, resultType: GeneratedSocialBio.self) else { return nil }
-        if first.bio.count <= platform.bioCharLimit { return first.bio }
-        let retryPrompt = prompt + "\n\nYour previous attempt was \(first.bio.count) characters — too long. It must be under \(platform.bioCharLimit) characters."
+        // An empty/whitespace-only bio is treated the same as an over-limit one: one retry,
+        // then omit (never render an empty bio card).
+        let firstEmpty = first.bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if !firstEmpty, first.bio.count <= platform.bioCharLimit { return first.bio }
+        let retryPrompt = firstEmpty
+            ? prompt + "\n\nYour previous attempt was empty. Write the bio's full text."
+            : prompt + "\n\nYour previous attempt was \(first.bio.count) characters — too long. It must be under \(platform.bioCharLimit) characters."
         guard let second = try? await assistant.generateStructured(
             prompt: retryPrompt, context: context, resultType: GeneratedSocialBio.self),
+              !second.bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               second.bio.count <= platform.bioCharLimit else { return nil }
         return second.bio
     }

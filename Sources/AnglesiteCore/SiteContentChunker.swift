@@ -43,8 +43,19 @@ public enum SiteContentChunker {
                 let fields = Frontmatter.parse(contents)
                 var title: String?
                 if case let .string(value)? = fields["title"] { title = value }
+                // Markdown/mdoc chunks carry the raw frontmatter-stripped body, not sanitized
+                // plain text: Apply matches a model excerpt verbatim against the file on disk
+                // (`CopyRewriteApplier`/`CopyEditReportModel`), and `plainText(markdown:)` removes
+                // interior syntax (link brackets, emphasis markers, …) that separates otherwise-
+                // adjacent words — an excerpt straddling one of those would never be a substring
+                // of the raw file. Raw markdown is also small enough to send as-is within the
+                // window. `.astro` chunks stay sanitized: the full Astro source (imports, JS,
+                // component props) would waste the on-device window on markup the model doesn't
+                // need to read, and Apply for `.astro` findings fails safe to Copy Rewrite instead
+                // (#465 review).
                 let raw = url.pathExtension.lowercased() == "astro"
-                    ? plainText(astro: contents) : plainText(markdown: Frontmatter.body(contents))
+                    ? plainText(astro: contents)
+                    : Frontmatter.body(contents).trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !raw.isEmpty else { continue }
                 let (text, truncated) = capped(raw)
                 chunks.append(ContentChunk(
@@ -79,8 +90,10 @@ public enum SiteContentChunker {
     }
 
     /// Frontmatter-stripped markdown → readable text: link labels kept (URLs dropped), heading
-    /// markers / emphasis / list bullets / code fences removed. Enough for a copy audit; not a
-    /// markdown renderer.
+    /// markers / emphasis / list bullets / code fences removed. Not a markdown renderer. Used for
+    /// repurposing prompts (`PostSource.load`'s post body); the copy-audit chunker (`chunks`
+    /// above) keeps the raw markdown body instead so model excerpts stay verbatim substrings of
+    /// the file on disk (#465 review).
     public static func plainText(markdown body: String) -> String {
         var text = body
         text = text.replacingOccurrences(of: #"\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)

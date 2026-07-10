@@ -34,5 +34,15 @@ import Foundation
         #expect(week.contains("Instagram"))
         #expect(week.contains("4"))            // cadence
         #expect(week.contains("Behind the oven"))
+        // Grammatical with no preceding site name — not the ", a bakery,." clause reused from
+        // bio/pillars, which reads as if the calendar itself were the bakery.
+        #expect(week.contains("for a bakery"))
+        #expect(!week.contains(", a bakery,."))
+
+        let weekNoBusinessType = SocialPlanPrompt.week(
+            index: 0, platforms: [insta],
+            pillars: [SocialPillar(name: "Behind the oven", detail: "process")],
+            businessType: nil, preamble: nil)
+        #expect(weekNoBusinessType.contains("Plan week 1 of a social media calendar."))
     }
 }

@@ -48,7 +48,7 @@ import Foundation
         defer { try? fm.removeItem(at: dir) }
         try fm.createDirectory(at: dir.appendingPathComponent("src/pages"), withIntermediateDirectories: true)
         try fm.createDirectory(at: dir.appendingPathComponent("src/content/posts"), withIntermediateDirectories: true)
-        try "---\ntitle: About\n---\nWe are a bakery."
+        try "---\ntitle: About\n---\nWe are a bakery. [Read our story](https://x.test/story) today."
             .write(to: dir.appendingPathComponent("src/pages/about.md"), atomically: true, encoding: .utf8)
         try "---\ntitle: Trip\n---\nWent to the coast."
             .write(to: dir.appendingPathComponent("src/content/posts/trip.mdoc"), atomically: true, encoding: .utf8)
@@ -60,5 +60,29 @@ import Foundation
         #expect(chunks[0].title == "About")
         #expect(chunks[0].filePath == "src/pages/about.md")
         #expect(chunks[0].text.contains("bakery"))
+        // Markdown chunks carry the raw frontmatter-stripped body now — the link markup
+        // survives rather than being reduced to just the label, so excerpt-apply can match it
+        // verbatim against the file on disk.
+        #expect(chunks[0].text.contains("[Read our story](https://x.test/story)"))
+    }
+
+    @Test func markdownChunkTextIsVerbatimSubstringOfFile() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("chunker-verbatim-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir.appendingPathComponent("src/content/posts"), withIntermediateDirectories: true)
+        let contents = """
+        ---
+        title: Trip
+        ---
+        We drove out and saw the [lighthouse](https://x.test/lighthouse) at dusk. **Unforgettable.**
+        """
+        try contents.write(to: dir.appendingPathComponent("src/content/posts/trip.mdoc"), atomically: true, encoding: .utf8)
+        let chunks = SiteContentChunker.chunks(sourceDirectory: dir)
+        let chunk = try #require(chunks.first)
+        #expect(!chunk.truncated)
+        // Verbatim substring of the raw file (before any truncation) — this is what makes
+        // CopyRewriteApplier's excerpt match succeed against the file on disk.
+        #expect(contents.contains(chunk.text))
     }
 }

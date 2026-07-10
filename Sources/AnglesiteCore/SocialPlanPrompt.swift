@@ -27,8 +27,12 @@ public enum SocialPlanPrompt {
             .map { "- \($0.platform): \($0.postsPerWeek) posts this week (\($0.note))" }
             .joined(separator: "\n")
         let pillarFacts = pillars.map { "- \($0.name): \($0.detail)" }.joined(separator: "\n")
+        // Unlike `bio`/`pillars`, there's no preceding site name here for `businessDescription`'s
+        // ", a bakery," clause to attach to — that reads as if the calendar itself were the
+        // bakery. Use a "for a <type>" clause instead, which is grammatical with or without one.
+        let businessClause = businessType.map { " for a \($0)" } ?? ""
         return joined(preamble, """
-        Plan week \(index + 1) of a social media calendar\(businessDescription(businessType)). \
+        Plan week \(index + 1) of a social media calendar\(businessClause). \
         Create one entry per post, spread across the week, rotating through the pillars so no \
         pillar repeats on consecutive days on the same platform.
 

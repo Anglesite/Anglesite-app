@@ -58,4 +58,21 @@ import Foundation
         #expect(md.contains("Buy 1 \\| get 1 free"))
         #expect(!md.contains("get 1\nfree"))
     }
+
+    @Test func tableCellsFlattenCarriageReturns() {
+        // `\r\n` and a lone `\r` are both line endings per CommonMark — either would still
+        // split the table row after only "\n" is flattened.
+        let plan = SocialMediaPlan(
+            businessType: nil,
+            platforms: [SocialPlatformProfile(platform: "Instagram", bioCharLimit: 150, postsPerWeek: 4, note: "n")],
+            bios: [:],
+            pillars: [SocialPillar(name: "P", detail: "d")],
+            weeks: [SocialCalendarWeek(
+                startDate: Date(timeIntervalSince1970: 0),
+                entries: [SocialCalendarEntry(day: "Monday", platform: "Instagram",
+                                              pillar: "P", idea: "Buy 1\r\nget 1\rfree")])])
+        let md = SocialCalendarMarkdown.render(plan: plan, siteName: "S")
+        #expect(md.contains("Buy 1 get 1 free"))
+        #expect(!md.contains("\r"))
+    }
 }

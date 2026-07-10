@@ -2,12 +2,16 @@ import Foundation
 
 /// Pure chat replies for the social planner tool, non-gated for CI tests.
 public enum PlanSocialMediaReply {
-    public static func preview(plan: SocialMediaPlan) -> String {
+    /// `weeks` is the requested/clamped week count the caller asked for — not
+    /// `plan.weeks.count`, since a week whose generation failed is silently dropped from
+    /// `plan.weeks`, and the model must resupply the count the user actually confirmed
+    /// (not however many weeks happened to succeed in the preview) on the `apply: true` call.
+    public static func preview(plan: SocialMediaPlan, weeks: Int) -> String {
         var lines: [String] = ["Here's the social media plan I'd save:"]
         lines.append("Platforms: " + plan.platforms.map { "\($0.platform) (\($0.postsPerWeek)×/week)" }.joined(separator: ", "))
         lines.append("Pillars: " + plan.pillars.map(\.name).joined(separator: ", "))
         lines.append("\(plan.weeks.count) week\(plan.weeks.count == 1 ? "" : "s") of calendar entries.")
-        lines.append("Confirm to save it to docs/social-calendar.md, or tell me what to change. When the user confirms, call this tool again with apply: true. (The plan is regenerated on save, so details may vary slightly from this preview.)")
+        lines.append("Confirm to save it to docs/social-calendar.md, or tell me what to change. When the user confirms, call this tool again with apply: true and weeks: \(weeks). (The plan is regenerated on save, so details may vary slightly from this preview.)")
         return lines.joined(separator: "\n")
     }
 
@@ -73,7 +77,7 @@ public struct PlanSocialMediaTool: Tool, Sendable {
                 return "I generated the plan but couldn't save it: \(error.localizedDescription)"
             }
         }
-        return PlanSocialMediaReply.preview(plan: plan)
+        return PlanSocialMediaReply.preview(plan: plan, weeks: weeks)
     }
 }
 #endif

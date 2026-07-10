@@ -62,7 +62,10 @@ public struct PostSource: Sendable, Equatable {
     /// Canonical published URL for a post: `https://<domain>/<collection>/<slug>/`.
     public static func postURL(domain: String, collection: String, slug: String) -> String {
         var host = domain
-        for prefix in ["https://", "http://"] where host.hasPrefix(prefix) {
+        // Case-insensitive match (the domain comes from a free-text wizard field stored
+        // verbatim) — drop the same character count from the original string so the rest of
+        // the host keeps its original casing.
+        for prefix in ["https://", "http://"] where host.lowercased().hasPrefix(prefix) {
             host = String(host.dropFirst(prefix.count))
         }
         host = host.hasSuffix("/") ? String(host.dropLast()) : host

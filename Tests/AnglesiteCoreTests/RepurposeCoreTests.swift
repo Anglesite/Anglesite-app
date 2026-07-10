@@ -41,6 +41,12 @@ import Foundation
         #expect(PostSource.postURL(domain: "https://example.com/", collection: "posts", slug: "a") == "https://example.com/posts/a/")
     }
 
+    @Test func postURLStripsSchemeCaseInsensitively() {
+        // A differently-cased scheme (from a free-text wizard field stored verbatim) must still
+        // be stripped, not doubled into "https://Https://example.com/…" — host case is preserved.
+        #expect(PostSource.postURL(domain: "Https://Example.com", collection: "posts", slug: "a") == "https://Example.com/posts/a/")
+    }
+
     @Test func syndicationAddsBlockAndDeduplicates() {
         let original = """
         ---
@@ -91,6 +97,24 @@ import Foundation
         """
         let out = SyndicationFrontmatter.adding(urls: ["https://a.test/1", "https://b.test/2"], to: original)
         #expect(!out.contains("syndication: ["))          // converted to block form
+        #expect(out.contains("syndication:\n  - https://a.test/1\n  - https://b.test/2"))
+        #expect(out.components(separatedBy: "https://a.test/1").count == 2) // deduped, appears once
+        #expect(out.contains("Body."))
+    }
+
+    @Test func syndicationBareScalarConvertsToBlockAndDedupes() {
+        // A hand-authored or externally-written bare scalar (`syndication: https://a.test/1`)
+        // must convert to block form, not append a "- item" after the scalar — that combination
+        // (scalar mapping value immediately followed by a nested sequence) is invalid YAML.
+        let original = """
+        ---
+        title: T
+        syndication: https://a.test/1
+        ---
+        Body.
+        """
+        let out = SyndicationFrontmatter.adding(urls: ["https://a.test/1", "https://b.test/2"], to: original)
+        #expect(!out.contains("syndication: https://a.test/1"))
         #expect(out.contains("syndication:\n  - https://a.test/1\n  - https://b.test/2"))
         #expect(out.components(separatedBy: "https://a.test/1").count == 2) // deduped, appears once
         #expect(out.contains("Body."))

@@ -100,17 +100,26 @@ public struct FoundationModelPostRepurposer: PostRepurposing {
             return PlatformPostVariant(platform: spec.platform, text: nil,
                                        failure: "Couldn't generate a \(spec.platform) post.")
         }
-        if RepurposePlatformSpecs.fits(first.text, spec: spec) {
+        // `fits` alone would accept an empty string (0 <= charLimit) as a successful variant —
+        // treat empty/whitespace-only text the same as an over-limit result: one retry, then an
+        // explicit failure rather than an empty post card.
+        let firstEmpty = first.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if !firstEmpty, RepurposePlatformSpecs.fits(first.text, spec: spec) {
             return PlatformPostVariant(platform: spec.platform, text: first.text, failure: nil)
         }
-        let retryPrompt = prompt + "\n\nYour previous attempt was \(first.text.count) characters — over the \(spec.charLimit)-character limit. Rewrite it well under \(spec.charLimit) characters."
+        let retryPrompt = firstEmpty
+            ? prompt + "\n\nYour previous attempt was empty. Write the post's full text."
+            : prompt + "\n\nYour previous attempt was \(first.text.count) characters — over the \(spec.charLimit)-character limit. Rewrite it well under \(spec.charLimit) characters."
         if let second = try? await assistant.generateStructured(
             prompt: retryPrompt, context: context, resultType: GeneratedPlatformPost.self),
+           !second.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            RepurposePlatformSpecs.fits(second.text, spec: spec) {
             return PlatformPostVariant(platform: spec.platform, text: second.text, failure: nil)
         }
         return PlatformPostVariant(platform: spec.platform, text: nil,
-                                   failure: "Couldn't fit \(spec.platform)'s \(spec.charLimit)-character limit.")
+                                   failure: firstEmpty
+                                       ? "Couldn't generate a \(spec.platform) post."
+                                       : "Couldn't fit \(spec.platform)'s \(spec.charLimit)-character limit.")
     }
 }
 #endif

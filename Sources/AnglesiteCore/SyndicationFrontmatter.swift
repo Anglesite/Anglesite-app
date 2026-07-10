@@ -25,8 +25,11 @@ public enum SyndicationFrontmatter {
         }
 
         if let inlineItems = inlineListItems(lines[keyIndex]) {
-            // Inline form (`syndication: [a, b]`): dedup against the inline items,
-            // then rewrite the line as block form with existing + new items.
+            // Inline value on the key line (`syndication: [a, b]` or a bare scalar
+            // `syndication: https://a.test/1`): dedup against those items, then rewrite the
+            // line as block form with existing + new items. Leaving a scalar mapping value
+            // followed by a nested `- item` sequence is invalid YAML, so this must always
+            // collapse to block form rather than appending after the key line.
             let toAdd = newURLs.filter { !inlineItems.contains($0) }
             guard !toAdd.isEmpty else { return contents }
             let blockLines = ["syndication:"] + (inlineItems + toAdd).map { "  - \($0)" }
@@ -47,25 +50,34 @@ public enum SyndicationFrontmatter {
         return lines.joined(separator: "\n")
     }
 
-    /// Parses the inline array items of a `syndication: [a, b]` line.
-    /// Returns `nil` for a bare `syndication:` key (block form, or empty).
+    /// Parses the inline value(s) of a `syndication:` key line that already carries content —
+    /// either an inline array (`syndication: [a, b]`) or a bare scalar
+    /// (`syndication: https://a.test/1`), the latter written by hand or another tool. Returns
+    /// `nil` for a bare `syndication:` key with nothing after the colon (block form, or empty).
     private static func inlineListItems(_ line: String) -> [String]? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("syndication:") else { return nil }
         let rest = trimmed.dropFirst("syndication:".count).trimmingCharacters(in: .whitespaces)
-        guard rest.hasPrefix("[") else { return nil }
+        guard !rest.isEmpty else { return nil }
+        guard rest.hasPrefix("[") else {
+            // Bare scalar value on the key line itself — a single existing item.
+            return [unquoted(rest)].filter { !$0.isEmpty }
+        }
         var inner = rest
         if inner.hasSuffix("]") { inner.removeLast() }
         inner.removeFirst()
-        let items = inner.split(separator: ",").map { item -> String in
-            var value = item.trimmingCharacters(in: .whitespaces)
-            if value.count >= 2,
-               (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) {
-                value.removeFirst()
-                value.removeLast()
-            }
-            return value
-        }
+        let items = inner.split(separator: ",").map { unquoted($0.trimmingCharacters(in: .whitespaces)) }
         return items.filter { !$0.isEmpty }
+    }
+
+    /// Strips a single layer of matching `"`/`'` quotes from a YAML scalar.
+    private static func unquoted(_ value: String) -> String {
+        var value = value
+        if value.count >= 2,
+           (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) {
+            value.removeFirst()
+            value.removeLast()
+        }
+        return value
     }
 }
