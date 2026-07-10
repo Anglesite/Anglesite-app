@@ -1,6 +1,11 @@
 // Sources/AnglesiteCore/ThemeApplyWizardModel.swift
 import Foundation
 import Observation
+// URLSession lives in FoundationNetworking on non-Darwin platforms (swift-corelibs-foundation);
+// this import is a no-op on macOS.
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Drives the "apply a design" wizard: pick a source (built-in theme vs. a freedesignmd.com
 /// system), pick within that source, review, then apply via `DesignApplyService`. Shared by both

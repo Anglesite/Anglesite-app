@@ -1,6 +1,10 @@
 import Foundation
 import Observation
+// SwiftUI is Darwin-only; only `axisBinding` below needs it (the GUI-sliders convenience) — the
+// rest of this model is toolchain-independent conversation-state logic, testable without it.
+#if canImport(SwiftUI)
 import SwiftUI
+#endif
 import AnglesiteSiteModel
 
 /// Drives one design-interview conversation: prompts the current ``ConversationStage`` through an
@@ -72,6 +76,7 @@ public final class DesignInterviewModel: Identifiable {
         draft.applyAdjectiveHint(hint)
     }
 
+    #if canImport(SwiftUI)
     /// A two-way `Binding` into one axis of `draft.axes`, for GUI sliders. `draft`'s setter is
     /// `internal(set)` (state changes are meant to flow through the model's own methods), so a
     /// cross-module SwiftUI view can't write `$model.draft.axes.temperature` directly — this
@@ -82,6 +87,7 @@ public final class DesignInterviewModel: Identifiable {
             set: { self.draft.axes[keyPath: keyPath] = $0 }
         )
     }
+    #endif
 
     /// "Design it for me" escape hatch: skip straight to axis confirmation using the
     /// business-type defaults already seeded in `draft.axes`.
