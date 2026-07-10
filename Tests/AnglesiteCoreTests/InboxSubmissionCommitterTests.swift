@@ -69,6 +69,29 @@ struct InboxSubmissionCommitterTests {
         """)
     }
 
+    @Test("markdocContent escapes embedded newlines in subject and from as literal \\n, not a real line break")
+    func markdocEscapesEmbeddedNewlines() {
+        let submission = InboxKVClient.Submission(
+            id: "12345678", subject: "Hello\nstatus: published", from: "visitor@x.com\r\nmore",
+            message: "hi", receivedAt: "2026-07-10T00:00:00Z")
+        let content = InboxSubmissionCommitter.markdocContent(for: submission)
+        #expect(content == """
+        ---
+        subject: "Hello\\nstatus: published"
+        from: "visitor@x.com\\r\\nmore"
+        receivedDate: 2026-07-10
+        status: new
+        ---
+        hi
+        """)
+
+        // No real newline was injected: the escaped-newline case has the same line count as an
+        // unaffected case (frontmatter delimiters + 4 fields + body = 6 lines), proving the
+        // embedded control characters stayed within their single frontmatter line.
+        let unaffectedContent = InboxSubmissionCommitter.markdocContent(for: Self.submission)
+        #expect(content.components(separatedBy: "\n").count == unaffectedContent.components(separatedBy: "\n").count)
+    }
+
     @Test("commit writes each submission and returns their ids on a successful commit")
     func commitWritesAndReturnsIDs() async throws {
         let siteDirectory = try Self.makeThrowawayGitRepo()
