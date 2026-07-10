@@ -122,7 +122,11 @@ struct PackagePreviewSummaryTests {
         try FileManager.default.setAttributes([.modificationDate: farFuture], ofItemAtPath: nestedDistFile.path)
 
         let summary = try PackagePreviewSummary.summarize(pkg)
-        #expect(summary.sourceLastModified == farFuture)
+        // Not exact equality: round-tripping a Date through filesystem modification-time
+        // attributes can lose sub-second precision (notably under Linux Foundation), so this
+        // only needs to confirm the nested "dist" file's timestamp won the last-modified scan.
+        let deltaFromFarFuture = abs(try #require(summary.sourceLastModified).timeIntervalSince(farFuture))
+        #expect(deltaFromFarFuture < 2)
     }
 
     @Test("hidden files like .DS_Store don't inflate page or collection counts")
