@@ -135,6 +135,49 @@ import Foundation
         }
     }
 
+    @Test func emptyCSSVarsSkipsGlobalCSSAndSucceedsWithNoCSSFileAtAll() throws {
+        // No src/styles directory at all — not even a malformed global.css.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let input = DesignApplyInput(
+            cssVars: [:], rationaleMarkdown: "# Design", brandSummary: "freedesignmd description.",
+            sourceLabel: "freedesignmd: acme"
+        )
+        let result = DesignApplyService.apply(input, to: dir)
+        guard case .success(let applied) = result else { Issue.record("expected success"); return }
+
+        #expect(!applied.writtenFiles.contains("src/styles/global.css"))
+        #expect(applied.writtenFiles.contains("docs/DESIGN.md"))
+        #expect(applied.writtenFiles.contains("docs/brand.md"))
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("src/styles/global.css").path))
+
+        let brand = try String(contentsOf: dir.appendingPathComponent("docs/brand.md"), encoding: .utf8)
+        #expect(brand.contains("freedesignmd: acme"))
+        #expect(brand.contains("freedesignmd description."))
+        let rationale = try String(contentsOf: dir.appendingPathComponent("docs/DESIGN.md"), encoding: .utf8)
+        #expect(rationale == "# Design")
+    }
+
+    @Test func emptyCSSVarsSkipsGlobalCSSAndSucceedsWithMalformedGlobalCSS() throws {
+        // A global.css that exists but has no `:root` block — would normally trip
+        // .missingRootBlock, but must not for an empty-cssVars caller.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let stylesDir = dir.appendingPathComponent("src/styles")
+        try FileManager.default.createDirectory(at: stylesDir, withIntermediateDirectories: true)
+        let originalCSS = "* { box-sizing: border-box; }\n"
+        try originalCSS.write(to: stylesDir.appendingPathComponent("global.css"), atomically: true, encoding: .utf8)
+
+        let input = DesignApplyInput(cssVars: [:], rationaleMarkdown: nil, brandSummary: "x", sourceLabel: "freedesignmd: acme")
+        let result = DesignApplyService.apply(input, to: dir)
+        guard case .success(let applied) = result else { Issue.record("expected success"); return }
+        #expect(!applied.writtenFiles.contains("src/styles/global.css"))
+
+        // global.css itself is untouched.
+        let css = try String(contentsOf: stylesDir.appendingPathComponent("global.css"), encoding: .utf8)
+        #expect(css == originalCSS)
+    }
+
     @Test func writeFailureAfterGlobalCSSReportsPartiallyWrittenFiles() throws {
         let dir = try makeSite()
         let failingManager = FailingFileManager(failingPathSubstring: "docs")

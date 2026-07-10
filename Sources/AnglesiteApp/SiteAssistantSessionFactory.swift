@@ -20,7 +20,8 @@ enum SiteAssistantSessionFactory {
         _ contentGraph: SiteContentGraph,
         _ knowledgeIndex: SiteKnowledgeIndex,
         _ semanticRanker: SemanticRanker?,
-        _ integrationService: any IntegrationOperationsService
+        _ integrationService: any IntegrationOperationsService,
+        _ themeCatalog: ThemeCatalog?
     ) -> any ConversationalAssistant
 
     struct Dependencies {
@@ -49,7 +50,7 @@ enum SiteAssistantSessionFactory {
             let editRouterProvider: EditRouterProvider = { siteID in
                 await EditRouterRegistry.shared.router(for: siteID)
             }
-            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService in
+            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, themeCatalog in
                 KnowledgeAugmentedAssistant(
                     base: FoundationModelAssistant(
                         tier: .onDevice,
@@ -57,7 +58,8 @@ enum SiteAssistantSessionFactory {
                         contentGraph: contentGraph,
                         knowledgeIndex: knowledgeIndex,
                         semanticRanker: semanticRanker,
-                        integrationService: integrationService
+                        integrationService: integrationService,
+                        themeCatalog: themeCatalog
                     ),
                     index: knowledgeIndex
                 )
@@ -115,6 +117,7 @@ enum SiteAssistantSessionFactory {
         semanticRanker: SemanticRanker?,
         conventionsEngine: ProjectConventionsEngine?,
         integrationService: any IntegrationOperationsService,
+        themeCatalog: ThemeCatalog? = nil,
         dependencies: Dependencies = .live
     ) -> SiteAssistantSession {
         let editBridge = IntentEditBridge(routerProvider: dependencies.editRouterProvider)
@@ -127,7 +130,8 @@ enum SiteAssistantSessionFactory {
                 contentGraph,
                 knowledgeIndex,
                 semanticRanker,
-                integrationService
+                integrationService,
+                themeCatalog
             ),
             annotationFeed: dependencies.annotationFeed(sourceDirectory),
             annotationResolver: { [resolveAnnotation = dependencies.resolveAnnotation] id in

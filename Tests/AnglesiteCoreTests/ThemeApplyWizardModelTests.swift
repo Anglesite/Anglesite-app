@@ -189,5 +189,13 @@ private final class WizardFreedesignmdStubURLProtocol: URLProtocol, @unchecked S
             Issue.record("expected success"); return
         }
         #expect(applied.writtenFiles.isEmpty == false)
+        #expect(applied.writtenFiles.contains("docs/brand.md"))
+        // The freedesignmd flow writes no CSS vars — the global.css upsert step must be skipped.
+        #expect(!applied.writtenFiles.contains("src/styles/global.css"))
+
+        let brandURL = package.sourceURL.appendingPathComponent("docs/brand.md")
+        let brand = try String(contentsOf: brandURL, encoding: .utf8)
+        #expect(brand.contains("freedesignmd: linear-orbit"))
+        #expect(brand.contains("Hairline-thin product workspace."))
     }
 }

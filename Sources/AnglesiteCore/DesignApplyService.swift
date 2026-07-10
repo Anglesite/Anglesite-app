@@ -37,19 +37,28 @@ public enum DesignApplyService {
         to sourceDirectory: URL,
         fileManager: FileManager = .default
     ) -> Result<AppliedDesign, DesignApplyError> {
-        let cssURL = sourceDirectory.appendingPathComponent(globalCSSRelativePath)
-        guard let original = try? String(contentsOf: cssURL, encoding: .utf8) else {
-            return .failure(.missingGlobalCSS)
-        }
-        guard let updatedCSS = upsertRootVars(input.cssVars, in: original) else {
-            return .failure(.missingRootBlock)
+        // An empty `cssVars` means the caller has no CSS tokens to write (e.g. the freedesignmd
+        // wizard flow, whose token translation is currently stubbed — see ThemeApplyWizardModel).
+        // Skip the global.css read/upsert/write entirely in that case: there is nothing to
+        // change, so this flow must not hard-fail just because global.css or its `:root` block
+        // is missing or malformed.
+        if !input.cssVars.isEmpty {
+            let cssURL = sourceDirectory.appendingPathComponent(globalCSSRelativePath)
+            guard let original = try? String(contentsOf: cssURL, encoding: .utf8) else {
+                return .failure(.missingGlobalCSS)
+            }
+            guard let updatedCSS = upsertRootVars(input.cssVars, in: original) else {
+                return .failure(.missingRootBlock)
+            }
+            do {
+                try updatedCSS.write(to: cssURL, atomically: true, encoding: .utf8)
+            } catch {
+                return .failure(.writeFailed(message: (error as NSError).localizedDescription, partiallyWritten: []))
+            }
         }
 
-        var written: [String] = []
+        var written: [String] = input.cssVars.isEmpty ? [] : [globalCSSRelativePath]
         do {
-            try updatedCSS.write(to: cssURL, atomically: true, encoding: .utf8)
-            written.append(globalCSSRelativePath)
-
             if let rationaleMarkdown = input.rationaleMarkdown {
                 let rationaleURL = sourceDirectory.appendingPathComponent(rationaleRelativePath)
                 try fileManager.createDirectory(at: rationaleURL.deletingLastPathComponent(), withIntermediateDirectories: true)

@@ -1101,6 +1101,13 @@ final class SiteWindowModel {
         let mcpClient: @Sendable () async -> MCPClient? = { [preview] in
             await preview.mcpClient()
         }
+        // Best-effort: SetupThemeTool only attaches to the chat assistant when a catalog loads
+        // successfully. A missing/unreadable template must not block opening the site — the
+        // assistant simply runs without the theme-apply tool, same as before this catalog existed.
+        let themeCatalog: ThemeCatalog? = {
+            guard let templateURL = TemplateRuntime.resolve().url else { return nil }
+            return try? ThemeCatalog.load(templateURL: templateURL)
+        }()
         let assistantSession = SiteAssistantSessionFactory.makeSession(
             siteID: resolved.id,
             sourceDirectory: resolved.sourceDirectory,
@@ -1110,7 +1117,8 @@ final class SiteWindowModel {
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
             conventionsEngine: conventionsEngine,
-            integrationService: integrationOps
+            integrationService: integrationOps,
+            themeCatalog: themeCatalog
         )
         chat = assistantSession.chat
         // The environment undo manager usually lands before the chat exists (cold open) —
