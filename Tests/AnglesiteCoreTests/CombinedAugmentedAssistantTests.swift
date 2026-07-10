@@ -88,6 +88,24 @@ struct CombinedAugmentedAssistantTests {
             atomically: true,
             encoding: .utf8
         )
+        // A decoy document whose distinctive vocabulary ("dependency", "invent"...) comes only
+        // from SiteGraphAugmentedAssistant's graphBlock instruction sentence ("...its dependency
+        // graph. Do not invent details...") — never from the real user question below. `search`'s
+        // scoring is purely additive per matched query term with no dilution penalty, so if
+        // `enrichedContext` regressed to (bug-for-bug) feeding the graph-enriched blob into
+        // `contentBlock` instead of the raw prompt, those instruction words would become search
+        // terms and this decoy would be promoted into the citations/prompt. A single-candidate
+        // fixture (just the CTA doc) can't tell that regression apart from the fix, because the
+        // original prompt's words are still present as terms even in a polluted query — this
+        // decoy is what makes the distinction observable.
+        try """
+        export const note = 'dependency dependency dependency invent invent invent \
+        injection graph specific facts answering built';
+        """.write(
+            to: root.appendingPathComponent("src/components/DepNotes.astro"),
+            atomically: true,
+            encoding: .utf8
+        )
         let index = SiteKnowledgeIndex()
         await index.rebuild(siteID: "site", projectRoot: root)
 
@@ -95,7 +113,10 @@ struct CombinedAugmentedAssistantTests {
         let assistant = CombinedAugmentedAssistant(base: base, index: index, graphSnapshotProvider: { snapshot })
         let context = AssistantContext(siteID: "site", siteDirectory: root)
 
-        for await _ in try await assistant.converse(prompt: "How does the Header work with the CTA?", context: context) {}
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(prompt: "How does the Header work with the CTA?", context: context) {
+            events.append(event)
+        }
 
         // Both blocks must be present in the single prompt sent to `base` — proving the content
         // search ran (it found the CTA excerpt) using the ORIGINAL question, not text mutated by
@@ -104,6 +125,16 @@ struct CombinedAugmentedAssistantTests {
         #expect(prompt?.contains("Facts about Header") == true)
         #expect(prompt?.contains("src/components/CTA.astro") == true)
         #expect(prompt?.contains("User request:\nHow does the Header work with the CTA?") == true)
+
+        // The decoy must NOT be promoted: its terms only exist in the graph decorator's own
+        // instruction text, never in the user's real question. If it shows up here, the content
+        // search ran against a polluted query.
+        #expect(prompt?.contains("DepNotes.astro") == false)
+        let citationEvents = events.compactMap { event -> [RetrievedCitation]? in
+            if case .citations(let citations) = event { return citations }
+            return nil
+        }
+        #expect(citationEvents.flatMap { $0 }.contains { $0.path == "src/components/DepNotes.astro" } == false)
     }
 
     @Test("citations from both sources are merged into a single .citations event")
