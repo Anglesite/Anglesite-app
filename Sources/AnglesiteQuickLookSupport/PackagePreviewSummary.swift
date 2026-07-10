@@ -41,9 +41,18 @@ public struct PackagePreviewSummary: Sendable, Equatable {
         self.cachedThumbnailURL = cachedThumbnailURL
     }
 
-    /// Directories skipped when scanning `Source/` for the most recent modification time —
-    /// generated/vendored trees whose churn doesn't reflect the author's own edits.
-    private static let modificationScanExclusions: Set<String> = ["node_modules", ".git", "dist"]
+    /// Top-level directories skipped when scanning `Source/` for the most recent modification
+    /// time — generated/vendored trees whose churn doesn't reflect the author's own edits. `.git`
+    /// isn't listed here: `.skipsHiddenFiles` already excludes every dot-prefixed entry.
+    private static let modificationScanExclusions: Set<String> = ["node_modules", "dist"]
+
+    /// Upper bound on files inspected during the last-modified scan. Quick Look extensions run
+    /// under a short watchdog budget; an unbounded recursive walk of a site with a very large
+    /// `public/`/asset tree could time out the extension and produce no preview at all — worse
+    /// than the "not a readable site" fallback this module exists to avoid. Once the cap is hit,
+    /// `mostRecentModificationDate` returns the most recent date seen so far rather than scanning
+    /// further — an approximation, not a hard guarantee of the true most-recent file.
+    private static let modificationScanEntryCap = 5000
 
     /// Builds a summary from `package`. Throws `AnglesitePackage.PackageError` if the marker is
     /// missing or unreadable — callers treat that as "not a readable Anglesite site".
@@ -111,10 +120,18 @@ public struct PackagePreviewSummary: Sendable, Equatable {
             return nil
         }
         var mostRecent: Date?
+        var entriesScanned = 0
         for case let url as URL in enumerator {
-            if modificationScanExclusions.contains(url.lastPathComponent) {
+            // Only exclude *top-level* children of Source/ (enumerator.level == 1) — matching by
+            // bare name at any depth would also skip a legitimately-named nested directory (e.g.
+            // a content collection someone names "dist"), silently understating recency for it.
+            if enumerator.level == 1, modificationScanExclusions.contains(url.lastPathComponent) {
                 enumerator.skipDescendants()
                 continue
+            }
+            entriesScanned += 1
+            if entriesScanned > modificationScanEntryCap {
+                break
             }
             guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isDirectoryKey]),
                   values.isDirectory != true,

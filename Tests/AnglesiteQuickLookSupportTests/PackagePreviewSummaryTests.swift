@@ -87,7 +87,7 @@ struct PackagePreviewSummaryTests {
         #expect(withThumbnail.cachedThumbnailURL == pkg.quickLookThumbnailURL)
     }
 
-    @Test("node_modules and .git are excluded from the last-modified scan")
+    @Test("node_modules is excluded from the last-modified scan")
     func excludesGeneratedDirectoriesFromModificationScan() throws {
         let root = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -105,5 +105,48 @@ struct PackagePreviewSummaryTests {
         let summary = try PackagePreviewSummary.summarize(pkg)
         #expect(summary.sourceLastModified != nil)
         #expect(summary.sourceLastModified! < farFuture)
+    }
+
+    @Test("a nested directory that merely shares a name with an exclusion is still scanned")
+    func onlyExcludesTopLevelGeneratedDirectories() throws {
+        let root = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // A content collection literally named "dist" is not the generated build-output
+        // directory that lives at Source/dist — only the top-level one should be excluded.
+        let pkg = try makeFixturePackage(at: root, pageNames: ["index.astro"], collections: ["dist": ["a.md"]])
+
+        let nestedDistFile = pkg.sourceURL
+            .appendingPathComponent("src/content/dist/a.md", isDirectory: false)
+        let farFuture = Date(timeIntervalSinceNow: 60 * 60 * 24 * 365)
+        try FileManager.default.setAttributes([.modificationDate: farFuture], ofItemAtPath: nestedDistFile.path)
+
+        let summary = try PackagePreviewSummary.summarize(pkg)
+        #expect(summary.sourceLastModified == farFuture)
+    }
+
+    @Test("hidden files like .DS_Store don't inflate page or collection counts")
+    func hiddenFilesExcludedFromCounts() throws {
+        let root = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let pkg = try makeFixturePackage(
+            at: root,
+            pageNames: ["index.astro", "about.astro"],
+            collections: ["notes": ["a.md", "b.md"]]
+        )
+
+        let pagesURL = pkg.sourceURL.appendingPathComponent("src/pages", isDirectory: true)
+        FileManager.default.createFile(atPath: pagesURL.appendingPathComponent(".DS_Store").path, contents: Data())
+
+        let notesURL = pkg.sourceURL.appendingPathComponent("src/content/notes", isDirectory: true)
+        FileManager.default.createFile(atPath: notesURL.appendingPathComponent(".DS_Store").path, contents: Data())
+
+        let summary = try PackagePreviewSummary.summarize(pkg)
+
+        #expect(summary.pageCount == 2)
+        #expect(summary.collectionCounts == [
+            PackagePreviewSummary.CollectionCount(name: "notes", count: 2)
+        ])
     }
 }
