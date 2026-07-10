@@ -63,6 +63,41 @@ struct InboxSubmissionSyncTests {
         #expect(count == 0)
     }
 
+    @Test("pullAndCommitIfConfigured no-ops when only the account id is set")
+    func noOpsWithPartialConfigurationMissingNamespace() async throws {
+        let fm = FileManager.default
+        let configDir = fm.temporaryDirectory.appendingPathComponent("inbox-sync-config-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: configDir) }
+        try await SiteConfigStore(configDirectory: configDir).save(
+            SiteSettings(inboxCaptureAccountID: "acct1", inboxCaptureKVNamespaceID: nil))
+
+        let count = await InboxSubmissionSync.pullAndCommitIfConfigured(
+            siteDirectory: URL(fileURLWithPath: "/nonexistent"),
+            configDirectory: configDir,
+            secretStore: FakeSecretStore(token: "unused"))
+        #expect(count == 0)
+    }
+
+    @Test("pullAndCommitIfConfigured no-ops (with no network call) when both ids are set but no token is stored")
+    func noOpsWithBothIDsSetButNoToken() async throws {
+        let fm = FileManager.default
+        let configDir = fm.temporaryDirectory.appendingPathComponent("inbox-sync-config-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: configDir) }
+        try await SiteConfigStore(configDirectory: configDir).save(
+            SiteSettings(inboxCaptureAccountID: "acct1", inboxCaptureKVNamespaceID: "ns1"))
+
+        let count = await InboxSubmissionSync.pullAndCommitIfConfigured(
+            siteDirectory: URL(fileURLWithPath: "/nonexistent"),
+            configDirectory: configDir,
+            secretStore: FakeSecretStore(token: nil),
+            transport: { _ in
+                Issue.record("transport must not be called when no Cloudflare token is available")
+                struct UnexpectedNetworkCall: Error {}
+                throw UnexpectedNetworkCall()
+            })
+        #expect(count == 0)
+    }
+
     private static func makeThrowawayGitRepo() throws -> URL {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("inbox-sync-repo-\(UUID().uuidString)", isDirectory: true)
