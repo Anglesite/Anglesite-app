@@ -33,6 +33,59 @@ struct InboxKVClientTests {
         #expect(submissions.contains { $0.id == "def" && $0.subject == "Question" })
     }
 
+    @Test("follows result_info.cursor across pages when listing keys")
+    func followsCursorAcrossPages() async throws {
+        let page1 = Data("""
+        {"success": true, "result": [{"name": "inbox:abc"}], "result_info": {"count": 1, "cursor": "next-page-cursor"}}
+        """.utf8)
+        let page2 = Data("""
+        {"success": true, "result": [{"name": "inbox:def"}], "result_info": {"count": 1, "cursor": ""}}
+        """.utf8)
+        let submissionA = Data("""
+        {"id": "abc", "subject": "Hello", "from": "a@example.com", "message": "Hi there", "receivedAt": "2026-07-10T00:00:00Z"}
+        """.utf8)
+        let submissionB = Data("""
+        {"id": "def", "subject": "Question", "from": "b@example.com", "message": "How do I...", "receivedAt": "2026-07-10T00:01:00Z"}
+        """.utf8)
+
+        let client = InboxKVClient(accountID: "acct1", namespaceID: "ns1", apiToken: "token", transport: { request in
+            let query = request.url?.query ?? ""
+            if request.url!.path.hasSuffix("/keys") {
+                return query.contains("cursor=next-page-cursor") ? (page2, Self.response(200)) : (page1, Self.response(200))
+            }
+            if request.url!.path.hasSuffix("/values/inbox:abc") { return (submissionA, Self.response(200)) }
+            if request.url!.path.hasSuffix("/values/inbox:def") { return (submissionB, Self.response(200)) }
+            return (Data(), Self.response(404))
+        })
+
+        let submissions = try await client.listStagedSubmissions()
+        #expect(submissions.count == 2)
+        #expect(submissions.contains { $0.id == "abc" })
+        #expect(submissions.contains { $0.id == "def" })
+    }
+
+    @Test("a single page response with no cursor still works and does not loop forever")
+    func singlePageWithoutCursorWorks() async throws {
+        let keysBody = Data("""
+        {"success": true, "result": [{"name": "inbox:abc"}]}
+        """.utf8)
+        let submissionA = Data("""
+        {"id": "abc", "subject": "Hello", "from": "a@example.com", "message": "Hi there", "receivedAt": "2026-07-10T00:00:00Z"}
+        """.utf8)
+
+        let client = InboxKVClient(accountID: "acct1", namespaceID: "ns1", apiToken: "token", transport: { request in
+            if request.url!.path.hasSuffix("/keys") { return (keysBody, Self.response(200)) }
+            if request.url!.path.hasSuffix("/values/inbox:abc") { return (submissionA, Self.response(200)) }
+            return (Data(), Self.response(404))
+        })
+
+        let submissions = try await client.listStagedSubmissions()
+        #expect(submissions == [
+            InboxKVClient.Submission(id: "abc", subject: "Hello", from: "a@example.com", message: "Hi there",
+                                      receivedAt: "2026-07-10T00:00:00Z")
+        ])
+    }
+
     @Test("skips a key whose value fails to decode instead of failing the whole pull")
     func skipsMalformedEntries() async throws {
         let keysBody = Data("""
