@@ -2,6 +2,11 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
+// Serialized: `pullsCommitsAndDeletes` spawns real `git` subprocesses via raw `Process()` (not
+// `ProcessSupervisor`) in `makeThrowawayGitRepo()`. See the identical note on
+// `InboxSubmissionCommitterTests` — running these concurrently with the rest of the suite's own
+// subprocess-heavy tests appears to trip a rare native heap-corruption crash in CI.
+@Suite(.serialized)
 struct InboxSubmissionSyncTests {
     private static func response(_ status: Int) -> HTTPURLResponse {
         HTTPURLResponse(url: URL(string: "https://api.cloudflare.com/")!, statusCode: status,

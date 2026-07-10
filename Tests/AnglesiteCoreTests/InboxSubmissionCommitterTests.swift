@@ -2,6 +2,14 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
+// Serialized: several tests here spawn real `git` subprocesses via raw `Process()` (not
+// `ProcessSupervisor`) in `makeThrowawayGitRepo()`. Running many of these concurrently, stacked
+// on top of the rest of the suite's own subprocess-spawning tests, appears to trip a rare
+// native heap-corruption crash ("freed pointer was not the last allocation") in CI — reproduced
+// consistently across several runs. Matches the `.serialized` precedent already used elsewhere
+// in this file's sibling suites (e.g. AuditCommandCancellationTests) for subprocess/timing-
+// sensitive tests.
+@Suite(.serialized)
 struct InboxSubmissionCommitterTests {
     private static let submission = InboxKVClient.Submission(
         id: "abcdef1234567890", subject: "Hello, World!", from: "visitor@example.com",
