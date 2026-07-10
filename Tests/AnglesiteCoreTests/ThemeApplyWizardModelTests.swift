@@ -3,7 +3,41 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
-@Suite struct ThemeApplyWizardModelTests {
+/// Stub `URLProtocol` that returns a canned status/body for every request, so the
+/// freedesignmd branch of `ThemeApplyWizardModel` can be exercised without a real network
+/// call. Mirrors `FreedesignmdStubURLProtocol` in FreedesignmdCatalogTests.swift, kept
+/// separate/private here to avoid cross-file coupling on a `private` type.
+private final class WizardFreedesignmdStubURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var statusCode = 200
+    nonisolated(unsafe) static var body = ""
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: Self.statusCode,
+            httpVersion: "HTTP/1.1",
+            headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(Self.body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    static func makeSession() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [WizardFreedesignmdStubURLProtocol.self]
+        return URLSession(configuration: config)
+    }
+}
+
+// .serialized: the freedesignmd tests share WizardFreedesignmdStubURLProtocol's mutable
+// static status/body, which would race under Swift Testing's default parallel execution.
+@Suite(.serialized) struct ThemeApplyWizardModelTests {
     private func makeSite() throws -> AnglesitePackage {
         let packageRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let stylesDir = packageRoot.appendingPathComponent("Source/src/styles")
@@ -59,5 +93,101 @@ import Foundation
         await model.advance()
         model.back()
         #expect(model.step == .pickSource)
+    }
+
+    // MARK: - Fix 1: apply() must not leave applyResult nil when there's nothing to apply
+
+    @Test @MainActor func applyFailsExplicitlyWhenBuiltInSelectionMissing() async {
+        let model = ThemeApplyWizardModel(catalog: testCatalog, businessType: "bakery",
+                                          package: AnglesitePackage(url: FileManager.default.temporaryDirectory))
+        model.source = .builtIn
+        // No selectedBuiltInID set — simulate a caller reaching `.review` then clearing the
+        // selection and calling apply() directly, bypassing canContinue's advance() gate.
+        await model.apply()
+        #expect(model.step == .applying)
+        guard case .failure = model.applyResult else {
+            Issue.record("expected apply() to surface a failure, not leave applyResult nil")
+            return
+        }
+    }
+
+    @Test @MainActor func applyFailsExplicitlyWhenFreedesignmdSelectionMissing() async {
+        let model = ThemeApplyWizardModel(catalog: testCatalog, businessType: "bakery",
+                                          package: AnglesitePackage(url: FileManager.default.temporaryDirectory))
+        model.source = .freedesignmd
+        // No selectedFreedesignmdSlug set.
+        await model.apply()
+        #expect(model.step == .applying)
+        guard case .failure = model.applyResult else {
+            Issue.record("expected apply() to surface a failure, not leave applyResult nil")
+            return
+        }
+    }
+
+    @Test @MainActor func applyFailsExplicitlyWhenSourceMissing() async {
+        let model = ThemeApplyWizardModel(catalog: testCatalog, businessType: "bakery",
+                                          package: AnglesitePackage(url: FileManager.default.temporaryDirectory))
+        // source is nil.
+        await model.apply()
+        guard case .failure = model.applyResult else {
+            Issue.record("expected apply() to surface a failure, not leave applyResult nil")
+            return
+        }
+    }
+
+    // MARK: - Fix 2: freedesignmd branch coverage
+
+    private let sampleListHTML = """
+    <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BreadcrumbList"},{"@type":"CollectionPage","mainEntity":{"@type":"ItemList","numberOfItems":2,"itemListElement":[{"@type":"ListItem","position":1,"url":"https://freedesignmd.com/system/linear-orbit","name":"Linear Orbit"},{"@type":"ListItem","position":2,"url":"https://freedesignmd.com/system/vinyl-noir","name":"Vinyl Noir"}]}}]}</script>
+    """
+
+    private let sampleDetailHTML = """
+    <meta name="description" content="Hairline-thin product workspace."/>
+    """
+
+    @Test @MainActor func picksFreedesignmdFlowAndPopulatesCandidates() async throws {
+        WizardFreedesignmdStubURLProtocol.statusCode = 200
+        WizardFreedesignmdStubURLProtocol.body = sampleListHTML
+        let session = WizardFreedesignmdStubURLProtocol.makeSession()
+        let package = try makeSite()
+        let model = ThemeApplyWizardModel(catalog: testCatalog, businessType: "bakery", package: package,
+                                          session: session)
+        model.source = .freedesignmd
+        await model.advance() // pickSource -> browseFreedesignmd, loads candidates
+        #expect(model.step == .browseFreedesignmd)
+        #expect(model.fetchError == nil)
+        #expect(model.freedesignmdCandidates.map(\.slug) == ["linear-orbit", "vinyl-noir"])
+    }
+
+    @Test @MainActor func loadFreedesignmdCandidatesSetsFetchErrorOnHTTPFailure() async {
+        WizardFreedesignmdStubURLProtocol.statusCode = 500
+        WizardFreedesignmdStubURLProtocol.body = "server error"
+        let session = WizardFreedesignmdStubURLProtocol.makeSession()
+        let model = ThemeApplyWizardModel(catalog: testCatalog, businessType: "bakery",
+                                          package: AnglesitePackage(url: FileManager.default.temporaryDirectory),
+                                          session: session)
+        model.source = .freedesignmd
+        await model.advance() // pickSource -> browseFreedesignmd, load fails
+        #expect(model.step == .browseFreedesignmd)
+        #expect(model.freedesignmdCandidates.isEmpty)
+        #expect(model.fetchError != nil)
+    }
+
+    @Test @MainActor func appliesFreedesignmdSelection() async throws {
+        WizardFreedesignmdStubURLProtocol.statusCode = 200
+        WizardFreedesignmdStubURLProtocol.body = sampleDetailHTML
+        let session = WizardFreedesignmdStubURLProtocol.makeSession()
+        let package = try makeSite()
+        let model = ThemeApplyWizardModel(catalog: testCatalog, businessType: "bakery", package: package,
+                                          session: session)
+        model.source = .freedesignmd
+        model.selectedFreedesignmdSlug = "linear-orbit"
+        model.step = .review
+        await model.apply()
+        #expect(model.step == .applying)
+        guard case .success(let applied) = model.applyResult else {
+            Issue.record("expected success"); return
+        }
+        #expect(applied.writtenFiles.isEmpty == false)
     }
 }

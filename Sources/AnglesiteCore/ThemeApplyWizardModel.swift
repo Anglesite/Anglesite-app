@@ -23,11 +23,15 @@ public final class ThemeApplyWizardModel: Identifiable {
 
     private let catalog: ThemeCatalog
     private let package: AnglesitePackage
+    private let session: URLSession
 
-    public init(catalog: ThemeCatalog, businessType: String, package: AnglesitePackage) {
+    public init(
+        catalog: ThemeCatalog, businessType: String, package: AnglesitePackage, session: URLSession = .shared
+    ) {
         self.catalog = catalog
         self.businessType = businessType
         self.package = package
+        self.session = session
     }
 
     public var selectedBuiltInTheme: Theme? {
@@ -67,7 +71,7 @@ public final class ThemeApplyWizardModel: Identifiable {
 
     private func loadFreedesignmdCandidates() async {
         do {
-            let all = try await FreedesignmdCatalog.fetchSystemList()
+            let all = try await FreedesignmdCatalog.fetchSystemList(session: session)
             freedesignmdCandidates = Array(FreedesignmdCatalog.rank(all, byKeywordsIn: businessType).prefix(10))
         } catch {
             fetchError = "Couldn't reach freedesignmd.com — \((error as NSError).localizedDescription)"
@@ -78,7 +82,10 @@ public final class ThemeApplyWizardModel: Identifiable {
         step = .applying
         switch source {
         case .builtIn:
-            guard let theme = selectedBuiltInTheme else { return }
+            guard let theme = selectedBuiltInTheme else {
+                applyResult = .failure(.writeFailed(message: "No theme selected to apply.", partiallyWritten: []))
+                return
+            }
             let input = DesignApplyInput(
                 cssVars: DesignTokenWriter.templateCSSVars(for: theme),
                 rationaleMarkdown: nil,
@@ -87,8 +94,11 @@ public final class ThemeApplyWizardModel: Identifiable {
             )
             applyResult = DesignApplyService.apply(input, to: package)
         case .freedesignmd:
-            guard let slug = selectedFreedesignmdSlug else { return }
-            let description = (try? await FreedesignmdCatalog.fetchDescription(slug: slug)) ?? nil
+            guard let slug = selectedFreedesignmdSlug else {
+                applyResult = .failure(.writeFailed(message: "No design system selected to apply.", partiallyWritten: []))
+                return
+            }
+            let description = (try? await FreedesignmdCatalog.fetchDescription(slug: slug, session: session)) ?? nil
             // freedesignmd's per-system CSS-token translation (mapping a fetched DESIGN.md's
             // described tokens onto the template's 12 vars) is deliberately stubbed to `[:]` —
             // see the plan's Task 8/9 note. This flow currently only records the description as
@@ -101,7 +111,7 @@ public final class ThemeApplyWizardModel: Identifiable {
             )
             applyResult = DesignApplyService.apply(input, to: package)
         case nil:
-            return
+            applyResult = .failure(.writeFailed(message: "No design source selected to apply.", partiallyWritten: []))
         }
     }
 }
