@@ -21,7 +21,7 @@ public final class ThemeApplyWizardModel: Identifiable {
     public internal(set) var applyResult: Result<AppliedDesign, DesignApplyError>?
     public internal(set) var fetchError: String?
 
-    private let catalog: ThemeCatalog
+    public let catalog: ThemeCatalog
     private let package: AnglesitePackage
     private let session: URLSession
 
