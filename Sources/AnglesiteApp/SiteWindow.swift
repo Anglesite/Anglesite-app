@@ -564,6 +564,9 @@ struct SiteWindow: View {
         .sheet(item: $bindableModel.copyEditModel) { reportModel in
             CopyEditReportView(model: reportModel)
         }
+        .sheet(item: $bindableModel.socialPlanModel) { planModel in
+            SocialPlanView(model: planModel)
+        }
         .sheet(item: $bindableModel.integrationWizardModel) { wizardModel in
             NavigationStack {
                 IntegrationWizard(model: wizardModel, onClose: { model.integrationWizardModel = nil })

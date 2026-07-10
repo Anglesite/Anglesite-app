@@ -85,6 +85,9 @@ final class SiteWindowModel {
     /// Built fresh each time (`presentCopyEdit`) with a new `ProjectConventionsStore` scoped to
     /// this site's `configDirectory` — the store is a stateless, file-backed actor (Task 10, #465).
     var copyEditModel: CopyEditReportModel?
+    /// Non-nil ⟺ the Social Media Plan sheet is presented (`.sheet(item:)`), same coupling and
+    /// fresh-`ProjectConventionsStore` pattern as `copyEditModel` (Task 13, #465).
+    var socialPlanModel: SocialPlanModel?
     /// The window's `UndoManager`, published down from `SiteWindow`'s
     /// `@Environment(\.undoManager)` so applied edits register for Edit ▸ Undo (#527). Weak +
     /// `@ObservationIgnored`: the window owns it and it isn't render state. Forwarded on set
@@ -257,6 +260,18 @@ final class SiteWindowModel {
         )
     }
 
+    var canOpenSocialPlan: Bool { site != nil }
+
+    /// Presents the Social Media Plan sheet (#465), same pattern as `presentCopyEdit`.
+    func presentSocialPlan() {
+        guard socialPlanModel == nil, let site else { return }
+        socialPlanModel = SocialPlanModel(
+            siteID: site.id,
+            sourceDirectory: site.sourceDirectory,
+            conventionsStore: ProjectConventionsStore(configDirectory: site.configDirectory)
+        )
+    }
+
     /// The `.failed`-state pane's Retry button — same recovery as Site ▸ Start Dev Server (#515),
     /// kept as one code path rather than two that could drift.
     func retryPreview() {
@@ -295,6 +310,7 @@ final class SiteWindowModel {
         chat = nil
         styleGuide = nil
         copyEditModel = nil
+        socialPlanModel = nil
         navigator?.stop()
         navigator = nil
         graphExplorer.stop()

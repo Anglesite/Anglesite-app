@@ -44,3 +44,16 @@ public enum SiteBusinessType {
         return SiteConfigFile.value(forKey: "BUSINESS_TYPE", in: contents)
     }
 }
+
+/// Reads display values from `Source/.site-config`, falling back sensibly.
+public enum SiteConfigValues {
+    public static func siteName(sourceDirectory: URL) -> String? {
+        let url = sourceDirectory.appendingPathComponent(".site-config")
+        if let contents = try? String(contentsOf: url, encoding: .utf8),
+           let name = SiteConfigFile.value(forKey: "SITE_NAME", in: contents), !name.isEmpty {
+            return name
+        }
+        let dirName = sourceDirectory.lastPathComponent
+        return dirName.isEmpty ? nil : dirName
+    }
+}

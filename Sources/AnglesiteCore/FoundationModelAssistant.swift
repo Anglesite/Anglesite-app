@@ -58,6 +58,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private let conventionsEngine: ProjectConventionsEngine?
     private let conventionsStore: ProjectConventionsStore?
     private let copyEditAuditor: (any CopyEditAuditing)?
+    private let socialMediaPlanner: (any SocialMediaPlanning)?
     private let logger = Logger(subsystem: "io.dwk.anglesite", category: "FoundationModelAssistant")
     /// The current conversational turn's consumer-facing ``TurnRelay``, retained so ``cancel()`` can
     /// wind it down. Cancelling stops *delivery* only — it never cancels the model stream, because
@@ -96,6 +97,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         conventionsEngine: ProjectConventionsEngine? = nil,
         conventionsStore: ProjectConventionsStore? = nil,
         copyEditAuditor: (any CopyEditAuditing)? = nil,
+        socialMediaPlanner: (any SocialMediaPlanning)? = nil,
         maxRetainedTurns: Int = 12
     ) {
         self.tier = tier
@@ -107,6 +109,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         self.conventionsEngine = conventionsEngine
         self.conventionsStore = conventionsStore
         self.copyEditAuditor = copyEditAuditor
+        self.socialMediaPlanner = socialMediaPlanner
         // `trimSessionIfNeeded`'s cutoff indexing (`promptIndices.count - maxRetainedTurns`) assumes
         // at least 1: `<= 0` would index at or past the end of `promptIndices` and crash. Clamp
         // rather than crash so a caller passing e.g. `0` ("keep no history") degrades to the
@@ -332,7 +335,8 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// `SpotlightSearchTool`; the edit/search pair is added only when both deps are present;
     /// `SetupIntegrationTool` is added when an `integrationService` is provided; `SaveBrandVoiceTool`
     /// is added when both a `conventionsEngine` and a `conventionsStore` are provided;
-    /// `ReviewCopyTool` is added when a `copyEditAuditor` is provided.
+    /// `ReviewCopyTool` is added when a `copyEditAuditor` is provided. `PlanSocialMediaTool` is
+    /// added when a `socialMediaPlanner` is provided.
     private var attachedToolNames: [String] {
         var names = [Self.spotlightToolDisplayName]
         if editBridge != nil && contentGraph != nil {
@@ -351,6 +355,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         }
         if copyEditAuditor != nil {
             names.append(ReviewCopyTool.toolName)
+        }
+        if socialMediaPlanner != nil {
+            names.append(PlanSocialMediaTool.toolName)
         }
         return names
     }
@@ -435,6 +442,11 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         if let copyEditAuditor {
             tools.append(ReviewCopyTool(
                 auditor: copyEditAuditor, conventionsStore: conventionsStore,
+                siteID: context.siteID, siteDirectory: context.siteDirectory))
+        }
+        if let socialMediaPlanner {
+            tools.append(PlanSocialMediaTool(
+                planner: socialMediaPlanner, conventionsStore: conventionsStore,
                 siteID: context.siteID, siteDirectory: context.siteDirectory))
         }
         return tools

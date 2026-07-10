@@ -48,6 +48,9 @@ struct SiteMenuCommands: Commands {
             Button("Review Copy…") { model?.presentCopyEdit() }
                 .disabled(model?.canOpenCopyEdit != true)
 
+            Button("Social Media Plan…") { model?.presentSocialPlan() }
+                .disabled(model?.canOpenSocialPlan != true)
+
             #if !ANGLESITE_MAS
             // Same identity swap as the toolbar: menus rebuild on every open, so a state-dependent
             // item is fine here (unlike the customizable toolbar, see #519).
