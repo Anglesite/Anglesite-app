@@ -200,6 +200,19 @@ private struct SiteGraphCanvas: View {
                     ContentUnavailableView("No matching graph nodes", systemImage: "point.3.connected.trianglepath.dotted")
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                if SiteGraphMiniMapGeometry.shouldShow(nodeCount: nodes.count) {
+                    SiteGraphMiniMap(
+                        nodes: nodes,
+                        edges: edges,
+                        positions: positions,
+                        canvasSize: proxy.size,
+                        selectedNodeID: selectedNodeID,
+                        onSelect: onSelect
+                    )
+                    .padding(12)
+                }
+            }
         }
     }
 
@@ -224,6 +237,60 @@ private struct SiteGraphCanvas: View {
         case .referencesAsset: return .green.opacity(0.5)
         case .contains: return .orange.opacity(0.45)
         }
+    }
+}
+
+/// Scaled-down overview of the whole visible graph (#613), overlaid bottom-trailing on the main
+/// canvas once the node count crosses `SiteGraphMiniMapGeometry.nodeCountThreshold`. Nodes render
+/// as kind-tinted dots and edges as hairlines at the same relative positions as the main canvas;
+/// clicking selects the nearest node there. No viewport rectangle yet — the main canvas has no
+/// pan/zoom to reflect (see #613's "if/when" note).
+private struct SiteGraphMiniMap: View {
+    let nodes: [SiteGraphNode]
+    let edges: [SiteGraphEdge]
+    let positions: [String: CGPoint]
+    let canvasSize: CGSize
+    let selectedNodeID: String?
+    let onSelect: (String) -> Void
+
+    private static let size = CGSize(width: 180, height: 120)
+
+    var body: some View {
+        let miniPositions = positions.mapValues {
+            SiteGraphMiniMapGeometry.scaledPoint($0, from: canvasSize, to: Self.size)
+        }
+        Canvas { context, _ in
+            for edge in edges {
+                guard let start = miniPositions[edge.sourceID], let end = miniPositions[edge.targetID] else { continue }
+                var path = Path()
+                path.move(to: start)
+                path.addLine(to: end)
+                context.stroke(path, with: .color(.secondary.opacity(0.25)), lineWidth: 0.5)
+            }
+            for node in nodes {
+                guard let point = miniPositions[node.id] else { continue }
+                let selected = node.id == selectedNodeID
+                let radius: CGFloat = selected ? 3.5 : 2
+                context.fill(
+                    Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)),
+                    with: .color(selected ? Color.accentColor : node.kind.tint.opacity(0.9))
+                )
+            }
+        }
+        .frame(width: Self.size.width, height: Self.size.height)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+        }
+        .onTapGesture { location in
+            if let id = SiteGraphMiniMapGeometry.nearestNodeID(to: location, positions: miniPositions) {
+                onSelect(id)
+            }
+        }
+        .accessibilityLabel("Site graph overview")
+        .accessibilityHint("Click to select the nearest node")
+        .help("Overview of the whole graph — click to jump to a node")
     }
 }
 

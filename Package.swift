@@ -173,7 +173,10 @@ packageTargets.append(
         dependencies: ["AnglesiteCore", "AnglesiteBridge", "AnglesiteIntents"],
         path: "Sources/AnglesiteApp",
         exclude: ["AnglesiteApp.swift", "LiveSiteRuntimeFactory.swift"],
-        swiftSettings: strictConcurrency + [.define("ANGLESITE_MAS")]
+        // #541: ChatView.swift imports FoundationModels, so without this its object code embeds a
+        // hard `-framework FoundationModels` autolink hint that overrides the test bundle's
+        // weak-link flag below (same mechanism as AnglesiteCore's setting).
+        swiftSettings: strictConcurrency + [.define("ANGLESITE_MAS")] + disableFoundationModelsAutolink
     )
 )
 packageTargets.append(
@@ -181,7 +184,8 @@ packageTargets.append(
         name: "AnglesiteAppTests",
         dependencies: ["AnglesiteAppCore", "AnglesiteTestSupport"],
         path: "Tests/AnglesiteAppTests",
-        swiftSettings: strictConcurrency
+        swiftSettings: strictConcurrency,
+        linkerSettings: weakLinkFoundationModels
     )
 )
 packageTargets.append(
