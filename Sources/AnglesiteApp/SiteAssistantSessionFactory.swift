@@ -61,7 +61,8 @@ enum SiteAssistantSessionFactory {
                         semanticRanker: semanticRanker,
                         integrationService: integrationService,
                         conventionsEngine: conventionsEngine,
-                        conventionsStore: conventionsStore
+                        conventionsStore: conventionsStore,
+                        copyEditAuditor: CopyEditAuditorFactory.makeDefault()
                     ),
                     index: knowledgeIndex
                 )

@@ -57,6 +57,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private let integrationService: (any IntegrationOperationsService)?
     private let conventionsEngine: ProjectConventionsEngine?
     private let conventionsStore: ProjectConventionsStore?
+    private let copyEditAuditor: (any CopyEditAuditing)?
     private let logger = Logger(subsystem: "io.dwk.anglesite", category: "FoundationModelAssistant")
     /// The current conversational turn's consumer-facing ``TurnRelay``, retained so ``cancel()`` can
     /// wind it down. Cancelling stops *delivery* only — it never cancels the model stream, because
@@ -94,6 +95,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         integrationService: (any IntegrationOperationsService)? = nil,
         conventionsEngine: ProjectConventionsEngine? = nil,
         conventionsStore: ProjectConventionsStore? = nil,
+        copyEditAuditor: (any CopyEditAuditing)? = nil,
         maxRetainedTurns: Int = 12
     ) {
         self.tier = tier
@@ -104,6 +106,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         self.integrationService = integrationService
         self.conventionsEngine = conventionsEngine
         self.conventionsStore = conventionsStore
+        self.copyEditAuditor = copyEditAuditor
         // `trimSessionIfNeeded`'s cutoff indexing (`promptIndices.count - maxRetainedTurns`) assumes
         // at least 1: `<= 0` would index at or past the end of `promptIndices` and crash. Clamp
         // rather than crash so a caller passing e.g. `0` ("keep no history") degrades to the
@@ -328,7 +331,8 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// reflect what's wired. Never empty — the conversational session always carries
     /// `SpotlightSearchTool`; the edit/search pair is added only when both deps are present;
     /// `SetupIntegrationTool` is added when an `integrationService` is provided; `SaveBrandVoiceTool`
-    /// is added when both a `conventionsEngine` and a `conventionsStore` are provided.
+    /// is added when both a `conventionsEngine` and a `conventionsStore` are provided;
+    /// `ReviewCopyTool` is added when a `copyEditAuditor` is provided.
     private var attachedToolNames: [String] {
         var names = [Self.spotlightToolDisplayName]
         if editBridge != nil && contentGraph != nil {
@@ -344,6 +348,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         }
         if conventionsEngine != nil, conventionsStore != nil {
             names.append(SaveBrandVoiceTool.toolName)
+        }
+        if copyEditAuditor != nil {
+            names.append(ReviewCopyTool.toolName)
         }
         return names
     }
@@ -424,6 +431,11 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         }
         if let conventionsEngine, let conventionsStore {
             tools.append(SaveBrandVoiceTool(engine: conventionsEngine, store: conventionsStore, siteID: context.siteID))
+        }
+        if let copyEditAuditor {
+            tools.append(ReviewCopyTool(
+                auditor: copyEditAuditor, conventionsStore: conventionsStore,
+                siteID: context.siteID, siteDirectory: context.siteDirectory))
         }
         return tools
     }
