@@ -1,54 +1,92 @@
 import Foundation
 
-/// Create/resolve wrapper around `URL.bookmarkData(options: .withSecurityScope, ...)`.
+/// Portable seam for macOS App Sandbox security-scoped bookmarks (cross-platform port design,
+/// docs/superpowers/specs/2026-07-08-cross-platform-swift-port-design.md §5), mirroring the
+/// `SecretStore`/`SiteFileWatching` seams: portable protocol + per-platform implementations,
+/// `#if` guards confined to `Platform/`.
 ///
-/// MAS-only at runtime: the sandboxed app persists one bookmark per site (on
-/// `SiteStore.Site.bookmarkData`), resolves it at window-open time, and holds the grant via
-/// `startAccessingSecurityScopedResource()` for the window's lifetime so the directly-spawned
-/// Node/Astro/wrangler children inherit folder access. Nothing crosses a process boundary —
-/// the app is the sole grant holder (see docs/specs/2026-05-27-sandboxed-app-store-plan.md,
-/// "ARCHITECTURE PIVOT").
-public enum SecurityScopedBookmark {
-    public struct Resolved: Sendable, Equatable {
-        public let url: URL
-        public let isStale: Bool
-    }
-
-    public enum BookmarkError: Error, Sendable {
-        case createFailed(String)
-        case resolveFailed(String)
-    }
-
+/// Implementations: `DarwinSecurityScopedBookmark` (macOS App Sandbox, backed by
+/// `URL.bookmarkData(options: .withSecurityScope, ...)`). Non-Darwin platforms have no App
+/// Sandbox equivalent, so `UnavailableSecurityScopedBookmark` is used — create/resolve always
+/// fail and start/stop grant nothing, matching how callers already treat "no grant" as an
+/// ordinary, user-facing failure (see `SiteAccess`).
+public protocol SecurityScopedBookmarking: Sendable {
     /// Create a security-scoped bookmark for `url`. The caller must have access at create time
     /// (typically: the URL just returned from `NSOpenPanel`).
-    public static func create(for url: URL) throws -> Data {
-        do {
-            return try url.bookmarkData(
-                options: .withSecurityScope,
-                includingResourceValuesForKeys: nil,
-                relativeTo: nil
-            )
-        } catch {
-            throw BookmarkError.createFailed(error.localizedDescription)
-        }
+    func create(for url: URL) throws -> Data
+
+    /// Resolve a previously-created bookmark. The caller must `startAccessing` the returned URL
+    /// before use and `stopAccessing` when done. A `true` `isStale` means the caller should
+    /// re-`create` a fresh bookmark (after starting access) and persist it.
+    func resolve(_ data: Data) throws -> SecurityScopedBookmarkResolution
+
+    /// Starts access to a resolved scoped resource. Returns whether access was granted.
+    @discardableResult
+    func startAccessing(_ url: URL) -> Bool
+
+    /// Stops access previously granted by `startAccessing`.
+    func stopAccessing(_ url: URL)
+}
+
+public struct SecurityScopedBookmarkResolution: Sendable, Equatable {
+    public let url: URL
+    public let isStale: Bool
+
+    public init(url: URL, isStale: Bool) {
+        self.url = url
+        self.isStale = isStale
+    }
+}
+
+public enum SecurityScopedBookmarkError: Error, Sendable {
+    case createFailed(String)
+    case resolveFailed(String)
+}
+
+/// Placeholder for platforms without App Sandbox bookmarks (Linux/Windows). `create`/`resolve`
+/// always fail; `startAccessing` always reports no access granted — features degrade
+/// capability-flagged, never by pretending a grant exists.
+public struct UnavailableSecurityScopedBookmark: SecurityScopedBookmarking {
+    public init() {}
+
+    public func create(for url: URL) throws -> Data {
+        throw SecurityScopedBookmarkError.createFailed("Security-scoped bookmarks are unavailable on this platform.")
     }
 
-    /// Resolve a previously-created bookmark. The caller must
-    /// `startAccessingSecurityScopedResource()` on the returned URL before use and
-    /// `stopAccessingSecurityScopedResource()` when done. A `true` `isStale` means the caller
-    /// should re-`create` a fresh bookmark (after starting access) and persist it.
-    public static func resolve(_ data: Data) throws -> Resolved {
-        var isStale = false
-        do {
-            let url = try URL(
-                resolvingBookmarkData: data,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
-            return Resolved(url: url, isStale: isStale)
-        } catch {
-            throw BookmarkError.resolveFailed(error.localizedDescription)
-        }
+    public func resolve(_ data: Data) throws -> SecurityScopedBookmarkResolution {
+        throw SecurityScopedBookmarkError.resolveFailed("Security-scoped bookmarks are unavailable on this platform.")
+    }
+
+    public func startAccessing(_ url: URL) -> Bool { false }
+
+    public func stopAccessing(_ url: URL) {}
+}
+
+/// Composition-root factory for the platform's default bookmark implementation. Call sites in
+/// the portable core depend on `any SecurityScopedBookmarking` and use this only as their
+/// production default; tests inject fakes directly.
+public enum PlatformSecurityScopedBookmark {
+    public static func make() -> any SecurityScopedBookmarking {
+        #if canImport(Darwin)
+        DarwinSecurityScopedBookmark()
+        #else
+        UnavailableSecurityScopedBookmark()
+        #endif
+    }
+}
+
+/// Static facade over the platform's default bookmark implementation, kept for the app target's
+/// existing MAS-only call sites (`SiteWindowModel`, `SitesLauncherView`, `SiteActions`), which
+/// call `SecurityScopedBookmark.create`/`.resolve` directly and are Darwin-only regardless.
+public enum SecurityScopedBookmark {
+    public typealias Resolved = SecurityScopedBookmarkResolution
+    public typealias BookmarkError = SecurityScopedBookmarkError
+
+    public static func create(for url: URL) throws -> Data {
+        try PlatformSecurityScopedBookmark.make().create(for: url)
+    }
+
+    public static func resolve(_ data: Data) throws -> SecurityScopedBookmarkResolution {
+        try PlatformSecurityScopedBookmark.make().resolve(data)
     }
 }
