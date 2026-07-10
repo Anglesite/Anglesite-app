@@ -21,7 +21,7 @@ public struct AppliedDesign: Sendable, Equatable {
 public enum DesignApplyError: Error, Sendable, Equatable {
     case missingGlobalCSS
     case missingRootBlock
-    case writeFailed(String)
+    case writeFailed(message: String, partiallyWritten: [String])
 }
 
 /// The single writer for applying a design to a site's `Source/` directory — shared by the
@@ -64,7 +64,7 @@ public enum DesignApplyService {
             try (existingBrand + entry).write(to: brandURL, atomically: true, encoding: .utf8)
             written.append(brandRelativePath)
         } catch {
-            return .failure(.writeFailed((error as NSError).localizedDescription))
+            return .failure(.writeFailed(message: (error as NSError).localizedDescription, partiallyWritten: written))
         }
 
         return .success(AppliedDesign(updatedVars: input.cssVars, writtenFiles: written))

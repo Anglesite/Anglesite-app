@@ -84,4 +84,71 @@ import Foundation
         let result = DesignApplyService.apply(input, to: dir)
         guard case .failure(.missingGlobalCSS) = result else { Issue.record("expected .missingGlobalCSS"); return }
     }
+
+    @Test func failsWithMissingRootBlockWhenGlobalCSSHasNoRoot() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let stylesDir = dir.appendingPathComponent("src/styles")
+        try FileManager.default.createDirectory(at: stylesDir, withIntermediateDirectories: true)
+        let css = "* { box-sizing: border-box; }\n"
+        try css.write(to: stylesDir.appendingPathComponent("global.css"), atomically: true, encoding: .utf8)
+
+        let input = DesignApplyInput(cssVars: ["color-primary": "#fff"], rationaleMarkdown: nil, brandSummary: "x", sourceLabel: "x")
+        let result = DesignApplyService.apply(input, to: dir)
+        guard case .failure(.missingRootBlock) = result else { Issue.record("expected .missingRootBlock"); return }
+    }
+
+    @Test func appendsBrandSummaryAcrossMultipleApplies() throws {
+        let dir = try makeSite()
+        let firstInput = DesignApplyInput(cssVars: [:], rationaleMarkdown: nil, brandSummary: "First brand summary.", sourceLabel: "Built-in theme: Warm")
+        _ = DesignApplyService.apply(firstInput, to: dir)
+        let secondInput = DesignApplyInput(cssVars: [:], rationaleMarkdown: nil, brandSummary: "Second brand summary.", sourceLabel: "Built-in theme: Cool")
+        _ = DesignApplyService.apply(secondInput, to: dir)
+
+        let brand = try String(contentsOf: dir.appendingPathComponent("docs/brand.md"), encoding: .utf8)
+        #expect(brand.contains("Built-in theme: Warm"))
+        #expect(brand.contains("First brand summary."))
+        #expect(brand.contains("Built-in theme: Cool"))
+        #expect(brand.contains("Second brand summary."))
+    }
+
+    /// A `FileManager` subclass that fails `createDirectory` once a target path matches a
+    /// given substring, used to force a partial-write failure partway through `apply`.
+    private final class FailingFileManager: FileManager, @unchecked Sendable {
+        let failingPathSubstring: String
+
+        init(failingPathSubstring: String) {
+            self.failingPathSubstring = failingPathSubstring
+            super.init()
+        }
+
+        override func createDirectory(
+            at url: URL,
+            withIntermediateDirectories createIntermediates: Bool,
+            attributes: [FileAttributeKey: Any]? = nil
+        ) throws {
+            if url.path.contains(failingPathSubstring) {
+                throw NSError(domain: "DesignApplyServiceTests", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "forced failure creating \(url.path)",
+                ])
+            }
+            try super.createDirectory(at: url, withIntermediateDirectories: createIntermediates, attributes: attributes)
+        }
+    }
+
+    @Test func writeFailureAfterGlobalCSSReportsPartiallyWrittenFiles() throws {
+        let dir = try makeSite()
+        let failingManager = FailingFileManager(failingPathSubstring: "docs")
+        let input = DesignApplyInput(cssVars: ["color-primary": "#ff0000"], rationaleMarkdown: nil,
+                                     brandSummary: "A test brand.", sourceLabel: "Test")
+        let result = DesignApplyService.apply(input, to: dir, fileManager: failingManager)
+
+        guard case .failure(.writeFailed(_, let partiallyWritten)) = result else {
+            Issue.record("expected .writeFailed"); return
+        }
+        #expect(partiallyWritten == ["src/styles/global.css"])
+
+        // The CSS write itself succeeded on disk even though the overall apply failed.
+        let css = try String(contentsOf: dir.appendingPathComponent("src/styles/global.css"), encoding: .utf8)
+        #expect(css.contains("--color-primary: #ff0000;"))
+    }
 }
