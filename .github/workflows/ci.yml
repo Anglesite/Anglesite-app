@@ -71,7 +71,13 @@ jobs:
         run: swift test -c debug --parallel
 
   build-test:
-    runs-on: macos-15
+    # macos-26, not macos-15: the macos-15 image's OS libswift_Concurrency (Swift 6.2.3-era,
+    # no assertions) carries a task-allocator bug (swiftlang/swift#86204 class) that crashed
+    # PR #644's test run 5/5 with "freed pointer was not the last allocation" — the trigger is
+    # an allocation pattern in the compiled binary, not any specific test, so any PR can trip
+    # it. macOS 26.4's runtime (Swift 6.3+) has the fix; verified by running #644's exact head
+    # green on macos-26 (PR #646) while it failed 5/5 on macos-15.
+    runs-on: macos-26
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -139,7 +145,10 @@ jobs:
 
   relay-tsan:
     name: Relay concurrency suites (ThreadSanitizer)
-    runs-on: macos-15
+    # macos-26 for the same OS-runtime reason as build-test: this lane runs Swift concurrency
+    # suites against the host's libswift_Concurrency, so it has the same exposure to the
+    # macos-15 image's Swift 6.2.x task-allocator bug.
+    runs-on: macos-26
     timeout-minutes: 15
     # The relay suites (TurnRelay/TextStreamRelay) have no plugin/Node dependency, so this lane
     # skips the sibling-plugin checkout. TSan deterministically flags data races the probabilistic
