@@ -1,0 +1,87 @@
+// Tests/AnglesiteCoreTests/DesignApplyServiceTests.swift
+import Testing
+import Foundation
+@testable import AnglesiteCore
+
+@Suite struct DesignApplyServiceTests {
+    private func makeSite() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let stylesDir = dir.appendingPathComponent("src/styles")
+        try FileManager.default.createDirectory(at: stylesDir, withIntermediateDirectories: true)
+        let css = """
+        :root {
+          --color-primary: #2563eb;
+          --color-accent: #f59e0b;
+          --font-heading: system-ui, -apple-system, sans-serif;
+        }
+
+        * { box-sizing: border-box; }
+        """
+        try css.write(to: stylesDir.appendingPathComponent("global.css"), atomically: true, encoding: .utf8)
+        return dir
+    }
+
+    @Test func updatesExistingVarsInRootBlock() throws {
+        let dir = try makeSite()
+        let input = DesignApplyInput(cssVars: ["color-primary": "#ff0000"], rationaleMarkdown: nil,
+                                     brandSummary: "A test brand.", sourceLabel: "Test")
+        let result = DesignApplyService.apply(input, to: dir)
+        guard case .success = result else { Issue.record("expected success"); return }
+        let css = try String(contentsOf: dir.appendingPathComponent("src/styles/global.css"), encoding: .utf8)
+        #expect(css.contains("--color-primary: #ff0000;"))
+        #expect(css.contains("--color-accent: #f59e0b;")) // untouched var preserved
+    }
+
+    @Test func addsNewVarsNotPreviouslyInRootBlock() throws {
+        let dir = try makeSite()
+        let input = DesignApplyInput(cssVars: ["color-surface": "#eeeeee"], rationaleMarkdown: nil,
+                                     brandSummary: "A test brand.", sourceLabel: "Test")
+        _ = DesignApplyService.apply(input, to: dir)
+        let css = try String(contentsOf: dir.appendingPathComponent("src/styles/global.css"), encoding: .utf8)
+        #expect(css.contains("--color-surface: #eeeeee;"))
+    }
+
+    @Test func preservesEverythingOutsideRootBlock() throws {
+        let dir = try makeSite()
+        let input = DesignApplyInput(cssVars: ["color-primary": "#ff0000"], rationaleMarkdown: nil,
+                                     brandSummary: "A test brand.", sourceLabel: "Test")
+        _ = DesignApplyService.apply(input, to: dir)
+        let css = try String(contentsOf: dir.appendingPathComponent("src/styles/global.css"), encoding: .utf8)
+        #expect(css.contains("* { box-sizing: border-box; }"))
+    }
+
+    @Test func writesRationaleWhenProvided() throws {
+        let dir = try makeSite()
+        let input = DesignApplyInput(cssVars: [:], rationaleMarkdown: "# Design", brandSummary: "A test brand.", sourceLabel: "Test")
+        let result = DesignApplyService.apply(input, to: dir)
+        guard case .success(let applied) = result else { Issue.record("expected success"); return }
+        #expect(applied.writtenFiles.contains("docs/DESIGN.md"))
+        let md = try String(contentsOf: dir.appendingPathComponent("docs/DESIGN.md"), encoding: .utf8)
+        #expect(md == "# Design")
+    }
+
+    @Test func skipsRationaleFileWhenNil() throws {
+        let dir = try makeSite()
+        let input = DesignApplyInput(cssVars: [:], rationaleMarkdown: nil, brandSummary: "A test brand.", sourceLabel: "Test")
+        guard case .success(let applied) = DesignApplyService.apply(input, to: dir) else { Issue.record("expected success"); return }
+        #expect(!applied.writtenFiles.contains("docs/DESIGN.md"))
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("docs/DESIGN.md").path))
+    }
+
+    @Test func appendsBrandSummaryToNewBrandMd() throws {
+        let dir = try makeSite()
+        let input = DesignApplyInput(cssVars: [:], rationaleMarkdown: nil, brandSummary: "A test brand.", sourceLabel: "Built-in theme: Warm")
+        _ = DesignApplyService.apply(input, to: dir)
+        let brand = try String(contentsOf: dir.appendingPathComponent("docs/brand.md"), encoding: .utf8)
+        #expect(brand.contains("Built-in theme: Warm"))
+        #expect(brand.contains("A test brand."))
+    }
+
+    @Test func failsWhenGlobalCSSMissing() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let input = DesignApplyInput(cssVars: ["color-primary": "#fff"], rationaleMarkdown: nil, brandSummary: "x", sourceLabel: "x")
+        let result = DesignApplyService.apply(input, to: dir)
+        guard case .failure(.missingGlobalCSS) = result else { Issue.record("expected .missingGlobalCSS"); return }
+    }
+}
