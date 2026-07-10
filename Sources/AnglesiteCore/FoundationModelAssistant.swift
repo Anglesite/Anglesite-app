@@ -25,24 +25,29 @@ public enum FoundationModelTier: String, Sendable, Equatable, CaseIterable {
     case privateCloudCompute = "privateCloudCompute"
 }
 
-/// Deterministic context-budget helpers, usable without `FoundationModels`. Per the 2026-07-10
-/// spike (see ``FoundationModelTier``'s doc comment), real PCC escalation is not yet wired up, so
-/// "escalation" here means the caller (e.g. the design-interview conversation) should chunk or
-/// summarize a prompt deterministically before it overruns the on-device context window — there
-/// is no larger-model request to make yet.
-public extension FoundationModelAssistant {
+/// Deterministic context-budget helpers, usable without `FoundationModels`. Declared as a
+/// standalone type (not an extension on ``FoundationModelAssistant``) because that actor is
+/// declared inside the `#if compiler(>=6.4)` gate below and is therefore unavailable at this
+/// point in the file on older toolchains — extending it here would break compilation on CI's
+/// pre-6.4 `swift test` runners (#128).
+///
+/// Per the 2026-07-10 spike (see ``FoundationModelTier``'s doc comment), real PCC escalation is
+/// not yet wired up, so "escalation" here means the caller (e.g. the design-interview
+/// conversation) should chunk or summarize a prompt deterministically before it overruns the
+/// on-device context window — there is no larger-model request to make yet.
+public enum FoundationModelContextBudget {
     /// Conservative characters-per-token proxy (~4 chars/token for English), matching the
     /// existing character-based approach in `maxPageContentCharacters` — no on-device tokenizer
     /// is available to measure the real count.
-    static let onDeviceTokenBudget = 4_096
+    public static let onDeviceTokenBudget = 4_096
     private static let charsPerTokenEstimate = 4
 
-    static func estimatedTokens(for text: String) -> Int {
+    public static func estimatedTokens(for text: String) -> Int {
         text.count / charsPerTokenEstimate
     }
 
     /// Whether a prompt is estimated to exceed the on-device context budget.
-    static func shouldEscalate(prompt: String) -> Bool {
+    public static func shouldEscalate(prompt: String) -> Bool {
         estimatedTokens(for: prompt) > onDeviceTokenBudget
     }
 }
