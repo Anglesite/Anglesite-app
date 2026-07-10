@@ -15,6 +15,10 @@ import FoundationModels
 /// v0.5; #25 follow-ups can introduce a richer renderer if needed).
 struct ChatView: View {
     @Bindable var model: ChatModel
+    /// Resolves a citation's path to a Site Graph Explorer node and reveals it there; returns
+    /// `false` when the path isn't a graph node, so the click falls back to opening the file
+    /// (#314). `nil` in previews/tests that don't wire a graph explorer.
+    var revealCitation: ((String) -> Bool)?
 
     /// Binds the prompt input. Lives in the view (not the model) because it's pure transient
     /// UI state; the model only sees the final string when the user hits Send.
@@ -94,7 +98,7 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(model.messages) { message in
-                        MessageRow(message: message, model: model)
+                        MessageRow(message: message, model: model, revealCitation: revealCitation)
                             .id(message.id)
                     }
                     if let error = model.lastError, !model.messages.contains(where: { $0.role == .error && $0.content == error }) {
@@ -247,6 +251,7 @@ private nonisolated(unsafe) let sharedRelativeTimeFormatter: RelativeDateTimeFor
 private struct MessageRow: View {
     let message: ChatModel.Message
     let model: ChatModel
+    var revealCitation: ((String) -> Bool)?
 
     var body: some View {
         if message.role == .edit {
@@ -255,7 +260,7 @@ private struct MessageRow: View {
             AnnotationRowView(message: message, model: model)
         } else if message.role == .citation {
             if let meta = message.citationMetadata {
-                CitationRowView(citations: meta.citations, siteDirectory: model.siteDirectoryURL)
+                CitationRowView(citations: meta.citations, siteDirectory: model.siteDirectoryURL, revealCitation: revealCitation)
             }
         } else {
             HStack {
