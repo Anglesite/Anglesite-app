@@ -29,6 +29,8 @@ struct ComponentEditorView: View {
     /// Each new picker value cancels the previous pending commit and restarts the delay, so only
     /// the settled value after the drag pauses actually commits.
     @State private var colorCommitTasks: [String: Task<Void, Never>] = [:]
+    /// Selector text for the inline "Add rule" form at the bottom of the Styles panel.
+    @State private var newRuleSelector: String = ""
 
     enum Mode: String, CaseIterable { case design = "Design", source = "Source" }
 
@@ -226,6 +228,20 @@ struct ComponentEditorView: View {
                         }
                     } else {
                         Text("No scoped styles").foregroundStyle(.secondary)
+                    }
+                    Divider()
+                    HStack {
+                        TextField("New selector, e.g. .card-footer", text: $newRuleSelector)
+                            .font(.system(.caption, design: .monospaced))
+                        Button("Add rule") {
+                            let selector = newRuleSelector.trimmingCharacters(in: .whitespaces)
+                            guard !selector.isEmpty else { return }
+                            Task {
+                                await model.addStyleRule(selector: selector, media: nil, declarations: [])
+                                newRuleSelector = ""
+                            }
+                        }
+                        .disabled(newRuleSelector.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
                 GroupBox("Computed") {
