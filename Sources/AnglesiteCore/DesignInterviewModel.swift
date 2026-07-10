@@ -60,6 +60,10 @@ public final class DesignInterviewModel: Identifiable {
             transcript.append((role: "assistant", text: "I couldn't respond just now — \(failureMessage)"))
             return
         }
+        guard !reply.isEmpty else {
+            transcript.append((role: "assistant", text: "The assistant didn't respond — try again."))
+            return
+        }
         transcript.append((role: "assistant", text: reply))
         draft.advance()
     }

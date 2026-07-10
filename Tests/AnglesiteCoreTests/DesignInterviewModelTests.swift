@@ -13,9 +13,14 @@ private actor FakeConversationalAssistant: ConversationalAssistant {
     /// When set, `converse` yields `.failed(message:)` instead of a successful reply — used to
     /// exercise `DesignInterviewModel.send(_:)`'s in-band-failure path.
     private let failureMessage: String?
+    /// When true, `converse` yields only `.started`/`.turnComplete` with no `.textDelta` in
+    /// between — used to exercise `DesignInterviewModel.send(_:)`'s empty-reply path (a terminal
+    /// event shape distinct from `.failed`/`.cancelled`).
+    private let emitsEmptyReply: Bool
 
-    init(failureMessage: String? = nil) {
+    init(failureMessage: String? = nil, emitsEmptyReply: Bool = false) {
         self.failureMessage = failureMessage
+        self.emitsEmptyReply = emitsEmptyReply
     }
 
     nonisolated var capabilities: AssistantCapabilities {
@@ -32,10 +37,13 @@ private actor FakeConversationalAssistant: ConversationalAssistant {
     #endif
     func converse(prompt: String, context: AssistantContext) async throws -> AsyncStream<AssistantEvent> {
         let failureMessage = failureMessage
+        let emitsEmptyReply = emitsEmptyReply
         return AsyncStream { continuation in
             continuation.yield(.started(model: "Fake", toolNames: []))
             if let failureMessage {
                 continuation.yield(.failed(message: failureMessage))
+            } else if emitsEmptyReply {
+                continuation.yield(.turnComplete(nil))
             } else {
                 continuation.yield(.textDelta("Got it."))
                 continuation.yield(.turnComplete(nil))
@@ -115,6 +123,21 @@ private actor FakeConversationalAssistant: ConversationalAssistant {
         }
         #expect(!lastAssistantTurn.text.isEmpty)
         #expect(lastAssistantTurn.text.contains("model unavailable"))
+    }
+
+    @Test @MainActor func sendOnEmptyReplyAppendsErrorAndDoesNotAdvanceStage() async throws {
+        let model = DesignInterviewModel(
+            businessType: "bakery",
+            assistant: FakeConversationalAssistant(emitsEmptyReply: true),
+            package: try makeSite())
+        #expect(model.draft.stage == .intent)
+        await model.send("It's a cozy neighborhood bakery.")
+        #expect(model.draft.stage == .intent, "stage must not advance when the assistant sends no text")
+        guard let lastAssistantTurn = model.transcript.last(where: { $0.role == "assistant" }) else {
+            Issue.record("expected an assistant transcript entry")
+            return
+        }
+        #expect(!lastAssistantTurn.text.isEmpty)
     }
 
     @Test @MainActor func sendAdvancesThroughAllStagesAcrossMultipleTurns() async throws {
