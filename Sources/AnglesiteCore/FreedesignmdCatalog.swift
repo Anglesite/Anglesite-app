@@ -44,6 +44,13 @@ public enum FreedesignmdCatalog {
         return ns.substring(with: match.range(at: 1))
     }
 
+    /// Fetches and parses the `/systems` catalog page's JSON-LD `ItemList`.
+    ///
+    /// - Important: As of 2026-07-10, the server-rendered `/systems` page's JSON-LD
+    ///   `itemListElement` only includes the first ~50 of the catalog's ~108 entries (per the
+    ///   JSON-LD's own `numberOfItems`); the remainder load via client-side pagination not
+    ///   present in this parse. This is a known constraint of the deterministic (non-LLM)
+    ///   parsing approach — callers should not assume completeness.
     public static func fetchSystemList(session: URLSession = .shared) async throws -> [FreedesignmdSystem] {
         let (data, response) = try await session.data(from: systemsURL)
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode,
