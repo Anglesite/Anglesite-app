@@ -105,10 +105,12 @@ struct AnglesiteLANHost {
         let nodeModules = siteDirectory.appendingPathComponent("node_modules", isDirectory: true)
         guard !FileManager.default.fileExists(atPath: nodeModules.path) else { return }
         print("anglesite-lan-host: installing dependencies in \(siteDirectory.path)…")
-        _ = try await ProcessSupervisor.shared.run(
+        let result = try await ProcessSupervisor.shared.run(
             executable: URL(fileURLWithPath: "/usr/bin/env"),
             arguments: ["npm", "install"],
             currentDirectoryURL: siteDirectory)
+        if !result.stdout.isEmpty { await LogCenter.shared.append(source: "npm-install", stream: .stdout, text: result.stdout) }
+        if !result.stderr.isEmpty { await LogCenter.shared.append(source: "npm-install", stream: .stderr, text: result.stderr) }
     }
 
     private static func streamLogs() async {
@@ -118,23 +120,34 @@ struct AnglesiteLANHost {
         }
     }
 
-    private static func waitForShutdownSignal() async {
+    // Retained for the process's lifetime: a `DispatchSourceSignal` isn't kept alive by the
+    // dispatch runtime once `.resume()` is called, so a local variable with no other strong
+    // reference is eligible for ARC deallocation as soon as `waitForShutdownSignal`'s setup
+    // closure returns — before either source could plausibly fire — which would silently
+    // reintroduce the "process doesn't respond to kill/Ctrl-C" bug these sources exist to fix.
+    @MainActor private static var sigintSource: DispatchSourceSignal?
+    @MainActor private static var sigtermSource: DispatchSourceSignal?
+
+    // Isolated to match the two properties above — both sources are scheduled on `.main` anyway.
+    @MainActor private static func waitForShutdownSignal() async {
         await withCheckedContinuation { continuation in
             // Use a no-op handler instead of SIG_IGN to avoid pulling in libswift_DarwinFoundation3
             // (which some macOS runners don't ship), making the process fail to load at dyld time.
             signal(SIGINT, { _ in })
-            let sigintSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
-            sigintSource.setEventHandler { continuation.resume() }
-            sigintSource.resume()
+            let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+            sigint.setEventHandler { continuation.resume() }
+            sigintSource = sigint
+            sigint.resume()
 
             // Also handle SIGTERM (the default signal from `kill`/launchd) the same way, so a
             // standing background process still runs `supervisor.shutdownAll()` instead of
             // dying immediately via the default disposition and orphaning the astro/node
             // children still holding the preview/MCP ports.
             signal(SIGTERM, { _ in })
-            let sigtermSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-            sigtermSource.setEventHandler { continuation.resume() }
-            sigtermSource.resume()
+            let sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+            sigterm.setEventHandler { continuation.resume() }
+            sigtermSource = sigterm
+            sigterm.resume()
         }
     }
 }
