@@ -23,6 +23,14 @@ struct AnglesitePackageTests {
         #expect(pkg.sourceURL.deletingLastPathComponent().path == pkgURL.path)
     }
 
+    @Test("quickLookThumbnailURL resolves under Config/")
+    func quickLookThumbnailURLResolves() throws {
+        let pkgURL = URL(fileURLWithPath: "/tmp/Acme.anglesite", isDirectory: true)
+        let pkg = AnglesitePackage(url: pkgURL)
+        #expect(pkg.quickLookThumbnailURL.lastPathComponent == "quicklook-thumbnail.png")
+        #expect(pkg.quickLookThumbnailURL.deletingLastPathComponent().path == pkg.configURL.path)
+    }
+
     @Test("marker written to Info.plist round-trips through read")
     func markerRoundTrips() throws {
         let dir = try makeTempDir()
