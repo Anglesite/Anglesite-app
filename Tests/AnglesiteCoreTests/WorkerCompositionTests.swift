@@ -86,4 +86,27 @@ struct WorkerCompositionTests {
         #expect(WorkerComposition.Feature.v3.contains(.micropub))
         #expect(WorkerComposition.Feature.v3.contains(.websub))
     }
+
+    @Test("inboxCaptureEnabled adds an INBOX_KV binding and uncomments main even with no @dwk/* features")
+    func inboxCaptureAddsKVBinding() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", features: [], inboxCaptureEnabled: true)
+        #expect(toml.contains("main = \"worker/worker.ts\""))
+        #expect(toml.contains("binding = \"INBOX_KV\""))
+        #expect(toml.contains("id = \"\"  # filled by provisioning"))
+    }
+
+    @Test("inboxCaptureEnabled fills the provisioned namespace id when given")
+    func inboxCaptureFillsProvisionedID() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", features: [], inboxCaptureEnabled: true, inboxKVNamespaceID: "abc123")
+        #expect(toml.contains("id = \"abc123\""))
+    }
+
+    @Test("inboxCaptureEnabled false omits the INBOX_KV binding")
+    func inboxCaptureDisabledOmitsBinding() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", features: [])
+        #expect(!toml.contains("INBOX_KV"))
+        #expect(!toml.contains("main ="))
+    }
 }
