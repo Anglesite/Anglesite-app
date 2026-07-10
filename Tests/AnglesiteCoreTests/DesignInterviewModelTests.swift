@@ -144,3 +144,26 @@ private actor FakeConversationalAssistant: ConversationalAssistant {
         #expect(model.draft.stage == .axisConfirmation, "stage must not become .done when apply fails")
     }
 }
+
+extension DesignInterviewModelTests {
+    @Test func applyingTurnReplyDeltasNudgesAxesAndCapturesBrandColor() {
+        var draft = DesignInterviewDraft(businessType: "bakery")
+        let before = draft.axes.temperature
+        DesignInterviewModel.applyTurnReplyDeltas(
+            temperature: 0.1, weight: nil, register: nil, time: nil, voice: nil,
+            brandColorHex: "#ff6600", to: &draft
+        )
+        #expect(draft.axes.temperature == before + 0.1)
+        #expect(draft.brandColorHex == "#ff6600")
+    }
+
+    @Test func applyingNilDeltasLeavesAxesUnchanged() {
+        var draft = DesignInterviewDraft(businessType: "bakery")
+        let before = draft.axes
+        DesignInterviewModel.applyTurnReplyDeltas(
+            temperature: nil, weight: nil, register: nil, time: nil, voice: nil,
+            brandColorHex: nil, to: &draft
+        )
+        #expect(draft.axes == before)
+    }
+}

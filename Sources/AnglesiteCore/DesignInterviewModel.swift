@@ -88,3 +88,45 @@ public final class DesignInterviewModel: Identifiable {
         }
     }
 }
+
+public extension DesignInterviewModel {
+    /// Applies a turn reply's optional per-axis deltas to `draft`, clamping via
+    /// `DesignAxesCatalog.adjusted`. Pure and toolchain-independent so it's testable without a
+    /// live FoundationModels session — the `@Generable` reply type that produces these values is
+    /// gated below.
+    nonisolated static func applyTurnReplyDeltas(
+        temperature: Double?, weight: Double?, register: Double?, time: Double?, voice: Double?,
+        brandColorHex: String?, to draft: inout DesignInterviewDraft
+    ) {
+        var deltas: [WritableKeyPath<DesignAxes, Double>: Double] = [:]
+        if let temperature { deltas[\.temperature] = temperature }
+        if let weight { deltas[\.weight] = weight }
+        if let register { deltas[\.register] = register }
+        if let time { deltas[\.time] = time }
+        if let voice { deltas[\.voice] = voice }
+        if !deltas.isEmpty { draft.axes = DesignAxesCatalog.adjusted(draft.axes, by: deltas) }
+        if let brandColorHex { draft.brandColorHex = brandColorHex }
+    }
+}
+
+#if compiler(>=6.4)
+import FoundationModels
+
+@Generable
+public struct DesignInterviewTurnReply: Sendable {
+    @Guide(description: "Your conversational reply to the owner, 1-2 sentences.")
+    public var replyText: String
+    @Guide(description: "Temperature axis change if the owner's message implies one, else omit.")
+    public var temperatureDelta: Double?
+    @Guide(description: "Weight axis change if the owner's message implies one, else omit.")
+    public var weightDelta: Double?
+    @Guide(description: "Register axis change if the owner's message implies one, else omit.")
+    public var registerDelta: Double?
+    @Guide(description: "Time axis change if the owner's message implies one, else omit.")
+    public var timeDelta: Double?
+    @Guide(description: "Voice axis change if the owner's message implies one, else omit.")
+    public var voiceDelta: Double?
+    @Guide(description: "Hex color if the owner mentioned a brand color, else omit.")
+    public var brandColorHex: String?
+}
+#endif
