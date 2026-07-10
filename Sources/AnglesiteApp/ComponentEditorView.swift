@@ -302,13 +302,27 @@ struct ComponentEditorView: View {
         decl: ComponentModel.Declaration
     ) -> some View {
         let key = spanKey(decl.span)
-        TextField("value", text: Binding(
+        let valueBinding = Binding(
             get: { valueDrafts[key] ?? decl.value },
             set: { valueDrafts[key] = $0 }
-        ))
-        .font(.system(.caption, design: .monospaced))
-        .textFieldStyle(.plain)
-        .onSubmit { commitDeclaration(model, rule: rule, decl: decl) }
+        )
+        HStack(spacing: 4) {
+            TextField("value", text: valueBinding)
+                .font(.system(.caption, design: .monospaced))
+                .textFieldStyle(.plain)
+                .onSubmit { commitDeclaration(model, rule: rule, decl: decl) }
+            if CSSColor.colorProperties.contains(decl.property),
+               let color = CSSColor.parse(valueBinding.wrappedValue) {
+                ColorPicker("", selection: Binding(
+                    get: { color },
+                    set: { newColor in
+                        valueDrafts[key] = CSSColor.format(newColor)
+                        commitDeclaration(model, rule: rule, decl: decl)
+                    }
+                ))
+                .labelsHidden()
+            }
+        }
     }
 
     private func commitSelector(_ model: ComponentEditorModel, rule: ComponentModel.StyleRule) {
