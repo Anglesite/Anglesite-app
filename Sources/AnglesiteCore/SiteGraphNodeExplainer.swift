@@ -37,12 +37,12 @@ public enum SiteGraphExplainPrompt {
     /// on-device model's small context window; the remainder is summarized as "and N more".
     public static let maxListedNames = 12
 
-    public static func prompt(
+    static func facts(
         node: SiteGraphNode,
         impact: ImpactAnalysis.Report,
         dependsOn: [SiteGraphNode],
         referencedBy: [SiteGraphNode]
-    ) -> String {
+    ) -> [String] {
         // A neighbor reachable through several edge kinds (e.g. both `imports` and `usesLayout`)
         // arrives once per edge — list it once, or the capped fact list fills with duplicates.
         let uniqueDependsOn = deduplicated(dependsOn)
@@ -58,7 +58,16 @@ public enum SiteGraphExplainPrompt {
             facts.append("- Referenced by: \(nameList(uniqueReferencedBy, withKinds: true))")
         }
         facts.append(contentsOf: impactFacts(impact))
+        return facts
+    }
 
+    public static func prompt(
+        node: SiteGraphNode,
+        impact: ImpactAnalysis.Report,
+        dependsOn: [SiteGraphNode],
+        referencedBy: [SiteGraphNode]
+    ) -> String {
+        let factLines = facts(node: node, impact: impact, dependsOn: dependsOn, referencedBy: referencedBy)
         return """
         You are explaining one file in a static website's dependency graph to the site's owner, \
         who is not a developer. Using only the facts below, write a short plain-language \
@@ -67,7 +76,7 @@ public enum SiteGraphExplainPrompt {
         list — synthesize them.
 
         Facts:
-        \(facts.joined(separator: "\n"))
+        \(factLines.joined(separator: "\n"))
         """
     }
 
