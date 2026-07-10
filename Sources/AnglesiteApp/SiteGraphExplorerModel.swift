@@ -2,21 +2,47 @@ import Foundation
 import Observation
 import AnglesiteCore
 
+/// Lifecycle of the AI explanation for the selected node (#614). `unavailable` is deliberately
+/// distinct from `failed`: the on-device model being off (Apple Intelligence disabled, model not
+/// downloaded) is an expected state with a user-facing remedy, not an error — and per the LLM
+/// policy it must surface as such rather than silently falling back to any cloud call.
+enum SiteGraphExplainState: Equatable {
+    case idle
+    /// Streaming in progress; the associated text grows as chunks arrive (empty until the first).
+    case generating(String)
+    case complete(String)
+    case unavailable(String)
+    case failed(String)
+}
+
 @MainActor
 @Observable
 final class SiteGraphExplorerModel {
     private(set) var snapshot = SiteGraphExplorerSnapshot(nodes: [], edges: [])
-    var selectedNodeID: String?
+    var selectedNodeID: String? {
+        didSet {
+            // A new selection invalidates the previous node's explanation — reset instead of
+            // showing stale prose (or a stale error) under the new node's inspector.
+            if oldValue != selectedNodeID { resetExplain() }
+        }
+    }
     var searchText = ""
     var enabledKinds = Set(SiteGraphNodeKind.allCases)
+    private(set) var explainState: SiteGraphExplainState = .idle
 
     private let graph: SiteContentGraph
+    private let explainer: (any SiteGraphNodeExplaining)?
     private var observeTask: Task<Void, Never>?
+    private var explainTask: Task<Void, Never>?
     private var siteID: String?
     private var sourceDirectory: URL?
 
-    init(graph: SiteContentGraph) {
+    init(
+        graph: SiteContentGraph,
+        explainer: (any SiteGraphNodeExplaining)? = SiteGraphExplainerFactory.makeDefault()
+    ) {
         self.graph = graph
+        self.explainer = explainer
     }
 
     var filteredNodes: [SiteGraphNode] {
@@ -138,6 +164,64 @@ final class SiteGraphExplorerModel {
     func node(id: String) -> SiteGraphNode? {
         snapshot.nodes.first { $0.id == id }
     }
+
+    // MARK: AI explanation (#614)
+
+    /// Whether the Explain action can run: a backend exists on this toolchain *and* a node is
+    /// selected. Runtime unavailability (Apple Intelligence off) is not gated here — the action
+    /// stays offered and resolves to ``SiteGraphExplainState/unavailable(_:)``, which tells the
+    /// user how to fix it.
+    var canExplain: Bool {
+        explainer != nil && selectedNode != nil
+    }
+
+    /// Streams an on-device AI explanation of the selected node into ``explainState``, grounded
+    /// in the node's edges and its ``ImpactAnalysis.Report`` (never a free-form guess about the
+    /// site). Neighbors are read from the *full* snapshot, matching `selectedImpact` — facts must
+    /// not shrink because a kind is toggled off in the toolbar.
+    func explainSelectedNode() {
+        guard let explainer, let node = selectedNode, let impact = selectedImpact,
+              let siteID, let sourceDirectory else { return }
+        explainTask?.cancel()
+        let prompt = SiteGraphExplainPrompt.prompt(
+            node: node,
+            impact: impact,
+            dependsOn: snapshot.edges.filter { $0.sourceID == node.id }.compactMap { self.node(id: $0.targetID) },
+            referencedBy: snapshot.edges.filter { $0.targetID == node.id }.compactMap { self.node(id: $0.sourceID) }
+        )
+        explainState = .generating("")
+        explainTask = Task { [explainer] in
+            do {
+                var text = ""
+                let stream = try await explainer.explain(prompt: prompt, siteID: siteID, siteDirectory: sourceDirectory)
+                for try await chunk in stream {
+                    if Task.isCancelled { return }
+                    text += chunk
+                    explainState = .generating(text)
+                }
+                guard !Task.isCancelled else { return }
+                explainState = .complete(text)
+            } catch AssistantError.unavailable(let message) {
+                guard !Task.isCancelled else { return }
+                explainState = .unavailable(message)
+            } catch {
+                guard !Task.isCancelled else { return }
+                explainState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Cancels delivery of an in-flight explanation and clears the state. Only consumption stops —
+    /// an underlying FoundationModels stream is never cancelled mid-iteration (that traps the
+    /// process); its detached drain finishes harmlessly, matching `FoundationModelAssistant`.
+    private func resetExplain() {
+        explainTask?.cancel()
+        explainTask = nil
+        explainState = .idle
+    }
+
+    /// Test-only: the in-flight explain task, so tests can await completion deterministically.
+    var explainTaskForTesting: Task<Void, Never>? { explainTask }
 
     private func refresh(siteID: String, sourceDirectory: URL) async {
         let pages = await graph.pages(for: siteID)

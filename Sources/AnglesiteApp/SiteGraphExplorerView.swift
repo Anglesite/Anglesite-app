@@ -365,6 +365,10 @@ private struct SiteGraphInspector: View {
                             Divider()
                             SiteGraphImpactSection(impact: impact, model: model)
                         }
+                        if model.canExplain {
+                            Divider()
+                            SiteGraphExplainSection(model: model)
+                        }
                         Divider()
                         SiteGraphEdgeList(
                             title: "Depends On",
@@ -387,6 +391,72 @@ private struct SiteGraphInspector: View {
             }
         }
         .background(Color(NSColor.controlBackgroundColor))
+    }
+}
+
+/// AI explanation of the selected node (#614): a plain-language synthesis of the structured
+/// Impact Analysis above it, generated on-device by Apple Intelligence (never a network call —
+/// see the LLM policy under #459). Runtime unavailability renders as guidance, not an error.
+private struct SiteGraphExplainSection: View {
+    @Bindable var model: SiteGraphExplorerModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Explain", systemImage: "sparkles")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+            switch model.explainState {
+            case .idle:
+                Button("Explain This Node", systemImage: "sparkles") {
+                    model.explainSelectedNode()
+                }
+                .buttonStyle(.bordered)
+                Text("Uses on-device Apple Intelligence. Nothing leaves your Mac.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .generating(let text):
+                if text.isEmpty {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Thinking…")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    explanationText(text)
+                }
+            case .complete(let text):
+                explanationText(text)
+                Button("Regenerate", systemImage: "arrow.clockwise") {
+                    model.explainSelectedNode()
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            case .unavailable(let message):
+                Label(message, systemImage: "info.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            case .failed(let message):
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Button("Try Again", systemImage: "arrow.clockwise") {
+                    model.explainSelectedNode()
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("AI explanation")
+    }
+
+    private func explanationText(_ text: String) -> some View {
+        Text(text)
+            .font(.callout)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
