@@ -255,23 +255,20 @@ if includeContainer {
 // Cross-platform port, phase 1 "purity" (docs/superpowers/specs/2026-07-08-cross-platform-
 // swift-port-design.md §10): off-Darwin, expose only the targets that actually compile
 // there, so `swift build && swift test` stays green on the Linux CI leg and the compiler is
-// the purity lint as seam PRs expand the portable set. Today that's AnglesiteSiteModel
-// and AnglesiteQuickLookSupport (both pure Foundation). The FoundationModels/NaturalLanguage/
-// SwiftUI/SecretStore/SiteFileWatching seams are done (all gated behind `canImport`), but
-// AnglesiteCore still doesn't compile off-Darwin: SecurityScopedBookmark.swift/SiteStore.swift
-// (security-scoped bookmarks), BundleSync.swift/EditUndoCoordinator.swift (NSFileCoordinator/
-// UndoManager), HTTPTransport.swift/MCPClient.swift/PlistDocumentIO.swift (URLSession.bytes(for:)
-// + CFGetTypeID, absent from FoundationNetworking/CoreFoundation on Linux), and
-// VsockTCPProxy.swift (a Glibc socket-type mismatch) are the remaining seams. ANGLESITE_PORT_WIP=1
-// opts AnglesiteCore back into the manifest so in-flight seam work can compile-check it locally
-// before the final purity PR (once all of the above are gated/ported) flips it on unconditionally.
+// the purity lint as seam PRs expand the portable set. AnglesiteSiteModel and
+// AnglesiteQuickLookSupport (both pure Foundation) were first; AnglesiteCore joined once its
+// Apple-only imports (FoundationModels, OSLog, Security, NSFileCoordinator, UndoManager,
+// URLSession.bytes(for:), CFGetTypeID, security-scoped bookmarks, vsock proxies, …) all grew
+// Platform/ seams or #if canImport gates (#566) — ANGLESITE_PORT_WIP no longer needs to opt it
+// back in. AnglesiteCoreTests is not yet in this set: its test files aren't purity-swept.
 // Filtering by name here (rather than duplicating target definitions in per-platform
 // lists) keeps the single source of truth above.
 #if !canImport(Darwin)
-var portableTargets: Set<String> = ["AnglesiteSiteModel", "AnglesiteSiteModelTests", "AnglesiteQuickLookSupport", "AnglesiteQuickLookSupportTests"]
-if ProcessInfo.processInfo.environment["ANGLESITE_PORT_WIP"] == "1" {
-    portableTargets.insert("AnglesiteCore")
-}
+let portableTargets: Set<String> = [
+    "AnglesiteSiteModel", "AnglesiteSiteModelTests",
+    "AnglesiteQuickLookSupport", "AnglesiteQuickLookSupportTests",
+    "AnglesiteCore",
+]
 packageTargets.removeAll { !portableTargets.contains($0.name) }
 // Every library product above is named after its single target, so the same name set
 // filters products. (The container probe executable breaks that convention, but it is
