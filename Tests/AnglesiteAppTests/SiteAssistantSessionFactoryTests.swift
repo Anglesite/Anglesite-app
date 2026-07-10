@@ -27,7 +27,7 @@ struct SiteAssistantSessionFactoryTests {
         )
         let capture = SnapshotCapture()
         var dependencies = SiteAssistantSessionFactory.Dependencies.live
-        dependencies.assistant = { _, _, _, _, _, graphSnapshotProvider in
+        dependencies.assistant = { _, _, _, _, _, _, graphSnapshotProvider in
             Task {
                 let snapshot = await graphSnapshotProvider()
                 await capture.capture(snapshot)

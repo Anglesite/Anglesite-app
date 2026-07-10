@@ -22,6 +22,7 @@ enum SiteAssistantSessionFactory {
         _ knowledgeIndex: SiteKnowledgeIndex,
         _ semanticRanker: SemanticRanker?,
         _ integrationService: any IntegrationOperationsService,
+        _ themeCatalog: ThemeCatalog?,
         _ graphSnapshotProvider: @escaping GraphSnapshotProvider
     ) -> any ConversationalAssistant
 
@@ -51,7 +52,7 @@ enum SiteAssistantSessionFactory {
             let editRouterProvider: EditRouterProvider = { siteID in
                 await EditRouterRegistry.shared.router(for: siteID)
             }
-            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, graphSnapshotProvider in
+            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, themeCatalog, graphSnapshotProvider in
                 CombinedAugmentedAssistant(
                     base: FoundationModelAssistant(
                         tier: .onDevice,
@@ -59,7 +60,8 @@ enum SiteAssistantSessionFactory {
                         contentGraph: contentGraph,
                         knowledgeIndex: knowledgeIndex,
                         semanticRanker: semanticRanker,
-                        integrationService: integrationService
+                        integrationService: integrationService,
+                        themeCatalog: themeCatalog
                     ),
                     index: knowledgeIndex,
                     graphSnapshotProvider: graphSnapshotProvider
@@ -118,6 +120,7 @@ enum SiteAssistantSessionFactory {
         semanticRanker: SemanticRanker?,
         conventionsEngine: ProjectConventionsEngine?,
         integrationService: any IntegrationOperationsService,
+        themeCatalog: ThemeCatalog? = nil,
         dependencies: Dependencies = .live,
         graphSnapshotProvider: @escaping GraphSnapshotProvider
     ) -> SiteAssistantSession {
@@ -132,6 +135,7 @@ enum SiteAssistantSessionFactory {
                 knowledgeIndex,
                 semanticRanker,
                 integrationService,
+                themeCatalog,
                 graphSnapshotProvider
             ),
             annotationFeed: dependencies.annotationFeed(sourceDirectory),

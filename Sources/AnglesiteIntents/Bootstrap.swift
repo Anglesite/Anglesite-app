@@ -63,6 +63,22 @@ public enum AnglesiteIntents {
         AppDependencyManager.shared.add { () -> any DomainOperationsService in
             DomainOperations()
         }
+        // `ApplyThemeIntent` (ThemeIntents.swift) resolves `@Dependency private var catalog:
+        // ThemeCatalog` against whatever is registered here. `ThemeCatalog.load` parses the
+        // bundled template's scripts/themes.ts and can throw (missing/unreadable template),
+        // so — matching `SitesLauncherView.presentNewSite()`'s handling of the same call —
+        // fall back to an empty catalog rather than letting bootstrap throw or the intent trap
+        // on an unregistered dependency. `perform()` already has a "I don't recognize that
+        // theme" reply path for an empty/mismatched catalog.
+        let themeResolution = TemplateRuntime.resolve()
+        let themeCatalog: ThemeCatalog
+        if let templateURL = themeResolution.url, let loaded = try? ThemeCatalog.load(templateURL: templateURL) {
+            themeCatalog = loaded
+        } else {
+            log.error("ThemeCatalog load failed at bootstrap; ApplyThemeIntent will report no themes available")
+            themeCatalog = ThemeCatalog(themes: [])
+        }
+        AppDependencyManager.shared.add { () -> ThemeCatalog in themeCatalog }
         // `EditContentIntent` (B.5 / #149) routes natural-language edits through
         // `IntentEditBridge`, which asks `EditRouterRegistry.shared` for the live edit router of
         // the requested site. The registry is populated by `PreviewModel.open()` and cleared by
