@@ -76,7 +76,13 @@ export function validateInboxFields(fields: Record<string, string>): InboxFields
 /** True (and records the hit) once `ip` has submitted `RATE_LIMIT_MAX_PER_WINDOW` times within
  *  the current hour-long window. A simple KV counter, not a sliding window — good enough for a
  *  single-owner-site abuse gate; Cloudflare's own Rate Limiting Rules remain the escalation path
- *  for anything more sophisticated. */
+ *  for anything more sophisticated.
+ *
+ *  The get-then-put below is NOT atomic: two concurrent requests from the same IP can both read
+ *  the same stale count before either write lands, so both get admitted, and Workers KV's
+ *  eventual consistency (writes can take up to ~60s to propagate globally) makes this worse under
+ *  a distributed burst. This makes the cap soft/best-effort — enough to deter casual abuse — not
+ *  a hard guarantee; a true hard limit would need an atomic counter (e.g. a Durable Object). */
 export async function isRateLimited(kv: InboxKV, ip: string): Promise<boolean> {
   const key = `ratelimit:${ip}`;
   const raw = await kv.get(key);
