@@ -94,4 +94,33 @@ struct LANHostServerTests {
             try LANHostServer.resolvePluginServerPath(explicit: missing.path, environment: [:])
         }
     }
+
+    // MARK: - astroDevArguments / mcpSidecarEnvironment
+
+    @Test("astro dev arguments bind the configured LAN host and port")
+    func astroArguments() {
+        let args = LANHostServer.astroDevArguments(bindHost: "0.0.0.0", previewPort: 4321)
+        #expect(args == ["astro", "dev", "--port", "4321", "--host", "0.0.0.0"])
+    }
+
+    @Test("mcp sidecar environment sets host/port/project root, omits bearer token by default")
+    func mcpEnvironmentDefault() {
+        let projectRoot = URL(fileURLWithPath: "/tmp/site")
+        let env = LANHostServer.mcpSidecarEnvironment(
+            bindHost: "0.0.0.0", mcpPort: 4399, projectRoot: projectRoot, bearerToken: nil)
+        #expect(env == [
+            "ANGLESITE_MCP_TRANSPORT": "http",
+            "ANGLESITE_MCP_PORT": "4399",
+            "ANGLESITE_MCP_HOST": "0.0.0.0",
+            "ANGLESITE_PROJECT_ROOT": "/tmp/site"
+        ])
+    }
+
+    @Test("mcp sidecar environment includes the bearer token when configured")
+    func mcpEnvironmentWithToken() {
+        let projectRoot = URL(fileURLWithPath: "/tmp/site")
+        let env = LANHostServer.mcpSidecarEnvironment(
+            bindHost: "0.0.0.0", mcpPort: 4399, projectRoot: projectRoot, bearerToken: "secret")
+        #expect(env["ANGLESITE_MCP_BEARER_TOKEN"] == "secret")
+    }
 }

@@ -72,4 +72,33 @@ public enum LANHostServer {
         }
         return serverDir
     }
+
+    /// `astro dev` CLI arguments for the LAN-bound host invocation — mirrors the container
+    /// guest's `npx astro dev --port 4321 --host 127.0.0.1`
+    /// (`Sources/AnglesiteContainer/ContainerizationControl.swift`), swapping the guest's
+    /// loopback-only bind for the configured LAN `bindHost`.
+    public static func astroDevArguments(bindHost: String, previewPort: Int) -> [String] {
+        ["astro", "dev", "--port", String(previewPort), "--host", bindHost]
+    }
+
+    /// Environment for the MCP sidecar (`node <pluginServerPath>/index.mjs`). Mirrors the
+    /// container guest's env exactly (`ANGLESITE_MCP_TRANSPORT=http`, `ANGLESITE_MCP_PORT=4399`)
+    /// except `ANGLESITE_MCP_HOST`, which the guest leaves unset (defaulting to 127.0.0.1,
+    /// correct for its own loopback vsock bridge) but the LAN host must set explicitly to bind
+    /// beyond loopback. `bearerToken` is optional forward-compat plumbing for #601 §2's "auth
+    /// parity with the sandbox path" checkbox — nil by default (trusted-LAN, single-owner).
+    public static func mcpSidecarEnvironment(
+        bindHost: String, mcpPort: Int, projectRoot: URL, bearerToken: String?
+    ) -> [String: String] {
+        var env = [
+            "ANGLESITE_MCP_TRANSPORT": "http",
+            "ANGLESITE_MCP_PORT": String(mcpPort),
+            "ANGLESITE_MCP_HOST": bindHost,
+            "ANGLESITE_PROJECT_ROOT": projectRoot.path
+        ]
+        if let bearerToken {
+            env["ANGLESITE_MCP_BEARER_TOKEN"] = bearerToken
+        }
+        return env
+    }
 }
