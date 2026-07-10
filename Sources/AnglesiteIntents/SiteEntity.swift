@@ -20,7 +20,11 @@ public struct SiteEntity: Sendable {
 
     /// The original display name used by `displayRepresentation` and `SiteEntityQuery`.
     public var displayName: String { name }
-    // App-internal, not a schema property; nil only if AppIntents ever builds via the macro init.
+    /// The `.anglesite` **package root** (`SiteStore.Site.packageURL`) — NOT the `Source/` git
+    /// repo. Scaffolding, file scans, and git ops must not use this URL directly: derive
+    /// `AnglesitePackage(url:).sourceURL` from it (see `ApplyThemeIntent`), or resolve the site
+    /// by `id` via `SiteStore`/`SiteAccess.withScopedAccess`, which hands back `sourceDirectory`.
+    /// App-internal, not a schema property; nil only if AppIntents ever builds via the macro init.
     public var directory: URL?
 
     public var displayRepresentation: DisplayRepresentation {
