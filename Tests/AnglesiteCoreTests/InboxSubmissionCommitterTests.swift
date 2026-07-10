@@ -21,10 +21,10 @@ struct InboxSubmissionCommitterTests {
 
     @Test("markdocContent matches the inbox collection's frontmatter schema")
     func markdocFormat() {
-        let content = InboxSubmissionCommitter.markdocContent(for: Self.submission, slug: "hello-world-abcdef12")
+        let content = InboxSubmissionCommitter.markdocContent(for: Self.submission)
         #expect(content == """
         ---
-        subject: "hello-world-abcdef12"
+        subject: "Hello, World!"
         from: "visitor@example.com"
         receivedDate: 2026-07-10
         status: new
@@ -37,8 +37,16 @@ struct InboxSubmissionCommitterTests {
     func markdocEscapesFrom() {
         let submission = InboxKVClient.Submission(
             id: "12345678", subject: "Hi", from: "\"Evil\" Corp", message: "hi", receivedAt: "2026-07-10T00:00:00Z")
-        let content = InboxSubmissionCommitter.markdocContent(for: submission, slug: "hi-12345678")
+        let content = InboxSubmissionCommitter.markdocContent(for: submission)
         #expect(content.contains("from: \"\\\"Evil\\\" Corp\""))
+    }
+
+    @Test("markdocContent escapes double quotes in the subject field")
+    func markdocEscapesSubject() {
+        let submission = InboxKVClient.Submission(
+            id: "12345678", subject: "Say \"hi\"", from: "a@example.com", message: "hi", receivedAt: "2026-07-10T00:00:00Z")
+        let content = InboxSubmissionCommitter.markdocContent(for: submission)
+        #expect(content.contains("subject: \"Say \\\"hi\\\"\""))
     }
 
     @Test("commit writes each submission and returns their ids on a successful commit")
@@ -57,6 +65,22 @@ struct InboxSubmissionCommitterTests {
     func commitEmptyIsNoOp() async {
         let ids = await InboxSubmissionCommitter.commit(
             submissions: [], into: URL(fileURLWithPath: "/nonexistent"))
+        #expect(ids.isEmpty)
+    }
+
+    @Test("commit returns an empty array (not a throw) when the git commit closure fails")
+    func commitReturnsEmptyOnGitCommitFailure() async throws {
+        // No real git repo needed: commit() writes the markdown file to disk before invoking
+        // gitCommitBatch, and this stub short-circuits the real git subprocess entirely.
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent(
+            "inbox-commit-fail-test-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let ids = await InboxSubmissionCommitter.commit(
+            submissions: [Self.submission], into: dir,
+            gitCommitBatch: { _, _, _ in nil })
         #expect(ids.isEmpty)
     }
 

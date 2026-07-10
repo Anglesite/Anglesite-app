@@ -11,8 +11,8 @@ import Foundation
 public enum InboxSubmissionCommitter {
     /// A URL/filename-safe slug derived from the subject, suffixed with the first 8 characters
     /// of the submission id to avoid collisions between two submissions with the same subject
-    /// text. This value becomes both the filename and the `subject` frontmatter field (the
-    /// collection's `slugField`).
+    /// text. This value becomes the `<slug>.md` filename only — Keystatic's `fields.slug`
+    /// serializer writes the human-entered subject text, not this slug, into frontmatter.
     public static func slug(for submission: InboxKVClient.Submission) -> String {
         let lowered = submission.subject.lowercased()
         let sluggedScalars = lowered.unicodeScalars.map { scalar -> Character in
@@ -27,14 +27,16 @@ public enum InboxSubmissionCommitter {
     }
 
     /// Keystatic frontmatter + Markdoc body for one submission, matching the `inbox` collection's
-    /// schema: `subject` (the slug field's value), `from`, `receivedDate` (YYYY-MM-DD), `status`
+    /// schema: `subject` (the human-entered subject text — `fields.slug`'s serializer writes the
+    /// name, not the derived slug, into frontmatter), `from`, `receivedDate` (YYYY-MM-DD), `status`
     /// (`new` for every freshly-synced submission), and the `message` markdoc body.
-    public static func markdocContent(for submission: InboxKVClient.Submission, slug: String) -> String {
+    public static func markdocContent(for submission: InboxKVClient.Submission) -> String {
         let receivedDate = String(submission.receivedAt.prefix(10))  // "2026-07-10T00:00:00Z" -> "2026-07-10"
+        let escapedSubject = submission.subject.replacingOccurrences(of: "\"", with: "\\\"")
         let escapedFrom = submission.from.replacingOccurrences(of: "\"", with: "\\\"")
         return """
         ---
-        subject: "\(slug)"
+        subject: "\(escapedSubject)"
         from: "\(escapedFrom)"
         receivedDate: \(receivedDate)
         status: new
@@ -48,6 +50,8 @@ public enum InboxSubmissionCommitter {
     /// (safe for the caller to delete from KV staging). Returns an empty array — never throws —
     /// if there was nothing to write or the commit failed, so callers leave undeleted ids staged
     /// for the next site-open's pull rather than losing them.
+    /// - Parameter fileManager: Used only to create the `src/content/inbox` directory; per-submission
+    ///   file writes go through `Data.write(to:options:)` directly and do not go through this.
     public static func commit(
         submissions: [InboxKVClient.Submission],
         into siteDirectory: URL,
@@ -64,7 +68,7 @@ public enum InboxSubmissionCommitter {
             let submissionSlug = slug(for: submission)
             let relPath = "src/content/inbox/\(submissionSlug).md"
             let fileURL = siteDirectory.appendingPathComponent(relPath, isDirectory: false)
-            guard let data = markdocContent(for: submission, slug: submissionSlug).data(using: .utf8) else { continue }
+            guard let data = markdocContent(for: submission).data(using: .utf8) else { continue }
             guard (try? data.write(to: fileURL, options: .atomic)) != nil else { continue }
             relPaths.append(relPath)
             ids.append(submission.id)
