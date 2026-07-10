@@ -37,7 +37,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         conventionsEngine: ProjectConventionsEngine? = nil,
         logCenter: LogCenter = .shared,
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) },
-        makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { FSEventsFileWatcher() }
+        makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { PlatformFileWatcher.make() }
     ) {
         self.ref = ref
         self.control = control
