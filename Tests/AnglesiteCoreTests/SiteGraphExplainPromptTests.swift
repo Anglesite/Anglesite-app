@@ -90,6 +90,19 @@ struct SiteGraphExplainPromptTests {
         #expect(prompt.contains("Nothing else on the site depends on this file"))
     }
 
+    @Test("a neighbor reachable through multiple edge kinds is listed once, not per edge")
+    func dedupesNeighbors() {
+        let target = node("p1", kind: .page, title: "Home")
+        let layout = node("l1", kind: .layout, title: "BaseLayout")
+        let prompt = SiteGraphExplainPrompt.prompt(
+            node: target,
+            impact: impact(forComponentImportedBy: 1),
+            dependsOn: [layout, layout],  // e.g. both imports and usesLayout edges to the same node
+            referencedBy: []
+        )
+        #expect(prompt.ranges(of: "BaseLayout").count == 1)
+    }
+
     @Test("prompt instructs the model to ground on the given facts only")
     func groundingInstruction() {
         let target = node("c1", kind: .component, title: "Header")

@@ -47,6 +47,13 @@ struct SiteGraphMiniMapGeometryTests {
         #expect(SiteGraphMiniMapGeometry.nearestNodeID(to: CGPoint(x: 10, y: 10), positions: positions) == "near")
     }
 
+    @Test("nearestNodeID misses when the closest node is beyond maxDistance")
+    func nearestNodeRespectsMaxDistance() {
+        let positions = ["only": CGPoint(x: 100, y: 100)]
+        #expect(SiteGraphMiniMapGeometry.nearestNodeID(to: .zero, positions: positions, maxDistance: 20) == nil)
+        #expect(SiteGraphMiniMapGeometry.nearestNodeID(to: CGPoint(x: 90, y: 100), positions: positions, maxDistance: 20) == "only")
+    }
+
     @Test("nearestNodeID breaks exact-distance ties deterministically by node ID")
     func nearestNodeTieBreak() {
         let positions: [String: CGPoint] = [

@@ -22,13 +22,24 @@ enum SiteGraphMiniMapGeometry {
     }
 
     /// The node whose position is closest to `point`, for click-to-jump selection. Exact-distance
-    /// ties break lexicographically by ID so repeated clicks are deterministic.
-    static func nearestNodeID(to point: CGPoint, positions: [String: CGPoint]) -> String? {
-        positions.min { lhs, rhs in
+    /// ties break lexicographically by ID so repeated clicks are deterministic. `maxDistance`
+    /// bounds the hit radius so a click on empty mini-map space is a no-op rather than jumping
+    /// the selection (and resetting inspector state) to some arbitrary far-away node.
+    static func nearestNodeID(
+        to point: CGPoint,
+        positions: [String: CGPoint],
+        maxDistance: CGFloat? = nil
+    ) -> String? {
+        let nearest = positions.min { lhs, rhs in
             let lhsDistance = hypot(lhs.value.x - point.x, lhs.value.y - point.y)
             let rhsDistance = hypot(rhs.value.x - point.x, rhs.value.y - point.y)
             if lhsDistance != rhsDistance { return lhsDistance < rhsDistance }
             return lhs.key < rhs.key
-        }?.key
+        }
+        guard let nearest else { return nil }
+        if let maxDistance, hypot(nearest.value.x - point.x, nearest.value.y - point.y) > maxDistance {
+            return nil
+        }
+        return nearest.key
     }
 }

@@ -110,6 +110,28 @@ struct SiteGraphExplorerModelExplainTests {
         }
     }
 
+    @Test("a graph refresh resets the explanation — its grounding snapshot is gone")
+    func refreshResets() async throws {
+        let (model, root) = try await makeModel(explainer: FakeExplainer(chunks: ["done"]))
+        defer { try? FileManager.default.removeItem(at: root) }
+        model.explainSelectedNode()
+        await model.explainTaskForTesting?.value
+        #expect(model.explainState == .complete("done"))
+        await model.refreshNow()
+        #expect(model.explainState == .idle)
+    }
+
+    @Test("stop() winds down an explanation along with the rest of the model")
+    func stopResets() async throws {
+        let (model, root) = try await makeModel(explainer: FakeExplainer(chunks: ["done"]))
+        defer { try? FileManager.default.removeItem(at: root) }
+        model.explainSelectedNode()
+        await model.explainTaskForTesting?.value
+        #expect(model.explainState == .complete("done"))
+        model.stop()
+        #expect(model.explainState == .idle)
+    }
+
     @Test("changing the selection resets the explanation to .idle")
     func selectionChangeResets() async throws {
         let (model, root) = try await makeModel(explainer: FakeExplainer(chunks: ["done"]))

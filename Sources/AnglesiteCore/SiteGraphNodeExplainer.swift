@@ -43,15 +43,19 @@ public enum SiteGraphExplainPrompt {
         dependsOn: [SiteGraphNode],
         referencedBy: [SiteGraphNode]
     ) -> String {
+        // A neighbor reachable through several edge kinds (e.g. both `imports` and `usesLayout`)
+        // arrives once per edge — list it once, or the capped fact list fills with duplicates.
+        let uniqueDependsOn = deduplicated(dependsOn)
+        let uniqueReferencedBy = deduplicated(referencedBy)
         var facts: [String] = []
         facts.append("- This file: \(node.title) (a \(kindLabel(node.kind)) on the site)")
         if let route = node.route { facts.append("- Its page address: \(route)") }
         if let filePath = node.filePath { facts.append("- Its source file: \(filePath)") }
-        if !dependsOn.isEmpty {
-            facts.append("- Depends on: \(nameList(dependsOn, withKinds: true))")
+        if !uniqueDependsOn.isEmpty {
+            facts.append("- Depends on: \(nameList(uniqueDependsOn, withKinds: true))")
         }
-        if !referencedBy.isEmpty {
-            facts.append("- Referenced by: \(nameList(referencedBy, withKinds: true))")
+        if !uniqueReferencedBy.isEmpty {
+            facts.append("- Referenced by: \(nameList(uniqueReferencedBy, withKinds: true))")
         }
         facts.append(contentsOf: impactFacts(impact))
 
@@ -92,6 +96,11 @@ public enum SiteGraphExplainPrompt {
         guard !nodes.isEmpty else { return }
         let noun = nodes.count == 1 ? singular : (plural ?? singular + "s")
         facts.append("- \(verb) \(nodes.count) \(noun): \(nameList(nodes, withKinds: false))")
+    }
+
+    private static func deduplicated(_ nodes: [SiteGraphNode]) -> [SiteGraphNode] {
+        var seen = Set<String>()
+        return nodes.filter { seen.insert($0.id).inserted }
     }
 
     private static func nameList(_ nodes: [SiteGraphNode], withKinds: Bool) -> String {

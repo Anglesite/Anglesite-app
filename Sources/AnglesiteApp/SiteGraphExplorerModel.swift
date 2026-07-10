@@ -137,6 +137,9 @@ final class SiteGraphExplorerModel {
     func stop() {
         observeTask?.cancel()
         observeTask = nil
+        // Wind down an in-flight explanation too, or its task (strongly capturing self for
+        // explainState writes) keeps draining the model stream for a window that's gone.
+        resetExplain()
     }
 
     /// Forces an immediate re-scan using the already-stored `siteID`/`sourceDirectory` from the
@@ -183,11 +186,20 @@ final class SiteGraphExplorerModel {
         guard let explainer, let node = selectedNode, let impact = selectedImpact,
               let siteID, let sourceDirectory else { return }
         explainTask?.cancel()
+        // Single edge pass + ID-keyed lookup, not a linear node scan per matched edge — a hub
+        // node on a large site would otherwise do O(edges × nodes) work on the main actor.
+        let nodesByID = Dictionary(snapshot.nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var dependsOn: [SiteGraphNode] = []
+        var referencedBy: [SiteGraphNode] = []
+        for edge in snapshot.edges {
+            if edge.sourceID == node.id, let target = nodesByID[edge.targetID] { dependsOn.append(target) }
+            if edge.targetID == node.id, let source = nodesByID[edge.sourceID] { referencedBy.append(source) }
+        }
         let prompt = SiteGraphExplainPrompt.prompt(
             node: node,
             impact: impact,
-            dependsOn: snapshot.edges.filter { $0.sourceID == node.id }.compactMap { self.node(id: $0.targetID) },
-            referencedBy: snapshot.edges.filter { $0.targetID == node.id }.compactMap { self.node(id: $0.sourceID) }
+            dependsOn: dependsOn,
+            referencedBy: referencedBy
         )
         explainState = .generating("")
         explainTask = Task { [explainer] in
@@ -241,6 +253,10 @@ final class SiteGraphExplorerModel {
         }.value
         if Task.isCancelled { return }
         snapshot = next
+        // The explanation was grounded in the snapshot just replaced; even when the selected node
+        // survives (so the didSet won't fire), keeping it risks stale prose contradicting the
+        // freshly-recomputed Impact section right above it.
+        resetExplain()
         if let selectedNodeID, !next.nodes.contains(where: { $0.id == selectedNodeID }) {
             self.selectedNodeID = nil
         }
