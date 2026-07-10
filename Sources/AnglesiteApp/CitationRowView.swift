@@ -20,9 +20,10 @@ struct CitationRowView: View {
             FlowLayout(spacing: 6) {
                 ForEach(citations) { citation in
                     CitationChip(citation: citation) {
-                        if revealCitation?(citation.path) == true { return }
-                        let url = siteDirectory.appendingPathComponent(citation.path)
-                        NSWorkspace.shared.open(url)
+                        Self.handleTap(
+                            citation: citation, siteDirectory: siteDirectory, revealCitation: revealCitation,
+                            openFile: { NSWorkspace.shared.open($0) }
+                        )
                     }
                 }
             }
@@ -31,6 +32,21 @@ struct CitationRowView: View {
         .padding(.vertical, 8)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Retrieved context from \(citations.count) file\(citations.count == 1 ? "" : "s")")
+    }
+
+    /// A citation click tries `revealCitation` first (the Site Graph Explorer reveal, #314) and
+    /// falls back to `openFile` only when that returns `false` or is `nil` — never both, never
+    /// neither. Pulled out of the button's action closure so it's unit-testable without a SwiftUI
+    /// rendering harness: `body` wires the real `NSWorkspace.shared.open` side effect, tests
+    /// inject a spy.
+    nonisolated static func handleTap(
+        citation: RetrievedCitation,
+        siteDirectory: URL,
+        revealCitation: ((String) -> Bool)?,
+        openFile: (URL) -> Void
+    ) {
+        if revealCitation?(citation.path) == true { return }
+        openFile(siteDirectory.appendingPathComponent(citation.path))
     }
 }
 

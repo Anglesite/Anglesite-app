@@ -162,6 +162,29 @@ struct SiteGraphAugmentedAssistantTests {
         #expect(!hasCitations)
     }
 
+    /// Speculative review finding: two distinct seed nodes sharing a `filePath` (not possible
+    /// from today's `SiteGraphExplorer.build`, but not structurally prevented either) shouldn't
+    /// cite the same file twice in one `.citations` event.
+    @Test("two seed nodes sharing a file path are cited once, not twice")
+    func duplicateFilePathCitedOnce() async throws {
+        let a = node("c1", title: "Header A", filePath: "src/components/Header.astro")
+        let b = node("c2", title: "Header B", filePath: "src/components/Header.astro")
+        let snapshot = SiteGraphExplorerSnapshot(nodes: [a, b], edges: [])
+        let base = CapturingConversationalAssistant()
+        let assistant = SiteGraphAugmentedAssistant(base: base, snapshotProvider: { snapshot })
+
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(prompt: "Tell me about the Header components", context: context) {
+            events.append(event)
+        }
+
+        guard case .citations(let citations) = events.first else {
+            Issue.record("Expected .citations event")
+            return
+        }
+        #expect(citations.filter { $0.path == "src/components/Header.astro" }.count == 1)
+    }
+
     @Test("generate also grounds the prompt, matching converse")
     func generateGroundsPrompt() async throws {
         let header = node("c1", title: "Header", filePath: "src/components/Header.astro")

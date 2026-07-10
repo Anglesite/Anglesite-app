@@ -73,9 +73,14 @@ public actor CombinedAugmentedAssistant: ConversationalAssistant {
     }
 
     private func enrichedContext(_ prompt: String, context: AssistantContext) async -> (prompt: String, citations: [RetrievedCitation]) {
-        let snapshot = await graphSnapshotProvider()
+        // The graph snapshot read and the content-index search are independent — only
+        // `graphBlock`'s synchronous computation actually depends on the snapshot — so run both
+        // `await`s concurrently instead of paying their latencies back-to-back on every turn.
+        async let snapshotTask = graphSnapshotProvider()
+        async let contentTask = KnowledgeAugmentedAssistant.contentBlock(prompt: prompt, context: context, index: index)
+        let snapshot = await snapshotTask
         let graph = SiteGraphAugmentedAssistant.graphBlock(prompt: prompt, snapshot: snapshot)
-        let content = await KnowledgeAugmentedAssistant.contentBlock(prompt: prompt, context: context, index: index)
+        let content = await contentTask
 
         var blocks: [String] = []
         var citations: [RetrievedCitation] = []

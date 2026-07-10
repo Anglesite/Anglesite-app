@@ -108,12 +108,18 @@ public actor SiteGraphAugmentedAssistant: ConversationalAssistant {
 
         var blocks: [String] = []
         var citations: [RetrievedCitation] = []
+        // Two distinct seed nodes could in principle share a `filePath` (e.g. a future graph
+        // builder change producing a duplicate node) — dedup here rather than assume the snapshot
+        // never does, so one `.citations` event never lists the same file twice.
+        var citedPaths: Set<String> = []
         for node in seeds {
             guard let impact = ImpactAnalysis.analyze(snapshot: snapshot, targetID: node.id) else { continue }
             let (dependsOn, referencedBy) = neighbors(of: node, in: snapshot)
             let facts = SiteGraphExplainPrompt.facts(node: node, impact: impact, dependsOn: dependsOn, referencedBy: referencedBy)
             blocks.append("Facts about \(node.title):\n" + facts.joined(separator: "\n"))
-            if let citation = citation(for: node) { citations.append(citation) }
+            if let citation = citation(for: node), citedPaths.insert(citation.path).inserted {
+                citations.append(citation)
+            }
         }
         guard !blocks.isEmpty else { return nil }
 

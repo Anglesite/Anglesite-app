@@ -4,6 +4,13 @@ import Foundation
 
 #if compiler(>=6.4)
 import FoundationModels
+
+/// A minimal `Generable` value for exercising `generateStructured`'s prompt-enrichment path.
+@Generable
+struct CombinedAugmentedAssistantStubResult: Equatable {
+    @Guide(description: "A generated title")
+    var title: String
+}
 #endif
 
 private actor CapturingConversationalAssistant: ConversationalAssistant {
@@ -224,6 +231,121 @@ struct CombinedAugmentedAssistantTests {
         }
 
         #expect(await base.prompts.first == prompt)
+        let hasCitations = events.contains { if case .citations = $0 { return true } else { return false } }
+        #expect(!hasCitations)
+    }
+
+    /// `converse` was the only entry point exercised so far; `generate` independently calls
+    /// `enrichedContext` too and could regress the original-prompt guarantee without either the
+    /// other tests or `converse`'s own passing noticing (review finding).
+    @Test("generate grounds the prompt against the original question, not a polluted one")
+    func generateUsesOriginalPrompt() async throws {
+        let header = node("c1", title: "Header", filePath: "src/components/Header.astro")
+        let snapshot = SiteGraphExplorerSnapshot(nodes: [header], edges: [])
+
+        let root = try makeSite()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "export const CTA = 'Book a consultation';\n".write(
+            to: root.appendingPathComponent("src/components/CTA.astro"),
+            atomically: true,
+            encoding: .utf8
+        )
+        // Same decoy technique as `contentSearchUsesOriginalPrompt` — vocabulary drawn only from
+        // the graph decorator's instruction sentence, absent from the real question.
+        try """
+        export const note = 'dependency dependency dependency invent invent invent \
+        injection graph specific facts answering built';
+        """.write(
+            to: root.appendingPathComponent("src/components/DepNotes.astro"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
+
+        let base = CapturingConversationalAssistant()
+        let assistant = CombinedAugmentedAssistant(base: base, index: index, graphSnapshotProvider: { snapshot })
+        let context = AssistantContext(siteID: "site", siteDirectory: root)
+
+        for try await _ in try await assistant.generate(prompt: "How does the Header work with the CTA?", context: context) {}
+
+        let prompt = await base.prompts.first
+        #expect(prompt?.contains("Facts about Header") == true)
+        #expect(prompt?.contains("src/components/CTA.astro") == true)
+        #expect(prompt?.contains("DepNotes.astro") == false)
+    }
+
+    #if compiler(>=6.4)
+    /// Same guarantee as `generateUsesOriginalPrompt`, for the third `ContentAssistant` entry
+    /// point (review finding — `generateStructured` also independently calls `enrichedContext`).
+    @Test("generateStructured grounds the prompt against the original question, not a polluted one")
+    func generateStructuredUsesOriginalPrompt() async throws {
+        let header = node("c1", title: "Header", filePath: "src/components/Header.astro")
+        let snapshot = SiteGraphExplorerSnapshot(nodes: [header], edges: [])
+
+        let root = try makeSite()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "export const CTA = 'Book a consultation';\n".write(
+            to: root.appendingPathComponent("src/components/CTA.astro"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        export const note = 'dependency dependency dependency invent invent invent \
+        injection graph specific facts answering built';
+        """.write(
+            to: root.appendingPathComponent("src/components/DepNotes.astro"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
+
+        let base = CapturingConversationalAssistant()
+        let assistant = CombinedAugmentedAssistant(base: base, index: index, graphSnapshotProvider: { snapshot })
+        let context = AssistantContext(siteID: "site", siteDirectory: root)
+
+        // `CapturingConversationalAssistant.generateStructured` always throws — this test only
+        // needs the prompt it recorded before doing so.
+        _ = try? await assistant.generateStructured(
+            prompt: "How does the Header work with the CTA?",
+            context: context,
+            resultType: CombinedAugmentedAssistantStubResult.self
+        )
+
+        let prompt = await base.prompts.first
+        #expect(prompt?.contains("Facts about Header") == true)
+        #expect(prompt?.contains("src/components/CTA.astro") == true)
+        #expect(prompt?.contains("DepNotes.astro") == false)
+    }
+    #endif
+
+    /// Mirrors `SiteGraphAugmentedAssistantTests.nodeWithoutFilePathNotCited` but through the
+    /// merge path — a node without a `filePath` (e.g. `.collection`) should still ground the
+    /// answer via its facts block without producing a citation for it (review finding: this case
+    /// wasn't covered for the routed-through-`CombinedAugmentedAssistant` path, only the
+    /// standalone `SiteGraphAugmentedAssistant`).
+    @Test("a graph node without a file path grounds the answer but isn't cited, through the merge path")
+    func nodeWithoutFilePathNotCitedThroughMerge() async throws {
+        let collection = node("col1", kind: .collection, title: "Blog Collection")
+        let snapshot = SiteGraphExplorerSnapshot(nodes: [collection], edges: [])
+
+        let root = try makeSite()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
+
+        let base = CapturingConversationalAssistant()
+        let assistant = CombinedAugmentedAssistant(base: base, index: index, graphSnapshotProvider: { snapshot })
+        let context = AssistantContext(siteID: "site", siteDirectory: root)
+
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(prompt: "What is the Blog Collection?", context: context) {
+            events.append(event)
+        }
+
+        let prompt = await base.prompts.first
+        #expect(prompt?.contains("Facts about Blog Collection") == true)
         let hasCitations = events.contains { if case .citations = $0 { return true } else { return false } }
         #expect(!hasCitations)
     }
