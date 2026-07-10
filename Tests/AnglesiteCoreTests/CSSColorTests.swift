@@ -19,6 +19,11 @@ struct CSSColorTests {
         #expect(CSSColor.format(color) == "#3366ff")
     }
 
+    @Test("format preserves alpha as 8-digit hex") func roundTripWithAlpha() {
+        let color = CSSColor.parse("#3366ff80")!
+        #expect(CSSColor.format(color) == "#3366ff80")
+    }
+
     @Test("color property set includes the common properties") func propertySet() {
         #expect(CSSColor.colorProperties.contains("background-color"))
         #expect(!CSSColor.colorProperties.contains("padding"))

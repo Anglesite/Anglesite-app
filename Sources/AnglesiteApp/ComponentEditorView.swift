@@ -22,6 +22,13 @@ struct ComponentEditorView: View {
     @State private var propertyDrafts: [String: String] = [:]
     /// In-progress edits to a declaration's value, keyed by `spanKey(decl.span)`.
     @State private var valueDrafts: [String: String] = [:]
+    /// Pending debounced commit from a `ColorPicker` drag, keyed by `spanKey(decl.span)`.
+    /// macOS `ColorPicker` updates its binding continuously while the system color panel is
+    /// being dragged, so committing on every change would fire a burst of redundant
+    /// `setStyleProperty` round-trips (and risk spurious `.failed`/stale-`baseVersion` conflicts).
+    /// Each new picker value cancels the previous pending commit and restarts the delay, so only
+    /// the settled value after the drag pauses actually commits.
+    @State private var colorCommitTasks: [String: Task<Void, Never>] = [:]
 
     enum Mode: String, CaseIterable { case design = "Design", source = "Source" }
 
@@ -317,11 +324,29 @@ struct ComponentEditorView: View {
                     get: { color },
                     set: { newColor in
                         valueDrafts[key] = CSSColor.format(newColor)
-                        commitDeclaration(model, rule: rule, decl: decl)
+                        debounceColorCommit(key, model, rule: rule, decl: decl)
                     }
                 ))
                 .labelsHidden()
             }
+        }
+    }
+
+    /// Debounces `ColorPicker` writes: cancels any pending commit for this declaration and
+    /// schedules a new one after a short pause, so only the settled value after a drag gesture
+    /// actually calls `commitDeclaration` (see `colorCommitTasks` doc comment).
+    private func debounceColorCommit(
+        _ key: String,
+        _ model: ComponentEditorModel,
+        rule: ComponentModel.StyleRule,
+        decl: ComponentModel.Declaration
+    ) {
+        colorCommitTasks[key]?.cancel()
+        colorCommitTasks[key] = Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            commitDeclaration(model, rule: rule, decl: decl)
+            colorCommitTasks[key] = nil
         }
     }
 

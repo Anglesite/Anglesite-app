@@ -22,11 +22,19 @@ public enum CSSColor {
     }
 
     public static func format(_ color: Color) -> String {
-        guard let components = color.cgColor?.components, components.count >= 3 else { return "#000000" }
+        guard let cgColor = color.cgColor, let components = cgColor.components, components.count >= 3 else {
+            return "#000000"
+        }
         let r = Int((components[0] * 255).rounded())
         let g = Int((components[1] * 255).rounded())
         let b = Int((components[2] * 255).rounded())
-        return String(format: "#%02x%02x%02x", r, g, b)
+        // `components` is [r, g, b, alpha] for RGB-family color spaces; `cgColor.alpha` is the
+        // authoritative alpha regardless of component layout, so use it rather than indexing
+        // components[3] (which would be wrong for e.g. a grayscale-backed CGColor).
+        let alpha = cgColor.alpha
+        guard alpha < 1 else { return String(format: "#%02x%02x%02x", r, g, b) }
+        let a = Int((alpha * 255).rounded())
+        return String(format: "#%02x%02x%02x%02x", r, g, b, a)
     }
 
     public static let colorProperties: Set<String> = [
