@@ -35,4 +35,46 @@ import Testing
         #expect(md.contains(config.palette.brand))
         #expect(md.contains(config.palette.accent))
     }
+
+    @Test func rationaleIncludesSurfaceFoundationPairingAndAdjustSection() {
+        let config = DesignConfigGenerator.config(axes: DesignAxesCatalog.balanced, siteType: "bakery", brandColor: nil)
+        let md = DesignTokenWriter.rationaleMarkdown(for: config)
+
+        #expect(md.contains("These five axes position your design. Each is a value from 0 to 1."))
+
+        #expect(md.contains(config.palette.surface))
+        #expect(md.contains("set a cool foundation."))
+
+        let expectedPairing = config.typography.pairing
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "+", with: " + ")
+        #expect(md.contains("Pairing strategy: \(expectedPairing)."))
+
+        #expect(md.contains("## To adjust"))
+        #expect(md.contains("Want it warmer? Increase `temperature` above"))
+        #expect(md.contains("Want more authority? Increase `register` above"))
+        #expect(md.contains("Want more whitespace? Decrease `weight` below"))
+        #expect(md.contains("Want it more modern? Increase `time` above"))
+        #expect(md.contains("Want it louder? Increase `voice` above"))
+        #expect(md.contains("Anglesite will regenerate these tokens the next time you apply a design."))
+
+        #expect(md.contains("Temperature (cool ↔ warm)"))
+        #expect(md.contains("Weight (airy ↔ dense)"))
+        #expect(md.contains("Register (playful ↔ authoritative)"))
+        #expect(md.contains("Time (classic ↔ contemporary)"))
+        #expect(md.contains("Voice (subtle ↔ bold)"))
+        #expect(!md.contains("<->"))
+    }
+
+    @Test func rationaleUsesHighAxisWordingForHighValueAxes() {
+        let axes = DesignAxes(temperature: 0.7, weight: 0.65, register: 0.8, time: 0.65, voice: 0.65)
+        let config = DesignConfigGenerator.config(axes: axes, siteType: "bakery", brandColor: nil)
+        let md = DesignTokenWriter.rationaleMarkdown(for: config)
+
+        #expect(md.contains("warm"))
+        #expect(md.contains("authoritative"))
+        #expect(md.contains("conveys authority and expertise"))
+        #expect(!md.contains("feels approachable and friendly"))
+        #expect(md.contains("set a warm foundation."))
+    }
 }

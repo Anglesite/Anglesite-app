@@ -43,6 +43,11 @@ public enum DesignTokenWriter {
         let moodWords = [temperature, weight, register, time, voice]
             .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
 
+        let foundation = axes.temperature > 0.5 ? "warm" : "cool"
+        let pairing = config.typography.pairing
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "+", with: " + ")
+
         return """
         # Your Design System
 
@@ -52,23 +57,41 @@ public enum DesignTokenWriter {
 
         ## Design axes
 
+        These five axes position your design. Each is a value from 0 to 1.
+
         | Axis | Value | Reading |
         |------|-------|---------|
-        | Temperature (cool <-> warm) | \(axes.temperature) | \(temperature) |
-        | Weight (airy <-> dense) | \(axes.weight) | \(weight) |
-        | Register (playful <-> authoritative) | \(axes.register) | \(register) |
-        | Time (classic <-> contemporary) | \(axes.time) | \(time) |
-        | Voice (subtle <-> bold) | \(axes.voice) | \(voice) |
+        | Temperature (cool ↔ warm) | \(axes.temperature) | \(temperature) |
+        | Weight (airy ↔ dense) | \(axes.weight) | \(weight) |
+        | Register (playful ↔ authoritative) | \(axes.register) | \(register) |
+        | Time (classic ↔ contemporary) | \(axes.time) | \(time) |
+        | Voice (subtle ↔ bold) | \(axes.voice) | \(voice) |
 
         ## Color
 
-        Your brand color is `\(config.palette.brand)`. The accent color `\(config.palette.accent)` provides contrast for calls to action. Text color `\(config.palette.text)` on background `\(config.palette.bg)` meets WCAG AA contrast requirements for readability.
+        Your brand color is `\(config.palette.brand)`. The accent color `\(config.palette.accent)` provides contrast for calls to action. The surface color `\(config.palette.surface)` and background `\(config.palette.bg)` set a \(foundation) foundation.
+
+        Text color `\(config.palette.text)` on background `\(config.palette.bg)` meets WCAG AA contrast requirements for readability.
 
         ## Typography
 
         Display font: `\(config.typography.display.split(separator: ",").first.map(String.init)?.replacingOccurrences(of: "\"", with: "") ?? config.typography.display)` — \(axes.register > 0.5 ? "conveys authority and expertise" : "feels approachable and friendly").
 
         Body font: `\(config.typography.body.split(separator: ",").first.map(String.init)?.replacingOccurrences(of: "\"", with: "") ?? config.typography.body)` — optimized for comfortable reading at body text sizes.
+
+        Pairing strategy: \(pairing).
+
+        ## To adjust
+
+        You can nudge these axes without re-running the full interview:
+
+        - Want it warmer? Increase `temperature` above \(axes.temperature).
+        - Want more authority? Increase `register` above \(axes.register).
+        - Want more whitespace? Decrease `weight` below \(axes.weight).
+        - Want it more modern? Increase `time` above \(axes.time).
+        - Want it louder? Increase `voice` above \(axes.voice).
+
+        Anglesite will regenerate these tokens the next time you apply a design.
         """
     }
 }
