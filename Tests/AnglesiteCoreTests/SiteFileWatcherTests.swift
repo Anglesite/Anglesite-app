@@ -1,3 +1,5 @@
+// Exercises the Darwin SiteFileWatching implementation; compiles out with it off-Darwin.
+#if canImport(CoreServices)
 import Foundation
 import Testing
 @testable import AnglesiteCore
@@ -43,3 +45,4 @@ struct SiteFileWatcherTests {
         #expect(saw)
     }
 }
+#endif
