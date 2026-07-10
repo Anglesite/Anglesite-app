@@ -10,6 +10,14 @@ import FoundationModels
 /// Minimal fake — echoes a fixed reply as a single `.textDelta` then `.turnComplete`, so tests
 /// can assert on stage progression and draft state without a real FoundationModels session.
 private actor FakeConversationalAssistant: ConversationalAssistant {
+    /// When set, `converse` yields `.failed(message:)` instead of a successful reply — used to
+    /// exercise `DesignInterviewModel.send(_:)`'s in-band-failure path.
+    private let failureMessage: String?
+
+    init(failureMessage: String? = nil) {
+        self.failureMessage = failureMessage
+    }
+
     nonisolated var capabilities: AssistantCapabilities {
         AssistantCapabilities(supportsStreaming: true, supportsStructuredOutput: false, supportsVision: false,
                               supportsTools: false, maxContextTokens: 4096, providerName: "Fake")
@@ -23,10 +31,15 @@ private actor FakeConversationalAssistant: ConversationalAssistant {
     }
     #endif
     func converse(prompt: String, context: AssistantContext) async throws -> AsyncStream<AssistantEvent> {
-        AsyncStream { continuation in
+        let failureMessage = failureMessage
+        return AsyncStream { continuation in
             continuation.yield(.started(model: "Fake", toolNames: []))
-            continuation.yield(.textDelta("Got it."))
-            continuation.yield(.turnComplete(nil))
+            if let failureMessage {
+                continuation.yield(.failed(message: failureMessage))
+            } else {
+                continuation.yield(.textDelta("Got it."))
+                continuation.yield(.turnComplete(nil))
+            }
             continuation.finish()
         }
     }
@@ -44,6 +57,15 @@ private actor FakeConversationalAssistant: ConversationalAssistant {
         try FileManager.default.createDirectory(at: stylesDir, withIntermediateDirectories: true)
         try ":root {\n  --color-primary: #000000;\n}\n".write(
             to: stylesDir.appendingPathComponent("global.css"), atomically: true, encoding: .utf8)
+        return AnglesitePackage(url: packageRoot)
+    }
+
+    /// A package whose `Source/` exists but has no `src/styles/global.css` at all, so
+    /// `DesignApplyService.apply` fails with `.missingGlobalCSS` rather than writing anything.
+    private func makeSiteWithoutGlobalCSS() throws -> AnglesitePackage {
+        let packageRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: packageRoot.appendingPathComponent("Source"), withIntermediateDirectories: true)
         return AnglesitePackage(url: packageRoot)
     }
 
@@ -77,5 +99,48 @@ private actor FakeConversationalAssistant: ConversationalAssistant {
         guard case .success(let applied) = model.applyResult else { Issue.record("expected success"); return }
         #expect(applied.writtenFiles.contains("src/styles/global.css"))
         #expect(model.draft.stage == .done)
+    }
+
+    @Test @MainActor func sendOnInBandFailureAppendsErrorAndDoesNotAdvanceStage() async throws {
+        let model = DesignInterviewModel(
+            businessType: "bakery",
+            assistant: FakeConversationalAssistant(failureMessage: "model unavailable"),
+            package: try makeSite())
+        #expect(model.draft.stage == .intent)
+        await model.send("It's a cozy neighborhood bakery.")
+        #expect(model.draft.stage == .intent, "stage must not advance when the assistant reports .failed")
+        guard let lastAssistantTurn = model.transcript.last(where: { $0.role == "assistant" }) else {
+            Issue.record("expected an assistant transcript entry")
+            return
+        }
+        #expect(!lastAssistantTurn.text.isEmpty)
+        #expect(lastAssistantTurn.text.contains("model unavailable"))
+    }
+
+    @Test @MainActor func sendAdvancesThroughAllStagesAcrossMultipleTurns() async throws {
+        let model = DesignInterviewModel(businessType: "bakery", assistant: FakeConversationalAssistant(), package: try makeSite())
+        #expect(model.draft.stage == .intent)
+
+        await model.send("It's a cozy neighborhood bakery.")
+        #expect(model.draft.stage == .mood)
+
+        await model.send("Warm and inviting, but still modern.")
+        #expect(model.draft.stage == .brandAnchor)
+
+        await model.send("Think a warm oat-milk latte color.")
+        #expect(model.draft.stage == .axisConfirmation)
+
+        await model.send("That all sounds right.")
+        #expect(model.draft.stage == .done)
+    }
+
+    @Test @MainActor func confirmAndApplyOnFailureLeavesStageAtAxisConfirmation() async throws {
+        let model = DesignInterviewModel(
+            businessType: "bakery", assistant: FakeConversationalAssistant(), package: try makeSiteWithoutGlobalCSS())
+        model.skipToAxisConfirmation()
+        await model.confirmAndApply()
+        guard case .failure(let error) = model.applyResult else { Issue.record("expected failure"); return }
+        #expect(error == .missingGlobalCSS)
+        #expect(model.draft.stage == .axisConfirmation, "stage must not become .done when apply fails")
     }
 }

@@ -42,8 +42,22 @@ public final class DesignInterviewModel: Identifiable {
             return
         }
         var reply = ""
+        var failureMessage: String?
         for await event in stream {
-            if case .textDelta(let delta) = event { reply += delta }
+            switch event {
+            case .textDelta(let delta):
+                reply += delta
+            case .failed(let message):
+                failureMessage = message
+            case .cancelled:
+                failureMessage = "The response was cancelled — try again."
+            default:
+                break
+            }
+        }
+        if let failureMessage {
+            transcript.append((role: "assistant", text: "I couldn't respond just now — \(failureMessage)"))
+            return
         }
         transcript.append((role: "assistant", text: reply))
         draft.advance()
@@ -67,7 +81,10 @@ public final class DesignInterviewModel: Identifiable {
             brandSummary: "Generated from a design interview for a \(draft.businessType).",
             sourceLabel: "design-interview"
         )
-        applyResult = DesignApplyService.apply(input, to: package)
-        draft.stage = .done
+        let result = DesignApplyService.apply(input, to: package)
+        applyResult = result
+        if case .success = result {
+            draft.stage = .done
+        }
     }
 }
