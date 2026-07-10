@@ -49,6 +49,26 @@ struct InboxSubmissionCommitterTests {
         #expect(content.contains("subject: \"Say \\\"hi\\\"\""))
     }
 
+    @Test("markdocContent escapes backslashes before quotes, in both subject and from")
+    func markdocEscapesBackslashes() {
+        // "C:\Users\test" (2 raw backslashes) and a from value ending in a raw backslash — both
+        // must round-trip as valid YAML double-quoted scalars: each raw "\" becomes "\\", and a
+        // trailing raw "\" must not combine with the closing quote to form "\"".
+        let submission = InboxKVClient.Submission(
+            id: "12345678", subject: "C:\\Users\\test", from: "trailing\\", message: "hi",
+            receivedAt: "2026-07-10T00:00:00Z")
+        let content = InboxSubmissionCommitter.markdocContent(for: submission)
+        #expect(content == """
+        ---
+        subject: "C:\\\\Users\\\\test"
+        from: "trailing\\\\"
+        receivedDate: 2026-07-10
+        status: new
+        ---
+        hi
+        """)
+    }
+
     @Test("commit writes each submission and returns their ids on a successful commit")
     func commitWritesAndReturnsIDs() async throws {
         let siteDirectory = try Self.makeThrowawayGitRepo()

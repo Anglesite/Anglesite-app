@@ -32,8 +32,8 @@ public enum InboxSubmissionCommitter {
     /// (`new` for every freshly-synced submission), and the `message` markdoc body.
     public static func markdocContent(for submission: InboxKVClient.Submission) -> String {
         let receivedDate = String(submission.receivedAt.prefix(10))  // "2026-07-10T00:00:00Z" -> "2026-07-10"
-        let escapedSubject = submission.subject.replacingOccurrences(of: "\"", with: "\\\"")
-        let escapedFrom = submission.from.replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedSubject = escapeYAMLDoubleQuoted(submission.subject)
+        let escapedFrom = escapeYAMLDoubleQuoted(submission.from)
         return """
         ---
         subject: "\(escapedSubject)"
@@ -43,6 +43,17 @@ public enum InboxSubmissionCommitter {
         ---
         \(submission.message)
         """
+    }
+
+    /// Escapes a raw string for embedding in a YAML double-quoted scalar. Backslashes must be
+    /// escaped first — escaping quotes before backslashes would double-process the backslashes
+    /// introduced by the quote-escaping step, and would leave a user-supplied backslash (e.g. one
+    /// ending the string, or preceding a character YAML treats as an escape like `\n`) to combine
+    /// with the following character or the closing quote, producing malformed frontmatter.
+    private static func escapeYAMLDoubleQuoted(_ raw: String) -> String {
+        raw
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
     /// Writes each submission to `src/content/inbox/<slug>.md` under `siteDirectory`, stages and
