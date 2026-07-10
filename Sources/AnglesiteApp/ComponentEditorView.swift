@@ -205,7 +205,8 @@ struct ComponentEditorView: View {
                                     }
                                 }
                                 Button("Add declaration") {
-                                    Task { await model.setStyleProperty(ruleSpan: spanArray(rule.span), property: "new-property", value: "") }
+                                    let newProperty = "new-property-\(UUID().uuidString.prefix(8))"
+                                    Task { await model.setStyleProperty(ruleSpan: spanArray(rule.span), property: newProperty, value: "") }
                                 }
                                 .font(.caption2)
                                 .buttonStyle(.plain)
@@ -329,7 +330,16 @@ struct ComponentEditorView: View {
         let property = propertyDrafts[key] ?? decl.property
         let value = valueDrafts[key] ?? decl.value
         guard property != decl.property || value != decl.value else { return }
-        Task { await model.setStyleProperty(ruleSpan: spanArray(rule.span), property: property, value: value) }
+        let ruleSpan = spanArray(rule.span)
+        let oldProperty = decl.property
+        if property != oldProperty {
+            Task {
+                await model.removeStyleProperty(ruleSpan: ruleSpan, property: oldProperty)
+                await model.setStyleProperty(ruleSpan: ruleSpan, property: property, value: value)
+            }
+        } else {
+            Task { await model.setStyleProperty(ruleSpan: ruleSpan, property: property, value: value) }
+        }
     }
 }
 
