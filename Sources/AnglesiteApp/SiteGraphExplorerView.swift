@@ -245,6 +245,11 @@ private struct SiteGraphCanvas: View {
 /// as kind-tinted dots and edges as hairlines at the same relative positions as the main canvas;
 /// clicking selects the nearest node there. No viewport rectangle yet — the main canvas has no
 /// pan/zoom to reflect (see #613's "if/when" note).
+///
+/// Like any corner mini-map, it occludes the canvas region beneath it (where `SiteGraphLayout`
+/// clamps overflow rows). Accepted tradeoff: a click there lands on the mini-map, whose scaled
+/// coordinates put the tap next to the *same* node's dot, so click-to-jump still selects the
+/// intended node; the bounded hit radius makes genuinely empty space a no-op.
 private struct SiteGraphMiniMap: View {
     let nodes: [SiteGraphNode]
     let edges: [SiteGraphEdge]
@@ -284,7 +289,9 @@ private struct SiteGraphMiniMap: View {
                 .stroke(Color(NSColor.separatorColor), lineWidth: 1)
         }
         .onTapGesture { location in
-            if let id = SiteGraphMiniMapGeometry.nearestNodeID(to: location, positions: miniPositions) {
+            // Bounded hit radius: a click on empty mini-map space is a no-op, not a jump to
+            // whatever node happens to be least far away.
+            if let id = SiteGraphMiniMapGeometry.nearestNodeID(to: location, positions: miniPositions, maxDistance: 16) {
                 onSelect(id)
             }
         }
@@ -428,24 +435,19 @@ private struct SiteGraphExplainSection: View {
                 }
             case .complete(let text):
                 explanationText(text)
-                Button("Regenerate", systemImage: "arrow.clockwise") {
-                    model.explainSelectedNode()
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
+                retryButton("Regenerate")
             case .unavailable(let message):
                 Label(message, systemImage: "info.circle")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                // The message names a remedy (enable Apple Intelligence); once the user has
+                // applied it they must be able to retry without changing the selection.
+                retryButton("Try Again")
             case .failed(let message):
                 Label(message, systemImage: "exclamationmark.triangle")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                Button("Try Again", systemImage: "arrow.clockwise") {
-                    model.explainSelectedNode()
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
+                retryButton("Try Again")
             }
         }
         .accessibilityElement(children: .contain)
@@ -457,6 +459,14 @@ private struct SiteGraphExplainSection: View {
             .font(.callout)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func retryButton(_ title: LocalizedStringKey) -> some View {
+        Button(title, systemImage: "arrow.clockwise") {
+            model.explainSelectedNode()
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
     }
 }
 
