@@ -1,3 +1,6 @@
+// SwiftUI (and the AppKit/UIKit color types it bridges to) is a Darwin-only framework, so this
+// bridge — used only by the app target's Styles panel ColorPicker — compiles out elsewhere.
+#if canImport(SwiftUI)
 import SwiftUI
 
 /// Best-effort CSS <color> <-> SwiftUI Color bridge for the Styles panel's ColorPicker.
@@ -42,3 +45,4 @@ public enum CSSColor {
         "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
     ]
 }
+#endif

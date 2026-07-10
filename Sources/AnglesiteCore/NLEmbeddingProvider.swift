@@ -1,3 +1,6 @@
+// NaturalLanguage is a Darwin-only framework, so this provider compiles out elsewhere; the
+// EmbeddingProvider protocol itself stays portable (see EmbeddingProvider.swift).
+#if canImport(NaturalLanguage)
 import Foundation
 import NaturalLanguage
 
@@ -30,3 +33,4 @@ public struct NLEmbeddingProvider: EmbeddingProvider {
         return floats.map { $0 / magnitude }
     }
 }
+#endif

@@ -1,8 +1,8 @@
 import Foundation
-import os
 
 #if compiler(>=6.4)
 import FoundationModels
+import os
 
 /// Foundation Models tool that suggests internal pages to link to from a given page. Uses
 /// semantic similarity (``SemanticRanker.related``) filtered by existing links (``LinkGraph``).

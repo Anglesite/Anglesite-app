@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 /// Which Apple model substrate a ``FoundationModelAssistant`` targets.
 ///
@@ -19,11 +18,14 @@ public enum FoundationModelTier: String, Sendable, Equatable, CaseIterable {
     case privateCloudCompute = "privateCloudCompute"
 }
 
-// Gated to the Xcode-27 toolchain — FoundationModels is absent at runtime on CI (#128).
-// See ContentAssistant.swift for the same pattern.
-#if compiler(>=6.4)
+// Gated to the Xcode-27 toolchain — FoundationModels is absent at runtime on CI (#128) — and to
+// canImport(FoundationModels) so a future Linux 6.4+ toolchain doesn't pull this in (the module,
+// and OSLog which this file's Logger also needs, are Darwin-only regardless of Swift version).
+// See ContentAssistant.swift for the same compiler(>=6.4) pattern.
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 import CoreSpotlight
+import OSLog
 
 /// A ``ContentAssistant`` backed by Apple's on-device `FoundationModels`. Streams free-form text
 /// and produces ``Generable`` structured output via guided generation.

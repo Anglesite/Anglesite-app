@@ -1,3 +1,6 @@
+// NaturalLanguage is a Darwin-only framework, so this provider compiles out elsewhere; the
+// EmbeddingProvider protocol itself stays portable (see EmbeddingProvider.swift).
+#if canImport(NaturalLanguage)
 import Foundation
 import NaturalLanguage
 import os
@@ -69,3 +72,4 @@ public struct NLContextualEmbeddingProvider: EmbeddingProvider {
         return recognizer.dominantLanguage
     }
 }
+#endif

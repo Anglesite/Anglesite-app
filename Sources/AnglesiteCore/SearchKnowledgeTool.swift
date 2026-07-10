@@ -1,8 +1,8 @@
 import Foundation
-import os
 
 #if compiler(>=6.4)
 import FoundationModels
+import os
 
 /// FoundationModels tool for retrieving ranked excerpts from the current site's local knowledge
 /// index. Complements ``SearchContentTool``: content graph search finds known pages/posts by
