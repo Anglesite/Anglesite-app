@@ -210,10 +210,16 @@ final class SiteWindowModel {
         }
     }
 
-    func showGraph() async {
-        guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+    /// Returns whether the pane actually switched to Graph — `false` when `leaveCurrentEditor()`/
+    /// `leaveCurrentInspector()` aborted (e.g. an external-change conflict dialog is now showing),
+    /// so callers that queue follow-up work (like `revealCitationInGraph`) can skip it rather than
+    /// mutating `graphExplorer` state the user never navigated to see.
+    @discardableResult
+    func showGraph() async -> Bool {
+        guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return false }
         inspectorContext = nil
         mainPaneMode = .graph
+        return true
     }
 
     /// Resolves a chat citation's file path to a Site Graph Explorer node and reveals it there
@@ -230,8 +236,8 @@ final class SiteWindowModel {
             return false
         }
         Task { [weak self] in
-            await self?.showGraph()
-            self?.graphExplorer.revealNode(node)
+            guard let self, await self.showGraph() else { return }
+            self.graphExplorer.revealNode(node)
         }
         return true
     }
