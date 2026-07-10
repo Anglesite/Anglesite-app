@@ -63,4 +63,48 @@ import Foundation
         #expect(out.contains("syndication:"))
         #expect(out.contains("Just body."))
     }
+
+    @Test func syndicationDedupIgnoresOtherBlockLists() {
+        let original = """
+        ---
+        title: T
+        tags:
+          - travel
+        syndication:
+          - https://a.test/1
+        ---
+        Body.
+        """
+        let out = SyndicationFrontmatter.adding(urls: ["travel", "https://b.test/2"], to: original)
+        #expect(out.contains("  - travel\n") || out.contains("- travel")) // tags list untouched
+        #expect(out.components(separatedBy: "- travel").count == 3) // "travel" added under syndication too — it wasn't already a syndication entry
+        #expect(out.contains("  - https://b.test/2"))
+    }
+
+    @Test func syndicationInlineArrayConvertsToBlockAndDedupes() {
+        let original = """
+        ---
+        title: T
+        syndication: [https://a.test/1]
+        ---
+        Body.
+        """
+        let out = SyndicationFrontmatter.adding(urls: ["https://a.test/1", "https://b.test/2"], to: original)
+        #expect(!out.contains("syndication: ["))          // converted to block form
+        #expect(out.contains("syndication:\n  - https://a.test/1\n  - https://b.test/2"))
+        #expect(out.components(separatedBy: "https://a.test/1").count == 2) // deduped, appears once
+        #expect(out.contains("Body."))
+    }
+
+    @Test func duplicateSlugResolvesAlphabeticallyFirstCollection() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("repurpose-dup-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: dir) }
+        for collection in ["notes", "posts"] {
+            try fm.createDirectory(at: dir.appendingPathComponent("src/content/\(collection)"), withIntermediateDirectories: true)
+            try "---\ntitle: \(collection)\n---\nBody."
+                .write(to: dir.appendingPathComponent("src/content/\(collection)/dup.mdoc"), atomically: true, encoding: .utf8)
+        }
+        #expect(PostSource.load(slug: "dup", sourceDirectory: dir)?.collection == "notes")
+    }
 }

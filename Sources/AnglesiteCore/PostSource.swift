@@ -22,12 +22,15 @@ public struct PostSource: Sendable, Equatable {
     }
 
     /// Finds `src/content/<collection>/<slug>.{md,mdoc}` across all collections.
+    /// If the same slug exists in more than one collection, the first collection
+    /// alphabetically (by directory name) wins — lookup order is deterministic.
     public static func load(slug: String, sourceDirectory: URL,
                             fileManager: FileManager = .default) -> PostSource? {
         let contentRoot = sourceDirectory.appendingPathComponent("src/content")
         guard let collections = try? fileManager.contentsOfDirectory(
             at: contentRoot, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return nil }
-        for collectionURL in collections where (try? collectionURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+        let sortedCollections = collections.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        for collectionURL in sortedCollections where (try? collectionURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
             for ext in ["mdoc", "md"] {
                 let url = collectionURL.appendingPathComponent("\(slug).\(ext)")
                 guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }
