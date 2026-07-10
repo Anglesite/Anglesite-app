@@ -8,6 +8,7 @@ import AnglesiteCore
 /// the disabled-with-explanation state per the LLM policy.
 @Observable @MainActor
 final class CopyEditReportModel: Identifiable {
+    let id = UUID()
     let siteID: String
     let sourceDirectory: URL
     private let auditor: (any CopyEditAuditing)?

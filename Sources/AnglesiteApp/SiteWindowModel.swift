@@ -249,7 +249,7 @@ final class SiteWindowModel {
     /// `styleGuide` at `loadAndStart` (~line 1068) — rather than reaching into that model's
     /// private store, since the store is a stateless file-backed actor keyed off the directory.
     func presentCopyEdit() {
-        guard let site else { return }
+        guard copyEditModel == nil, let site else { return }
         copyEditModel = CopyEditReportModel(
             siteID: site.id,
             sourceDirectory: site.sourceDirectory,

@@ -5,9 +5,8 @@ import Foundation
 /// Siri/Shortcuts front-door for the copy audit (#465). Reuses the same chunker/auditor as the
 /// GUI and chat; the intent summarizes and points at the app for applying rewrites.
 ///
-/// Not registered in `AnglesiteShortcuts.appShortcuts` — that provider is capped at 10 curated
-/// phrases and is already full (see the NOTE there re: the Bucket 3 integration intents, which
-/// are similarly unregistered). The intent is still fully first-class: invocable from the
+/// Not registered in AnglesiteShortcuts: only one phrase slot remains under the 10-phrase cap
+/// and it's reserved for higher-traffic intents; ReviewCopyIntent stays discoverable via the
 /// Shortcuts app and via `SiteEntityQuery` resolution.
 public struct ReviewCopyIntent: AppIntent {
     public static let title: LocalizedStringResource = "Review Site Copy"
