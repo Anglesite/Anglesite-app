@@ -4,7 +4,7 @@ import Foundation
 
 // FoundationModels (and thus the `generateStructured` / `Generable` surface) is only
 // available on the Xcode-27 toolchain — see ContentAssistant.swift and #128.
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 /// A minimal `Generable` value used to exercise the protocol's structured-output surface.
@@ -27,7 +27,7 @@ struct UnrelatedGeneratedResult: Equatable {
 private struct StubAssistant: ContentAssistant {
     let chunks: [String]
     let capabilities: AssistantCapabilities
-    #if compiler(>=6.4)
+    #if compiler(>=6.4) && canImport(FoundationModels)
     let structured: StubGeneratedResult
     #endif
 
@@ -38,7 +38,7 @@ private struct StubAssistant: ContentAssistant {
         }
     }
 
-    #if compiler(>=6.4)
+    #if compiler(>=6.4) && canImport(FoundationModels)
     func generateStructured<T: Generable>(
         prompt: String,
         context: AssistantContext,
@@ -66,7 +66,7 @@ struct ContentAssistantTests {
     )
 
     private func makeAssistant(chunks: [String] = []) -> StubAssistant {
-        #if compiler(>=6.4)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         StubAssistant(chunks: chunks, capabilities: Self.testCapabilities, structured: StubGeneratedResult(title: "x"))
         #else
         StubAssistant(chunks: chunks, capabilities: Self.testCapabilities)
@@ -102,7 +102,7 @@ struct ContentAssistantTests {
         #expect(collected == "Hello, world!")
     }
 
-    #if compiler(>=6.4)
+    #if compiler(>=6.4) && canImport(FoundationModels)
     @Test("generateStructured returns the requested Generable type")
     func structuredReturnsTypedValue() async throws {
         let expected = StubGeneratedResult(title: "Generated")

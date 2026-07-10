@@ -1,8 +1,9 @@
 import Foundation
 
 // Gated to the Xcode-27 toolchain — `GeneratedAltText` is `@Generable` (FoundationModels), absent
-// at runtime on CI (#128). Same pattern as FoundationModelAssistant.swift / GenerableTypes.swift.
-#if compiler(>=6.4)
+// at runtime on CI (#128) — and to canImport for genuine off-Darwin portability (cross-platform
+// port design §5). Same pattern as FoundationModelAssistant.swift / GenerableTypes.swift.
+#if compiler(>=6.4) && canImport(FoundationModels)
 
 /// Post-processes a successful image-drop edit by generating alt text with the on-device vision
 /// model and applying it to the `<img>` (C.7, #157).

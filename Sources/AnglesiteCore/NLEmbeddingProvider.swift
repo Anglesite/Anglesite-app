@@ -1,4 +1,8 @@
 import Foundation
+
+// NaturalLanguage is Darwin-only (cross-platform port design §5); off-Darwin, callers fall back
+// to ``LexicalEmbeddingProvider``.
+#if canImport(NaturalLanguage)
 import NaturalLanguage
 
 /// Production ``EmbeddingProvider`` backed by Apple's on-device `NLEmbedding.sentenceEmbedding`.
@@ -30,3 +34,4 @@ public struct NLEmbeddingProvider: EmbeddingProvider {
         return floats.map { $0 / magnitude }
     }
 }
+#endif

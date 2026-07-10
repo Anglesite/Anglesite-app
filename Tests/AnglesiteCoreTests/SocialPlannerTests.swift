@@ -5,7 +5,7 @@ import Foundation
 @Suite struct SocialPlannerTests {
     @Test func factoryMatchesToolchain() {
         let planner = SocialMediaPlannerFactory.makeDefault()
-        #if compiler(>=6.4)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         #expect(planner != nil)
         #else
         #expect(planner == nil)

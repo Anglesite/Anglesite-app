@@ -1,7 +1,11 @@
 import Foundation
-import NaturalLanguage
 import Testing
 @testable import AnglesiteCore
+
+// Gated for the same reason as the type under test — NaturalLanguage is a Darwin-only
+// framework (see NLEmbeddingProvider.swift's canImport(NaturalLanguage) guard).
+#if canImport(NaturalLanguage)
+import NaturalLanguage
 
 @Suite("NLEmbeddingProvider")
 struct NLEmbeddingProviderTests {
@@ -19,3 +23,4 @@ struct NLEmbeddingProviderTests {
         #expect(VectorMath.cosine(pricing, plans) > VectorMath.cosine(pricing, weather))
     }
 }
+#endif

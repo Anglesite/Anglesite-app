@@ -5,7 +5,7 @@ import Foundation
 @Suite struct CopyEditAuditorTests {
     @Test func factoryMatchesToolchain() {
         let auditor = CopyEditAuditorFactory.makeDefault()
-        #if compiler(>=6.4)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         #expect(auditor != nil)
         #else
         #expect(auditor == nil)

@@ -15,6 +15,7 @@ struct SiteAssistantSession {
 enum SiteAssistantSessionFactory {
     typealias MCPClientProvider = @Sendable () async -> MCPClient?
     typealias EditRouterProvider = @Sendable (_ siteID: String) async -> (any EditRouter)?
+    typealias GraphSnapshotProvider = @Sendable () async -> SiteGraphExplorerSnapshot
     typealias AssistantBuilder = @Sendable (
         _ editBridge: IntentEditBridge,
         _ contentGraph: SiteContentGraph,
@@ -22,7 +23,9 @@ enum SiteAssistantSessionFactory {
         _ semanticRanker: SemanticRanker?,
         _ integrationService: any IntegrationOperationsService,
         _ conventionsEngine: ProjectConventionsEngine?,
-        _ conventionsStore: ProjectConventionsStore
+        _ conventionsStore: ProjectConventionsStore,
+        _ themeCatalog: ThemeCatalog?,
+        _ graphSnapshotProvider: @escaping GraphSnapshotProvider
     ) -> any ConversationalAssistant
 
     struct Dependencies {
@@ -51,8 +54,8 @@ enum SiteAssistantSessionFactory {
             let editRouterProvider: EditRouterProvider = { siteID in
                 await EditRouterRegistry.shared.router(for: siteID)
             }
-            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, conventionsEngine, conventionsStore in
-                KnowledgeAugmentedAssistant(
+            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, conventionsEngine, conventionsStore, themeCatalog, graphSnapshotProvider in
+                CombinedAugmentedAssistant(
                     base: FoundationModelAssistant(
                         tier: .onDevice,
                         editBridge: editBridge,
@@ -64,9 +67,11 @@ enum SiteAssistantSessionFactory {
                         conventionsStore: conventionsStore,
                         copyEditAuditor: CopyEditAuditorFactory.makeDefault(),
                         socialMediaPlanner: SocialMediaPlannerFactory.makeDefault(),
-                        postRepurposer: PostRepurposerFactory.makeDefault()
+                        postRepurposer: PostRepurposerFactory.makeDefault(),
+                        themeCatalog: themeCatalog
                     ),
-                    index: knowledgeIndex
+                    index: knowledgeIndex,
+                    graphSnapshotProvider: graphSnapshotProvider
                 )
             }
             return Dependencies(
@@ -122,7 +127,9 @@ enum SiteAssistantSessionFactory {
         semanticRanker: SemanticRanker?,
         conventionsEngine: ProjectConventionsEngine?,
         integrationService: any IntegrationOperationsService,
-        dependencies: Dependencies = .live
+        themeCatalog: ThemeCatalog? = nil,
+        dependencies: Dependencies = .live,
+        graphSnapshotProvider: @escaping GraphSnapshotProvider
     ) -> SiteAssistantSession {
         let editBridge = IntentEditBridge(routerProvider: dependencies.editRouterProvider)
         // A second `ProjectConventionsStore` instance pointed at the same `configDirectory` as
@@ -143,7 +150,9 @@ enum SiteAssistantSessionFactory {
                 semanticRanker,
                 integrationService,
                 conventionsEngine,
-                conventionsStore
+                conventionsStore,
+                themeCatalog,
+                graphSnapshotProvider
             ),
             annotationFeed: dependencies.annotationFeed(sourceDirectory),
             annotationResolver: { [resolveAnnotation = dependencies.resolveAnnotation] id in

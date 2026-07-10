@@ -1,16 +1,21 @@
 import Foundation
-import OSLog
 
 /// Which Apple model substrate a ``FoundationModelAssistant`` targets.
 ///
 /// Declared *outside* the `#if compiler(>=6.4)` gate because it has no `FoundationModels`
 /// dependency and can be referenced from package code compiled on older CI toolchains.
 ///
-/// - Important: The public `FoundationModels` framework is **on-device**. There is no
-///   caller-selectable Private Cloud Compute session; PCC is used transparently by some system
-///   APIs. `.privateCloudCompute` is therefore *modeled* here so future call sites can express
-///   intent, but **v1 backs it with the same on-device session**. The only observable difference
-///   today is the advertised ``AssistantCapabilities``.
+/// - Important: A 2026-07-10 feasibility spike
+///   (`docs/specs/2026-07-10-pcc-escalation-spike-notes.md`) found that a real, public
+///   `PrivateCloudComputeLanguageModel` API exists in the macOS 27 SDK's `FoundationModels`
+///   framework, conforming to `LanguageModel` and usable via `LanguageModelSession(model:)` —
+///   it is not aspirational or SPI. However, using it requires a manually-requested Apple
+///   developer entitlement this project has not yet obtained, plus undesigned quota- and
+///   availability-fallback handling (the type carries its own `QuotaUsage`/`Availability`
+///   states). `.privateCloudCompute` remains backed by the on-device session until that
+///   entitlement is granted and the integration is designed — this is a deliberate near-term
+///   scope choice, not an API limitation. The only observable difference today is the
+///   advertised ``AssistantCapabilities``.
 public enum FoundationModelTier: String, Sendable, Equatable, CaseIterable {
     /// `SystemLanguageModel.default` — the ~3B on-device model. Free, no network.
     case onDevice            = "onDevice"
@@ -19,11 +24,47 @@ public enum FoundationModelTier: String, Sendable, Equatable, CaseIterable {
     case privateCloudCompute = "privateCloudCompute"
 }
 
-// Gated to the Xcode-27 toolchain — FoundationModels is absent at runtime on CI (#128).
-// See ContentAssistant.swift for the same pattern.
-#if compiler(>=6.4)
+/// Deterministic context-budget helpers, usable without `FoundationModels`. Declared as a
+/// standalone type (not an extension on ``FoundationModelAssistant``) because that actor is
+/// declared inside the `#if compiler(>=6.4)` gate below and is therefore unavailable at this
+/// point in the file on older toolchains — extending it here would break compilation on CI's
+/// pre-6.4 `swift test` runners (#128).
+///
+/// Per the 2026-07-10 spike (see ``FoundationModelTier``'s doc comment), real PCC escalation is
+/// not yet wired up, so "escalation" here means the caller (e.g. the design-interview
+/// conversation) should chunk or summarize a prompt deterministically before it overruns the
+/// on-device context window — there is no larger-model request to make yet.
+public enum FoundationModelContextBudget {
+    /// Conservative characters-per-token proxy (~4 chars/token for English), matching the
+    /// existing character-based approach in `maxPageContentCharacters` — no on-device tokenizer
+    /// is available to measure the real count.
+    public static let onDeviceTokenBudget = 4_096
+    private static let charsPerTokenEstimate = 4
+
+    public static func estimatedTokens(for text: String) -> Int {
+        text.count / charsPerTokenEstimate
+    }
+
+    /// Whether a prompt is estimated to exceed the on-device context budget.
+    ///
+    /// - Note: this is currently unconsumed scaffolding — `DesignInterviewModel`/
+    ///   `DesignInterviewPrompts` don't call it yet; they apply their own independent, smaller
+    ///   character cap directly on the user's raw message instead (see
+    ///   `DesignInterviewPrompts.truncatedUserMessage`). Wiring this budget check into the actual
+    ///   conversation flow is tracked alongside design-interview's other app-integration gaps in
+    ///   Anglesite-app#631.
+    public static func shouldEscalate(prompt: String) -> Bool {
+        estimatedTokens(for: prompt) > onDeviceTokenBudget
+    }
+}
+
+// Gated to the Xcode-27 toolchain — FoundationModels is absent at runtime on CI (#128) — and to
+// canImport for genuine off-Darwin portability (cross-platform port design §5). See
+// ContentAssistant.swift for the same pattern.
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 import CoreSpotlight
+import OSLog
 
 /// A ``ContentAssistant`` backed by Apple's on-device `FoundationModels`. Streams free-form text
 /// and produces ``Generable`` structured output via guided generation.
@@ -60,6 +101,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private let copyEditAuditor: (any CopyEditAuditing)?
     private let socialMediaPlanner: (any SocialMediaPlanning)?
     private let postRepurposer: (any PostRepurposing)?
+    private let themeCatalog: ThemeCatalog?
     private let logger = Logger(subsystem: "io.dwk.anglesite", category: "FoundationModelAssistant")
     /// The current conversational turn's consumer-facing ``TurnRelay``, retained so ``cancel()`` can
     /// wind it down. Cancelling stops *delivery* only — it never cancels the model stream, because
@@ -100,6 +142,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         copyEditAuditor: (any CopyEditAuditing)? = nil,
         socialMediaPlanner: (any SocialMediaPlanning)? = nil,
         postRepurposer: (any PostRepurposing)? = nil,
+        themeCatalog: ThemeCatalog? = nil,
         maxRetainedTurns: Int = 12
     ) {
         self.tier = tier
@@ -113,6 +156,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         self.copyEditAuditor = copyEditAuditor
         self.socialMediaPlanner = socialMediaPlanner
         self.postRepurposer = postRepurposer
+        self.themeCatalog = themeCatalog
         // `trimSessionIfNeeded`'s cutoff indexing (`promptIndices.count - maxRetainedTurns`) assumes
         // at least 1: `<= 0` would index at or past the end of `promptIndices` and crash. Clamp
         // rather than crash so a caller passing e.g. `0` ("keep no history") degrades to the
@@ -340,7 +384,8 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// is added when both a `conventionsEngine` and a `conventionsStore` are provided;
     /// `ReviewCopyTool` is added when a `copyEditAuditor` is provided. `PlanSocialMediaTool` is
     /// added when a `socialMediaPlanner` is provided. `RepurposePostTool`/`SaveSyndicationTool` are
-    /// added together when a `postRepurposer` is provided.
+    /// added together when a `postRepurposer` is provided. `SetupThemeTool` is added when a
+    /// `themeCatalog` is provided.
     private var attachedToolNames: [String] {
         var names = [Self.spotlightToolDisplayName]
         if editBridge != nil && contentGraph != nil {
@@ -366,6 +411,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         if postRepurposer != nil {
             names.append(RepurposePostTool.toolName)
             names.append(SaveSyndicationTool.toolName)
+        }
+        if themeCatalog != nil {
+            names.append(SetupThemeTool.toolName)
         }
         return names
     }
@@ -462,6 +510,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
                 repurposer: postRepurposer, conventionsStore: conventionsStore,
                 siteID: context.siteID, siteDirectory: context.siteDirectory))
             tools.append(SaveSyndicationTool(siteDirectory: context.siteDirectory))
+        }
+        if let themeCatalog {
+            tools.append(SetupThemeTool(catalog: themeCatalog, sourceDirectory: context.siteDirectory))
         }
         return tools
     }

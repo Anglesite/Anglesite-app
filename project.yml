@@ -88,6 +88,68 @@ targets:
         product: AnglesiteIntents
       - package: Anglesite
         product: AnglesiteContainer
+      - target: AnglesiteQuickLookPreview
+        embed: true
+      - target: AnglesiteQuickLookThumbnail
+        embed: true
+
+  AnglesiteQuickLookPreview:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: Sources/AnglesiteQuickLookPreview
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.dwk.anglesite.QuickLookPreview
+        PRODUCT_NAME: AnglesiteQuickLookPreview
+        INFOPLIST_FILE: Resources/QuickLookPreview/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Resources/QuickLookPreview/AnglesiteQuickLookPreview.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        MACOSX_DEPLOYMENT_TARGET: "27.0"
+        SWIFT_VERSION: "5.10"
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "0.1.0"
+        SKIP_INSTALL: YES
+      configs:
+        Debug:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+    dependencies:
+      - package: Anglesite
+        product: AnglesiteQuickLookSupport
+
+  AnglesiteQuickLookThumbnail:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: Sources/AnglesiteQuickLookThumbnail
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.dwk.anglesite.QuickLookThumbnail
+        PRODUCT_NAME: AnglesiteQuickLookThumbnail
+        INFOPLIST_FILE: Resources/QuickLookThumbnail/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Resources/QuickLookThumbnail/AnglesiteQuickLookThumbnail.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        MACOSX_DEPLOYMENT_TARGET: "27.0"
+        SWIFT_VERSION: "5.10"
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "0.1.0"
+        SKIP_INSTALL: YES
+      configs:
+        Debug:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+    dependencies:
+      - package: Anglesite
+        product: AnglesiteQuickLookSupport
 
 schemes:
   Anglesite:

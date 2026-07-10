@@ -21,7 +21,7 @@ public protocol SiteGraphNodeExplaining: Sendable {
 /// ``AssistantError/unavailable(_:)`` ("backend exists, Apple Intelligence is off").
 public enum SiteGraphExplainerFactory {
     public static func makeDefault() -> (any SiteGraphNodeExplaining)? {
-        #if compiler(>=6.4)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         return FoundationModelSiteGraphExplainer()
         #else
         return nil
@@ -37,12 +37,12 @@ public enum SiteGraphExplainPrompt {
     /// on-device model's small context window; the remainder is summarized as "and N more".
     public static let maxListedNames = 12
 
-    public static func prompt(
+    static func facts(
         node: SiteGraphNode,
         impact: ImpactAnalysis.Report,
         dependsOn: [SiteGraphNode],
         referencedBy: [SiteGraphNode]
-    ) -> String {
+    ) -> [String] {
         // A neighbor reachable through several edge kinds (e.g. both `imports` and `usesLayout`)
         // arrives once per edge — list it once, or the capped fact list fills with duplicates.
         let uniqueDependsOn = deduplicated(dependsOn)
@@ -58,7 +58,16 @@ public enum SiteGraphExplainPrompt {
             facts.append("- Referenced by: \(nameList(uniqueReferencedBy, withKinds: true))")
         }
         facts.append(contentsOf: impactFacts(impact))
+        return facts
+    }
 
+    public static func prompt(
+        node: SiteGraphNode,
+        impact: ImpactAnalysis.Report,
+        dependsOn: [SiteGraphNode],
+        referencedBy: [SiteGraphNode]
+    ) -> String {
+        let factLines = facts(node: node, impact: impact, dependsOn: dependsOn, referencedBy: referencedBy)
         return """
         You are explaining one file in a static website's dependency graph to the site's owner, \
         who is not a developer. Using only the facts below, write a short plain-language \
@@ -67,7 +76,7 @@ public enum SiteGraphExplainPrompt {
         list — synthesize them.
 
         Facts:
-        \(facts.joined(separator: "\n"))
+        \(factLines.joined(separator: "\n"))
         """
     }
 
@@ -124,9 +133,10 @@ public enum SiteGraphExplainPrompt {
     }
 }
 
-// Gated to the Xcode-27 toolchain — FoundationModels is absent at runtime on CI (#128).
+// Gated to the Xcode-27 toolchain (FoundationModels absent at runtime on CI, #128) and to
+// canImport for genuine off-Darwin portability (cross-platform port design §5).
 // See FoundationModelAssistant.swift for the pattern.
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 /// On-device explainer: streams ``FoundationModelAssistant``'s one-shot `generate` output. A host
 /// without Apple Intelligence throws ``AssistantError/unavailable(_:)`` from `generate` before
 /// the stream opens — surfaced by the UI as its "unavailable" state, never a cloud fallback.

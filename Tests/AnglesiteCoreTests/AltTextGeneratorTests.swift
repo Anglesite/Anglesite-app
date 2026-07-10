@@ -4,7 +4,7 @@ import Foundation
 
 // Gated like the type under test — `AltTextGenerator` references `GeneratedAltText` (`@Generable`,
 // Xcode-27 only). The logic here is model-free: the vision call is injected as a closure.
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 
 @Suite("AltTextGenerator")
 struct AltTextGeneratorTests {

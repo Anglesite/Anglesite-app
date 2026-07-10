@@ -64,14 +64,30 @@ var packageTargets: [Target] = [
         swiftSettings: strictConcurrency
     ),
     .target(
+        name: "AnglesiteQuickLookSupport",
+        dependencies: ["AnglesiteSiteModel"],
+        path: "Sources/AnglesiteQuickLookSupport",
+        swiftSettings: strictConcurrency
+    ),
+    .target(
         name: "AnglesiteCore",
         dependencies: ["AnglesiteSiteModel"],
         path: "Sources/AnglesiteCore",
         swiftSettings: strictConcurrency + disableFoundationModelsAutolink
     ),
+    // Webview-agnostic message schema + overlay-bundle lookup (cross-platform port design §6
+    // "AnglesiteBridgeCore split") — no WebKit import, so it's portable off-Darwin. Each
+    // platform's webview adapter (AnglesiteBridge/WKWebView today; WebKitGTK/WebView2 later)
+    // wraps this in its own script-injection/message-handler API.
+    .target(
+        name: "AnglesiteBridgeCore",
+        dependencies: ["AnglesiteCore"],
+        path: "Sources/AnglesiteBridgeCore",
+        swiftSettings: strictConcurrency
+    ),
     .target(
         name: "AnglesiteBridge",
-        dependencies: ["AnglesiteCore"],
+        dependencies: ["AnglesiteCore", "AnglesiteBridgeCore"],
         path: "Sources/AnglesiteBridge",
         swiftSettings: strictConcurrency
     ),
@@ -86,6 +102,13 @@ var packageTargets: [Target] = [
         dependencies: ["AnglesiteCore"],
         path: "Sources/AnglesiteIntents",
         swiftSettings: strictConcurrency
+    ),
+    .executableTarget(
+        name: "AnglesiteLANHost",
+        dependencies: ["AnglesiteCore"],
+        path: "Sources/AnglesiteLANHost",
+        swiftSettings: strictConcurrency,
+        linkerSettings: weakLinkFoundationModels
     ),
     // Test-only support shared across the test targets (e.g. the e2e prerequisite probes used by
     // both AnglesiteCoreTests and AnglesiteBridgeTests). Not exposed as a `.library` product, so
@@ -103,10 +126,25 @@ var packageTargets: [Target] = [
         swiftSettings: strictConcurrency
     ),
     .testTarget(
+        name: "AnglesiteQuickLookSupportTests",
+        dependencies: ["AnglesiteQuickLookSupport"],
+        path: "Tests/AnglesiteQuickLookSupportTests",
+        swiftSettings: strictConcurrency
+    ),
+    .testTarget(
         name: "AnglesiteCoreTests",
         dependencies: ["AnglesiteCore", "AnglesiteSiteModel", "AnglesiteTestSupport"],
         path: "Tests/AnglesiteCoreTests",
         swiftSettings: strictConcurrency,
+        linkerSettings: weakLinkFoundationModels
+    ),
+    .testTarget(
+        name: "AnglesiteBridgeCoreTests",
+        dependencies: ["AnglesiteBridgeCore", "AnglesiteCore"],
+        path: "Tests/AnglesiteBridgeCoreTests",
+        swiftSettings: strictConcurrency,
+        // Depends on AnglesiteCore, so the bundle needs the same #541 weak link as its siblings —
+        // without it dyld can't load the bundle on an SDK/OS mangling-skewed Xcode 27 beta host.
         linkerSettings: weakLinkFoundationModels
     ),
     .testTarget(
@@ -220,10 +258,13 @@ if includeContainer && ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_
 
 var packageProducts: [Product] = [
     .library(name: "AnglesiteSiteModel", targets: ["AnglesiteSiteModel"]),
+    .library(name: "AnglesiteQuickLookSupport", targets: ["AnglesiteQuickLookSupport"]),
     .library(name: "AnglesiteCore", targets: ["AnglesiteCore"]),
+    .library(name: "AnglesiteBridgeCore", targets: ["AnglesiteBridgeCore"]),
     .library(name: "AnglesiteBridge", targets: ["AnglesiteBridge"]),
     .library(name: "AnglesiteIOS", targets: ["AnglesiteIOS"]),
-    .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"])
+    .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"]),
+    .executable(name: "anglesite-lan-host", targets: ["AnglesiteLANHost"])
 ]
 
 var packageDependencies: [Package.Dependency] = []
@@ -242,17 +283,25 @@ if includeContainer {
 // Cross-platform port, phase 1 "purity" (docs/superpowers/specs/2026-07-08-cross-platform-
 // swift-port-design.md §10): off-Darwin, expose only the targets that actually compile
 // there, so `swift build && swift test` stays green on the Linux CI leg and the compiler is
-// the purity lint as seam PRs expand the portable set. Today that's AnglesiteSiteModel
-// (pure Foundation). AnglesiteCore still has Apple-only imports (FoundationModels, OSLog,
-// Security, …); ANGLESITE_PORT_WIP=1 opts it back in so in-flight seam work can
-// compile-check it locally before the final purity PR flips it on unconditionally.
+// the purity lint as seam PRs expand the portable set. AnglesiteSiteModel and
+// AnglesiteQuickLookSupport (both pure Foundation) were first; AnglesiteCore joined once its
+// Apple-only imports (FoundationModels, OSLog, Security, NSFileCoordinator, UndoManager,
+// URLSession.bytes(for:), CFGetTypeID, security-scoped bookmarks, vsock proxies, …) all grew
+// Platform/ seams or #if canImport gates (#566) — ANGLESITE_PORT_WIP no longer needs to opt it
+// back in. AnglesiteCoreTests is not yet in this set: its test files aren't purity-swept.
+// AnglesiteBridgeCore joined at phase 2 (#567): it's the webview-agnostic message-schema half
+// of the former AnglesiteBridge (no WebKit import), split out so the message dispatch logic —
+// and its tests — run on every platform; AnglesiteBridge itself (the WKWebView adapter) stays
+// Darwin-only.
 // Filtering by name here (rather than duplicating target definitions in per-platform
 // lists) keeps the single source of truth above.
 #if !canImport(Darwin)
-var portableTargets: Set<String> = ["AnglesiteSiteModel", "AnglesiteSiteModelTests"]
-if ProcessInfo.processInfo.environment["ANGLESITE_PORT_WIP"] == "1" {
-    portableTargets.insert("AnglesiteCore")
-}
+let portableTargets: Set<String> = [
+    "AnglesiteSiteModel", "AnglesiteSiteModelTests",
+    "AnglesiteQuickLookSupport", "AnglesiteQuickLookSupportTests",
+    "AnglesiteCore",
+    "AnglesiteBridgeCore", "AnglesiteBridgeCoreTests",
+]
 packageTargets.removeAll { !portableTargets.contains($0.name) }
 // Every library product above is named after its single target, so the same name set
 // filters products. (The container probe executable breaks that convention, but it is

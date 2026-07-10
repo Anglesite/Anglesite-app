@@ -187,7 +187,7 @@ struct SiteWindow: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         if model.chatPresented, let chat = model.chat {
                             Divider()
-                            ChatView(model: chat)
+                            ChatView(model: chat, revealCitation: { path in model.revealCitationInGraph(path) })
                                 .frame(width: 420)
                                 .transition(reduceMotion
                                     ? .opacity

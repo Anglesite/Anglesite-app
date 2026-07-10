@@ -34,7 +34,9 @@ public enum ReviewCopyReply {
     }
 }
 
-#if compiler(>=6.4)
+// Gated to the Xcode-27 toolchain (FoundationModels absent at runtime on CI, #128) and to
+// canImport for genuine off-Darwin portability (cross-platform port design §5).
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 /// Chat front-door for the copy audit (#465). Page-scoped when `route` is given; otherwise a

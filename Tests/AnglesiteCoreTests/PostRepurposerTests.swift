@@ -12,7 +12,7 @@ import Foundation
 
     @Test func factoryMatchesToolchain() {
         let repurposer = PostRepurposerFactory.makeDefault()
-        #if compiler(>=6.4)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         #expect(repurposer != nil)
         #else
         #expect(repurposer == nil)

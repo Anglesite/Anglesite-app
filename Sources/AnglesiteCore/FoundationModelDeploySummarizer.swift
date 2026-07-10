@@ -4,7 +4,7 @@ import Foundation
 /// can default its dependency without importing FoundationModels.
 public enum DeploySummarizerFactory {
     public static func makeDefault() -> any DeployFailureSummarizing {
-        #if compiler(>=6.4)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         return FoundationModelDeploySummarizer()
         #else
         return NoopDeploySummarizer()
@@ -12,7 +12,9 @@ public enum DeploySummarizerFactory {
     }
 }
 
-#if compiler(>=6.4)
+// Gated to the Xcode-27 toolchain (FoundationModels absent at runtime on CI, #128) and to
+// canImport for genuine off-Darwin portability (cross-platform port design §5).
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 import os
 

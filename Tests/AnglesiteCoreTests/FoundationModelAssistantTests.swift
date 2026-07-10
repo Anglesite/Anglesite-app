@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // Gated like the type under test (#128). Capability/tier assertions run on any toolchain≥6.4;
 // the generate/generateStructured tests are live-model and skip when unavailable.
 // TODO(#104/#161): migrate the live tests to the mock LanguageModel session once #104 lands.
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 @Suite("FoundationModelAssistant")

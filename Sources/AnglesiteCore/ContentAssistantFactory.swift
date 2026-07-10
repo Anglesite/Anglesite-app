@@ -7,7 +7,7 @@ import Foundation
 /// Xcode-27 toolchain (no FoundationModels — see #128), matching `SiteGraphExplainerFactory`.
 public enum ContentAssistantFactory {
     public static func make(tier: FoundationModelTier) -> (any ContentAssistant)? {
-        #if compiler(>=6.4)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         return FoundationModelAssistant(tier: tier)
         #else
         return nil

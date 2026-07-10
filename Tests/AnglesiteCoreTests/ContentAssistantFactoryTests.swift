@@ -4,7 +4,7 @@ import Testing
 @Suite struct ContentAssistantFactoryTests {
     @Test func makeReturnsBackendMatchingToolchain() {
         let assistant = ContentAssistantFactory.make(tier: .privateCloudCompute)
-        #if compiler(>=6.4)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         #expect(assistant != nil)
         #expect(assistant?.capabilities.providerName == "Private Cloud Compute")
         #else

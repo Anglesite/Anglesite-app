@@ -105,7 +105,16 @@ public enum PlistDocumentIO {
         case let value as Date:
             return .date(value)
         case let value as NSNumber:
-            if CFGetTypeID(value) == CFBooleanGetTypeID() {
+            #if canImport(Darwin)
+            let isBool = CFGetTypeID(value) == CFBooleanGetTypeID()
+            #else
+            // CFGetTypeID/CFBooleanGetTypeID (CoreFoundation) don't exist off Darwin. Empirically,
+            // swift-corelibs-foundation's PropertyListSerialization boxes plist booleans with
+            // objCType "c" and every plist number (integer or real) with "i"/"q"/"d"/"f" — never
+            // "c" — matching the `["f", "d"].contains(type)` check just below.
+            let isBool = String(cString: value.objCType) == "c"
+            #endif
+            if isBool {
                 return .bool(value.boolValue)
             }
             let type = String(cString: value.objCType)

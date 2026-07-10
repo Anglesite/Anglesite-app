@@ -41,6 +41,14 @@ public struct AnglesitePackage: Sendable, Equatable {
     /// fetches from it to fast-forward the local repo — the bundle acts as an iCloud-mediated remote.
     public var syncBundleURL: URL { syncDirectoryURL.appendingPathComponent("source.bundle", isDirectory: false) }
 
+    /// Cached home-page thumbnail (nice-to-have, #621). Nothing writes this file yet — a future
+    /// feature (e.g. captured on deploy) will populate it. The Quick Look preview and thumbnail
+    /// extensions (`AnglesiteQuickLookPreview` / `AnglesiteQuickLookThumbnail`) read it if present
+    /// and fall back to a generated placeholder otherwise.
+    public var quickLookThumbnailURL: URL {
+        configURL.appendingPathComponent("quicklook-thumbnail.png", isDirectory: false)
+    }
+
     // MARK: - Marker
 
     /// The `Info.plist` marker: stable identity + format version + provenance. Encoded with

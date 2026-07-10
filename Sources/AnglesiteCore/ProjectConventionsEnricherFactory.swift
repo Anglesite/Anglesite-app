@@ -7,7 +7,7 @@ import Foundation
 /// identically (just without tone/brand enrichment) on the reduced CI toolchain.
 public enum ProjectConventionsEnricherFactory {
     public static func makeDefault() -> ProjectConventionsEngine.ConventionsEnricher? {
-        #if compiler(>=6.4)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         return { sampleText, context in
             let result = try await FoundationModelAssistant(tier: .onDevice).generateStructured(
                 prompt: """

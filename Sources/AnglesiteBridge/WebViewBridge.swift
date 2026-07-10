@@ -1,6 +1,7 @@
 import Foundation
 import WebKit
 import AnglesiteCore
+import AnglesiteBridgeCore
 
 /// Bridges the WKWebView preview to the native edit pipeline.
 ///
@@ -8,7 +9,9 @@ import AnglesiteCore
 /// Step 2 (#16) registers the `anglesite` `WKScriptMessageHandler` on this same configuration to
 /// receive edit messages from the injected JS overlay.
 public enum WebViewBridge {
-    public static let scriptMessageNamespace = "anglesite"
+    /// The script-message namespace, shared with every platform adapter — see
+    /// ``AnglesiteMessageDispatcher/scriptMessageNamespace``.
+    public static let scriptMessageNamespace = AnglesiteMessageDispatcher.scriptMessageNamespace
 
     /// A `WKWebViewConfiguration` tuned for previewing a local Astro dev server. In Debug builds it
     /// uses a non-persistent data store so nothing is cached between launches (the dev server moves
@@ -42,12 +45,12 @@ public enum WebViewBridge {
 
     /// Loads the bundled edit overlay (built by `scripts/build-overlay.sh`) as a `WKUserScript`,
     /// or returns `nil` when the bundle hasn't been produced (e.g. `swift test`, or a build where
-    /// the prebuild script was skipped).
+    /// the prebuild script was skipped). The lookup + read is shared with every platform adapter
+    /// via ``AnglesiteOverlayBundle``; only the `WKUserScript` wrapping is WKWebView-specific.
     @MainActor
     public static func makeOverlayUserScript(in bundle: Bundle = .main) -> WKUserScript? {
-        guard let url = bundle.url(forResource: "overlay", withExtension: "js", subdirectory: "edit-overlay")
-        else { return nil }
-        return makeOverlayUserScript(from: url)
+        guard let source = AnglesiteOverlayBundle.source(in: bundle) else { return nil }
+        return WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
     }
 
     /// Reads `url` and wraps it as a `WKUserScript` at `atDocumentEnd`. Returns `nil` on read

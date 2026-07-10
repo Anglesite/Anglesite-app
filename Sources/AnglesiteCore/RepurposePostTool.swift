@@ -21,7 +21,9 @@ public enum RepurposeReply {
     }
 }
 
-#if compiler(>=6.4)
+// Gated to the Xcode-27 toolchain (FoundationModels absent at runtime on CI, #128) and to
+// canImport for genuine off-Darwin portability (cross-platform port design §5).
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 /// Chat front-door for repurposing one post into per-platform variants (#465).

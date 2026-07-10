@@ -3,7 +3,7 @@ import Testing
 @testable import AnglesiteCore
 
 // FoundationModels is absent on the CI runner; these only compile/run under Xcode 27.
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 @Suite struct FoundationModelPageCopyGeneratorTests {
     @Test func promptIncludesTheTitle() {
         let prompt = FoundationModelPageCopyGenerator.prompt(for: "About Us")
