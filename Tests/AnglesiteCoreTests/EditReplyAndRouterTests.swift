@@ -89,4 +89,15 @@ struct EditReplyAndRouterTests {
         let reply = await resolved.apply(msg)
         #expect(reply.status == .failed, "the fallback should be a LoggingEditRouter, which always replies failed")
     }
+
+    // MARK: parseStructured piggybacked model
+
+    @Test("parseStructured decodes a piggybacked model")
+    func parseStructuredDecodesModel() {
+        let json = """
+        {"type":"anglesite:edit-applied","id":"1","file":"src/components/Card.astro","range":{"start":0,"end":1},"model":\(ComponentModelTests.fixture)}
+        """
+        let parsed = MCPApplyEditRouter.parseStructured(json)
+        #expect(parsed?.model?.path == "src/components/Card.astro")
+    }
 }

@@ -73,7 +73,9 @@ struct EditMessageTests {
     }
 
     @Test("Rejects missing required field") func rejectsMissingRequiredField() {
-        for missing in ["id", "type", "path", "selector", "op"] {
+        // "selector" is intentionally excluded: it's optional now (Component Editor ops carry
+        // `component` instead) — see `legacyMessageStillDecodes` / `componentMessageEncoding`.
+        for missing in ["id", "type", "path", "op"] {
             var body = validBody()
             body.removeValue(forKey: missing)
             #expect(
@@ -105,5 +107,50 @@ struct EditMessageTests {
         #expect(
             EditMessage.decode(from: validBody(overrides: ["type": "anglesite:something-else"])) == .failure(.unknownType("anglesite:something-else"))
         )
+    }
+
+    @Test("New component-style op constants exist")
+    func componentStyleOpConstants() {
+        #expect(EditMessage.Op.setStyleProperty == "set-style-property")
+        #expect(EditMessage.Op.removeStyleProperty == "remove-style-property")
+        #expect(EditMessage.Op.addStyleRule == "add-style-rule")
+        #expect(EditMessage.Op.setRuleSelector == "set-rule-selector")
+    }
+
+    @Test("A component-style message encodes component and omits selector")
+    func componentMessageEncoding() {
+        let message = EditMessage(
+            id: "1",
+            path: "src/components/Card.astro",
+            selector: nil,
+            op: EditMessage.Op.setStyleProperty,
+            component: .object([
+                "path": .string("src/components/Card.astro"),
+                "baseVersion": .string("sha256:abc123456789"),
+                "ruleSpan": .array([.int(10), .int(40)]),
+                "property": .string("color"),
+                "value": .string("red"),
+            ]),
+            value: nil
+        )
+        let wire = message.jsonValue
+        guard case .object(let dict) = wire else { Issue.record("expected object"); return }
+        #expect(dict["selector"] == nil)
+        #expect(dict["component"] != nil)
+    }
+
+    @Test("A legacy replace-attr message still decodes with selector and no component")
+    func legacyMessageStillDecodes() {
+        let body: [String: Any] = [
+            "id": "1", "type": "anglesite:apply-edit", "path": "/about/",
+            "selector": ["tag": "h1", "classes": [], "nthChild": 1],
+            "op": "replace-attr", "value": ["name": "class", "value": "big"],
+        ]
+        switch EditMessage.decode(from: body) {
+        case .success(let message):
+            #expect(message.component == nil)
+        case .failure(let error):
+            Issue.record("expected decode success, got \(error)")
+        }
     }
 }

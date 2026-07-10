@@ -77,7 +77,8 @@ public struct MCPApplyEditRouter: EditRouter {
                     message: trimmed,
                     file: parsed?.file,
                     commit: parsed?.commit,
-                    result: parsed?.result
+                    result: parsed?.result,
+                    model: parsed?.model
                 )
             }
             let reply = EditReply(
@@ -86,7 +87,8 @@ public struct MCPApplyEditRouter: EditRouter {
                 message: trimmed,
                 file: parsed?.file,
                 commit: parsed?.commit,
-                result: parsed?.result
+                result: parsed?.result,
+                model: parsed?.model
             )
             if reply.commit != nil { onEdit?(reply) }
             // Fire-and-forget so the overlay gets its reply immediately; alt-text generation and the
@@ -138,13 +140,19 @@ public struct MCPApplyEditRouter: EditRouter {
             let srcset = resultDict["srcset"] as? String
             image = EditReply.ImageResult(src: src, srcset: srcset)
         }
-        if file == nil && commit == nil && image == nil { return nil }
-        return Parsed(file: file, commit: commit, result: image)
+        var model: ComponentModel?
+        if let modelDict = json["model"],
+           let modelData = try? JSONSerialization.data(withJSONObject: modelDict) {
+            model = try? JSONDecoder().decode(ComponentModel.self, from: modelData)
+        }
+        if file == nil && commit == nil && image == nil && model == nil { return nil }
+        return Parsed(file: file, commit: commit, result: image, model: model)
     }
 
     struct Parsed: Equatable {
         let file: String?
         let commit: String?
         let result: EditReply.ImageResult?
+        let model: ComponentModel?
     }
 }
