@@ -64,16 +64,21 @@ public struct CopyEditReport: Sendable, Equatable {
     public let findings: [CopyFinding]
     public let auditedCount: Int
     public let skippedRoutes: [String]
+    /// Non-nil when the audit couldn't run at all (e.g. Apple Intelligence off at runtime) —
+    /// carries the user-facing explanation. Front-doors show this instead of a skip list.
+    public let unavailableMessage: String?
 
-    public init(findings: [CopyFinding], auditedCount: Int, skippedRoutes: [String]) {
+    public init(findings: [CopyFinding], auditedCount: Int, skippedRoutes: [String], unavailableMessage: String? = nil) {
         self.findings = findings
         self.auditedCount = auditedCount
         self.skippedRoutes = skippedRoutes
+        self.unavailableMessage = unavailableMessage
     }
 }
 
 public enum CopyEditReportBuilder {
-    public static func report(results: [(chunk: ContentChunk, drafts: [CopyFindingDraft]?)]) -> CopyEditReport {
+    public static func report(results: [(chunk: ContentChunk, drafts: [CopyFindingDraft]?)],
+                              unavailableMessage: String? = nil) -> CopyEditReport {
         var findings: [CopyFinding] = []
         var skipped: [String] = []
         var audited = 0
@@ -98,6 +103,7 @@ public enum CopyEditReportBuilder {
             }
         }
         findings.sort { ($0.severity, $0.route) < ($1.severity, $1.route) }
-        return CopyEditReport(findings: findings, auditedCount: audited, skippedRoutes: skipped)
+        return CopyEditReport(findings: findings, auditedCount: audited, skippedRoutes: skipped,
+                              unavailableMessage: unavailableMessage)
     }
 }

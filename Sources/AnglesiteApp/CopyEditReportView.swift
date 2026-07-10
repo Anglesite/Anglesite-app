@@ -46,6 +46,13 @@ struct CopyEditReportView: View {
                 "Apple Intelligence Required",
                 systemImage: "sparkles",
                 description: Text(ContentHelpDialogs.assistantUnavailable(feature: "Copy review")))
+        } else if let message = model.report?.unavailableMessage {
+            // Runtime unavailability (Apple Intelligence toggled off, on a 6.4+ toolchain) — same
+            // explanation surface as the pre-6.4 `model.unavailable` case above.
+            ContentUnavailableView(
+                "Apple Intelligence Required",
+                systemImage: "sparkles",
+                description: Text(message))
         } else if model.running && model.report == nil {
             VStack(spacing: 8) {
                 ProgressView()

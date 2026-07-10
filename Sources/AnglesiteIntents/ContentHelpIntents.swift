@@ -42,6 +42,9 @@ public struct ReviewCopyIntent: AppIntent {
             conventions: nil, businessType: SiteBusinessType.read(sourceDirectory: sourceDirectory))
         let report = await auditor.audit(
             chunks: chunks, preamble: preamble, siteID: site.id, siteDirectory: sourceDirectory)
+        if let unavailableMessage = report.unavailableMessage {
+            return .result(dialog: "\(unavailableMessage)")
+        }
         return .result(dialog: "\(ContentHelpDialogs.copyReview(findingCount: report.findings.count, pageCount: report.auditedCount, skippedCount: report.skippedRoutes.count, siteName: site.displayName))")
     }
 }

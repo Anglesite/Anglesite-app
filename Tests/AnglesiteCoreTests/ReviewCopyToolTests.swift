@@ -26,4 +26,12 @@ import Testing
         #expect(text.contains("first 8"))
         #expect(text.contains("Review Copy")) // points at the GUI for the full audit
     }
+
+    @Test func unavailableReportShortCircuitsToExplanation() {
+        let report = CopyEditReport(findings: [], auditedCount: 0, skippedRoutes: ["/a", "/b"],
+                                    unavailableMessage: "Copy review needs Apple Intelligence, which isn't available on this Mac right now.")
+        let text = ReviewCopyReply.text(for: report, capped: nil)
+        #expect(text.contains("Apple Intelligence"))
+        #expect(!text.contains("/a")) // no confusing skip list
+    }
 }

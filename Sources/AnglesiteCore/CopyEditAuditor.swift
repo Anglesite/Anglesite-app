@@ -21,8 +21,11 @@ public enum CopyEditAuditorFactory {
 
 #if compiler(>=6.4)
 import FoundationModels
+import OSLog
 
 public struct FoundationModelCopyEditAuditor: CopyEditAuditing {
+    private static let logger = Logger(subsystem: "io.dwk.anglesite", category: "CopyEditAuditor")
+
     public init() {}
 
     public func audit(chunks: [ContentChunk], preamble: String?, siteID: String, siteDirectory: URL) async -> CopyEditReport {
@@ -44,8 +47,20 @@ public struct FoundationModelCopyEditAuditor: CopyEditAuditing {
                                      excerpt: $0.excerpt, issue: $0.issue,
                                      suggestedRewrite: $0.suggestedRewrite)
                 }))
+            } catch AssistantError.unavailable(let message) {
+                // Apple Intelligence went unavailable mid-audit (e.g. toggled off at runtime) —
+                // stop rather than degrading every remaining page to an unexplained "Not reviewed"
+                // skip. The report carries the explanation so front-doors can surface it directly.
+                Self.logger.notice("Copy audit stopped: FM unavailable — \(message, privacy: .public)")
+                let unavailableMessage = message.isEmpty
+                    ? ContentHelpDialogs.assistantUnavailable(feature: "Copy review")
+                    : message
+                return CopyEditReportBuilder.report(
+                    results: chunks.map { ($0, nil) }, unavailableMessage: unavailableMessage)
             } catch {
                 // Partial results over aborts (spec §6): one failed page becomes a named skip.
+                // Logged (not silent) so a skipped-chunk cause is diagnosable (Task-8 minor).
+                Self.logger.error("Copy audit chunk failed for \(chunk.route, privacy: .public): \(String(describing: error), privacy: .public)")
                 results.append((chunk, nil))
             }
         }

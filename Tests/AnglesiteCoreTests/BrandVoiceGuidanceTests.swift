@@ -34,6 +34,16 @@ import Foundation
         #expect(BrandVoiceGuidance.preamble(conventions: c, businessType: nil) == nil)
     }
 
+    /// `ProjectConventionsEngine.maybeEnrich` writes `Learned(value:, source: .inferred(confidence: 1))`
+    /// with no `sampleSize` — this shape must still count as signal or enricher-learned tone would
+    /// never reach copy-edit/social/repurpose prompts unless the owner ran the interview.
+    @Test func enricherShapedToneCountsAsSignal() {
+        var c = ProjectConventions.empty
+        c.writing.toneDescriptors = Learned(value: ["warm"], source: .inferred(confidence: 1)) // no sampleSize — the enricher's shape
+        let p = BrandVoiceGuidance.preamble(conventions: c, businessType: nil)
+        #expect(p?.contains("warm") == true)
+    }
+
     @Test func readsBusinessTypeFromSiteConfig() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("bvg-\(UUID().uuidString)")

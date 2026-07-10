@@ -85,8 +85,16 @@ public struct FoundationModelPostRepurposer: PostRepurposing {
                          preamble: String?, assistant: any ContentAssistant,
                          context: AssistantContext) async -> PlatformPostVariant {
         let prompt = RepurposePrompt.build(post: post, postURL: postURL, spec: spec, preamble: preamble)
-        guard let first = try? await assistant.generateStructured(
-            prompt: prompt, context: context, resultType: GeneratedPlatformPost.self) else {
+        let first: GeneratedPlatformPost
+        do {
+            first = try await assistant.generateStructured(
+                prompt: prompt, context: context, resultType: GeneratedPlatformPost.self)
+        } catch AssistantError.unavailable(let message) {
+            let unavailableMessage = message.isEmpty
+                ? ContentHelpDialogs.assistantUnavailable(feature: "Repurposing")
+                : message
+            return PlatformPostVariant(platform: spec.platform, text: nil, failure: unavailableMessage)
+        } catch {
             return PlatformPostVariant(platform: spec.platform, text: nil,
                                        failure: "Couldn't generate a \(spec.platform) post.")
         }

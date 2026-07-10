@@ -29,9 +29,14 @@ public enum BrandVoiceGuidance {
         return (["Match this site's voice:"] + lines).joined(separator: "\n")
     }
 
-    /// A `Learned` value counts only if the user set it or it was inferred from real samples.
+    /// A `Learned` value counts if the user set it, it was inferred from real samples, or the
+    /// enricher inferred it with positive confidence (the enricher writes confidence without
+    /// sampleSize — see ProjectConventionsEngine.maybeEnrich).
     static func hasSignal<V>(_ learned: Learned<V>) -> Bool {
-        learned.isOverridden || learned.sampleSize.map { $0 > 0 } == true
+        if learned.isOverridden { return true }
+        if learned.sampleSize.map({ $0 > 0 }) == true { return true }
+        if case .inferred(let confidence) = learned.source, confidence > 0 { return true }
+        return false
     }
 }
 

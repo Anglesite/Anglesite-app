@@ -4,8 +4,10 @@ import AnglesiteCore
 
 /// Drives the Review Copy sheet (#465): runs the chunked audit, tracks per-finding apply state,
 /// and performs the deterministic excerpt-replacement apply. Depends only on `CopyEditAuditing`
-/// so tests inject fakes; `auditor == nil` (pre-6.4 toolchain or Apple Intelligence off) renders
-/// the disabled-with-explanation state per the LLM policy.
+/// so tests inject fakes; `auditor == nil` covers only the pre-6.4 toolchain, rendering the
+/// disabled-with-explanation state per the LLM policy. Apple Intelligence being off *at runtime*
+/// (a Swift 6.4 build, but the model unavailable) is a separate case: the auditor exists but
+/// `report?.unavailableMessage` is set instead — the view shows the same explanation for both.
 @Observable @MainActor
 final class CopyEditReportModel: Identifiable {
     let id = UUID()

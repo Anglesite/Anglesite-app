@@ -4,6 +4,9 @@ import Foundation
 /// a site-wide audit was truncated to the tool's chunk budget (no silent caps — spec §6).
 public enum ReviewCopyReply {
     public static func text(for report: CopyEditReport, capped: Int?) -> String {
+        if let unavailableMessage = report.unavailableMessage {
+            return unavailableMessage
+        }
         var lines: [String] = []
         if report.findings.isEmpty {
             lines.append("I found no copy issues across \(report.auditedCount) page\(report.auditedCount == 1 ? "" : "s") — the copy reads well.")
