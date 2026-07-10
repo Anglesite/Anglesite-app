@@ -44,7 +44,15 @@ final class ComponentEditorModel {
     /// `model` was fetched) — drives the "changed outside Anglesite — Reload" banner (design
     /// doc §5). `load()` is triggered automatically to refetch; the flag stays set until the
     /// caller acknowledges it (e.g. the panel dismisses it once the refreshed model renders).
-    private(set) var conflict = false
+    var conflict = false
+    /// Set when a style write op fails for a reason other than staleness (invalid CSS value, a
+    /// `no-match` on a drifted `ruleSpan`, a transient MCP/transport error). This is intentionally
+    /// distinct from `loadError`/`loadErrorReason`: those drive `ComponentEditorView`'s full-pane
+    /// `ContentUnavailableView` takeover, which would destroy the three-pane editor (outline/canvas/
+    /// inspector) over a routine, retryable write failure and leave the user with no way to retry.
+    /// `writeError` instead drives a small dismissible banner scoped to the Styles panel; `model`
+    /// and `loadError` are left untouched so the editor pane stays live.
+    var writeError: String?
 
     init(file: FileRef, context: ComponentEditorContext) {
         self.file = file
@@ -189,14 +197,16 @@ final class ComponentEditorModel {
     /// - `.failed` whose message indicates the base version went stale triggers a `load()`
     ///   refetch and flips `conflict` so the UI can surface a "changed outside Anglesite —
     ///   Reload" banner.
-    /// - Any other `.failed` (or `.ambiguous`/`.preview`, which these ops never return) is
-    ///   surfaced via `loadErrorReason`.
+    /// - Any other `.failed` (or `.ambiguous`/`.preview`, which these ops never return) is a
+    ///   routine, recoverable write failure — surfaced via `writeError`, NOT `loadError`/
+    ///   `loadErrorReason` (see `writeError`'s doc comment for why).
     private func applyComponentStyleEdit(_ message: EditMessage) async {
         guard let editRouter = context.editRouter else { return }
         let reply = await editRouter.apply(message)
         switch reply.status {
         case .applied:
             conflict = false
+            writeError = nil
             if let freshModel = reply.model {
                 model = freshModel
             } else {
@@ -206,8 +216,7 @@ final class ComponentEditorModel {
             conflict = true
             await load()
         default:
-            loadError = reply.message
-            loadErrorReason = .other
+            writeError = reply.message ?? "The edit couldn't be applied."
         }
     }
 }

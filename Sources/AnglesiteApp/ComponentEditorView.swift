@@ -184,6 +184,12 @@ struct ComponentEditorView: View {
                         }
                     }
                 }
+                if model.conflict {
+                    conflictBanner(model)
+                }
+                if let writeError = model.writeError {
+                    writeErrorBanner(model, message: writeError)
+                }
                 GroupBox("Styles") {
                     if let styles = model.model?.styles, !styles.isEmpty {
                         ForEach(Array(styles.enumerated()), id: \.offset) { ruleIndex, rule in
@@ -257,6 +263,48 @@ struct ComponentEditorView: View {
             }
             .padding(10)
         }
+    }
+
+    /// "This component changed outside Anglesite" banner — the edit that triggered a stale-write
+    /// refusal was never applied; `ComponentEditorModel.applyComponentStyleEdit` already reloaded
+    /// the latest version, so this just informs the user why their change didn't stick.
+    private func conflictBanner(_ model: ComponentEditorModel) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "arrow.triangle.2.circlepath").foregroundStyle(.orange)
+            Text("This component changed outside Anglesite — your edit wasn't applied, reloaded the latest version.")
+                .font(.caption)
+            Spacer()
+            Button {
+                model.conflict = false
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// Transient, non-fatal banner for a style write op that failed for a reason other than
+    /// staleness (invalid value, drifted `ruleSpan`, transient MCP error). Scoped to the Styles
+    /// panel so a routine write failure never takes over the whole editor pane (see
+    /// `ComponentEditorModel.writeError`'s doc comment).
+    private func writeErrorBanner(_ model: ComponentEditorModel, message: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle").foregroundStyle(.red)
+            Text(message).font(.caption)
+            Spacer()
+            Button {
+                model.writeError = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func highlightInCanvas(nodeID: String?) {
