@@ -155,4 +155,51 @@ public struct GeneratedPageCopyFindings: Equatable, Sendable {
     @Guide(description: "Up to 5 highest-impact findings for this page. Empty when the copy is strong.")
     public var findings: [GeneratedCopyFinding]
 }
+
+/// On-device guided-generation result for a single social platform bio (#465). Mapped to
+/// `SocialMediaPlan.bios` before it crosses the FoundationModels gate.
+@Generable
+public struct GeneratedSocialBio: Equatable, Sendable {
+    @Guide(description: "The profile bio text, within the stated character limit. No hashtags unless the platform calls for them.")
+    public var bio: String
+}
+
+/// On-device guided-generation result for a single social content pillar (#465). Mapped to
+/// the non-gated `SocialPillar` before it crosses the FoundationModels gate.
+@Generable
+public struct GeneratedSocialPillar: Equatable, Sendable {
+    @Guide(description: "Short pillar name, e.g. 'Behind the scenes'.")
+    public var name: String
+    @Guide(description: "One sentence on what this pillar covers and why followers care.")
+    public var detail: String
+}
+
+/// On-device guided-generation result for the full set of social content pillars (#465).
+@Generable
+public struct GeneratedSocialPillars: Equatable, Sendable {
+    @Guide(description: "3 to 5 content pillars. Roughly 80% value/story content, 20% promotional.")
+    public var pillars: [GeneratedSocialPillar]
+}
+
+/// On-device guided-generation result for a single social calendar entry (#465). Mapped to
+/// the non-gated `SocialCalendarEntry` before it crosses the FoundationModels gate.
+@Generable
+public struct GeneratedSocialWeekEntry: Equatable, Sendable {
+    @Guide(description: "Day of week, e.g. 'Monday'.")
+    public var day: String
+    @Guide(description: "Platform name, exactly as given in the prompt.")
+    public var platform: String
+    @Guide(description: "Pillar name, exactly as given in the prompt.")
+    public var pillar: String
+    @Guide(description: "One concrete post idea the owner could shoot/write that day.")
+    public var idea: String
+}
+
+/// On-device guided-generation result for one week's social calendar (#465), one call per week
+/// (chunk-first — see `SocialPlanPrompt`).
+@Generable
+public struct GeneratedSocialWeek: Equatable, Sendable {
+    @Guide(description: "The week's post schedule, respecting each platform's posts-per-week cadence.")
+    public var entries: [GeneratedSocialWeekEntry]
+}
 #endif
