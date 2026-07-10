@@ -200,8 +200,23 @@ private struct SiteGraphCanvas: View {
                     ContentUnavailableView("No matching graph nodes", systemImage: "point.3.connected.trianglepath.dotted")
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                if nodes.count > Self.miniMapThreshold {
+                    SiteGraphMiniMap(
+                        nodes: nodes,
+                        positions: positions,
+                        canvasSize: proxy.size,
+                        selectedNodeID: selectedNodeID,
+                        onSelect: onSelect
+                    )
+                }
+            }
         }
     }
+
+    /// Below this node count, the canvas already lays everything out legibly — a mini-map
+    /// would just be redundant chrome (#613).
+    private static let miniMapThreshold = 24
 
     private func highlighted(_ edge: SiteGraphEdge, selectedNodeID: String?) -> Bool {
         guard let selectedNodeID else { return false }
@@ -264,6 +279,73 @@ private struct SiteGraphNodeButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(node.kind.title), \(node.title)")
         .help(node.detail ?? node.title)
+    }
+}
+
+/// Overview panel for large graphs (#613): a scaled-down rendering of every node's position in
+/// `SiteGraphCanvas`, so "where am I in the whole graph" is answerable without a pan/zoom viewport
+/// (the main canvas doesn't have one yet — it fits everything into the visible frame). Tapping
+/// jumps to the nearest node, same as clicking it directly on the full canvas.
+private struct SiteGraphMiniMap: View {
+    let nodes: [SiteGraphNode]
+    let positions: [String: CGPoint]
+    let canvasSize: CGSize
+    let selectedNodeID: String?
+    let onSelect: (String) -> Void
+
+    private let size = CGSize(width: 160, height: 110)
+
+    var body: some View {
+        let scaleX = canvasSize.width > 0 ? size.width / canvasSize.width : 0
+        let scaleY = canvasSize.height > 0 ? size.height / canvasSize.height : 0
+
+        Canvas { context, _ in
+            for node in nodes {
+                guard let point = positions[node.id] else { continue }
+                let dot = CGPoint(x: point.x * scaleX, y: point.y * scaleY)
+                let selected = node.id == selectedNodeID
+                let radius: CGFloat = selected ? 4 : 2.5
+                let rect = CGRect(x: dot.x - radius, y: dot.y - radius, width: radius * 2, height: radius * 2)
+                context.fill(Path(ellipseIn: rect), with: .color(node.kind.tint.opacity(selected ? 1 : 0.7)))
+                if selected {
+                    context.stroke(Path(ellipseIn: rect.insetBy(dx: -1.5, dy: -1.5)), with: .color(.white), lineWidth: 1)
+                }
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+        }
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onEnded { value in
+                    guard scaleX > 0, scaleY > 0 else { return }
+                    let target = CGPoint(x: value.location.x / scaleX, y: value.location.y / scaleY)
+                    if let nearest = nearestNode(to: target) {
+                        onSelect(nearest)
+                    }
+                }
+        )
+        .padding(10)
+        .accessibilityLabel("Graph mini-map")
+        .accessibilityHint("Overview of all \(nodes.count) nodes; tap to jump to the nearest one")
+    }
+
+    private func nearestNode(to point: CGPoint) -> String? {
+        var bestID: String?
+        var bestDistance = CGFloat.greatestFiniteMagnitude
+        for node in nodes {
+            guard let candidate = positions[node.id] else { continue }
+            let distance = hypot(candidate.x - point.x, candidate.y - point.y)
+            if distance < bestDistance {
+                bestDistance = distance
+                bestID = node.id
+            }
+        }
+        return bestID
     }
 }
 
