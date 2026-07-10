@@ -167,6 +167,9 @@ struct SiteWindow: View {
                     },
                     onDuplicateRequested: { item in
                         Task { await model.duplicate(id: item.id) }
+                    },
+                    onRepurposeRequested: { item in
+                        Task { await model.presentRepurpose(postRowID: item.id) }
                     }
                 )
                     .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
@@ -566,6 +569,9 @@ struct SiteWindow: View {
         }
         .sheet(item: $bindableModel.socialPlanModel) { planModel in
             SocialPlanView(model: planModel)
+        }
+        .sheet(item: $bindableModel.repurposeModel) { repurposeModel in
+            RepurposeView(model: repurposeModel)
         }
         .sheet(item: $bindableModel.integrationWizardModel) { wizardModel in
             NavigationStack {

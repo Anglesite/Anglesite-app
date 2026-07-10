@@ -10,6 +10,7 @@ struct SiteNavigatorView: View {
     var onDeleteCleanupCandidate: (DeadAssetScanner.CleanupCandidate) async -> Void
     var onDeleteRequested: (NavigatorItem) -> Void
     var onDuplicateRequested: (NavigatorItem) -> Void
+    var onRepurposeRequested: (NavigatorItem) -> Void
     @FocusState private var editingFocused: Bool
     @State private var candidateToDelete: DeadAssetScanner.CleanupCandidate?
     /// The title shown in the confirmation dialog. Held separately from `candidateToDelete` so the
@@ -132,6 +133,9 @@ struct SiteNavigatorView: View {
                     }
                     if model.canDuplicate(item.id) {
                         Button("Duplicate") { onDuplicateRequested(item) }
+                    }
+                    if model.canRepurpose(item.id) {
+                        Button("Repurpose Post…") { onRepurposeRequested(item) }
                     }
                     if model.canDelete(item.id) {
                         Button("Delete", role: .destructive) { onDeleteRequested(item) }

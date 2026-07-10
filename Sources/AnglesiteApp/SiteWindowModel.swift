@@ -88,6 +88,9 @@ final class SiteWindowModel {
     /// Non-nil ⟺ the Social Media Plan sheet is presented (`.sheet(item:)`), same coupling and
     /// fresh-`ProjectConventionsStore` pattern as `copyEditModel` (Task 13, #465).
     var socialPlanModel: SocialPlanModel?
+    /// Non-nil ⟺ the Repurpose Post sheet is presented (`.sheet(item:)`), same coupling and
+    /// fresh-`ProjectConventionsStore` pattern as `copyEditModel`/`socialPlanModel` (Task 16, #465).
+    var repurposeModel: RepurposeModel?
     /// The window's `UndoManager`, published down from `SiteWindow`'s
     /// `@Environment(\.undoManager)` so applied edits register for Edit ▸ Undo (#527). Weak +
     /// `@ObservationIgnored`: the window owns it and it isn't render state. Forwarded on set
@@ -272,6 +275,23 @@ final class SiteWindowModel {
         )
     }
 
+    /// Presents the Repurpose Post sheet (#465), same pattern as `presentCopyEdit`/`presentSocialPlan`.
+    func presentRepurpose(slug: String) {
+        guard repurposeModel == nil, let site else { return }
+        repurposeModel = RepurposeModel(
+            siteID: site.id, sourceDirectory: site.sourceDirectory, slug: slug,
+            conventionsStore: ProjectConventionsStore(configDirectory: site.configDirectory)
+        )
+    }
+
+    /// Resolves a Navigator row id to its post's slug, then presents — mirrors `duplicate(id:)`'s
+    /// id→Post resolution pattern for reaching the actor-isolated `SiteContentGraph` from the
+    /// Navigator's context menu, which only carries a `NavigatorItem.id` (Task 16, #465).
+    func presentRepurpose(postRowID id: String) async {
+        guard let post = await contentGraph.post(id: id) else { return }
+        presentRepurpose(slug: post.slug)
+    }
+
     /// The `.failed`-state pane's Retry button — same recovery as Site ▸ Start Dev Server (#515),
     /// kept as one code path rather than two that could drift.
     func retryPreview() {
@@ -311,6 +331,7 @@ final class SiteWindowModel {
         styleGuide = nil
         copyEditModel = nil
         socialPlanModel = nil
+        repurposeModel = nil
         navigator?.stop()
         navigator = nil
         graphExplorer.stop()

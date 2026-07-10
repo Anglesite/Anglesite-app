@@ -25,6 +25,10 @@ final class SiteNavigatorModel {
     private var siteID: String?
     private var siteRoot: URL?
     private let renameService = NavigatorRenameService()
+    /// Post ids seen in the last `refresh()`, so `canRepurpose` can distinguish post rows from
+    /// page rows without an extra actor hop — both are `.route` targets and `isContentRow` alone
+    /// can't tell them apart (Task 16, #465).
+    private var postIDs: Set<String> = []
 
     private let graph: SiteContentGraph
     private var observeTask: Task<Void, Never>?
@@ -109,6 +113,10 @@ final class SiteNavigatorModel {
     func canDelete(_ id: String) -> Bool { isContentRow(id) }
     func canDuplicate(_ id: String) -> Bool { isContentRow(id) }
 
+    /// Repurpose (#465, Task 16) is post-only — unlike Rename/Delete/Duplicate, which apply to
+    /// pages too — so it checks `postIDs` rather than the page-or-post `isContentRow`.
+    func canRepurpose(_ id: String) -> Bool { postIDs.contains(id) }
+
     func beginEditing(_ id: String) {
         guard canRename(id) else { return }
         let current = sections.flatMap(\.items).first { $0.id == id }?.title ?? ""
@@ -192,6 +200,9 @@ final class SiteNavigatorModel {
             SiteFileTree.scan(siteRoot: siteRoot)
         }.value
         if Task.isCancelled { return }
+        // Assigned together with `sections` below so `canRepurpose` never gates against a post
+        // set that's out of sync with what's actually shown in the sidebar.
+        postIDs = Set(posts.map(\.id))
         sections = buildNavigatorTree(
             pages: pages,
             posts: posts,
