@@ -42,4 +42,20 @@ import Foundation
         #expect(url.lastPathComponent == "social-calendar.md")
         #expect(try String(contentsOf: url, encoding: .utf8) == "# Plan")
     }
+
+    @Test func tableCellsEscapePipesAndNewlines() {
+        let plan = SocialMediaPlan(
+            businessType: nil,
+            platforms: [SocialPlatformProfile(platform: "Instagram", bioCharLimit: 150, postsPerWeek: 4, note: "visual | reels")],
+            bios: [:],
+            pillars: [SocialPillar(name: "P", detail: "d")],
+            weeks: [SocialCalendarWeek(
+                startDate: Date(timeIntervalSince1970: 0),
+                entries: [SocialCalendarEntry(day: "Monday", platform: "Instagram",
+                                              pillar: "P", idea: "Buy 1 | get 1\nfree")])])
+        let md = SocialCalendarMarkdown.render(plan: plan, siteName: "S")
+        #expect(md.contains("visual \\| reels"))
+        #expect(md.contains("Buy 1 \\| get 1 free"))
+        #expect(!md.contains("get 1\nfree"))
+    }
 }

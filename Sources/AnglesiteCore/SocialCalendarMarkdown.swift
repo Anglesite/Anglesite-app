@@ -13,6 +13,13 @@ public enum SocialCalendarMarkdown {
         return f
     }()
 
+    /// FM-generated text goes into table cells — escape pipes and flatten newlines so a
+    /// stray "|" can't split the row.
+    private static func cell(_ text: String) -> String {
+        text.replacingOccurrences(of: "|", with: "\\|")
+            .replacingOccurrences(of: "\n", with: " ")
+    }
+
     public static func render(plan: SocialMediaPlan, siteName: String) -> String {
         var out: [String] = []
         out.append("# Social media plan for \(siteName)")
@@ -24,7 +31,7 @@ public enum SocialCalendarMarkdown {
         out.append("| Platform | Posts/week | Why |")
         out.append("|---|---|---|")
         for p in plan.platforms {
-            out.append("| \(p.platform) | \(p.postsPerWeek) | \(p.note) |")
+            out.append("| \(cell(p.platform)) | \(p.postsPerWeek) | \(cell(p.note)) |")
         }
         out.append("")
         out.append("## Profile bios")
@@ -45,7 +52,7 @@ public enum SocialCalendarMarkdown {
             out.append("| Day | Platform | Pillar | Idea |")
             out.append("|---|---|---|---|")
             for e in week.entries {
-                out.append("| \(e.day) | \(e.platform) | \(e.pillar) | \(e.idea) |")
+                out.append("| \(cell(e.day)) | \(cell(e.platform)) | \(cell(e.pillar)) | \(cell(e.idea)) |")
             }
             out.append("")
         }
