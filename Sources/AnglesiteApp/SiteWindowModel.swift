@@ -216,6 +216,26 @@ final class SiteWindowModel {
         mainPaneMode = .graph
     }
 
+    /// Resolves a chat citation's file path to a Site Graph Explorer node and reveals it there
+    /// (#314): switches the main pane to Graph and selects the node. Returns `false` — and does
+    /// nothing — when the path doesn't match any node in the current snapshot, so the caller
+    /// (`ChatView`'s citation click handler) can fall back to opening the file directly.
+    ///
+    /// The pane switch and selection happen asynchronously (matching `setPaneSelection`'s
+    /// existing fire-and-forget `Task { await showGraph() }` pattern) — the `Bool` this returns
+    /// reflects only whether a matching node was found, not whether the navigation has finished.
+    @discardableResult
+    func revealCitationInGraph(_ path: String) -> Bool {
+        guard let node = graphExplorer.snapshot.nodes.first(where: { $0.filePath == path }) else {
+            return false
+        }
+        Task { [weak self] in
+            await self?.showGraph()
+            self?.graphExplorer.revealNode(node)
+        }
+        return true
+    }
+
     func openSiriReadiness() {
         guard siriReadinessModel == nil, let indexer = contentIndexerStore.indexer, let site else { return }
         siriReadinessModel = SiriReadinessModel(
