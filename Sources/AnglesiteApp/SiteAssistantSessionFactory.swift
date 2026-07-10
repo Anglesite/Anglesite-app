@@ -63,7 +63,8 @@ enum SiteAssistantSessionFactory {
                         conventionsEngine: conventionsEngine,
                         conventionsStore: conventionsStore,
                         copyEditAuditor: CopyEditAuditorFactory.makeDefault(),
-                        socialMediaPlanner: SocialMediaPlannerFactory.makeDefault()
+                        socialMediaPlanner: SocialMediaPlannerFactory.makeDefault(),
+                        postRepurposer: PostRepurposerFactory.makeDefault()
                     ),
                     index: knowledgeIndex
                 )

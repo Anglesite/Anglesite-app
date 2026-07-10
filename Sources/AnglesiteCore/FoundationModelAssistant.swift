@@ -59,6 +59,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private let conventionsStore: ProjectConventionsStore?
     private let copyEditAuditor: (any CopyEditAuditing)?
     private let socialMediaPlanner: (any SocialMediaPlanning)?
+    private let postRepurposer: (any PostRepurposing)?
     private let logger = Logger(subsystem: "io.dwk.anglesite", category: "FoundationModelAssistant")
     /// The current conversational turn's consumer-facing ``TurnRelay``, retained so ``cancel()`` can
     /// wind it down. Cancelling stops *delivery* only — it never cancels the model stream, because
@@ -98,6 +99,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         conventionsStore: ProjectConventionsStore? = nil,
         copyEditAuditor: (any CopyEditAuditing)? = nil,
         socialMediaPlanner: (any SocialMediaPlanning)? = nil,
+        postRepurposer: (any PostRepurposing)? = nil,
         maxRetainedTurns: Int = 12
     ) {
         self.tier = tier
@@ -110,6 +112,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         self.conventionsStore = conventionsStore
         self.copyEditAuditor = copyEditAuditor
         self.socialMediaPlanner = socialMediaPlanner
+        self.postRepurposer = postRepurposer
         // `trimSessionIfNeeded`'s cutoff indexing (`promptIndices.count - maxRetainedTurns`) assumes
         // at least 1: `<= 0` would index at or past the end of `promptIndices` and crash. Clamp
         // rather than crash so a caller passing e.g. `0` ("keep no history") degrades to the
@@ -336,7 +339,8 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// `SetupIntegrationTool` is added when an `integrationService` is provided; `SaveBrandVoiceTool`
     /// is added when both a `conventionsEngine` and a `conventionsStore` are provided;
     /// `ReviewCopyTool` is added when a `copyEditAuditor` is provided. `PlanSocialMediaTool` is
-    /// added when a `socialMediaPlanner` is provided.
+    /// added when a `socialMediaPlanner` is provided. `RepurposePostTool`/`SaveSyndicationTool` are
+    /// added together when a `postRepurposer` is provided.
     private var attachedToolNames: [String] {
         var names = [Self.spotlightToolDisplayName]
         if editBridge != nil && contentGraph != nil {
@@ -358,6 +362,10 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         }
         if socialMediaPlanner != nil {
             names.append(PlanSocialMediaTool.toolName)
+        }
+        if postRepurposer != nil {
+            names.append(RepurposePostTool.toolName)
+            names.append(SaveSyndicationTool.toolName)
         }
         return names
     }
@@ -448,6 +456,12 @@ public actor FoundationModelAssistant: ConversationalAssistant {
             tools.append(PlanSocialMediaTool(
                 planner: socialMediaPlanner, conventionsStore: conventionsStore,
                 siteID: context.siteID, siteDirectory: context.siteDirectory))
+        }
+        if let postRepurposer {
+            tools.append(RepurposePostTool(
+                repurposer: postRepurposer, conventionsStore: conventionsStore,
+                siteID: context.siteID, siteDirectory: context.siteDirectory))
+            tools.append(SaveSyndicationTool(siteDirectory: context.siteDirectory))
         }
         return tools
     }

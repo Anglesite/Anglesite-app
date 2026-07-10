@@ -202,4 +202,13 @@ public struct GeneratedSocialWeek: Equatable, Sendable {
     @Guide(description: "The week's post schedule, respecting each platform's posts-per-week cadence.")
     public var entries: [GeneratedSocialWeekEntry]
 }
+
+/// On-device guided-generation result for one platform's repurposed blog-post copy (#465).
+/// Mapped to the non-gated `PlatformPostVariant` before it crosses the FoundationModels gate;
+/// the char-limit policy (spec §5.3) is enforced in Swift, never trusted to the model.
+@Generable
+public struct GeneratedPlatformPost: Equatable, Sendable {
+    @Guide(description: "The complete post text for the platform, within the stated character limit, ready to copy-paste.")
+    public var text: String
+}
 #endif
