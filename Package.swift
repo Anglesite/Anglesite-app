@@ -64,6 +64,12 @@ var packageTargets: [Target] = [
         swiftSettings: strictConcurrency
     ),
     .target(
+        name: "AnglesiteQuickLookSupport",
+        dependencies: ["AnglesiteSiteModel"],
+        path: "Sources/AnglesiteQuickLookSupport",
+        swiftSettings: strictConcurrency
+    ),
+    .target(
         name: "AnglesiteCore",
         dependencies: ["AnglesiteSiteModel"],
         path: "Sources/AnglesiteCore",
@@ -100,6 +106,12 @@ var packageTargets: [Target] = [
         name: "AnglesiteSiteModelTests",
         dependencies: ["AnglesiteSiteModel"],
         path: "Tests/AnglesiteSiteModelTests",
+        swiftSettings: strictConcurrency
+    ),
+    .testTarget(
+        name: "AnglesiteQuickLookSupportTests",
+        dependencies: ["AnglesiteQuickLookSupport"],
+        path: "Tests/AnglesiteQuickLookSupportTests",
         swiftSettings: strictConcurrency
     ),
     .testTarget(
@@ -220,6 +232,7 @@ if includeContainer && ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_
 
 var packageProducts: [Product] = [
     .library(name: "AnglesiteSiteModel", targets: ["AnglesiteSiteModel"]),
+    .library(name: "AnglesiteQuickLookSupport", targets: ["AnglesiteQuickLookSupport"]),
     .library(name: "AnglesiteCore", targets: ["AnglesiteCore"]),
     .library(name: "AnglesiteBridge", targets: ["AnglesiteBridge"]),
     .library(name: "AnglesiteIOS", targets: ["AnglesiteIOS"]),
@@ -249,7 +262,7 @@ if includeContainer {
 // Filtering by name here (rather than duplicating target definitions in per-platform
 // lists) keeps the single source of truth above.
 #if !canImport(Darwin)
-var portableTargets: Set<String> = ["AnglesiteSiteModel", "AnglesiteSiteModelTests"]
+var portableTargets: Set<String> = ["AnglesiteSiteModel", "AnglesiteSiteModelTests", "AnglesiteQuickLookSupport", "AnglesiteQuickLookSupportTests"]
 if ProcessInfo.processInfo.environment["ANGLESITE_PORT_WIP"] == "1" {
     portableTargets.insert("AnglesiteCore")
 }
