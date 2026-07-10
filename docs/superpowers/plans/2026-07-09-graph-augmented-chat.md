@@ -998,6 +998,512 @@ git commit -m "feat: reveal-in-graph on chat citation click (#314)"
 
 ---
 
+### Task 6: Fix nested-decorator query pollution with `CombinedAugmentedAssistant`
+
+**Why:** The final whole-branch review (after Tasks 1-5) found that nesting
+`SiteGraphAugmentedAssistant(base: KnowledgeAugmentedAssistant(base: FoundationModelAssistant(...)))`
+(Task 3's wiring) means `KnowledgeAugmentedAssistant.enrichedContext` searches
+`SiteKnowledgeIndex` using the prompt `SiteGraphAugmentedAssistant` already rewrote — a blob of
+instructions and fact lines, not the user's actual question — degrading the content-index
+citations on exactly the structural questions this feature targets. Both decorators already
+compute `(prompt, context) -> (enrichedText, citations)` independently; the fix is to run both
+retrievals against the same, untouched prompt and merge once, instead of nesting.
+
+**Files:**
+- Modify: `Sources/AnglesiteCore/SiteGraphAugmentedAssistant.swift` (extract a reusable static retrieval step)
+- Modify: `Sources/AnglesiteCore/KnowledgeAugmentedAssistant.swift` (extract a reusable static retrieval step)
+- Create: `Sources/AnglesiteCore/CombinedAugmentedAssistant.swift`
+- Test: `Tests/AnglesiteCoreTests/CombinedAugmentedAssistantTests.swift`
+- Modify: `Sources/AnglesiteApp/SiteAssistantSessionFactory.swift:67-82` (only the body of the `assistant` closure changes — the `AssistantBuilder` typealias and `makeSession` signature from Task 3 are unchanged)
+
+**Interfaces:**
+- Consumes: `SiteGraphExplainPrompt.facts(...)` (Task 1, unchanged), `SiteGraphAugmentedAssistant`'s existing static helpers (Task 2), `KnowledgeAugmentedAssistant.formatContext` (existing).
+- Produces: `SiteGraphAugmentedAssistant.graphBlock(prompt:snapshot:) -> (block: String, citations: [RetrievedCitation])?`, `KnowledgeAugmentedAssistant.contentBlock(prompt:context:index:) async -> (block: String, citations: [RetrievedCitation])?`, `public actor CombinedAugmentedAssistant: ConversationalAssistant` with `init(base:index:graphSnapshotProvider:)`.
+
+The extractions in Steps 1-2 are pure refactors — each decorator's OWN `enrichedContext` must
+keep producing byte-identical output to before, so `SiteGraphAugmentedAssistantTests` and
+`KnowledgeAugmentedAssistantTests` must both keep passing unchanged.
+
+- [ ] **Step 1: Extract `SiteGraphAugmentedAssistant.graphBlock(prompt:snapshot:)`**
+
+Run baseline: `swift test --filter SiteGraphAugmentedAssistant` — Expected: PASS (5/5, established baseline)
+
+In `Sources/AnglesiteCore/SiteGraphAugmentedAssistant.swift`, replace the `enrichedContext` method (current lines 82-109) with:
+
+```swift
+    private func enrichedContext(_ prompt: String) async -> (prompt: String, citations: [RetrievedCitation]) {
+        let snapshot = await snapshotProvider()
+        guard let (block, citations) = Self.graphBlock(prompt: prompt, snapshot: snapshot) else {
+            return (prompt, [])
+        }
+        let enriched = """
+        \(block)
+
+        User request:
+        \(prompt)
+        """
+        return (enriched, citations)
+    }
+
+    /// Builds the graph-facts block and citations for `prompt` against `snapshot`, or `nil` when
+    /// no node matches. Exposed (not `private`) so ``CombinedAugmentedAssistant`` can run this
+    /// retrieval directly against the original user question instead of a prompt another
+    /// decorator already rewrote (#314).
+    static func graphBlock(
+        prompt: String,
+        snapshot: SiteGraphExplorerSnapshot
+    ) -> (block: String, citations: [RetrievedCitation])? {
+        let seeds = seedNodes(for: prompt, in: snapshot)
+        guard !seeds.isEmpty else { return nil }
+
+        var blocks: [String] = []
+        var citations: [RetrievedCitation] = []
+        for node in seeds {
+            guard let impact = ImpactAnalysis.analyze(snapshot: snapshot, targetID: node.id) else { continue }
+            let (dependsOn, referencedBy) = neighbors(of: node, in: snapshot)
+            let facts = SiteGraphExplainPrompt.facts(node: node, impact: impact, dependsOn: dependsOn, referencedBy: referencedBy)
+            blocks.append("Facts about \(node.title):\n" + facts.joined(separator: "\n"))
+            if let citation = citation(for: node) { citations.append(citation) }
+        }
+        guard !blocks.isEmpty else { return nil }
+
+        let instructions = """
+        You are answering a question about how this Astro website is built, using only the \
+        facts below about specific files in its dependency graph. Do not invent details that \
+        are not in the facts, and cite file paths when you use a fact.
+        """
+        return (instructions + "\n\n" + blocks.joined(separator: "\n\n"), citations)
+    }
+```
+
+Run: `swift test --filter SiteGraphAugmentedAssistant`
+Expected: PASS (same 5/5, output unchanged — this is a pure extraction)
+
+- [ ] **Step 2: Extract `KnowledgeAugmentedAssistant.contentBlock(prompt:context:index:)`**
+
+Run baseline: `swift test --filter KnowledgeAugmentedAssistant` — Expected: PASS (established baseline)
+
+In `Sources/AnglesiteCore/KnowledgeAugmentedAssistant.swift`, replace the `enrichedContext` method (current lines 65-80) with:
+
+```swift
+    private func enrichedContext(_ prompt: String, context: AssistantContext) async -> (prompt: String, citations: [RetrievedCitation]) {
+        guard let (block, citations) = await Self.contentBlock(prompt: prompt, context: context, index: index) else {
+            return (prompt, [])
+        }
+        let enriched = """
+        \(block)
+
+        User request:
+        \(prompt)
+        """
+        return (enriched, citations)
+    }
+
+    /// Builds the content-search block and citations for `prompt`, or `nil` when nothing
+    /// matches. Exposed (not `private`) so ``CombinedAugmentedAssistant`` can run this retrieval
+    /// directly against the original user question instead of a prompt another decorator already
+    /// rewrote (#314).
+    static func contentBlock(
+        prompt: String,
+        context: AssistantContext,
+        index: SiteKnowledgeIndex
+    ) async -> (block: String, citations: [RetrievedCitation])? {
+        let results = await index.search(
+            siteID: context.siteID,
+            query: prompt,
+            options: context.searchOptions
+        )
+        guard !results.isEmpty else { return nil }
+        return (formatContext(results), results.map(RetrievedCitation.init))
+    }
+```
+
+(`formatContext` is already `private static` — leave it as-is, unchanged.)
+
+Run: `swift test --filter KnowledgeAugmentedAssistant`
+Expected: PASS (same as baseline, output unchanged — this is a pure extraction)
+
+- [ ] **Step 3: Write the failing tests for `CombinedAugmentedAssistant`**
+
+Create `Tests/AnglesiteCoreTests/CombinedAugmentedAssistantTests.swift`:
+
+```swift
+import Testing
+import Foundation
+@testable import AnglesiteCore
+
+#if compiler(>=6.4)
+import FoundationModels
+#endif
+
+private actor CapturingConversationalAssistant: ConversationalAssistant {
+    private(set) var prompts: [String] = []
+
+    nonisolated var capabilities: AssistantCapabilities {
+        AssistantCapabilities(
+            supportsStreaming: true,
+            supportsStructuredOutput: false,
+            supportsVision: false,
+            supportsTools: false,
+            maxContextTokens: nil,
+            providerName: "Capture"
+        )
+    }
+
+    func converse(prompt: String, context: AssistantContext) async throws -> AsyncStream<AssistantEvent> {
+        prompts.append(prompt)
+        return AsyncStream { continuation in
+            continuation.yield(.started(model: "Capture", toolNames: []))
+            continuation.yield(.textDelta("ok"))
+            continuation.yield(.turnComplete(nil))
+            continuation.finish()
+        }
+    }
+
+    func generate(prompt: String, context: AssistantContext) async throws -> AsyncThrowingStream<String, Error> {
+        prompts.append(prompt)
+        return AsyncThrowingStream { continuation in
+            continuation.yield("ok")
+            continuation.finish()
+        }
+    }
+
+    #if compiler(>=6.4)
+    func generateStructured<T: Generable & Sendable>(
+        prompt: String,
+        context: AssistantContext,
+        resultType: T.Type
+    ) async throws -> T {
+        prompts.append(prompt)
+        throw AssistantError.unsupported("capture assistant does not generate structured values")
+    }
+    #endif
+
+    func cancel() async {}
+    func resetSession() async {}
+}
+
+@Suite("CombinedAugmentedAssistant")
+struct CombinedAugmentedAssistantTests {
+    private func node(
+        _ id: String,
+        kind: SiteGraphNodeKind = .component,
+        title: String,
+        filePath: String? = nil
+    ) -> SiteGraphNode {
+        SiteGraphNode(id: id, kind: kind, title: title, detail: nil, filePath: filePath, route: nil)
+    }
+
+    private func makeSite() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("combined-assistant-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("src/components"),
+            withIntermediateDirectories: true
+        )
+        return root
+    }
+
+    @Test("the content-index search runs against the original prompt, not a graph-enriched one")
+    func contentSearchUsesOriginalPrompt() async throws {
+        // A seed node whose title/facts would previously have polluted the content-index query
+        // if it were nested inside SiteGraphAugmentedAssistant's enriched text.
+        let header = node("c1", title: "Header", filePath: "src/components/Header.astro")
+        let snapshot = SiteGraphExplorerSnapshot(nodes: [header], edges: [])
+
+        let root = try makeSite()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "export const CTA = 'Book a consultation';\n".write(
+            to: root.appendingPathComponent("src/components/CTA.astro"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
+
+        let base = CapturingConversationalAssistant()
+        let assistant = CombinedAugmentedAssistant(base: base, index: index, graphSnapshotProvider: { snapshot })
+        let context = AssistantContext(siteID: "site", siteDirectory: root)
+
+        for await _ in try await assistant.converse(prompt: "How does the Header work with the CTA?", context: context) {}
+
+        // Both blocks must be present in the single prompt sent to `base` — proving the content
+        // search ran (it found the CTA excerpt) using the ORIGINAL question, not text mutated by
+        // the graph decorator first.
+        let prompt = await base.prompts.first
+        #expect(prompt?.contains("Facts about Header") == true)
+        #expect(prompt?.contains("src/components/CTA.astro") == true)
+        #expect(prompt?.contains("User request:\nHow does the Header work with the CTA?") == true)
+    }
+
+    @Test("citations from both sources are merged into a single .citations event")
+    func mergesCitationsIntoOneEvent() async throws {
+        let header = node("c1", title: "Header", filePath: "src/components/Header.astro")
+        let snapshot = SiteGraphExplorerSnapshot(nodes: [header], edges: [])
+
+        let root = try makeSite()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "export const CTA = 'Book a consultation';\n".write(
+            to: root.appendingPathComponent("src/components/CTA.astro"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
+
+        let base = CapturingConversationalAssistant()
+        let assistant = CombinedAugmentedAssistant(base: base, index: index, graphSnapshotProvider: { snapshot })
+        let context = AssistantContext(siteID: "site", siteDirectory: root)
+
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(prompt: "How does the Header work with the CTA?", context: context) {
+            events.append(event)
+        }
+
+        let citationEvents = events.filter { if case .citations = $0 { return true } else { return false } }
+        #expect(citationEvents.count == 1)
+        guard case .citations(let citations) = citationEvents.first else {
+            Issue.record("Expected exactly one .citations event")
+            return
+        }
+        #expect(citations.contains { $0.path == "src/components/Header.astro" })
+        #expect(citations.contains { $0.path == "src/components/CTA.astro" })
+    }
+
+    @Test("a path cited by both sources is only cited once, keeping the graph citation")
+    func dedupesCitationsByPath() async throws {
+        let cta = node("c1", title: "CTA", filePath: "src/components/CTA.astro")
+        let snapshot = SiteGraphExplorerSnapshot(nodes: [cta], edges: [])
+
+        let root = try makeSite()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "export const CTA = 'Book a consultation';\n".write(
+            to: root.appendingPathComponent("src/components/CTA.astro"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
+
+        let base = CapturingConversationalAssistant()
+        let assistant = CombinedAugmentedAssistant(base: base, index: index, graphSnapshotProvider: { snapshot })
+        let context = AssistantContext(siteID: "site", siteDirectory: root)
+
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(prompt: "Tell me about the CTA component", context: context) {
+            events.append(event)
+        }
+
+        guard case .citations(let citations) = events.first else {
+            Issue.record("Expected first event to be .citations")
+            return
+        }
+        let ctaCitations = citations.filter { $0.path == "src/components/CTA.astro" }
+        #expect(ctaCitations.count == 1)
+        #expect(ctaCitations.first?.kind == .component)
+    }
+
+    @Test("neither source matching leaves the prompt untouched and skips citations")
+    func neitherMatchesLeavesPromptUntouched() async throws {
+        let root = try makeSite()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
+
+        let base = CapturingConversationalAssistant()
+        let assistant = CombinedAugmentedAssistant(
+            base: base, index: index,
+            graphSnapshotProvider: { SiteGraphExplorerSnapshot(nodes: [], edges: []) }
+        )
+        let prompt = "Explain quantum entanglement"
+
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(prompt: prompt, context: AssistantContext(siteID: "site", siteDirectory: root)) {
+            events.append(event)
+        }
+
+        #expect(await base.prompts.first == prompt)
+        let hasCitations = events.contains { if case .citations = $0 { return true } else { return false } }
+        #expect(!hasCitations)
+    }
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they fail**
+
+Run: `swift test --filter CombinedAugmentedAssistant`
+Expected: FAIL with "cannot find 'CombinedAugmentedAssistant' in scope"
+
+- [ ] **Step 5: Implement `CombinedAugmentedAssistant`**
+
+Create `Sources/AnglesiteCore/CombinedAugmentedAssistant.swift`:
+
+```swift
+import Foundation
+
+#if compiler(>=6.4)
+import FoundationModels
+#endif
+
+/// Combines graph-structure grounding (``SiteGraphAugmentedAssistant``) and content-search
+/// grounding (``KnowledgeAugmentedAssistant``) into a single enrichment pass, both run against
+/// the same, untouched user prompt (#314).
+///
+/// Nesting the two decorators (each rewriting `prompt` and forwarding to the next) was the
+/// original approach and was rejected: the inner decorator's retrieval search then runs against
+/// the OUTER decorator's already-enriched prompt — a blob of instructions and fact lines, not
+/// the user's actual question — degrading exactly the citations this feature is meant to
+/// produce. Running both retrievals here, against the same original `prompt`, avoids that.
+public actor CombinedAugmentedAssistant: ConversationalAssistant {
+    private let base: any ConversationalAssistant
+    private let index: SiteKnowledgeIndex
+    private let graphSnapshotProvider: @Sendable () async -> SiteGraphExplorerSnapshot
+
+    public init(
+        base: any ConversationalAssistant,
+        index: SiteKnowledgeIndex,
+        graphSnapshotProvider: @escaping @Sendable () async -> SiteGraphExplorerSnapshot
+    ) {
+        self.base = base
+        self.index = index
+        self.graphSnapshotProvider = graphSnapshotProvider
+    }
+
+    public nonisolated var capabilities: AssistantCapabilities {
+        base.capabilities
+    }
+
+    public func converse(prompt: String, context: AssistantContext) async throws -> AsyncStream<AssistantEvent> {
+        let (enriched, citations) = await enrichedContext(prompt, context: context)
+        let baseStream = try await base.converse(prompt: enriched, context: context)
+        guard !citations.isEmpty else { return baseStream }
+        return AsyncStream { continuation in
+            let task = Task {
+                continuation.yield(.citations(citations))
+                for await event in baseStream {
+                    continuation.yield(event)
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    public func generate(prompt: String, context: AssistantContext) async throws -> AsyncThrowingStream<String, Error> {
+        let (enriched, _) = await enrichedContext(prompt, context: context)
+        return try await base.generate(prompt: enriched, context: context)
+    }
+
+    #if compiler(>=6.4)
+    public func generateStructured<T: Generable & Sendable>(
+        prompt: String,
+        context: AssistantContext,
+        resultType: T.Type
+    ) async throws -> T {
+        let (enriched, _) = await enrichedContext(prompt, context: context)
+        return try await base.generateStructured(prompt: enriched, context: context, resultType: resultType)
+    }
+    #endif
+
+    public func cancel() async {
+        await base.cancel()
+    }
+
+    public func resetSession() async {
+        await base.resetSession()
+    }
+
+    private func enrichedContext(_ prompt: String, context: AssistantContext) async -> (prompt: String, citations: [RetrievedCitation]) {
+        let snapshot = await graphSnapshotProvider()
+        let graph = SiteGraphAugmentedAssistant.graphBlock(prompt: prompt, snapshot: snapshot)
+        let content = await KnowledgeAugmentedAssistant.contentBlock(prompt: prompt, context: context, index: index)
+
+        var blocks: [String] = []
+        var citations: [RetrievedCitation] = []
+        if let graph {
+            blocks.append(graph.block)
+            citations.append(contentsOf: graph.citations)
+        }
+        if let content {
+            blocks.append(content.block)
+            // A file that's both a matched graph node and a content-search hit is cited once —
+            // the graph citation (added first, above) already covers it and carries the more
+            // specific `SiteGraphNodeKind`-derived kind mapping.
+            let citedPaths = Set(citations.map(\.path))
+            citations.append(contentsOf: content.citations.filter { !citedPaths.contains($0.path) })
+        }
+        guard !blocks.isEmpty else { return (prompt, []) }
+
+        let enriched = """
+        \(blocks.joined(separator: "\n\n"))
+
+        User request:
+        \(prompt)
+        """
+        return (enriched, citations)
+    }
+}
+```
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+Run: `swift test --filter CombinedAugmentedAssistant`
+Expected: PASS (all 4 tests)
+
+Also re-run the two extraction targets to confirm no regression:
+
+Run: `swift test --filter SiteGraphAugmentedAssistant`
+Expected: PASS (5/5)
+
+Run: `swift test --filter KnowledgeAugmentedAssistant`
+Expected: PASS (established baseline count)
+
+- [ ] **Step 7: Wire `CombinedAugmentedAssistant` into `SiteAssistantSessionFactory`**
+
+In `Sources/AnglesiteApp/SiteAssistantSessionFactory.swift`, replace the `assistant` closure inside `Dependencies.live` (the one built in Task 3, currently constructing a nested `SiteGraphAugmentedAssistant(base: KnowledgeAugmentedAssistant(...))`) with:
+
+```swift
+            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, graphSnapshotProvider in
+                CombinedAugmentedAssistant(
+                    base: FoundationModelAssistant(
+                        tier: .onDevice,
+                        editBridge: editBridge,
+                        contentGraph: contentGraph,
+                        knowledgeIndex: knowledgeIndex,
+                        semanticRanker: semanticRanker,
+                        integrationService: integrationService
+                    ),
+                    index: knowledgeIndex,
+                    graphSnapshotProvider: graphSnapshotProvider
+                )
+            }
+```
+
+The `AssistantBuilder` typealias and `makeSession`'s signature (both from Task 3) are unchanged — only this closure's body changes. `SiteAssistantSessionFactoryTests` (Task 3) stubs `Dependencies.assistant` entirely and never constructs the production closure, so it needs no changes and must still pass unchanged.
+
+- [ ] **Step 8: Run the full test suite and build to verify no regressions**
+
+Run: `swift test`
+Expected: PASS (every target, no regressions)
+
+Run: `xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build`
+Expected: BUILD SUCCEEDED
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add Sources/AnglesiteCore/SiteGraphAugmentedAssistant.swift Sources/AnglesiteCore/KnowledgeAugmentedAssistant.swift Sources/AnglesiteCore/CombinedAugmentedAssistant.swift Tests/AnglesiteCoreTests/CombinedAugmentedAssistantTests.swift Sources/AnglesiteApp/SiteAssistantSessionFactory.swift
+git commit -m "fix: run graph and content RAG against the same original prompt (#314)
+
+Nesting SiteGraphAugmentedAssistant around KnowledgeAugmentedAssistant meant the
+inner content-index search ran against the outer decorator's already-enriched
+prompt instead of the user's actual question, degrading citations on exactly the
+structural questions #314 targets. CombinedAugmentedAssistant runs both
+retrievals against the same original prompt and merges once."
+```
+
+---
+
 ## Self-Review Notes
 
 - **Spec coverage:** Architecture (Task 2), Components (Tasks 1-2), Citations & navigation (Tasks 4-5), Error handling (no new task — verified by Task 2's existing-error-path tests inherited from the unchanged `FoundationModelAssistant`/`ChatModel` error surface), Testing (each task's own test file) — all spec sections have a task.
