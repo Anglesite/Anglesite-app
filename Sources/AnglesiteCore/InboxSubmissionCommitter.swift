@@ -50,10 +50,22 @@ public enum InboxSubmissionCommitter {
     /// introduced by the quote-escaping step, and would leave a user-supplied backslash (e.g. one
     /// ending the string, or preceding a character YAML treats as an escape like `\n`) to combine
     /// with the following character or the closing quote, producing malformed frontmatter.
+    ///
+    /// Also escapes the C0 control characters significant inside a YAML double-quoted scalar —
+    /// literal newline, carriage return, and tab — to their `\n`/`\r`/`\t` escapes. A visitor-
+    /// supplied `subject`/`from` can contain a literal newline (a JSON request body's `\n` becomes
+    /// a real newline once the Worker's `JSON.parse` runs; `validateInboxFields`'s `.trim()` only
+    /// trims leading/trailing whitespace, not embedded characters), which would otherwise spill
+    /// the double-quoted scalar across multiple lines and produce invalid frontmatter. These three
+    /// replacements don't overlap with each other or with the backslash/quote ones above, so their
+    /// relative order doesn't matter as long as they run after the backslash escape.
     private static func escapeYAMLDoubleQuoted(_ raw: String) -> String {
         raw
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
     }
 
     /// Writes each submission to `src/content/inbox/<slug>.md` under `siteDirectory`, stages and
