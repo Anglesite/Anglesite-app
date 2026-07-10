@@ -54,8 +54,11 @@ test("handleInbox: stages a valid JSON submission and returns 202", async () => 
   });
   const response = await handleInbox(request, { INBOX_KV: kv });
   assert.equal(response.status, 202);
-  assert.equal(kv.store.size, 1);
-  const staged = JSON.parse([...kv.store.values()][0]);
+  // 2 keys, not 1: isRateLimited() always writes a `ratelimit:<ip>` counter as a side effect on
+  // every allowed call, in addition to the `inbox:<id>` staged submission written here.
+  assert.equal(kv.store.size, 2);
+  const [, stagedRaw] = [...kv.store.entries()].find(([key]) => key.startsWith("inbox:"))!;
+  const staged = JSON.parse(stagedRaw);
   assert.equal(staged.subject, "Hello");
   assert.equal(staged.from, "a@example.com");
   assert.equal(staged.message, "Hi there");
@@ -74,7 +77,11 @@ test("handleInbox: silently drops a honeypot-tripped submission", async () => {
   });
   const response = await handleInbox(request, { INBOX_KV: kv });
   assert.equal(response.status, 202);
-  assert.equal(kv.store.size, 0);
+  // 1 key, not 0: rate limiting runs before the honeypot check in handleInbox, so this call still
+  // writes the `ratelimit:<ip>` counter — a honeypot-tripped request still consumes a rate-limit
+  // slot, which is correct: bots shouldn't be exempt from rate limiting just because they tripped
+  // the honeypot.
+  assert.equal(kv.store.size, 1);
 });
 
 test("handleInbox: rejects a non-POST method", async () => {

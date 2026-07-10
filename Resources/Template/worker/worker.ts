@@ -107,7 +107,7 @@ export async function handleInbox(request: Request, env: WorkerEnv): Promise<Res
   if (!env.INBOX_KV) return new Response("Inbox capture not configured", { status: 500 });
 
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-  if (ip !== "unknown" && await isRateLimited(env.INBOX_KV, ip)) {
+  if (await isRateLimited(env.INBOX_KV, ip)) {
     return new Response(null, { status: 429 });
   }
 
