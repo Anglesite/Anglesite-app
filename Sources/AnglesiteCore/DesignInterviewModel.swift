@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 import AnglesiteSiteModel
 
 /// Drives one design-interview conversation: prompts the current ``ConversationStage`` through an
@@ -65,6 +66,17 @@ public final class DesignInterviewModel: Identifiable {
 
     public func nudge(_ hint: DesignAdjectiveHint) {
         draft.applyAdjectiveHint(hint)
+    }
+
+    /// A two-way `Binding` into one axis of `draft.axes`, for GUI sliders. `draft`'s setter is
+    /// `internal(set)` (state changes are meant to flow through the model's own methods), so a
+    /// cross-module SwiftUI view can't write `$model.draft.axes.temperature` directly — this
+    /// routes the write back through the model instead of widening `draft`'s access.
+    public func axisBinding(_ keyPath: WritableKeyPath<DesignAxes, Double>) -> Binding<Double> {
+        Binding(
+            get: { self.draft.axes[keyPath: keyPath] },
+            set: { self.draft.axes[keyPath: keyPath] = $0 }
+        )
     }
 
     /// "Design it for me" escape hatch: skip straight to axis confirmation using the
