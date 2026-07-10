@@ -20,7 +20,9 @@ import FoundationModels
 
 /// Chat front-door for the brand-voice interview (#465): the model interviews the owner in
 /// conversation, then calls this once with the collected answers. Writes `.userOverride`
-/// entries via `ProjectConventionsStore` — the same store the Style Guide inspector edits.
+/// entries through the shared `ProjectConventionsEngine` (via `BrandVoiceWriter`) — the same
+/// engine `ProjectConventionsModel`'s Style Guide sheet writes through — so a chat-driven save
+/// can't be silently reverted by a later GUI override write persisting a stale engine snapshot.
 public struct SaveBrandVoiceTool: Tool, Sendable {
     public static let toolName = "saveBrandVoice"
     public let name = SaveBrandVoiceTool.toolName
@@ -38,8 +40,15 @@ public struct SaveBrandVoiceTool: Tool, Sendable {
         public var avoidPhrases: String?
     }
 
+    private let engine: ProjectConventionsEngine
     private let store: ProjectConventionsStore
-    public init(store: ProjectConventionsStore) { self.store = store }
+    private let siteID: String
+
+    public init(engine: ProjectConventionsEngine, store: ProjectConventionsStore, siteID: String) {
+        self.engine = engine
+        self.store = store
+        self.siteID = siteID
+    }
 
     public func call(arguments: Arguments) async throws -> String {
         let answers = BrandVoiceAnswers(
@@ -49,9 +58,9 @@ public struct SaveBrandVoiceTool: Tool, Sendable {
             avoidPhrases: BrandVoiceInterview.list(arguments.avoidPhrases)
         )
         let reply = SaveBrandVoiceReply.confirmation(for: answers)
-        guard reply.contains("Saved") else { return reply }
-        let current = await store.load() ?? .empty
-        await store.save(BrandVoiceInterview.apply(answers, to: current))
+        if BrandVoiceWriter.hasContent(answers) {
+            await BrandVoiceWriter.save(answers, engine: engine, store: store, siteID: siteID)
+        }
         return reply
     }
 }

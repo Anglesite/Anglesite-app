@@ -38,3 +38,31 @@ public enum BrandVoiceInterview {
             .filter { !$0.isEmpty }
     }
 }
+
+/// Single write path for interview answers (#465): applies overrides through the shared
+/// engine — so any open Style Guide stays consistent and later engine-snapshot persists
+/// can't clobber this write — then persists the engine's merged state to the store.
+/// Seeds the engine from disk first when it has no entry for the site yet.
+public enum BrandVoiceWriter {
+    /// Returns false (and writes nothing) when every answer is empty.
+    @discardableResult
+    public static func save(_ answers: BrandVoiceAnswers, engine: ProjectConventionsEngine,
+                            store: ProjectConventionsStore, siteID: String) async -> Bool {
+        guard hasContent(answers) else { return false }
+        if await engine.conventions(siteID: siteID) == nil {
+            await engine.seed(siteID: siteID, with: (await store.load()) ?? .empty)
+        }
+        let audience = answers.audience.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !audience.isEmpty { await engine.applyOverride(siteID: siteID, value: .audience(audience)) }
+        if !answers.toneWords.isEmpty { await engine.applyOverride(siteID: siteID, value: .toneDescriptors(answers.toneWords)) }
+        if !answers.brandTerms.isEmpty { await engine.applyOverride(siteID: siteID, value: .brandTerms(answers.brandTerms)) }
+        if !answers.avoidPhrases.isEmpty { await engine.applyOverride(siteID: siteID, value: .avoidPhrases(answers.avoidPhrases)) }
+        if let merged = await engine.conventions(siteID: siteID) { await store.save(merged) }
+        return true
+    }
+
+    public static func hasContent(_ answers: BrandVoiceAnswers) -> Bool {
+        !answers.audience.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !answers.toneWords.isEmpty || !answers.brandTerms.isEmpty || !answers.avoidPhrases.isEmpty
+    }
+}

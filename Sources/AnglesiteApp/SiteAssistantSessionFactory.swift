@@ -21,6 +21,7 @@ enum SiteAssistantSessionFactory {
         _ knowledgeIndex: SiteKnowledgeIndex,
         _ semanticRanker: SemanticRanker?,
         _ integrationService: any IntegrationOperationsService,
+        _ conventionsEngine: ProjectConventionsEngine?,
         _ conventionsStore: ProjectConventionsStore
     ) -> any ConversationalAssistant
 
@@ -50,7 +51,7 @@ enum SiteAssistantSessionFactory {
             let editRouterProvider: EditRouterProvider = { siteID in
                 await EditRouterRegistry.shared.router(for: siteID)
             }
-            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, conventionsStore in
+            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, conventionsEngine, conventionsStore in
                 KnowledgeAugmentedAssistant(
                     base: FoundationModelAssistant(
                         tier: .onDevice,
@@ -59,6 +60,7 @@ enum SiteAssistantSessionFactory {
                         knowledgeIndex: knowledgeIndex,
                         semanticRanker: semanticRanker,
                         integrationService: integrationService,
+                        conventionsEngine: conventionsEngine,
                         conventionsStore: conventionsStore
                     ),
                     index: knowledgeIndex
@@ -122,8 +124,10 @@ enum SiteAssistantSessionFactory {
         let editBridge = IntentEditBridge(routerProvider: dependencies.editRouterProvider)
         // A second `ProjectConventionsStore` instance pointed at the same `configDirectory` as
         // `SiteWindowModel`'s Style Guide store (rather than threading that instance through this
-        // factory's parameter list) — safe because the store is a thin file-backed actor with no
-        // in-memory cache of its own, so both instances read/write the same `conventions.json`.
+        // factory's parameter list) — harmless because all writes now flow through the shared
+        // `conventionsEngine` (#465): `BrandVoiceWriter`/`ProjectConventionsModel` only ever persist
+        // the engine's merged snapshot to whichever store instance they hold, so a second store
+        // pointed at the same `conventions.json` never observes a stale value.
         let conventionsStore = ProjectConventionsStore(configDirectory: configDirectory)
         let chat = ChatModel(
             siteID: siteID,
@@ -135,6 +139,7 @@ enum SiteAssistantSessionFactory {
                 knowledgeIndex,
                 semanticRanker,
                 integrationService,
+                conventionsEngine,
                 conventionsStore
             ),
             annotationFeed: dependencies.annotationFeed(sourceDirectory),
