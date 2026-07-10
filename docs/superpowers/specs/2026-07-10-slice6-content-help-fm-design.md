@@ -68,8 +68,11 @@ and invocable from chat. Replaces the skills' shared `docs/brand-voice.md` contr
 gives new/sparse sites a real voice signal where inference is weak.
 
 ### 4.3 `SiteContentChunker`
-Deterministic per-item iteration over `SiteContentGraph` (pages + posts) producing
-capped plain-text chunks:
+Deterministic per-item enumeration of the site's content producing capped plain-text
+chunks. It scans the `Source/` tree directly (`src/content/**`, `src/pages/**`) — the
+same filesystem truth `SiteContentGraph` is populated from — so tools and App Intents
+don't depend on a warmed in-memory graph. *(Amended at planning time; originally
+"iteration over `SiteContentGraph`".)*
 
 - `.md`/`.mdoc`: frontmatter-stripped markdown body.
 - `.astro` inline text: a simple tag-strip extractor (v1 — not a full HTML parser;
@@ -104,10 +107,14 @@ Each: deterministic gatherer → structured FM generator → three front-doors.
 - **Aggregate (deterministic):** group by page, sort by severity → `CopyEditReport`.
   Per-chunk FM failures degrade to a partial report listing skipped pages — never
   abort, never silently drop.
-- **Apply:** findings land as **annotations** via the existing annotation store, so
-  they appear in navigator/preview like any annotation; accepting a suggested rewrite
-  routes through the existing `apply_edit` diff-confirm pipeline. No new apply
-  machinery; "never batch-rewrite" is preserved structurally.
+- **Apply:** findings can be saved as **annotations** via the existing annotation
+  store, so they appear in navigator/preview like any annotation. Accepting a
+  suggested rewrite is a **deterministic exact-excerpt replacement** in the finding's
+  source file, confirmed with a before/after diff; if the model's quoted excerpt
+  doesn't match the file verbatim, Apply is disabled and the rewrite is offered
+  copy-to-clipboard. *(Amended at planning time: `apply_edit` is selector/DOM-based
+  while findings live in markdown source, so it isn't the right apply path.)*
+  Per-finding confirm preserves "never batch-rewrite" structurally.
 - **Front-doors:** GUI report view ("Review Copy…") with per-finding Apply/Dismiss;
   App Intent returning the summary; chat Tool `reviewCopy` (page-scoped answers
   inline; site-scoped kicks off the audit).
