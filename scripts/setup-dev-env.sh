@@ -145,9 +145,9 @@ setup_linux() {
     fi
 
     echo
-    echo "Build:  swift build          (portable targets only — Package.swift filters off-Darwin)"
+    echo "Build:  swift build          (portable targets only — Package.swift filters off-Darwin;"
+    echo "                              AnglesiteSiteModel, AnglesiteQuickLookSupport, AnglesiteCore)"
     echo "Tests:  swift test"
-    echo "Seams:  ANGLESITE_PORT_WIP=1 swift build --target AnglesiteCore   (in-flight purity work)"
 }
 
 case "$(uname -s)" in
