@@ -38,11 +38,13 @@ public actor SiteGraphAugmentedAssistant: ConversationalAssistant {
         let (enriched, citations) = await enrichedContext(prompt)
         let baseStream = try await base.converse(prompt: enriched, context: context)
         guard !citations.isEmpty else { return baseStream }
-        // Prepended ahead of whatever `base` itself yields — if `base` is a
-        // `KnowledgeAugmentedAssistant`, its own `.citations` event (content-search sources)
-        // still arrives afterward as a second, separate "Sources" row. That's an accepted UX
-        // trade-off: two decorators, each contributing citations independently, is simpler and
-        // more honest than guessing how to merge two different kinds of retrieval.
+        // Prepended ahead of whatever `base` itself yields. Note: the production chat path no
+        // longer composes this decorator around `KnowledgeAugmentedAssistant` — it uses
+        // `CombinedAugmentedAssistant`, which runs both retrievals against the same original
+        // prompt and merges into a single `.citations` event (#314). This instance-level
+        // `converse` stays correct for standalone use (as its own tests exercise it), but if you
+        // do nest another decorator as `base` here, its citations still arrive as a second,
+        // separate event — that combination is untested and not the shipped composition.
         return AsyncStream { continuation in
             let task = Task {
                 continuation.yield(.citations(citations))
