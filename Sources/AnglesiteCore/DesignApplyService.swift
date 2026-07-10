@@ -101,3 +101,13 @@ public enum DesignApplyService {
         return String(css[css.startIndex..<openBrace.upperBound]) + body + String(css[closeBrace.lowerBound...])
     }
 }
+
+public extension DesignApplyService {
+    static func apply(
+        _ input: DesignApplyInput,
+        to package: AnglesitePackage,
+        fileManager: FileManager = .default
+    ) -> Result<AppliedDesign, DesignApplyError> {
+        apply(input, to: package.sourceURL, fileManager: fileManager)
+    }
+}

@@ -17,15 +17,29 @@ public struct AnglesitePackage: Sendable, Equatable {
 
     /// The package directory (`…/Name.anglesite`).
     public let url: URL
+    /// For synthetic test packages created via `init(sourceDirectory:)`, this is set to the
+    /// source directory itself. For normal packages, this is `nil`.
+    private let syntheticSourceDirectory: URL?
 
     public init(url: URL) {
         self.url = url
+        self.syntheticSourceDirectory = nil
+    }
+
+    /// Convenience initializer for test-friendly wrapping of a bare source directory.
+    /// Constructs a synthetic package pointing to a directory that acts as the source location,
+    /// without requiring a full `.anglesite` package structure on disk.
+    public init(sourceDirectory: URL) {
+        self.url = sourceDirectory
+        self.syntheticSourceDirectory = sourceDirectory
     }
 
     // MARK: - Layout
 
     public var infoPlistURL: URL { url.appendingPathComponent("Info.plist", isDirectory: false) }
-    public var sourceURL: URL { url.appendingPathComponent("Source", isDirectory: true) }
+    public var sourceURL: URL {
+        syntheticSourceDirectory ?? url.appendingPathComponent("Source", isDirectory: true)
+    }
     public var configURL: URL { url.appendingPathComponent("Config", isDirectory: true) }
 
     /// App-owned sync state, inside `Config/` (never in the `Source/` git repo).

@@ -152,3 +152,17 @@ import Foundation
         #expect(css.contains("--color-primary: #ff0000;"))
     }
 }
+
+extension DesignApplyServiceTests {
+    @Test func packageOverloadDelegatesToSourceDirectory() throws {
+        let dir = try makeSite()
+        // AnglesitePackage(sourceDirectory:) is the existing test-friendly initializer used
+        // elsewhere in AnglesiteCoreTests (see AnglesiteSiteModelTests) — wraps a bare directory
+        // without requiring a full .anglesite package on disk.
+        let package = AnglesitePackage(sourceDirectory: dir)
+        let input = DesignApplyInput(cssVars: ["color-primary": "#ff0000"], rationaleMarkdown: nil,
+                                     brandSummary: "x", sourceLabel: "x")
+        let result = DesignApplyService.apply(input, to: package)
+        guard case .success = result else { Issue.record("expected success"); return }
+    }
+}
