@@ -42,6 +42,12 @@ struct SiteMenuCommands: Commands {
             Button("Siri AI Readiness…") { model?.openSiriReadiness() }
                 .disabled(model?.canOpenSiriReadiness != true)
 
+            // No dedicated "Style Guide…" menu item exists to mirror (Style Guide is toolbar-only,
+            // see `SiteWindow`'s `styleGuide` `ToolbarItem`) — this follows the sibling ellipsis
+            // items above instead (#465).
+            Button("Review Copy…") { model?.presentCopyEdit() }
+                .disabled(model?.canOpenCopyEdit != true)
+
             #if !ANGLESITE_MAS
             // Same identity swap as the toolbar: menus rebuild on every open, so a state-dependent
             // item is fine here (unlike the customizable toolbar, see #519).

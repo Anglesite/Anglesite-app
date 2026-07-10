@@ -80,6 +80,11 @@ final class SiteWindowModel {
     /// same lifecycle as `chat`. Its own `sheetPresented` drives the `.sheet(isPresented:)` in
     /// `SiteWindow`, following `AuditModel`'s pattern rather than the item-based sheets.
     var styleGuide: ProjectConventionsModel?
+    /// Non-nil ⟺ the Review Copy sheet is presented (`.sheet(item:)`), following the same
+    /// coupling-presentation-to-the-model pattern as `siriReadinessModel`/`integrationWizardModel`.
+    /// Built fresh each time (`presentCopyEdit`) with a new `ProjectConventionsStore` scoped to
+    /// this site's `configDirectory` — the store is a stateless, file-backed actor (Task 10, #465).
+    var copyEditModel: CopyEditReportModel?
     /// The window's `UndoManager`, published down from `SiteWindow`'s
     /// `@Environment(\.undoManager)` so applied edits register for Edit ▸ Undo (#527). Weak +
     /// `@ObservationIgnored`: the window owns it and it isn't render state. Forwarded on set
@@ -237,6 +242,21 @@ final class SiteWindowModel {
         Task { await styleGuide.presentSheet() }
     }
 
+    var canOpenCopyEdit: Bool { site != nil }
+
+    /// Presents the Review Copy sheet (#465). Reconstructs a `ProjectConventionsStore` from the
+    /// site's `configDirectory` — the same expression `ProjectConventionsModel.init` uses for
+    /// `styleGuide` at `loadAndStart` (~line 1068) — rather than reaching into that model's
+    /// private store, since the store is a stateless file-backed actor keyed off the directory.
+    func presentCopyEdit() {
+        guard let site else { return }
+        copyEditModel = CopyEditReportModel(
+            siteID: site.id,
+            sourceDirectory: site.sourceDirectory,
+            conventionsStore: ProjectConventionsStore(configDirectory: site.configDirectory)
+        )
+    }
+
     /// The `.failed`-state pane's Retry button — same recovery as Site ▸ Start Dev Server (#515),
     /// kept as one code path rather than two that could drift.
     func retryPreview() {
@@ -274,6 +294,7 @@ final class SiteWindowModel {
         }
         chat = nil
         styleGuide = nil
+        copyEditModel = nil
         navigator?.stop()
         navigator = nil
         graphExplorer.stop()
