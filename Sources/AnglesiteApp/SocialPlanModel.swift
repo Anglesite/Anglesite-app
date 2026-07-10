@@ -28,6 +28,8 @@ final class SocialPlanModel: Identifiable {
     }
 
     func generate() async {
+        errorMessage = nil
+        weeks = min(max(weeks, 1), 8)
         guard let planner, !running else { return }
         running = true
         saved = false
@@ -46,6 +48,7 @@ final class SocialPlanModel: Identifiable {
     }
 
     func save() {
+        errorMessage = nil
         guard let markdown else { return }
         do {
             try SocialCalendarMarkdown.write(markdown: markdown, sourceDirectory: sourceDirectory)

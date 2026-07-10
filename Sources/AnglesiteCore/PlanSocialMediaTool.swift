@@ -7,7 +7,7 @@ public enum PlanSocialMediaReply {
         lines.append("Platforms: " + plan.platforms.map { "\($0.platform) (\($0.postsPerWeek)×/week)" }.joined(separator: ", "))
         lines.append("Pillars: " + plan.pillars.map(\.name).joined(separator: ", "))
         lines.append("\(plan.weeks.count) week\(plan.weeks.count == 1 ? "" : "s") of calendar entries.")
-        lines.append("Confirm to save it to docs/social-calendar.md, or tell me what to change. When the user confirms, call this tool again with apply: true.")
+        lines.append("Confirm to save it to docs/social-calendar.md, or tell me what to change. When the user confirms, call this tool again with apply: true. (The plan is regenerated on save, so details may vary slightly from this preview.)")
         return lines.joined(separator: "\n")
     }
 
