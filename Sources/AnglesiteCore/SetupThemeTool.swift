@@ -12,8 +12,12 @@ public enum SetupThemeArguments {
             return "I couldn't find this site's stylesheet, so I couldn't apply \(themeName)."
         case .failure(.missingRootBlock):
             return "This site's stylesheet doesn't have the expected structure, so I couldn't apply \(themeName)."
-        case .failure(.writeFailed(let message, _)):
-            return "Applying \(themeName) failed: \(message)."
+        case .failure(.writeFailed(let message, let partiallyWritten)):
+            guard !partiallyWritten.isEmpty else {
+                return "Applying \(themeName) failed: \(message)."
+            }
+            let files = partiallyWritten.joined(separator: ", ")
+            return "Applying \(themeName) failed partway through: \(message). Some files were already updated (\(files)) — the site may be in a mixed state until you try again."
         }
     }
 }

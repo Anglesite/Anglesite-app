@@ -47,6 +47,13 @@ public enum FoundationModelContextBudget {
     }
 
     /// Whether a prompt is estimated to exceed the on-device context budget.
+    ///
+    /// - Note: this is currently unconsumed scaffolding — `DesignInterviewModel`/
+    ///   `DesignInterviewPrompts` don't call it yet; they apply their own independent, smaller
+    ///   character cap directly on the user's raw message instead (see
+    ///   `DesignInterviewPrompts.truncatedUserMessage`). Wiring this budget check into the actual
+    ///   conversation flow is tracked alongside design-interview's other app-integration gaps in
+    ///   Anglesite-app#631.
     public static func shouldEscalate(prompt: String) -> Bool {
         estimatedTokens(for: prompt) > onDeviceTokenBudget
     }

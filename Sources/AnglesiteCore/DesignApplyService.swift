@@ -79,25 +79,30 @@ public enum DesignApplyService {
         return .success(AppliedDesign(updatedVars: input.cssVars, writtenFiles: written))
     }
 
-    /// Replaces or appends `--<key>: <value>;` lines inside the first `:root { ... }` block,
-    /// leaving everything else in the file untouched. Returns `nil` if no `:root` block is found.
+    /// Replaces or appends `--<key>: <value>;` lines inside the top-level `:root { ... }` block,
+    /// leaving everything else in the file untouched. Returns `nil` if no top-level `:root` block
+    /// is found.
     static func upsertRootVars(_ vars: [String: String], in css: String) -> String? {
-        guard let rootRange = css.range(of: ":root"),
-              let openBrace = css.range(of: "{", range: rootRange.upperBound..<css.endIndex),
-              let closeBrace = css.range(of: "}", range: openBrace.upperBound..<css.endIndex)
-        else { return nil }
+        guard let (openBrace, closeBrace) = topLevelRootBlockRange(in: css) else { return nil }
 
-        var body = String(css[openBrace.upperBound..<closeBrace.lowerBound])
+        var body = String(css[openBrace..<closeBrace])
         var remaining = vars
 
         for key in vars.keys {
+            // Replace every occurrence, not just the first: a hand-edited `:root` block can
+            // declare the same custom property twice, and CSS gives the *last* declaration
+            // precedence — leaving an earlier duplicate stale would silently keep the old value
+            // in effect even though this function reports the var as updated.
             let pattern = #"(--\#(NSRegularExpression.escapedPattern(for: key))\s*:\s*)[^;]*;"#
             guard let re = try? NSRegularExpression(pattern: pattern) else { continue }
             let range = NSRange(body.startIndex..<body.endIndex, in: body)
-            if let match = re.firstMatch(in: body, range: range), let matchRange = Range(match.range, in: body) {
+            let matches = re.matches(in: body, range: range)
+            guard !matches.isEmpty else { continue }
+            for match in matches.reversed() {
+                guard let matchRange = Range(match.range, in: body) else { continue }
                 body.replaceSubrange(matchRange, with: "--\(key): \(vars[key]!);")
-                remaining.removeValue(forKey: key)
             }
+            remaining.removeValue(forKey: key)
         }
 
         if !remaining.isEmpty {
@@ -107,7 +112,54 @@ public enum DesignApplyService {
             body += additions + "\n"
         }
 
-        return String(css[css.startIndex..<openBrace.upperBound]) + body + String(css[closeBrace.lowerBound...])
+        return String(css[css.startIndex..<openBrace]) + body + String(css[closeBrace...])
+    }
+
+    /// Scans `css` for the first `:root { ... }` rule declared at the top level of the
+    /// stylesheet (brace depth 0), returning the range of its body (between the braces,
+    /// exclusive). Skips `:root` occurrences that are:
+    /// - part of a compound selector, e.g. `:root[data-theme="dark"]` (no `{` immediately
+    ///   after `:root`, modulo whitespace), or
+    /// - nested inside another block, e.g. a `:root` re-declared inside
+    ///   `@media (prefers-color-scheme: dark) { :root { ... } }` — a plain substring/regex
+    ///   search for `:root` can't tell this apart from the real top-level rule, and would
+    ///   silently upsert tokens into the wrong scope.
+    static func topLevelRootBlockRange(in css: String) -> (open: String.Index, close: String.Index)? {
+        var depth = 0
+        var i = css.startIndex
+        while i < css.endIndex {
+            let c = css[i]
+            if c == "{" {
+                depth += 1
+            } else if c == "}" {
+                depth -= 1
+            } else if depth == 0, css[i...].hasPrefix(":root") {
+                var j = css.index(i, offsetBy: 5)
+                while j < css.endIndex, css[j].isWhitespace { j = css.index(after: j) }
+                if j < css.endIndex, css[j] == "{" {
+                    guard let close = matchingCloseBrace(in: css, openingAt: j) else { return nil }
+                    return (css.index(after: j), close)
+                }
+            }
+            i = css.index(after: i)
+        }
+        return nil
+    }
+
+    /// Finds the index of the `}` that closes the `{` at `openBrace`, accounting for nested
+    /// braces inside the block.
+    private static func matchingCloseBrace(in css: String, openingAt openBrace: String.Index) -> String.Index? {
+        var depth = 1
+        var k = css.index(after: openBrace)
+        while k < css.endIndex {
+            if css[k] == "{" { depth += 1 }
+            else if css[k] == "}" {
+                depth -= 1
+                if depth == 0 { return k }
+            }
+            k = css.index(after: k)
+        }
+        return nil
     }
 }
 

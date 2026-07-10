@@ -98,7 +98,10 @@ public final class ThemeApplyWizardModel: Identifiable {
                 applyResult = .failure(.writeFailed(message: "No design system selected to apply.", partiallyWritten: []))
                 return
             }
-            let description = (try? await FreedesignmdCatalog.fetchDescription(slug: slug, session: session)) ?? nil
+            // `try?` already flattens to `String??` -> `String?` (SE-0230); a fetch failure and a
+            // page with no `<meta description>` both land here as `nil` and get the same fallback
+            // brand summary below — that's an acceptable, intentional merge of the two cases.
+            let description = try? await FreedesignmdCatalog.fetchDescription(slug: slug, session: session)
             // freedesignmd's per-system CSS-token translation (mapping a fetched DESIGN.md's
             // described tokens onto the template's 12 vars) is deliberately stubbed to `[:]` —
             // see the plan's Task 8/9 note. This flow currently only records the description as

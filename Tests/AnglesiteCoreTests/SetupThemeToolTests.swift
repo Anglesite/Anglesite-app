@@ -16,10 +16,21 @@ import Testing
 
     @Test func replyForWriteFailedIncludesMessage() {
         let reply = SetupThemeArguments.reply(
+            for: .failure(.writeFailed(message: "disk full", partiallyWritten: [])),
+            themeName: "Warm"
+        )
+        #expect(reply.contains("disk full"))
+    }
+
+    @Test func replyForPartialWriteFailureNamesTheFilesAlreadyWritten() {
+        let reply = SetupThemeArguments.reply(
             for: .failure(.writeFailed(message: "disk full", partiallyWritten: ["src/styles/global.css"])),
             themeName: "Warm"
         )
         #expect(reply.contains("disk full"))
+        #expect(reply.contains("src/styles/global.css"))
+        // Must not read like nothing happened — the CSS write already landed on disk.
+        #expect(reply.contains("already updated") || reply.contains("mixed state"))
     }
 
     @Test func replyForMissingRootBlockExplainsWhatWentWrong() {

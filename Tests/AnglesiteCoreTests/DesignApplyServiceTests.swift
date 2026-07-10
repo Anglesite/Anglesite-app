@@ -178,6 +178,85 @@ import Foundation
         #expect(css == originalCSS)
     }
 
+    @Test func ignoresAttributeSelectorRootAndUpdatesTheBareRootBlock() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let stylesDir = dir.appendingPathComponent("src/styles")
+        try FileManager.default.createDirectory(at: stylesDir, withIntermediateDirectories: true)
+        let css = """
+        :root[data-theme="dark"] {
+          --color-primary: #000000;
+        }
+
+        :root {
+          --color-primary: #2563eb;
+        }
+        """
+        try css.write(to: stylesDir.appendingPathComponent("global.css"), atomically: true, encoding: .utf8)
+
+        let input = DesignApplyInput(cssVars: ["color-primary": "#ff0000"], rationaleMarkdown: nil,
+                                     brandSummary: "x", sourceLabel: "x")
+        let result = DesignApplyService.apply(input, to: dir)
+        guard case .success = result else { Issue.record("expected success"); return }
+        let updated = try String(contentsOf: stylesDir.appendingPathComponent("global.css"), encoding: .utf8)
+        // The attribute-selector block must be left untouched — only the bare `:root` block updates.
+        #expect(updated.contains("[data-theme=\"dark\"] {\n  --color-primary: #000000;"))
+        #expect(updated.contains(":root {\n  --color-primary: #ff0000;"))
+    }
+
+    @Test func skipsRootBlockNestedInsideAMediaQueryAndUpdatesTheTopLevelOne() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let stylesDir = dir.appendingPathComponent("src/styles")
+        try FileManager.default.createDirectory(at: stylesDir, withIntermediateDirectories: true)
+        let css = """
+        @media (prefers-color-scheme: dark) {
+          :root {
+            --color-primary: #000000;
+          }
+        }
+
+        :root {
+          --color-primary: #2563eb;
+        }
+        """
+        try css.write(to: stylesDir.appendingPathComponent("global.css"), atomically: true, encoding: .utf8)
+
+        let input = DesignApplyInput(cssVars: ["color-primary": "#ff0000"], rationaleMarkdown: nil,
+                                     brandSummary: "x", sourceLabel: "x")
+        let result = DesignApplyService.apply(input, to: dir)
+        guard case .success = result else { Issue.record("expected success"); return }
+        let updated = try String(contentsOf: stylesDir.appendingPathComponent("global.css"), encoding: .utf8)
+        // The @media-nested :root must be left untouched — only the top-level block updates.
+        #expect(updated.contains("@media (prefers-color-scheme: dark) {\n  :root {\n    --color-primary: #000000;"))
+        #expect(updated.contains("\n:root {\n  --color-primary: #ff0000;"))
+    }
+
+    @Test func updatesEveryDuplicateDeclarationOfTheSameProperty() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let stylesDir = dir.appendingPathComponent("src/styles")
+        try FileManager.default.createDirectory(at: stylesDir, withIntermediateDirectories: true)
+        // A hand-edited :root block declaring --color-primary twice — CSS gives the LAST
+        // declaration precedence, so both must be rewritten or the stale first one would look
+        // "updated" in isolation while the real, cascading value stayed old.
+        let css = """
+        :root {
+          --color-primary: #111111;
+          --color-accent: #f59e0b;
+          --color-primary: #222222;
+        }
+        """
+        try css.write(to: stylesDir.appendingPathComponent("global.css"), atomically: true, encoding: .utf8)
+
+        let input = DesignApplyInput(cssVars: ["color-primary": "#ff0000"], rationaleMarkdown: nil,
+                                     brandSummary: "x", sourceLabel: "x")
+        let result = DesignApplyService.apply(input, to: dir)
+        guard case .success = result else { Issue.record("expected success"); return }
+        let updated = try String(contentsOf: stylesDir.appendingPathComponent("global.css"), encoding: .utf8)
+        #expect(updated.components(separatedBy: "--color-primary: #111111;").count == 1) // gone
+        #expect(updated.components(separatedBy: "--color-primary: #222222;").count == 1) // gone
+        #expect(updated.components(separatedBy: "--color-primary: #ff0000;").count == 3) // both replaced
+        #expect(updated.contains("--color-accent: #f59e0b;")) // untouched var preserved
+    }
+
     @Test func writeFailureAfterGlobalCSSReportsPartiallyWrittenFiles() throws {
         let dir = try makeSite()
         let failingManager = FailingFileManager(failingPathSubstring: "docs")
