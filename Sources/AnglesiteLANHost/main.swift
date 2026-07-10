@@ -80,12 +80,21 @@ struct AnglesiteLANHost {
             currentDirectoryURL: siteDirectory,
             restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 2))
 
+        // Merge the sidecar's overrides over the inherited environment rather than passing them
+        // alone — Foundation's `Process.environment` setter *replaces* the child's environment
+        // when non-nil, so a bare partial dict would strip PATH/HOME and the `node` subprocess
+        // spawned via `/usr/bin/env` would fail to resolve `node` on a typical Mac.
+        var sidecarEnvironment = ProcessInfo.processInfo.environment
+        for (key, value) in LANHostServer.mcpSidecarEnvironment(
+            bindHost: bind, mcpPort: mcpPort, projectRoot: siteDirectory, bearerToken: token) {
+            sidecarEnvironment[key] = value
+        }
+
         _ = try await supervisor.launch(
             source: "mcp-sidecar",
             executable: URL(fileURLWithPath: "/usr/bin/env"),
             arguments: ["node", pluginServerPath.appendingPathComponent("index.mjs", isDirectory: false).path],
-            environment: LANHostServer.mcpSidecarEnvironment(
-                bindHost: bind, mcpPort: mcpPort, projectRoot: siteDirectory, bearerToken: token),
+            environment: sidecarEnvironment,
             restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 2))
 
         await waitForShutdownSignal()
@@ -114,9 +123,18 @@ struct AnglesiteLANHost {
             // Use a no-op handler instead of SIG_IGN to avoid pulling in libswift_DarwinFoundation3
             // (which some macOS runners don't ship), making the process fail to load at dyld time.
             signal(SIGINT, { _ in })
-            let source = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
-            source.setEventHandler { continuation.resume() }
-            source.resume()
+            let sigintSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+            sigintSource.setEventHandler { continuation.resume() }
+            sigintSource.resume()
+
+            // Also handle SIGTERM (the default signal from `kill`/launchd) the same way, so a
+            // standing background process still runs `supervisor.shutdownAll()` instead of
+            // dying immediately via the default disposition and orphaning the astro/node
+            // children still holding the preview/MCP ports.
+            signal(SIGTERM, { _ in })
+            let sigtermSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+            sigtermSource.setEventHandler { continuation.resume() }
+            sigtermSource.resume()
         }
     }
 }
