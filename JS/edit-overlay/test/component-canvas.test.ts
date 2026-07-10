@@ -104,6 +104,19 @@ describe("component canvas", () => {
     expect(document.getElementById("anglesite-scrub")).toBeNull();
   });
 
+  it("scrub rejects a value containing a brace instead of injecting extra rules", () => {
+    setPath("/_anglesite/component/Card");
+    document.body.innerHTML = `<article class="card">hi</article><body-marker></body-marker>`;
+    installComponentCanvas();
+
+    (window as any).anglesiteCanvas.scrub(".card", "color", "red; } body-marker { display:none");
+    expect(document.getElementById("anglesite-scrub")).toBeNull();
+
+    (window as any).anglesiteCanvas.scrub(".card", "color", "red");
+    (window as any).anglesiteCanvas.scrub("} .card", "color", "red");
+    expect(document.getElementById("anglesite-scrub")?.textContent).toContain(".card { color: red; }");
+  });
+
   it("clearScrub is safe to call when no scrub tag exists", () => {
     setPath("/_anglesite/component/Card");
     installComponentCanvas();

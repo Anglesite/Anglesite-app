@@ -208,11 +208,11 @@ struct ComponentEditorView: View {
                                             .font(.system(.caption, design: .monospaced))
                                             .textFieldStyle(.plain)
                                             .frame(width: 110)
-                                            .onSubmit { commitDeclaration(model, rule: rule, decl: decl) }
+                                            .onSubmit { commitDeclaration(model, ruleIndex: ruleIndex, rule: rule, decl: decl) }
                                         Text(":")
-                                        declarationValueField(model, rule: rule, decl: decl)
+                                        declarationValueField(model, ruleIndex: ruleIndex, rule: rule, decl: decl)
                                         Button(role: .destructive) {
-                                            Task { await model.removeStyleProperty(ruleSpan: spanArray(rule.span), property: decl.property) }
+                                            removeDeclaration(model, rule: rule, decl: decl)
                                         } label: {
                                             Image(systemName: "minus.circle")
                                         }
@@ -378,6 +378,7 @@ struct ComponentEditorView: View {
     @ViewBuilder
     private func declarationValueField(
         _ model: ComponentEditorModel,
+        ruleIndex: Int,
         rule: ComponentModel.StyleRule,
         decl: ComponentModel.Declaration
     ) -> some View {
@@ -390,7 +391,7 @@ struct ComponentEditorView: View {
             TextField("value", text: valueBinding)
                 .font(.system(.caption, design: .monospaced))
                 .textFieldStyle(.plain)
-                .onSubmit { commitDeclaration(model, rule: rule, decl: decl) }
+                .onSubmit { commitDeclaration(model, ruleIndex: ruleIndex, rule: rule, decl: decl) }
             if CSSColor.colorProperties.contains(decl.property),
                let color = CSSColor.parse(valueBinding.wrappedValue) {
                 ColorPicker("", selection: Binding(
@@ -401,7 +402,7 @@ struct ComponentEditorView: View {
                         webView?.evaluateJavaScript(
                             "window.anglesiteCanvas?.scrub?.(\(jsStringLiteral(rule.selector)), \(jsStringLiteral(decl.property)), \(jsStringLiteral(formatted)))"
                         )
-                        debounceColorCommit(key, model, rule: rule, decl: decl)
+                        debounceColorCommit(key, model, ruleIndex: ruleIndex, rule: rule, decl: decl)
                     }
                 ))
                 .labelsHidden()
@@ -415,6 +416,7 @@ struct ComponentEditorView: View {
     private func debounceColorCommit(
         _ key: String,
         _ model: ComponentEditorModel,
+        ruleIndex: Int,
         rule: ComponentModel.StyleRule,
         decl: ComponentModel.Declaration
     ) {
@@ -422,7 +424,7 @@ struct ComponentEditorView: View {
         colorCommitTasks[key] = Task {
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            commitDeclaration(model, rule: rule, decl: decl)
+            commitDeclaration(model, ruleIndex: ruleIndex, rule: rule, decl: decl)
             _ = try? await webView?.evaluateJavaScript("window.anglesiteCanvas?.clearScrub?.()")
             colorCommitTasks[key] = nil
         }
@@ -435,11 +437,39 @@ struct ComponentEditorView: View {
         Task { await model.setRuleSelector(ruleSpan: spanArray(rule.span), newSelector: newSelector) }
     }
 
+    /// Cancels any pending debounced `ColorPicker` commit and discards the in-progress drafts
+    /// for `decl` before removing it. Without this, a declaration removed mid-drag (before the
+    /// `debounceColorCommit` delay elapses) would have its pending commit fire afterward and
+    /// resurrect the just-deleted declaration via `setStyleProperty`.
+    private func removeDeclaration(
+        _ model: ComponentEditorModel,
+        rule: ComponentModel.StyleRule,
+        decl: ComponentModel.Declaration
+    ) {
+        let key = spanKey(decl.span)
+        colorCommitTasks[key]?.cancel()
+        colorCommitTasks[key] = nil
+        valueDrafts[key] = nil
+        propertyDrafts[key] = nil
+        Task { await model.removeStyleProperty(ruleSpan: spanArray(rule.span), property: decl.property) }
+    }
+
     /// Commits both the property-name and value drafts for a declaration.
     /// Called from either field's `onSubmit` so an edit to just the property
     /// name (value unchanged) still lands, not only edits to the value field.
+    ///
+    /// A property rename is a remove-then-add sequence against the *same* rule: removing the
+    /// old declaration shifts byte offsets within the file (including, in general, the rule's
+    /// own end offset), so the second write must target the rule's freshly reloaded span, not
+    /// the one captured before either op ran — reusing the stale span would make the add
+    /// mismatch or fail outright on essentially every rename. `ruleIndex` (the rule's stable
+    /// ordinal position — these two ops never add/remove/reorder rules) is used to re-derive
+    /// the fresh span from `model.model` after the remove completes. If the remove itself
+    /// failed, the rename is abandoned rather than adding the new name anyway, which would
+    /// otherwise leave both the old and new declarations present.
     private func commitDeclaration(
         _ model: ComponentEditorModel,
+        ruleIndex: Int,
         rule: ComponentModel.StyleRule,
         decl: ComponentModel.Declaration
     ) {
@@ -451,8 +481,10 @@ struct ComponentEditorView: View {
         let oldProperty = decl.property
         if property != oldProperty {
             Task {
-                await model.removeStyleProperty(ruleSpan: ruleSpan, property: oldProperty)
-                await model.setStyleProperty(ruleSpan: ruleSpan, property: property, value: value)
+                let removed = await model.removeStyleProperty(ruleSpan: ruleSpan, property: oldProperty)
+                guard removed else { return }
+                let freshSpan = model.ruleSpan(atIndex: ruleIndex).map(spanArray) ?? ruleSpan
+                await model.setStyleProperty(ruleSpan: freshSpan, property: property, value: value)
             }
         } else {
             Task { await model.setStyleProperty(ruleSpan: ruleSpan, property: property, value: value) }

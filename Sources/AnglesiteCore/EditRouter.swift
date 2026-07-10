@@ -27,6 +27,12 @@ public struct EditReply: Sendable, Equatable, Encodable {
     /// included a `model` key (Component Editor CSS write ops), sparing the app a second
     /// `get_component_model` round-trip after the edit. `nil` otherwise.
     public let model: ComponentModel?
+    /// Machine-readable refusal code from the plugin's `anglesite:edit-failed` body (e.g.
+    /// `"stale"`, `"no-match"`, `"invalid-input"`) — present whenever the router could parse a
+    /// structured failure. Callers that need to distinguish failure kinds (e.g. staleness vs. a
+    /// routine refusal) should switch on this instead of substring-matching `message`, which is
+    /// free-form prose the plugin is free to reword.
+    public let reason: String?
 
     public struct ImageResult: Sendable, Equatable, Encodable {
         public let src: String
@@ -52,7 +58,8 @@ public struct EditReply: Sendable, Equatable, Encodable {
         before: String? = nil,
         after: String? = nil,
         op: String? = nil,
-        model: ComponentModel? = nil
+        model: ComponentModel? = nil,
+        reason: String? = nil
     ) {
         self.id = id
         self.status = status
@@ -64,6 +71,7 @@ public struct EditReply: Sendable, Equatable, Encodable {
         self.after = after
         self.op = op
         self.model = model
+        self.reason = reason
     }
 }
 
