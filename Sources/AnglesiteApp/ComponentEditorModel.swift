@@ -40,6 +40,19 @@ final class ComponentEditorModel {
     var selectedNodeID: String?
     var computedStyles: [String: String] = [:]
     var knobValues: [String: String] = [:]
+    /// Set when a write op is refused as stale (the source changed outside Anglesite since
+    /// `model` was fetched) — drives the "changed outside Anglesite — Reload" banner (design
+    /// doc §5). `load()` is triggered automatically to refetch; the flag stays set until the
+    /// caller acknowledges it (e.g. the panel dismisses it once the refreshed model renders).
+    var conflict = false
+    /// Set when a style write op fails for a reason other than staleness (invalid CSS value, a
+    /// `no-match` on a drifted `ruleSpan`, a transient MCP/transport error). This is intentionally
+    /// distinct from `loadError`/`loadErrorReason`: those drive `ComponentEditorView`'s full-pane
+    /// `ContentUnavailableView` takeover, which would destroy the three-pane editor (outline/canvas/
+    /// inspector) over a routine, retryable write failure and leave the user with no way to retry.
+    /// `writeError` instead drives a small dismissible banner scoped to the Styles panel; `model`
+    /// and `loadError` are left untouched so the editor pane stays live.
+    var writeError: String?
 
     init(file: FileRef, context: ComponentEditorContext) {
         self.file = file
@@ -120,5 +133,117 @@ final class ComponentEditorModel {
             return
         }
         selectedNodeID = ComponentOutline.node(atLine: line, column: column, in: model.template)?.id
+    }
+
+    // MARK: - Style writes
+
+    /// Set (or add) a CSS declaration's value within a `<style>` rule identified by `ruleSpan`.
+    /// Returns whether the write actually applied — see `applyComponentStyleEdit`.
+    @discardableResult
+    func setStyleProperty(ruleSpan: [Int?], property: String, value: String) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentStyleEditBuilder.setStyleProperty(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                ruleSpan: ruleSpan,
+                property: property,
+                value: value
+            )
+        )
+    }
+
+    /// Remove a CSS declaration from a rule identified by `ruleSpan`.
+    /// Returns whether the write actually applied — see `applyComponentStyleEdit`.
+    @discardableResult
+    func removeStyleProperty(ruleSpan: [Int?], property: String) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentStyleEditBuilder.removeStyleProperty(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                ruleSpan: ruleSpan,
+                property: property
+            )
+        )
+    }
+
+    /// Rewrite a rule's selector.
+    /// Returns whether the write actually applied — see `applyComponentStyleEdit`.
+    @discardableResult
+    func setRuleSelector(ruleSpan: [Int?], newSelector: String) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentStyleEditBuilder.setRuleSelector(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                ruleSpan: ruleSpan,
+                newSelector: newSelector
+            )
+        )
+    }
+
+    /// Add a new CSS rule to the component's `<style>` block.
+    /// Returns whether the write actually applied — see `applyComponentStyleEdit`.
+    @discardableResult
+    func addStyleRule(selector: String, media: String?, declarations: [(property: String, value: String)]) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentStyleEditBuilder.addStyleRule(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                selector: selector,
+                media: media,
+                declarations: declarations
+            )
+        )
+    }
+
+    /// The span of a style rule at `index` in the current `model`, or `nil` if the model isn't
+    /// loaded or `index` is out of range. Used to re-derive a rule's span after a prior write in
+    /// the same gesture may have shifted byte offsets within the file (see `ComponentEditorView
+    /// .commitDeclaration`'s rename path, which removes then re-adds a declaration on the same
+    /// rule — the remove shifts the rule's own end offset, so the follow-up add must target the
+    /// freshly reloaded span, not the one captured before either write).
+    func ruleSpan(atIndex index: Int) -> ComponentModel.Span? {
+        guard let styles = model?.styles, styles.indices.contains(index) else { return nil }
+        return styles[index].span
+    }
+
+    /// Routes a built `EditMessage` to `context.editRouter` and reconciles the result:
+    /// - `.applied` with a piggybacked `reply.model` adopts it directly (no second fetch).
+    /// - `.applied` without one falls back to `load()`.
+    /// - `.failed` with reason `"stale"` (the plugin's machine-readable refusal code — see
+    ///   `EditReply.reason`) triggers a `load()` refetch and flips `conflict` so the UI can
+    ///   surface a "changed outside Anglesite — Reload" banner.
+    /// - Any other `.failed` (or `.ambiguous`/`.preview`, which these ops never return) is a
+    ///   routine, recoverable write failure — surfaced via `writeError`, NOT `loadError`/
+    ///   `loadErrorReason` (see `writeError`'s doc comment for why).
+    ///
+    /// Returns whether the op actually applied — callers that must sequence a follow-up op
+    /// against a rule this call may have mutated (e.g. a property rename's remove-then-add)
+    /// use this to avoid compounding a failure and to know a fresh `model` is available.
+    @discardableResult
+    private func applyComponentStyleEdit(_ message: EditMessage) async -> Bool {
+        guard let editRouter = context.editRouter else { return false }
+        let reply = await editRouter.apply(message)
+        switch reply.status {
+        case .applied:
+            conflict = false
+            writeError = nil
+            if let freshModel = reply.model {
+                model = freshModel
+            } else {
+                await load()
+            }
+            return true
+        case .failed where reply.reason == "stale":
+            conflict = true
+            await load()
+            return false
+        default:
+            writeError = reply.message ?? "The edit couldn't be applied."
+            return false
+        }
     }
 }

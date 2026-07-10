@@ -14,6 +14,24 @@ struct ComponentEditorView: View {
     @State private var mode: Mode = .design
     @State private var webView: WKWebView?
 
+    /// In-progress edits to a rule's selector, keyed by `spanKey(rule.span)`,
+    /// pending commit (on focus loss) to `ComponentEditorModel.setRuleSelector`.
+    @State private var selectorDrafts: [String: String] = [:]
+    /// In-progress edits to a declaration's property name, keyed by
+    /// `spanKey(decl.span)`, pending commit to `setStyleProperty`.
+    @State private var propertyDrafts: [String: String] = [:]
+    /// In-progress edits to a declaration's value, keyed by `spanKey(decl.span)`.
+    @State private var valueDrafts: [String: String] = [:]
+    /// Pending debounced commit from a `ColorPicker` drag, keyed by `spanKey(decl.span)`.
+    /// macOS `ColorPicker` updates its binding continuously while the system color panel is
+    /// being dragged, so committing on every change would fire a burst of redundant
+    /// `setStyleProperty` round-trips (and risk spurious `.failed`/stale-`baseVersion` conflicts).
+    /// Each new picker value cancels the previous pending commit and restarts the delay, so only
+    /// the settled value after the drag pauses actually commits.
+    @State private var colorCommitTasks: [String: Task<Void, Never>] = [:]
+    /// Selector text for the inline "Add rule" form at the bottom of the Styles panel.
+    @State private var newRuleSelector: String = ""
+
     enum Mode: String, CaseIterable { case design = "Design", source = "Source" }
 
     init(file: FileRef, context: ComponentEditorContext, fileEditor: FileEditorModel) {
@@ -166,23 +184,70 @@ struct ComponentEditorView: View {
                         }
                     }
                 }
+                if model.conflict {
+                    conflictBanner(model)
+                }
+                if let writeError = model.writeError {
+                    writeErrorBanner(model, message: writeError)
+                }
                 GroupBox("Styles") {
                     if let styles = model.model?.styles, !styles.isEmpty {
-                        ForEach(Array(styles.enumerated()), id: \.offset) { _, rule in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(rule.media.map { "@media \($0)" } ?? "")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                                Text(rule.selector).font(.system(.caption, design: .monospaced)).bold()
-                                ForEach(rule.declarations, id: \.property) { decl in
-                                    Text("\(decl.property): \(decl.value);")
-                                        .font(.system(.caption, design: .monospaced))
+                        ForEach(Array(styles.enumerated()), id: \.offset) { ruleIndex, rule in
+                            VStack(alignment: .leading, spacing: 4) {
+                                if let media = rule.media {
+                                    Text("@media \(media)").font(.caption2).foregroundStyle(.secondary)
                                 }
+                                TextField("selector", text: selectorBinding(for: rule))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textFieldStyle(.plain)
+                                    .bold()
+                                    .onSubmit { commitSelector(model, rule: rule) }
+                                ForEach(rule.declarations, id: \.property) { decl in
+                                    HStack(spacing: 4) {
+                                        TextField("property", text: propertyBinding(for: decl))
+                                            .font(.system(.caption, design: .monospaced))
+                                            .textFieldStyle(.plain)
+                                            .frame(width: 110)
+                                            .onSubmit { commitDeclaration(model, ruleIndex: ruleIndex, rule: rule, decl: decl) }
+                                        Text(":")
+                                        declarationValueField(model, ruleIndex: ruleIndex, rule: rule, decl: decl)
+                                        Button(role: .destructive) {
+                                            removeDeclaration(model, rule: rule, decl: decl)
+                                        } label: {
+                                            Image(systemName: "minus.circle")
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                Button("Add declaration") {
+                                    let newProperty = "new-property-\(UUID().uuidString.prefix(8))"
+                                    Task { await model.setStyleProperty(ruleSpan: spanArray(rule.span), property: newProperty, value: "") }
+                                }
+                                .font(.caption2)
+                                .buttonStyle(.plain)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 2)
+                            .padding(.vertical, 4)
+                            if ruleIndex < styles.count - 1 {
+                                Divider()
+                            }
                         }
                     } else {
                         Text("No scoped styles").foregroundStyle(.secondary)
+                    }
+                    Divider()
+                    HStack {
+                        TextField("New selector, e.g. .card-footer", text: $newRuleSelector)
+                            .font(.system(.caption, design: .monospaced))
+                        Button("Add rule") {
+                            let selector = newRuleSelector.trimmingCharacters(in: .whitespaces)
+                            guard !selector.isEmpty else { return }
+                            Task {
+                                await model.addStyleRule(selector: selector, media: nil, declarations: [])
+                                newRuleSelector = ""
+                            }
+                        }
+                        .disabled(newRuleSelector.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
                 GroupBox("Computed") {
@@ -198,6 +263,48 @@ struct ComponentEditorView: View {
             }
             .padding(10)
         }
+    }
+
+    /// "This component changed outside Anglesite" banner — the edit that triggered a stale-write
+    /// refusal was never applied; `ComponentEditorModel.applyComponentStyleEdit` already reloaded
+    /// the latest version, so this just informs the user why their change didn't stick.
+    private func conflictBanner(_ model: ComponentEditorModel) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "arrow.triangle.2.circlepath").foregroundStyle(.orange)
+            Text("This component changed outside Anglesite — your edit wasn't applied, reloaded the latest version.")
+                .font(.caption)
+            Spacer()
+            Button {
+                model.conflict = false
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// Transient, non-fatal banner for a style write op that failed for a reason other than
+    /// staleness (invalid value, drifted `ruleSpan`, transient MCP error). Scoped to the Styles
+    /// panel so a routine write failure never takes over the whole editor pane (see
+    /// `ComponentEditorModel.writeError`'s doc comment).
+    private func writeErrorBanner(_ model: ComponentEditorModel, message: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle").foregroundStyle(.red)
+            Text(message).font(.caption)
+            Spacer()
+            Button {
+                model.writeError = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func highlightInCanvas(nodeID: String?) {
@@ -228,6 +335,159 @@ struct ComponentEditorView: View {
         case .text: node.text ?? "text"
         case .expression: "{…}"
         default: node.tag ?? node.kind.rawValue
+        }
+    }
+
+    // MARK: - Styles panel editing
+
+    /// `ComponentModel.Span` isn't `CustomStringConvertible`, so build a
+    /// stable dictionary key from its optional start/end offsets directly.
+    private func spanKey(_ span: ComponentModel.Span) -> String {
+        "\(span.start ?? -1)-\(span.end ?? -1)"
+    }
+
+    /// Escapes a Swift string into a double-quoted JS string literal for
+    /// interpolation into `evaluateJavaScript` call sites.
+    private func jsStringLiteral(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
+    private func spanArray(_ span: ComponentModel.Span) -> [Int?] {
+        [span.start, span.end]
+    }
+
+    private func selectorBinding(for rule: ComponentModel.StyleRule) -> Binding<String> {
+        let key = spanKey(rule.span)
+        return Binding(
+            get: { selectorDrafts[key] ?? rule.selector },
+            set: { selectorDrafts[key] = $0 }
+        )
+    }
+
+    private func propertyBinding(for decl: ComponentModel.Declaration) -> Binding<String> {
+        let key = spanKey(decl.span)
+        return Binding(
+            get: { propertyDrafts[key] ?? decl.property },
+            set: { propertyDrafts[key] = $0 }
+        )
+    }
+
+    @ViewBuilder
+    private func declarationValueField(
+        _ model: ComponentEditorModel,
+        ruleIndex: Int,
+        rule: ComponentModel.StyleRule,
+        decl: ComponentModel.Declaration
+    ) -> some View {
+        let key = spanKey(decl.span)
+        let valueBinding = Binding(
+            get: { valueDrafts[key] ?? decl.value },
+            set: { valueDrafts[key] = $0 }
+        )
+        HStack(spacing: 4) {
+            TextField("value", text: valueBinding)
+                .font(.system(.caption, design: .monospaced))
+                .textFieldStyle(.plain)
+                .onSubmit { commitDeclaration(model, ruleIndex: ruleIndex, rule: rule, decl: decl) }
+            if CSSColor.colorProperties.contains(decl.property),
+               let color = CSSColor.parse(valueBinding.wrappedValue) {
+                ColorPicker("", selection: Binding(
+                    get: { color },
+                    set: { newColor in
+                        let formatted = CSSColor.format(newColor)
+                        valueDrafts[key] = formatted
+                        webView?.evaluateJavaScript(
+                            "window.anglesiteCanvas?.scrub?.(\(jsStringLiteral(rule.selector)), \(jsStringLiteral(decl.property)), \(jsStringLiteral(formatted)))"
+                        )
+                        debounceColorCommit(key, model, ruleIndex: ruleIndex, rule: rule, decl: decl)
+                    }
+                ))
+                .labelsHidden()
+            }
+        }
+    }
+
+    /// Debounces `ColorPicker` writes: cancels any pending commit for this declaration and
+    /// schedules a new one after a short pause, so only the settled value after a drag gesture
+    /// actually calls `commitDeclaration` (see `colorCommitTasks` doc comment).
+    private func debounceColorCommit(
+        _ key: String,
+        _ model: ComponentEditorModel,
+        ruleIndex: Int,
+        rule: ComponentModel.StyleRule,
+        decl: ComponentModel.Declaration
+    ) {
+        colorCommitTasks[key]?.cancel()
+        colorCommitTasks[key] = Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            commitDeclaration(model, ruleIndex: ruleIndex, rule: rule, decl: decl)
+            _ = try? await webView?.evaluateJavaScript("window.anglesiteCanvas?.clearScrub?.()")
+            colorCommitTasks[key] = nil
+        }
+    }
+
+    private func commitSelector(_ model: ComponentEditorModel, rule: ComponentModel.StyleRule) {
+        let key = spanKey(rule.span)
+        let newSelector = selectorDrafts[key] ?? rule.selector
+        guard newSelector != rule.selector else { return }
+        Task { await model.setRuleSelector(ruleSpan: spanArray(rule.span), newSelector: newSelector) }
+    }
+
+    /// Cancels any pending debounced `ColorPicker` commit and discards the in-progress drafts
+    /// for `decl` before removing it. Without this, a declaration removed mid-drag (before the
+    /// `debounceColorCommit` delay elapses) would have its pending commit fire afterward and
+    /// resurrect the just-deleted declaration via `setStyleProperty`.
+    private func removeDeclaration(
+        _ model: ComponentEditorModel,
+        rule: ComponentModel.StyleRule,
+        decl: ComponentModel.Declaration
+    ) {
+        let key = spanKey(decl.span)
+        colorCommitTasks[key]?.cancel()
+        colorCommitTasks[key] = nil
+        valueDrafts[key] = nil
+        propertyDrafts[key] = nil
+        Task { await model.removeStyleProperty(ruleSpan: spanArray(rule.span), property: decl.property) }
+    }
+
+    /// Commits both the property-name and value drafts for a declaration.
+    /// Called from either field's `onSubmit` so an edit to just the property
+    /// name (value unchanged) still lands, not only edits to the value field.
+    ///
+    /// A property rename is a remove-then-add sequence against the *same* rule: removing the
+    /// old declaration shifts byte offsets within the file (including, in general, the rule's
+    /// own end offset), so the second write must target the rule's freshly reloaded span, not
+    /// the one captured before either op ran — reusing the stale span would make the add
+    /// mismatch or fail outright on essentially every rename. `ruleIndex` (the rule's stable
+    /// ordinal position — these two ops never add/remove/reorder rules) is used to re-derive
+    /// the fresh span from `model.model` after the remove completes. If the remove itself
+    /// failed, the rename is abandoned rather than adding the new name anyway, which would
+    /// otherwise leave both the old and new declarations present.
+    private func commitDeclaration(
+        _ model: ComponentEditorModel,
+        ruleIndex: Int,
+        rule: ComponentModel.StyleRule,
+        decl: ComponentModel.Declaration
+    ) {
+        let key = spanKey(decl.span)
+        let property = propertyDrafts[key] ?? decl.property
+        let value = valueDrafts[key] ?? decl.value
+        guard property != decl.property || value != decl.value else { return }
+        let ruleSpan = spanArray(rule.span)
+        let oldProperty = decl.property
+        if property != oldProperty {
+            Task {
+                let removed = await model.removeStyleProperty(ruleSpan: ruleSpan, property: oldProperty)
+                guard removed else { return }
+                let freshSpan = model.ruleSpan(atIndex: ruleIndex).map(spanArray) ?? ruleSpan
+                await model.setStyleProperty(ruleSpan: freshSpan, property: property, value: value)
+            }
+        } else {
+            Task { await model.setStyleProperty(ruleSpan: ruleSpan, property: property, value: value) }
         }
     }
 }

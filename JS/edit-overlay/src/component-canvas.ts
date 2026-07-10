@@ -7,6 +7,7 @@
 
 const HARNESS_PREFIX = "/_anglesite/component/";
 const RING_CLASS = "anglesite-canvas-ring";
+const SCRUB_STYLE_ID = "anglesite-scrub";
 
 // Curated list shown in the inspector's Computed section.
 const REPORTED_PROPERTIES = [
@@ -51,7 +52,42 @@ export function installComponentCanvas(): void {
       if (el) drawRing(el);
     },
     clear: clearRing,
+    scrub,
+    clearScrub,
   };
+}
+
+/**
+ * `selector`/`property`/`value` are interpolated into the scrub `<style>` tag's raw text — a
+ * `{` or `}` in any of them would break out of the intended `selector { property: value; }`
+ * block and inject arbitrary rules (or attribute selectors) into this harness page's live DOM
+ * while a drag/scrub is in progress. This is a live-preview-only override (the eventual real
+ * `apply_edit` op is what actually validates and commits the value), so fail safe by skipping
+ * the scrub entirely rather than trusting unescaped input.
+ */
+function containsUnsafeCssBreak(value: string): boolean {
+  return value.includes("{") || value.includes("}");
+}
+
+function scrub(selector: string, property: string, value: string): void {
+  if (
+    containsUnsafeCssBreak(selector) ||
+    containsUnsafeCssBreak(property) ||
+    containsUnsafeCssBreak(value)
+  ) {
+    return;
+  }
+  let style = document.getElementById(SCRUB_STYLE_ID) as HTMLStyleElement | null;
+  if (!style) {
+    style = document.createElement("style");
+    style.id = SCRUB_STYLE_ID;
+    document.head.appendChild(style);
+  }
+  style.textContent = `${selector} { ${property}: ${value}; }`;
+}
+
+function clearScrub(): void {
+  document.getElementById(SCRUB_STYLE_ID)?.remove();
 }
 
 /// Astro's dev server stamps `data-astro-source-loc` at the END of an

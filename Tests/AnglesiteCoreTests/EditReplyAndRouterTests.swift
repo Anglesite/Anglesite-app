@@ -89,4 +89,52 @@ struct EditReplyAndRouterTests {
         let reply = await resolved.apply(msg)
         #expect(reply.status == .failed, "the fallback should be a LoggingEditRouter, which always replies failed")
     }
+
+    // MARK: parseStructured piggybacked model
+
+    @Test("parseStructured decodes a piggybacked model")
+    func parseStructuredDecodesModel() {
+        let json = """
+        {"type":"anglesite:edit-applied","id":"1","file":"src/components/Card.astro","range":{"start":0,"end":1},"model":\(ComponentModelTests.fixture)}
+        """
+        let parsed = MCPApplyEditRouter.parseStructured(json)
+        #expect(parsed?.model?.path == "src/components/Card.astro")
+    }
+
+    // MARK: parseStructured failure reason
+
+    @Test("parseStructured decodes a machine-readable failure reason")
+    func parseStructuredDecodesFailureReason() {
+        let json = """
+        {"type":"anglesite:edit-failed","id":"1","reason":"stale","detail":"src/Card.astro changed since the model was fetched"}
+        """
+        let parsed = MCPApplyEditRouter.parseStructured(json)
+        #expect(parsed?.reason == "stale")
+    }
+
+    @Test("parseStructured returns nil for JSON with no recognized fields")
+    func parseStructuredReturnsNilForUnrecognizedJSON() {
+        let json = #"{"type":"something-else","id":"1"}"#
+        #expect(MCPApplyEditRouter.parseStructured(json) == nil)
+    }
+
+    private struct FailureReasonRouter: EditRouter {
+        let reason: String
+        func apply(_ message: EditMessage) async -> EditReply {
+            EditReply(id: message.id, status: .failed, message: "detail text", reason: reason)
+        }
+    }
+
+    @Test("A .failed reply threads its reason through for callers to switch on, not just message prose")
+    func failedReplyExposesReason() async {
+        let router = FailureReasonRouter(reason: "stale")
+        let msg = EditMessage(
+            id: "e-1", type: .applyEdit, path: "/",
+            selector: .object(["tag": .string("H1"), "classes": .array([]), "nthChild": .int(1)]),
+            op: "replace-text", value: .string("Hi")
+        )
+        let reply = await router.apply(msg)
+        #expect(reply.reason == "stale")
+        #expect(reply.status == .failed)
+    }
 }
