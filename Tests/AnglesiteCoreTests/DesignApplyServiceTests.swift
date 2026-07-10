@@ -154,15 +154,34 @@ import Foundation
 }
 
 extension DesignApplyServiceTests {
+    /// Builds a real `.anglesite` package layout: a package root containing a `Source/`
+    /// subdirectory with the `src/styles/global.css` fixture nested underneath, matching
+    /// `AnglesitePackage.sourceURL`'s real `url/Source` invariant (not a synthetic wrapper).
+    private func makePackageRoot() throws -> URL {
+        let packageRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let stylesDir = packageRoot.appendingPathComponent("Source/src/styles")
+        try FileManager.default.createDirectory(at: stylesDir, withIntermediateDirectories: true)
+        let css = """
+        :root {
+          --color-primary: #2563eb;
+          --color-accent: #f59e0b;
+          --font-heading: system-ui, -apple-system, sans-serif;
+        }
+
+        * { box-sizing: border-box; }
+        """
+        try css.write(to: stylesDir.appendingPathComponent("global.css"), atomically: true, encoding: .utf8)
+        return packageRoot
+    }
+
     @Test func packageOverloadDelegatesToSourceDirectory() throws {
-        let dir = try makeSite()
-        // AnglesitePackage(sourceDirectory:) is the existing test-friendly initializer used
-        // elsewhere in AnglesiteCoreTests (see AnglesiteSiteModelTests) — wraps a bare directory
-        // without requiring a full .anglesite package on disk.
-        let package = AnglesitePackage(sourceDirectory: dir)
+        let packageRoot = try makePackageRoot()
+        let package = AnglesitePackage(url: packageRoot)
         let input = DesignApplyInput(cssVars: ["color-primary": "#ff0000"], rationaleMarkdown: nil,
                                      brandSummary: "x", sourceLabel: "x")
         let result = DesignApplyService.apply(input, to: package)
         guard case .success = result else { Issue.record("expected success"); return }
+        let css = try String(contentsOf: packageRoot.appendingPathComponent("Source/src/styles/global.css"), encoding: .utf8)
+        #expect(css.contains("--color-primary: #ff0000;"))
     }
 }
