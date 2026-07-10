@@ -52,19 +52,17 @@ enum SiteAssistantSessionFactory {
                 await EditRouterRegistry.shared.router(for: siteID)
             }
             let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, graphSnapshotProvider in
-                SiteGraphAugmentedAssistant(
-                    base: KnowledgeAugmentedAssistant(
-                        base: FoundationModelAssistant(
-                            tier: .onDevice,
-                            editBridge: editBridge,
-                            contentGraph: contentGraph,
-                            knowledgeIndex: knowledgeIndex,
-                            semanticRanker: semanticRanker,
-                            integrationService: integrationService
-                        ),
-                        index: knowledgeIndex
+                CombinedAugmentedAssistant(
+                    base: FoundationModelAssistant(
+                        tier: .onDevice,
+                        editBridge: editBridge,
+                        contentGraph: contentGraph,
+                        knowledgeIndex: knowledgeIndex,
+                        semanticRanker: semanticRanker,
+                        integrationService: integrationService
                     ),
-                    snapshotProvider: graphSnapshotProvider
+                    index: knowledgeIndex,
+                    graphSnapshotProvider: graphSnapshotProvider
                 )
             }
             return Dependencies(

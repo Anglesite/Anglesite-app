@@ -81,31 +81,46 @@ public actor SiteGraphAugmentedAssistant: ConversationalAssistant {
 
     private func enrichedContext(_ prompt: String) async -> (prompt: String, citations: [RetrievedCitation]) {
         let snapshot = await snapshotProvider()
-        let seeds = Self.seedNodes(for: prompt, in: snapshot)
-        guard !seeds.isEmpty else { return (prompt, []) }
-
-        var blocks: [String] = []
-        var citations: [RetrievedCitation] = []
-        for node in seeds {
-            guard let impact = ImpactAnalysis.analyze(snapshot: snapshot, targetID: node.id) else { continue }
-            let (dependsOn, referencedBy) = Self.neighbors(of: node, in: snapshot)
-            let facts = SiteGraphExplainPrompt.facts(node: node, impact: impact, dependsOn: dependsOn, referencedBy: referencedBy)
-            blocks.append("Facts about \(node.title):\n" + facts.joined(separator: "\n"))
-            if let citation = Self.citation(for: node) { citations.append(citation) }
+        guard let (block, citations) = Self.graphBlock(prompt: prompt, snapshot: snapshot) else {
+            return (prompt, [])
         }
-        guard !blocks.isEmpty else { return (prompt, []) }
-
         let enriched = """
-        You are answering a question about how this Astro website is built, using only the \
-        facts below about specific files in its dependency graph. Do not invent details that \
-        are not in the facts, and cite file paths when you use a fact.
-
-        \(blocks.joined(separator: "\n\n"))
+        \(block)
 
         User request:
         \(prompt)
         """
         return (enriched, citations)
+    }
+
+    /// Builds the graph-facts block and citations for `prompt` against `snapshot`, or `nil` when
+    /// no node matches. Exposed (not `private`) so ``CombinedAugmentedAssistant`` can run this
+    /// retrieval directly against the original user question instead of a prompt another
+    /// decorator already rewrote (#314).
+    static func graphBlock(
+        prompt: String,
+        snapshot: SiteGraphExplorerSnapshot
+    ) -> (block: String, citations: [RetrievedCitation])? {
+        let seeds = seedNodes(for: prompt, in: snapshot)
+        guard !seeds.isEmpty else { return nil }
+
+        var blocks: [String] = []
+        var citations: [RetrievedCitation] = []
+        for node in seeds {
+            guard let impact = ImpactAnalysis.analyze(snapshot: snapshot, targetID: node.id) else { continue }
+            let (dependsOn, referencedBy) = neighbors(of: node, in: snapshot)
+            let facts = SiteGraphExplainPrompt.facts(node: node, impact: impact, dependsOn: dependsOn, referencedBy: referencedBy)
+            blocks.append("Facts about \(node.title):\n" + facts.joined(separator: "\n"))
+            if let citation = citation(for: node) { citations.append(citation) }
+        }
+        guard !blocks.isEmpty else { return nil }
+
+        let instructions = """
+        You are answering a question about how this Astro website is built, using only the \
+        facts below about specific files in its dependency graph. Do not invent details that \
+        are not in the facts, and cite file paths when you use a fact.
+        """
+        return (instructions + "\n\n" + blocks.joined(separator: "\n\n"), citations)
     }
 
     /// Scores every node's title/route/filePath against the question's words (case-insensitive
