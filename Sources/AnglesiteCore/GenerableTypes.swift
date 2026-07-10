@@ -131,4 +131,28 @@ public struct GeneratedProjectConventions: Equatable, Sendable {
     @Guide(description: "Up to five brand or product terms with their canonical capitalization as used in the text, e.g. ['Anglesite', 'Astro'].")
     public var brandTerms: [String]
 }
+
+/// On-device guided-generation result for a single copy-edit checklist finding (#465). Mapped to
+/// the non-gated `CopyFindingDraft` before it crosses the FoundationModels gate.
+@Generable
+public struct GeneratedCopyFinding: Equatable, Sendable {
+    @Guide(description: "Checklist category: clarity, benefits, voice, cta, scannability, reader-focus, jargon, social-proof, missing-info, or mobile.")
+    public var category: String
+    @Guide(description: "Severity: high, medium, or low.")
+    public var severity: String
+    @Guide(description: "Short excerpt of the problematic copy, quoted verbatim from the page text — exact characters, no paraphrase.")
+    public var excerpt: String
+    @Guide(description: "One-sentence plain-language description of the issue.")
+    public var issue: String
+    @Guide(description: "Suggested replacement copy in the site's voice.")
+    public var suggestedRewrite: String
+}
+
+/// On-device guided-generation result for a whole page's copy-edit audit (#465): up to 5
+/// highest-impact findings, per `CopyEditPrompt`.
+@Generable
+public struct GeneratedPageCopyFindings: Equatable, Sendable {
+    @Guide(description: "Up to 5 highest-impact findings for this page. Empty when the copy is strong.")
+    public var findings: [GeneratedCopyFinding]
+}
 #endif
