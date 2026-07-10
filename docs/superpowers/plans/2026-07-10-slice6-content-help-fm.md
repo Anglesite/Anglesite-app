@@ -657,16 +657,18 @@ git commit -m "feat: brand-voice interview front-doors — saveBrandVoice chat t
 
 ### Task 5: `Frontmatter` parser + `SiteContentChunker`
 
+> **AMENDMENT (execution, 2026-07-10):** `Sources/AnglesiteCore/Frontmatter.swift` already exists (PR #401, #275/#346) with `Frontmatter.parse(_:) -> [String: FrontmatterValue]`, 9 production consumers and 14 tests. Do NOT create a new type or change `parse`. Instead: (1) add `public static func body(_ source: String) -> String` to the existing `Frontmatter` enum — everything after the closing `---` fence; the whole input when unfenced or unterminated; (2) the chunker gets fields from the existing `Frontmatter.parse` (title via the `.string` case of `FrontmatterValue`) and the body via the new accessor; (3) the plan's `FrontmatterTests.swift` new-file steps are replaced by body-accessor tests appended to the existing `Tests/AnglesiteCoreTests/FrontmatterTests.swift`. Task 14 amended accordingly.
+
 **Files:**
-- Create: `Sources/AnglesiteCore/Frontmatter.swift`
+- Modify: `Sources/AnglesiteCore/Frontmatter.swift` (add `body(_:)` accessor only)
 - Create: `Sources/AnglesiteCore/SiteContentChunker.swift`
-- Test: `Tests/AnglesiteCoreTests/FrontmatterTests.swift`
+- Test: `Tests/AnglesiteCoreTests/FrontmatterTests.swift` (append body tests)
 - Test: `Tests/AnglesiteCoreTests/SiteContentChunkerTests.swift`
 
 **Interfaces:**
-- Consumes: nothing new (Foundation only).
+- Consumes: existing `Frontmatter.parse(_:) -> [String: FrontmatterValue]`.
 - Produces:
-  - `Frontmatter.parse(_ contents: String) -> (fields: [String: String], body: String)` — top-level `key: value` pairs between `---` fences; body is everything after the closing fence (or the whole input when unfenced).
+  - `Frontmatter.body(_ source: String) -> String` — everything after the closing fence (whole input when unfenced/unterminated).
   - `ContentChunk { route: String, title: String?, filePath: String /* project-relative */, text: String, truncated: Bool }`, `Identifiable` via `id == filePath`.
   - `SiteContentChunker.maxChunkCharacters = 2_000`
   - `SiteContentChunker.chunks(sourceDirectory: URL, fileManager: FileManager = .default) -> [ContentChunk]` — scans `src/content/**/*.{md,mdoc}` + `src/pages/**/*.{astro,md,mdoc}`, sorted by `route`, empty-text files skipped.
@@ -2914,8 +2916,10 @@ git commit -m "feat: social media plan front-doors — planSocialMedia tool, GUI
 - Create: `Sources/AnglesiteCore/SyndicationFrontmatter.swift`
 - Test: `Tests/AnglesiteCoreTests/RepurposeCoreTests.swift`
 
+> **AMENDMENT (execution, 2026-07-10):** per Task 5's amendment, `PostSource.load` uses the EXISTING `Frontmatter.parse(_:) -> [String: FrontmatterValue]` (title/description via the `.string` case, tags via the `.array` case — drop the plan's ad-hoc bracket-stripping tags parser) plus the new `Frontmatter.body(_:)` accessor for the raw body. `SyndicationFrontmatter` is unaffected (it does its own line-based fence walk).
+
 **Interfaces:**
-- Consumes: `Frontmatter` (Task 5), `SiteContentChunker.plainText(markdown:)` (Task 5), `SiteConfigFile`.
+- Consumes: existing `Frontmatter.parse` + `Frontmatter.body(_:)` (Task 5), `SiteContentChunker.plainText(markdown:)` (Task 5), `SiteConfigFile`.
 - Produces:
   - `PlatformPostSpec { platform: String, charLimit: Int, includesURL: Bool, allowsHashtags: Bool, styleHint: String }`
   - `RepurposePlatformSpecs.all: [PlatformPostSpec]` (Instagram 2200 / Facebook 500 / Google Business 1500 / Nextdoor 800 / X 280 / Bluesky 300) and `.fits(_ text: String, spec:) -> Bool`
