@@ -212,3 +212,97 @@ extension SiteWindowModelTests {
         #expect(model.contentActionError == nil)
     }
 }
+
+extension SiteWindowModelTests {
+    @Test("revealCitationInGraph returns true and switches to the graph pane for a matching path")
+    func revealCitationInGraphMatches() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let contentGraph = SiteContentGraph()
+        await contentGraph.load(
+            siteID: "site-1",
+            pages: [SiteContentGraph.Page(
+                id: "site-1:page:/about", siteID: "site-1", route: "/about",
+                filePath: "src/pages/about.astro", title: "About", lastModified: Date()
+            )],
+            posts: [], images: []
+        )
+        let model = makeModel(contentGraph: contentGraph)
+        model.graphExplorer.start(siteID: "site-1", sourceDirectory: root)
+        while model.graphExplorer.snapshot.nodes.isEmpty { await Task.yield() }
+
+        let handled = model.revealCitationInGraph("src/pages/about.astro")
+
+        #expect(handled)
+        while model.mainPaneMode != .graph { await Task.yield() }
+        #expect(model.graphExplorer.selectedNodeID == model.graphExplorer.snapshot.nodes.first?.id)
+    }
+
+    @Test("revealCitationInGraph returns false and does not switch panes for an unknown path")
+    func revealCitationInGraphNoMatch() {
+        let model = makeModel()
+
+        let handled = model.revealCitationInGraph("src/pages/unknown.astro")
+
+        #expect(!handled)
+        #expect(model.mainPaneMode == .preview)
+    }
+
+    /// Review finding: `revealCitationInGraph`'s deferred `Task` used to call `revealNode`
+    /// unconditionally, even when `showGraph()` aborted (e.g. an unresolved external-file
+    /// conflict), mutating `graphExplorer`'s selection/search state while the user was still
+    /// looking at the editor's conflict dialog. `showGraph()` now reports whether it actually
+    /// switched, and `revealCitationInGraph` only reveals the node when it did.
+    @Test("revealCitationInGraph doesn't touch graph state when showGraph aborts on an editor conflict")
+    func revealCitationInGraphSkipsRevealWhenShowGraphAborts() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let contentGraph = SiteContentGraph()
+        await contentGraph.load(
+            siteID: "site-1",
+            pages: [SiteContentGraph.Page(
+                id: "site-1:page:/about", siteID: "site-1", route: "/about",
+                filePath: "src/pages/about.astro", title: "About", lastModified: Date()
+            )],
+            posts: [], images: []
+        )
+        let model = makeModel(contentGraph: contentGraph)
+        model.graphExplorer.start(siteID: "site-1", sourceDirectory: root)
+        while model.graphExplorer.snapshot.nodes.isEmpty { await Task.yield() }
+
+        // A dirty editor whose file changed externally under it — `flushBeforeLeaving()`'s real
+        // conflict path (same technique as `EditableFileSessionTests`'s `writeExternally`).
+        let editedFile = root.appendingPathComponent("conflict.txt")
+        try Data("original".utf8).write(to: editedFile)
+        let fileRef = FileRef(url: editedFile, group: .components, name: "conflict.txt")
+        let editorModel = FileEditorModel(file: fileRef)
+        await editorModel.load()
+        editorModel.text = "dirty edit"
+        try Data("changed on disk".utf8).write(to: editedFile)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(2)], ofItemAtPath: editedFile.path
+        )
+        model.mainPaneMode = .editor(fileRef)
+        model.activeEditor = .text(editorModel)
+
+        let handled = model.revealCitationInGraph("src/pages/about.astro")
+        #expect(handled)
+
+        // Bounded poll (not unbounded) for the conflict to surface — the signal that
+        // `showGraph()`'s deferred Task has finished running and aborted.
+        var iterations = 0
+        while editorModel.conflictDiskContents == nil, iterations < 10_000 {
+            await Task.yield()
+            iterations += 1
+        }
+        guard editorModel.conflictDiskContents != nil else {
+            Issue.record("flushBeforeLeaving never surfaced the external conflict")
+            return
+        }
+
+        #expect(model.mainPaneMode == .editor(fileRef))
+        #expect(model.graphExplorer.selectedNodeID == nil)
+    }
+}

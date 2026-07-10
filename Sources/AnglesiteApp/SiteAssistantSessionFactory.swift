@@ -15,13 +15,15 @@ struct SiteAssistantSession {
 enum SiteAssistantSessionFactory {
     typealias MCPClientProvider = @Sendable () async -> MCPClient?
     typealias EditRouterProvider = @Sendable (_ siteID: String) async -> (any EditRouter)?
+    typealias GraphSnapshotProvider = @Sendable () async -> SiteGraphExplorerSnapshot
     typealias AssistantBuilder = @Sendable (
         _ editBridge: IntentEditBridge,
         _ contentGraph: SiteContentGraph,
         _ knowledgeIndex: SiteKnowledgeIndex,
         _ semanticRanker: SemanticRanker?,
         _ integrationService: any IntegrationOperationsService,
-        _ themeCatalog: ThemeCatalog?
+        _ themeCatalog: ThemeCatalog?,
+        _ graphSnapshotProvider: @escaping GraphSnapshotProvider
     ) -> any ConversationalAssistant
 
     struct Dependencies {
@@ -50,8 +52,8 @@ enum SiteAssistantSessionFactory {
             let editRouterProvider: EditRouterProvider = { siteID in
                 await EditRouterRegistry.shared.router(for: siteID)
             }
-            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, themeCatalog in
-                KnowledgeAugmentedAssistant(
+            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, themeCatalog, graphSnapshotProvider in
+                CombinedAugmentedAssistant(
                     base: FoundationModelAssistant(
                         tier: .onDevice,
                         editBridge: editBridge,
@@ -61,7 +63,8 @@ enum SiteAssistantSessionFactory {
                         integrationService: integrationService,
                         themeCatalog: themeCatalog
                     ),
-                    index: knowledgeIndex
+                    index: knowledgeIndex,
+                    graphSnapshotProvider: graphSnapshotProvider
                 )
             }
             return Dependencies(
@@ -118,7 +121,8 @@ enum SiteAssistantSessionFactory {
         conventionsEngine: ProjectConventionsEngine?,
         integrationService: any IntegrationOperationsService,
         themeCatalog: ThemeCatalog? = nil,
-        dependencies: Dependencies = .live
+        dependencies: Dependencies = .live,
+        graphSnapshotProvider: @escaping GraphSnapshotProvider
     ) -> SiteAssistantSession {
         let editBridge = IntentEditBridge(routerProvider: dependencies.editRouterProvider)
         let chat = ChatModel(
@@ -131,7 +135,8 @@ enum SiteAssistantSessionFactory {
                 knowledgeIndex,
                 semanticRanker,
                 integrationService,
-                themeCatalog
+                themeCatalog,
+                graphSnapshotProvider
             ),
             annotationFeed: dependencies.annotationFeed(sourceDirectory),
             annotationResolver: { [resolveAnnotation = dependencies.resolveAnnotation] id in

@@ -210,10 +210,36 @@ final class SiteWindowModel {
         }
     }
 
-    func showGraph() async {
-        guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+    /// Returns whether the pane actually switched to Graph — `false` when `leaveCurrentEditor()`/
+    /// `leaveCurrentInspector()` aborted (e.g. an external-change conflict dialog is now showing),
+    /// so callers that queue follow-up work (like `revealCitationInGraph`) can skip it rather than
+    /// mutating `graphExplorer` state the user never navigated to see.
+    @discardableResult
+    func showGraph() async -> Bool {
+        guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return false }
         inspectorContext = nil
         mainPaneMode = .graph
+        return true
+    }
+
+    /// Resolves a chat citation's file path to a Site Graph Explorer node and reveals it there
+    /// (#314): switches the main pane to Graph and selects the node. Returns `false` — and does
+    /// nothing — when the path doesn't match any node in the current snapshot, so the caller
+    /// (`ChatView`'s citation click handler) can fall back to opening the file directly.
+    ///
+    /// The pane switch and selection happen asynchronously (matching `setPaneSelection`'s
+    /// existing fire-and-forget `Task { await showGraph() }` pattern) — the `Bool` this returns
+    /// reflects only whether a matching node was found, not whether the navigation has finished.
+    @discardableResult
+    func revealCitationInGraph(_ path: String) -> Bool {
+        guard let node = graphExplorer.snapshot.nodes.first(where: { $0.filePath == path }) else {
+            return false
+        }
+        Task { [weak self] in
+            guard let self, await self.showGraph() else { return }
+            self.graphExplorer.revealNode(node)
+        }
+        return true
     }
 
     func openSiriReadiness() {
@@ -1118,7 +1144,11 @@ final class SiteWindowModel {
             semanticRanker: semanticRanker,
             conventionsEngine: conventionsEngine,
             integrationService: integrationOps,
-            themeCatalog: themeCatalog
+            themeCatalog: themeCatalog,
+            graphSnapshotProvider: { [weak self] in
+                guard let self else { return SiteGraphExplorerSnapshot(nodes: [], edges: []) }
+                return await MainActor.run { self.graphExplorer.snapshot }
+            }
         )
         chat = assistantSession.chat
         // The environment undo manager usually lands before the chat exists (cold open) —
