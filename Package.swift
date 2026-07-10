@@ -75,9 +75,19 @@ var packageTargets: [Target] = [
         path: "Sources/AnglesiteCore",
         swiftSettings: strictConcurrency + disableFoundationModelsAutolink
     ),
+    // Webview-agnostic message schema + overlay-bundle lookup (cross-platform port design §6
+    // "AnglesiteBridgeCore split") — no WebKit import, so it's portable off-Darwin. Each
+    // platform's webview adapter (AnglesiteBridge/WKWebView today; WebKitGTK/WebView2 later)
+    // wraps this in its own script-injection/message-handler API.
+    .target(
+        name: "AnglesiteBridgeCore",
+        dependencies: ["AnglesiteCore"],
+        path: "Sources/AnglesiteBridgeCore",
+        swiftSettings: strictConcurrency
+    ),
     .target(
         name: "AnglesiteBridge",
-        dependencies: ["AnglesiteCore"],
+        dependencies: ["AnglesiteCore", "AnglesiteBridgeCore"],
         path: "Sources/AnglesiteBridge",
         swiftSettings: strictConcurrency
     ),
@@ -120,6 +130,12 @@ var packageTargets: [Target] = [
         path: "Tests/AnglesiteCoreTests",
         swiftSettings: strictConcurrency,
         linkerSettings: weakLinkFoundationModels
+    ),
+    .testTarget(
+        name: "AnglesiteBridgeCoreTests",
+        dependencies: ["AnglesiteBridgeCore", "AnglesiteCore"],
+        path: "Tests/AnglesiteBridgeCoreTests",
+        swiftSettings: strictConcurrency
     ),
     .testTarget(
         name: "AnglesiteBridgeTests",
@@ -234,6 +250,7 @@ var packageProducts: [Product] = [
     .library(name: "AnglesiteSiteModel", targets: ["AnglesiteSiteModel"]),
     .library(name: "AnglesiteQuickLookSupport", targets: ["AnglesiteQuickLookSupport"]),
     .library(name: "AnglesiteCore", targets: ["AnglesiteCore"]),
+    .library(name: "AnglesiteBridgeCore", targets: ["AnglesiteBridgeCore"]),
     .library(name: "AnglesiteBridge", targets: ["AnglesiteBridge"]),
     .library(name: "AnglesiteIOS", targets: ["AnglesiteIOS"]),
     .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"])
@@ -261,6 +278,10 @@ if includeContainer {
 // URLSession.bytes(for:), CFGetTypeID, security-scoped bookmarks, vsock proxies, …) all grew
 // Platform/ seams or #if canImport gates (#566) — ANGLESITE_PORT_WIP no longer needs to opt it
 // back in. AnglesiteCoreTests is not yet in this set: its test files aren't purity-swept.
+// AnglesiteBridgeCore joined at phase 2 (#567): it's the webview-agnostic message-schema half
+// of the former AnglesiteBridge (no WebKit import), split out so the message dispatch logic —
+// and its tests — run on every platform; AnglesiteBridge itself (the WKWebView adapter) stays
+// Darwin-only.
 // Filtering by name here (rather than duplicating target definitions in per-platform
 // lists) keeps the single source of truth above.
 #if !canImport(Darwin)
@@ -268,6 +289,7 @@ let portableTargets: Set<String> = [
     "AnglesiteSiteModel", "AnglesiteSiteModelTests",
     "AnglesiteQuickLookSupport", "AnglesiteQuickLookSupportTests",
     "AnglesiteCore",
+    "AnglesiteBridgeCore", "AnglesiteBridgeCoreTests",
 ]
 packageTargets.removeAll { !portableTargets.contains($0.name) }
 // Every library product above is named after its single target, so the same name set
