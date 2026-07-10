@@ -1,5 +1,8 @@
 // Sources/AnglesiteCore/NativeContentOperations.swift
 import Foundation
+#if canImport(Darwin)
+import SwiftGit2
+#endif
 
 /// Native, in-process `create_page` / `create_post`. Byte-faithful to the Node sidecar's
 /// `create-content.mjs` (see `ContentScaffold`), but writes the file with `FileManager` and
@@ -368,9 +371,36 @@ public struct NativeContentOperations: ContentOperationsService {
         try contents.write(to: abs, atomically: true, encoding: .utf8)
     }
 
+    #if canImport(Darwin)
+    /// Stage and commit exactly `relPath` on the current branch. Returns the new HEAD SHA, or
+    /// nil on any failure (not a repo, no configured git identity) — best-effort, mirroring the
+    /// Node sidecar's `commitFile`. Via SwiftGit2 (in-process libgit2, #640): `/usr/bin/git`
+    /// cannot execute at all under App Sandbox.
+    ///
+    /// Two behavioral differences from the subprocess-git version this replaced, both judged
+    /// acceptable for this app's single-user, one-operation-at-a-time usage:
+    ///  - Commits whatever is currently staged, not scoped to just `relPath` the way `git commit
+    ///    -- relPath` was — there's no equivalent path-scoped commit in SwiftGit2's public API.
+    ///    Since every call site here does add-then-commit for one file with nothing else staged
+    ///    in between, this doesn't currently observably differ.
+    ///  - Does not run `.git/hooks/pre-commit`/`commit-msg` — libgit2 never invokes shell hooks
+    ///    (that's a porcelain-layer concept). Nothing in this app currently relies on commit-time
+    ///    hooks firing for content-op commits (unlike `pre-deploy-check.sh`, which is a separate,
+    ///    still-enforced deploy-time gate — see CLAUDE.md's "app cannot bypass plugin security
+    ///    hooks").
+    @Sendable public static func processGitCommit(_ projectRoot: URL, _ relPath: String, _ message: String) async -> String? {
+        SwiftGit2Bootstrap.ensureInitialized
+        guard case .success(let repo) = Repository.at(projectRoot) else { return nil }
+        guard case .success = repo.add(path: relPath) else { return nil }
+        guard case .success(let signature) = repo.defaultSignature() else { return nil }
+        guard case .success(let commit) = repo.commit(message: message, signature: signature) else { return nil }
+        return commit.oid.description
+    }
+    #else
     /// Stage and commit exactly `relPath` on the current branch. Returns the new HEAD SHA,
     /// or nil on any failure (not a repo, rejecting hook, git missing) — best-effort, mirroring
-    /// the Node sidecar's `commitFile`.
+    /// the Node sidecar's `commitFile`. Off-Darwin there's no App Sandbox to route around, so
+    /// plain subprocess git remains correct here rather than a gap to fill.
     @Sendable public static func processGitCommit(_ projectRoot: URL, _ relPath: String, _ message: String) async -> String? {
         let git = URL(fileURLWithPath: "/usr/bin/git")
         func run(_ args: [String]) async -> ProcessSupervisor.RunResult? {
@@ -384,12 +414,34 @@ public struct NativeContentOperations: ContentOperationsService {
               let head = await run(["rev-parse", "HEAD"]) else { return nil }
         return head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+    #endif
 
     /// Stage-delete and commit exactly `relPath` on the current branch (`git rm` + `git commit`).
     /// Returns the new HEAD SHA, or nil on any failure (not a repo, dirty tree, rejecting hook,
     /// git missing, no HEAD copy) — best-effort, mirroring `processGitCommit`'s shape exactly.
     /// Git history is the sole undo/archive mechanism for this delete; there is no separate
     /// trash/archive path.
+    ///
+    /// STILL SUBPROCESS-GIT ON DARWIN TOO (#640 follow-up) — deliberately not yet converted to
+    /// SwiftGit2 alongside `processGitCommit`, unlike everything else in this file. Converting it
+    /// safely needs three capabilities SwiftGit2's public API doesn't have yet, all upstream of
+    /// this method's actual safety property (a failed commit after a successful `rm` must roll
+    /// back cleanly — there's no separate trash, so a bug here is a silent, permanent data-loss
+    /// path):
+    ///   1. `git rm` equivalent — `git_index_remove_bypath` + unlinking the working-tree file.
+    ///      No `Repository.remove(path:)` exists (mirror of `add(path:)`, which does exist).
+    ///   2. The `cat-file -e HEAD:relPath` precondition — checking a path exists in HEAD's tree
+    ///      without a full checkout. Needs `git_object_lookup_bypath`, unwrapped anywhere.
+    ///   3. The `checkout HEAD -- relPath` rollback — restoring exactly one path from a tree,
+    ///      not the whole working copy. `Repository.checkout` only takes a whole-repo strategy;
+    ///      libgit2's `git_checkout_options.paths` (a path-scoped `git_strarray` filter) isn't
+    ///      exposed.
+    /// Each is a small, self-contained libgit2 wrapper addition (same shape as `add(path:)` /
+    /// `defaultSignature()` on anglesite/SwiftGit2), but rolling all three into one commit-message-
+    /// sized patch and getting the rollback interaction right deserves its own change, not a
+    /// footnote inside this one. Until then: deletes still fail under App Sandbox exactly as
+    /// #640 originally found (creates now work; deletes remain broken there) — an incomplete but
+    /// honest intermediate state, not a silent regression.
     @Sendable public static func processGitDelete(_ projectRoot: URL, _ relPath: String, _ message: String) async -> String? {
         let git = URL(fileURLWithPath: "/usr/bin/git")
         func run(_ args: [String]) async -> ProcessSupervisor.RunResult? {

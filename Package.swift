@@ -57,6 +57,15 @@ let includeContainer = false
 // runtime of GH's `macos-15` runner (which currently caps at Xcode 26.3).
 // Locally on Xcode 27 the tests build + run normally; on the older toolchain
 // we drop them so `swift test` still passes. Tracking removal in #128.
+// SwiftGit2 (Anglesite's patched fork — see #640) is Darwin-only: it has no Linux platform
+// entry, and the App Sandbox problem it solves doesn't exist off-macOS in the first place.
+// GitInitRunner/NativeContentOperations keep the plain subprocess-git path as their
+// #if !canImport(Darwin) branch, which is correct there, not just a fallback.
+var anglesiteCoreDependencies: [Target.Dependency] = ["AnglesiteSiteModel"]
+#if canImport(Darwin)
+anglesiteCoreDependencies.append(.product(name: "SwiftGit2", package: "SwiftGit2"))
+#endif
+
 var packageTargets: [Target] = [
     .target(
         name: "AnglesiteSiteModel",
@@ -71,7 +80,7 @@ var packageTargets: [Target] = [
     ),
     .target(
         name: "AnglesiteCore",
-        dependencies: ["AnglesiteSiteModel"],
+        dependencies: anglesiteCoreDependencies,
         path: "Sources/AnglesiteCore",
         swiftSettings: strictConcurrency + disableFoundationModelsAutolink
     ),
@@ -257,6 +266,16 @@ var packageProducts: [Product] = [
 ]
 
 var packageDependencies: [Package.Dependency] = []
+
+#if canImport(Darwin)
+// Anglesite's patched fork of mbernson/SwiftGit2 — see #640 and Spikes/GitPackageSpike. Pinned
+// to a commit rather than a tag or branch: SwiftGit2 upstream has no tagged SPM release yet, and
+// pinning to anglesite/main's tip would silently pick up unreviewed future commits. Bump
+// deliberately.
+packageDependencies.append(
+    .package(url: "https://github.com/Anglesite/SwiftGit2.git", revision: "ac0acfed2fe1b963005663821e96e1464a178854")
+)
+#endif
 
 // Keep the AnglesiteContainer product and its native dependency together with the target above:
 // excluded as one unit under ANGLESITE_SKIP_CONTAINER=1 so the manifest never references a missing
