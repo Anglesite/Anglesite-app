@@ -14,6 +14,15 @@ struct ComponentEditorView: View {
     @State private var mode: Mode = .design
     @State private var webView: WKWebView?
 
+    /// In-progress edits to a rule's selector, keyed by `spanKey(rule.span)`,
+    /// pending commit (on focus loss) to `ComponentEditorModel.setRuleSelector`.
+    @State private var selectorDrafts: [String: String] = [:]
+    /// In-progress edits to a declaration's property name, keyed by
+    /// `spanKey(decl.span)`, pending commit to `setStyleProperty`.
+    @State private var propertyDrafts: [String: String] = [:]
+    /// In-progress edits to a declaration's value, keyed by `spanKey(decl.span)`.
+    @State private var valueDrafts: [String: String] = [:]
+
     enum Mode: String, CaseIterable { case design = "Design", source = "Source" }
 
     init(file: FileRef, context: ComponentEditorContext, fileEditor: FileEditorModel) {
@@ -168,18 +177,44 @@ struct ComponentEditorView: View {
                 }
                 GroupBox("Styles") {
                     if let styles = model.model?.styles, !styles.isEmpty {
-                        ForEach(Array(styles.enumerated()), id: \.offset) { _, rule in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(rule.media.map { "@media \($0)" } ?? "")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                                Text(rule.selector).font(.system(.caption, design: .monospaced)).bold()
-                                ForEach(rule.declarations, id: \.property) { decl in
-                                    Text("\(decl.property): \(decl.value);")
-                                        .font(.system(.caption, design: .monospaced))
+                        ForEach(Array(styles.enumerated()), id: \.offset) { ruleIndex, rule in
+                            VStack(alignment: .leading, spacing: 4) {
+                                if let media = rule.media {
+                                    Text("@media \(media)").font(.caption2).foregroundStyle(.secondary)
                                 }
+                                TextField("selector", text: selectorBinding(for: rule))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textFieldStyle(.plain)
+                                    .bold()
+                                    .onSubmit { commitSelector(model, rule: rule) }
+                                ForEach(rule.declarations, id: \.property) { decl in
+                                    HStack(spacing: 4) {
+                                        TextField("property", text: propertyBinding(for: decl))
+                                            .font(.system(.caption, design: .monospaced))
+                                            .textFieldStyle(.plain)
+                                            .frame(width: 110)
+                                            .onSubmit { commitDeclaration(model, rule: rule, decl: decl) }
+                                        Text(":")
+                                        declarationValueField(model, rule: rule, decl: decl)
+                                        Button(role: .destructive) {
+                                            Task { await model.removeStyleProperty(ruleSpan: spanArray(rule.span), property: decl.property) }
+                                        } label: {
+                                            Image(systemName: "minus.circle")
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                Button("Add declaration") {
+                                    Task { await model.setStyleProperty(ruleSpan: spanArray(rule.span), property: "new-property", value: "") }
+                                }
+                                .font(.caption2)
+                                .buttonStyle(.plain)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 2)
+                            .padding(.vertical, 4)
+                            if ruleIndex < styles.count - 1 {
+                                Divider()
+                            }
                         }
                     } else {
                         Text("No scoped styles").foregroundStyle(.secondary)
@@ -229,6 +264,72 @@ struct ComponentEditorView: View {
         case .expression: "{…}"
         default: node.tag ?? node.kind.rawValue
         }
+    }
+
+    // MARK: - Styles panel editing
+
+    /// `ComponentModel.Span` isn't `CustomStringConvertible`, so build a
+    /// stable dictionary key from its optional start/end offsets directly.
+    private func spanKey(_ span: ComponentModel.Span) -> String {
+        "\(span.start ?? -1)-\(span.end ?? -1)"
+    }
+
+    private func spanArray(_ span: ComponentModel.Span) -> [Int?] {
+        [span.start, span.end]
+    }
+
+    private func selectorBinding(for rule: ComponentModel.StyleRule) -> Binding<String> {
+        let key = spanKey(rule.span)
+        return Binding(
+            get: { selectorDrafts[key] ?? rule.selector },
+            set: { selectorDrafts[key] = $0 }
+        )
+    }
+
+    private func propertyBinding(for decl: ComponentModel.Declaration) -> Binding<String> {
+        let key = spanKey(decl.span)
+        return Binding(
+            get: { propertyDrafts[key] ?? decl.property },
+            set: { propertyDrafts[key] = $0 }
+        )
+    }
+
+    @ViewBuilder
+    private func declarationValueField(
+        _ model: ComponentEditorModel,
+        rule: ComponentModel.StyleRule,
+        decl: ComponentModel.Declaration
+    ) -> some View {
+        let key = spanKey(decl.span)
+        TextField("value", text: Binding(
+            get: { valueDrafts[key] ?? decl.value },
+            set: { valueDrafts[key] = $0 }
+        ))
+        .font(.system(.caption, design: .monospaced))
+        .textFieldStyle(.plain)
+        .onSubmit { commitDeclaration(model, rule: rule, decl: decl) }
+    }
+
+    private func commitSelector(_ model: ComponentEditorModel, rule: ComponentModel.StyleRule) {
+        let key = spanKey(rule.span)
+        let newSelector = selectorDrafts[key] ?? rule.selector
+        guard newSelector != rule.selector else { return }
+        Task { await model.setRuleSelector(ruleSpan: spanArray(rule.span), newSelector: newSelector) }
+    }
+
+    /// Commits both the property-name and value drafts for a declaration.
+    /// Called from either field's `onSubmit` so an edit to just the property
+    /// name (value unchanged) still lands, not only edits to the value field.
+    private func commitDeclaration(
+        _ model: ComponentEditorModel,
+        rule: ComponentModel.StyleRule,
+        decl: ComponentModel.Declaration
+    ) {
+        let key = spanKey(decl.span)
+        let property = propertyDrafts[key] ?? decl.property
+        let value = valueDrafts[key] ?? decl.value
+        guard property != decl.property || value != decl.value else { return }
+        Task { await model.setStyleProperty(ruleSpan: spanArray(rule.span), property: property, value: value) }
     }
 }
 
