@@ -8,7 +8,7 @@ public enum CopyEditPrompt {
     1. Clarity — would a first-time visitor instantly understand what this page offers?
     2. Benefits over features — does the copy say what the visitor gets, not just what the business does?
     3. Voice consistency — does the tone match the site's voice throughout?
-    4. Calls to action (every page needs a clear call to action) — is there a clear next step, and is it compelling?
+    4. Calls to action — is there a clear call to action on this page, and is it compelling?
     5. Scannability — short paragraphs, meaningful headings, front-loaded sentences?
     6. Reader focus — more "you" than "we"?
     7. Jargon — any insider terms a customer wouldn't use?
