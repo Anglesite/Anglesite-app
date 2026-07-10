@@ -3,9 +3,10 @@ import Foundation
 // `FoundationModels` ships in the macOS 26 SDK but is absent from GitHub's `macos-15`
 // runner at *runtime* — linking it into the package makes the whole test bundle fail to
 // `dlopen`. Gate it behind the Xcode-27 toolchain (Swift 6.4) so CI on Xcode 26.3 builds
-// without it, while production (always Xcode 27) gets these types. See #128 and
+// without it, while production (always Xcode 27) gets these types. Also gate on canImport
+// for genuine off-Darwin portability (cross-platform port design §5). See #128 and
 // ContentAssistant.swift for the same pattern.
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 /// The kind of mutation a ``GeneratedEditCommand`` performs. The cases correspond 1:1 to

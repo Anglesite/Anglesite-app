@@ -4,8 +4,9 @@ import Foundation
 // runner at *runtime* — linking it into the package makes the whole test bundle fail to
 // `dlopen`. Gate it behind the Xcode-27 toolchain (Swift 6.4) so CI on Xcode 26.3 builds
 // and loads the reduced surface, while production (always Xcode 27) gets the full protocol.
+// Also gate on canImport for genuine off-Darwin portability (cross-platform port design §5).
 // Same pattern + tracking as the long-running-intent guards — see #128.
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 #endif
 
@@ -35,7 +36,7 @@ public protocol ContentAssistant: Sendable {
     ///   `nonisolated` boundary without a data-race warning. Tightening a `public` requirement is
     ///   technically source-breaking for out-of-module conformers, but every conformer is internal
     ///   to this app, and all `@Generable` result types already conform to `Sendable`.
-    #if compiler(>=6.4)
+    #if compiler(>=6.4) && canImport(FoundationModels)
     func generateStructured<T: Generable & Sendable>(
         prompt: String,
         context: AssistantContext,

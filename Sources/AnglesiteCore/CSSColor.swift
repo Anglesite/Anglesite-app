@@ -1,3 +1,6 @@
+// SwiftUI is Darwin-only; this bridge exists purely for the (Darwin-only) Styles panel's
+// ColorPicker, so it compiles out cleanly on the portable core (cross-platform port design §5).
+#if canImport(SwiftUI)
 import SwiftUI
 
 /// Best-effort CSS <color> <-> SwiftUI Color bridge for the Styles panel's ColorPicker.
@@ -42,3 +45,4 @@ public enum CSSColor {
         "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
     ]
 }
+#endif
