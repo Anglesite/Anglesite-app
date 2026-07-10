@@ -20,7 +20,8 @@ enum SiteAssistantSessionFactory {
         _ contentGraph: SiteContentGraph,
         _ knowledgeIndex: SiteKnowledgeIndex,
         _ semanticRanker: SemanticRanker?,
-        _ integrationService: any IntegrationOperationsService
+        _ integrationService: any IntegrationOperationsService,
+        _ conventionsStore: ProjectConventionsStore
     ) -> any ConversationalAssistant
 
     struct Dependencies {
@@ -49,7 +50,7 @@ enum SiteAssistantSessionFactory {
             let editRouterProvider: EditRouterProvider = { siteID in
                 await EditRouterRegistry.shared.router(for: siteID)
             }
-            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService in
+            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, conventionsStore in
                 KnowledgeAugmentedAssistant(
                     base: FoundationModelAssistant(
                         tier: .onDevice,
@@ -57,7 +58,8 @@ enum SiteAssistantSessionFactory {
                         contentGraph: contentGraph,
                         knowledgeIndex: knowledgeIndex,
                         semanticRanker: semanticRanker,
-                        integrationService: integrationService
+                        integrationService: integrationService,
+                        conventionsStore: conventionsStore
                     ),
                     index: knowledgeIndex
                 )
@@ -118,6 +120,11 @@ enum SiteAssistantSessionFactory {
         dependencies: Dependencies = .live
     ) -> SiteAssistantSession {
         let editBridge = IntentEditBridge(routerProvider: dependencies.editRouterProvider)
+        // A second `ProjectConventionsStore` instance pointed at the same `configDirectory` as
+        // `SiteWindowModel`'s Style Guide store (rather than threading that instance through this
+        // factory's parameter list) — safe because the store is a thin file-backed actor with no
+        // in-memory cache of its own, so both instances read/write the same `conventions.json`.
+        let conventionsStore = ProjectConventionsStore(configDirectory: configDirectory)
         let chat = ChatModel(
             siteID: siteID,
             siteDirectory: sourceDirectory,
@@ -127,7 +134,8 @@ enum SiteAssistantSessionFactory {
                 contentGraph,
                 knowledgeIndex,
                 semanticRanker,
-                integrationService
+                integrationService,
+                conventionsStore
             ),
             annotationFeed: dependencies.annotationFeed(sourceDirectory),
             annotationResolver: { [resolveAnnotation = dependencies.resolveAnnotation] id in

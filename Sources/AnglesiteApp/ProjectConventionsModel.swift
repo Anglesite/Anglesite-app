@@ -64,6 +64,31 @@ final class ProjectConventionsModel {
         }
     }
 
+    /// Applies the brand-voice interview's answers (#465) as `.userOverride` writes — one per
+    /// non-empty answer, mirroring `setOverride`'s single-field flow but batching the interview's
+    /// up-to-four fields into a single persist. Goes through the same `engine`/`store` this model
+    /// already writes through (rather than the store alone), so the Style Guide sheet reflects
+    /// the interview's answers immediately, the same as any other override.
+    func applyBrandVoice(_ answers: BrandVoiceAnswers) async {
+        let audience = answers.audience.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !audience.isEmpty {
+            await engine.applyOverride(siteID: siteID, value: .audience(audience))
+        }
+        if !answers.toneWords.isEmpty {
+            await engine.applyOverride(siteID: siteID, value: .toneDescriptors(answers.toneWords))
+        }
+        if !answers.brandTerms.isEmpty {
+            await engine.applyOverride(siteID: siteID, value: .brandTerms(answers.brandTerms))
+        }
+        if !answers.avoidPhrases.isEmpty {
+            await engine.applyOverride(siteID: siteID, value: .avoidPhrases(answers.avoidPhrases))
+        }
+        conventions = await engine.conventions(siteID: siteID)
+        if let conventions {
+            await store.save(conventions)
+        }
+    }
+
     func clearOverride(_ field: OverridableField) async {
         await engine.clearOverride(siteID: siteID, field: field)
         // `engine.clearOverride` only flips the field's `source` back to `.inferred` — its value

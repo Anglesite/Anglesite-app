@@ -10,6 +10,7 @@ struct ProjectStyleGuideView: View {
     let siteName: String
 
     @Environment(\.dismiss) private var dismiss
+    @State private var interviewPresented = false
 
     var body: some View {
         NavigationStack {
@@ -30,6 +31,9 @@ struct ProjectStyleGuideView: View {
             }
             .navigationTitle("Project Style Guide")
             .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    Button("Set Up Brand Voice…") { interviewPresented = true }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Rescan Now") {
                         Task { await model.rescan() }
@@ -42,6 +46,9 @@ struct ProjectStyleGuideView: View {
             }
         }
         .frame(minWidth: 480, minHeight: 420)
+        .sheet(isPresented: $interviewPresented) {
+            BrandVoiceInterviewView(model: model)
+        }
     }
 
     // MARK: Sections

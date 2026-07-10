@@ -55,6 +55,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private let knowledgeIndex: SiteKnowledgeIndex?
     private let semanticRanker: SemanticRanker?
     private let integrationService: (any IntegrationOperationsService)?
+    private let conventionsStore: ProjectConventionsStore?
     private let logger = Logger(subsystem: "io.dwk.anglesite", category: "FoundationModelAssistant")
     /// The current conversational turn's consumer-facing ``TurnRelay``, retained so ``cancel()`` can
     /// wind it down. Cancelling stops *delivery* only — it never cancels the model stream, because
@@ -90,6 +91,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         knowledgeIndex: SiteKnowledgeIndex? = nil,
         semanticRanker: SemanticRanker? = nil,
         integrationService: (any IntegrationOperationsService)? = nil,
+        conventionsStore: ProjectConventionsStore? = nil,
         maxRetainedTurns: Int = 12
     ) {
         self.tier = tier
@@ -98,6 +100,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
         self.integrationService = integrationService
+        self.conventionsStore = conventionsStore
         // `trimSessionIfNeeded`'s cutoff indexing (`promptIndices.count - maxRetainedTurns`) assumes
         // at least 1: `<= 0` would index at or past the end of `promptIndices` and crash. Clamp
         // rather than crash so a caller passing e.g. `0` ("keep no history") degrades to the
@@ -321,7 +324,8 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// Tool names for the `.started` event (emitted only on the `converse` path) so the chat UI can
     /// reflect what's wired. Never empty — the conversational session always carries
     /// `SpotlightSearchTool`; the edit/search pair is added only when both deps are present;
-    /// `SetupIntegrationTool` is added when an `integrationService` is provided.
+    /// `SetupIntegrationTool` is added when an `integrationService` is provided; `SaveBrandVoiceTool`
+    /// is added when a `conventionsStore` is provided.
     private var attachedToolNames: [String] {
         var names = [Self.spotlightToolDisplayName]
         if editBridge != nil && contentGraph != nil {
@@ -334,6 +338,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         }
         if integrationService != nil {
             names.append(SetupIntegrationTool.toolName)
+        }
+        if conventionsStore != nil {
+            names.append(SaveBrandVoiceTool.toolName)
         }
         return names
     }
@@ -411,6 +418,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         }
         if let integrationService {
             tools.append(SetupIntegrationTool(service: integrationService, siteID: context.siteID))
+        }
+        if let conventionsStore {
+            tools.append(SaveBrandVoiceTool(store: conventionsStore))
         }
         return tools
     }
