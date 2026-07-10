@@ -12,7 +12,14 @@ public enum InboxSubmissionSync {
         guard let submissions = try? await client.listStagedSubmissions(), !submissions.isEmpty else { return 0 }
         let committedIDs = await InboxSubmissionCommitter.commit(submissions: submissions, into: siteDirectory)
         for id in committedIDs {
-            try? await client.deleteSubmission(id: id)
+            do {
+                try await client.deleteSubmission(id: id)
+            } catch {
+                await LogCenter.shared.append(
+                    source: "InboxSubmissionSync", stream: .stderr,
+                    text: "Failed to delete staged submission \(id) from INBOX_KV after commit: "
+                        + "\(error). It will be re-fetched and safely re-attempted on the next pull.")
+            }
         }
         return committedIDs.count
     }
