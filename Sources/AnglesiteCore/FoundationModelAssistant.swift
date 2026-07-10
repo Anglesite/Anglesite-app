@@ -55,6 +55,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private let knowledgeIndex: SiteKnowledgeIndex?
     private let semanticRanker: SemanticRanker?
     private let integrationService: (any IntegrationOperationsService)?
+    private let themeCatalog: ThemeCatalog?
     private let logger = Logger(subsystem: "io.dwk.anglesite", category: "FoundationModelAssistant")
     /// The current conversational turn's consumer-facing ``TurnRelay``, retained so ``cancel()`` can
     /// wind it down. Cancelling stops *delivery* only — it never cancels the model stream, because
@@ -90,6 +91,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         knowledgeIndex: SiteKnowledgeIndex? = nil,
         semanticRanker: SemanticRanker? = nil,
         integrationService: (any IntegrationOperationsService)? = nil,
+        themeCatalog: ThemeCatalog? = nil,
         maxRetainedTurns: Int = 12
     ) {
         self.tier = tier
@@ -98,6 +100,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
         self.integrationService = integrationService
+        self.themeCatalog = themeCatalog
         // `trimSessionIfNeeded`'s cutoff indexing (`promptIndices.count - maxRetainedTurns`) assumes
         // at least 1: `<= 0` would index at or past the end of `promptIndices` and crash. Clamp
         // rather than crash so a caller passing e.g. `0` ("keep no history") degrades to the
@@ -335,6 +338,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         if integrationService != nil {
             names.append(SetupIntegrationTool.toolName)
         }
+        if themeCatalog != nil {
+            names.append(SetupThemeTool.toolName)
+        }
         return names
     }
 
@@ -411,6 +417,9 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         }
         if let integrationService {
             tools.append(SetupIntegrationTool(service: integrationService, siteID: context.siteID))
+        }
+        if let themeCatalog {
+            tools.append(SetupThemeTool(catalog: themeCatalog, sourceDirectory: context.siteDirectory))
         }
         return tools
     }
