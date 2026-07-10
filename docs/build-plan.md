@@ -105,11 +105,11 @@ Per design doc §12: sandboxed App Store build, Quick Look, Spotlight, Settings 
 - ✅ Task N — bundled-Node re-sign (`scripts/resign-node.sh` + `Resources/node-runtime.entitlements`, postBuildScript on MAS): shipped as the transitional host-Node path, then retired by #70 once Node moved into the container image.
 - ✅ Task 8 — every `Process()` routed through `ProcessSupervisor` (the `wrangler`/preflight and `gh auth status` shell-outs).
 - ✅ Tasks 9–10 — Foundation Models chat is enabled; the `gh` Settings panel remains compiled out via `#if !ANGLESITE_MAS`.
-- 🔲 **Task 11** — real-signed, write-heavy MAS smoke (local-container preview/edit, image-drop into `public/images/`, build/preflight, a real `wrangler` run) — the load-bearing end-to-end validation for the App Store runtime and entitlement profile.
+- 🔲 **Task 11** (#81) — real-signed, write-heavy MAS smoke (local-container preview/edit, image-drop into `public/images/`, build/preflight, a real `wrangler` run) — the load-bearing end-to-end validation for the App Store runtime and entitlement profile.
 - ✅ **Task 12** — App Store release pipeline (`scripts/release.sh`: archive/export/upload, Node re-sign verification, WWDR preflight) + `docs/release.md`.
-- 🔲 **Task 13** — closeout (phase pointers, single scheme green, App Store smoke green).
+- 🔲 **Task 13** (#617) — closeout + App Store submission (validate-only signing check, phase pointers, App Store smoke green, submit for review). *(The original Task 13 issue #83 was closed not-planned when the two-target world was retired; #617 is its single-target replacement.)*
 
-**Apple Help Book shipped.** A classic indexed Help Book (`Resources/Anglesite.help`) of 15 hand-authored, Apple-native-styled HTML pages covering every shipped feature (sites, preview, editing with the assistant, image drop, undo, health/readiness, deploy, accounts, settings, updates, debug pane, shortcuts, troubleshooting). `scripts/build-help-index.sh` builds the `hiutil` search index as a pre-build phase; `CFBundleHelpBookFolder`/`CFBundleHelpBookName` register the book so **Help ▸ Anglesite Help** opens it (no Swift change needed). `scripts/check-help-links.sh` guards intra-book links. Design / plan: [`docs/specs/2026-05-28-apple-help-design.md`](specs/2026-05-28-apple-help-design.md) · [`docs/specs/2026-05-28-apple-help-plan.md`](specs/2026-05-28-apple-help-plan.md). *Deferred follow-ups:* capture real screenshots for the placeholder slots; book-icon artwork (`AnglesiteHelp.png`).
+**Apple Help Book shipped.** A classic indexed Help Book (`Resources/Anglesite.help`) of 15 hand-authored, Apple-native-styled HTML pages covering every shipped feature (sites, preview, editing with the assistant, image drop, undo, health/readiness, deploy, accounts, settings, updates, debug pane, shortcuts, troubleshooting). `scripts/build-help-index.sh` builds the `hiutil` search index as a pre-build phase; `CFBundleHelpBookFolder`/`CFBundleHelpBookName` register the book so **Help ▸ Anglesite Help** opens it (no Swift change needed). `scripts/check-help-links.sh` guards intra-book links. Design / plan: [`docs/specs/2026-05-28-apple-help-design.md`](specs/2026-05-28-apple-help-design.md) · [`docs/specs/2026-05-28-apple-help-plan.md`](specs/2026-05-28-apple-help-plan.md). *Deferred follow-ups (#619):* capture real screenshots for the placeholder slots; book-icon artwork (`AnglesiteHelp.png`).
 
 **Xcode 27 migration (#108).** The app builds on Xcode 27.0 (27A5194q) / Swift 6.4. The `@State` macro semantics audit found no behavioral regressions — see [`docs/specs/2026-06-10-xcode27-state-macro-audit-notes.md`](specs/2026-06-10-xcode27-state-macro-audit-notes.md). `LSMinimumSystemVersion` is 27.0. Vendored Node is arm64-only (#106) since macOS 27 is Apple-silicon-only. Verification notes: [`docs/specs/2026-06-10-xcode27-build-test-verification-notes.md`](specs/2026-06-10-xcode27-build-test-verification-notes.md).
 
@@ -132,16 +132,16 @@ The v1 architecture replaces the in-process Node subprocess with a container-bac
 - ✅ **Repo bootstrap for non-Git sites** (#68) — create + push a repo.
 - ✅ **LocalContainerSiteRuntime** (#69) — Apple Containerization local runtime. The full path is in place and productionized: the `LocalContainerControl` seam + `LocalContainerSiteRuntime` actor + `VsockTCPProxy`; the `ContainerizationControl` conformer against the real `apple/containerization` API; import bundled OCI layout → boot `LinuxContainer` (NAT outbound + vsock inbound) → **virtio-fs host-repo share + in-guest `git clone`** for hydration → `astro dev` + the baked MCP sidecar + socat bridge → host-side vsock→TCP proxies; capability-driven selection in `PreviewModel`, gated on `BundledImage.isProvisioned` + the signed entitlement; the vendored arm64 image, Linux kernel, and version-matched initfs; and the app-owned MCP sidecar baked into the image. Live entitled probes (`scripts/run-container-probe.sh echo` / `boot`) validated the runtime; CI never compiles the native graph because the target/product/dependency are gated behind `ANGLESITE_SKIP_CONTAINER`.
 - ✅ **Retire host-side embedded Node** (#70) — host Node/npm cache resources, host preview runtime, stdio MCP spawn, Node signing phases, and host JIT entitlements were removed after #69 validation. `scripts/audit-host-node-retirement.sh --expect-retired` is the closeout gate.
-- 🔲 **v1 release hardening** — finish the signed local-container smoke matrix for release builds, keep `scripts/run-container-probe.sh {echo,boot}` as the author-run runtime gate, and document any boot/provisioning failures with container logs.
-- 🔲 **Distribution-grade container artifact provisioning** — replace the current developer-oriented kernel/initfs provisioning path (`scripts/vendor-container-kernel.sh` and env overrides) with pinned, reproducible release artifacts before App Store closeout.
+- 🔲 **v1 release hardening** (#81 → #617) — finish the signed local-container smoke matrix for release builds, keep `scripts/run-container-probe.sh {echo,boot}` as the author-run runtime gate, and document any boot/provisioning failures with container logs.
+- 🔲 **Distribution-grade container artifact provisioning** (#616) — replace the current developer-oriented kernel/initfs provisioning path (`scripts/vendor-container-kernel.sh` and env overrides) with pinned, reproducible release artifacts before App Store closeout.
 - ✅ **Virtualization entitlement (Wall 2) — no approval exists to file.** `com.apple.security.virtualization` is present in `Resources/Anglesite.entitlements` and is an unrestricted entitlement: not a portal capability, honored under any signature including ad-hoc Debug builds (verified 2026-07-07 — `scripts/run-container-probe.sh echo` passed under `codesign --sign -`; see the subspike notes addendum). The only remaining check is that App Store upload validation accepts it with a standard profile — covered by `scripts/release.sh --validate-only` under v1 release hardening (precedent: `try-containers/Containers` ships it sandboxed on MAS).
 - ⏸ **iOS target** (#71, v2.0/deferred) — thin SwiftUI/UIKit client using only the remote Cloudflare runtime. `scripts/audit-ios-thin-client-readiness.sh` remains the inventory and future `--expect-ready` gate, but #71 now belongs under the v2.0 iOS/iPadOS epic (#342), not the v1 macOS critical path.
 
 ---
 
-## Phase 10.2+ — macOS 27 platform features (open)
+## Phase 10.2+ — macOS 27 platform features
 
-These issues target macOS 27 APIs available with Xcode 27 / Swift 6.4:
+These issues target macOS 27 APIs available with Xcode 27 / Swift 6.4 (all landed; follow-ups noted inline):
 
 - ✅ **Native chat on Foundation Models** (#105) — chat now uses `FoundationModelAssistant` through the provider-agnostic `ConversationalAssistant` seam in the App Store target.
 - ✅ **System-wide MCP** (#101) — expose Anglesite actions to system AI via macOS 27's system-wide MCP.
@@ -155,6 +155,23 @@ These issues target macOS 27 APIs available with Xcode 27 / Swift 6.4:
 - ✅ **On-device summarization** (#93), **Image Playground** (#92), **Writing Tools** (#91).
 - ✅ **Accessibility** — VoiceOver pass (#80), Dynamic Type audit (#79).
 - ✅ **Misc** — oxlint for JS overlay (#73), reframe "filesystem is source of truth" → "Git is source of truth" (#72).
+- ✅ **Menu bar + toolbar completeness** (#518, swept 2026-07-08/09) — File ▸ Save ⌘S/Revert (#509), Sidebar/Toolbar commands (#510), Site menu (#511), View menu with Preview–Editor–Graph ⌘1–3 (#512), File ▸ Reveal in Finder/Rename (#513), customizable `.toolbar(id:)` toolbar (#519), macOS conventions (proxy icon #521, Dock menu #522, ShareLink #523, launcher drops #524, Settings General-first #529 — via #540), preview navigation (#514), dev-server Start/Stop/Restart (#515), navigator content commands Delete/Duplicate/New Post…/New Component… (#516, PR #585 — manual GUI verification tracked in #586), Print ⌘P (#525), completion notifications + Dock progress (#526), UndoManager ⌘Z (#527), String Catalog scaffolding (#528). *Remaining:* Edit ▸ Find + Format menu (#517, needs editor work), toolbar search field (#520, needs a search backend).
+- ✅ **Visual Site Graph Explorer** (#308, PR #508 + follow-ups) and **Project Impact Analysis** (#309, PR #545) — interactive graph/tree of pages, components, and assets with dependency edges, filtering, search, and blast-radius reporting for a selected file. *Follow-ups:* mini-map for large sites (#613), AI explanations of selected nodes (#614 — on-device FM per the LLM policy; the broader free-form Q&A ask in #314 builds on this).
+- ✅ **Redirect/permalink management** (#530, PR #583) — git-tracked `RedirectsStore` (`Source/redirects.json`) + Astro integration emitting dev-server redirects and `dist/_redirects`, delete-triggered "offer a redirect" flow, `RouteCoverageScanner` pre-deploy diff against the last deploy's route snapshot, Redirects tab in Site Settings; blog-post coverage extended in #584.
+
+---
+
+## Active epics (status 2026-07-10)
+
+`gh issue list` remains the source of truth; this is the snapshot of open tracks beyond Phase 10 release work.
+
+- **Claude Code removal (#459)** — Slices 1–4 (#460–463) landed; Slices 5–7 (#464–466) queued: theme/design on PCC, content help on FM/PCC, then the cleanup slice that deletes `ClaudeAgent` and converts the plugin repo. Runtime inbox capture (#587) split out of Slice 3, blocked on `@dwk/workers`.
+- **Component Editor (#496)** — slice 1 (read-only editor, plugin v1.3.0) landed; next: slice-1 manual GUI smoke (#491) and slice 2 Styles panel (#492), then structure ops (#493), props/zone code editors (#494), extract-to-component (#495). Fast-follows: #489, #490.
+- **Personal Publishing OS pivot (#334)** — V-1 typed content + feeds (#335) shipped. V-2 outbound social (#336: #354–357), V-3 inbound (#337: #358–362), V-4 federation + reader (#338: #363–366), V-5 communities (#339: #367–371) are all gated on a stable, conformant `@dwk/workers` release.
+- **Cross-platform Swift port (#571)** — Windows/Linux v2 in five phases (#566–570), Linux first; P5 carries `ExternalLLMBackend` + Phi Silica under the revised LLM policy.
+- **UTM-VM dev/test rig (#589)** — Phase-1 LAN runtime (#601): guest side + wiring landed, host-side LAN-bound dev-server process remains. Later phases pull in iOS and (unscoped) Android validation.
+- **v2.0 / deferred:** Cloudflare remote runtime (#66, needs Workers Paid plan for boot smoke), iOS thin client (#71) under the iOS/iPadOS epic (#342), multi-editor collaboration (#399), quick-capture posting flow (#531).
+- **Blocked / external:** Safari MCP preview debugging (#453), CI `#if compiler(>=6.4)` cleanup once GH runners ship Xcode 27 (#128).
 
 ---
 
