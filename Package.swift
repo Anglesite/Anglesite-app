@@ -103,6 +103,13 @@ var packageTargets: [Target] = [
         path: "Sources/AnglesiteIntents",
         swiftSettings: strictConcurrency
     ),
+    .executableTarget(
+        name: "AnglesiteLANHost",
+        dependencies: ["AnglesiteCore"],
+        path: "Sources/AnglesiteLANHost",
+        swiftSettings: strictConcurrency,
+        linkerSettings: weakLinkFoundationModels
+    ),
     // Test-only support shared across the test targets (e.g. the e2e prerequisite probes used by
     // both AnglesiteCoreTests and AnglesiteBridgeTests). Not exposed as a `.library` product, so
     // the app/xcodeproj never links it — only `swift test` builds it.
@@ -253,7 +260,8 @@ var packageProducts: [Product] = [
     .library(name: "AnglesiteBridgeCore", targets: ["AnglesiteBridgeCore"]),
     .library(name: "AnglesiteBridge", targets: ["AnglesiteBridge"]),
     .library(name: "AnglesiteIOS", targets: ["AnglesiteIOS"]),
-    .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"])
+    .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"]),
+    .executable(name: "anglesite-lan-host", targets: ["AnglesiteLANHost"])
 ]
 
 var packageDependencies: [Package.Dependency] = []
