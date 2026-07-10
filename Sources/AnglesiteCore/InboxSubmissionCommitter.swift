@@ -1,0 +1,100 @@
+import Foundation
+
+/// Writes staged inbox submissions (`InboxKVClient.Submission`) into the site's local git
+/// working copy as Keystatic-format Markdoc files (`src/content/inbox/<slug>.md`, matching the
+/// `inbox` collection schema injected by `IntegrationCatalog.inbox`,
+/// `Sources/AnglesiteCore/IntegrationCatalog.swift:652-665`), then commits them in one commit.
+/// This is the "commit staged submissions into the site's local git working copy" half of #587
+/// — it operates on the host's `Source/` directory directly (the same `siteDirectory`
+/// `SiteRuntime` implementations pass to `start`), reusing `ProcessSupervisor` the same way
+/// `NativeContentOperations.processGitCommit` does for a single file.
+public enum InboxSubmissionCommitter {
+    /// A URL/filename-safe slug derived from the subject, suffixed with the first 8 characters
+    /// of the submission id to avoid collisions between two submissions with the same subject
+    /// text. This value becomes both the filename and the `subject` frontmatter field (the
+    /// collection's `slugField`).
+    public static func slug(for submission: InboxKVClient.Submission) -> String {
+        let lowered = submission.subject.lowercased()
+        let sluggedScalars = lowered.unicodeScalars.map { scalar -> Character in
+            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : "-"
+        }
+        var collapsed = String(sluggedScalars).replacingOccurrences(
+            of: "-+", with: "-", options: .regularExpression)
+        collapsed = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        if collapsed.isEmpty { collapsed = "message" }
+        let suffix = submission.id.prefix(8)
+        return "\(collapsed)-\(suffix)"
+    }
+
+    /// Keystatic frontmatter + Markdoc body for one submission, matching the `inbox` collection's
+    /// schema: `subject` (the slug field's value), `from`, `receivedDate` (YYYY-MM-DD), `status`
+    /// (`new` for every freshly-synced submission), and the `message` markdoc body.
+    public static func markdocContent(for submission: InboxKVClient.Submission, slug: String) -> String {
+        let receivedDate = String(submission.receivedAt.prefix(10))  // "2026-07-10T00:00:00Z" -> "2026-07-10"
+        let escapedFrom = submission.from.replacingOccurrences(of: "\"", with: "\\\"")
+        return """
+        ---
+        subject: "\(slug)"
+        from: "\(escapedFrom)"
+        receivedDate: \(receivedDate)
+        status: new
+        ---
+        \(submission.message)
+        """
+    }
+
+    /// Writes each submission to `src/content/inbox/<slug>.md` under `siteDirectory`, stages and
+    /// commits all of them in a single commit, and returns the ids that were part of that commit
+    /// (safe for the caller to delete from KV staging). Returns an empty array — never throws —
+    /// if there was nothing to write or the commit failed, so callers leave undeleted ids staged
+    /// for the next site-open's pull rather than losing them.
+    public static func commit(
+        submissions: [InboxKVClient.Submission],
+        into siteDirectory: URL,
+        fileManager: FileManager = .default,
+        gitCommitBatch: @Sendable (URL, [String], String) async -> String? = processGitCommitBatch
+    ) async -> [String] {
+        guard !submissions.isEmpty else { return [] }
+        let inboxDir = siteDirectory.appendingPathComponent("src/content/inbox", isDirectory: true)
+        try? fileManager.createDirectory(at: inboxDir, withIntermediateDirectories: true)
+
+        var relPaths: [String] = []
+        var ids: [String] = []
+        for submission in submissions {
+            let submissionSlug = slug(for: submission)
+            let relPath = "src/content/inbox/\(submissionSlug).md"
+            let fileURL = siteDirectory.appendingPathComponent(relPath, isDirectory: false)
+            guard let data = markdocContent(for: submission, slug: submissionSlug).data(using: .utf8) else { continue }
+            guard (try? data.write(to: fileURL, options: .atomic)) != nil else { continue }
+            relPaths.append(relPath)
+            ids.append(submission.id)
+        }
+        guard !relPaths.isEmpty else { return [] }
+
+        let message = ids.count == 1
+            ? "inbox: capture 1 visitor submission"
+            : "inbox: capture \(ids.count) visitor submissions"
+        guard await gitCommitBatch(siteDirectory, relPaths, message) != nil else { return [] }
+        return ids
+    }
+
+    /// Stages and commits multiple relative paths in one commit — the batched counterpart to
+    /// `NativeContentOperations.processGitCommit`, which only ever commits a single path.
+    @Sendable public static func processGitCommitBatch(
+        _ projectRoot: URL, _ relPaths: [String], _ message: String
+    ) async -> String? {
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        func run(_ args: [String]) async -> ProcessSupervisor.RunResult? {
+            let result = try? await ProcessSupervisor.shared.run(
+                executable: git, arguments: args, currentDirectoryURL: projectRoot)
+            guard let result, result.exitCode == 0 else { return nil }
+            return result
+        }
+        guard await run(["rev-parse", "--git-dir"]) != nil,
+              await run(["add", "--"] + relPaths) != nil,
+              await run(["commit", "-m", message, "--"] + relPaths) != nil,
+              let head = await run(["rev-parse", "HEAD"])
+        else { return nil }
+        return head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
