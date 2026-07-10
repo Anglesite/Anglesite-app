@@ -4,7 +4,7 @@ import Foundation
 
 // Gated like the types under test — FoundationModels is unavailable at runtime on CI (#128).
 // These tests need no live model: the tools' `call(...)` is pure mapping/routing/query logic.
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 /// Records the EditMessage it receives and returns a canned reply.
