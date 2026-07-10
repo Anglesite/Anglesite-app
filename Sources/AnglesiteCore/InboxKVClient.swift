@@ -33,8 +33,18 @@ public struct InboxKVClient: Sendable {
 
     private struct KeyListEnvelope: Decodable {
         struct Key: Decodable { let name: String }
+        /// Cloudflare's "List a Namespace's Keys" pagination info: `cursor` is empty once there
+        /// are no more pages. Optional so a response without `result_info` (e.g. in tests, or if
+        /// Cloudflare ever omits it) still decodes.
+        struct ResultInfo: Decodable { let cursor: String? }
         let success: Bool
         let result: [Key]?
+        let resultInfo: ResultInfo?
+
+        enum CodingKeys: String, CodingKey {
+            case success, result
+            case resultInfo = "result_info"
+        }
     }
 
     private static let keyPrefix = "inbox:"
@@ -63,9 +73,35 @@ public struct InboxKVClient: Sendable {
     /// Malformed entries (a key whose value fails to decode as `Submission`) are skipped rather
     /// than failing the whole pull — one bad/partial write shouldn't block every other
     /// submission.
+    ///
+    /// Cloudflare's "List a Namespace's Keys" endpoint paginates (max 1000 keys per call), so
+    /// this follows `result_info.cursor` across pages until it comes back empty — or the page
+    /// itself comes back empty, which also ends the loop so a misbehaving cursor can't spin
+    /// forever.
     public func listStagedSubmissions() async throws -> [Submission] {
-        let keysURLString = "\(baseURL)/accounts/\(accountID)/storage/kv/namespaces/\(namespaceID)/keys"
+        var allKeys: [KeyListEnvelope.Key] = []
+        var cursor: String?
+        repeat {
+            let page = try await fetchKeysPage(cursor: cursor)
+            guard !page.result.isEmpty else { break }
+            allKeys.append(contentsOf: page.result)
+            cursor = page.cursor
+        } while !(cursor ?? "").isEmpty
+
+        var submissions: [Submission] = []
+        for key in allKeys {
+            guard let submission = try? await fetchSubmission(key: key.name) else { continue }
+            submissions.append(submission)
+        }
+        return submissions
+    }
+
+    private func fetchKeysPage(cursor: String?) async throws -> (result: [KeyListEnvelope.Key], cursor: String?) {
+        var keysURLString = "\(baseURL)/accounts/\(accountID)/storage/kv/namespaces/\(namespaceID)/keys"
             + "?prefix=\(Self.keyPrefix)"
+        if let cursor, !cursor.isEmpty {
+            keysURLString += "&cursor=\(cursor)"
+        }
         guard let url = URL(string: keysURLString) else { throw CloudflareError.malformedResponse }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
@@ -76,13 +112,7 @@ public struct InboxKVClient: Sendable {
         guard let envelope = try? JSONDecoder().decode(KeyListEnvelope.self, from: data), envelope.success else {
             throw CloudflareError.malformedResponse
         }
-
-        var submissions: [Submission] = []
-        for key in envelope.result ?? [] {
-            guard let submission = try? await fetchSubmission(key: key.name) else { continue }
-            submissions.append(submission)
-        }
-        return submissions
+        return (envelope.result ?? [], envelope.resultInfo?.cursor)
     }
 
     /// Deletes a staged submission by id — called only after it has been successfully committed
