@@ -115,15 +115,20 @@ public final class InotifyFileWatcher: SiteFileWatching, @unchecked Sendable {
         lock.lock(); watchedDirectories[wd] = directory; lock.unlock()
 
         guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+            at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles]
         ) else { return }
 
         for entry in entries {
             guard !SiteIndexPaths.skippedDirectoryNames.contains(entry.lastPathComponent) else { continue }
-            let values = try? entry.resourceValues(forKeys: [.isDirectoryKey])
-            if values?.isDirectory == true {
-                try addWatches(under: entry, fd: fd)
-            }
+            let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            // A symlinked subdirectory is skipped rather than recursed into: `isDirectoryKey`
+            // resolves through the link, so an unfiltered walk could cycle back up the tree (a
+            // symlink pointing at an ancestor) or fan out into an unrelated, unbounded directory
+            // — either way well past `fs.inotify.max_user_watches`. FSEvents doesn't have this
+            // failure mode (it watches the real filesystem tree, not a manually-walked listing),
+            // so this is inotify-specific.
+            guard values?.isSymbolicLink != true, values?.isDirectory == true else { continue }
+            try addWatches(under: entry, fd: fd)
         }
     }
 
@@ -186,8 +191,20 @@ public final class InotifyFileWatcher: SiteFileWatching, @unchecked Sendable {
         guard let directory, currentFD >= 0 else { return }
 
         if event.mask & UInt32(IN_DELETE_SELF | IN_MOVE_SELF) != 0 {
-            // The watched directory itself vanished or moved; its subtree's state is now
-            // unknowable from here.
+            // The watched directory itself vanished or moved — possibly outside `root`
+            // entirely. Per inotify(7), only IN_DELETE_SELF is reliably followed by an
+            // automatic IN_IGNORED; a plain rename (IN_MOVE_SELF) leaves the kernel watch
+            // armed on the same inode wherever it now lives, with no further event on this fd
+            // if that's outside our tree. Clean up immediately rather than waiting for an
+            // IN_IGNORED that may never come: drop the map entry so a moved-away directory's
+            // future changes can't resolve against this stale URL, and release the kernel-side
+            // watch so it doesn't sit there consuming `fs.inotify.max_user_watches` forever.
+            // If this was actually an in-place rename, the kernel's `fsnotify_move()` emits
+            // this IN_MOVE_SELF *before* the paired IN_MOVED_TO on the parent directory's own
+            // watch, so the parent's handler (which re-walks and re-arms via `addWatches`)
+            // always runs after this cleanup, never racing it.
+            lock.lock(); watchedDirectories.removeValue(forKey: event.wd); lock.unlock()
+            inotify_rm_watch(currentFD, event.wd)
             pendingRescan = true
             scheduleFlush()
             return

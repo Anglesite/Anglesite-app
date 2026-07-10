@@ -95,5 +95,53 @@ struct InotifyFileWatcherTests {
         try? await Task.sleep(nanoseconds: 2_000_000_000)
         #expect(box.all().isEmpty)
     }
+
+    @Test("moving a watched subdirectory outside root releases its watch instead of leaking it", .timeLimit(.minutes(1)))
+    func releasesWatchOnMoveOutOfTree() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("inotify-\(UUID().uuidString)", isDirectory: true)
+        let sub = root.appendingPathComponent("posts", isDirectory: true)
+        try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: sub.appendingPathComponent("f.txt"))
+
+        let box = BatchBox()
+        let watcher = InotifyFileWatcher()
+        try watcher.start(root: root) { box.add($0) }
+        defer { watcher.stop() }
+
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        let outside = FileManager.default.temporaryDirectory
+            .appendingPathComponent("inotify-outside-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.moveItem(at: sub, to: outside)
+        defer { try? FileManager.default.removeItem(at: outside) }
+
+        _ = await poll(timeout: 10) { box.all().contains { $0.needsFullRescan } }
+        let countAfterMove = box.all().count
+
+        // Editing the file at its new, out-of-tree location must not surface here: if the old
+        // watch on `posts` leaked (IN_MOVE_SELF doesn't auto-remove the kernel watch, unlike
+        // deletion), this edit would show up as a batch reporting a path under the stale,
+        // no-longer-existent `root/posts` — see the review that caught this.
+        try Data("y".utf8).write(to: outside.appendingPathComponent("f.txt"))
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        #expect(box.all().count == countAfterMove)
+    }
+
+    @Test("a symlinked subdirectory is not recursed into", .timeLimit(.minutes(1)))
+    func skipsSymlinkedSubdirectories() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("inotify-\(UUID().uuidString)", isDirectory: true)
+        let child = root.appendingPathComponent("child", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        // A symlink back to `root` would send an unfiltered recursive walk into an infinite
+        // cycle; `start()` returning promptly (within the test's time limit) is the assertion.
+        try FileManager.default.createSymbolicLink(
+            at: child.appendingPathComponent("loop"), withDestinationURL: root
+        )
+
+        let watcher = InotifyFileWatcher()
+        try watcher.start(root: root) { _ in }
+        watcher.stop()
+    }
 }
 #endif
