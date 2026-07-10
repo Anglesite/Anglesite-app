@@ -298,6 +298,15 @@ struct ComponentEditorView: View {
         "\(span.start ?? -1)-\(span.end ?? -1)"
     }
 
+    /// Escapes a Swift string into a double-quoted JS string literal for
+    /// interpolation into `evaluateJavaScript` call sites.
+    private func jsStringLiteral(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
     private func spanArray(_ span: ComponentModel.Span) -> [Int?] {
         [span.start, span.end]
     }
@@ -339,7 +348,11 @@ struct ComponentEditorView: View {
                 ColorPicker("", selection: Binding(
                     get: { color },
                     set: { newColor in
-                        valueDrafts[key] = CSSColor.format(newColor)
+                        let formatted = CSSColor.format(newColor)
+                        valueDrafts[key] = formatted
+                        webView?.evaluateJavaScript(
+                            "window.anglesiteCanvas?.scrub?.(\(jsStringLiteral(rule.selector)), \(jsStringLiteral(decl.property)), \(jsStringLiteral(formatted)))"
+                        )
                         debounceColorCommit(key, model, rule: rule, decl: decl)
                     }
                 ))
@@ -362,6 +375,7 @@ struct ComponentEditorView: View {
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
             commitDeclaration(model, rule: rule, decl: decl)
+            _ = try? await webView?.evaluateJavaScript("window.anglesiteCanvas?.clearScrub?.()")
             colorCommitTasks[key] = nil
         }
     }
