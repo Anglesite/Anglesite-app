@@ -31,10 +31,13 @@ import CoreSpotlight
 /// Compiled into AnglesiteCore on both build targets; it needs no subprocess, so it is the
 /// on-device path usable from the sandboxed MAS build.
 public actor FoundationModelAssistant: ConversationalAssistant {
-    // TODO(#541): this hardcoded mangled-symbol check is a workaround for a beta Xcode/macOS SDK-OS
-    // skew. Re-verify the symbol name against the shipping GA SDK and delete this guard (and the
-    // weak-link linker settings in Package.swift/project.yml) once Xcode 27 and macOS 27 are both
-    // out of beta and the toolchain/OS pair is guaranteed to match.
+    // TODO(#623): this hardcoded mangled-symbol check is a workaround for a beta Xcode/macOS SDK-OS
+    // skew (#541). Verified still live 2026-07-09 (#618, Xcode 27A5209h / macOS 26A5378j): the OS
+    // now exports this same initializer under a *different* mangling (the extension signature's
+    // Copyable requirement marker was dropped, `Rszrl` → `Rszl`), while the SDK still emits — and
+    // this binary therefore still references — the old one. The hardcoded name must track what the
+    // SDK emits, not what the OS exports; #623 has the re-sync recipe and the exit condition for
+    // deleting this guard plus the weak-link settings in Package.swift/project.yml.
     /// Whether `Attachment(imageURL:orientation:)` actually resolves on this host. FoundationModels
     /// is weak-linked (#541), so a mangled name the installed OS doesn't export binds to a NULL
     /// pointer rather than failing to load — `dlsym` against the already-loaded image is the way to
