@@ -67,7 +67,7 @@ struct PackagePreviewSummaryTests {
         try FileManager.default.createDirectory(at: pkgURL, withIntermediateDirectories: true)
         let pkg = AnglesitePackage(url: pkgURL)
 
-        #expect(throws: AnglesitePackage.PackageError.self) {
+        #expect(throws: AnglesitePackage.PackageError.markerMissing(pkg.infoPlistURL)) {
             _ = try PackagePreviewSummary.summarize(pkg)
         }
     }

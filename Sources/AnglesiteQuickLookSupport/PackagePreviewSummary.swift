@@ -56,7 +56,9 @@ public struct PackagePreviewSummary: Sendable, Equatable {
         let pagesURL = package.sourceURL
             .appendingPathComponent("src", isDirectory: true)
             .appendingPathComponent("pages", isDirectory: true)
-        let pageCount = (try? fileManager.contentsOfDirectory(atPath: pagesURL.path))?.count ?? 0
+        let pageCount = (try? fileManager.contentsOfDirectory(atPath: pagesURL.path))?
+            .filter { !$0.hasPrefix(".") }
+            .count ?? 0
 
         let contentURL = package.sourceURL
             .appendingPathComponent("src", isDirectory: true)
@@ -92,7 +94,9 @@ public struct PackagePreviewSummary: Sendable, Equatable {
         }
         return directories
             .map { url -> CollectionCount in
-                let count = (try? fileManager.contentsOfDirectory(atPath: url.path))?.count ?? 0
+                let count = (try? fileManager.contentsOfDirectory(atPath: url.path))?
+                    .filter { !$0.hasPrefix(".") }
+                    .count ?? 0
                 return CollectionCount(name: url.lastPathComponent, count: count)
             }
             .sorted { $0.name < $1.name }

@@ -256,7 +256,7 @@ if includeContainer {
 // swift-port-design.md §10): off-Darwin, expose only the targets that actually compile
 // there, so `swift build && swift test` stays green on the Linux CI leg and the compiler is
 // the purity lint as seam PRs expand the portable set. Today that's AnglesiteSiteModel
-// (pure Foundation). AnglesiteCore still has Apple-only imports (FoundationModels, OSLog,
+// and AnglesiteQuickLookSupport (both pure Foundation). AnglesiteCore still has Apple-only imports (FoundationModels, OSLog,
 // Security, …); ANGLESITE_PORT_WIP=1 opts it back in so in-flight seam work can
 // compile-check it locally before the final purity PR flips it on unconditionally.
 // Filtering by name here (rather than duplicating target definitions in per-platform
