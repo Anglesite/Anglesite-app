@@ -362,6 +362,49 @@ struct SiteContentGraphTests {
         #expect(last == Self.siteA)
     }
 
+    // MARK: - isPopulated (#658)
+
+    @Test("isPopulated is false for a siteID that has never been loaded")
+    func isPopulatedFalseByDefault() async {
+        let graph = SiteContentGraph()
+        #expect(await graph.isPopulated(siteID: Self.siteA) == false)
+    }
+
+    @Test("isPopulated becomes true after load(siteID:...), even with an empty payload")
+    func isPopulatedTrueAfterLoad() async {
+        let graph = SiteContentGraph()
+        await graph.load(siteID: Self.siteA, pages: [], posts: [], images: [])
+        #expect(await graph.isPopulated(siteID: Self.siteA) == true)
+    }
+
+    @Test("isPopulated flips back to false after unload(siteID:)")
+    func isPopulatedFalseAfterUnload() async {
+        let graph = SiteContentGraph()
+        await graph.load(siteID: Self.siteA, pages: [Self.page()], posts: [], images: [])
+        await graph.unload(siteID: Self.siteA)
+        #expect(await graph.isPopulated(siteID: Self.siteA) == false)
+    }
+
+    @Test("isPopulated is scoped per siteID: loading one site does not mark another populated")
+    func isPopulatedIsPerSiteIsolated() async {
+        let graph = SiteContentGraph()
+        await graph.load(siteID: Self.siteA, pages: [], posts: [], images: [])
+        #expect(await graph.isPopulated(siteID: Self.siteA) == true)
+        #expect(await graph.isPopulated(siteID: Self.siteB) == false)
+    }
+
+    @Test("upsertPage/upsertPost/upsertImage alone do not mark a siteID populated — only a full load does")
+    func isPopulatedNotSetByIncrementalUpserts() async {
+        // #660: upserts (e.g. the navigator's rename path) can add real entries without a scan
+        // ever having run — isPopulated intentionally stays false in that case, since it can't
+        // distinguish "this is the whole site's content" from "this is one edited entry."
+        let graph = SiteContentGraph()
+        await graph.upsertPage(Self.page())
+        await graph.upsertPost(Self.post())
+        await graph.upsertImage(Self.image())
+        #expect(await graph.isPopulated(siteID: Self.siteA) == false)
+    }
+
     @Test("searchPages matches title and route case-insensitively")
     func searchPagesMatchesTitleAndRouteCaseInsensitive() async {
         let graph = SiteContentGraph()

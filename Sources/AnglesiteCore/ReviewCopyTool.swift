@@ -46,7 +46,7 @@ public struct ReviewCopyTool: Tool, Sendable {
     public static let toolName = "reviewCopy"
     public static let maxSiteChunks = 8
     public let name = ReviewCopyTool.toolName
-    public let description = "Review the site's written copy for clarity, tone, calls to action, and jargon. Pass a route (like '/about') for one page, or omit it to review the site."
+    public let description = "Review the site's written copy for clarity, tone, calls to action, and jargon. Pass a route (like '/about') for one page, or omit it to review the site. If the user gives you a route, call this directly with it — do not search for the page first; this tool reads pages from disk and will find them even if a prior search came back empty."
 
     @Generable
     public struct Arguments {
