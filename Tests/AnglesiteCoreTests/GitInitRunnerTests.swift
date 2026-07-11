@@ -2,39 +2,41 @@ import XCTest
 @testable import AnglesiteCore
 
 /// Regression coverage for #548: production wiring in `SitesLauncherView` used to discard the
-/// `RunResult` of `git init` entirely (`_ = try await ...run(...)`), so a nonzero exit code never
-/// surfaced as an error or even a warning — the scaffolder's "non-fatal" git-init step silently
-/// believed it had succeeded. `GitInitRunner` centralizes the exit-code check so it can't regress.
+/// result of `git init` entirely (`_ = try await ...run(...)`), so a failure never surfaced as an
+/// error or even a warning — the scaffolder's "non-fatal" git-init step silently believed it had
+/// succeeded. `GitInitRunner` centralizes the failure check so it can't regress.
+///
+/// Runs against SwiftGit2 (in-process libgit2, #640) rather than a subprocess — there's no
+/// injectable command runner to fake exit codes with anymore, so these exercise the real thing
+/// against real temp directories.
 final class GitInitRunnerTests: XCTestCase {
 
-    func testThrowsWithStderrOnNonzeroExit() async {
-        let dir = URL(fileURLWithPath: "/tmp/some-site")
-        do {
-            try await GitInitRunner.run(in: dir) { _, _, _ in
-                ProcessSupervisor.RunResult(stdout: "", stderr: "fatal: not a valid path", exitCode: 128)
-            }
-            XCTFail("expected GitInitError to be thrown")
-        } catch let error as GitInitError {
-            guard case .failed(let exitCode, let stderr) = error else { return XCTFail("wrong case") }
-            XCTAssertEqual(exitCode, 128)
-            XCTAssertEqual(stderr, "fatal: not a valid path")
-            XCTAssertEqual(error.errorDescription, "git init exited 128: fatal: not a valid path")
-        } catch {
-            XCTFail("expected GitInitError, got \(error)")
-        }
+    func testSucceedsAndCreatesAGitDirectory() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("gitinitrunner-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        try GitInitRunner.run(in: dir)
+
+        var isDirectory: ObjCBool = false
+        let gitDirExists = FileManager.default.fileExists(atPath: dir.appendingPathComponent(".git").path, isDirectory: &isDirectory)
+        XCTAssertTrue(gitDirExists)
+        XCTAssertTrue(isDirectory.boolValue)
     }
 
-    func testSucceedsOnZeroExit() async throws {
-        let dir = URL(fileURLWithPath: "/tmp/some-site")
-        var capturedArgs: [String] = []
-        var capturedCwd: URL?
-        try await GitInitRunner.run(in: dir) { executable, args, cwd in
-            capturedArgs = args
-            capturedCwd = cwd
-            XCTAssertEqual(executable.path, "/usr/bin/git")
-            return ProcessSupervisor.RunResult(stdout: "Initialized empty Git repository", stderr: "", exitCode: 0)
+    func testThrowsGitInitErrorWhenTargetIsNotADirectory() throws {
+        // git_repository_init requires a directory; pointing it at a plain file must fail.
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("gitinitrunner-\(UUID().uuidString)-not-a-dir")
+        try Data("not a directory".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        XCTAssertThrowsError(try GitInitRunner.run(in: file)) { error in
+            guard let gitError = error as? GitInitError else {
+                return XCTFail("expected GitInitError, got \(error)")
+            }
+            guard case .failed(let message) = gitError else { return XCTFail("wrong case") }
+            XCTAssertFalse(message.isEmpty)
+            XCTAssertEqual(gitError.errorDescription, "git init failed: \(message)")
         }
-        XCTAssertEqual(capturedArgs, ["init"])
-        XCTAssertEqual(capturedCwd, dir)
     }
 }

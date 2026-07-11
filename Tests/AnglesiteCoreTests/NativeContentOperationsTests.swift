@@ -215,6 +215,35 @@ struct NativeContentOperationsTests {
         #expect(sha?.count == 40)
     }
 
+    @Test("processGitCommit returns nil when the configured git identity can't be resolved")
+    func realGitNoIdentity() async throws {
+        // Forcing "genuinely no user.name/user.email anywhere in the config chain" isn't
+        // reliably constructible here: SwiftGit2's resolution goes through libgit2's own
+        // process-global config-search-path cache (populated once, at first SwiftGit2Init()), so
+        // mutating HOME/XDG_CONFIG_HOME mid-test doesn't retroactively affect it. Making the local
+        // repo config merely unreadable doesn't work either — empirically verified: libgit2
+        // silently skips an inaccessible local config and falls through to this dev/CI machine's
+        // real ambient global config instead of failing. What *does* reliably fail is malformed
+        // config syntax: a config file libgit2 can open but not parse is a hard error, not a
+        // silently-skipped level. This is a different trigger than "no identity configured
+        // anywhere" but exercises the exact thing this test actually cares about: a
+        // `defaultSignature()` failure, for any reason, must make `processGitCommit` return nil
+        // rather than crash or silently misbehave (finding #2 in PR #649's review).
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        _ = try await ProcessSupervisor.shared.run(executable: git, arguments: ["init"], currentDirectoryURL: repo)
+        // Deliberately no `git config user.email`/`user.name` this time — and the config file's
+        // contents are overwritten with unparseable garbage below, so it can't fall back to
+        // whatever `git init` itself wrote there either.
+        let configPath = repo.appendingPathComponent(".git/config")
+        try "[core\nthis is not valid git-config syntax".write(to: configPath, atomically: true, encoding: .utf8)
+
+        try "page".write(to: repo.appendingPathComponent("p.astro"), atomically: true, encoding: .utf8)
+        let sha = await NativeContentOperations.processGitCommit(repo, "p.astro", "anglesite: add page /p")
+        #expect(sha == nil)
+    }
+
     @Test("processGitDelete removes and commits the file, nil outside a repo")
     func realGitDelete() async throws {
         // Outside a repo → nil (best-effort), file untouched.
@@ -253,11 +282,16 @@ struct NativeContentOperationsTests {
         try "<div>original</div>".write(to: filePath, atomically: true, encoding: .utf8)
         _ = await NativeContentOperations.processGitCommit(repo, "unused.astro", "add unused.astro")
 
-        // Install a pre-commit hook that always rejects, so `git commit` fails after `git rm`
-        // has already removed the file from the index and working tree.
-        let hookPath = repo.appendingPathComponent(".git/hooks/pre-commit")
-        try "#!/bin/sh\nexit 1\n".write(to: hookPath, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookPath.path)
+        // Force the commit step to fail after the remove already succeeds: make the object
+        // database unwritable, so writing the new tree/commit objects fails. This used to be a
+        // rejecting `.git/hooks/pre-commit` hook, but SwiftGit2/libgit2 never runs shell hooks —
+        // a documented, accepted difference from the subprocess-git implementation this replaced
+        // (see processGitCommit's doc comment) — so a hook no longer exercises this path at all.
+        // Read access is untouched (0o555), so the rollback's restore-from-HEAD (which only reads
+        // existing objects, not writes new ones) still works.
+        let objectsDir = repo.appendingPathComponent(".git/objects")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: objectsDir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: objectsDir.path) }
 
         let sha = await NativeContentOperations.processGitDelete(repo, "unused.astro", "Remove unused.astro")
         #expect(sha == nil)
