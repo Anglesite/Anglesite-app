@@ -41,6 +41,20 @@ struct SecretStoreTests {
         #expect(try store.readCloudflareToken() == nil)
     }
 
+    @Test("GitHub convenience methods address the shared SecretAccounts slot")
+    func gitHubConvenienceUsesSharedAccount() throws {
+        let store = InMemorySecretStore()
+        try store.writeGitHubToken("ghp_123")
+        #expect(try store.read(account: SecretAccounts.githubToken) == "ghp_123")
+        #expect(try store.readGitHubToken() == "ghp_123")
+        // Distinct from the Cloudflare slot — writing one must not clobber the other.
+        try store.writeCloudflareToken("cf-456")
+        #expect(try store.readGitHubToken() == "ghp_123")
+        try store.clearGitHubToken()
+        #expect(try store.readGitHubToken() == nil)
+        #expect(try store.readCloudflareToken() == "cf-456")
+    }
+
     @Test("UnavailableSecretStore reads nothing, deletes as no-op, and refuses writes")
     func unavailableStoreBehavior() throws {
         let store = UnavailableSecretStore()
