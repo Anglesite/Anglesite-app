@@ -70,9 +70,19 @@ struct PreviewWebView: AdwaitaWidget {
             name: "script-message-received::\(namespace)",
             argCount: 1,
             pointer: ucm
-        ) { args in
-            guard let raw = args.first as? UnsafeRawPointer else { return }
-            guard let jsonC = jsc_value_to_json(OpaquePointer(raw), 0) else { return }
+        ) { (args: [Any]) -> Void in
+            guard let raw = args.first as? UnsafeRawPointer else {
+                // A marshaling mismatch (e.g. Adwaita boxing the signal argument differently)
+                // would otherwise be a completely silent dead bridge — logs are sacred.
+                let got: String
+                if let first = args.first { got = String(describing: Swift.type(of: first)) } else { got = "nothing" }
+                Task { await logCenter.append(source: "bridge-gtk", stream: .stderr, text: "script-message signal argument was not a pointer (got \(got))") }
+                return
+            }
+            guard let jsonC = jsc_value_to_json(OpaquePointer(raw), 0) else {
+                Task { await logCenter.append(source: "bridge-gtk", stream: .stderr, text: "jsc_value_to_json returned NULL for a script message") }
+                return
+            }
             let json = String(cString: jsonC)
             g_free(jsonC)
             guard let data = json.data(using: .utf8),

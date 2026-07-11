@@ -7,9 +7,15 @@ import AnglesiteCore
 /// preview and route overlay edits. One site at a time, matching the one-window MVP — opening
 /// a second package stops the first site's container.
 ///
+/// An `actor`, not `@MainActor`: `current`/`inFlightStop` are mutated from GTK callbacks *and*
+/// detached tasks, so they need real isolation — and on Linux `MainActor` rides the libdispatch
+/// main queue, which a GTK app's `g_main_loop`-parked main thread never drains, so main-actor
+/// work would starve. Actor isolation runs on the cooperative pool and is prompt regardless of
+/// what the main thread is doing.
+///
 /// UI-free by design: state reaches the shell through `SiteRuntime.observe()`, which the app
 /// layer drains and marshals onto the GTK main loop itself (`Idle`).
-final class ShellModel {
+actor ShellModel {
     struct OpenedSite {
         let displayName: String
         let siteID: String
@@ -19,15 +25,27 @@ final class ShellModel {
 
     private var current: OpenedSite?
 
+    /// The chain of not-yet-finished `runtime.stop()` calls from previous opens. Kept (rather
+    /// than fire-and-forgotten) for two reasons: `stopCurrent()` awaits it so process exit
+    /// can't race past an in-flight teardown and leak that container, and each new site's
+    /// `start()` is gated on it so re-opening the *same* package can't hit a podman
+    /// container-name collision with its own not-yet-removed predecessor.
+    private var inFlightStop: Task<Void, Never>?
+
     /// Reads the package marker (site identity, #242), stops any previously-open site, and
-    /// kicks off the container boot. Returns immediately — `start()` runs detached and the
-    /// caller watches `runtime.observe()` for `.starting` → `.ready`/`.failed`.
+    /// kicks off the container boot. Returns as soon as identity is known — `start()` runs
+    /// detached (gated on the previous teardown) and the caller watches `runtime.observe()`
+    /// for `.starting` → `.ready`/`.failed`.
     func open(packageURL: URL) throws -> OpenedSite {
         let package = AnglesitePackage(url: packageURL)
         let marker = try package.readMarker()
 
         if let previous = current {
-            Task { await previous.runtime.stop() }
+            let priorStops = inFlightStop
+            inFlightStop = Task {
+                await priorStops?.value
+                await previous.runtime.stop()
+            }
         }
 
         let client = MCPClient(supervisor: .shared)
@@ -45,14 +63,21 @@ final class ShellModel {
         current = site
 
         let sourceURL = package.sourceURL
-        Task { await runtime.start(siteID: site.siteID, siteDirectory: sourceURL) }
+        let stopGate = inFlightStop
+        Task {
+            await stopGate?.value
+            await runtime.start(siteID: site.siteID, siteDirectory: sourceURL)
+        }
         return site
     }
 
-    /// Stops the open site's container, if any. Called on window close so quitting the shell
-    /// never leaks a running podman container (`podman stop` on a `--rm` container tears the
-    /// whole guest down, astro/MCP included).
+    /// Stops the open site's container, if any, after draining any earlier in-flight
+    /// teardowns. Called on window close and on SIGINT/SIGTERM so quitting the shell never
+    /// leaks a running podman container (`podman stop` on a `--rm` container tears the whole
+    /// guest down, astro/MCP included) — even when the quit lands mid-site-switch.
     func stopCurrent() async {
+        await inFlightStop?.value
+        inFlightStop = nil
         guard let site = current else { return }
         current = nil
         await site.runtime.stop()

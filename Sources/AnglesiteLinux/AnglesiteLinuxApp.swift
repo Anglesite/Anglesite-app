@@ -1,6 +1,8 @@
 import Foundation
+import Glibc
 import Adwaita
 import AnglesiteCore
+import CWebKitGTK
 
 /// The Linux shell (cross-platform port phase 2, #567): a GTK4/libadwaita window that opens a
 /// `.anglesite` package, boots its site in a rootless-podman container
@@ -30,6 +32,17 @@ struct AnglesiteLinuxApp: App {
     @State private var router: MCPApplyEditRouter?
     @State private var openDialog: Signal = .init()
     @State private var quitting = false
+    /// Monotonic count of `open(packageURL:)` calls. Every UI update an open's observation
+    /// task schedules is guarded on the generation it was spawned under, so a superseded
+    /// site's late transitions (e.g. its teardown settling after a site switch) can never
+    /// clobber the current site's `status`/title — even if an `Idle` closure was already
+    /// enqueued when the observation task got cancelled.
+    @State private var openGeneration = 0
+    /// The active open's observation task, cancelled on site switch and shutdown. Without
+    /// this, each "Open Site…" switch would park the previous `for await`-loop task (and the
+    /// runtime + MCP client it retains) for the rest of the process's life —
+    /// `SiteRuntime.observe()`'s stream only ends when the consumer cancels.
+    @State private var observation: Task<Void, Never>?
 
     var scene: Scene {
         Window(id: "main") { _ in
@@ -55,6 +68,10 @@ struct AnglesiteLinuxApp: App {
                             FileHandle.standardError.write(Data("[\(line.source)] \(line.text)\n".utf8))
                         }
                     }
+                    // Ctrl+C / kill must tear the container down exactly like the window
+                    // close-box does — `podman run -d` guests outlive this process otherwise.
+                    ShutdownSignals.handler = { beginShutdown() }
+                    ShutdownSignals.install()
                     // `anglesite-linux Foo.anglesite` — open straight into the site.
                     if let path = CommandLine.arguments.dropFirst().first {
                         open(packageURL: URL(fileURLWithPath: path))
@@ -63,16 +80,11 @@ struct AnglesiteLinuxApp: App {
         }
         .defaultSize(width: 1200, height: 800)
         .onClose {
-            // Never leak the site container: intercept the first close, stop the runtime
-            // (podman stop tears down the whole `--rm` guest), then quit for real. GTK's main
-            // loop keeps running during the async stop, so the window just stays up for the
-            // second or two the teardown takes.
-            if quitting { return .close }
-            quitting = true
-            Task {
-                await model.stopCurrent()
-                Idle { app.quit() }
-            }
+            // Never leak the site container: intercept close, stop the runtime (podman stop
+            // tears down the whole `--rm` guest), then quit for real. GTK's main loop keeps
+            // running during the async stop, so the window just stays up for the second or
+            // two the teardown takes.
+            beginShutdown()
             return .cancel
         }
     }
@@ -114,38 +126,86 @@ struct AnglesiteLinuxApp: App {
 
     /// Opens the package and forwards every runtime state transition onto the GTK main loop.
     /// Errors surface as `.failed` on the status page rather than crashing the shell — the
-    /// Debug-pane equivalent (LogCenter) has the full container output.
+    /// launching terminal (LogCenter → stderr) has the full container output. Always called
+    /// on the GTK main loop (folder importer, `onAppear`), so the cancel-then-replace of
+    /// `observation` and the generation bump are ordered without further synchronization.
     func open(packageURL: URL) {
-        let site: ShellModel.OpenedSite
-        do {
-            site = try model.open(packageURL: packageURL)
-        } catch {
-            status = .failed(
-                name: packageURL.deletingPathExtension().lastPathComponent,
-                message: "Not an openable .anglesite package: \(error)"
-            )
-            return
-        }
-        router = site.router
-        status = .starting(name: site.displayName)
+        if quitting { return }
+        openGeneration += 1
+        let generation = openGeneration
+        observation?.cancel()
 
-        let name = site.displayName
-        let runtime = site.runtime
-        Task {
-            for await state in await runtime.observe() {
+        let placeholderName = packageURL.deletingPathExtension().lastPathComponent
+        status = .starting(name: placeholderName)
+
+        observation = Task {
+            let site: ShellModel.OpenedSite
+            do {
+                site = try await model.open(packageURL: packageURL)
+            } catch {
                 Idle {
+                    guard openGeneration == generation else { return }
+                    status = .failed(
+                        name: placeholderName,
+                        message: "Not an openable .anglesite package: \(error)"
+                    )
+                }
+                return
+            }
+            Idle {
+                guard openGeneration == generation else { return }
+                router = site.router
+                status = .starting(name: site.displayName)
+            }
+            for await state in await site.runtime.observe() {
+                if Task.isCancelled { break }
+                Idle {
+                    guard openGeneration == generation else { return }
                     switch state {
                     case .idle:
                         break
                     case .starting:
-                        status = .starting(name: name)
+                        status = .starting(name: site.displayName)
                     case .ready(_, let url):
-                        status = .ready(name: name, url: url.absoluteString)
+                        status = .ready(name: site.displayName, url: url.absoluteString)
                     case .failed(_, let message):
-                        status = .failed(name: name, message: message)
+                        status = .failed(name: site.displayName, message: message)
                     }
                 }
             }
         }
+    }
+
+    /// Shared teardown for the window close-box and SIGINT/SIGTERM: stop the site container
+    /// (draining any in-flight site-switch teardowns first, see `ShellModel.stopCurrent`),
+    /// then quit the GTK app. Idempotent — a second close click or signal while teardown is
+    /// in flight is a no-op (and a second Ctrl+C hard-kills, since the signal source is
+    /// one-shot).
+    func beginShutdown() {
+        guard !quitting else { return }
+        quitting = true
+        observation?.cancel()
+        Task {
+            await model.stopCurrent()
+            Idle { app.quit() }
+        }
+    }
+}
+
+/// `g_unix_signal_add`'s callback is a captureless C function pointer, so the shutdown closure
+/// parks in this global. `nonisolated(unsafe)` is sound here: `handler` is written once from
+/// the GTK main loop (`onAppear`) before `install()` registers the sources, and GLib invokes
+/// unix-signal sources on that same main context — never from the raw signal handler.
+enum ShutdownSignals {
+    nonisolated(unsafe) static var handler: (() -> Void)?
+
+    static func install() {
+        let callback: @convention(c) (gpointer?) -> gboolean = { _ in
+            ShutdownSignals.handler?()
+            return 0 // G_SOURCE_REMOVE: the next signal falls through to default disposition,
+                     // so a second Ctrl+C force-kills a wedged teardown instead of being eaten.
+        }
+        _ = g_unix_signal_add(SIGINT, callback, nil)
+        _ = g_unix_signal_add(SIGTERM, callback, nil)
     }
 }

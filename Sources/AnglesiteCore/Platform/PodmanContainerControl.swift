@@ -45,7 +45,10 @@ public struct PodmanContainerControl: LocalContainerControl {
     /// vsock proxies dial loopback from *inside* the guest) yields connection-reset on every
     /// mapped port. Binding `0.0.0.0` here doesn't widen host exposure — `start()` publishes
     /// both ports onto host loopback (`-p 127.0.0.1::…`), and the container's own interface
-    /// lives on pasta's private network. Verified against real podman on Linux (#567).
+    /// lives on pasta's private network. Verified live against real podman on Linux (#567,
+    /// PR #662 review): `ss -tlnp` shows pasta's host-side listener bound to `127.0.0.1:<port>`
+    /// (`podman port`'s `0.0.0.0:<port>` output is cosmetic reporting of the guest-side bind),
+    /// loopback connects, and a connect to the host's LAN address is refused.
     public static let defaultAstroCommand =
         "/usr/local/bin/anglesite-hydrate /workspace/site && cd /workspace/site && npx astro dev --port \(previewPort) --host 0.0.0.0"
 
