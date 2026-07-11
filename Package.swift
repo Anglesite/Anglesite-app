@@ -19,8 +19,14 @@ let strictConcurrency: [SwiftSetting] = [
 // bundle — since the missing symbol is resolved eagerly at load time. Weak-linking the framework
 // defers that resolution: the binary launches, and only the (narrow, vision-only) code path that
 // actually calls the missing symbol would fail if invoked on a mismatched OS/SDK pair.
+// `.when(platforms: [.macOS])`: `-weak_framework` is a Darwin ld option — ld.gold on the Linux
+// CI leg rejects it, and AnglesiteBridgeCoreTests (which carries this setting) is in the
+// off-Darwin portable target set, so the flag must never reach a non-Darwin link.
 let weakLinkFoundationModels: [LinkerSetting] = [
-    .unsafeFlags(["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"])
+    .unsafeFlags(
+        ["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"],
+        .when(platforms: [.macOS])
+    )
 ]
 
 // AnglesiteCore and AnglesiteAppCore (ChatView.swift) `import` FoundationModels. Swift embeds a *hard*
@@ -57,6 +63,15 @@ let includeContainer = false
 // runtime of GH's `macos-15` runner (which currently caps at Xcode 26.3).
 // Locally on Xcode 27 the tests build + run normally; on the older toolchain
 // we drop them so `swift test` still passes. Tracking removal in #128.
+// SwiftGit2 (Anglesite's patched fork — see #640) is Darwin-only: it has no Linux platform
+// entry, and the App Sandbox problem it solves doesn't exist off-macOS in the first place.
+// GitInitRunner/NativeContentOperations keep the plain subprocess-git path as their
+// #if !canImport(Darwin) branch, which is correct there, not just a fallback.
+var anglesiteCoreDependencies: [Target.Dependency] = ["AnglesiteSiteModel"]
+#if canImport(Darwin)
+anglesiteCoreDependencies.append(.product(name: "SwiftGit2", package: "SwiftGit2"))
+#endif
+
 var packageTargets: [Target] = [
     .target(
         name: "AnglesiteSiteModel",
@@ -71,7 +86,7 @@ var packageTargets: [Target] = [
     ),
     .target(
         name: "AnglesiteCore",
-        dependencies: ["AnglesiteSiteModel"],
+        dependencies: anglesiteCoreDependencies,
         path: "Sources/AnglesiteCore",
         swiftSettings: strictConcurrency + disableFoundationModelsAutolink
     ),
@@ -268,6 +283,16 @@ var packageProducts: [Product] = [
 ]
 
 var packageDependencies: [Package.Dependency] = []
+
+#if canImport(Darwin)
+// Anglesite's patched fork of mbernson/SwiftGit2 — see #640 and Spikes/GitPackageSpike. Pinned
+// to a commit rather than a tag or branch: SwiftGit2 upstream has no tagged SPM release yet, and
+// pinning to anglesite/main's tip would silently pick up unreviewed future commits. Bump
+// deliberately.
+packageDependencies.append(
+    .package(url: "https://github.com/Anglesite/SwiftGit2.git", revision: "49d2a87bcfa9c0e4f94862e7cfaa129d2adf64db")
+)
+#endif
 
 // Keep the AnglesiteContainer product and its native dependency together with the target above:
 // excluded as one unit under ANGLESITE_SKIP_CONTAINER=1 so the manifest never references a missing
