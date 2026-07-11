@@ -114,11 +114,13 @@ private struct AdvancedSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 #else
-                LabeledContent("GitHub") {
-                    Text("Uses your existing `git` credentials")
-                        .foregroundStyle(.secondary)
-                }
-                Text("The App Store build doesn't bundle `gh`. Anglesite uses whatever `git` credentials are already configured on your Mac (Keychain or SSH key) when pushing.")
+                KeychainTokenRow(
+                    title: "GitHub personal access token",
+                    read: { try KeychainStore().readGitHubToken() },
+                    write: { try KeychainStore().writeGitHubToken($0) },
+                    clear: { try KeychainStore().clearGitHubToken() }
+                )
+                Text("Used to push backups and publish sites to GitHub over HTTPS (the sandboxed app can't run `git` or `gh`, so it pushes in-process with this token). Create a fine-grained token with Contents read/write access at github.com/settings/tokens. Stored in the macOS Keychain under `io.dwk.anglesite` and never written to logs.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 #endif
@@ -170,11 +172,28 @@ private struct AdvancedSettingsView: View {
     }
 }
 
-/// Cloudflare API token row. Reads the current state from the Keychain on appear; saves a new
-/// value on commit; clears the slot on "Clear". The field stays a `SecureField` so the token
-/// doesn't appear in a screen share, but the actual secret bytes only round-trip when the user
-/// edits the field — appearing only redacts.
+/// Cloudflare API token row — the Keychain-token row bound to the Cloudflare slot.
 private struct CloudflareTokenRow: View {
+    var body: some View {
+        KeychainTokenRow(
+            title: "Cloudflare API token",
+            read: { try KeychainStore().readCloudflareToken() },
+            write: { try KeychainStore().writeCloudflareToken($0) },
+            clear: { try KeychainStore().clearCloudflareToken() }
+        )
+    }
+}
+
+/// Generic Keychain-backed token row (Cloudflare, GitHub). Reads the current state from the
+/// Keychain on appear; saves a new value on commit; clears the slot on "Clear". The field stays
+/// a `SecureField` so the token doesn't appear in a screen share, but the actual secret bytes
+/// only round-trip when the user edits the field — appearing only redacts.
+private struct KeychainTokenRow: View {
+    let title: String
+    let read: () throws -> String?
+    let write: (String) throws -> Void
+    let clear: () throws -> Void
+
     @State private var token: String = ""
     @State private var status: Status = .unknown
     @State private var savedMessage: String?
@@ -186,20 +205,18 @@ private struct CloudflareTokenRow: View {
         case error(String)
     }
 
-    private let store = KeychainStore()
-
     var body: some View {
-        LabeledContent("Cloudflare API token") {
+        LabeledContent(title) {
             VStack(alignment: .trailing, spacing: 6) {
                 HStack(spacing: 8) {
                     SecureField("paste token", text: $token, prompt: Text(promptText))
                         .textFieldStyle(.roundedBorder)
                         .frame(minWidth: 240)
-                        .accessibilityLabel("Cloudflare API token")
+                        .accessibilityLabel(title)
                         .accessibilityValue(statusDescription)
                     Button("Save") { save() }
                         .disabled(token.isEmpty)
-                    Button("Clear") { clear() }
+                    Button("Clear") { doClear() }
                         .disabled(status != .present)
                 }
                 if let savedMessage {
@@ -237,7 +254,7 @@ private struct CloudflareTokenRow: View {
 
     private func refreshStatus() {
         do {
-            status = (try store.readCloudflareToken() != nil) ? .present : .absent
+            status = (try read() != nil) ? .present : .absent
         } catch {
             status = .error("couldn't read keychain: \(error)")
         }
@@ -245,7 +262,7 @@ private struct CloudflareTokenRow: View {
 
     private func save() {
         do {
-            try store.writeCloudflareToken(token)
+            try write(token)
             token = ""
             status = .present
             savedMessage = "Saved."
@@ -255,9 +272,9 @@ private struct CloudflareTokenRow: View {
         }
     }
 
-    private func clear() {
+    private func doClear() {
         do {
-            try store.clearCloudflareToken()
+            try clear()
             token = ""
             status = .absent
             savedMessage = "Cleared."
@@ -269,8 +286,8 @@ private struct CloudflareTokenRow: View {
 }
 
 // The gh-backed GitHub panel is compiled out of the App Store build. A sandboxed app can't rely
-// on a user-installed `gh`; it uses the user's existing git credentials instead — see the #else
-// branch in the Credentials section above.
+// on a user-installed `gh` (nor spawn `git` at all, #640) — it stores its own GitHub token and
+// pushes in-process instead; see the KeychainTokenRow in the #else branch above (#653).
 #if !ANGLESITE_MAS
 /// "Connect GitHub" row. The app never sees the GitHub token — `gh` stores it in its own
 /// credential store. This row just launches the `gh auth login` device-code flow and
