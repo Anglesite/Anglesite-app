@@ -114,11 +114,19 @@ public actor SiteContentGraph {
     private var images: [String: Image] = [:]
     private var changeHandler: ChangeHandler?
 
-    /// siteIDs that have received at least one `load(siteID:...)` since cold start (or since
-    /// their last `unload`). Lets a caller distinguish "this site's index is genuinely empty"
-    /// from "this site was never scanned" (#658) — the latter is not evidence content is
-    /// missing, just that nothing has populated the graph yet (e.g. the active runtime hasn't
-    /// completed a site-open scan).
+    /// siteIDs that have received at least one full `load(siteID:...)` since cold start (or
+    /// since their last `unload`). Lets a caller distinguish "this site's index is genuinely
+    /// empty" from "this site was never scanned" (#658) — the latter is not evidence content is
+    /// missing, just that nothing has populated the graph yet.
+    ///
+    /// Deliberately **not** set by `upsertPage`/`upsertPost`/`upsertImage` — an incremental
+    /// upsert (e.g. the navigator's rename path) proves one entry exists, not that the whole
+    /// site has been enumerated, so it can't license "a search miss is reliable."
+    ///
+    /// As of writing, the only production caller of `load` is a post-mutation rescan
+    /// (`ContentCreationWorkflow.refreshContentGraph`) — nothing calls it at site-open, so this
+    /// flag is `false` for most of a session until the user creates/deletes content. Tracked as
+    /// #660; until that lands, `isPopulated` is a correct but under-exercised signal in practice.
     private var populatedSiteIDs: Set<String> = []
 
     /// Additive multi-subscriber broadcast for UI observers (the Site Navigator), keyed by a

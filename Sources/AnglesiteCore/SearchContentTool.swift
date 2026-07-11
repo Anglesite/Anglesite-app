@@ -13,12 +13,7 @@ public struct SearchContentTool: Tool, Sendable {
     /// `.started` event) can report the attached tools without constructing an instance.
     public static let toolName = "searchContent"
     public let name = SearchContentTool.toolName
-    public let description = """
-        Search the current site's pages and posts by title, route, slug, tag, or collection. This \
-        is a convenience lookup, not the source of truth: if you already know a post's slug or a \
-        page's route (e.g. the user stated it), call the tool for that slug/route directly instead \
-        of searching first — a search miss does not prove the content doesn't exist.
-        """
+    public let description = "Search the current site's pages and posts by title, route, slug, tag, or collection. This is a convenience lookup, not the source of truth: if you already know a post's slug or a page's route (e.g. the user stated it), call the tool for that slug/route directly instead of searching first — a search miss does not prove the content doesn't exist."
 
     @Generable
     public struct Arguments {
