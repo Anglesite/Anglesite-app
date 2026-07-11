@@ -171,6 +171,13 @@ final class PreviewModel {
             // returning the bridge's no-router fallback message.
             await EditRouterRegistry.shared.register(router, for: siteID)
             await runtime.start(siteID: siteID, siteDirectory: siteDirectory)
+            // #587: pull any visitor submissions staged since the site was last open and commit
+            // them into the git working copy. No-ops for sites without inbox capture configured
+            // (SiteSettings.inboxCapture{AccountID,KVNamespaceID} unset).
+            let configDirectory = siteDirectory.deletingLastPathComponent()
+                .appendingPathComponent("Config", isDirectory: true)
+            _ = await InboxSubmissionSync.pullAndCommitIfConfigured(
+                siteDirectory: siteDirectory, configDirectory: configDirectory)
             clearDevServerCommandInFlight(token: token)
         }
     }
