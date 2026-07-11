@@ -160,6 +160,12 @@ struct InboxSubmissionCommitterTests {
             }
         }
         try git(["init", "-q"])
+        // Repo-local identity: the code under test commits via SwiftGit2 on Darwin, whose
+        // `defaultSignature()` reads git config — the GIT_AUTHOR_*/GIT_COMMITTER_* env vars
+        // above only cover this fixture's own subprocess commits. Same pattern as
+        // `NativeContentOperationsTests`.
+        try git(["config", "user.email", "test@anglesite.test"])
+        try git(["config", "user.name", "test"])
         try git(["add", "-A"])
         try git(["commit", "-q", "-m", "initial"])
         return dir

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Darwin)
+import SwiftGit2
+#endif
 
 /// Writes staged inbox submissions (`InboxKVClient.Submission`) into the site's local git
 /// working copy as Keystatic-format Markdoc files (`src/content/inbox/<slug>.md`, matching the
@@ -6,8 +9,10 @@ import Foundation
 /// `Sources/AnglesiteCore/IntegrationCatalog.swift:652-665`), then commits them in one commit.
 /// This is the "commit staged submissions into the site's local git working copy" half of #587
 /// — it operates on the host's `Source/` directory directly (the same `siteDirectory`
-/// `SiteRuntime` implementations pass to `start`), reusing `ProcessSupervisor` the same way
-/// `NativeContentOperations.processGitCommit` does for a single file.
+/// `SiteRuntime` implementations pass to `start`), committing the same way
+/// `NativeContentOperations.processGitCommit` does for a single file: in-process SwiftGit2
+/// (libgit2) on Darwin, where `/usr/bin/git` cannot execute under App Sandbox (#640), and
+/// subprocess git off-Darwin.
 public enum InboxSubmissionCommitter {
     /// A URL/filename-safe slug derived from the subject, suffixed with the first 8 characters
     /// of the submission id to avoid collisions between two submissions with the same subject
@@ -105,8 +110,30 @@ public enum InboxSubmissionCommitter {
         return ids
     }
 
+    #if canImport(Darwin)
     /// Stages and commits multiple relative paths in one commit — the batched counterpart to
     /// `NativeContentOperations.processGitCommit`, which only ever commits a single path.
+    /// Via SwiftGit2 (in-process libgit2, #640): `/usr/bin/git` cannot execute at all under App
+    /// Sandbox. Same two behavioral caveats as `processGitCommit` (commits whatever is staged
+    /// rather than a path-scoped commit; no shell hooks) — see its doc comment for why both are
+    /// acceptable here.
+    @Sendable public static func processGitCommitBatch(
+        _ projectRoot: URL, _ relPaths: [String], _ message: String
+    ) async -> String? {
+        SwiftGit2Bootstrap.ensureInitialized
+        guard case .success(let repo) = Repository.at(projectRoot) else { return nil }
+        for relPath in relPaths {
+            guard case .success = repo.add(path: relPath) else { return nil }
+        }
+        guard case .success(let signature) = repo.defaultSignature() else { return nil }
+        guard case .success(let commit) = repo.commit(message: message, signature: signature) else { return nil }
+        return commit.oid.description
+    }
+    #else
+    /// Stages and commits multiple relative paths in one commit — the batched counterpart to
+    /// `NativeContentOperations.processGitCommit`, which only ever commits a single path.
+    /// Off-Darwin there's no App Sandbox to route around, so plain subprocess git remains
+    /// correct here rather than a gap to fill.
     @Sendable public static func processGitCommitBatch(
         _ projectRoot: URL, _ relPaths: [String], _ message: String
     ) async -> String? {
@@ -124,4 +151,5 @@ public enum InboxSubmissionCommitter {
         else { return nil }
         return head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+    #endif
 }
