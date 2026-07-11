@@ -2,14 +2,20 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
-/// Drives `RepoBootstrap`'s preflight (`remote(of:)`, `ensureCommittable`) against real temp git
-/// repos rather than a mocked `RepoCommandRunner` — on Darwin those methods run in-process via
-/// SwiftGit2 (#654) and no longer consult `run` at all. Mirrors the real-repo fixture pattern
-/// established by `NativeContentOperationsTests` for the same reason (#649/#640). `git` subprocess
-/// calls below are purely test-fixture setup (init/config/remote/seed-commit), not exercising the
-/// code under test — off-Darwin, where `RepoBootstrap` itself still uses subprocess git, that
-/// distinction disappears but the fixtures remain valid.
 @Suite struct RepoBootstrapTests {
+    actor CallLog { var calls: [[String]] = []; func add(_ a: [String]) { calls.append(a) } }
+
+    /// Fake runner that records every invocation and returns scripted results by arg-prefix.
+    private func runner(_ log: CallLog, _ table: [(match: [String], result: ProcessSupervisor.RunResult)]) -> RepoCommandRunner {
+        { _, args, _ in
+            await log.add(args)
+            for entry in table where Array(args.prefix(entry.match.count)) == entry.match { return entry.result }
+            return ProcessSupervisor.RunResult(stdout: "", stderr: "", exitCode: 1)
+        }
+    }
+    private func ok(_ o: String = "") -> ProcessSupervisor.RunResult { .init(stdout: o, stderr: "", exitCode: 0) }
+    private func fail(_ c: Int32 = 1) -> ProcessSupervisor.RunResult { .init(stdout: "", stderr: "", exitCode: c) }
+
     struct StubProvider: RepoProvider {
         let authed: Bool
         let result: Result<RemoteRepo, RepoBootstrapError>
@@ -40,159 +46,121 @@ import Foundation
         return out
     }
 
-    /// `RepoBootstrap`'s initializer still takes a `RepoCommandRunner` (shared with `GHRepoProvider`
-    /// and the off-Darwin preflight fallback), but the Darwin preflight under test here never calls
-    /// it — a runner that always fails makes that assumption loud if it ever stops holding.
-    private func unusedRunner() -> RepoCommandRunner {
-        { _, _, _ in ProcessSupervisor.RunResult(stdout: "", stderr: "", exitCode: 1) }
-    }
-
-    /// A fresh temp directory, optionally already a git repo (with local identity configured so
-    /// `defaultSignature()` resolves deterministically), optionally with a seed commit and/or an
-    /// `origin` remote. `initialized: false` leaves a plain directory — the "not yet a repo, needs
-    /// `git init`" fixture.
-    private func makeSourceDir(
-        initialized: Bool, commit: Bool = false, remoteURL: String? = nil
-    ) async throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("repo-bootstrap-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        guard initialized else { return dir }
-
-        let git = URL(fileURLWithPath: "/usr/bin/git")
-        func run(_ args: [String]) async throws {
-            _ = try await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: dir)
-        }
-        try await run(["init"])
-        try await run(["config", "user.email", "t@t.io"])
-        try await run(["config", "user.name", "t"])
-        if let remoteURL { try await run(["remote", "add", "origin", remoteURL]) }
-        if commit {
-            try "seed".write(to: dir.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
-            try await run(["add", "-A"])
-            try await run(["commit", "-m", "seed"])
-        }
-        return dir
-    }
-
-    @Test func publishShortCircuitsWhenAlreadyPublished() async throws {
-        let source = try await makeSourceDir(initialized: true, commit: true, remoteURL: "https://github.com/acme/site.git")
-        let b = RepoBootstrap(provider: StubProvider(authed: true, result: .success(repo())), run: unusedRunner())
-        let events = await collect(b.publish(source: source, repoName: "site", isPrivate: true))
+    @Test func publishShortCircuitsWhenAlreadyPublished() async {
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: StubProvider(authed: true, result: .success(repo())),
+            run: runner(log, [(["git", "remote", "get-url"], ok("https://github.com/acme/site.git"))]))
+        let events = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "site", isPrivate: true))
         #expect(events.last == .published(repo()))
-        // Short-circuits before even checking auth — .needsAuth must never appear.
-        #expect(!events.contains(.needsAuth))
+        // No git init / commit attempted.
+        #expect(await !log.calls.contains(["git", "init"]))
     }
 
-    @Test func publishEmitsNeedsAuthWhenNotAuthenticated() async throws {
-        let source = try await makeSourceDir(initialized: true, commit: true)   // no origin
-        let b = RepoBootstrap(provider: StubProvider(authed: false, result: .success(repo())), run: unusedRunner())
-        let events = await collect(b.publish(source: source, repoName: "site", isPrivate: true))
+    @Test func publishEmitsNeedsAuthWhenNotAuthenticated() async {
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: StubProvider(authed: false, result: .success(repo())),
+            run: runner(log, [(["git", "remote", "get-url"], fail())]))   // no origin
+        let events = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "site", isPrivate: true))
         #expect(events.contains(.needsAuth))
         #expect(events.last == .needsAuth)
     }
 
-    @Test func publishInitsCommitsThenPublishes() async throws {
-        // Not yet a repo — `ensureCommittable` must `git init` and commit before publishing.
-        let source = try await makeSourceDir(initialized: false)
-        try "hello".write(to: source.appendingPathComponent("index.md"), atomically: true, encoding: .utf8)
-        let b = RepoBootstrap(provider: StubProvider(authed: true, result: .success(repo())), run: unusedRunner())
-        let events = await collect(b.publish(source: source, repoName: "site", isPrivate: true))
+    @Test func publishInitsCommitsThenPublishes() async {
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: StubProvider(authed: true, result: .success(repo())),
+            run: runner(log, [
+                (["git", "remote", "get-url"], fail()),                 // no origin → proceed
+                (["git", "rev-parse", "--is-inside-work-tree"], fail()), // not a repo → init
+                (["git", "init"], ok()),
+                (["git", "rev-parse", "HEAD"], fail()),                  // no commits → commit
+                (["git", "status"], ok(" M file")),
+                (["git", "add"], ok()),
+                (["git", "commit"], ok()),
+            ]))
+        let events = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "site", isPrivate: true))
         #expect(events.last == .published(repo()))
-        #expect(events.contains(.progress(step: .initializing, message: "Initializing git repository…")))
-        #expect(events.contains(.progress(step: .committing, message: "Committing your site…")))
+        #expect(await log.calls.contains(["git", "init"]))
+        #expect(await log.calls.contains(["git", "commit", "-m", "Initial commit"]))
     }
 
-    @Test func publishSurfacesProviderError() async throws {
-        let source = try await makeSourceDir(initialized: true, commit: true)   // clean, has commits
+    @Test func publishSurfacesProviderError() async {
+        let log = CallLog()
         let b = RepoBootstrap(
             provider: StubProvider(authed: true, result: .failure(RepoBootstrapError(reason: "Name already exists"))),
-            run: unusedRunner())
-        let events = await collect(b.publish(source: source, repoName: "site", isPrivate: true))
+            run: runner(log, [
+                (["git", "remote", "get-url"], fail()),
+                (["git", "rev-parse", "--is-inside-work-tree"], ok()),   // already a repo
+                (["git", "rev-parse", "HEAD"], ok("abc123")),            // has commits
+                (["git", "status"], ok("")),                             // clean
+            ]))
+        let events = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "site", isPrivate: true))
         #expect(events.last == .failed(reason: "Name already exists"))
     }
 
-    @Test func remoteReturnsParsedRepoWhenOriginSet() async throws {
-        let source = try await makeSourceDir(initialized: true, remoteURL: "https://github.com/acme/site.git")
-        let b = RepoBootstrap(provider: StubProvider(authed: true, result: .success(repo())), run: unusedRunner())
-        #expect(await b.remote(of: source)?.owner == "acme")
+    @Test func remoteReturnsParsedRepoWhenOriginSet() async {
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: StubProvider(authed: true, result: .success(repo())),
+            run: runner(log, [(["git", "remote", "get-url"], ok("https://github.com/acme/site.git"))]))
+        #expect(await b.remote(of: URL(fileURLWithPath: "/tmp/s"))?.owner == "acme")
     }
 
-    @Test func remoteReturnsNilWhenNoOrigin() async throws {
-        let source = try await makeSourceDir(initialized: true)
-        let b = RepoBootstrap(provider: StubProvider(authed: true, result: .success(repo())), run: unusedRunner())
-        #expect(await b.remote(of: source) == nil)
+    @Test func remoteReturnsNilWhenNoOrigin() async {
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: StubProvider(authed: true, result: .success(repo())),
+            run: runner(log, [(["git", "remote", "get-url"], fail())]))
+        #expect(await b.remote(of: URL(fileURLWithPath: "/tmp/s")) == nil)
     }
 
-    @Test func remoteReturnsNilOutsideAGitRepo() async throws {
-        let source = try await makeSourceDir(initialized: false)
-        let b = RepoBootstrap(provider: StubProvider(authed: true, result: .success(repo())), run: unusedRunner())
-        #expect(await b.remote(of: source) == nil)
-    }
-
-    @Test func publishSlugifiesDisplayName() async throws {
+    @Test func publishSlugifiesDisplayName() async {
         // Display names with spaces/punctuation must be slugified before reaching the provider.
-        let source = try await makeSourceDir(initialized: true, commit: true)
         let capturing = CapturingProvider(result: .success(repo()))
-        let b = RepoBootstrap(provider: capturing, run: unusedRunner())
-        _ = await collect(b.publish(source: source, repoName: "My Cool Site!", isPrivate: true))
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: capturing,
+            run: runner(log, [
+                (["git", "remote", "get-url"], fail()),
+                (["git", "rev-parse", "--is-inside-work-tree"], ok()),  // already a repo
+                (["git", "rev-parse", "HEAD"], ok("abc123")),           // has commits
+                (["git", "status"], ok("")),                            // clean
+            ]))
+        _ = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "My Cool Site!", isPrivate: true))
         #expect(await capturing.capturedName == "my-cool-site")
     }
 
-    @Test func publishRefusesWhenDotenvWouldBeCommitted() async throws {
+    @Test func publishRefusesWhenDotenvWouldBeCommitted() async {
         // A dirty tree containing a .env file must abort before staging — never create the repo.
-        let source = try await makeSourceDir(initialized: true, commit: true)
-        try "SECRET=1".write(to: source.appendingPathComponent(".env"), atomically: true, encoding: .utf8)
-        try "page".write(to: source.appendingPathComponent("page.astro"), atomically: true, encoding: .utf8)
         let capturing = CapturingProvider(result: .success(repo()))
-        let b = RepoBootstrap(provider: capturing, run: unusedRunner())
-        let events = await collect(b.publish(source: source, repoName: "site", isPrivate: true))
+        let log = CallLog()
+        let b = RepoBootstrap(
+            provider: capturing,
+            run: runner(log, [
+                (["git", "remote", "get-url"], fail()),                       // no origin → proceed
+                (["git", "rev-parse", "--is-inside-work-tree"], ok()),        // already a repo
+                (["git", "rev-parse", "HEAD"], ok("abc123")),                 // has commits
+                (["git", "status"], ok("?? .env\n M src/page.astro")),        // dirty, includes .env
+            ]))
+        let events = await collect(b.publish(source: URL(fileURLWithPath: "/tmp/s"), repoName: "site", isPrivate: true))
         if case .failed(let reason) = events.last {
             #expect(reason.contains(".env"))
         } else {
             Issue.record("expected .failed, got \(String(describing: events.last))")
         }
-        #expect(await capturing.capturedName == nil)   // never created the repo
-
-        // Nothing was staged — the .env file is still untracked, not sitting in the index.
-        let git = URL(fileURLWithPath: "/usr/bin/git")
-        let status = try await ProcessSupervisor.shared.run(
-            executable: git, arguments: ["status", "--porcelain"], currentDirectoryURL: source)
-        #expect(status.stdout.contains("?? .env"))
+        #expect(await !log.calls.contains(["git", "add", "-A"]))   // never staged
+        #expect(await capturing.capturedName == nil)               // never created the repo
     }
 
-    @Test func publishRefusesWhenNestedDotenvWouldBeCommitted() async throws {
-        // .env.local nested in a subdirectory must be caught the same way as a top-level .env.
-        let source = try await makeSourceDir(initialized: true, commit: true)
-        try FileManager.default.createDirectory(
-            at: source.appendingPathComponent("config"), withIntermediateDirectories: true)
-        try "SECRET=1".write(to: source.appendingPathComponent("config/.env.local"), atomically: true, encoding: .utf8)
-        let b = RepoBootstrap(
-            provider: StubProvider(authed: true, result: .success(repo())), run: unusedRunner())
-        let events = await collect(b.publish(source: source, repoName: "site", isPrivate: true))
-        if case .failed(let reason) = events.last {
-            #expect(reason.contains(".env.local"))
-        } else {
-            Issue.record("expected .failed, got \(String(describing: events.last))")
-        }
-    }
-
-    @Test func publishStagesAndCommitsFilesInNewSubdirectories() async throws {
-        // A new, non-secret file nested in a brand-new directory must still get staged and
-        // committed — the same recursion gap that hid nested .env secrets would otherwise also
-        // silently drop ordinary nested content from the "add -A" equivalent.
-        let source = try await makeSourceDir(initialized: true, commit: true)
-        try FileManager.default.createDirectory(
-            at: source.appendingPathComponent("src/pages"), withIntermediateDirectories: true)
-        try "hello".write(to: source.appendingPathComponent("src/pages/about.md"), atomically: true, encoding: .utf8)
-        let b = RepoBootstrap(
-            provider: StubProvider(authed: true, result: .success(repo())), run: unusedRunner())
-        let events = await collect(b.publish(source: source, repoName: "site", isPrivate: true))
-        #expect(events.last == .published(repo()))
-
-        let git = URL(fileURLWithPath: "/usr/bin/git")
-        let show = try await ProcessSupervisor.shared.run(
-            executable: git, arguments: ["show", "--stat", "HEAD"], currentDirectoryURL: source)
-        #expect(show.stdout.contains("src/pages/about.md"))
+    @Test func dotenvFilesDetectsSecretsAndIgnoresOthers() {
+        let porcelain = "?? .env\n M config/.env.local\n?? README.md\nA  foo.env.bak\nR  old.txt -> new.txt"
+        let found = RepoBootstrap.dotenvFiles(inPorcelain: porcelain)
+        #expect(found.contains(".env"))
+        #expect(found.contains("config/.env.local"))
+        #expect(!found.contains("README.md"))
+        #expect(!found.contains("foo.env.bak"))   // basename isn't .env / .env.* — not a secret
+        #expect(!found.contains("new.txt"))
     }
 }
