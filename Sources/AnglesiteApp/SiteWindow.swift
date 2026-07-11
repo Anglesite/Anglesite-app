@@ -167,6 +167,9 @@ struct SiteWindow: View {
                     },
                     onDuplicateRequested: { item in
                         Task { await model.duplicate(id: item.id) }
+                    },
+                    onRepurposeRequested: { item in
+                        Task { await model.presentRepurpose(postRowID: item.id) }
                     }
                 )
                     .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
@@ -560,6 +563,15 @@ struct SiteWindow: View {
             // buttons are structurally the only way out — otherwise the continuation would leak
             // and `preview.open()` would never run.
             .interactiveDismissDisabled()
+        }
+        .sheet(item: $bindableModel.copyEditModel) { reportModel in
+            CopyEditReportView(model: reportModel)
+        }
+        .sheet(item: $bindableModel.socialPlanModel) { planModel in
+            SocialPlanView(model: planModel)
+        }
+        .sheet(item: $bindableModel.repurposeModel) { repurposeModel in
+            RepurposeView(model: repurposeModel)
         }
         .sheet(item: $bindableModel.integrationWizardModel) { wizardModel in
             NavigationStack {

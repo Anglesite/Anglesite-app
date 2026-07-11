@@ -72,6 +72,25 @@ public enum Frontmatter {
         return out
     }
 
+    /// Everything after the closing `---` fence — the raw markdown/astro body with the
+    /// frontmatter block removed. Returns the whole input when there is no fence at the very
+    /// start or the fence is unterminated (malformed file — don't eat content). Companion to
+    /// `parse`, added for the content-help chunker (Slice 6, #465).
+    public static func body(_ source: String) -> String {
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        guard let match = frontmatterPattern.firstMatch(in: source, range: range),
+              let matched = Range(match.range, in: source)
+        else { return source }
+        var rest = source[matched.upperBound...]
+        // Drop the closing fence's own line ending so the body starts on the next line.
+        if rest.hasPrefix("\r\n") {
+            rest = rest.dropFirst(2)
+        } else if rest.hasPrefix("\n") {
+            rest = rest.dropFirst()
+        }
+        return String(rest)
+    }
+
     // MARK: - Helpers
 
     /// Compiled once — `frontmatterBlock` runs per page/post file during a scan, so recompiling

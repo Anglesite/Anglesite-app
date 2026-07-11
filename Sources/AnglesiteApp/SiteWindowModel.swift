@@ -80,6 +80,17 @@ final class SiteWindowModel {
     /// same lifecycle as `chat`. Its own `sheetPresented` drives the `.sheet(isPresented:)` in
     /// `SiteWindow`, following `AuditModel`'s pattern rather than the item-based sheets.
     var styleGuide: ProjectConventionsModel?
+    /// Non-nil ⟺ the Review Copy sheet is presented (`.sheet(item:)`), following the same
+    /// coupling-presentation-to-the-model pattern as `siriReadinessModel`/`integrationWizardModel`.
+    /// Built fresh each time (`presentCopyEdit`) with a new `ProjectConventionsStore` scoped to
+    /// this site's `configDirectory` — the store is a stateless, file-backed actor (Task 10, #465).
+    var copyEditModel: CopyEditReportModel?
+    /// Non-nil ⟺ the Social Media Plan sheet is presented (`.sheet(item:)`), same coupling and
+    /// fresh-`ProjectConventionsStore` pattern as `copyEditModel` (Task 13, #465).
+    var socialPlanModel: SocialPlanModel?
+    /// Non-nil ⟺ the Repurpose Post sheet is presented (`.sheet(item:)`), same coupling and
+    /// fresh-`ProjectConventionsStore` pattern as `copyEditModel`/`socialPlanModel` (Task 16, #465).
+    var repurposeModel: RepurposeModel?
     /// The window's `UndoManager`, published down from `SiteWindow`'s
     /// `@Environment(\.undoManager)` so applied edits register for Edit ▸ Undo (#527). Weak +
     /// `@ObservationIgnored`: the window owns it and it isn't render state. Forwarded on set
@@ -263,6 +274,50 @@ final class SiteWindowModel {
         Task { await styleGuide.presentSheet() }
     }
 
+    var canOpenCopyEdit: Bool { site != nil }
+
+    /// Presents the Review Copy sheet (#465). Reconstructs a `ProjectConventionsStore` from the
+    /// site's `configDirectory` — the same expression `ProjectConventionsModel.init` uses for
+    /// `styleGuide` at `loadAndStart` (~line 1068) — rather than reaching into that model's
+    /// private store, since the store is a stateless file-backed actor keyed off the directory.
+    func presentCopyEdit() {
+        guard copyEditModel == nil, let site else { return }
+        copyEditModel = CopyEditReportModel(
+            siteID: site.id,
+            sourceDirectory: site.sourceDirectory,
+            conventionsStore: ProjectConventionsStore(configDirectory: site.configDirectory)
+        )
+    }
+
+    var canOpenSocialPlan: Bool { site != nil }
+
+    /// Presents the Social Media Plan sheet (#465), same pattern as `presentCopyEdit`.
+    func presentSocialPlan() {
+        guard socialPlanModel == nil, let site else { return }
+        socialPlanModel = SocialPlanModel(
+            siteID: site.id,
+            sourceDirectory: site.sourceDirectory,
+            conventionsStore: ProjectConventionsStore(configDirectory: site.configDirectory)
+        )
+    }
+
+    /// Presents the Repurpose Post sheet (#465), same pattern as `presentCopyEdit`/`presentSocialPlan`.
+    func presentRepurpose(slug: String) {
+        guard repurposeModel == nil, let site else { return }
+        repurposeModel = RepurposeModel(
+            siteID: site.id, sourceDirectory: site.sourceDirectory, slug: slug,
+            conventionsStore: ProjectConventionsStore(configDirectory: site.configDirectory)
+        )
+    }
+
+    /// Resolves a Navigator row id to its post's slug, then presents — mirrors `duplicate(id:)`'s
+    /// id→Post resolution pattern for reaching the actor-isolated `SiteContentGraph` from the
+    /// Navigator's context menu, which only carries a `NavigatorItem.id` (Task 16, #465).
+    func presentRepurpose(postRowID id: String) async {
+        guard let post = await contentGraph.post(id: id) else { return }
+        presentRepurpose(slug: post.slug)
+    }
+
     /// The `.failed`-state pane's Retry button — same recovery as Site ▸ Start Dev Server (#515),
     /// kept as one code path rather than two that could drift.
     func retryPreview() {
@@ -300,6 +355,9 @@ final class SiteWindowModel {
         }
         chat = nil
         styleGuide = nil
+        copyEditModel = nil
+        socialPlanModel = nil
+        repurposeModel = nil
         navigator?.stop()
         navigator = nil
         graphExplorer.stop()

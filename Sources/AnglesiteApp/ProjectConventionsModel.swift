@@ -64,6 +64,16 @@ final class ProjectConventionsModel {
         }
     }
 
+    /// Applies the brand-voice interview's answers (#465) as `.userOverride` writes — one per
+    /// non-empty answer, mirroring `setOverride`'s single-field flow but batching the interview's
+    /// up-to-four fields into a single persist. Delegates to `BrandVoiceWriter`, the single write
+    /// path shared with `SaveBrandVoiceTool`'s chat front-door, so both routes agree on seeding
+    /// and empty-answer handling.
+    func applyBrandVoice(_ answers: BrandVoiceAnswers) async {
+        await BrandVoiceWriter.save(answers, engine: engine, store: store, siteID: siteID)
+        conventions = await engine.conventions(siteID: siteID)
+    }
+
     func clearOverride(_ field: OverridableField) async {
         await engine.clearOverride(siteID: siteID, field: field)
         // `engine.clearOverride` only flips the field's `source` back to `.inferred` — its value

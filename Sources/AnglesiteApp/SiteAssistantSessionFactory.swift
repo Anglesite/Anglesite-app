@@ -22,6 +22,8 @@ enum SiteAssistantSessionFactory {
         _ knowledgeIndex: SiteKnowledgeIndex,
         _ semanticRanker: SemanticRanker?,
         _ integrationService: any IntegrationOperationsService,
+        _ conventionsEngine: ProjectConventionsEngine?,
+        _ conventionsStore: ProjectConventionsStore,
         _ themeCatalog: ThemeCatalog?,
         _ graphSnapshotProvider: @escaping GraphSnapshotProvider
     ) -> any ConversationalAssistant
@@ -52,7 +54,7 @@ enum SiteAssistantSessionFactory {
             let editRouterProvider: EditRouterProvider = { siteID in
                 await EditRouterRegistry.shared.router(for: siteID)
             }
-            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, themeCatalog, graphSnapshotProvider in
+            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, conventionsEngine, conventionsStore, themeCatalog, graphSnapshotProvider in
                 CombinedAugmentedAssistant(
                     base: FoundationModelAssistant(
                         tier: .onDevice,
@@ -61,6 +63,11 @@ enum SiteAssistantSessionFactory {
                         knowledgeIndex: knowledgeIndex,
                         semanticRanker: semanticRanker,
                         integrationService: integrationService,
+                        conventionsEngine: conventionsEngine,
+                        conventionsStore: conventionsStore,
+                        copyEditAuditor: CopyEditAuditorFactory.makeDefault(),
+                        socialMediaPlanner: SocialMediaPlannerFactory.makeDefault(),
+                        postRepurposer: PostRepurposerFactory.makeDefault(),
                         themeCatalog: themeCatalog
                     ),
                     index: knowledgeIndex,
@@ -125,6 +132,13 @@ enum SiteAssistantSessionFactory {
         graphSnapshotProvider: @escaping GraphSnapshotProvider
     ) -> SiteAssistantSession {
         let editBridge = IntentEditBridge(routerProvider: dependencies.editRouterProvider)
+        // A second `ProjectConventionsStore` instance pointed at the same `configDirectory` as
+        // `SiteWindowModel`'s Style Guide store (rather than threading that instance through this
+        // factory's parameter list) — harmless because all writes now flow through the shared
+        // `conventionsEngine` (#465): `BrandVoiceWriter`/`ProjectConventionsModel` only ever persist
+        // the engine's merged snapshot to whichever store instance they hold, so a second store
+        // pointed at the same `conventions.json` never observes a stale value.
+        let conventionsStore = ProjectConventionsStore(configDirectory: configDirectory)
         let chat = ChatModel(
             siteID: siteID,
             siteDirectory: sourceDirectory,
@@ -135,6 +149,8 @@ enum SiteAssistantSessionFactory {
                 knowledgeIndex,
                 semanticRanker,
                 integrationService,
+                conventionsEngine,
+                conventionsStore,
                 themeCatalog,
                 graphSnapshotProvider
             ),

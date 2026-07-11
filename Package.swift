@@ -19,8 +19,14 @@ let strictConcurrency: [SwiftSetting] = [
 // bundle — since the missing symbol is resolved eagerly at load time. Weak-linking the framework
 // defers that resolution: the binary launches, and only the (narrow, vision-only) code path that
 // actually calls the missing symbol would fail if invoked on a mismatched OS/SDK pair.
+// `.when(platforms: [.macOS])`: `-weak_framework` is a Darwin ld option — ld.gold on the Linux
+// CI leg rejects it, and AnglesiteBridgeCoreTests (which carries this setting) is in the
+// off-Darwin portable target set, so the flag must never reach a non-Darwin link.
 let weakLinkFoundationModels: [LinkerSetting] = [
-    .unsafeFlags(["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"])
+    .unsafeFlags(
+        ["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"],
+        .when(platforms: [.macOS])
+    )
 ]
 
 // AnglesiteCore and AnglesiteAppCore (ChatView.swift) `import` FoundationModels. Swift embeds a *hard*
@@ -151,7 +157,10 @@ var packageTargets: [Target] = [
         name: "AnglesiteBridgeCoreTests",
         dependencies: ["AnglesiteBridgeCore", "AnglesiteCore"],
         path: "Tests/AnglesiteBridgeCoreTests",
-        swiftSettings: strictConcurrency
+        swiftSettings: strictConcurrency,
+        // Depends on AnglesiteCore, so the bundle needs the same #541 weak link as its siblings —
+        // without it dyld can't load the bundle on an SDK/OS mangling-skewed Xcode 27 beta host.
+        linkerSettings: weakLinkFoundationModels
     ),
     .testTarget(
         name: "AnglesiteBridgeTests",
