@@ -39,15 +39,23 @@ public struct PodmanContainerControl: LocalContainerControl {
 
     /// The production astro-dev guest command: hydrate deps from the image's baked toolchain
     /// (zero-install hardlink when the cloned site's lockfile matches the template; offline-first
-    /// npm ci otherwise), then serve. Matches `ContainerizationControl`'s guest command exactly.
+    /// npm ci otherwise), then serve. Matches `ContainerizationControl`'s guest command except
+    /// for the bind host: rootless podman's port publishing (pasta) forwards to the container's
+    /// eth0, NOT guest loopback, so a `127.0.0.1` bind (correct on macOS, where the guest-local
+    /// vsock proxies dial loopback from *inside* the guest) yields connection-reset on every
+    /// mapped port. Binding `0.0.0.0` here doesn't widen host exposure — `start()` publishes
+    /// both ports onto host loopback (`-p 127.0.0.1::…`), and the container's own interface
+    /// lives on pasta's private network. Verified against real podman on Linux (#567).
     public static let defaultAstroCommand =
-        "/usr/local/bin/anglesite-hydrate /workspace/site && cd /workspace/site && npx astro dev --port \(previewPort) --host 127.0.0.1"
+        "/usr/local/bin/anglesite-hydrate /workspace/site && cd /workspace/site && npx astro dev --port \(previewPort) --host 0.0.0.0"
 
     /// The production MCP-sidecar guest command: baked into the image at
     /// `/usr/local/lib/anglesite-mcp/` (scripts/vendor-container-image.sh stages the plugin's
-    /// `server/` dir). Config rides ENV, not flags — matches `ContainerizationControl` exactly.
+    /// `server/` dir). Config rides ENV, not flags — matches `ContainerizationControl` except
+    /// for `ANGLESITE_MCP_HOST=0.0.0.0` (the server's default is `127.0.0.1`), for the same
+    /// pasta port-forwarding reason as `defaultAstroCommand` above.
     public static let defaultMCPCommand =
-        "ANGLESITE_MCP_TRANSPORT=http ANGLESITE_MCP_PORT=\(mcpPort) ANGLESITE_PROJECT_ROOT=/workspace/site node /usr/local/lib/anglesite-mcp/server/index.mjs"
+        "ANGLESITE_MCP_TRANSPORT=http ANGLESITE_MCP_HOST=0.0.0.0 ANGLESITE_MCP_PORT=\(mcpPort) ANGLESITE_PROJECT_ROOT=/workspace/site node /usr/local/lib/anglesite-mcp/server/index.mjs"
 
     /// - Parameters:
     ///   - image: The OCI image reference `podman run` boots. Defaults to a locally-tagged image

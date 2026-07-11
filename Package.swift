@@ -332,6 +332,41 @@ packageTargets.removeAll { !portableTargets.contains($0.name) }
 // filters products. (The container probe executable breaks that convention, but it is
 // Darwin-only and already excluded via includeContainer.)
 packageProducts.removeAll { !portableTargets.contains($0.name) }
+
+// Cross-platform port phase 2 (#567): the Linux shell — GTK4/libadwaita via Adwaita for Swift,
+// with a WebKitGTK preview (design §6). Opt-in via ANGLESITE_LINUX_SHELL=1 rather than
+// default-on: building it needs GTK system headers (libadwaita ≥ 1.7 for adwaita-swift main's
+// generated widgets, plus webkitgtk-6.0) that the Linux CI purity leg's swift:*-noble image
+// doesn't carry (noble caps libadwaita at 1.5), so — mirroring ANGLESITE_CONTAINER_TESTS —
+// the shell only enters the manifest when explicitly requested. Until a Flatpak-based CI lane
+// exists (the packaging item on #567), a GTK-provisioned Linux box is the real verification,
+// the same status PodmanContainerControl shipped with (#647).
+if ProcessInfo.processInfo.environment["ANGLESITE_LINUX_SHELL"] == "1" {
+    // Pinned to a commit, matching the SwiftGit2 policy above: adwaita-swift's only tag
+    // (0.1.0) predates its current API, and tracking main would silently pick up unreviewed
+    // commits. Bump deliberately. (Its own dependencies are branch-based, which SwiftPM
+    // permits under a revision pin.)
+    packageDependencies.append(
+        .package(url: "https://git.aparoksha.dev/aparoksha/adwaita-swift", revision: "15fe44efffa5c9ad5c2c5a703b104d0180c6af5e")
+    )
+    packageTargets.append(
+        .systemLibrary(name: "CWebKitGTK", path: "Sources/CWebKitGTK", pkgConfig: "webkitgtk-6.0")
+    )
+    packageTargets.append(
+        .executableTarget(
+            name: "AnglesiteLinux",
+            dependencies: [
+                "AnglesiteCore",
+                "AnglesiteBridgeCore",
+                "CWebKitGTK",
+                .product(name: "Adwaita", package: "adwaita-swift")
+            ],
+            path: "Sources/AnglesiteLinux",
+            swiftSettings: strictConcurrency
+        )
+    )
+    packageProducts.append(.executable(name: "anglesite-linux", targets: ["AnglesiteLinux"]))
+}
 #endif
 
 let package = Package(
