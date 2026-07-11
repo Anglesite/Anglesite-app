@@ -1070,6 +1070,13 @@ final class SiteWindowModel {
         }
     }
 
+    /// Scan `sourceDirectory` and load the result into `contentGraph`. Called from `loadAndStart`
+    /// so the graph is warm (`isPopulated(siteID:) == true`) before the first chat turn, not just
+    /// after the first content create/delete (#660).
+    func refreshContentGraph(siteID: String, sourceDirectory: URL) async {
+        await contentGraph.rescan(siteID: siteID, projectRoot: sourceDirectory)
+    }
+
     func loadAndStart(siteID: String?, openSitesWindow: () -> Void, dismissSiteWindow: @escaping () -> Void) async {
         self.dismissSiteWindow = dismissSiteWindow
         // SwiftUI's NSPersistentUIManager will happily restore a WindowGroup with a
@@ -1161,6 +1168,18 @@ final class SiteWindowModel {
         // silently discarded by the runtime's fresh scan (#313).
         await styleGuide?.seedFromDisk()
         preview.open(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
+        // Warm the content graph now rather than waiting for the first create/delete (#660), so
+        // `SearchContentTool`'s `isPopulated` check is already reliable by the time the chat
+        // assistant is wired up below. Kicked off in the background (not awaited here) so its
+        // filesystem walk runs concurrently with the Navigator's and Graph Explorer's own,
+        // independent scans just below rather than serializing three full-tree walks; only
+        // awaited right before `SiteAssistantSessionFactory.makeSession` constructs
+        // `SearchContentTool`, the one thing that actually needs it done. Runs unconditionally —
+        // the scan is deterministic filesystem I/O, independent of whether a container runtime
+        // is available.
+        let contentGraphRefresh = Task {
+            await refreshContentGraph(siteID: resolved.id, sourceDirectory: resolved.sourceDirectory)
+        }
         // Scan from the package ROOT (not Source/): SiteFileTree's adaptive layout detects the
         // `.anglesite` package here and resolves Source/ for Components/Styles plus the sibling
         // Config/ + Info.plist for the Metadata group. Handing it Source/ would hide Metadata.
@@ -1192,6 +1211,7 @@ final class SiteWindowModel {
             guard let templateURL = TemplateRuntime.resolve().url else { return nil }
             return try? ThemeCatalog.load(templateURL: templateURL)
         }()
+        await contentGraphRefresh.value
         let assistantSession = SiteAssistantSessionFactory.makeSession(
             siteID: resolved.id,
             sourceDirectory: resolved.sourceDirectory,

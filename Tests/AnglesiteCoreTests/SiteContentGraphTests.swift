@@ -405,6 +405,41 @@ struct SiteContentGraphTests {
         #expect(await graph.isPopulated(siteID: Self.siteA) == false)
     }
 
+    // MARK: - rescan (#660)
+
+    @Test("rescan scans a real project root and populates the graph")
+    func rescanPopulatesFromRealProjectRoot() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("site-content-graph-\(UUID().uuidString)")
+        let pagesDir = root.appendingPathComponent("src/pages")
+        try FileManager.default.createDirectory(at: pagesDir, withIntermediateDirectories: true)
+        try Data().write(to: pagesDir.appendingPathComponent("about.astro"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let graph = SiteContentGraph()
+        let scanned = await graph.rescan(siteID: Self.siteA, projectRoot: root)
+
+        #expect(scanned == true)
+        #expect(await graph.isPopulated(siteID: Self.siteA) == true)
+        let pages = await graph.pages(for: Self.siteA)
+        #expect(pages.map(\.route) == ["/about"])
+    }
+
+    @Test("rescan against a project root that can't be listed leaves the site unpopulated")
+    func rescanUnreadableProjectRootDoesNotMarkPopulated() async {
+        // #660 follow-up: a stale/revoked security-scoped bookmark (MAS) or a deleted/unmounted
+        // source directory must not silently report "scanned and empty" — that would make
+        // `isPopulated` lie to `SearchContentTool`, which trusts it to mean "a miss is reliable."
+        let missingRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("site-content-graph-missing-\(UUID().uuidString)")
+
+        let graph = SiteContentGraph()
+        let scanned = await graph.rescan(siteID: Self.siteA, projectRoot: missingRoot)
+
+        #expect(scanned == false)
+        #expect(await graph.isPopulated(siteID: Self.siteA) == false)
+    }
+
     @Test("searchPages matches title and route case-insensitively")
     func searchPagesMatchesTitleAndRouteCaseInsensitive() async {
         let graph = SiteContentGraph()
