@@ -29,11 +29,10 @@ public protocol SecretStore: Sendable {
 public enum SecretAccounts {
     /// The Cloudflare API token used by `wrangler deploy`.
     public static let cloudflareToken = "cloudflare-api-token"
-    /// A GitHub personal access token (repo scope) for the REST-based Publish-to-GitHub path
-    /// (#654). Distinct from `gh`'s own credential store: `GitHubAuthFlow`'s `gh auth login` path
-    /// deliberately never routes a token through the app (`gh` keeps it in its own keychain
-    /// entry), so this slot is populated only via an explicit token-paste flow.
-    public static let githubToken = "github-personal-access-token"
+    /// The GitHub personal access token used for in-process git pushes (#653) and the GitHub
+    /// REST API (#654). The app owns this credential: the old `gh auth login` flow left the
+    /// token with `gh`, which the sandboxed app can neither spawn nor read.
+    public static let gitHubToken = "github-token"
 }
 
 public extension SecretStore {
@@ -54,17 +53,17 @@ public extension SecretStore {
 
     /// Read the GitHub personal access token under the shared account key.
     func readGitHubToken() throws -> String? {
-        try read(account: SecretAccounts.githubToken)
+        try read(account: SecretAccounts.gitHubToken)
     }
 
     /// Store the GitHub personal access token under the shared account key. Empty string clears.
     func writeGitHubToken(_ token: String) throws {
-        try write(token, account: SecretAccounts.githubToken)
+        try write(token, account: SecretAccounts.gitHubToken)
     }
 
     /// Clear the GitHub personal access token slot.
     func clearGitHubToken() throws {
-        try delete(account: SecretAccounts.githubToken)
+        try delete(account: SecretAccounts.gitHubToken)
     }
 }
 

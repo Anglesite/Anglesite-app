@@ -26,3 +26,8 @@ directory = "dist"
 # [[r2_buckets]]
 # binding = "MEDIA"
 # bucket_name = "{{SITE_NAME}}-media"
+#
+# Inbox capture (#587) adds this binding (uncommented by Anglesite when enabled):
+# [[kv_namespaces]]
+# binding = "INBOX_KV"
+# id = ""

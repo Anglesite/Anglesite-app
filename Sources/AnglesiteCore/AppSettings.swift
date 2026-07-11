@@ -26,6 +26,12 @@ public final class AppSettings: @unchecked Sendable {
         public static let announcesLiveUpdates = "anglesite.announcesLiveUpdates"
         public static let notifiesOnCompletion = "anglesite.notifiesOnCompletion"
         public static let didCleanLegacyChatBackendDefaults = "anglesite.didCleanLegacyChatBackendDefaults"
+        public static let gitHubAccountLogin = "anglesite.gitHubAccount.login"
+        public static let gitHubAccountName = "anglesite.gitHubAccount.name"
+        public static let gitHubAccountAvatarURL = "anglesite.gitHubAccount.avatarURL"
+        public static let cloudflareAccountVerified = "anglesite.cloudflareAccount.verified"
+        public static let cloudflareAccountName = "anglesite.cloudflareAccount.name"
+        public static let cloudflareAccountEmail = "anglesite.cloudflareAccount.email"
     }
 
     private enum LegacyKey {
@@ -198,6 +204,59 @@ public final class AppSettings: @unchecked Sendable {
                 defaults.removeObject(forKey: Key.lastOpenedSiteID)
             }
         }
+    }
+
+    /// Best-effort GitHub identity from the last successful token verification, shown in Settings
+    /// instead of a bare "token stored" — the same "who am I signed in as" surfacing Xcode's
+    /// Accounts pane does. Non-secret display fields only; the token itself lives in the Keychain,
+    /// never here. `nil` until a token verifies at least once (see `GitHubAPITokenVerifier`).
+    public var gitHubAccount: GitHubAccount? {
+        get {
+            guard let login = defaults.string(forKey: Key.gitHubAccountLogin), !login.isEmpty else { return nil }
+            let name = defaults.string(forKey: Key.gitHubAccountName)
+            let avatarURL = defaults.string(forKey: Key.gitHubAccountAvatarURL).flatMap(URL.init(string:))
+            return GitHubAccount(login: login, name: name, avatarURL: avatarURL)
+        }
+        set {
+            guard let account = newValue else {
+                defaults.removeObject(forKey: Key.gitHubAccountLogin)
+                defaults.removeObject(forKey: Key.gitHubAccountName)
+                defaults.removeObject(forKey: Key.gitHubAccountAvatarURL)
+                return
+            }
+            defaults.set(account.login, forKey: Key.gitHubAccountLogin)
+            setOptionalString(account.name, forKey: Key.gitHubAccountName)
+            setOptionalString(account.avatarURL?.absoluteString, forKey: Key.gitHubAccountAvatarURL)
+        }
+    }
+
+    /// Best-effort Cloudflare identity from the last successful token verification. A dedicated
+    /// "verified" flag (rather than inferring presence from `name`/`email`) distinguishes a
+    /// verified-but-uninformative token — a scoped token lacking `account:read` still verifies,
+    /// just with nothing to show — from a token that's never been checked at all.
+    public var cloudflareAccount: CloudflareAccount? {
+        get {
+            guard defaults.bool(forKey: Key.cloudflareAccountVerified) else { return nil }
+            return CloudflareAccount(
+                name: defaults.string(forKey: Key.cloudflareAccountName),
+                email: defaults.string(forKey: Key.cloudflareAccountEmail)
+            )
+        }
+        set {
+            guard let account = newValue else {
+                defaults.removeObject(forKey: Key.cloudflareAccountVerified)
+                defaults.removeObject(forKey: Key.cloudflareAccountName)
+                defaults.removeObject(forKey: Key.cloudflareAccountEmail)
+                return
+            }
+            defaults.set(true, forKey: Key.cloudflareAccountVerified)
+            setOptionalString(account.name, forKey: Key.cloudflareAccountName)
+            setOptionalString(account.email, forKey: Key.cloudflareAccountEmail)
+        }
+    }
+
+    private func setOptionalString(_ value: String?, forKey key: String) {
+        if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
     }
 
     /// One-time cleanup for settings removed when chat became Foundation Models-only.

@@ -92,15 +92,38 @@ import Foundation
         #expect(events.last == .needsAuth)
     }
 
-    @Test func publishInitsCommitsThenPublishes() async throws {
-        // Not yet a repo — `ensureCommittable` must `git init` and commit before publishing.
+    @Test func publishInitializesRepoWhenNotYetOne() async throws {
+        // Not yet a repo — `ensureCommittable` must `Repository.create` (git init's SwiftGit2
+        // equivalent) before attempting to commit. Deliberately does NOT assert `.published`/that
+        // the commit itself succeeds: `defaultSignature()` resolves against the ambient git
+        // config (global/system), which a fresh temp directory with no prior `git config` has no
+        // control over — on a CI runner with no ambient user.name/user.email this legitimately
+        // fails with `.failed(reason: "No git identity configured…")`, same as real `git commit`
+        // would. The commit step itself (staging + committing once identity IS configured) is
+        // exercised deterministically by every other test here via `makeSourceDir`, which sets
+        // local identity explicitly — that logic doesn't care whether the `Repository` handle
+        // came from `.create` (this path) or `.at` (an already-existing repo), so this test only
+        // needs to prove the init half actually ran.
         let source = try await makeSourceDir(initialized: false)
         try "hello".write(to: source.appendingPathComponent("index.md"), atomically: true, encoding: .utf8)
         let b = RepoBootstrap(provider: StubProvider(authed: true, result: .success(repo())), run: unusedRunner())
         let events = await collect(b.publish(source: source, repoName: "site", isPrivate: true))
-        #expect(events.last == .published(repo()))
         #expect(events.contains(.progress(step: .initializing, message: "Initializing git repository…")))
+        #expect(FileManager.default.fileExists(atPath: source.appendingPathComponent(".git").path))
+    }
+
+    @Test func publishCommitsFirstCommitThenPublishes() async throws {
+        // Complements `publishInitializesRepoWhenNotYetOne`: a repo that already exists (local
+        // identity configured deterministically by `makeSourceDir`, unlike ambient config) but has
+        // no commits yet must still stage and commit before publishing.
+        let source = try await makeSourceDir(initialized: true)   // no commit — first commit is due
+        try "hello".write(to: source.appendingPathComponent("index.md"), atomically: true, encoding: .utf8)
+        let b = RepoBootstrap(provider: StubProvider(authed: true, result: .success(repo())), run: unusedRunner())
+        let events = await collect(b.publish(source: source, repoName: "site", isPrivate: true))
+        #expect(events.last == .published(repo()))
         #expect(events.contains(.progress(step: .committing, message: "Committing your site…")))
+        // Never took the init path — the repo was already there.
+        #expect(!events.contains(.progress(step: .initializing, message: "Initializing git repository…")))
     }
 
     @Test func publishSurfacesProviderError() async throws {
@@ -194,5 +217,40 @@ import Foundation
         let show = try await ProcessSupervisor.shared.run(
             executable: git, arguments: ["show", "--stat", "HEAD"], currentDirectoryURL: source)
         #expect(show.stdout.contains("src/pages/about.md"))
+    }
+
+    @Test func publishStagesAndCommitsADeletedFile() async throws {
+        // A file removed from the working tree since the last commit must be staged for removal
+        // (repo.remove(path:)) and the deletion committed — the "git rm" half of "add -A", with no
+        // coverage before this test (review finding on PR #663).
+        let source = try await makeSourceDir(initialized: true, commit: true)   // seeds README.md
+        try FileManager.default.removeItem(at: source.appendingPathComponent("README.md"))
+        let b = RepoBootstrap(
+            provider: StubProvider(authed: true, result: .success(repo())), run: unusedRunner())
+        let events = await collect(b.publish(source: source, repoName: "site", isPrivate: true))
+        #expect(events.last == .published(repo()))
+
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        let status = try await ProcessSupervisor.shared.run(
+            executable: git, arguments: ["status", "--porcelain"], currentDirectoryURL: source)
+        #expect(status.stdout.isEmpty)   // deletion was committed, not left dangling
+        let show = try await ProcessSupervisor.shared.run(
+            executable: git, arguments: ["show", "--stat", "HEAD"], currentDirectoryURL: source)
+        #expect(show.stdout.contains("README.md"))
+    }
+
+    @Test func publishRefusesOnATrulyEmptyDirectory() async throws {
+        // git-init'd (or about-to-be), nothing to stage, no commits — must fail loudly rather than
+        // silently create a content-less root commit and a real, empty GitHub repo (review finding
+        // on PR #663; matches the old subprocess `git commit`'s "nothing to commit" refusal).
+        let source = try await makeSourceDir(initialized: true)   // configured identity, no files, no commit
+        let b = RepoBootstrap(
+            provider: StubProvider(authed: true, result: .success(repo())), run: unusedRunner())
+        let events = await collect(b.publish(source: source, repoName: "site", isPrivate: true))
+        if case .failed(let reason) = events.last {
+            #expect(reason.contains("Nothing to commit"))
+        } else {
+            Issue.record("expected .failed, got \(String(describing: events.last))")
+        }
     }
 }

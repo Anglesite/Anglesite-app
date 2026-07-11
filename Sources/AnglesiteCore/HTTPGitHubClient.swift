@@ -7,6 +7,9 @@ import FoundationNetworking
 
 /// Errors surfaced by the GitHub repo-creation client.
 public enum GitHubRepoAPIError: Error, Equatable, Sendable {
+    /// The transport itself failed (DNS/offline/TLS/timeout) — never reached GitHub, so this is
+    /// distinct from `.api`, which means GitHub responded with a rejection.
+    case network
     case unauthorized
     case nameAlreadyExists
     case http(status: Int)
@@ -48,7 +51,7 @@ public struct HTTPGitHubClient: Sendable {
         do {
             (data, http) = try await transport(request)
         } catch {
-            throw GitHubRepoAPIError.api(message: error.localizedDescription)
+            throw GitHubRepoAPIError.network
         }
 
         if http.statusCode == 401 || http.statusCode == 403 { throw GitHubRepoAPIError.unauthorized }

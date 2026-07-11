@@ -45,7 +45,7 @@ struct SecretStoreTests {
     func gitHubConvenienceUsesSharedAccount() throws {
         let store = InMemorySecretStore()
         try store.writeGitHubToken("ghp_123")
-        #expect(try store.read(account: SecretAccounts.githubToken) == "ghp_123")
+        #expect(try store.read(account: SecretAccounts.gitHubToken) == "ghp_123")
         #expect(try store.readGitHubToken() == "ghp_123")
         // Distinct from the Cloudflare slot — writing one must not clobber the other.
         try store.writeCloudflareToken("cf-456")

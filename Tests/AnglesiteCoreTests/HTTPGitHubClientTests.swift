@@ -24,6 +24,16 @@ struct HTTPGitHubClientTests {
         #expect(repo.url == URL(string: "https://github.com/acme/site"))
     }
 
+    @Test("a transport-level failure maps to .network, not .api")
+    func transportFailureMapsToNetwork() async {
+        // A DNS/offline/TLS/timeout failure never reached GitHub — it must be distinguishable
+        // from a real GitHub-side rejection (review finding on PR #663).
+        let client = HTTPGitHubClient(transport: { _ in throw URLError(.notConnectedToInternet) })
+        await #expect(throws: GitHubRepoAPIError.network) {
+            _ = try await client.createRepo(name: "site", isPrivate: true, token: "tok")
+        }
+    }
+
     @Test("a 401 maps to .unauthorized")
     func unauthorized() async {
         let client = HTTPGitHubClient(transport: Self.transport(status: 401, json: #"{"message":"Bad credentials"}"#))

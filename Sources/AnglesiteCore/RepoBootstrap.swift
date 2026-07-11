@@ -74,6 +74,13 @@ public actor RepoBootstrap {
         }
         let dirty = !entries.isEmpty
         guard noCommits || dirty else { return }
+        // A git-init'd-but-truly-empty directory (no commits, nothing to stage) must fail loudly
+        // rather than create a content-less root commit — matching the old subprocess `git commit`
+        // path, which reliably failed with "nothing to commit" in this case. Silently proceeding
+        // would create a real (but empty) GitHub repository where publish previously refused.
+        guard dirty else {
+            throw RepoBootstrapError(reason: "Nothing to commit — the site directory is empty.")
+        }
 
         // Refuse to stage likely-secret files. Staging everything would otherwise sweep
         // .env/.env.local etc. into the repo; "private by default" doesn't protect a repo later

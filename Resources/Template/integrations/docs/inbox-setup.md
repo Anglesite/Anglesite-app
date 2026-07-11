@@ -17,7 +17,13 @@ from your contact form provider, a question someone asked in person, a reminder 
 
 ## What this doesn't do yet
 
-There's no visitor-facing form that writes directly into this Inbox — visitor messages today go
-through the [Contact Form integration](../pages/contact.astro) (Formspree or a mailto: link).
-Wiring a live submission pipeline into this Inbox is tracked in
-[#587](https://github.com/Anglesite/Anglesite-app/issues/587).
+The infrastructure for capturing visitor messages into this Inbox exists ([#587](https://github.com/Anglesite/Anglesite-app/issues/587)): a
+Worker route (`/inbox`) stages submissions to a KV store, and on each site open, the app automatically
+pulls and commits them into your repo's Inbox collection as new entries. To use it, you need to set up
+a Cloudflare KV namespace for staging and configure your site with its ID and your account ID — this
+requires manual provisioning steps for now. Once you've done that, visitor messages sent to your `/inbox`
+endpoint will flow directly into this collection.
+
+Until a Settings wizard to automate this provisioning is built, you can either set up the namespace
+manually (store the IDs in `SiteSettings.inboxCaptureAccountID` and `inboxCaptureKVNamespaceID`), or
+keep routing visitor feedback through the [Contact Form integration](../pages/contact.astro) as you do today.
