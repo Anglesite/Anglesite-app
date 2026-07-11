@@ -30,7 +30,13 @@ import FoundationModels
 public struct RepurposePostTool: Tool, Sendable {
     public static let toolName = "repurposePost"
     public let name = RepurposePostTool.toolName
-    public let description = "Turn one published blog post into ready-to-paste social posts for each platform (Instagram, Facebook, Google Business, Nextdoor, X, Bluesky), respecting each platform's length rules."
+    public let description = """
+        Turn one published blog post into ready-to-paste social posts for each platform \
+        (Instagram, Facebook, Google Business, Nextdoor, X, Bluesky), respecting each platform's \
+        length rules. If the user gives you a slug, call this directly with it — do not search \
+        for the post first; this tool reads the post from disk and will find it even if a prior \
+        search came back empty.
+        """
 
     @Generable
     public struct Arguments {

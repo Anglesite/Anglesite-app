@@ -198,11 +198,31 @@ struct SearchContentToolTests {
         #expect(!out.contains("POST"))
     }
 
-    @Test("no matches returns an explicit message, not an empty string")
-    func noMatchesIsExplicit() async throws {
+    @Test("no matches on an unpopulated index says so and doesn't assert non-existence")
+    func noMatchesOnUnpopulatedIndexIsExplicit() async throws {
+        // makeGraph() seeds via upsert*, never load(siteID:...), so the graph is unpopulated for
+        // site1 — the same "runtime never ran a scan" state as #658.
         let tool = SearchContentTool(contentGraph: await makeGraph(), siteID: "site1")
         let out = try await tool.call(arguments: .init(query: "zzz-no-such-thing"))
-        #expect(out == "No matching pages or posts.")
+        #expect(out.contains("hasn't been loaded yet"))
+        // #658: a search miss must not read as proof the content doesn't exist — filesystem-backed
+        // tools (repurposePost, reviewCopy) can still succeed against an unpopulated index.
+        #expect(out.contains("does not mean the content doesn't exist"))
+    }
+
+    @Test("no matches on a populated index is reported as reliable")
+    func noMatchesOnPopulatedIndexIsReliable() async throws {
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: "site1",
+            pages: [.init(
+                id: "site1:page:/about", siteID: "site1", route: "/about", filePath: "src/pages/about.md",
+                title: "About Us", lastModified: Date(timeIntervalSince1970: 0))],
+            posts: [], images: [])
+        let tool = SearchContentTool(contentGraph: graph, siteID: "site1")
+        let out = try await tool.call(arguments: .init(query: "zzz-no-such-thing"))
+        #expect(out.contains("index is loaded and current"))
+        #expect(!out.contains("hasn't been loaded yet"))
     }
 
     @Test("a flood of pages does not silently exclude posts; truncation is reported per category")

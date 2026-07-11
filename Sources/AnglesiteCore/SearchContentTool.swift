@@ -13,7 +13,12 @@ public struct SearchContentTool: Tool, Sendable {
     /// `.started` event) can report the attached tools without constructing an instance.
     public static let toolName = "searchContent"
     public let name = SearchContentTool.toolName
-    public let description = "Search the current site's pages and posts by title, route, slug, tag, or collection."
+    public let description = """
+        Search the current site's pages and posts by title, route, slug, tag, or collection. This \
+        is a convenience lookup, not the source of truth: if you already know a post's slug or a \
+        page's route (e.g. the user stated it), call the tool for that slug/route directly instead \
+        of searching first — a search miss does not prove the content doesn't exist.
+        """
 
     @Generable
     public struct Arguments {
@@ -47,7 +52,23 @@ public struct SearchContentTool: Tool, Sendable {
             return "POST  \(post.slug)\(draft)  (\(post.filePath))"
         }
 
-        if pageLines.isEmpty && postLines.isEmpty { return "No matching pages or posts." }
+        if pageLines.isEmpty && postLines.isEmpty {
+            if await contentGraph.isPopulated(siteID: siteID) {
+                return """
+                    No matching pages or posts in the search index (the index is loaded and \
+                    current, so this result is reliable). If you know the exact slug or route \
+                    anyway, calling the relevant tool (e.g. repurposePost, reviewCopy) directly \
+                    will still work — it doesn't depend on this index.
+                    """
+            }
+            return """
+                No matching pages or posts — but the search index for this site hasn't been \
+                loaded yet, so this result is NOT reliable and does not mean the content \
+                doesn't exist. If you know the exact slug or route, call the relevant tool \
+                (e.g. repurposePost, reviewCopy) with it directly rather than concluding the \
+                content is missing.
+                """
+        }
 
         // Budget the combined cap across both categories so a flood of one can't crowd the other
         // out of the results entirely (a model that only sees pages can't learn there were posts).
