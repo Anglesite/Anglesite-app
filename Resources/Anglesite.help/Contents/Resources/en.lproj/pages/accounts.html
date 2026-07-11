@@ -13,7 +13,8 @@
 	<p class="lead">Connect your GitHub and Cloudflare accounts so Anglesite can back up and publish your site.</p>
 
 	<h2>GitHub</h2>
-	<p>Connecting your site to GitHub happens outside Anglesite. Your site's <code>Source</code> folder is an ordinary Git repository, so you can add a GitHub remote with the <code>gh</code> command-line tool or <code>git remote</code> in Terminal. Once the repository has an origin configured, Anglesite uses it to back up and publish your site.</p>
+	<p>Your site's <code>Source</code> folder is an ordinary Git repository, so you can add a GitHub remote with the <code>gh</code> command-line tool or <code>git remote</code> in Terminal. Once the repository has an origin configured, Anglesite uses it to back up and publish your site.</p>
+	<p>To let Anglesite push to GitHub, add a GitHub personal access token in <strong>Settings ▸ Advanced</strong>. Create a fine-grained token with <em>Contents: Read and write</em> access for your site's repository at <code>github.com/settings/tokens</code>.</p>
 
 	<h2>Cloudflare</h2>
 	<p>When Anglesite needs to deploy to Cloudflare, it will prompt you to provide a Cloudflare API token. You can create one in your Cloudflare dashboard.</p>

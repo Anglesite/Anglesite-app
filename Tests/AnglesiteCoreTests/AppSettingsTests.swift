@@ -155,4 +155,54 @@ final class AppSettingsTests {
     @Test("Debug menu revealed by option key in release") func debugMenuRevealedByOptionKeyInRelease() {
         #expect(DebugPaneVisibility.menuItemVisible(isDebugBuild: false, settingEnabled: false, optionHeldAtLaunch: true))
     }
+
+    // MARK: Cached verified-account identity (Settings "surfaced like Xcode does")
+
+    @Test("GitHub account defaults to nil") func gitHubAccountDefaultsToNil() {
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.gitHubAccount == nil)
+    }
+
+    @Test("GitHub account round trip, including a nil name/avatar") func gitHubAccountRoundTrip() {
+        let settings = AppSettings(defaults: defaults)
+        let account = GitHubAccount(login: "octocat", name: "The Octocat", avatarURL: URL(string: "https://example.com/a.png"))
+        settings.gitHubAccount = account
+        #expect(settings.gitHubAccount == account)
+
+        settings.gitHubAccount = GitHubAccount(login: "octocat2", name: nil, avatarURL: nil)
+        #expect(settings.gitHubAccount == GitHubAccount(login: "octocat2", name: nil, avatarURL: nil))
+    }
+
+    @Test("Clearing the GitHub account removes all its fields") func gitHubAccountClear() {
+        let settings = AppSettings(defaults: defaults)
+        settings.gitHubAccount = GitHubAccount(login: "octocat", name: "The Octocat", avatarURL: nil)
+        settings.gitHubAccount = nil
+        #expect(settings.gitHubAccount == nil)
+        #expect(defaults.string(forKey: AppSettings.Key.gitHubAccountName) == nil)
+    }
+
+    @Test("Cloudflare account defaults to nil") func cloudflareAccountDefaultsToNil() {
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.cloudflareAccount == nil)
+    }
+
+    @Test("Cloudflare account round trip, distinguishing a nameless-but-verified account from unset")
+    func cloudflareAccountRoundTrip() {
+        let settings = AppSettings(defaults: defaults)
+        settings.cloudflareAccount = CloudflareAccount(name: "Acme Corp", email: nil)
+        #expect(settings.cloudflareAccount == CloudflareAccount(name: "Acme Corp", email: nil))
+
+        // A verified token whose account lookup returned nothing still counts as "connected" —
+        // must not read back the same as "never verified".
+        settings.cloudflareAccount = CloudflareAccount(name: nil, email: nil)
+        #expect(settings.cloudflareAccount == CloudflareAccount(name: nil, email: nil))
+    }
+
+    @Test("Clearing the Cloudflare account removes all its fields") func cloudflareAccountClear() {
+        let settings = AppSettings(defaults: defaults)
+        settings.cloudflareAccount = CloudflareAccount(name: "Acme Corp", email: "a@example.com")
+        settings.cloudflareAccount = nil
+        #expect(settings.cloudflareAccount == nil)
+        #expect(defaults.string(forKey: AppSettings.Key.cloudflareAccountName) == nil)
+    }
 }
