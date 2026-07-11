@@ -1,0 +1,12 @@
+// WebKitGTK 6.0 (the GTK4-native API series) for the AnglesiteLinux preview. Header/linker
+// flags come from `pkgConfig: "webkitgtk-6.0"` in Package.swift — install libwebkitgtk-6.0-dev
+// (Debian/Ubuntu) or webkitgtk6.0-devel (Fedora) to build.
+//
+// This module includes the GTK headers a second time (Adwaita for Swift's CAdw is the first),
+// so its projections of shared GObject types are DISTINCT Swift types from CAdw's. That's fine
+// by construction: AnglesiteLinux exchanges widgets between the two worlds only as
+// OpaquePointer (Adwaita's ViewStorage currency), never as typed GObject pointers.
+module CWebKitGTK [system] {
+    header "shim.h"
+    export *
+}
