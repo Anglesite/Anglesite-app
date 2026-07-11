@@ -5,11 +5,13 @@ import SwiftGit2
 /// Executes `BackupCommand`'s git vocabulary in-process via SwiftGit2 (libgit2) — `/usr/bin/git`
 /// cannot execute at all under the MAS App Sandbox (#640/#653). This is deliberately an
 /// interpreter for the *exact* argument vectors `BackupCommand` issues, not a general git CLI
-/// shim: the vocabulary is closed (eight commands), both ends live in this module, and keeping
-/// the `GitRunner`/`GitStreamer` seams' shape means the command's orchestration — refusal
-/// ordering, cancellation guards, the #246 unpushed-commit check — and its entire test suite
-/// carry over unchanged. An argument vector outside the vocabulary fails loudly (exit 64)
-/// rather than guessing.
+/// shim: the vocabulary is closed (nine shapes: `rev-parse --is-inside-work-tree`, `rev-parse
+/// --abbrev-ref HEAD`, `rev-parse HEAD`, `remote get-url <name>`, `status --porcelain`,
+/// `rev-list --count <upstream>..HEAD`, `add -A`, `commit -m <msg>`, `push <remote> <branch>`),
+/// both ends live in this module, and keeping the `GitRunner`/`GitStreamer` seams' shape means
+/// the command's orchestration — refusal ordering, cancellation guards, the #246 unpushed-commit
+/// check — and its entire test suite carry over unchanged. An argument vector outside the
+/// vocabulary fails loudly (exit 64) rather than guessing.
 ///
 /// Exit codes are synthesized: 0 success, 1 generic failure, 128 "not a repository" (matching
 /// subprocess git's fatal exit), 64 unsupported usage. `BackupCommand` only branches on
@@ -17,8 +19,19 @@ import SwiftGit2
 ///
 /// libgit2 calls are blocking (push does real network I/O), so they run on a Dispatch global
 /// queue via `offPool` rather than on the cooperative pool. Like `NativeContentOperations`,
-/// each call opens its own `Repository` handle; cross-process/file-level git locking covers
-/// concurrent access the same way it does for two `git` processes.
+/// each call opens its own `Repository` handle for the site directory it's given.
+///
+/// Concurrency: the fork's own test suite runs `.serialized` because uncoordinated concurrent
+/// libgit2 use is unsafe in general — but the risk that guards against (racing the process-wide,
+/// lazily-populated libgit2 config-search-path cache on first use) is already closed here by
+/// `SwiftGit2Bootstrap.ensureInitialized`'s `static let`: Swift guarantees a `static let`
+/// initializer runs exactly once even when first touched concurrently from multiple threads, so
+/// every caller blocks on the same one-time `SwiftGit2Init()` before any repository operation
+/// runs. Past that, two concurrent calls against *different* site directories each open their own
+/// `Repository` handle and don't share libgit2 state, so concurrent backups of different sites
+/// are safe. Two concurrent calls against the *same* site directory are not coordinated — the
+/// same class of hazard as two `git` processes racing on one working directory, not something new
+/// this port introduced.
 public enum InProcessGit {
     /// Reads the GitHub personal access token used for HTTPS pushes. The default reads the
     /// app-owned Keychain slot (`SecretAccounts.gitHubToken`); tests inject their own.
@@ -129,7 +142,7 @@ public enum InProcessGit {
                             ?? entry.headToIndex?.newFile?.path
                             ?? entry.headToIndex?.oldFile?.path
                             ?? "(unknown path)"
-                        return "?? \(path)"
+                        return "\(porcelainCode(for: entry.status)) \(path)"
                     }
                     .joined(separator: "\n")
                 }
@@ -270,6 +283,32 @@ public enum InProcessGit {
 
     private static func errorText(_ error: NSError) -> String {
         error.localizedDescription
+    }
+
+    /// Maps a libgit2 `Diff.Status` set to git's two-letter porcelain code (`git status
+    /// --porcelain`'s XY: index status, then worktree status) — real codes rather than a
+    /// fabricated `??` for every entry. `BackupCommand` only checks `.isEmpty` today, but a
+    /// future caller parsing codes (or a human reading `LogCenter`) should see the truth.
+    /// `conflicted` collapses every unmerged combination to `UU` — real git distinguishes which
+    /// side changed (`AA`, `DU`, `UD`, …), a distinction nothing here currently consumes.
+    private static func porcelainCode(for status: Diff.Status) -> String {
+        if status.contains(.conflicted) { return "UU" }
+        if status.contains(.workTreeNew) { return "??" }
+
+        var x: Character = " "
+        if status.contains(.indexNew) { x = "A" }
+        else if status.contains(.indexModified) { x = "M" }
+        else if status.contains(.indexDeleted) { x = "D" }
+        else if status.contains(.indexRenamed) { x = "R" }
+        else if status.contains(.indexTypeChange) { x = "T" }
+
+        var y: Character = " "
+        if status.contains(.workTreeModified) { y = "M" }
+        else if status.contains(.workTreeDeleted) { y = "D" }
+        else if status.contains(.workTreeTypeChange) { y = "T" }
+        else if status.contains(.workTreeRenamed) { y = "R" }
+
+        return "\(x)\(y)"
     }
 
     /// Runs blocking libgit2 work on a Dispatch global queue so a slow network push never

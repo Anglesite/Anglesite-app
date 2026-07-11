@@ -117,6 +117,28 @@ import Foundation
         #expect(!dirty.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
+    @Test("status --porcelain reports real XY codes, not a fabricated ?? for everything")
+    func statusPorcelainRealCodes() async throws {
+        let repo = try await makeRepo()
+
+        // Untracked (no index side at all): "??".
+        try "new".write(to: repo.appendingPathComponent("new.txt"), atomically: true, encoding: .utf8)
+        // Modified in the worktree, not yet staged: " M".
+        try "hello v2".write(to: repo.appendingPathComponent("hello.txt"), atomically: true, encoding: .utf8)
+
+        let beforeStaging = await InProcessGit.run(siteDirectory: repo, arguments: ["status", "--porcelain"])
+        let beforeLines = Set(beforeStaging.stdout.split(separator: "\n").map(String.init))
+        #expect(beforeLines.contains("?? new.txt"))
+        #expect(beforeLines.contains(" M hello.txt"))
+
+        // Staged with subprocess git: the new file is "A ", the modification is "M ".
+        try await git(["add", "-A"], in: repo)
+        let afterStaging = await InProcessGit.run(siteDirectory: repo, arguments: ["status", "--porcelain"])
+        let afterLines = Set(afterStaging.stdout.split(separator: "\n").map(String.init))
+        #expect(afterLines.contains("A  new.txt"))
+        #expect(afterLines.contains("M  hello.txt"))
+    }
+
     @Test("rev-list --count origin/<branch>..HEAD counts unpushed commits, non-zero exit when the remote ref is unknown")
     func revListCount() async throws {
         let repo = try await makeRepo()
@@ -238,6 +260,24 @@ import Foundation
         #expect(exit != 0)
         #expect(stderr.contains("GitHub"))
         #expect(stderr.contains("Settings"))
+    }
+
+    @Test("a push failure's stderr never contains the raw token")
+    func pushFailureNeverLeaksToken() async throws {
+        let repo = try await makeRepo()
+        let secretToken = "ghp_SuperSecretTokenShouldNeverLeak12345"
+        // Port 1 refuses the connection immediately (nothing can bind it without root) — a real
+        // push attempt through libgit2's HTTPS transport that fails fast without a DNS timeout.
+        try await git(["remote", "add", "origin", "https://127.0.0.1:1/nonexistent.git"], in: repo)
+
+        let (exit, stderr) = await InProcessGit.stream(
+            siteDirectory: repo,
+            arguments: ["push", "origin", "draft"],
+            source: "test",
+            tokenProvider: { secretToken }
+        )
+        #expect(exit != 0)
+        #expect(!stderr.contains(secretToken), "push failure stderr must never echo the raw token: \(stderr)")
     }
 }
 #endif

@@ -19,8 +19,13 @@ import Security
 /// Security notes:
 /// - `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` keeps the token off iCloud Keychain and
 ///   inaccessible while the Mac is locked.
-/// - The token must never be logged. `DeployCommand` passes it via `environment` (which is opaque
-///   to the supervisor's stdout/stderr pump), so it does not end up in `LogCenter`.
+/// - The token must never be logged. `DeployCommand` passes the Cloudflare token via
+///   `environment` (which is opaque to the supervisor's stdout/stderr pump), so it never reaches
+///   `LogCenter`. The GitHub token (#653) takes a different path with the same invariant but a
+///   different mechanism: `InProcessGit` hands it to libgit2 through a `Credentials.plaintext`
+///   push callback — never interpolated into a URL, error string, or log line it constructs — so
+///   it likewise never reaches `LogCenter`, though its blast radius differs (an in-process
+///   credential callback vs. an opaque subprocess environment variable).
 public struct KeychainStore: SecretStore {
     public enum Error: Swift.Error, Equatable {
         /// `SecItemCopyMatching` / `SecItemAdd` / `SecItemUpdate` / `SecItemDelete` returned a
