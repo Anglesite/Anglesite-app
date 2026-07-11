@@ -88,7 +88,14 @@ public enum CopyEditReportBuilder {
                 continue
             }
             audited += 1
-            for (index, d) in drafts.enumerated() {
+            // The prompt demands verbatim excerpts from the page, so any excerpt that doesn't
+            // actually occur in the chunk's text is hallucinated — most often the model echoing
+            // its own guided-generation schema instructions back as a "finding". Drop those before
+            // indexing; a dropped finding is noise, not signal. Accepted edge case: a genuine
+            // finding about text beyond the 2,000-char chunk cap is dropped too, since the cap
+            // already excluded that text from review.
+            let verified = drafts.filter { !$0.excerpt.isEmpty && chunk.text.contains($0.excerpt) }
+            for (index, d) in verified.enumerated() {
                 findings.append(CopyFinding(
                     id: "\(chunk.filePath)#\(index)",
                     route: chunk.route,
