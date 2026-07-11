@@ -118,7 +118,22 @@ private struct AdvancedSettingsView: View {
                     title: "GitHub personal access token",
                     read: { try KeychainStore().readGitHubToken() },
                     write: { try KeychainStore().writeGitHubToken($0) },
-                    clear: { try KeychainStore().clearGitHubToken() }
+                    clear: {
+                        try KeychainStore().clearGitHubToken()
+                        AppSettings.shared.gitHubAccount = nil
+                    },
+                    verify: { token in
+                        switch await GitHubAPITokenVerifier().verify(token: token) {
+                        case .success(let account):
+                            AppSettings.shared.gitHubAccount = account
+                            return .success(.init(label: account.login, detail: account.name, avatarURL: account.avatarURL))
+                        case .failure(let error):
+                            return .failure(error.userMessage)
+                        }
+                    },
+                    cachedIdentity: {
+                        AppSettings.shared.gitHubAccount.map { .init(label: $0.login, detail: $0.name, avatarURL: $0.avatarURL) }
+                    }
                 )
                 Text("Used to push backups and publish sites to GitHub over HTTPS (the sandboxed app can't run `git` or `gh`, so it pushes in-process with this token). Create a fine-grained token with Contents read/write access at github.com/settings/tokens. Stored in the macOS Keychain under `io.dwk.anglesite` and never written to logs.")
                     .font(.caption)
@@ -172,14 +187,32 @@ private struct AdvancedSettingsView: View {
     }
 }
 
-/// Cloudflare API token row — the Keychain-token row bound to the Cloudflare slot.
+/// Cloudflare API token row — the Keychain-token row bound to the Cloudflare slot. Verifies
+/// against Cloudflare before persisting (same "verify then persist" shape `TokenOnboarding`
+/// uses at deploy time) so the row can surface the connected account, not just "token stored".
 private struct CloudflareTokenRow: View {
     var body: some View {
         KeychainTokenRow(
             title: "Cloudflare API token",
             read: { try KeychainStore().readCloudflareToken() },
             write: { try KeychainStore().writeCloudflareToken($0) },
-            clear: { try KeychainStore().clearCloudflareToken() }
+            clear: {
+                try KeychainStore().clearCloudflareToken()
+                AppSettings.shared.cloudflareAccount = nil
+            },
+            verify: { token in
+                // siteDirectory is vestigial on this protocol — verification is a pure API call.
+                switch await CloudflareAPITokenVerifier().verify(token: token, siteDirectory: FileManager.default.homeDirectoryForCurrentUser) {
+                case .success(let account):
+                    AppSettings.shared.cloudflareAccount = account
+                    return .success(.init(label: account.name ?? "Verified", detail: account.email, avatarURL: nil))
+                case .failure(let error):
+                    return .failure(error.userMessage)
+                }
+            },
+            cachedIdentity: {
+                AppSettings.shared.cloudflareAccount.map { .init(label: $0.name ?? "Verified", detail: $0.email, avatarURL: nil) }
+            }
         )
     }
 }
@@ -188,19 +221,49 @@ private struct CloudflareTokenRow: View {
 /// Keychain on appear; saves a new value on commit; clears the slot on "Clear". The field stays
 /// a `SecureField` so the token doesn't appear in a screen share, but the actual secret bytes
 /// only round-trip when the user edits the field — appearing only redacts.
+///
+/// When `verify` is supplied, `Save` checks the token against the provider's API first and, on
+/// success, surfaces the connected account — "Signed in as octocat" with an avatar for GitHub,
+/// a checkmark + account name for Cloudflare — instead of a bare "Saved." This mirrors Xcode's
+/// Accounts pane, which shows who you're signed in as rather than just "credential stored", and
+/// matches `GitHubAuthRow` below (the non-MAS `gh`-backed row already does this). `verify`
+/// defaults to `nil` — a future token slot with nothing to verify against just omits it and
+/// keeps the plain "Saved."/"Token stored" behavior.
 private struct KeychainTokenRow: View {
+    /// The identity to display after a token verifies. `detail` is a secondary line (e.g. a
+    /// GitHub display name, a Cloudflare account email) shown only when it differs from `label`.
+    struct Identity: Equatable {
+        let label: String
+        let detail: String?
+        let avatarURL: URL?
+    }
+
+    enum VerifyOutcome {
+        case success(Identity)
+        case failure(String)
+    }
+
     let title: String
     let read: () throws -> String?
     let write: (String) throws -> Void
     let clear: () throws -> Void
+    /// A plain `String` failure message, not `Error` — the verify closures wrap already-classified
+    /// provider errors (`GitHubTokenVerifyError.userMessage`, `TokenVerifyError.userMessage`) that
+    /// have nothing left to inspect, so there's no reason to make the row re-wrap a real `Error`.
+    var verify: ((String) async -> VerifyOutcome)? = nil
+    /// Reads back a previously verified identity (e.g. `AppSettings.shared.gitHubAccount`) so a
+    /// stored token still shows "Signed in as …" on the next launch without re-verifying eagerly.
+    var cachedIdentity: () -> Identity? = { nil }
 
     @State private var token: String = ""
     @State private var status: Status = .unknown
     @State private var savedMessage: String?
+    @State private var isBusy = false
 
     private enum Status: Equatable {
         case unknown
         case present
+        case connected(Identity)
         case absent
         case error(String)
     }
@@ -208,18 +271,25 @@ private struct KeychainTokenRow: View {
     var body: some View {
         LabeledContent(title) {
             VStack(alignment: .trailing, spacing: 6) {
+                if case .connected(let identity) = status {
+                    connectedLabel(identity)
+                }
                 HStack(spacing: 8) {
                     SecureField("paste token", text: $token, prompt: Text(promptText))
                         .textFieldStyle(.roundedBorder)
                         .frame(minWidth: 240)
+                        .disabled(isBusy)
                         .accessibilityLabel(title)
                         .accessibilityValue(statusDescription)
-                    Button("Save") { save() }
-                        .disabled(token.isEmpty)
+                    Button("Save") { Task { await save() } }
+                        .disabled(token.isEmpty || isBusy)
                     Button("Clear") { doClear() }
-                        .disabled(status != .present)
+                        .disabled(!isStored || isBusy)
                 }
-                if let savedMessage {
+                if isBusy {
+                    ProgressView().controlSize(.small)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                } else if let savedMessage {
                     Text(savedMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -230,12 +300,48 @@ private struct KeychainTokenRow: View {
                 }
             }
         }
-        .task { refreshStatus() }
+        .task { await refreshStatus() }
+    }
+
+    private var isStored: Bool {
+        switch status {
+        case .present, .connected: return true
+        case .unknown, .absent, .error: return false
+        }
+    }
+
+    @ViewBuilder
+    private func connectedLabel(_ identity: Identity) -> some View {
+        HStack(spacing: 6) {
+            if let avatarURL = identity.avatarURL {
+                AsyncImage(url: avatarURL) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        Circle().fill(Color.secondary.opacity(0.2))
+                    }
+                }
+                .frame(width: 18, height: 18)
+                .clipShape(Circle())
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Signed in as \(identity.label)")
+                    .font(.caption)
+                if let detail = identity.detail, detail != identity.label {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     private var promptText: String {
         switch status {
-        case .present: return "•••••••• (stored)"
+        case .present, .connected: return "•••••••• (stored)"
         case .absent:  return "paste token"
         case .unknown: return ""
         case .error:   return "paste token"
@@ -245,29 +351,72 @@ private struct KeychainTokenRow: View {
     /// Spoken status for VoiceOver — the redacted `SecureField` prompt isn't announced clearly.
     private var statusDescription: String {
         switch status {
-        case .present:           return "Token stored"
-        case .absent:            return "No token stored"
-        case .unknown:           return "Checking…"
-        case .error(let message): return "Error: \(message)"
+        case .present:                  return "Token stored"
+        case .connected(let identity):  return "Signed in as \(identity.label)"
+        case .absent:                   return "No token stored"
+        case .unknown:                  return "Checking…"
+        case .error(let message):       return "Error: \(message)"
         }
     }
 
-    private func refreshStatus() {
+    private func refreshStatus() async {
+        let stored: String?
         do {
-            status = (try read() != nil) ? .present : .absent
+            stored = try read()
         } catch {
             status = .error("couldn't read keychain: \(error)")
+            return
         }
+        guard let stored else {
+            status = .absent
+            return
+        }
+        if let cached = cachedIdentity() {
+            status = .connected(cached)
+            return
+        }
+        status = .present
+        guard let verify else { return }
+        // A token exists but nothing's cached yet — saved before this feature shipped, or via an
+        // env-var override some callers use. Best-effort silent backfill: a failure here just
+        // leaves the generic "stored" wording rather than surfacing a scary error for an ambient
+        // background check the user didn't ask for.
+        isBusy = true
+        if case .success(let identity) = await verify(stored) {
+            status = .connected(identity)
+        }
+        isBusy = false
     }
 
-    private func save() {
-        do {
-            try write(token)
-            token = ""
-            status = .present
-            savedMessage = "Saved."
-        } catch {
-            status = .error("couldn't save: \(error)")
+    private func save() async {
+        let candidate = token
+        guard let verify else {
+            do {
+                try write(candidate)
+                token = ""
+                status = .present
+                savedMessage = "Saved."
+            } catch {
+                status = .error("couldn't save: \(error)")
+                savedMessage = nil
+            }
+            return
+        }
+        isBusy = true
+        let outcome = await verify(candidate)
+        isBusy = false
+        switch outcome {
+        case .success(let identity):
+            do {
+                try write(candidate)
+                token = ""
+                status = .connected(identity)
+                savedMessage = nil
+            } catch {
+                status = .error("couldn't save: \(error)")
+            }
+        case .failure(let message):
+            status = .error(message)
             savedMessage = nil
         }
     }
