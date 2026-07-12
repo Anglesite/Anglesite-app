@@ -306,3 +306,67 @@ extension SiteWindowModelTests {
         #expect(model.graphExplorer.selectedNodeID == nil)
     }
 }
+
+extension SiteWindowModelTests {
+    private func siteWithNonexistentPackage(id: String = "site-a") -> SiteStore.Site {
+        SiteStore.Site(
+            id: id, name: "Test",
+            packageURL: URL(fileURLWithPath: "/tmp/site-window-model-\(UUID().uuidString).anglesite"),
+            isValid: true, missingSentinels: [], lastSeen: Date(), bookmarkData: nil
+        )
+    }
+
+    @Test("presentDesignInterview builds a fresh model from the open site, defaulting business type to empty when the site has no .site-config")
+    func presentDesignInterviewBuildsModel() {
+        let model = makeModel()
+        model.site = siteWithNonexistentPackage()
+
+        model.presentDesignInterview()
+
+        #expect(model.designInterviewModel != nil)
+        #expect(model.designInterviewModel?.draft.businessType == "")
+    }
+
+    @Test("presentDesignInterview no-ops when there is no open site")
+    func presentDesignInterviewNoSiteIsNoOp() {
+        let model = makeModel()
+
+        model.presentDesignInterview()
+
+        #expect(model.designInterviewModel == nil)
+    }
+
+    @Test("presentDesignInterview doesn't replace an already-presented model")
+    func presentDesignInterviewDoesNotReplaceExisting() {
+        let model = makeModel()
+        model.site = siteWithNonexistentPackage()
+        model.presentDesignInterview()
+        let first = model.designInterviewModel
+
+        model.presentDesignInterview()
+
+        #expect(model.designInterviewModel === first)
+    }
+
+    @Test("applyPendingDesignInterviewRequest presents the sheet when a request is pending for this site")
+    func applyPendingDesignInterviewRequestConsumesPendingRequest() {
+        let model = makeModel()
+        model.site = siteWithNonexistentPackage()
+        model.router.requestDesignInterview(siteID: "site-a")
+
+        model.applyPendingDesignInterviewRequest(for: "site-a")
+
+        #expect(model.designInterviewModel != nil)
+    }
+
+    @Test("applyPendingDesignInterviewRequest no-ops when nothing is pending for this site")
+    func applyPendingDesignInterviewRequestNoPendingRequestIsNoOp() {
+        let model = makeModel()
+        model.site = siteWithNonexistentPackage()
+        _ = model.router.consumeDesignInterviewRequest(for: "site-a")   // defensive: clear any stale request
+
+        model.applyPendingDesignInterviewRequest(for: "site-a")
+
+        #expect(model.designInterviewModel == nil)
+    }
+}

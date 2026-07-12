@@ -91,6 +91,9 @@ final class SiteWindowModel {
     /// Non-nil ⟺ the Repurpose Post sheet is presented (`.sheet(item:)`), same coupling and
     /// fresh-`ProjectConventionsStore` pattern as `copyEditModel`/`socialPlanModel` (Task 16, #465).
     var repurposeModel: RepurposeModel?
+    /// Non-nil ⟺ the Design Interview sheet is presented (`.sheet(item:)`), same fresh-
+    /// construction-from-`site` pattern as `copyEditModel`/`socialPlanModel`/`repurposeModel` (#631).
+    var designInterviewModel: DesignInterviewModel?
     /// The window's `UndoManager`, published down from `SiteWindow`'s
     /// `@Environment(\.undoManager)` so applied edits register for Edit ▸ Undo (#527). Weak +
     /// `@ObservationIgnored`: the window owns it and it isn't render state. Forwarded on set
@@ -291,6 +294,8 @@ final class SiteWindowModel {
 
     var canOpenSocialPlan: Bool { site != nil }
 
+    var canOpenDesignInterview: Bool { site != nil }
+
     /// Presents the Social Media Plan sheet (#465), same pattern as `presentCopyEdit`.
     func presentSocialPlan() {
         guard socialPlanModel == nil, let site else { return }
@@ -298,6 +303,20 @@ final class SiteWindowModel {
             siteID: site.id,
             sourceDirectory: site.sourceDirectory,
             conventionsStore: ProjectConventionsStore(configDirectory: site.configDirectory)
+        )
+    }
+
+    /// Presents the Design Interview sheet (#631), same fresh-construction-from-`site` pattern as
+    /// `presentCopyEdit`/`presentSocialPlan`. Builds a standalone `FoundationModelAssistant`
+    /// rather than reusing the site's shared `chat` assistant — the interview is its own
+    /// independent conversation, not a turn appended to the main chat's session/transcript.
+    func presentDesignInterview() {
+        guard designInterviewModel == nil, let site else { return }
+        designInterviewModel = DesignInterviewModel(
+            businessType: SiteBusinessType.read(sourceDirectory: site.sourceDirectory) ?? "",
+            assistant: FoundationModelAssistant(tier: .onDevice),
+            package: AnglesitePackage(url: site.packageURL),
+            siteID: site.id
         )
     }
 
@@ -633,6 +652,16 @@ final class SiteWindowModel {
         case .some(.none): preview.clearRoute()
         case .none: break
         }
+    }
+
+    /// Apply (and clear) any pending `StartDesignInterviewIntent` request for `siteID`: presents
+    /// the design-interview sheet if it isn't already up. Same dual cold/warm calling convention
+    /// as `applyPendingNavigation` — called from `loadAndStart` (cold-open) and from
+    /// `.onChange(of: router.pendingDesignInterview)` (an already-open window).
+    @MainActor
+    func applyPendingDesignInterviewRequest(for siteID: String) {
+        guard router.consumeDesignInterviewRequest(for: siteID) else { return }
+        presentDesignInterview()
     }
 
     /// Route a navigator selection: pages/posts switch to preview and navigate; files open the editor.
@@ -1182,6 +1211,7 @@ final class SiteWindowModel {
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
         applyPendingNavigation(for: resolved.id)
+        applyPendingDesignInterviewRequest(for: resolved.id)
         let mcpClient: @Sendable () async -> MCPClient? = { [preview] in
             await preview.mcpClient()
         }
