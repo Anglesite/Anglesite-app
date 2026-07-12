@@ -96,6 +96,10 @@ struct SiteWindow: View {
         .onChange(of: model.router.pendingNavigation) { _, _ in
             if let id = model.site?.id { model.applyPendingNavigation(for: id) }
         }
+        // Same warm/cold split as above, for `StartDesignInterviewIntent` requests (#631).
+        .onChange(of: model.router.pendingDesignInterview) { _, _ in
+            if let id = model.site?.id { model.applyPendingDesignInterviewRequest(for: id) }
+        }
         .onChange(of: model.site?.id) { _, _ in model.handleSiteChanged() }
         // `initial: true` covers the common case where the environment value is already set on
         // first render; the change handler covers SwiftUI delivering/replacing it later.
@@ -572,6 +576,15 @@ struct SiteWindow: View {
         }
         .sheet(item: $bindableModel.repurposeModel) { repurposeModel in
             RepurposeView(model: repurposeModel)
+        }
+        .sheet(item: $bindableModel.designInterviewModel) { interviewModel in
+            DesignInterviewPanel(model: interviewModel)
+                .frame(minWidth: 640, minHeight: 420)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { model.designInterviewModel = nil }
+                    }
+                }
         }
         .sheet(item: $bindableModel.integrationWizardModel) { wizardModel in
             NavigationStack {
