@@ -369,4 +369,28 @@ extension SiteWindowModelTests {
 
         #expect(model.designInterviewModel == nil)
     }
+
+    /// #660: `loadAndStart` should warm the content graph at site-open rather than leaving
+    /// `isPopulated` false until the first create/delete. This exercises the scan-and-load step
+    /// directly (bypassing `loadAndStart`'s `SiteStore.shared` dependency, same seam gap noted
+    /// throughout this file) against a real temp source directory.
+    @Test("refreshContentGraph scans a real source directory and marks the site's content graph populated")
+    func refreshContentGraphPopulatesFromSourceDirectory() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("site-window-model-\(UUID().uuidString)")
+        let pagesDir = root.appendingPathComponent("src/pages")
+        try FileManager.default.createDirectory(at: pagesDir, withIntermediateDirectories: true)
+        try Data().write(to: pagesDir.appendingPathComponent("about.astro"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let graph = SiteContentGraph()
+        let model = makeModel(contentGraph: graph)
+        #expect(await graph.isPopulated(siteID: "site-a") == false)
+
+        await model.refreshContentGraph(siteID: "site-a", sourceDirectory: root)
+
+        #expect(await graph.isPopulated(siteID: "site-a") == true)
+        let pages = await graph.pages(for: "site-a")
+        #expect(pages.map(\.route) == ["/about"])
+    }
 }
