@@ -25,6 +25,7 @@ enum SiteAssistantSessionFactory {
         _ conventionsEngine: ProjectConventionsEngine?,
         _ conventionsStore: ProjectConventionsStore,
         _ themeCatalog: ThemeCatalog?,
+        _ designInterviewFactory: FoundationModelAssistant.DesignInterviewModelFactory?,
         _ graphSnapshotProvider: @escaping GraphSnapshotProvider
     ) -> any ConversationalAssistant
 
@@ -54,7 +55,7 @@ enum SiteAssistantSessionFactory {
             let editRouterProvider: EditRouterProvider = { siteID in
                 await EditRouterRegistry.shared.router(for: siteID)
             }
-            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, conventionsEngine, conventionsStore, themeCatalog, graphSnapshotProvider in
+            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, conventionsEngine, conventionsStore, themeCatalog, designInterviewFactory, graphSnapshotProvider in
                 CombinedAugmentedAssistant(
                     base: FoundationModelAssistant(
                         tier: .onDevice,
@@ -68,7 +69,8 @@ enum SiteAssistantSessionFactory {
                         copyEditAuditor: CopyEditAuditorFactory.makeDefault(),
                         socialMediaPlanner: SocialMediaPlannerFactory.makeDefault(),
                         postRepurposer: PostRepurposerFactory.makeDefault(),
-                        themeCatalog: themeCatalog
+                        themeCatalog: themeCatalog,
+                        designInterviewFactory: designInterviewFactory
                     ),
                     index: knowledgeIndex,
                     graphSnapshotProvider: graphSnapshotProvider
@@ -121,6 +123,7 @@ enum SiteAssistantSessionFactory {
         siteID: String,
         sourceDirectory: URL,
         configDirectory: URL,
+        packageURL: URL? = nil,
         mcpClient: @escaping MCPClientProvider,
         contentGraph: SiteContentGraph,
         knowledgeIndex: SiteKnowledgeIndex,
@@ -139,6 +142,27 @@ enum SiteAssistantSessionFactory {
         // the engine's merged snapshot to whichever store instance they hold, so a second store
         // pointed at the same `conventions.json` never observes a stale value.
         let conventionsStore = ProjectConventionsStore(configDirectory: configDirectory)
+        // The chat front door's design-interview factory (#665), invoked lazily by
+        // `FoundationModelAssistant` on `DesignInterviewTool`'s first call. Mirrors
+        // `SiteWindowModel.presentDesignInterview()`: a **standalone** on-device assistant, because
+        // the interview is its own model conversation — routing it through the hosting chat
+        // assistant would both append interview turns to the chat session's transcript and
+        // re-enter that actor's single-flight session mid-drain.
+        let designInterviewFactory: FoundationModelAssistant.DesignInterviewModelFactory? = packageURL.map { packageURL in
+            {
+                // Read off the main actor — only DesignInterviewModel's init needs MainActor,
+                // and `.site-config` may live on slow (e.g. iCloud-backed) storage.
+                let businessType = SiteBusinessType.read(sourceDirectory: sourceDirectory) ?? ""
+                return await MainActor.run {
+                    DesignInterviewModel(
+                        businessType: businessType,
+                        assistant: FoundationModelAssistant(tier: .onDevice),
+                        package: AnglesitePackage(url: packageURL),
+                        siteID: siteID
+                    )
+                }
+            }
+        }
         let chat = ChatModel(
             siteID: siteID,
             siteDirectory: sourceDirectory,
@@ -152,6 +176,7 @@ enum SiteAssistantSessionFactory {
                 conventionsEngine,
                 conventionsStore,
                 themeCatalog,
+                designInterviewFactory,
                 graphSnapshotProvider
             ),
             annotationFeed: dependencies.annotationFeed(sourceDirectory),

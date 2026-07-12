@@ -21,10 +21,20 @@ public struct DesignInterviewTool: Tool, Sendable {
         public var designForMe: Bool?
     }
 
-    private let model: DesignInterviewModel
-    public init(model: DesignInterviewModel) { self.model = model }
+    /// Resolves the conversation's model on each call. Front doors that already hold a model
+    /// (the GUI sheet) wrap it in a constant closure via ``init(model:)``; the chat front door
+    /// (#665) passes ``FoundationModelAssistant``'s lazy, session-cached accessor instead, so the
+    /// interview isn't built until the assistant actually invokes the tool. Throwing so a
+    /// provider whose backing state is gone fails the tool call loudly rather than silently
+    /// handing back a fresh interview with no history.
+    public typealias ModelProvider = @Sendable () async throws -> DesignInterviewModel
+
+    private let provider: ModelProvider
+    public init(model: DesignInterviewModel) { self.provider = { model } }
+    public init(provider: @escaping ModelProvider) { self.provider = provider }
 
     public func call(arguments: Arguments) async throws -> String {
+        let model = try await provider()
         if arguments.designForMe == true {
             let businessType = await MainActor.run { () -> String in
                 model.skipToAxisConfirmation()

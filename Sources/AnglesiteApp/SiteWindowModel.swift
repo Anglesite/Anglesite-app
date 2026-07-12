@@ -1246,6 +1246,7 @@ final class SiteWindowModel {
             siteID: resolved.id,
             sourceDirectory: resolved.sourceDirectory,
             configDirectory: resolved.configDirectory,
+            packageURL: resolved.packageURL,
             mcpClient: mcpClient,
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,

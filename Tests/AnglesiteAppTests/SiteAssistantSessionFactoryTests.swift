@@ -27,7 +27,7 @@ struct SiteAssistantSessionFactoryTests {
         )
         let capture = SnapshotCapture()
         var dependencies = SiteAssistantSessionFactory.Dependencies.live
-        dependencies.assistant = { _, _, _, _, _, _, _, _, graphSnapshotProvider in
+        dependencies.assistant = { _, _, _, _, _, _, _, _, _, graphSnapshotProvider in
             Task {
                 let snapshot = await graphSnapshotProvider()
                 await capture.capture(snapshot)
@@ -52,6 +52,47 @@ struct SiteAssistantSessionFactoryTests {
 
         while await capture.received == nil { await Task.yield() }
         #expect(await capture.received == expected)
+    }
+
+    /// Runs `makeSession` with a builder that only records whether a design-interview factory
+    /// arrived, returning that observation (#665).
+    private func interviewFactoryPresence(packageURL: URL?) -> Bool {
+        // The builder closure is `@Sendable`, so it can't mutate a captured local directly —
+        // but it runs synchronously inside `makeSession`, so an unchecked box is race-free here.
+        final class Observed: @unchecked Sendable { var factoryPresent = false }
+        let observed = Observed()
+        var dependencies = SiteAssistantSessionFactory.Dependencies.live
+        dependencies.assistant = { _, _, _, _, _, _, _, _, designInterviewFactory, _ in
+            observed.factoryPresent = designInterviewFactory != nil
+            return StubConversationalAssistant()
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        _ = SiteAssistantSessionFactory.makeSession(
+            siteID: "site-1",
+            sourceDirectory: root,
+            configDirectory: root,
+            packageURL: packageURL,
+            mcpClient: { nil },
+            contentGraph: SiteContentGraph(),
+            knowledgeIndex: SiteKnowledgeIndex(),
+            semanticRanker: nil,
+            conventionsEngine: nil,
+            integrationService: IntegrationOperations.live(),
+            dependencies: dependencies,
+            graphSnapshotProvider: { SiteGraphExplorerSnapshot(nodes: [], edges: []) }
+        )
+        return observed.factoryPresent
+    }
+
+    @Test("a packageURL yields a design-interview factory for the chat assistant (#665)")
+    func packageURLYieldsDesignInterviewFactory() {
+        let packageURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        #expect(interviewFactoryPresence(packageURL: packageURL))
+    }
+
+    @Test("no packageURL means no design-interview factory (#665)")
+    func missingPackageURLMeansNoFactory() {
+        #expect(!interviewFactoryPresence(packageURL: nil))
     }
 }
 

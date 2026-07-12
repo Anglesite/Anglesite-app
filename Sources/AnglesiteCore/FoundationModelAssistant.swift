@@ -101,7 +101,21 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private let copyEditAuditor: (any CopyEditAuditing)?
     private let socialMediaPlanner: (any SocialMediaPlanning)?
     private let postRepurposer: (any PostRepurposing)?
+    /// Builds a fresh ``DesignInterviewModel`` for the chat front door (#665). Infallible —
+    /// distinct from ``DesignInterviewTool/ModelProvider``, which may throw when its backing
+    /// state is gone. Named so the app-side wiring and this actor spell one type.
+    public typealias DesignInterviewModelFactory = @Sendable () async -> DesignInterviewModel
+
     private let themeCatalog: ThemeCatalog?
+    private let designInterviewFactory: DesignInterviewModelFactory?
+    /// The chat session's design interview, built lazily by ``currentDesignInterviewModel()`` on
+    /// the tool's first call. One interview per chat session: unlike every other tool dependency
+    /// on this actor (window-lifetime, stateless), the interview is conversation-lifetime mutable
+    /// state (#665) — it survives session trims (``trimSessionIfNeeded(current:context:)`` must
+    /// not reset an in-flight interview) and is cleared only by ``resetSession()``. Deliberately
+    /// a *separate* instance from the GUI sheet's `SiteWindowModel.designInterviewModel`: each
+    /// front door owns its own conversation, and sharing would pop the sheet from a chat turn.
+    private var designInterviewModel: DesignInterviewModel?
     private let logger = Logger(subsystem: "io.dwk.anglesite", category: "FoundationModelAssistant")
     /// The current conversational turn's consumer-facing ``TurnRelay``, retained so ``cancel()`` can
     /// wind it down. Cancelling stops *delivery* only — it never cancels the model stream, because
@@ -143,6 +157,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         socialMediaPlanner: (any SocialMediaPlanning)? = nil,
         postRepurposer: (any PostRepurposing)? = nil,
         themeCatalog: ThemeCatalog? = nil,
+        designInterviewFactory: DesignInterviewModelFactory? = nil,
         maxRetainedTurns: Int = 12
     ) {
         self.tier = tier
@@ -157,6 +172,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         self.socialMediaPlanner = socialMediaPlanner
         self.postRepurposer = postRepurposer
         self.themeCatalog = themeCatalog
+        self.designInterviewFactory = designInterviewFactory
         // `trimSessionIfNeeded`'s cutoff indexing (`promptIndices.count - maxRetainedTurns`) assumes
         // at least 1: `<= 0` would index at or past the end of `promptIndices` and crash. Clamp
         // rather than crash so a caller passing e.g. `0` ("keep no history") degrades to the
@@ -357,6 +373,28 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         activeRelay?.cancel()
         activeRelay = nil
         session = nil
+        // Resetting the chat also starts a fresh design interview (#665) — the interview is
+        // conversation-lifetime state, and "reset" means the whole conversation to the user.
+        designInterviewModel = nil
+    }
+
+    /// Returns the chat session's ``DesignInterviewModel``, lazily building it via the injected
+    /// `designInterviewFactory` on first use, or `nil` when no factory was supplied. Cached so
+    /// every ``DesignInterviewTool`` call within one chat session continues the same interview;
+    /// ``resetSession()`` clears it. See `designInterviewModel`'s doc comment for the lifetime
+    /// rationale (#665).
+    func currentDesignInterviewModel() async -> DesignInterviewModel? {
+        guard let designInterviewFactory else { return nil }
+        if let designInterviewModel { return designInterviewModel }
+        let created = await designInterviewFactory()
+        // Actor reentrancy: a concurrent tool call may have built one while the factory ran —
+        // first writer wins so both calls continue the same interview. The losing build is
+        // discarded outright; that's intentional and cheap while `DesignInterviewModel.init` is
+        // plain property assignment — keep the factory free of heavy work (I/O is fine, it's
+        // rare) or add dedup before the `await` if that ever changes.
+        if let existing = designInterviewModel { return existing }
+        designInterviewModel = created
+        return created
     }
 
     /// Test-only: the clamped ``maxRetainedTurns`` actually stored, so tests can assert `init`
@@ -385,7 +423,8 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// `ReviewCopyTool` is added when a `copyEditAuditor` is provided. `PlanSocialMediaTool` is
     /// added when a `socialMediaPlanner` is provided. `RepurposePostTool`/`SaveSyndicationTool` are
     /// added together when a `postRepurposer` is provided. `SetupThemeTool` is added when a
-    /// `themeCatalog` is provided.
+    /// `themeCatalog` is provided. `DesignInterviewTool` is added when a
+    /// `designInterviewFactory` is provided (#665).
     private var attachedToolNames: [String] {
         var names = [Self.spotlightToolDisplayName]
         if editBridge != nil && contentGraph != nil {
@@ -415,7 +454,20 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         if themeCatalog != nil {
             names.append(SetupThemeTool.toolName)
         }
+        if designInterviewFactory != nil {
+            names.append(DesignInterviewTool.toolName)
+        }
         return names
+    }
+
+    /// Test-only: exposes ``attachedToolNames`` so tests can assert optional-tool advertising
+    /// without a live model turn (the production surface is the `.started` event).
+    var attachedToolNamesForTesting: [String] { attachedToolNames }
+
+    /// Test-only: exposes ``conversationTools(for:includeSpotlight:)`` so tests can assert which
+    /// tool types a conversational session would carry without constructing a live session.
+    func conversationToolsForTesting(for context: AssistantContext) -> [any Tool] {
+        conversationTools(for: context, includeSpotlight: false)
     }
 
     /// Returns the cached conversational session, lazily creating it from `context` on first use.
@@ -513,6 +565,20 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         }
         if let themeCatalog {
             tools.append(SetupThemeTool(catalog: themeCatalog, sourceDirectory: context.siteDirectory))
+        }
+        if designInterviewFactory != nil {
+            // The provider routes through the actor's cache so every call in this chat session
+            // continues one interview (#665). `[weak self]` because the actor retains the
+            // session, the session retains its tools, and a strong capture would close a
+            // self-retain cycle. A nil `self` means the tool outlived its actor — unreachable
+            // today (the session's lifetime is bounded by the actor's); fail the call loudly
+            // rather than silently fabricating an uncached interview with no history.
+            tools.append(DesignInterviewTool(provider: { [weak self] in
+                guard let self, let model = await self.currentDesignInterviewModel() else {
+                    throw CancellationError()
+                }
+                return model
+            }))
         }
         return tools
     }
