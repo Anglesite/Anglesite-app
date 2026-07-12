@@ -222,6 +222,10 @@ public struct ContentCreationWorkflow: ContentOperationsService {
     private func refreshContentGraph(siteID: String, indexFilePath: String? = nil) async {
         guard let root = await siteDirectory(siteID) else { return }
         if let contentGraph {
+            // Claim a scan generation (#666) before the filesystem walk starts, so a slower
+            // rescan racing against a faster, newer one — e.g. the site-open scan in
+            // `SiteContentGraph.rescan` — never clobbers the newer result.
+            let generation = await contentGraph.beginScan(siteID: siteID)
             let listing = await Task.detached(priority: .utility) {
                 ContentScanner.scan(projectRoot: root, siteID: siteID)
             }.value
@@ -229,7 +233,8 @@ public struct ContentCreationWorkflow: ContentOperationsService {
                 siteID: siteID,
                 pages: listing.pages,
                 posts: listing.posts,
-                images: listing.images
+                images: listing.images,
+                generation: generation
             )
         }
         if let indexFilePath {

@@ -259,8 +259,13 @@ extension SiteContentGraph {
     /// Returns `false` without touching `siteID`'s existing state if `projectRoot` can't even be
     /// listed — a stale/revoked security-scoped bookmark, a deleted or unmounted directory — so
     /// `isPopulated` never lies about "scanned and empty" when the scan never actually ran.
+    ///
+    /// Claims a scan generation (#666) before the filesystem walk starts, so a slower rescan
+    /// racing against a faster, newer one from another call site (`ContentCreationWorkflow`'s
+    /// post-mutation rescan) never clobbers the newer result.
     @discardableResult
     public func rescan(siteID: String, projectRoot: URL) async -> Bool {
+        let generation = beginScan(siteID: siteID)
         let listing = await Task.detached(priority: .utility) { () async -> ContentListing? in
             guard (try? FileManager.default.contentsOfDirectory(atPath: projectRoot.path)) != nil else {
                 await LogCenter.shared.append(
@@ -273,7 +278,13 @@ extension SiteContentGraph {
             return ContentScanner.scan(projectRoot: projectRoot, siteID: siteID)
         }.value
         guard let listing else { return false }
-        await load(siteID: siteID, pages: listing.pages, posts: listing.posts, images: listing.images)
+        await load(
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images,
+            generation: generation
+        )
         return true
     }
 }

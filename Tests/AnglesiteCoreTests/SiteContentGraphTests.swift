@@ -440,6 +440,91 @@ struct SiteContentGraphTests {
         #expect(await graph.isPopulated(siteID: Self.siteA) == false)
     }
 
+    // MARK: - scan generation guard (#666)
+
+    @Test("beginScan returns increasing tokens per siteID, starting at 1")
+    func beginScanReturnsIncreasingTokens() async {
+        let graph = SiteContentGraph()
+        let first = await graph.beginScan(siteID: Self.siteA)
+        let second = await graph.beginScan(siteID: Self.siteA)
+        #expect(first == 1)
+        #expect(second == 2)
+    }
+
+    @Test("load without a generation token bypasses the freshness guard (back-compat default)")
+    func loadWithoutGenerationAlwaysApplies() async {
+        let graph = SiteContentGraph()
+        _ = await graph.beginScan(siteID: Self.siteA)
+        await graph.load(siteID: Self.siteA, pages: [Self.page()], posts: [], images: [])
+        let pages = await graph.pages(for: Self.siteA)
+        #expect(pages.count == 1)
+    }
+
+    @Test("load with the current generation applies normally")
+    func loadWithCurrentGenerationApplies() async {
+        let graph = SiteContentGraph()
+        let gen = await graph.beginScan(siteID: Self.siteA)
+        await graph.load(siteID: Self.siteA, pages: [Self.page()], posts: [], images: [], generation: gen)
+        let pages = await graph.pages(for: Self.siteA)
+        #expect(pages.count == 1)
+        #expect(await graph.isPopulated(siteID: Self.siteA) == true)
+    }
+
+    @Test("""
+    simulates the #666 race: a slower site-open scan started first must not clobber a \
+    faster, newer create-triggered rescan
+    """)
+    func staleGenerationLoadIsDiscarded() async {
+        let graph = SiteContentGraph()
+
+        // Site-open scan starts first (older generation)...
+        let openScanGeneration = await graph.beginScan(siteID: Self.siteA)
+
+        // ...but a Shortcut creates a page and its rescan starts — and finishes — while the
+        // site-open scan is still walking the filesystem.
+        let createRescanGeneration = await graph.beginScan(siteID: Self.siteA)
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [Self.page(route: "/new-from-shortcut")],
+            posts: [],
+            images: [],
+            generation: createRescanGeneration
+        )
+
+        // The slower site-open scan finally finishes and calls load with its stale snapshot,
+        // captured before the Shortcut's page existed — this must be discarded, not applied.
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [Self.page(route: "/about")],
+            posts: [],
+            images: [],
+            generation: openScanGeneration
+        )
+
+        let routes = await graph.pages(for: Self.siteA).map(\.route)
+        #expect(routes == ["/new-from-shortcut"])
+    }
+
+    @Test("scan generations are tracked independently per siteID, not a single shared counter")
+    func scanGenerationsArePerSiteIsolated() async {
+        let graph = SiteContentGraph()
+        let siteAGeneration = await graph.beginScan(siteID: Self.siteA)
+        // Advance siteB's counter ahead of siteA's — if generations were a single shared
+        // counter instead of keyed per siteID, siteA's load below would be wrongly discarded.
+        _ = await graph.beginScan(siteID: Self.siteB)
+        _ = await graph.beginScan(siteID: Self.siteB)
+
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [Self.page(site: Self.siteA)],
+            posts: [],
+            images: [],
+            generation: siteAGeneration
+        )
+
+        #expect(await graph.pages(for: Self.siteA).count == 1)
+    }
+
     @Test("searchPages matches title and route case-insensitively")
     func searchPagesMatchesTitleAndRouteCaseInsensitive() async {
         let graph = SiteContentGraph()
