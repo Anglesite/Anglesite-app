@@ -261,8 +261,13 @@ extension SiteContentGraph {
     /// `isPopulated` never lies about "scanned and empty" when the scan never actually ran.
     @discardableResult
     public func rescan(siteID: String, projectRoot: URL) async -> Bool {
-        let listing = await Task.detached(priority: .utility) { () -> ContentListing? in
+        let listing = await Task.detached(priority: .utility) { () async -> ContentListing? in
             guard (try? FileManager.default.contentsOfDirectory(atPath: projectRoot.path)) != nil else {
+                await LogCenter.shared.append(
+                    source: "content-graph:\(siteID)", stream: .stderr,
+                    text: "Couldn't list \(projectRoot.path) — leaving the content graph unpopulated "
+                        + "for this scan (stale bookmark, or the directory is missing/unmounted?)"
+                )
                 return nil
             }
             return ContentScanner.scan(projectRoot: projectRoot, siteID: siteID)
