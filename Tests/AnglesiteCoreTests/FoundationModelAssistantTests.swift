@@ -4,6 +4,7 @@ import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
 @testable import AnglesiteCore
+import AnglesiteSiteModel
 
 // Gated like the type under test (#128). Capability/tier assertions run on any toolchain≥6.4;
 // the generate/generateStructured tests are live-model and skip when unavailable.
@@ -64,6 +65,67 @@ struct FoundationModelAssistantTests {
         #expect(FoundationModelAssistant(maxRetainedTurns: 0).maxRetainedTurnsForTesting == 1)
         #expect(FoundationModelAssistant(maxRetainedTurns: -5).maxRetainedTurnsForTesting == 1)
         #expect(FoundationModelAssistant(maxRetainedTurns: 3).maxRetainedTurnsForTesting == 3)
+    }
+
+    // MARK: Design-interview chat tool (#665) — no model required
+
+    /// Counts factory invocations from a `@Sendable` closure without data races.
+    private actor InvocationCounter {
+        var count = 0
+        func increment() { count += 1 }
+    }
+
+    /// A design-interview factory whose inner assistant is never exercised — these tests only
+    /// cover the hosting actor's lazy-build/cache/reset lifecycle, not the interview itself.
+    private func makeInterviewFactory(counting counter: InvocationCounter) -> @Sendable () async -> DesignInterviewModel {
+        {
+            await counter.increment()
+            return await MainActor.run {
+                DesignInterviewModel(
+                    businessType: "bakery",
+                    assistant: FoundationModelAssistant(tier: .onDevice),
+                    package: AnglesitePackage(url: FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString)),
+                    siteID: "site-1"
+                )
+            }
+        }
+    }
+
+    @Test("design-interview model is built lazily, cached across calls, and cleared by resetSession (#665)")
+    func designInterviewModelLifecycle() async throws {
+        let counter = InvocationCounter()
+        let assistant = FoundationModelAssistant(designInterviewFactory: makeInterviewFactory(counting: counter))
+        // Lazy: nothing built at init.
+        #expect(await counter.count == 0)
+        let first = try #require(await assistant.currentDesignInterviewModel())
+        let second = try #require(await assistant.currentDesignInterviewModel())
+        // Cached: one interview per chat session, not one per turn.
+        #expect(first === second)
+        #expect(await counter.count == 1)
+        // resetSession starts a fresh interview along with the fresh chat.
+        await assistant.resetSession()
+        let third = try #require(await assistant.currentDesignInterviewModel())
+        #expect(third !== first)
+        #expect(await counter.count == 2)
+    }
+
+    @Test("no factory means no design-interview model and no advertised tool (#665)")
+    func designInterviewAbsentWithoutFactory() async {
+        let assistant = FoundationModelAssistant()
+        #expect(await assistant.currentDesignInterviewModel() == nil)
+        #expect(await !assistant.attachedToolNamesForTesting.contains(DesignInterviewTool.toolName))
+    }
+
+    @Test("a supplied factory attaches DesignInterviewTool to the conversational session (#665)")
+    func designInterviewToolAttachedWithFactory() async {
+        let counter = InvocationCounter()
+        let assistant = FoundationModelAssistant(designInterviewFactory: makeInterviewFactory(counting: counter))
+        #expect(await assistant.attachedToolNamesForTesting.contains(DesignInterviewTool.toolName))
+        let tools = await assistant.conversationToolsForTesting(for: makeContext())
+        #expect(tools.contains { $0 is DesignInterviewTool })
+        // Attaching the tool must not eagerly build the interview model.
+        #expect(await counter.count == 0)
     }
 
     @Test("PCC-tier assistant constructs and remains usable (falls back to on-device)")
