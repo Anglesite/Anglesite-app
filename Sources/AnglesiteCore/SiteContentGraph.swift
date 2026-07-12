@@ -133,7 +133,27 @@ public actor SiteContentGraph {
     /// these are fire-and-forget siteID feeds. Pruned via the stream's `onTermination`.
     private var changeStreamContinuations: [UUID: AsyncStream<String>.Continuation] = [:]
 
+    /// Per-siteID monotonic counter guarding `load` against a slower, earlier-started scan
+    /// landing after (and clobbering) a faster, newer one (#666). Keyed per siteID so two
+    /// sites' scans never interfere with each other's fencing.
+    private var scanGenerations: [String: Int] = [:]
+
     public init() {}
+
+    /// Claims a new scan generation for `siteID`. Call this *before* starting a filesystem
+    /// walk, then pass the returned token to `load(siteID:pages:posts:images:generation:)`
+    /// when the scan completes.
+    ///
+    /// First-started, not first-finished, wins: if another `beginScan` call claims a newer
+    /// generation for the same siteID before this scan's `load` lands, that `load` call is
+    /// silently discarded — a later-started scan reflects a filesystem state that already
+    /// accounts for whatever mutation triggered it, so an earlier-started scan's result is
+    /// stale by definition, however long it takes to complete (#666).
+    public func beginScan(siteID: String) -> Int {
+        let next = (scanGenerations[siteID] ?? 0) + 1
+        scanGenerations[siteID] = next
+        return next
+    }
 
     public func setChangeHandler(_ handler: ChangeHandler?) {
         changeHandler = handler
@@ -170,13 +190,24 @@ public actor SiteContentGraph {
     // MARK: - Bulk load
 
     /// Replaces all entries for `siteID` with the supplied payload. Existing entries for
-    /// other siteIDs are untouched. Always emits a change for `siteID`.
+    /// other siteIDs are untouched. Always emits a change for `siteID`, unless discarded by
+    /// the `generation` guard below.
+    ///
+    /// - Parameter generation: A token from `beginScan(siteID:)`. When provided, this call is
+    ///   silently discarded (no state change, no emit) if a newer scan has since claimed a
+    ///   later generation for `siteID` — see `beginScan` (#666). `nil` (the default) skips the
+    ///   guard entirely, applying unconditionally; used by incremental/test callers that don't
+    ///   participate in the scan-race fence.
     public func load(
         siteID: String,
         pages: [Page],
         posts: [Post],
-        images: [Image]
+        images: [Image],
+        generation: Int? = nil
     ) async {
+        if let generation, scanGenerations[siteID] != generation {
+            return
+        }
         for key in self.pages.compactMap({ $0.value.siteID == siteID ? $0.key : nil }) {
             self.pages.removeValue(forKey: key)
         }
