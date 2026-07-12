@@ -117,6 +117,15 @@ public enum AnglesiteOperations {
             resultShape: .none
         ),
         OperationDescriptor(
+            // `.readOnly`: like `preview-site`, this only opens/focuses the app to a conversation
+            // surface — it persists nothing itself. The interview's eventual `confirmAndApply()`
+            // write happens later, inside the GUI panel, not as part of this intent.
+            operationID: "start-design-interview", displayName: "Start Design Interview",
+            intentTypeName: "StartDesignInterviewIntent", sideEffect: .readOnly,
+            requiresConfirmation: false, isCancellable: false,
+            resultShape: .none
+        ),
+        OperationDescriptor(
             operationID: "add-page", displayName: "Add Page",
             intentTypeName: "AddPageIntent", sideEffect: .createsContent,
             requiresConfirmation: false, isCancellable: true,
