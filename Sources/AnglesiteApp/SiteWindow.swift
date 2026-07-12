@@ -578,13 +578,16 @@ struct SiteWindow: View {
             RepurposeView(model: repurposeModel)
         }
         .sheet(item: $bindableModel.designInterviewModel) { interviewModel in
-            DesignInterviewPanel(model: interviewModel)
-                .frame(minWidth: 640, minHeight: 420)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { model.designInterviewModel = nil }
+            NavigationStack {
+                DesignInterviewPanel(model: interviewModel)
+                    .navigationTitle("Design Interview")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { model.designInterviewModel = nil }
+                        }
                     }
-                }
+            }
+            .frame(minWidth: 640, minHeight: 420)
         }
         .sheet(item: $bindableModel.integrationWizardModel) { wizardModel in
             NavigationStack {
