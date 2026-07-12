@@ -36,6 +36,25 @@ public final class WindowRouter {
         pendingNavigation.removeValue(forKey: siteID)
     }
 
+    /// Pending "open the design-interview sheet" request per site, set by
+    /// `StartDesignInterviewIntent` and consumed once by that site's window — mirrors
+    /// `pendingNavigation`'s set-then-consume shape. Kept as its own `Set` (not folded into
+    /// `pendingNavigation`) because it targets a different surface (the design-interview sheet,
+    /// not the preview's page route) and carries no route value of its own.
+    public private(set) var pendingDesignInterview: Set<String> = []
+
+    /// Requests that `siteID`'s window open (or focus), then present the design-interview sheet.
+    public func requestDesignInterview(siteID: String) {
+        pendingDesignInterview.insert(siteID)
+        requested = siteID
+    }
+
+    /// Take (and clear) the pending design-interview request for `siteID`. `true` when one was
+    /// pending, `false` otherwise.
+    public func consumeDesignInterviewRequest(for siteID: String) -> Bool {
+        pendingDesignInterview.remove(siteID) != nil
+    }
+
     /// Set by File ▸ New Site (which can't host the wizard sheet itself). The "Sites"
     /// launcher observes this, runs `presentNewSite()`, then clears it via
     /// `clearNewSiteRequest()`. `private(set)` so only the two methods below mutate it —
