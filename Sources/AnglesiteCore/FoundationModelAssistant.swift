@@ -101,8 +101,13 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private let copyEditAuditor: (any CopyEditAuditing)?
     private let socialMediaPlanner: (any SocialMediaPlanning)?
     private let postRepurposer: (any PostRepurposing)?
+    /// Builds a fresh ``DesignInterviewModel`` for the chat front door (#665). Infallible —
+    /// distinct from ``DesignInterviewTool/ModelProvider``, which may throw when its backing
+    /// state is gone. Named so the app-side wiring and this actor spell one type.
+    public typealias DesignInterviewModelFactory = @Sendable () async -> DesignInterviewModel
+
     private let themeCatalog: ThemeCatalog?
-    private let designInterviewFactory: (@Sendable () async -> DesignInterviewModel)?
+    private let designInterviewFactory: DesignInterviewModelFactory?
     /// The chat session's design interview, built lazily by ``currentDesignInterviewModel()`` on
     /// the tool's first call. One interview per chat session: unlike every other tool dependency
     /// on this actor (window-lifetime, stateless), the interview is conversation-lifetime mutable
@@ -152,7 +157,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         socialMediaPlanner: (any SocialMediaPlanning)? = nil,
         postRepurposer: (any PostRepurposing)? = nil,
         themeCatalog: ThemeCatalog? = nil,
-        designInterviewFactory: (@Sendable () async -> DesignInterviewModel)? = nil,
+        designInterviewFactory: DesignInterviewModelFactory? = nil,
         maxRetainedTurns: Int = 12
     ) {
         self.tier = tier
@@ -558,14 +563,18 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         if let themeCatalog {
             tools.append(SetupThemeTool(catalog: themeCatalog, sourceDirectory: context.siteDirectory))
         }
-        if let designInterviewFactory {
+        if designInterviewFactory != nil {
             // The provider routes through the actor's cache so every call in this chat session
             // continues one interview (#665). `[weak self]` because the actor retains the
             // session, the session retains its tools, and a strong capture would close a
-            // self-retain cycle; the factory fallback only runs if the actor is already gone.
+            // self-retain cycle. A nil `self` means the tool outlived its actor — unreachable
+            // today (the session's lifetime is bounded by the actor's); fail the call loudly
+            // rather than silently fabricating an uncached interview with no history.
             tools.append(DesignInterviewTool(provider: { [weak self] in
-                if let self, let model = await self.currentDesignInterviewModel() { return model }
-                return await designInterviewFactory()
+                guard let self, let model = await self.currentDesignInterviewModel() else {
+                    throw CancellationError()
+                }
+                return model
             }))
         }
         return tools

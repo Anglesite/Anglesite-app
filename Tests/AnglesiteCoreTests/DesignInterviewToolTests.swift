@@ -7,31 +7,8 @@ import Foundation
 #if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
-/// Minimal fake — echoes a fixed reply as a single `.textDelta` then `.turnComplete`, so the
-/// tool's call path can be exercised without a real FoundationModels session (same shape as
-/// `DesignInterviewModelTests`' fake, private to that file).
-private actor FakeConversationalAssistant: ConversationalAssistant {
-    nonisolated var capabilities: AssistantCapabilities {
-        AssistantCapabilities(supportsStreaming: true, supportsStructuredOutput: false, supportsVision: false,
-                              supportsTools: false, maxContextTokens: 4096, providerName: "Fake")
-    }
-    func generate(prompt: String, context: AssistantContext) async throws -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { $0.yield("echo: \(prompt)"); $0.finish() }
-    }
-    func generateStructured<T: Generable & Sendable>(prompt: String, context: AssistantContext, resultType: T.Type) async throws -> T {
-        fatalError("not used by DesignInterviewToolTests")
-    }
-    func converse(prompt: String, context: AssistantContext) async throws -> AsyncStream<AssistantEvent> {
-        AsyncStream { continuation in
-            continuation.yield(.started(model: "Fake", toolNames: []))
-            continuation.yield(.textDelta("Got it."))
-            continuation.yield(.turnComplete(nil))
-            continuation.finish()
-        }
-    }
-    func cancel() async {}
-    func resetSession() async {}
-}
+// Uses the shared `FakeConversationalAssistant` (FakeConversationalAssistant.swift) for the
+// canned "Got it." reply, so the tool's call path runs without a real FoundationModels session.
 
 @Suite struct DesignInterviewToolTests {
     /// A real `.anglesite` package layout (root + `Source/`), matching

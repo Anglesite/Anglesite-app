@@ -25,7 +25,7 @@ enum SiteAssistantSessionFactory {
         _ conventionsEngine: ProjectConventionsEngine?,
         _ conventionsStore: ProjectConventionsStore,
         _ themeCatalog: ThemeCatalog?,
-        _ designInterviewFactory: (@Sendable () async -> DesignInterviewModel)?,
+        _ designInterviewFactory: FoundationModelAssistant.DesignInterviewModelFactory?,
         _ graphSnapshotProvider: @escaping GraphSnapshotProvider
     ) -> any ConversationalAssistant
 
@@ -148,11 +148,14 @@ enum SiteAssistantSessionFactory {
         // the interview is its own model conversation — routing it through the hosting chat
         // assistant would both append interview turns to the chat session's transcript and
         // re-enter that actor's single-flight session mid-drain.
-        let designInterviewFactory: (@Sendable () async -> DesignInterviewModel)? = packageURL.map { packageURL in
+        let designInterviewFactory: FoundationModelAssistant.DesignInterviewModelFactory? = packageURL.map { packageURL in
             {
-                await MainActor.run {
+                // Read off the main actor — only DesignInterviewModel's init needs MainActor,
+                // and `.site-config` may live on slow (e.g. iCloud-backed) storage.
+                let businessType = SiteBusinessType.read(sourceDirectory: sourceDirectory) ?? ""
+                return await MainActor.run {
                     DesignInterviewModel(
-                        businessType: SiteBusinessType.read(sourceDirectory: sourceDirectory) ?? "",
+                        businessType: businessType,
                         assistant: FoundationModelAssistant(tier: .onDevice),
                         package: AnglesitePackage(url: packageURL),
                         siteID: siteID
