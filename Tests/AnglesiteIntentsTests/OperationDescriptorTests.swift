@@ -51,6 +51,7 @@ extension AppIntentsTests {
                 "site-status": .init(sideEffect: .readOnly, requiresConfirmation: false, isCancellable: false, resultShape: .none),
                 "find-content-by-type": .init(sideEffect: .readOnly, requiresConfirmation: false, isCancellable: false, resultShape: .entities("PostEntity")),
                 "preview-site": .init(sideEffect: .readOnly, requiresConfirmation: false, isCancellable: false, resultShape: .none),
+                "start-design-interview": .init(sideEffect: .readOnly, requiresConfirmation: false, isCancellable: false, resultShape: .none),
                 "add-page": .init(sideEffect: .createsContent, requiresConfirmation: false, isCancellable: true, resultShape: .entity("PageEntity")),
                 "add-post": .init(sideEffect: .createsContent, requiresConfirmation: false, isCancellable: true, resultShape: .entity("PostEntity")),
                 // TODO(#239/#250): flip requiresConfirmation to true when the EditContentIntent

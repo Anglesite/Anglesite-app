@@ -51,6 +51,9 @@ struct SiteMenuCommands: Commands {
             Button("Social Media Plan…") { model?.presentSocialPlan() }
                 .disabled(model?.canOpenSocialPlan != true)
 
+            Button("Design Interview…") { model?.presentDesignInterview() }
+                .disabled(model?.canOpenDesignInterview != true)
+
             #if !ANGLESITE_MAS
             // Same identity swap as the toolbar: menus rebuild on every open, so a state-dependent
             // item is fine here (unlike the customizable toolbar, see #519).

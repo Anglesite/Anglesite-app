@@ -11,7 +11,10 @@ struct WindowRouterTests {
     private func freshRouter() -> WindowRouter {
         let router = WindowRouter.shared
         router.requested = nil
-        for id in ["siteA", "siteB", "siteC"] { _ = router.consumeNavigation(for: id) }
+        for id in ["siteA", "siteB", "siteC"] {
+            _ = router.consumeNavigation(for: id)
+            _ = router.consumeDesignInterviewRequest(for: id)
+        }
         return router
     }
 
@@ -53,5 +56,22 @@ struct WindowRouterTests {
         router.requestOpen(siteID: "siteA", route: "/contact")
         #expect(router.consumeNavigation(for: "siteA") == "/contact")
         #expect(router.consumeNavigation(for: "siteA") == nil)
+    }
+
+    @Test("requestDesignInterview sets the open trigger and records a pending request once")
+    func requestDesignInterviewSetsPendingRequest() {
+        let router = freshRouter()
+        router.requestDesignInterview(siteID: "siteA")
+        #expect(router.requested == "siteA")
+        #expect(router.consumeDesignInterviewRequest(for: "siteA"))
+        #expect(!router.consumeDesignInterviewRequest(for: "siteA"))   // consumed once → false
+    }
+
+    @Test("a design-interview request for one site is not consumed by another")
+    func designInterviewRequestIsPerSite() {
+        let router = freshRouter()
+        router.requestDesignInterview(siteID: "siteA")
+        #expect(!router.consumeDesignInterviewRequest(for: "siteB"))
+        #expect(router.consumeDesignInterviewRequest(for: "siteA"))
     }
 }

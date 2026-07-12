@@ -65,6 +65,7 @@ extension AppIntentsTests {
             Workflow(label: "Add page", operationID: "add-page", sideEffect: .createsContent, confirmsAtRuntime: false),
             Workflow(label: "Add post", operationID: "add-post", sideEffect: .createsContent, confirmsAtRuntime: false),
             Workflow(label: "Preview a page", operationID: "preview-site", sideEffect: .readOnly, confirmsAtRuntime: false),
+            Workflow(label: "Start a design interview", operationID: "start-design-interview", sideEffect: .readOnly, confirmsAtRuntime: false),
             Workflow(label: "Edit visible content with confirmation", operationID: "edit-content", sideEffect: .modifiesContent, confirmsAtRuntime: true),
             Workflow(label: "Add booking integration", operationID: "add-booking", sideEffect: .createsContent, confirmsAtRuntime: true),
             Workflow(label: "Add donations integration", operationID: "add-donations", sideEffect: .createsContent, confirmsAtRuntime: true),
