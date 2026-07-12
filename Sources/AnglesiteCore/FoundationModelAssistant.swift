@@ -388,7 +388,10 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         if let designInterviewModel { return designInterviewModel }
         let created = await designInterviewFactory()
         // Actor reentrancy: a concurrent tool call may have built one while the factory ran —
-        // first writer wins so both calls continue the same interview.
+        // first writer wins so both calls continue the same interview. The losing build is
+        // discarded outright; that's intentional and cheap while `DesignInterviewModel.init` is
+        // plain property assignment — keep the factory free of heavy work (I/O is fine, it's
+        // rare) or add dedup before the `await` if that ever changes.
         if let existing = designInterviewModel { return existing }
         designInterviewModel = created
         return created
