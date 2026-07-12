@@ -249,3 +249,31 @@ public enum ContentScanner {
         return f
     }()
 }
+
+extension SiteContentGraph {
+    /// Scans `projectRoot` off the main actor and loads the result for `siteID` — the shared
+    /// "keep me in sync with disk" glue both `ContentCreationWorkflow`'s post-mutation rescan
+    /// and `SiteWindowModel`'s site-open scan (#660) need, kept off the actor itself per its
+    /// documented "no I/O surface" invariant.
+    ///
+    /// Returns `false` without touching `siteID`'s existing state if `projectRoot` can't even be
+    /// listed — a stale/revoked security-scoped bookmark, a deleted or unmounted directory — so
+    /// `isPopulated` never lies about "scanned and empty" when the scan never actually ran.
+    @discardableResult
+    public func rescan(siteID: String, projectRoot: URL) async -> Bool {
+        let listing = await Task.detached(priority: .utility) { () async -> ContentListing? in
+            guard (try? FileManager.default.contentsOfDirectory(atPath: projectRoot.path)) != nil else {
+                await LogCenter.shared.append(
+                    source: "content-graph:\(siteID)", stream: .stderr,
+                    text: "Couldn't list \(projectRoot.path) — leaving the content graph unpopulated "
+                        + "for this scan (stale bookmark, or the directory is missing/unmounted?)"
+                )
+                return nil
+            }
+            return ContentScanner.scan(projectRoot: projectRoot, siteID: siteID)
+        }.value
+        guard let listing else { return false }
+        await load(siteID: siteID, pages: listing.pages, posts: listing.posts, images: listing.images)
+        return true
+    }
+}

@@ -123,10 +123,9 @@ public actor SiteContentGraph {
     /// upsert (e.g. the navigator's rename path) proves one entry exists, not that the whole
     /// site has been enumerated, so it can't license "a search miss is reliable."
     ///
-    /// As of writing, the only production caller of `load` is a post-mutation rescan
-    /// (`ContentCreationWorkflow.refreshContentGraph`) — nothing calls it at site-open, so this
-    /// flag is `false` for most of a session until the user creates/deletes content. Tracked as
-    /// #660; until that lands, `isPopulated` is a correct but under-exercised signal in practice.
+    /// Populated both by a post-mutation rescan (`ContentCreationWorkflow.refreshContentGraph`)
+    /// and by `SiteWindowModel.refreshContentGraph` at site-open (#660), so this flag is normally
+    /// `true` shortly after a site finishes opening, well before the first chat turn.
     private var populatedSiteIDs: Set<String> = []
 
     /// Additive multi-subscriber broadcast for UI observers (the Site Navigator), keyed by a
