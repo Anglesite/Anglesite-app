@@ -5,6 +5,11 @@
 # Stages the MCP sidecar (from the sibling plugin repo) and the website template's dependency
 # manifests into the build context, and registers a cleanup trap so the staged, gitignored
 # copies don't linger after the build. Source this file, then call stage_dev_image_context "$CTX".
+#
+# The EXIT trap it registers runs in the *caller's* shell (this function is sourced, not
+# subshelled) and overwrites any EXIT trap already set there — fine today since both callers
+# invoke this exactly once and set no other EXIT trap, but worth remembering if a future caller
+# needs its own EXIT cleanup too.
 
 stage_dev_image_context() {
     local ctx="$1"
