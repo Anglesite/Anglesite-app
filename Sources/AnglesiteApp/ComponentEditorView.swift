@@ -273,10 +273,47 @@ struct ComponentEditorView: View {
                     onComputedStyles: { model.computedStyles = $0.styles },
                     onWebView: { webView = $0 }
                 )
+                .dropDestination(for: PaletteDragPayload.self) { items, location in
+                    guard let item = items.first, let webView else { return false }
+                    Task { await performCanvasDrop(model, payload: item, location: location, webView: webView) }
+                    return true
+                }
             } else {
                 ContentUnavailableView("Dev Server Starting…", systemImage: "hourglass")
             }
         }
+    }
+
+    /// Resolves a canvas drop point to an insertion target via the overlay's `dropTargetAt`,
+    /// then maps that source location back to a node id the same way `canvasSelected` does
+    /// (`ComponentOutline.node(atLine:column:)`), and issues an `insert-node` at the resolved
+    /// parent/index.
+    private func performCanvasDrop(_ model: ComponentEditorModel, payload: PaletteDragPayload, location: CGPoint, webView: WKWebView) async {
+        let script = "JSON.stringify(window.anglesiteCanvas?.dropTargetAt?.(\(location.x), \(location.y)) ?? null)"
+        guard let raw = try? await webView.evaluateJavaScript(script) as? String,
+              let data = raw.data(using: .utf8),
+              let target = try? JSONDecoder().decode(DropTargetPayload.self, from: data),
+              let modelRoot = model.model?.template,
+              let node = ComponentOutline.node(atLine: target.line, column: target.column, in: modelRoot)
+        else { return }
+
+        switch target.zone {
+        case "into":
+            await model.insertNode(parentId: node.id, index: node.children.count, node: payload.kind)
+        case "before", "after":
+            guard let parentID = parentID(of: node.id, in: model), let siblingIndex = childIndex(of: node.id, underParent: parentID, in: model) else { return }
+            let index = target.zone == "before" ? siblingIndex : siblingIndex + 1
+            await model.insertNode(parentId: parentID, index: index, node: payload.kind)
+        default:
+            break
+        }
+    }
+
+    private struct DropTargetPayload: Decodable {
+        let file: String?
+        let line: Int
+        let column: Int
+        let zone: String
     }
 
     private func knobsBar(_ model: ComponentEditorModel, props: [ComponentModel.Prop]) -> some View {
