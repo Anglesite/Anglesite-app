@@ -1,0 +1,35 @@
+---
+import { buildEsiIncludeTag } from "./esi-markup";
+
+export interface Props {
+  /**
+   * URL to fetch and splice in place of this tag at the edge. Routed through `@dwk/esi`'s
+   * safeFetch-backed resolver in production, so an attacker- or user-supplied URL is safe here.
+   * In local dev preview, fetched client-side instead — a cross-origin `src` needs that origin's
+   * own CORS headers to resolve in preview (production has no such restriction). Pair with
+   * `EsiRemove` for fallback markup shown when nothing ESI-aware processes this page:
+   *
+   * ```astro
+   * <EsiInclude src="/fragments/count" onerror="continue" />
+   * <EsiRemove><span class="count-fallback">—</span></EsiRemove>
+   * ```
+   */
+  src: string;
+  /** Fallback URL retried once if `src` fails (only when `onerror` is unset). */
+  alt?: string;
+  /** `"continue"`: drop this fragment silently on failure instead of retrying `alt`. */
+  onerror?: "continue";
+}
+
+const { src, alt, onerror } = Astro.props;
+const tag = buildEsiIncludeTag({ src, alt, onerror });
+---
+<Fragment set:html={tag} />
+{import.meta.env.DEV && (
+  <script>
+    import { resolveEsiFragments, esiPreviewIsUnprocessed } from "./esi-dev-shim";
+    if (!esiPreviewIsUnprocessed(location.search)) {
+      resolveEsiFragments(document, (url) => fetch(url));
+    }
+  </script>
+)}
