@@ -359,7 +359,7 @@ struct ComponentEditorView: View {
                                     .textFieldStyle(.plain)
                                     .onSubmit { commitAttr(model, node: node, name: attr.name) }
                                 Button(role: .destructive) {
-                                    Task { await model.setAttr(nodeId: node.id, name: attr.name, value: nil) }
+                                    removeAttr(model, node: node, name: attr.name)
                                 } label: {
                                     Image(systemName: "minus.circle")
                                 }
@@ -582,6 +582,16 @@ struct ComponentEditorView: View {
         let current = node.attrs.first(where: { $0.name == name })?.value ?? ""
         guard draft != current else { return }
         Task { await model.setAttr(nodeId: node.id, name: name, value: draft) }
+    }
+
+    /// Discards any in-progress draft for `name` before removing the attribute. Without this, a
+    /// stale draft (typed but never submitted) would linger in `attrValueDrafts` and resurface if
+    /// the same attribute name is later re-added via "Add attribute" — `attrValueBinding`'s getter
+    /// would render the discarded draft instead of the freshly-committed value, and submitting it
+    /// would silently overwrite the new value. Mirrors `removeDeclaration`'s draft-clearing.
+    private func removeAttr(_ model: ComponentEditorModel, node: ComponentModel.Node, name: String) {
+        attrValueDrafts["\(node.id):\(name)"] = nil
+        Task { await model.setAttr(nodeId: node.id, name: name, value: nil) }
     }
 
     private func propertyBinding(for decl: ComponentModel.Declaration) -> Binding<String> {
