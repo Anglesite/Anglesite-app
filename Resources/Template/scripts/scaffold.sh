@@ -60,6 +60,9 @@ printf '%s\n' \
     "# SCRIPT_ALLOW=example.com             — additional CSP script-src domains (comma-separated)" \
     "# BLOCK_AI=true                        — block AI training crawlers via robots.txt (off by default;" \
     "#                                        trades away AI-search discoverability)" \
+    "# CONTENT_SIGNALS=search=yes,ai-input=no,ai-train=no — Content-Signal directive in robots.txt" \
+    "#                                        (Cloudflare Content Signals Policy; keys: search," \
+    "#                                        ai-input, ai-train; values: yes/no)" \
     > "$TARGET/.site-config"
 
 echo "==> Scaffolded Anglesite site in $TARGET"
