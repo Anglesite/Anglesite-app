@@ -263,8 +263,9 @@ Targets the **git repository's** size — primarily unused binary blobs.
 - v1 semantics: identify binary assets no longer referenced by the current site, offer
   removal from the working tree, then repack (`git gc`). Report bytes saved.
 - History rewriting (purging blobs from past commits) is offered only as an explicitly
-  destructive second step with a clear warning: **it invalidates existing clones** (#72 —
-  clones are first-class).
+  destructive second step. If `Source/` has a **git remote configured**, the warning states
+  that it invalidates existing clones (#72 — clones are first-class); with no remote there
+  are no clones, so the step runs with an ordinary confirmation and no clone warning.
 
 ### 4.4 Highlights & Comments (draft annotations)
 
