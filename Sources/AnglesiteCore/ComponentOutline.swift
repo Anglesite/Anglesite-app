@@ -148,4 +148,19 @@ public struct PaletteDragPayload: Codable, Sendable, Transferable {
         CodableRepresentation(contentType: .anglesitePaletteDragPayload)
     }
 }
+
+/// Unified drag payload for the outline row drop target (Task 16), which must accept drops
+/// from two different drag sources — an outline row being reordered (`ComponentDragItem`) and
+/// a palette item being inserted (`PaletteDragPayload`). SwiftUI's `.dropDestination(for:)` on
+/// macOS does not compose when chained for two different `Transferable` types on the same view
+/// (only the first-registered type actually receives drops at the AppKit level), so both drag
+/// sources must share one `Transferable` type and one `.dropDestination` call.
+public enum OutlineDragPayload: Codable, Sendable, Transferable {
+    case move(ComponentDragItem)
+    case insert(PaletteDragPayload)
+
+    public static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .anglesiteOutlineDragPayload)
+    }
+}
 #endif

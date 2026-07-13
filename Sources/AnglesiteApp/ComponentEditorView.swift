@@ -148,16 +148,18 @@ struct ComponentEditorView: View {
         }
         .padding(.leading, CGFloat(row.depth) * 14)
         .contentShape(Rectangle())
-        .draggable(ComponentDragItem(fileID: model.relativePath, nodeID: row.node.id))
-        .dropDestination(for: ComponentDragItem.self) { items, location in
-            guard let item = items.first, item.fileID == model.relativePath, item.nodeID != row.node.id else { return false }
-            Task { await performMove(model, draggedNodeID: item.nodeID, targetRow: row, location: location) }
-            return true
-        }
-        .dropDestination(for: PaletteDragPayload.self) { items, location in
+        .draggable(OutlineDragPayload.move(ComponentDragItem(fileID: model.relativePath, nodeID: row.node.id)))
+        .dropDestination(for: OutlineDragPayload.self) { items, location in
             guard let item = items.first else { return false }
-            Task { await performInsert(model, payload: item, targetRow: row, location: location) }
-            return true
+            switch item {
+            case .move(let dragItem):
+                guard dragItem.fileID == model.relativePath, dragItem.nodeID != row.node.id else { return false }
+                Task { await performMove(model, draggedNodeID: dragItem.nodeID, targetRow: row, location: location) }
+                return true
+            case .insert(let payload):
+                Task { await performInsert(model, payload: payload, targetRow: row, location: location) }
+                return true
+            }
         }
         .onTapGesture(count: 2) {
             guard row.isSealed else { return }
@@ -254,7 +256,7 @@ struct ComponentEditorView: View {
                     }
                     .frame(width: 84, height: 44)
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-                    .draggable(PaletteDragPayload(label: item.label, kind: item.kind))
+                    .draggable(OutlineDragPayload.insert(PaletteDragPayload(label: item.label, kind: item.kind)))
                 }
             }
             .padding(8)
@@ -279,9 +281,9 @@ struct ComponentEditorView: View {
                     onComputedStyles: { model.computedStyles = $0.styles },
                     onWebView: { webView = $0 }
                 )
-                .dropDestination(for: PaletteDragPayload.self) { items, location in
-                    guard let item = items.first, let webView else { return false }
-                    Task { await performCanvasDrop(model, payload: item, location: location, webView: webView) }
+                .dropDestination(for: OutlineDragPayload.self) { items, location in
+                    guard let item = items.first, case .insert(let payload) = item, let webView else { return false }
+                    Task { await performCanvasDrop(model, payload: payload, location: location, webView: webView) }
                     return true
                 }
             } else {

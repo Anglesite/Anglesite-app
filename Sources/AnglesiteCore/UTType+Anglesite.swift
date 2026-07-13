@@ -27,5 +27,6 @@ public extension UTType {
     /// Spotlight) involved, which is what Info.plist registration is for.
     static let anglesiteComponentDragItem = UTType(exportedAs: "io.dwk.anglesite.component-drag-item")
     static let anglesitePaletteDragPayload = UTType(exportedAs: "io.dwk.anglesite.palette-drag-payload")
+    static let anglesiteOutlineDragPayload = UTType(exportedAs: "io.dwk.anglesite.outline-drag-payload")
 }
 #endif
