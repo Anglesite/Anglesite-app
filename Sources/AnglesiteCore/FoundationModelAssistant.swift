@@ -641,15 +641,10 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     private static let transcriptBudgetHeadroom = 0.7
 
     /// Token ceiling a candidate transcript must fit under, derived from
-    /// ``transcriptBudgetHeadroom``. A stored-once computed property so
-    /// ``sessionFittingBudget(_:context:)`` doesn't recompute the multiplication on every candidate.
+    /// ``transcriptBudgetHeadroom``.
     private static var transcriptBudgetThreshold: Int {
         Int(Double(FoundationModelContextBudget.onDeviceTokenBudget) * transcriptBudgetHeadroom)
     }
-
-    /// Test-only: exposes ``transcriptBudgetThreshold`` so tests can compute the same token ceiling
-    /// without duplicating the headroom constant.
-    static var transcriptBudgetThresholdForTesting: Int { transcriptBudgetThreshold }
 
     /// Proactively shrinks `session`'s retained-turn window below ``maxRetainedTurns`` when its
     /// estimated token weight is already within reach of the on-device budget (#657). A heavy
