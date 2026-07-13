@@ -17,6 +17,7 @@ struct DebugPaneView: View {
     @State private var searchQuery: String = ""
     @State private var autoScroll: Bool = true
     @State private var subscriberTask: Task<Void, Never>?
+    @AppStorage(AppSettings.Key.esiPreviewUnprocessed) private var esiPreviewUnprocessed: Bool = false
 
     private static let allSourcesTag = "All"
     private let center: LogCenter
@@ -30,6 +31,10 @@ struct DebugPaneView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             toolbar
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            Divider()
+            serverSection
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             Divider()
@@ -97,6 +102,23 @@ struct DebugPaneView: View {
             }
             Button("Copy") { copyVisibleToClipboard() }
             Button("Save…") { saveVisibleToFile() }
+        }
+    }
+
+    /// Production-behavior controls, distinct from the log-filtering toolbar above. ESI's
+    /// Live/Unprocessed toggle is the first control here — see
+    /// docs/superpowers/specs/2026-07-13-esi-astro-component-design.md §4a; broader controls
+    /// (running a composed Worker locally, viewing worker/analytics logs) are tracked in #699.
+    private var serverSection: some View {
+        HStack(spacing: 12) {
+            Text("Server").font(.headline)
+            Picker("ESI Fragments", selection: $esiPreviewUnprocessed) {
+                Text("Live").tag(false)
+                Text("Unprocessed (show fallbacks)").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 320)
+            Spacer()
         }
     }
 
