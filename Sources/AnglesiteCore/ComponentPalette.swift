@@ -54,7 +54,7 @@ public enum ComponentPalette {
     /// contains `src/components/` or `src/layouts/` by construction — see `SiteFileTree`).
     private static func componentPath(for file: FileRef) -> String {
         let full = file.url.path(percentEncoded: false)
-        if let range = full.range(of: "src/") {
+        if let range = full.range(of: "src/", options: .backwards) {
             return String(full[range.lowerBound...])
         }
         return full

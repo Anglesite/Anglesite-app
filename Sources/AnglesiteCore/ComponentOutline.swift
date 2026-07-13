@@ -91,6 +91,72 @@ public enum ComponentOutline {
         let normalized = file.hasPrefix("/") ? String(file.dropFirst()) : file
         return normalized == relativePath || normalized.hasSuffix("/" + relativePath)
     }
+
+    /// Three-way classification of a drop point within an outline row (Task 16), shared by
+    /// drag-reorder and palette-insert. Kept here (not the View) so the geometry and the
+    /// index math it feeds are unit-testable.
+    public enum DropZone: Equatable, Sendable {
+        case before, into, after
+    }
+
+    /// Classifies `y` (row-local, per SwiftUI's `dropDestination` contract) into a `DropZone`:
+    /// top third = before, bottom third = after, middle third = into. `rowHeight` is a fixed
+    /// reference (the sidebar row's approximate rendered height) rather than measured
+    /// geometry — acceptable imprecision for a coarse three-way split.
+    public static func dropZone(y: Double, rowHeight: Double = 22) -> DropZone {
+        if y < rowHeight / 3 { return .before }
+        if y > rowHeight * 2 / 3 { return .after }
+        return .into
+    }
+
+    /// Finds `nodeID`'s parent id by walking `root`. Returns nil if `nodeID` is `root` itself
+    /// or isn't found.
+    public static func parentID(of nodeID: String, in root: ComponentModel.Node) -> String? {
+        if root.children.contains(where: { $0.id == nodeID }) { return root.id }
+        for child in root.children {
+            if let found = parentID(of: nodeID, in: child) { return found }
+        }
+        return nil
+    }
+
+    /// The index of `nodeID` among `parentID`'s children, or nil if either id isn't found.
+    public static func childIndex(of nodeID: String, underParent parentID: String, in root: ComponentModel.Node) -> Int? {
+        guard let parent = findNode(parentID, in: root) else { return nil }
+        return parent.children.firstIndex { $0.id == nodeID }
+    }
+
+    /// True when `candidateID` is `ancestorID` itself, or nested anywhere in its subtree.
+    /// Used to refuse a reparent that would create a structural cycle — dragging a node onto
+    /// (or before/after a descendant of) its own descendant.
+    public static func isNodeOrDescendant(_ candidateID: String, of ancestorID: String, in root: ComponentModel.Node) -> Bool {
+        guard let ancestor = findNode(ancestorID, in: root) else { return false }
+        return containsNode(candidateID, in: ancestor)
+    }
+
+    /// Adjusts a computed before/after sibling index for a reorder move: the plugin's
+    /// `move-node` handler removes the dragged node from its old position before re-inserting,
+    /// and computes the target index against that post-removal list. `targetIndex` here is the
+    /// target's position in the *current* (pre-removal) list, so when the dragged node is
+    /// already an earlier sibling of the target under the same parent, its removal shifts every
+    /// later sibling (including the target) down by one — this corrects for that so the drop
+    /// lands in the same visual spot.
+    public static func adjustedMoveIndex(targetIndex: Int, draggedIndex: Int?) -> Int {
+        guard let draggedIndex, draggedIndex < targetIndex else { return targetIndex }
+        return targetIndex - 1
+    }
+
+    private static func findNode(_ id: String, in node: ComponentModel.Node) -> ComponentModel.Node? {
+        if node.id == id { return node }
+        for child in node.children {
+            if let found = findNode(id, in: child) { return found }
+        }
+        return nil
+    }
+
+    private static func containsNode(_ id: String, in node: ComponentModel.Node) -> Bool {
+        if node.id == id { return true }
+        return node.children.contains { containsNode(id, in: $0) }
+    }
 }
 
 /// Builds harness-route URLs for the component canvas (route injected by the

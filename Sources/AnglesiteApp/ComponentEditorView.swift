@@ -147,8 +147,6 @@ struct ComponentEditorView: View {
         }
     }
 
-    private enum DropZone { case before, into, after }
-
     private func outline(_ model: ComponentEditorModel) -> some View {
         VStack(spacing: 0) {
             List(model.outlineRows, selection: Binding(
@@ -200,76 +198,60 @@ struct ComponentEditorView: View {
 
     /// Top third of the row = insert before (same parent as the target); bottom third =
     /// insert after (same parent); middle third = reparent as the target's last child.
-    /// `location` is row-local per SwiftUI's `dropDestination` contract; row height isn't
-    /// known exactly here, so this uses a fixed 22pt reference band (the sidebar row's
-    /// approximate rendered height) rather than a measured GeometryReader — acceptable
-    /// imprecision for a coarse three-way split.
-    private func dropZone(at location: CGPoint) -> DropZone {
-        let rowHeight: CGFloat = 22
-        if location.y < rowHeight / 3 { return .before }
-        if location.y > rowHeight * 2 / 3 { return .after }
-        return .into
+    /// Pure geometry lives in `ComponentOutline.dropZone` (testable in Core); this wrapper
+    /// additionally redirects a sealed row's middle third to `.after` — the outline hides a
+    /// sealed component instance's slot-fill children (spec §4.1), so an `.into` drop there
+    /// would silently vanish (it lands as markup with nowhere to render).
+    private func dropZone(at location: CGPoint, for row: ComponentOutline.Row) -> ComponentOutline.DropZone {
+        let zone = ComponentOutline.dropZone(y: Double(location.y))
+        if row.isSealed && zone == .into { return .after }
+        return zone
     }
 
     private func performMove(_ model: ComponentEditorModel, draggedNodeID: String, targetRow: ComponentOutline.Row, location: CGPoint) async {
         guard let dragged = model.outlineRows.first(where: { $0.node.id == draggedNodeID }) else { return }
-        switch dropZone(at: location) {
+        // Refuse a reparent that would create a structural cycle — dragging a node onto (or
+        // before/after within) its own subtree. `performMove`'s only prior self-drop guard was
+        // `dragItem.nodeID != row.node.id` in `outlineRow`, which doesn't catch a *descendant*.
+        guard let root = model.model?.template, !ComponentOutline.isNodeOrDescendant(targetRow.node.id, of: dragged.node.id, in: root) else { return }
+        switch dropZone(at: location, for: targetRow) {
         case .into:
             let targetChildCount = targetRow.node.children.count
             await model.moveNode(nodeId: dragged.node.id, newParentId: targetRow.node.id, newIndex: targetChildCount)
         case .before, .after:
             guard let parentID = parentID(of: targetRow.node.id, in: model), let siblingIndex = childIndex(of: targetRow.node.id, underParent: parentID, in: model) else { return }
-            var newIndex = dropZone(at: location) == .before ? siblingIndex : siblingIndex + 1
-            // The plugin's move-node handler removes the dragged node from its old position
-            // before re-inserting, and computes `newIndex` against that post-removal sibling
-            // list. `siblingIndex` above is the target's position in the *current* (pre-removal)
-            // list, so when the dragged node is already an earlier sibling of the target under
-            // this same parent, its removal shifts every later sibling (including the target)
-            // down by one — the boundary must be adjusted to land in the same visual spot.
-            if let draggedIndex = childIndex(of: dragged.node.id, underParent: parentID, in: model), draggedIndex < newIndex {
-                newIndex -= 1
-            }
+            let zone = dropZone(at: location, for: targetRow)
+            let targetIndex = zone == .before ? siblingIndex : siblingIndex + 1
+            let draggedIndex = childIndex(of: dragged.node.id, underParent: parentID, in: model)
+            let newIndex = ComponentOutline.adjustedMoveIndex(targetIndex: targetIndex, draggedIndex: draggedIndex)
             await model.moveNode(nodeId: dragged.node.id, newParentId: parentID, newIndex: newIndex)
         }
     }
 
     private func performInsert(_ model: ComponentEditorModel, payload: PaletteDragPayload, targetRow: ComponentOutline.Row, location: CGPoint) async {
-        switch dropZone(at: location) {
+        switch dropZone(at: location, for: targetRow) {
         case .into:
             await model.insertNode(parentId: targetRow.node.id, index: targetRow.node.children.count, node: payload.kind)
         case .before, .after:
             guard let parentID = parentID(of: targetRow.node.id, in: model), let siblingIndex = childIndex(of: targetRow.node.id, underParent: parentID, in: model) else { return }
-            let index = dropZone(at: location) == .before ? siblingIndex : siblingIndex + 1
+            let zone = dropZone(at: location, for: targetRow)
+            let index = zone == .before ? siblingIndex : siblingIndex + 1
             await model.insertNode(parentId: parentID, index: index, node: payload.kind)
         }
     }
 
     /// Finds `nodeID`'s parent id by walking `model.model?.template` — the outline's flat `Row`
-    /// list doesn't carry parent links (per `ComponentOutline.Row`'s shape), so this walks the
-    /// tree directly. Returns the synthetic fragment root's id for a top-level node.
+    /// list doesn't carry parent links (per `ComponentOutline.Row`'s shape). Delegates the
+    /// actual walk to `ComponentOutline` (testable in Core); this wrapper just resolves the
+    /// tree root from the model.
     private func parentID(of nodeID: String, in model: ComponentEditorModel) -> String? {
         guard let root = model.model?.template else { return nil }
-        func search(_ node: ComponentModel.Node) -> String? {
-            if node.children.contains(where: { $0.id == nodeID }) { return node.id }
-            for child in node.children {
-                if let found = search(child) { return found }
-            }
-            return nil
-        }
-        return search(root)
+        return ComponentOutline.parentID(of: nodeID, in: root)
     }
 
     private func childIndex(of nodeID: String, underParent parentID: String, in model: ComponentEditorModel) -> Int? {
         guard let root = model.model?.template else { return nil }
-        func find(_ node: ComponentModel.Node) -> ComponentModel.Node? {
-            if node.id == parentID { return node }
-            for child in node.children {
-                if let found = find(child) { return found }
-            }
-            return nil
-        }
-        guard let parent = find(root) else { return nil }
-        return parent.children.firstIndex { $0.id == nodeID }
+        return ComponentOutline.childIndex(of: nodeID, underParent: parentID, in: root)
     }
 
     private func openSealedComponent(_ model: ComponentEditorModel, row: ComponentOutline.Row) {
@@ -336,12 +318,17 @@ struct ComponentEditorView: View {
               let node = ComponentOutline.node(atLine: target.line, column: target.column, in: modelRoot)
         else { return }
 
-        switch target.zone {
+        // Same sealed-instance redirect as the outline path (`dropZone(at:for:)`): the JS
+        // overlay's zone geometry has no notion of sealed component instances, so a canvas drop
+        // squarely on a `<Hcard />`-style instance would otherwise land as invisible slot-fill
+        // content the outline can never render.
+        let zone = (node.kind == .component && target.zone == "into") ? "after" : target.zone
+        switch zone {
         case "into":
             await model.insertNode(parentId: node.id, index: node.children.count, node: payload.kind)
         case "before", "after":
             guard let parentID = parentID(of: node.id, in: model), let siblingIndex = childIndex(of: node.id, underParent: parentID, in: model) else { return }
-            let index = target.zone == "before" ? siblingIndex : siblingIndex + 1
+            let index = zone == "before" ? siblingIndex : siblingIndex + 1
             await model.insertNode(parentId: parentID, index: index, node: payload.kind)
         default:
             break

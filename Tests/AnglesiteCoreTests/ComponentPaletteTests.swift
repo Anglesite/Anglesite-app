@@ -49,4 +49,20 @@ import Testing
         }
         #expect(names == ["Badge"])
     }
+
+    @Test("componentPath derives from the LAST src/ segment, not the first")
+    func componentPathUsesLastSrcSegment() {
+        // An ancestor directory that itself contains "src/" before the real project root
+        // (e.g. a checkout kept under ~/src/) previously produced a bogus import specifier
+        // that retained the earlier segment.
+        let badge = FileRef(
+            url: URL(fileURLWithPath: "/Users/dwk/src/MySite.anglesite/Source/src/components/Badge.astro"),
+            group: .components, name: "Badge.astro")
+        let items = ComponentPalette.items(projectComponents: [badge], excluding: nil)
+        let path = items.compactMap { item -> String? in
+            if case .component(_, let path) = item.kind { return path }
+            return nil
+        }.first
+        #expect(path == "src/components/Badge.astro")
+    }
 }
