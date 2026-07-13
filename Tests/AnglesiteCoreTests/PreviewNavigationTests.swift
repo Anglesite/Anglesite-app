@@ -48,4 +48,35 @@ struct PreviewNavigationTests {
         #expect(PreviewNavigation.targetURL(base: Self.base, route: "/about#top")
                 == URL(string: "http://localhost:4321/about#top")!)
     }
+
+    @Test("applyingEsiPreviewMode: unprocessed=false leaves the URL untouched")
+    func esiPreviewModeOffIsNoop() {
+        #expect(PreviewNavigation.applyingEsiPreviewMode(Self.base, unprocessed: false) == Self.base)
+    }
+
+    @Test("applyingEsiPreviewMode: unprocessed=true appends the query parameter")
+    func esiPreviewModeOnAppendsQuery() {
+        #expect(PreviewNavigation.applyingEsiPreviewMode(Self.base, unprocessed: true)
+                == URL(string: "http://localhost:4321/?esiPreview=unprocessed")!)
+    }
+
+    @Test("applyingEsiPreviewMode: preserves an existing query item")
+    func esiPreviewModePreservesExistingQuery() {
+        let withQuery = URL(string: "http://localhost:4321/about?preview=1")!
+        let result = PreviewNavigation.applyingEsiPreviewMode(withQuery, unprocessed: true)
+        let comps = URLComponents(url: result, resolvingAgainstBaseURL: false)!
+        let items = Dictionary(uniqueKeysWithValues: (comps.queryItems ?? []).map { ($0.name, $0.value) })
+        #expect(items["preview"] == "1")
+        #expect(items["esiPreview"] == "unprocessed")
+    }
+
+    @Test("applyingEsiPreviewMode: replaces a stale esiPreview value rather than duplicating it")
+    func esiPreviewModeReplacesStaleValue() {
+        let stale = URL(string: "http://localhost:4321/?esiPreview=live")!
+        let result = PreviewNavigation.applyingEsiPreviewMode(stale, unprocessed: true)
+        let comps = URLComponents(url: result, resolvingAgainstBaseURL: false)!
+        let matches = (comps.queryItems ?? []).filter { $0.name == "esiPreview" }
+        #expect(matches.count == 1)
+        #expect(matches.first?.value == "unprocessed")
+    }
 }

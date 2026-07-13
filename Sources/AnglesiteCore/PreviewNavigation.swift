@@ -20,4 +20,20 @@ public enum PreviewNavigation {
         comps.fragment = routeComps.fragment
         return comps.url ?? base
     }
+
+    /// Query-parameter key the app appends to force `EsiInclude`'s dev-preview shim into the
+    /// "unprocessed" state (spec §4a) — must match `esi-dev-shim.ts`'s `esiPreviewIsUnprocessed`.
+    public static let esiPreviewQueryKey = "esiPreview"
+    public static let esiPreviewUnprocessedValue = "unprocessed"
+
+    /// Appends (or replaces) the `esiPreview=unprocessed` query item on `url` when `unprocessed`
+    /// is `true`; returns `url` unchanged when `false`. Existing query items are preserved.
+    public static func applyingEsiPreviewMode(_ url: URL, unprocessed: Bool) -> URL {
+        guard unprocessed else { return url }
+        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        var items = (comps.queryItems ?? []).filter { $0.name != esiPreviewQueryKey }
+        items.append(URLQueryItem(name: esiPreviewQueryKey, value: esiPreviewUnprocessedValue))
+        comps.queryItems = items
+        return comps.url ?? url
+    }
 }
