@@ -16,6 +16,10 @@ struct ComponentEditorContext {
     /// tests/previews that construct a context without write capability;
     /// `ComponentCanvasView` falls back to `LoggingEditRouter()` in that case.
     let editRouter: EditRouter?
+    /// Opens a different file in the main pane — used to implement "double-click a sealed
+    /// component instance to edit its own definition" (spec §4.1). `nil` in
+    /// tests/previews that don't need navigation.
+    var onOpenFile: ((FileRef) -> Void)? = nil
 }
 
 @MainActor
@@ -53,6 +57,8 @@ final class ComponentEditorModel {
     /// `writeError` instead drives a small dismissible banner scoped to the Styles panel; `model`
     /// and `loadError` are left untouched so the editor pane stays live.
     var writeError: String?
+    /// Sibling project components for the palette — scanned once per `load()`, not per render.
+    private(set) var projectComponents: [FileRef] = []
 
     init(file: FileRef, context: ComponentEditorContext) {
         self.file = file
@@ -100,6 +106,7 @@ final class ComponentEditorModel {
                     ($0.name, KnobDefaults.value(for: $0))
                 }
             )
+            projectComponents = SiteFileTree.scan(siteRoot: context.sourceRoot)[.components] ?? []
         } catch ComponentModelClient.ModelError.notConnected {
             loadError = "Site is not running yet."
             loadErrorReason = .notConnected
@@ -133,6 +140,13 @@ final class ComponentEditorModel {
             return
         }
         selectedNodeID = ComponentOutline.node(atLine: line, column: column, in: model.template)?.id
+    }
+
+    /// Resolves `tag` (a component instance's tag name, e.g. "Badge") against `projectComponents`
+    /// and asks the host to open it. No-op if the tag can't be resolved or navigation isn't wired.
+    func openReferencedComponent(tag: String?) {
+        guard let tag, let match = projectComponents.first(where: { $0.name == "\(tag).astro" }) else { return }
+        context.onOpenFile?(match)
     }
 
     // MARK: - Style writes

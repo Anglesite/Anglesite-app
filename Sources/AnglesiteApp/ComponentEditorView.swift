@@ -110,20 +110,149 @@ struct ComponentEditorView: View {
         }
     }
 
+    private enum DropZone { case before, into, after }
+
     private func outline(_ model: ComponentEditorModel) -> some View {
-        List(model.outlineRows, selection: Binding(
-            get: { model.selectedNodeID },
-            set: { model.selectedNodeID = $0 }
-        )) { row in
-            HStack(spacing: 4) {
-                Image(systemName: icon(for: row.node.kind))
-                    .foregroundStyle(.secondary)
-                Text(label(for: row.node))
+        VStack(spacing: 0) {
+            List(model.outlineRows, selection: Binding(
+                get: { model.selectedNodeID },
+                set: { model.selectedNodeID = $0 }
+            )) { row in
+                outlineRow(model, row: row)
+                    .tag(row.node.id)
             }
-            .padding(.leading, CGFloat(row.depth) * 14)
-            .tag(row.node.id)
+            .listStyle(.sidebar)
+            Divider()
+            paletteView(model)
+                .frame(height: 160)
         }
-        .listStyle(.sidebar)
+    }
+
+    private func outlineRow(_ model: ComponentEditorModel, row: ComponentOutline.Row) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon(for: row.node.kind))
+                .foregroundStyle(.secondary)
+            Text(label(for: row.node))
+            if row.isSealed {
+                Spacer()
+                Image(systemName: "ellipsis.circle")
+                    .foregroundStyle(.tertiary)
+                    .help("Contains slot-fill content — double-click to edit \(row.node.tag ?? "this component")")
+            }
+        }
+        .padding(.leading, CGFloat(row.depth) * 14)
+        .contentShape(Rectangle())
+        .draggable(ComponentDragItem(fileID: model.relativePath, nodeID: row.node.id))
+        .dropDestination(for: ComponentDragItem.self) { items, location in
+            guard let item = items.first, item.fileID == model.relativePath, item.nodeID != row.node.id else { return false }
+            Task { await performMove(model, draggedNodeID: item.nodeID, targetRow: row, location: location) }
+            return true
+        }
+        .dropDestination(for: PaletteDragPayload.self) { items, location in
+            guard let item = items.first else { return false }
+            Task { await performInsert(model, payload: item, targetRow: row, location: location) }
+            return true
+        }
+        .onTapGesture(count: 2) {
+            guard row.isSealed else { return }
+            openSealedComponent(model, row: row)
+        }
+    }
+
+    /// Top third of the row = insert before (same parent as the target); bottom third =
+    /// insert after (same parent); middle third = reparent as the target's last child.
+    /// `location` is row-local per SwiftUI's `dropDestination` contract; row height isn't
+    /// known exactly here, so this uses a fixed 22pt reference band (the sidebar row's
+    /// approximate rendered height) rather than a measured GeometryReader — acceptable
+    /// imprecision for a coarse three-way split.
+    private func dropZone(at location: CGPoint) -> DropZone {
+        let rowHeight: CGFloat = 22
+        if location.y < rowHeight / 3 { return .before }
+        if location.y > rowHeight * 2 / 3 { return .after }
+        return .into
+    }
+
+    private func performMove(_ model: ComponentEditorModel, draggedNodeID: String, targetRow: ComponentOutline.Row, location: CGPoint) async {
+        guard let dragged = model.outlineRows.first(where: { $0.node.id == draggedNodeID }) else { return }
+        switch dropZone(at: location) {
+        case .into:
+            let targetChildCount = targetRow.node.children.count
+            await model.moveNode(nodeId: dragged.node.id, newParentId: targetRow.node.id, newIndex: targetChildCount)
+        case .before, .after:
+            guard let parentID = parentID(of: targetRow.node.id, in: model), let siblingIndex = childIndex(of: targetRow.node.id, underParent: parentID, in: model) else { return }
+            var newIndex = dropZone(at: location) == .before ? siblingIndex : siblingIndex + 1
+            // The plugin's move-node handler removes the dragged node from its old position
+            // before re-inserting, and computes `newIndex` against that post-removal sibling
+            // list. `siblingIndex` above is the target's position in the *current* (pre-removal)
+            // list, so when the dragged node is already an earlier sibling of the target under
+            // this same parent, its removal shifts every later sibling (including the target)
+            // down by one — the boundary must be adjusted to land in the same visual spot.
+            if let draggedIndex = childIndex(of: dragged.node.id, underParent: parentID, in: model), draggedIndex < newIndex {
+                newIndex -= 1
+            }
+            await model.moveNode(nodeId: dragged.node.id, newParentId: parentID, newIndex: newIndex)
+        }
+    }
+
+    private func performInsert(_ model: ComponentEditorModel, payload: PaletteDragPayload, targetRow: ComponentOutline.Row, location: CGPoint) async {
+        switch dropZone(at: location) {
+        case .into:
+            await model.insertNode(parentId: targetRow.node.id, index: targetRow.node.children.count, node: payload.kind)
+        case .before, .after:
+            guard let parentID = parentID(of: targetRow.node.id, in: model), let siblingIndex = childIndex(of: targetRow.node.id, underParent: parentID, in: model) else { return }
+            let index = dropZone(at: location) == .before ? siblingIndex : siblingIndex + 1
+            await model.insertNode(parentId: parentID, index: index, node: payload.kind)
+        }
+    }
+
+    /// Finds `nodeID`'s parent id by walking `model.model?.template` — the outline's flat `Row`
+    /// list doesn't carry parent links (per `ComponentOutline.Row`'s shape), so this walks the
+    /// tree directly. Returns the synthetic fragment root's id for a top-level node.
+    private func parentID(of nodeID: String, in model: ComponentEditorModel) -> String? {
+        guard let root = model.model?.template else { return nil }
+        func search(_ node: ComponentModel.Node) -> String? {
+            if node.children.contains(where: { $0.id == nodeID }) { return node.id }
+            for child in node.children {
+                if let found = search(child) { return found }
+            }
+            return nil
+        }
+        return search(root)
+    }
+
+    private func childIndex(of nodeID: String, underParent parentID: String, in model: ComponentEditorModel) -> Int? {
+        guard let root = model.model?.template else { return nil }
+        func find(_ node: ComponentModel.Node) -> ComponentModel.Node? {
+            if node.id == parentID { return node }
+            for child in node.children {
+                if let found = find(child) { return found }
+            }
+            return nil
+        }
+        guard let parent = find(root) else { return nil }
+        return parent.children.firstIndex { $0.id == nodeID }
+    }
+
+    private func openSealedComponent(_ model: ComponentEditorModel, row: ComponentOutline.Row) {
+        model.openReferencedComponent(tag: row.node.tag)
+    }
+
+    private func paletteView(_ model: ComponentEditorModel) -> some View {
+        let items = ComponentPalette.items(projectComponents: model.projectComponents, excluding: model.file)
+        return ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 8) {
+                ForEach(items) { item in
+                    VStack(spacing: 2) {
+                        Image(systemName: item.systemImage)
+                        Text(item.label).font(.caption2).lineLimit(1)
+                    }
+                    .frame(width: 84, height: 44)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    .draggable(PaletteDragPayload(label: item.label, kind: item.kind))
+                }
+            }
+            .padding(8)
+        }
     }
 
     @ViewBuilder private func canvas(_ model: ComponentEditorModel) -> some View {
