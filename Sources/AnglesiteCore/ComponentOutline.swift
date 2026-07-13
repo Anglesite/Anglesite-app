@@ -89,13 +89,15 @@ public enum HarnessURL {
         if !props.isEmpty,
            let data = try? JSONSerialization.data(withJSONObject: props, options: [.sortedKeys]),
            let json = String(data: data, encoding: .utf8) {
-            // `URLComponents.queryItems` percent-encodes via `.urlQueryAllowed`, which treats `+`
-            // as unreserved and leaves it literal — but the harness decodes the query with
-            // `URLSearchParams`, which follows form-encoding semantics and turns an unescaped `+`
-            // into a space. Percent-encode `+` explicitly so a prop value containing one survives
-            // the round-trip intact.
-            var allowedCharacters = CharacterSet.urlQueryAllowed
-            allowedCharacters.remove(charactersIn: "+")
+            // `URLComponents.queryItems` percent-encodes via `.urlQueryAllowed`, which treats RFC
+            // 3986 sub-delims (`+`, `&`, `=`, `;`, …) as unreserved and leaves them literal — but
+            // the harness decodes the query with `URLSearchParams`, which follows form-encoding
+            // semantics: an unescaped `+` becomes a space, and `&`/`=` are parsed as extra
+            // parameter delimiters, corrupting the JSON payload. Percent-encode everything except
+            // RFC 3986 unreserved characters (unlike `.urlQueryAllowed`, this doesn't special-case
+            // "query-safe" delimiters) so any prop value survives the round-trip intact.
+            var allowedCharacters = CharacterSet.alphanumerics
+            allowedCharacters.insert(charactersIn: "-._~")
             guard let encodedJSON = json.addingPercentEncoding(withAllowedCharacters: allowedCharacters) else { return nil }
             components.percentEncodedQuery = "props=" + encodedJSON
         }

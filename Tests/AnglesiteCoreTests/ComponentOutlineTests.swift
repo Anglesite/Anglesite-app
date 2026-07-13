@@ -75,6 +75,21 @@ struct ComponentOutlineTests {
         #expect(decoded["title"] == "1 + 1")
     }
 
+    @Test("Harness URL percent-encodes & and = in prop values instead of leaving them literal") func harnessURLAmpersandEqualsEncoding() throws {
+        let base = URL(string: "http://localhost:4321")!
+        let url = try #require(HarnessURL.build(base: base, componentPath: "src/components/Card.astro", props: ["title": "Save & Close = done"]))
+        // `.urlQueryAllowed` treats RFC 3986 sub-delims like `&` and `=` as unreserved, but they're
+        // parameter/key-value delimiters to `URLSearchParams` on the harness side — left literal,
+        // they'd split the query into bogus extra parameters and corrupt the JSON payload.
+        let rawQuery = try #require(url.query(percentEncoded: true))
+        #expect(!rawQuery.dropFirst("props=".count).contains("&"))
+        #expect(!rawQuery.dropFirst("props=".count).contains("="))
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let propsJSON = try #require(components.queryItems?.first(where: { $0.name == "props" })?.value)
+        let decoded = try JSONDecoder().decode([String: String].self, from: Data(propsJSON.utf8))
+        #expect(decoded["title"] == "Save & Close = done")
+    }
+
     @Test("fileMatches compares the harness's vite-rooted file against the project-relative path") func fileMatchesTest() {
         #expect(ComponentOutline.fileMatches("/src/components/Card.astro", relativePath: "src/components/Card.astro"))
         #expect(ComponentOutline.fileMatches("src/components/Card.astro", relativePath: "src/components/Card.astro"))
