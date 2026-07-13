@@ -117,6 +117,14 @@ struct EditMessageTests {
         #expect(EditMessage.Op.setRuleSelector == "set-rule-selector")
     }
 
+    @Test("New component-structure op constants match the plugin's op names")
+    func componentStructureOpConstants() {
+        #expect(EditMessage.Op.insertNode == "insert-node")
+        #expect(EditMessage.Op.moveNode == "move-node")
+        #expect(EditMessage.Op.removeNode == "remove-node")
+        #expect(EditMessage.Op.setAttr == "set-attr")
+    }
+
     @Test("A component-style message encodes component and omits selector")
     func componentMessageEncoding() {
         let message = EditMessage(
