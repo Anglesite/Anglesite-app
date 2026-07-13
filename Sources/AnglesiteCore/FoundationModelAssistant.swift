@@ -312,7 +312,12 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         // it and keep history.)
         if activeDrains > 0 { session = nil }
 
-        let session = try conversationSession(for: context)
+        // Proactively trim *before* this turn extends the transcript further — a heavy attached
+        // tool set (#657) can already have pushed the cached session within reach of the on-device
+        // budget even though `maxRetainedTurns` hasn't been crossed, and the existing post-turn,
+        // turn-count-only trim below only protects *future* turns, not the one about to run.
+        let session = sessionFittingBudget(try conversationSession(for: context), context: context)
+        self.session = session
         let providerName = capabilities.providerName
         let toolNames = attachedToolNames
 
@@ -588,24 +593,83 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// compaction API (#456). Runs after each turn drains so the *next* turn (not the one that just
     /// finished) benefits from the smaller transcript. `current === session` guards against
     /// clobbering a session a newer turn already replaced while this drain was still in flight (see
-    /// `activeDrains` in ``converse(prompt:context:)``).
+    /// `activeDrains` in ``converse(prompt:context:)``). Pure turn-count: the pre-turn
+    /// ``sessionFittingBudget(_:context:)`` check (#657) is what protects the turn about to run
+    /// from a heavy tool set overflowing the budget before this ceiling is even crossed.
     private func trimSessionIfNeeded(current: LanguageModelSession, context: AssistantContext) {
         guard session === current else { return }
-        let transcript = current.transcript
+        guard let trimmed = Self.trimmedTranscript(current.transcript, retaining: maxRetainedTurns) else { return }
+        let tools = conversationTools(for: context, includeSpotlight: true)
+        session = LanguageModelSession(tools: tools, transcript: trimmed)
+    }
+
+    /// Rebuilds `transcript` keeping only its most recent `turns` `.prompt` entries (and everything
+    /// after the cutoff), plus the leading `.instructions` entry if present — so a trimmed session
+    /// still carries the route/page context and tool schemas it was created with. Returns `nil` when
+    /// `transcript` doesn't hold more than `turns` prompts (nothing to trim). Shared by the
+    /// turn-count trim (``trimSessionIfNeeded(current:context:)``) and the token-budget trim
+    /// (``sessionFittingBudget(_:context:)``, #657) so both rebuild a session identically.
+    private static func trimmedTranscript(_ transcript: Transcript, retaining turns: Int) -> Transcript? {
         let promptIndices = transcript.indices.filter {
             if case .prompt = transcript[$0] { return true }
             return false
         }
-        guard promptIndices.count > maxRetainedTurns else { return }
-        let cutoff = promptIndices[promptIndices.count - maxRetainedTurns]
+        guard promptIndices.count > turns else { return nil }
+        let cutoff = promptIndices[promptIndices.count - turns]
         var retained = Array(transcript[cutoff...])
-        // Keep the leading instructions entry so the trimmed session still carries the route/page
-        // context it was created with.
         if let first = transcript.first, case .instructions = first {
             retained.insert(first, at: 0)
         }
-        let tools = conversationTools(for: context, includeSpotlight: true)
-        session = LanguageModelSession(tools: tools, transcript: Transcript(entries: retained))
+        return Transcript(entries: retained)
+    }
+
+    /// Estimated token weight of a transcript's entries, including tool schemas baked into a
+    /// leading `.instructions` entry — `Transcript.Entry` is `CustomStringConvertible`, so its
+    /// `description` captures the actual segments/tool definitions sent to the model, letting this
+    /// reuse ``FoundationModelContextBudget``'s character-based token proxy rather than needing a
+    /// real on-device tokenizer.
+    private static func estimatedTranscriptTokens(_ transcript: Transcript) -> Int {
+        transcript.reduce(into: 0) { total, entry in
+            total += FoundationModelContextBudget.estimatedTokens(for: String(describing: entry))
+        }
+    }
+
+    /// Fraction of ``FoundationModelContextBudget/onDeviceTokenBudget`` the cached session is
+    /// allowed to reach before a turn proactively trims it further — kept below 1.0 so trimming
+    /// leaves headroom for the turn about to run (its own prompt plus the model's response),
+    /// rather than reacting only once the budget is already blown.
+    private static let transcriptBudgetHeadroom = 0.7
+
+    /// Token ceiling a candidate transcript must fit under, derived from
+    /// ``transcriptBudgetHeadroom``.
+    private static var transcriptBudgetThreshold: Int {
+        Int(Double(FoundationModelContextBudget.onDeviceTokenBudget) * transcriptBudgetHeadroom)
+    }
+
+    /// Proactively shrinks `session`'s retained-turn window below ``maxRetainedTurns`` when its
+    /// estimated token weight is already within reach of the on-device budget (#657). A heavy
+    /// attached tool set (11 tools, per the chat front door) can push a cached session's estimated
+    /// weight over budget well before ``maxRetainedTurns`` prompts accumulate — the existing
+    /// post-turn, count-only ``trimSessionIfNeeded(current:context:)`` can't prevent that, since it
+    /// only ever protects the turn *after* the one that overflowed. Shrinks the window one turn at a
+    /// time (rather than jumping straight to ``trimmedTranscript(_:retaining:)``'s single-shot cut)
+    /// so it stops as soon as the transcript fits, instead of over-trimming history that wasn't the
+    /// problem. Returns `session` unchanged once it fits, or once shrunk to a single retained turn —
+    /// the smallest useful window, past which the tool schemas (not history) are what dominate.
+    private func sessionFittingBudget(_ session: LanguageModelSession, context: AssistantContext) -> LanguageModelSession {
+        guard Self.estimatedTranscriptTokens(session.transcript) > Self.transcriptBudgetThreshold else {
+            return session
+        }
+        var window = maxRetainedTurns
+        while window > 1 {
+            window -= 1
+            guard let candidate = Self.trimmedTranscript(session.transcript, retaining: window) else { continue }
+            if window == 1 || Self.estimatedTranscriptTokens(candidate) <= Self.transcriptBudgetThreshold {
+                let tools = conversationTools(for: context, includeSpotlight: true)
+                return LanguageModelSession(tools: tools, transcript: candidate)
+            }
+        }
+        return session
     }
 
     /// Character cap on how much of ``AssistantContext/currentPageContent`` is folded into a

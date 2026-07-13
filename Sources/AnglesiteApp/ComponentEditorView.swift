@@ -72,10 +72,7 @@ struct ComponentEditorView: View {
             Divider()
             switch mode {
             case .design: designPane
-            case .source:
-                TextEditor(text: $fileEditor.text)
-                    .font(.system(.body, design: .monospaced))
-                    .scrollContentBackground(.hidden)
+            case .source: sourcePane
             }
         }
         .task(id: loadKey) {
@@ -86,6 +83,40 @@ struct ComponentEditorView: View {
         .onChange(of: model?.selectedNodeID) { _, newValue in
             highlightInCanvas(nodeID: newValue)
         }
+        .onChange(of: model?.loadErrorReason) { _, newValue in
+            // Design spec §5: an unparseable component degrades to the Source tab with the
+            // compiler diagnostic in a banner, rather than a dead-end full-pane error — fixing
+            // the syntax error in source is the only way out, so land the user where they can.
+            if newValue == .unparseable { mode = .source }
+        }
+    }
+
+    @ViewBuilder private var sourcePane: some View {
+        VStack(spacing: 0) {
+            if let model, model.loadErrorReason == .unparseable, let error = model.loadError {
+                parseErrorBanner(message: error)
+                Divider()
+            }
+            TextEditor(text: $fileEditor.text)
+                .font(.system(.body, design: .monospaced))
+                .scrollContentBackground(.hidden)
+        }
+    }
+
+    /// Compiler diagnostic banner shown atop the Source tab when the Design pane couldn't parse
+    /// the component (see `sourcePane`). Unlike `conflictBanner`/`writeErrorBanner` it has no
+    /// dismiss button — it stays until the underlying syntax error is fixed and the component
+    /// reloads clean.
+    private func parseErrorBanner(message: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle").foregroundStyle(.red)
+            Text(message)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+            Spacer()
+        }
+        .padding(8)
+        .background(.red.opacity(0.12))
     }
 
     @ViewBuilder private var designPane: some View {
@@ -736,8 +767,14 @@ private struct ComponentCanvasView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
+    @MainActor
     final class Coordinator {
         var loadedURL: URL?
+        /// Debounces reloads triggered by rapid `url` changes (e.g. a knob TextField's
+        /// per-keystroke `harnessURL`, which folds prop edits into the query string) so each
+        /// keystroke doesn't fire a full `webView.load()`. Cancelled and restarted on every
+        /// further change; only the settled URL after a short pause actually reloads.
+        var pendingReload: Task<Void, Never>?
     }
 
     func makeNSView(context: Context) -> WKWebView {
@@ -759,7 +796,15 @@ private struct ComponentCanvasView: NSViewRepresentable {
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         guard context.coordinator.loadedURL != url else { return }
-        context.coordinator.loadedURL = url
-        webView.load(URLRequest(url: url))
+        let targetURL = url
+        let coordinator = context.coordinator
+        coordinator.pendingReload?.cancel()
+        coordinator.pendingReload = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            coordinator.loadedURL = targetURL
+            coordinator.pendingReload = nil
+            webView.load(URLRequest(url: targetURL))
+        }
     }
 }

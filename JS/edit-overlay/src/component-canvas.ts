@@ -8,6 +8,7 @@
 const HARNESS_PREFIX = "/_anglesite/component/";
 const RING_CLASS = "anglesite-canvas-ring";
 const SCRUB_STYLE_ID = "anglesite-scrub";
+const INSTALLED_FLAG = "__anglesiteComponentCanvasInstalled" as const;
 
 // Curated list shown in the inspector's Computed section.
 const REPORTED_PROPERTIES = [
@@ -42,8 +43,12 @@ export function sourceLoc(el: Element): SourceLoc | null {
   return null;
 }
 
+/** Mount the component canvas onto `window`/`document`. Safe to call more than once. */
 export function installComponentCanvas(): void {
   if (!isHarnessPage()) return;
+  const win = window as unknown as { [INSTALLED_FLAG]?: boolean };
+  if (win[INSTALLED_FLAG]) return;
+  win[INSTALLED_FLAG] = true;
   document.addEventListener("click", onClick, true);
   (window as unknown as Record<string, unknown>).anglesiteCanvas = {
     highlight(line: number, column: number): void {

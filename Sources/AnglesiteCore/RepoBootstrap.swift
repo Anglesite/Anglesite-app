@@ -181,6 +181,15 @@ public actor RepoBootstrap {
     }
     #endif
 
+    /// Local git init+commit only — no GitHub involved. Reuses the same staging/secret-file/
+    /// identity checks as `publish`'s preflight. Entry point for the new-site scaffold, which
+    /// must land a real initial commit before the site can be cloned into a container runtime
+    /// (an empty, commit-less repo fails `git checkout HEAD`) — see CLAUDE.md's "Git is the
+    /// source of truth" (#72).
+    public func commitAll(source: URL) async throws {
+        try await ensureCommittable(source: source, emit: { _ in })
+    }
+
     /// Detect → (auth) → ensure committable → create + push. Streams progress; settles to
     /// `.published` / `.needsAuth` / `.failed`. Idempotent: an already-published site yields
     /// `.published(existing)` with no side effects.

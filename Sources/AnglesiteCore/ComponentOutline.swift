@@ -79,6 +79,18 @@ public enum ComponentOutline {
 
         return exact ?? bestOffset
     }
+
+    /// True when a canvas selection's `file` (vite-rooted, e.g.
+    /// "/src/components/Card.astro", or an absolute filesystem path ending in
+    /// that) refers to the component at `relativePath` (project-relative,
+    /// e.g. "src/components/Card.astro") — compared via suffix, not equality,
+    /// so a selection elsewhere in the harness page (chrome, a nested child
+    /// component's own markup) never line-matches against the wrong outline.
+    public static func fileMatches(_ file: String?, relativePath: String) -> Bool {
+        guard let file, !file.isEmpty else { return false }
+        let normalized = file.hasPrefix("/") ? String(file.dropFirst()) : file
+        return normalized == relativePath || normalized.hasSuffix("/" + relativePath)
+    }
 }
 
 /// Builds harness-route URLs for the component canvas (route injected by the
@@ -95,7 +107,17 @@ public enum HarnessURL {
         if !props.isEmpty,
            let data = try? JSONSerialization.data(withJSONObject: props, options: [.sortedKeys]),
            let json = String(data: data, encoding: .utf8) {
-            components.queryItems = [URLQueryItem(name: "props", value: json)]
+            // `URLComponents.queryItems` percent-encodes via `.urlQueryAllowed`, which treats RFC
+            // 3986 sub-delims (`+`, `&`, `=`, `;`, …) as unreserved and leaves them literal — but
+            // the harness decodes the query with `URLSearchParams`, which follows form-encoding
+            // semantics: an unescaped `+` becomes a space, and `&`/`=` are parsed as extra
+            // parameter delimiters, corrupting the JSON payload. Percent-encode everything except
+            // RFC 3986 unreserved characters (unlike `.urlQueryAllowed`, this doesn't special-case
+            // "query-safe" delimiters) so any prop value survives the round-trip intact.
+            var allowedCharacters = CharacterSet.alphanumerics
+            allowedCharacters.insert(charactersIn: "-._~")
+            guard let encodedJSON = json.addingPercentEncoding(withAllowedCharacters: allowedCharacters) else { return nil }
+            components.percentEncodedQuery = "props=" + encodedJSON
         }
         return components.url
     }

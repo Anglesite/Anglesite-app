@@ -26,16 +26,20 @@ public struct ReviewCopyIntent: AppIntent {
     }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
+        .result(dialog: IntentDialog(stringLiteral: try await run()))
+    }
+
+    private func run() async throws -> String {
         // `SiteEntity.directory` is the `.anglesite` PACKAGE root (see its init from
         // `SiteStore.Site`), not the `Source/` git repo the auditor needs to read — derive the
         // actual source directory via `AnglesitePackage` here rather than changing the entity's
         // established (and elsewhere-relied-on) semantics.
         guard let packageURL = site.directory else {
-            return .result(dialog: "\(IntegrationDialogs.failed(reason: "site folder unavailable", siteName: site.displayName))")
+            return IntegrationDialogs.failed(reason: "site folder unavailable", siteName: site.displayName)
         }
         let sourceDirectory = AnglesitePackage(url: packageURL).sourceURL
         guard let auditor = CopyEditAuditorFactory.makeDefault() else {
-            return .result(dialog: "\(ContentHelpDialogs.assistantUnavailable(feature: "Copy review"))")
+            return ContentHelpDialogs.assistantUnavailable(feature: "Copy review")
         }
         let chunks = SiteContentChunker.chunks(sourceDirectory: sourceDirectory)
         let preamble = BrandVoiceGuidance.preamble(
@@ -43,9 +47,22 @@ public struct ReviewCopyIntent: AppIntent {
         let report = await auditor.audit(
             chunks: chunks, preamble: preamble, siteID: site.id, siteDirectory: sourceDirectory)
         if let unavailableMessage = report.unavailableMessage {
-            return .result(dialog: "\(unavailableMessage)")
+            return unavailableMessage
         }
-        return .result(dialog: "\(ContentHelpDialogs.copyReview(findingCount: report.findings.count, pageCount: report.auditedCount, skippedCount: report.skippedRoutes.count, siteName: site.displayName))")
+        return ContentHelpDialogs.copyReview(findingCount: report.findings.count, pageCount: report.auditedCount, skippedCount: report.skippedRoutes.count, siteName: site.displayName)
+    }
+}
+
+// MARK: - Test-only helpers
+
+extension ReviewCopyIntent {
+    /// Drives `perform`'s dialog logic directly, bypassing the AppIntents runtime (`IntentDialog`
+    /// exposes no way to read its text back out, so tests can't inspect `perform()`'s return
+    /// value directly — mirrors `ListDNSRecordsIntent.performForTesting()`). Safe for the
+    /// site-folder-unavailable guard; reaching further calls the real `CopyEditAuditorFactory`
+    /// (no test-only override exists for it).
+    func performForTesting() async throws -> String {
+        try await run()
     }
 }
 
@@ -72,14 +89,18 @@ public struct PlanSocialMediaIntent: AppIntent {
     }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
+        .result(dialog: IntentDialog(stringLiteral: try await run()))
+    }
+
+    private func run() async throws -> String {
         // Same `SiteEntity.directory` ground truth as `ReviewCopyIntent`: it's the package root,
         // not `Source/` — derive the source directory via `AnglesitePackage`.
         guard let packageURL = site.directory else {
-            return .result(dialog: "\(IntegrationDialogs.failed(reason: "site folder unavailable", siteName: site.displayName))")
+            return IntegrationDialogs.failed(reason: "site folder unavailable", siteName: site.displayName)
         }
         let sourceDirectory = AnglesitePackage(url: packageURL).sourceURL
         guard let planner = SocialMediaPlannerFactory.makeDefault() else {
-            return .result(dialog: "\(ContentHelpDialogs.assistantUnavailable(feature: "Social planning"))")
+            return ContentHelpDialogs.assistantUnavailable(feature: "Social planning")
         }
         let businessType = SiteBusinessType.read(sourceDirectory: sourceDirectory)
         let siteName = SiteConfigValues.siteName(sourceDirectory: sourceDirectory) ?? site.displayName
@@ -88,13 +109,25 @@ public struct PlanSocialMediaIntent: AppIntent {
             siteName: siteName, businessType: businessType,
             preamble: BrandVoiceGuidance.preamble(conventions: nil, businessType: businessType),
             weeks: clamped, startDate: Date(), siteID: site.id, siteDirectory: sourceDirectory) else {
-            return .result(dialog: "\(ContentHelpDialogs.assistantUnavailable(feature: "Social planning"))")
+            return ContentHelpDialogs.assistantUnavailable(feature: "Social planning")
         }
         // Writing a docs file into the site repo: confirm like AddBookingIntent confirms writes.
         try await requestConfirmation(dialog: "Save a \(plan.weeks.count)-week social plan to \(site.displayName)'s docs/social-calendar.md?")
         let markdown = SocialCalendarMarkdown.render(plan: plan, siteName: siteName)
         try SocialCalendarMarkdown.write(markdown: markdown, sourceDirectory: sourceDirectory)
-        return .result(dialog: "\(ContentHelpDialogs.socialPlanSaved(weeks: plan.weeks.count, siteName: site.displayName))")
+        return ContentHelpDialogs.socialPlanSaved(weeks: plan.weeks.count, siteName: site.displayName)
+    }
+}
+
+// MARK: - Test-only helpers
+
+extension PlanSocialMediaIntent {
+    /// Drives `perform`'s dialog logic directly, bypassing the AppIntents runtime — see
+    /// `ReviewCopyIntent.performForTesting()`. Safe for the site-folder-unavailable guard;
+    /// reaching further calls the real `SocialMediaPlannerFactory` and, on success, a real
+    /// `requestConfirmation` (no test-only override exists for either).
+    func performForTesting() async throws -> String {
+        try await run()
     }
 }
 
@@ -121,17 +154,22 @@ public struct RepurposePostIntent: AppIntent {
     }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String> {
+        let (value, dialog) = try await run()
+        return .result(value: value, dialog: IntentDialog(stringLiteral: dialog))
+    }
+
+    private func run() async throws -> (value: String, dialog: String) {
         // Same `SiteEntity.directory` ground truth as `ReviewCopyIntent`/`PlanSocialMediaIntent`:
         // it's the package root, not `Source/` — derive the source directory via `AnglesitePackage`.
         guard let packageURL = site.directory else {
-            return .result(value: "", dialog: "\(IntegrationDialogs.failed(reason: "site folder unavailable", siteName: site.displayName))")
+            return ("", IntegrationDialogs.failed(reason: "site folder unavailable", siteName: site.displayName))
         }
         let sourceDirectory = AnglesitePackage(url: packageURL).sourceURL
         guard let repurposer = PostRepurposerFactory.makeDefault() else {
-            return .result(value: "", dialog: "\(ContentHelpDialogs.assistantUnavailable(feature: "Repurposing"))")
+            return ("", ContentHelpDialogs.assistantUnavailable(feature: "Repurposing"))
         }
         guard let post = PostSource.load(slug: slug, sourceDirectory: sourceDirectory) else {
-            return .result(value: "", dialog: "\(IntegrationDialogs.failed(reason: "no post named \(slug)", siteName: site.displayName))")
+            return ("", IntegrationDialogs.failed(reason: "no post named \(slug)", siteName: site.displayName))
         }
         // Domain resolution mirrors `RepurposePostTool`/`RepurposeModel`: the app writes `DOMAIN`
         // (not `SITE_DOMAIN`) into `.site-config`, so this reads it via `WebsiteAnalyticsAsset.bestHost`.
@@ -150,6 +188,18 @@ public struct RepurposePostIntent: AppIntent {
         let summary = ContentHelpDialogs.repurposeSummary(
             postTitle: post.title, platformCount: variants.count - failed, failedCount: failed)
         let dialog = domain.isEmpty ? "\(RepurposeReply.missingDomainWarning) \(summary)" : summary
-        return .result(value: block, dialog: "\(dialog)")
+        return (block, dialog)
+    }
+}
+
+// MARK: - Test-only helpers
+
+extension RepurposePostIntent {
+    /// Drives `perform`'s dialog logic directly, bypassing the AppIntents runtime — see
+    /// `ReviewCopyIntent.performForTesting()`. Safe for the site-folder-unavailable guard;
+    /// reaching further calls the real `PostRepurposerFactory` (no test-only override exists
+    /// for it).
+    func performForTesting() async throws -> (value: String, dialog: String) {
+        try await run()
     }
 }
