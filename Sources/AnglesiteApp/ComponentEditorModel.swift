@@ -26,10 +26,13 @@ final class ComponentEditorModel {
 
     /// Distinguishes "dev server/MCP client isn't up yet" (retryable, not a
     /// real failure — `ComponentEditorView`'s `loadKey` re-triggers `load()`
-    /// once `context.baseURL`/the client become available) from a genuine
-    /// load failure worth showing as an error page.
+    /// once `context.baseURL`/the client become available) from an
+    /// unparseable component (design spec §5: degrade to the Source tab with
+    /// the compiler diagnostic in a banner, never a dead end) from any other
+    /// genuine load failure worth showing as a full-pane error.
     enum LoadErrorReason: Equatable {
         case notConnected
+        case unparseable
         case other
     }
 
@@ -100,32 +103,22 @@ final class ComponentEditorModel {
                     ($0.name, KnobDefaults.value(for: $0))
                 }
             )
-        } catch ComponentModelClient.ModelError.notConnected {
-            loadError = "Site is not running yet."
-            loadErrorReason = .notConnected
+        } catch let error as ComponentModelClient.ModelError {
+            loadError = error.friendlyMessage
+            switch error {
+            case .notConnected: loadErrorReason = .notConnected
+            case .toolFailed(let reason, _): loadErrorReason = reason == "parse-failed" ? .unparseable : .other
+            case .decodeFailed: loadErrorReason = .other
+            }
         } catch {
-            loadError = String(describing: error)
+            loadError = "Couldn't load this component: \(error.localizedDescription)"
             loadErrorReason = .other
         }
     }
 
-    /// True when a canvas selection's `message.file` refers to the component
-    /// currently being edited. The annotation file is vite-rooted (e.g.
-    /// "/src/components/Card.astro" or an absolute filesystem path ending in
-    /// that), while `relativePath` is project-relative (e.g.
-    /// "src/components/Card.astro") — so compare via suffix, not equality.
-    /// A selection elsewhere in the harness page (chrome, a nested child
-    /// component's own markup) must not be line-matched against this
-    /// component's outline.
-    private func fileMatches(_ file: String?) -> Bool {
-        guard let file, !file.isEmpty else { return false }
-        let normalized = file.hasPrefix("/") ? String(file.dropFirst()) : file
-        return normalized == relativePath || normalized.hasSuffix("/" + relativePath)
-    }
-
     func canvasSelected(_ message: CanvasSelectionMessage) {
         guard let model,
-              fileMatches(message.file),
+              ComponentOutline.fileMatches(message.file, relativePath: relativePath),
               let line = message.line,
               let column = message.column
         else {

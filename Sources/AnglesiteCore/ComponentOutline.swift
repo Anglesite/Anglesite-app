@@ -61,6 +61,18 @@ public enum ComponentOutline {
 
         return exact ?? bestOffset
     }
+
+    /// True when a canvas selection's `file` (vite-rooted, e.g.
+    /// "/src/components/Card.astro", or an absolute filesystem path ending in
+    /// that) refers to the component at `relativePath` (project-relative,
+    /// e.g. "src/components/Card.astro") — compared via suffix, not equality,
+    /// so a selection elsewhere in the harness page (chrome, a nested child
+    /// component's own markup) never line-matches against the wrong outline.
+    public static func fileMatches(_ file: String?, relativePath: String) -> Bool {
+        guard let file, !file.isEmpty else { return false }
+        let normalized = file.hasPrefix("/") ? String(file.dropFirst()) : file
+        return normalized == relativePath || normalized.hasSuffix("/" + relativePath)
+    }
 }
 
 /// Builds harness-route URLs for the component canvas (route injected by the
@@ -77,7 +89,15 @@ public enum HarnessURL {
         if !props.isEmpty,
            let data = try? JSONSerialization.data(withJSONObject: props, options: [.sortedKeys]),
            let json = String(data: data, encoding: .utf8) {
-            components.queryItems = [URLQueryItem(name: "props", value: json)]
+            // `URLComponents.queryItems` percent-encodes via `.urlQueryAllowed`, which treats `+`
+            // as unreserved and leaves it literal — but the harness decodes the query with
+            // `URLSearchParams`, which follows form-encoding semantics and turns an unescaped `+`
+            // into a space. Percent-encode `+` explicitly so a prop value containing one survives
+            // the round-trip intact.
+            var allowedCharacters = CharacterSet.urlQueryAllowed
+            allowedCharacters.remove(charactersIn: "+")
+            guard let encodedJSON = json.addingPercentEncoding(withAllowedCharacters: allowedCharacters) else { return nil }
+            components.percentEncodedQuery = "props=" + encodedJSON
         }
         return components.url
     }

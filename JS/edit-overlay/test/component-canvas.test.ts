@@ -18,6 +18,7 @@ describe("component canvas", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     delete (window as any).anglesiteCanvas;
+    delete (window as any).__anglesiteComponentCanvasInstalled;
   });
 
   it("isHarnessPage gates on the harness path prefix", () => {
@@ -121,5 +122,19 @@ describe("component canvas", () => {
     setPath("/_anglesite/component/Card");
     installComponentCanvas();
     expect(() => (window as any).anglesiteCanvas.clearScrub()).not.toThrow();
+  });
+
+  it("is idempotent: repeated installs don't double-register the click listener", () => {
+    setPath("/_anglesite/component/Card");
+    const posts = capturePosts();
+    document.body.innerHTML =
+      `<article data-astro-source-file="/f.astro" data-astro-source-loc="7:1">hi</article>`;
+    installComponentCanvas();
+    installComponentCanvas();
+    installComponentCanvas();
+    (document.querySelector("article") as HTMLElement).dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    expect(posts.filter((p: any) => p.type === "anglesite:canvas-selection")).toHaveLength(1);
   });
 });

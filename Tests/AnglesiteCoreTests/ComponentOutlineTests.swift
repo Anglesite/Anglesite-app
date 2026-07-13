@@ -62,6 +62,28 @@ struct ComponentOutlineTests {
         #expect(HarnessURL.build(base: base, componentPath: "src/pages/index.astro", props: [:]) == nil)
     }
 
+    @Test("Harness URL percent-encodes + in prop values instead of leaving it literal") func harnessURLPlusEncoding() throws {
+        let base = URL(string: "http://localhost:4321")!
+        let url = try #require(HarnessURL.build(base: base, componentPath: "src/components/Card.astro", props: ["title": "1 + 1"]))
+        // A literal `+` in the query is decoded as a space by `URLSearchParams` on the harness
+        // side, so the raw query string must carry it percent-encoded, not literal.
+        #expect(url.query(percentEncoded: true)?.contains("+") == false)
+        // And the round trip through URLComponents' own decoding recovers the original value.
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let propsJSON = try #require(components.queryItems?.first(where: { $0.name == "props" })?.value)
+        let decoded = try JSONDecoder().decode([String: String].self, from: Data(propsJSON.utf8))
+        #expect(decoded["title"] == "1 + 1")
+    }
+
+    @Test("fileMatches compares the harness's vite-rooted file against the project-relative path") func fileMatchesTest() {
+        #expect(ComponentOutline.fileMatches("/src/components/Card.astro", relativePath: "src/components/Card.astro"))
+        #expect(ComponentOutline.fileMatches("src/components/Card.astro", relativePath: "src/components/Card.astro"))
+        #expect(ComponentOutline.fileMatches("/Users/dev/site/src/components/Card.astro", relativePath: "src/components/Card.astro"))
+        #expect(!ComponentOutline.fileMatches("/src/components/Other.astro", relativePath: "src/components/Card.astro"))
+        #expect(!ComponentOutline.fileMatches(nil, relativePath: "src/components/Card.astro"))
+        #expect(!ComponentOutline.fileMatches("", relativePath: "src/components/Card.astro"))
+    }
+
     @Test("Knob defaults prefer declared defaults, else type samples") func knobDefaults() {
         #expect(KnobDefaults.value(for: .init(name: "n", type: "number", optional: true, defaultValue: "1")) == "1")
         #expect(KnobDefaults.value(for: .init(name: "t", type: "string", optional: false, defaultValue: "\"Hello\"")) == "Hello")
