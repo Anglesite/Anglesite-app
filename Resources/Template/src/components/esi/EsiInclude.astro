@@ -29,7 +29,7 @@ const tag = buildEsiIncludeTag({ src, alt, onerror });
   <script>
     import { resolveEsiFragments, esiPreviewIsUnprocessed } from "./esi-dev-shim";
     if (!esiPreviewIsUnprocessed(location.search)) {
-      resolveEsiFragments(document, (url) => fetch(url));
+      resolveEsiFragments(document, (url, signal) => fetch(url, { signal }));
     }
   </script>
 )}

@@ -1,4 +1,14 @@
-/** Escapes the two characters that matter inside a double-quoted HTML attribute value. */
+/**
+ * Escapes the two characters that matter inside a double-quoted HTML attribute value — correct
+ * and sufficient for a browser parsing this as HTML.
+ *
+ * Forward-looking caveat: `@dwk/esi`'s edge-side tokenizer doesn't exist as code yet (the design
+ * this hinges on emitting exact literal bytes that tokenizer expects). If it ends up being a
+ * lightweight/regex-based parser rather than a full HTML parser, an unescaped `>` in `src`/`alt`
+ * (e.g. `src="/a>injected"`) could prematurely terminate the tag from that parser's point of view
+ * even though it's valid to a browser. Revisit once that tokenizer lands and its actual parsing
+ * behavior can be verified against.
+ */
 export function escapeAttribute(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }

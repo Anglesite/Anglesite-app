@@ -87,6 +87,41 @@ test("resolveEsiFragments: fetchImpl throwing leaves the element empty and resol
   assert.equal(el.hasAttribute("data-esi-dev-resolved"), true);
 });
 
+test("resolveEsiFragments: passes an AbortSignal to fetchImpl, so a hanging fetch can be timed out", async () => {
+  const el = makeElement({ src: "/fragments/count", alt: "/fragments/fallback" });
+  const doc: EsiFragmentDocument = { querySelectorAll: () => [el] };
+  let receivedSignal: AbortSignal | undefined;
+  await resolveEsiFragments(doc, async (url, signal) => {
+    if (url === "/fragments/count") {
+      receivedSignal = signal;
+      // Simulates AbortSignal.timeout() firing: fetch rejects once its signal aborts.
+      throw new Error("simulated timeout abort");
+    }
+    return new Response("fallback-text", { status: 200 });
+  });
+  assert.ok(receivedSignal instanceof AbortSignal, "fetchImpl must receive a real AbortSignal");
+  // A timed-out src falls through to alt exactly like any other failure.
+  assert.equal(el.innerHTML, "fallback-text");
+});
+
+test("resolveEsiFragments: two concurrent invocations on the same element only fetch once", async () => {
+  const el = makeElement({ src: "/fragments/count" });
+  const doc: EsiFragmentDocument = { querySelectorAll: () => [el] };
+  let fetchCount = 0;
+  const fetchImpl = async () => {
+    fetchCount++;
+    return new Response("42", { status: 200 });
+  };
+  // Two script instances resolving the same page in the same tick (e.g. two EsiInclude
+  // components, if Astro doesn't dedupe the client script) must not both fire a fetch for the
+  // same element — RESOLVED_ATTR is claimed synchronously before either awaits.
+  const first = resolveEsiFragments(doc, fetchImpl);
+  const second = resolveEsiFragments(doc, fetchImpl);
+  await Promise.all([first, second]);
+  assert.equal(fetchCount, 1);
+  assert.equal(el.innerHTML, "42");
+});
+
 test("esiPreviewIsUnprocessed: true only for ?esiPreview=unprocessed", () => {
   assert.equal(esiPreviewIsUnprocessed("?esiPreview=unprocessed"), true);
   assert.equal(esiPreviewIsUnprocessed(""), false);

@@ -1,7 +1,7 @@
 // Resources/Template/src/components/esi/esi-components.build.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, cp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, cp, writeFile, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,8 +46,20 @@ import EsiRemove from "../components/esi/EsiRemove.astro";
     assert.match(html, /<esi:comment text="build fixture"\/>/);
     assert.match(html, /<esi:remove><span class="fallback">—<\/span><\/esi:remove>/);
 
-    // The dev-only fetch shim must not ship to production at all — not just be inert.
-    assert.ok(!html.includes("resolveEsiFragments"), "dev shim script leaked into production build");
+    // The dev-only fetch shim must not ship to production at all — not just be inert. `index.html`
+    // alone isn't enough: Astro hoists client <script> blocks into separately bundled
+    // `dist/_astro/*.js` chunks, so a leaked shim could land there even with no trace in the page
+    // HTML. Walk the whole `dist/` tree.
+    const distFiles = await readdir(join(fixtureDir, "dist"), { recursive: true, withFileTypes: true });
+    for (const entry of distFiles) {
+      if (!entry.isFile()) continue;
+      const filePath = join(entry.parentPath ?? entry.path, entry.name);
+      const contents = await readFile(filePath, "utf8").catch(() => "");
+      assert.ok(
+        !contents.includes("resolveEsiFragments"),
+        `dev shim script leaked into production build: ${filePath}`
+      );
+    }
   } finally {
     await rm(fixtureDir, { recursive: true, force: true });
   }
