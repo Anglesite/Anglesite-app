@@ -27,14 +27,24 @@ public struct ApplyThemeIntent: AppIntent {
     }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
-        guard let theme = catalog.theme(id: themeID) else {
-            let names = catalog.themes.map(\.name).joined(separator: ", ")
-            return .result(dialog: IntentDialog(stringLiteral: "I don't recognize that theme. Available: \(names)."))
+        .result(dialog: IntentDialog(stringLiteral: try await run()))
+    }
+
+    private func run() async throws -> String {
+        // Tests bind ThemeCatalogOverride.scoped; production goes through @Dependency.
+        let themeCatalog = ThemeCatalogOverride.scoped ?? catalog
+        guard let theme = themeCatalog.theme(id: themeID) else {
+            let names = themeCatalog.themes.map(\.name).joined(separator: ", ")
+            return "I don't recognize that theme. Available: \(names)."
         }
         guard let packageURL = site.directory else {
-            return .result(dialog: IntentDialog(stringLiteral: "I couldn't find \(site.displayName)'s location."))
+            return "I couldn't find \(site.displayName)'s location."
         }
-        try await requestConfirmation(dialog: "Apply the \(theme.name) theme to \(site.displayName)?")
+        // A bound override means we're under test — skip the real Siri confirmation UI, which
+        // isn't introspectable under `swift test` (mirrors AddDNSRecordIntent/DeleteDNSRecordIntent).
+        if ThemeCatalogOverride.scoped == nil {
+            try await requestConfirmation(dialog: "Apply the \(theme.name) theme to \(site.displayName)?")
+        }
         let package = AnglesitePackage(url: packageURL)
         let input = DesignApplyInput(
             cssVars: DesignTokenWriter.templateCSSVars(for: theme),
@@ -43,6 +53,20 @@ public struct ApplyThemeIntent: AppIntent {
             sourceLabel: "Built-in theme: \(theme.name)"
         )
         let result = DesignApplyService.apply(input, to: package)
-        return .result(dialog: IntentDialog(stringLiteral: SetupThemeArguments.reply(for: result, themeName: theme.name)))
+        return SetupThemeArguments.reply(for: result, themeName: theme.name)
+    }
+}
+
+// MARK: - Test-only helpers
+
+extension ApplyThemeIntent {
+    /// Drives `perform`'s dialog logic directly, bypassing the AppIntents `@Dependency` gate and
+    /// (since a bound override also skips `requestConfirmation`) the confirmation gate too.
+    /// Only callable when `ThemeCatalogOverride.scoped` is bound.
+    func performForTesting() async throws -> String {
+        guard ThemeCatalogOverride.scoped != nil else {
+            fatalError("performForTesting requires a bound ThemeCatalogOverride.scoped")
+        }
+        return try await run()
     }
 }
