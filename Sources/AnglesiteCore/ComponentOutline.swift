@@ -1,4 +1,12 @@
 import Foundation
+// CoreTransferable is Darwin-only; ComponentOutline is in the Linux-portable target set
+// (Package.swift's cross-platform-port purity sweep), so the drag-payload Transferable types
+// below — pure data used by SwiftUI .draggable/.dropDestination in the app target (Task
+// 16/17/18) — are gated off the off-Darwin build rather than pulled in unconditionally.
+#if canImport(CoreTransferable)
+import CoreTransferable
+import UniformTypeIdentifiers
+#endif
 
 /// Pure presentation logic for the Component Editor, kept in Core so it is
 /// testable without the app target (hosted app tests don't run on CI).
@@ -6,20 +14,30 @@ public enum ComponentOutline {
     public struct Row: Sendable, Equatable, Identifiable {
         public let node: ComponentModel.Node
         public let depth: Int
+        /// True for a `kind == .component` node — its children are real markup (slot-fill
+        /// content authored at the use site), but the outline treats the instance as opaque
+        /// (spec §4.1): configure it via its attrs/props, or double-click to edit the
+        /// component's own definition.
+        public let isSealed: Bool
         public var id: String { node.id }
 
-        public init(node: ComponentModel.Node, depth: Int) {
+        public init(node: ComponentModel.Node, depth: Int, isSealed: Bool = false) {
             self.node = node
             self.depth = depth
+            self.isSealed = isSealed
         }
     }
 
     /// Depth-first rows for a flat SwiftUI List; the synthetic fragment root
-    /// is skipped so depth 0 is the component's top-level markup.
+    /// is skipped so depth 0 is the component's top-level markup. A
+    /// `kind == .component` node's children are never visited — the instance
+    /// is sealed (spec §4.1), so its slot-fill markup never becomes rows.
     public static func rows(from root: ComponentModel.Node) -> [Row] {
         var rows: [Row] = []
         func visit(_ node: ComponentModel.Node, depth: Int) {
-            rows.append(Row(node: node, depth: depth))
+            let sealed = node.kind == .component
+            rows.append(Row(node: node, depth: depth, isSealed: sealed))
+            guard !sealed else { return }
             for child in node.children { visit(child, depth: depth + 1) }
         }
         let topLevel = root.kind == .fragment ? root.children : [root]
@@ -97,3 +115,37 @@ public enum KnobDefaults {
         }
     }
 }
+
+#if canImport(CoreTransferable)
+/// Drag payload for an outline row being reordered/reparented (Task 16) — identifies the
+/// component file being edited (guards against a cross-editor drop landing on the wrong
+/// component's tree) and the node being moved.
+public struct ComponentDragItem: Codable, Sendable, Transferable {
+    public let fileID: String
+    public let nodeID: String
+
+    public init(fileID: String, nodeID: String) {
+        self.fileID = fileID
+        self.nodeID = nodeID
+    }
+
+    public static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .anglesiteComponentDragItem)
+    }
+}
+
+/// Drag payload for a palette row being dropped into the outline or onto the canvas (Task 17/18).
+public struct PaletteDragPayload: Codable, Sendable, Transferable {
+    public let label: String
+    public let kind: ComponentStructureEditBuilder.NodeSpec
+
+    public init(label: String, kind: ComponentStructureEditBuilder.NodeSpec) {
+        self.label = label
+        self.kind = kind
+    }
+
+    public static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .anglesitePaletteDragPayload)
+    }
+}
+#endif

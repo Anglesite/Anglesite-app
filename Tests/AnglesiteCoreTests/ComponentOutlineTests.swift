@@ -13,6 +13,28 @@ struct ComponentOutlineTests {
         #expect(rows.map(\.depth) == [0, 1, 1])
     }
 
+    @Test("a component-instance node's children are not expanded into rows")
+    func sealedInstanceHidesChildren() {
+        let slotFill = ComponentModel.Node(id: "n3", kind: .text, tag: nil, attrs: [], span: .init(start: nil, end: nil), loc: nil, text: "fill", children: [])
+        let badge = ComponentModel.Node(id: "n2", kind: .component, tag: "Badge", attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [slotFill])
+        let root = ComponentModel.Node(id: "n0", kind: .fragment, tag: nil, attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [badge])
+
+        let rows = ComponentOutline.rows(from: root)
+        #expect(rows.map(\.node.id) == ["n2"]) // n3 (the slot-fill text) never appears as a row
+        #expect(rows.first?.isSealed == true)
+    }
+
+    @Test("a plain element's children still expand normally")
+    func plainElementExpands() {
+        let child = ComponentModel.Node(id: "n2", kind: .text, tag: nil, attrs: [], span: .init(start: nil, end: nil), loc: nil, text: "hi", children: [])
+        let article = ComponentModel.Node(id: "n1", kind: .element, tag: "article", attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [child])
+        let root = ComponentModel.Node(id: "n0", kind: .fragment, tag: nil, attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [article])
+
+        let rows = ComponentOutline.rows(from: root)
+        #expect(rows.map(\.node.id) == ["n1", "n2"])
+        #expect(rows.first?.isSealed == false)
+    }
+
     @Test("Loc lookup finds an exact line+column match") func locLookupExact() throws {
         let root = try model().template
         #expect(ComponentOutline.node(atLine: 7, column: 1, in: root)?.id == "n1")

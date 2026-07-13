@@ -5,7 +5,7 @@ import Foundation
 /// dependency, mirrors `ComponentStyleEditBuilder`'s shape exactly.
 public enum ComponentStructureEditBuilder {
     /// New-node spec for `insertNode` — mirrors the plugin's `component.node` schema.
-    public enum NodeSpec: Equatable {
+    public enum NodeSpec: Equatable, Codable {
         case element(tag: String)
         case component(tag: String, componentPath: String)
         case slot(name: String? = nil)
