@@ -62,6 +62,31 @@ test("resolveEsiFragments: skips elements already marked resolved", async () => 
   assert.equal(el.innerHTML, "cached");
 });
 
+test("resolveEsiFragments: no src attribute marks resolved without fetching", async () => {
+  const el = makeElement({});
+  const doc: EsiFragmentDocument = { querySelectorAll: () => [el] };
+  let called = false;
+  await assert.doesNotReject(
+    resolveEsiFragments(doc, async () => {
+      called = true;
+      return new Response("42");
+    })
+  );
+  assert.equal(called, false);
+  assert.equal(el.innerHTML, "");
+  assert.equal(el.hasAttribute("data-esi-dev-resolved"), true);
+});
+
+test("resolveEsiFragments: fetchImpl throwing leaves the element empty and resolved", async () => {
+  const el = makeElement({ src: "/fragments/count" });
+  const doc: EsiFragmentDocument = { querySelectorAll: () => [el] };
+  await resolveEsiFragments(doc, async () => {
+    throw new Error("network down");
+  });
+  assert.equal(el.innerHTML, "");
+  assert.equal(el.hasAttribute("data-esi-dev-resolved"), true);
+});
+
 test("esiPreviewIsUnprocessed: true only for ?esiPreview=unprocessed", () => {
   assert.equal(esiPreviewIsUnprocessed("?esiPreview=unprocessed"), true);
   assert.equal(esiPreviewIsUnprocessed(""), false);
