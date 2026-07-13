@@ -19,6 +19,7 @@ public final class AppSettings: @unchecked Sendable {
         public static let lanRuntimePreviewPort = "anglesite.lanRuntimePreviewPort"
         public static let lanRuntimeMCPPort     = "anglesite.lanRuntimeMCPPort"
         public static let debugPaneEnabled   = "anglesite.debugPaneEnabled"
+        public static let esiPreviewUnprocessed = "anglesite.esiPreviewUnprocessed"
         public static let lastOpenedSiteID   = "anglesite.lastOpenedSiteID"
         public static let sitesRootBookmark  = "anglesite.sitesRootBookmark"
         public static let autoGenerateAltText = "anglesite.autoGenerateAltText"
@@ -127,6 +128,16 @@ public final class AppSettings: @unchecked Sendable {
     public var debugPaneEnabled: Bool {
         get { defaults.bool(forKey: Key.debugPaneEnabled) }
         set { defaults.set(newValue, forKey: Key.debugPaneEnabled) }
+    }
+
+    /// Forces local preview to skip `EsiInclude`'s dev-only fetch shim, so `EsiRemove`'s fallback
+    /// content can be previewed on demand instead of only by sabotaging the fragment URL
+    /// (docs/superpowers/specs/2026-07-13-esi-astro-component-design.md §4a). Global rather than
+    /// per-site: the Debug Pane this control lives in has no per-site scoping today. Defaults to
+    /// `false` (live/resolved preview, today's existing behavior).
+    public var esiPreviewUnprocessed: Bool {
+        get { defaults.bool(forKey: Key.esiPreviewUnprocessed) }
+        set { defaults.set(newValue, forKey: Key.esiPreviewUnprocessed) }
     }
 
     /// Security-scoped bookmark for the sites root, persisted so the sandboxed (MAS) build only

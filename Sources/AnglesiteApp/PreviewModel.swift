@@ -307,10 +307,12 @@ final class PreviewModel {
 
     /// The URL the preview WKWebView should load: the active page route against the ready base
     /// URL, or the base URL itself when no route is active. `nil` until the runtime is `.ready`.
+    /// Also carries the Debug Pane's global ESI preview mode (spec §4a) as a query parameter, so
+    /// `EsiInclude`'s dev shim can read it.
     var displayURL: URL? {
         guard let base = readyURL else { return nil }
-        guard let route = activeRoute else { return base }
-        return PreviewNavigation.targetURL(base: base, route: route)
+        let target = activeRoute.map { PreviewNavigation.targetURL(base: base, route: $0) } ?? base
+        return PreviewNavigation.applyingEsiPreviewMode(target, unprocessed: EsiPreviewMode.shared.unprocessed)
     }
 
     /// Open the Web Inspector for the live preview. No-ops when the weak `webView` is nil

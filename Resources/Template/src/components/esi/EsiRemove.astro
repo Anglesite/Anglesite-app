@@ -1,0 +1,9 @@
+---
+const openTag = "<esi:remove>";
+const closeTag = "</esi:remove>";
+---
+{/* Fallback markup shown only when nothing ESI-aware processes this page — see EsiInclude's
+    doc comment for the idiomatic EsiInclude/EsiRemove sibling pairing. */}
+<Fragment set:html={openTag} />
+<slot />
+<Fragment set:html={closeTag} />
