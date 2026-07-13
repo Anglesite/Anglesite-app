@@ -178,6 +178,7 @@ describe("dropTargetAt", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     delete (window as any).anglesiteCanvas;
+    delete (window as any).__anglesiteComponentCanvasInstalled;
     setPath("/_anglesite/component/Card");
     stubLayout();
   });
