@@ -83,3 +83,18 @@ public struct WorkerDescriptor: Sendable, Equatable, Codable, Identifiable {
         }
     }
 }
+
+/// Parses `catalog.json` (the `@dwk/workers` monorepo's published worker manifest) into
+/// `WorkerDescriptor`s. Stateless — call `parse(_:)` directly, mirroring
+/// `WorkersConformanceReader`'s shape.
+public enum WorkerCatalogReader {
+    private struct Root: Decodable {
+        let workers: [WorkerDescriptor]
+    }
+
+    /// Decodes `data` (UTF-8 JSON matching the `catalog.json` schema) and returns its
+    /// `WorkerDescriptor`s. Throws a `DecodingError` if the JSON is malformed.
+    public static func parse(_ data: Data) throws -> [WorkerDescriptor] {
+        try JSONDecoder().decode(Root.self, from: data).workers
+    }
+}
