@@ -31,6 +31,12 @@ struct ComponentEditorView: View {
     @State private var colorCommitTasks: [String: Task<Void, Never>] = [:]
     /// Selector text for the inline "Add rule" form at the bottom of the Styles panel.
     @State private var newRuleSelector: String = ""
+    /// In-progress edits to an attribute value, keyed by `"<nodeID>:<attrName>"`, pending
+    /// commit (on submit) to `ComponentEditorModel.setAttr`.
+    @State private var attrValueDrafts: [String: String] = [:]
+    /// Name/value text for the inline "Add attribute" form in the Selection panel.
+    @State private var newAttrName: String = ""
+    @State private var newAttrValue: String = ""
 
     enum Mode: String, CaseIterable { case design = "Design", source = "Source" }
 
@@ -346,7 +352,35 @@ struct ComponentEditorView: View {
                         LabeledContent("Kind", value: node.kind.rawValue)
                         if let tag = node.tag { LabeledContent("Tag", value: tag) }
                         ForEach(node.attrs, id: \.name) { attr in
-                            LabeledContent(attr.name, value: attr.value ?? "—")
+                            HStack(spacing: 4) {
+                                Text(attr.name).font(.system(.caption, design: .monospaced)).frame(width: 90, alignment: .leading)
+                                TextField("value", text: attrValueBinding(model, node: node, name: attr.name))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textFieldStyle(.plain)
+                                    .onSubmit { commitAttr(model, node: node, name: attr.name) }
+                                Button(role: .destructive) {
+                                    Task { await model.setAttr(nodeId: node.id, name: attr.name, value: nil) }
+                                } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        HStack {
+                            TextField("New attribute name", text: $newAttrName)
+                                .font(.system(.caption, design: .monospaced))
+                            TextField("value", text: $newAttrValue)
+                                .font(.system(.caption, design: .monospaced))
+                            Button("Add") {
+                                let name = newAttrName.trimmingCharacters(in: .whitespaces)
+                                guard !name.isEmpty else { return }
+                                Task {
+                                    await model.setAttr(nodeId: node.id, name: name, value: newAttrValue)
+                                    newAttrName = ""
+                                    newAttrValue = ""
+                                }
+                            }
+                            .disabled(newAttrName.trimmingCharacters(in: .whitespaces).isEmpty)
                         }
                     }
                 }
@@ -531,6 +565,23 @@ struct ComponentEditorView: View {
             get: { selectorDrafts[key] ?? rule.selector },
             set: { selectorDrafts[key] = $0 }
         )
+    }
+
+    private func attrValueBinding(_ model: ComponentEditorModel, node: ComponentModel.Node, name: String) -> Binding<String> {
+        let key = "\(node.id):\(name)"
+        let current = node.attrs.first(where: { $0.name == name })?.value ?? ""
+        return Binding(
+            get: { attrValueDrafts[key] ?? current },
+            set: { attrValueDrafts[key] = $0 }
+        )
+    }
+
+    private func commitAttr(_ model: ComponentEditorModel, node: ComponentModel.Node, name: String) {
+        let key = "\(node.id):\(name)"
+        guard let draft = attrValueDrafts[key] else { return }
+        let current = node.attrs.first(where: { $0.name == name })?.value ?? ""
+        guard draft != current else { return }
+        Task { await model.setAttr(nodeId: node.id, name: name, value: draft) }
     }
 
     private func propertyBinding(for decl: ComponentModel.Declaration) -> Binding<String> {
