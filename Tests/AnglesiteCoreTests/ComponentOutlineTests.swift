@@ -13,6 +13,28 @@ struct ComponentOutlineTests {
         #expect(rows.map(\.depth) == [0, 1, 1])
     }
 
+    @Test("a component-instance node's children are not expanded into rows")
+    func sealedInstanceHidesChildren() {
+        let slotFill = ComponentModel.Node(id: "n3", kind: .text, tag: nil, attrs: [], span: .init(start: nil, end: nil), loc: nil, text: "fill", children: [])
+        let badge = ComponentModel.Node(id: "n2", kind: .component, tag: "Badge", attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [slotFill])
+        let root = ComponentModel.Node(id: "n0", kind: .fragment, tag: nil, attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [badge])
+
+        let rows = ComponentOutline.rows(from: root)
+        #expect(rows.map(\.node.id) == ["n2"]) // n3 (the slot-fill text) never appears as a row
+        #expect(rows.first?.isSealed == true)
+    }
+
+    @Test("a plain element's children still expand normally")
+    func plainElementExpands() {
+        let child = ComponentModel.Node(id: "n2", kind: .text, tag: nil, attrs: [], span: .init(start: nil, end: nil), loc: nil, text: "hi", children: [])
+        let article = ComponentModel.Node(id: "n1", kind: .element, tag: "article", attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [child])
+        let root = ComponentModel.Node(id: "n0", kind: .fragment, tag: nil, attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [article])
+
+        let rows = ComponentOutline.rows(from: root)
+        #expect(rows.map(\.node.id) == ["n1", "n2"])
+        #expect(rows.first?.isSealed == false)
+    }
+
     @Test("Loc lookup finds an exact line+column match") func locLookupExact() throws {
         let root = try model().template
         #expect(ComponentOutline.node(atLine: 7, column: 1, in: root)?.id == "n1")
@@ -111,5 +133,63 @@ struct ComponentOutlineTests {
         #expect(EditorKind.resolve(for: astro) == .component)
         let css = FileRef(url: URL(fileURLWithPath: "/s/src/components/card.css"), group: .components, name: "card.css")
         #expect(EditorKind.resolve(for: css) == .text)
+    }
+
+    // MARK: - Outline drag-reorder/insert geometry and tree helpers (#493 review follow-up)
+
+    @Test(
+        "dropZone classifies row-local y into before/into/after thirds",
+        arguments: [(1.0, ComponentOutline.DropZone.before), (11.0, .into), (21.0, .after)]
+    )
+    func dropZoneThirds(y: Double, expected: ComponentOutline.DropZone) {
+        #expect(ComponentOutline.dropZone(y: y, rowHeight: 22) == expected)
+    }
+
+    /// A 3-level tree used by the tree-helper tests below:
+    /// root(n0) > section(n1) > [p1(n2), p2(n3), p3(n4) > span(n5)]
+    private func reorderFixtureRoot() -> ComponentModel.Node {
+        let span = ComponentModel.Node(id: "n5", kind: .element, tag: "span", attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [])
+        let p1 = ComponentModel.Node(id: "n2", kind: .element, tag: "p", attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [])
+        let p2 = ComponentModel.Node(id: "n3", kind: .element, tag: "p", attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [])
+        let p3 = ComponentModel.Node(id: "n4", kind: .element, tag: "p", attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [span])
+        let section = ComponentModel.Node(id: "n1", kind: .element, tag: "section", attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [p1, p2, p3])
+        return ComponentModel.Node(id: "n0", kind: .fragment, tag: nil, attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [section])
+    }
+
+    @Test("parentID finds the direct parent, and nil for the root or an unknown id") func parentIDLookup() {
+        let root = reorderFixtureRoot()
+        #expect(ComponentOutline.parentID(of: "n2", in: root) == "n1")
+        #expect(ComponentOutline.parentID(of: "n5", in: root) == "n4")
+        #expect(ComponentOutline.parentID(of: "n0", in: root) == nil)
+        #expect(ComponentOutline.parentID(of: "missing", in: root) == nil)
+    }
+
+    @Test("childIndex finds a node's position among its parent's children") func childIndexLookup() {
+        let root = reorderFixtureRoot()
+        #expect(ComponentOutline.childIndex(of: "n2", underParent: "n1", in: root) == 0)
+        #expect(ComponentOutline.childIndex(of: "n4", underParent: "n1", in: root) == 2)
+        #expect(ComponentOutline.childIndex(of: "n2", underParent: "missing", in: root) == nil)
+        #expect(ComponentOutline.childIndex(of: "missing", underParent: "n1", in: root) == nil)
+    }
+
+    @Test("isNodeOrDescendant is true for self and any depth of descendant, false for an ancestor or an unrelated sibling")
+    func isNodeOrDescendantLookup() {
+        let root = reorderFixtureRoot()
+        #expect(ComponentOutline.isNodeOrDescendant("n1", of: "n1", in: root)) // self
+        #expect(ComponentOutline.isNodeOrDescendant("n2", of: "n1", in: root)) // direct child
+        #expect(ComponentOutline.isNodeOrDescendant("n5", of: "n1", in: root)) // grandchild
+        #expect(!ComponentOutline.isNodeOrDescendant("n1", of: "n2", in: root)) // ancestor, not descendant
+        #expect(!ComponentOutline.isNodeOrDescendant("n3", of: "n4", in: root)) // unrelated sibling
+    }
+
+    @Test("adjustedMoveIndex corrects the target index for the dragged node's own pre-removal position")
+    func adjustedMoveIndexCorrection() {
+        // Dragged node is BEFORE the target in the pre-removal list: removal shifts the target
+        // (and every index computed from it) down by one.
+        #expect(ComponentOutline.adjustedMoveIndex(targetIndex: 2, draggedIndex: 0) == 1)
+        // Dragged node is AFTER the target: the target's position is unaffected by the removal.
+        #expect(ComponentOutline.adjustedMoveIndex(targetIndex: 1, draggedIndex: 2) == 1)
+        // No dragged-index context (e.g. a palette insert, not a reorder): pass through unchanged.
+        #expect(ComponentOutline.adjustedMoveIndex(targetIndex: 1, draggedIndex: nil) == 1)
     }
 }

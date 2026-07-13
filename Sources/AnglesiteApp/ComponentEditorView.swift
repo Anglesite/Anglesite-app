@@ -31,6 +31,12 @@ struct ComponentEditorView: View {
     @State private var colorCommitTasks: [String: Task<Void, Never>] = [:]
     /// Selector text for the inline "Add rule" form at the bottom of the Styles panel.
     @State private var newRuleSelector: String = ""
+    /// In-progress edits to an attribute value, keyed by `"<nodeID>:<attrName>"`, pending
+    /// commit (on submit) to `ComponentEditorModel.setAttr`.
+    @State private var attrValueDrafts: [String: String] = [:]
+    /// Name/value text for the inline "Add attribute" form in the Selection panel.
+    @State private var newAttrName: String = ""
+    @State private var newAttrValue: String = ""
 
     enum Mode: String, CaseIterable { case design = "Design", source = "Source" }
 
@@ -142,19 +148,132 @@ struct ComponentEditorView: View {
     }
 
     private func outline(_ model: ComponentEditorModel) -> some View {
-        List(model.outlineRows, selection: Binding(
-            get: { model.selectedNodeID },
-            set: { model.selectedNodeID = $0 }
-        )) { row in
-            HStack(spacing: 4) {
-                Image(systemName: icon(for: row.node.kind))
-                    .foregroundStyle(.secondary)
-                Text(label(for: row.node))
+        VStack(spacing: 0) {
+            List(model.outlineRows, selection: Binding(
+                get: { model.selectedNodeID },
+                set: { model.selectedNodeID = $0 }
+            )) { row in
+                outlineRow(model, row: row)
+                    .tag(row.node.id)
             }
-            .padding(.leading, CGFloat(row.depth) * 14)
-            .tag(row.node.id)
+            .listStyle(.sidebar)
+            Divider()
+            paletteView(model)
+                .frame(height: 160)
         }
-        .listStyle(.sidebar)
+    }
+
+    private func outlineRow(_ model: ComponentEditorModel, row: ComponentOutline.Row) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon(for: row.node.kind))
+                .foregroundStyle(.secondary)
+            Text(label(for: row.node))
+            if row.isSealed {
+                Spacer()
+                Image(systemName: "ellipsis.circle")
+                    .foregroundStyle(.tertiary)
+                    .help("Contains slot-fill content — double-click to edit \(row.node.tag ?? "this component")")
+            }
+        }
+        .padding(.leading, CGFloat(row.depth) * 14)
+        .contentShape(Rectangle())
+        .draggable(OutlineDragPayload.move(ComponentDragItem(fileID: model.relativePath, nodeID: row.node.id)))
+        .dropDestination(for: OutlineDragPayload.self) { items, location in
+            guard let item = items.first else { return false }
+            switch item {
+            case .move(let dragItem):
+                guard dragItem.fileID == model.relativePath, dragItem.nodeID != row.node.id else { return false }
+                Task { await performMove(model, draggedNodeID: dragItem.nodeID, targetRow: row, location: location) }
+                return true
+            case .insert(let payload):
+                Task { await performInsert(model, payload: payload, targetRow: row, location: location) }
+                return true
+            }
+        }
+        .onTapGesture(count: 2) {
+            guard row.isSealed else { return }
+            openSealedComponent(model, row: row)
+        }
+    }
+
+    /// Top third of the row = insert before (same parent as the target); bottom third =
+    /// insert after (same parent); middle third = reparent as the target's last child.
+    /// Pure geometry lives in `ComponentOutline.dropZone` (testable in Core); this wrapper
+    /// additionally redirects a sealed row's middle third to `.after` — the outline hides a
+    /// sealed component instance's slot-fill children (spec §4.1), so an `.into` drop there
+    /// would silently vanish (it lands as markup with nowhere to render).
+    private func dropZone(at location: CGPoint, for row: ComponentOutline.Row) -> ComponentOutline.DropZone {
+        let zone = ComponentOutline.dropZone(y: Double(location.y))
+        if row.isSealed && zone == .into { return .after }
+        return zone
+    }
+
+    private func performMove(_ model: ComponentEditorModel, draggedNodeID: String, targetRow: ComponentOutline.Row, location: CGPoint) async {
+        guard let dragged = model.outlineRows.first(where: { $0.node.id == draggedNodeID }) else { return }
+        // Refuse a reparent that would create a structural cycle — dragging a node onto (or
+        // before/after within) its own subtree. `performMove`'s only prior self-drop guard was
+        // `dragItem.nodeID != row.node.id` in `outlineRow`, which doesn't catch a *descendant*.
+        guard let root = model.model?.template, !ComponentOutline.isNodeOrDescendant(targetRow.node.id, of: dragged.node.id, in: root) else { return }
+        switch dropZone(at: location, for: targetRow) {
+        case .into:
+            let targetChildCount = targetRow.node.children.count
+            await model.moveNode(nodeId: dragged.node.id, newParentId: targetRow.node.id, newIndex: targetChildCount)
+        case .before, .after:
+            guard let parentID = parentID(of: targetRow.node.id, in: model), let siblingIndex = childIndex(of: targetRow.node.id, underParent: parentID, in: model) else { return }
+            let zone = dropZone(at: location, for: targetRow)
+            let targetIndex = zone == .before ? siblingIndex : siblingIndex + 1
+            let draggedIndex = childIndex(of: dragged.node.id, underParent: parentID, in: model)
+            let newIndex = ComponentOutline.adjustedMoveIndex(targetIndex: targetIndex, draggedIndex: draggedIndex)
+            await model.moveNode(nodeId: dragged.node.id, newParentId: parentID, newIndex: newIndex)
+        }
+    }
+
+    private func performInsert(_ model: ComponentEditorModel, payload: PaletteDragPayload, targetRow: ComponentOutline.Row, location: CGPoint) async {
+        switch dropZone(at: location, for: targetRow) {
+        case .into:
+            await model.insertNode(parentId: targetRow.node.id, index: targetRow.node.children.count, node: payload.kind)
+        case .before, .after:
+            guard let parentID = parentID(of: targetRow.node.id, in: model), let siblingIndex = childIndex(of: targetRow.node.id, underParent: parentID, in: model) else { return }
+            let zone = dropZone(at: location, for: targetRow)
+            let index = zone == .before ? siblingIndex : siblingIndex + 1
+            await model.insertNode(parentId: parentID, index: index, node: payload.kind)
+        }
+    }
+
+    /// Finds `nodeID`'s parent id by walking `model.model?.template` — the outline's flat `Row`
+    /// list doesn't carry parent links (per `ComponentOutline.Row`'s shape). Delegates the
+    /// actual walk to `ComponentOutline` (testable in Core); this wrapper just resolves the
+    /// tree root from the model.
+    private func parentID(of nodeID: String, in model: ComponentEditorModel) -> String? {
+        guard let root = model.model?.template else { return nil }
+        return ComponentOutline.parentID(of: nodeID, in: root)
+    }
+
+    private func childIndex(of nodeID: String, underParent parentID: String, in model: ComponentEditorModel) -> Int? {
+        guard let root = model.model?.template else { return nil }
+        return ComponentOutline.childIndex(of: nodeID, underParent: parentID, in: root)
+    }
+
+    private func openSealedComponent(_ model: ComponentEditorModel, row: ComponentOutline.Row) {
+        model.openReferencedComponent(tag: row.node.tag)
+    }
+
+    private func paletteView(_ model: ComponentEditorModel) -> some View {
+        let items = ComponentPalette.items(projectComponents: model.projectComponents, excluding: model.file)
+        return ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 8) {
+                ForEach(items) { item in
+                    VStack(spacing: 2) {
+                        Image(systemName: item.systemImage)
+                        Text(item.label).font(.caption2).lineLimit(1)
+                    }
+                    .frame(width: 84, height: 44)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    .draggable(OutlineDragPayload.insert(PaletteDragPayload(label: item.label, kind: item.kind)))
+                }
+            }
+            .padding(8)
+        }
     }
 
     @ViewBuilder private func canvas(_ model: ComponentEditorModel) -> some View {
@@ -175,10 +294,52 @@ struct ComponentEditorView: View {
                     onComputedStyles: { model.computedStyles = $0.styles },
                     onWebView: { webView = $0 }
                 )
+                .dropDestination(for: OutlineDragPayload.self) { items, location in
+                    guard let item = items.first, case .insert(let payload) = item, let webView else { return false }
+                    Task { await performCanvasDrop(model, payload: payload, location: location, webView: webView) }
+                    return true
+                }
             } else {
                 ContentUnavailableView("Dev Server Starting…", systemImage: "hourglass")
             }
         }
+    }
+
+    /// Resolves a canvas drop point to an insertion target via the overlay's `dropTargetAt`,
+    /// then maps that source location back to a node id the same way `canvasSelected` does
+    /// (`ComponentOutline.node(atLine:column:)`), and issues an `insert-node` at the resolved
+    /// parent/index.
+    private func performCanvasDrop(_ model: ComponentEditorModel, payload: PaletteDragPayload, location: CGPoint, webView: WKWebView) async {
+        let script = "JSON.stringify(window.anglesiteCanvas?.dropTargetAt?.(\(location.x), \(location.y)) ?? null)"
+        guard let raw = try? await webView.evaluateJavaScript(script) as? String,
+              let data = raw.data(using: .utf8),
+              let target = try? JSONDecoder().decode(DropTargetPayload.self, from: data),
+              let modelRoot = model.model?.template,
+              let node = ComponentOutline.node(atLine: target.line, column: target.column, in: modelRoot)
+        else { return }
+
+        // Same sealed-instance redirect as the outline path (`dropZone(at:for:)`): the JS
+        // overlay's zone geometry has no notion of sealed component instances, so a canvas drop
+        // squarely on a `<Hcard />`-style instance would otherwise land as invisible slot-fill
+        // content the outline can never render.
+        let zone = (node.kind == .component && target.zone == "into") ? "after" : target.zone
+        switch zone {
+        case "into":
+            await model.insertNode(parentId: node.id, index: node.children.count, node: payload.kind)
+        case "before", "after":
+            guard let parentID = parentID(of: node.id, in: model), let siblingIndex = childIndex(of: node.id, underParent: parentID, in: model) else { return }
+            let index = zone == "before" ? siblingIndex : siblingIndex + 1
+            await model.insertNode(parentId: parentID, index: index, node: payload.kind)
+        default:
+            break
+        }
+    }
+
+    private struct DropTargetPayload: Decodable {
+        let file: String?
+        let line: Int
+        let column: Int
+        let zone: String
     }
 
     private func knobsBar(_ model: ComponentEditorModel, props: [ComponentModel.Prop]) -> some View {
@@ -211,7 +372,35 @@ struct ComponentEditorView: View {
                         LabeledContent("Kind", value: node.kind.rawValue)
                         if let tag = node.tag { LabeledContent("Tag", value: tag) }
                         ForEach(node.attrs, id: \.name) { attr in
-                            LabeledContent(attr.name, value: attr.value ?? "—")
+                            HStack(spacing: 4) {
+                                Text(attr.name).font(.system(.caption, design: .monospaced)).frame(width: 90, alignment: .leading)
+                                TextField("value", text: attrValueBinding(model, node: node, name: attr.name))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textFieldStyle(.plain)
+                                    .onSubmit { commitAttr(model, node: node, name: attr.name) }
+                                Button(role: .destructive) {
+                                    removeAttr(model, node: node, name: attr.name)
+                                } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        HStack {
+                            TextField("New attribute name", text: $newAttrName)
+                                .font(.system(.caption, design: .monospaced))
+                            TextField("value", text: $newAttrValue)
+                                .font(.system(.caption, design: .monospaced))
+                            Button("Add") {
+                                let name = newAttrName.trimmingCharacters(in: .whitespaces)
+                                guard !name.isEmpty else { return }
+                                Task {
+                                    await model.setAttr(nodeId: node.id, name: name, value: newAttrValue)
+                                    newAttrName = ""
+                                    newAttrValue = ""
+                                }
+                            }
+                            .disabled(newAttrName.trimmingCharacters(in: .whitespaces).isEmpty)
                         }
                     }
                 }
@@ -396,6 +585,33 @@ struct ComponentEditorView: View {
             get: { selectorDrafts[key] ?? rule.selector },
             set: { selectorDrafts[key] = $0 }
         )
+    }
+
+    private func attrValueBinding(_ model: ComponentEditorModel, node: ComponentModel.Node, name: String) -> Binding<String> {
+        let key = "\(node.id):\(name)"
+        let current = node.attrs.first(where: { $0.name == name })?.value ?? ""
+        return Binding(
+            get: { attrValueDrafts[key] ?? current },
+            set: { attrValueDrafts[key] = $0 }
+        )
+    }
+
+    private func commitAttr(_ model: ComponentEditorModel, node: ComponentModel.Node, name: String) {
+        let key = "\(node.id):\(name)"
+        guard let draft = attrValueDrafts[key] else { return }
+        let current = node.attrs.first(where: { $0.name == name })?.value ?? ""
+        guard draft != current else { return }
+        Task { await model.setAttr(nodeId: node.id, name: name, value: draft) }
+    }
+
+    /// Discards any in-progress draft for `name` before removing the attribute. Without this, a
+    /// stale draft (typed but never submitted) would linger in `attrValueDrafts` and resurface if
+    /// the same attribute name is later re-added via "Add attribute" — `attrValueBinding`'s getter
+    /// would render the discarded draft instead of the freshly-committed value, and submitting it
+    /// would silently overwrite the new value. Mirrors `removeDeclaration`'s draft-clearing.
+    private func removeAttr(_ model: ComponentEditorModel, node: ComponentModel.Node, name: String) {
+        attrValueDrafts["\(node.id):\(name)"] = nil
+        Task { await model.setAttr(nodeId: node.id, name: name, value: nil) }
     }
 
     private func propertyBinding(for decl: ComponentModel.Declaration) -> Binding<String> {

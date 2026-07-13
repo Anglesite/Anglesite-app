@@ -35,13 +35,14 @@ if [[ ! -f "$SRC/.claude-plugin/plugin.json" ]]; then
     exit 0
 fi
 
-# Minimum-version guard: the app requires plugin features introduced in 1.4.0
+# Minimum-version guard: the app requires plugin features introduced in 1.5.0
 # (set-style-property/remove-style-property/add-style-rule/set-rule-selector,
-# used by the Component Editor's Styles panel write path). A MISSING plugin
-# stays best-effort (handled above — PluginRuntime reports it at runtime), but
+# used by slice 2's Styles panel; insert-node/move-node/remove-node/set-attr,
+# used by slice 3's palette and structure edits). A MISSING plugin stays
+# best-effort (handled above — PluginRuntime reports it at runtime), but
 # bundling a plugin that IS present yet too old would ship an app whose edit
 # pipeline fails in confusing ways at runtime — fail the build loudly instead.
-MIN_PLUGIN_VERSION="1.4.0"
+MIN_PLUGIN_VERSION="1.5.0"
 # plutil parses the JSON and extracts the top-level key specifically — a first-match
 # grep could be fooled by a nested "version" (engines/mcpServers/…) appearing earlier
 # in the manifest. This script only runs on macOS (Xcode build phase), so plutil is

@@ -16,6 +16,10 @@ struct ComponentEditorContext {
     /// tests/previews that construct a context without write capability;
     /// `ComponentCanvasView` falls back to `LoggingEditRouter()` in that case.
     let editRouter: EditRouter?
+    /// Opens a different file in the main pane — used to implement "double-click a sealed
+    /// component instance to edit its own definition" (spec §4.1). `nil` in
+    /// tests/previews that don't need navigation.
+    var onOpenFile: ((FileRef) -> Void)? = nil
 }
 
 @MainActor
@@ -56,6 +60,8 @@ final class ComponentEditorModel {
     /// `writeError` instead drives a small dismissible banner scoped to the Styles panel; `model`
     /// and `loadError` are left untouched so the editor pane stays live.
     var writeError: String?
+    /// Sibling project components for the palette — scanned once per `load()`, not per render.
+    private(set) var projectComponents: [FileRef] = []
 
     init(file: FileRef, context: ComponentEditorContext) {
         self.file = file
@@ -103,6 +109,7 @@ final class ComponentEditorModel {
                     ($0.name, KnobDefaults.value(for: $0))
                 }
             )
+            projectComponents = SiteFileTree.scan(siteRoot: context.sourceRoot)[.components] ?? []
         } catch let error as ComponentModelClient.ModelError {
             loadError = error.friendlyMessage
             switch error {
@@ -126,6 +133,13 @@ final class ComponentEditorModel {
             return
         }
         selectedNodeID = ComponentOutline.node(atLine: line, column: column, in: model.template)?.id
+    }
+
+    /// Resolves `tag` (a component instance's tag name, e.g. "Badge") against `projectComponents`
+    /// and asks the host to open it. No-op if the tag can't be resolved or navigation isn't wired.
+    func openReferencedComponent(tag: String?) {
+        guard let tag, let match = projectComponents.first(where: { $0.name == "\(tag).astro" }) else { return }
+        context.onOpenFile?(match)
     }
 
     // MARK: - Style writes
@@ -203,7 +217,73 @@ final class ComponentEditorModel {
         return styles[index].span
     }
 
-    /// Routes a built `EditMessage` to `context.editRouter` and reconciles the result:
+    // MARK: - Structure writes
+
+    /// Insert a new node as the child at `index` under `parentId` (the fragment root's id for
+    /// a top-level insert). Returns whether the write actually applied.
+    @discardableResult
+    func insertNode(parentId: String, index: Int, node: ComponentStructureEditBuilder.NodeSpec) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentStructureEditBuilder.insertNode(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                parentId: parentId,
+                index: index,
+                node: node
+            )
+        )
+    }
+
+    /// Reorder/reparent an existing node. Returns whether the write actually applied.
+    @discardableResult
+    func moveNode(nodeId: String, newParentId: String, newIndex: Int) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentStructureEditBuilder.moveNode(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                nodeId: nodeId,
+                newParentId: newParentId,
+                newIndex: newIndex
+            )
+        )
+    }
+
+    /// Delete a node (the plugin prunes any now-unused component imports). Returns whether the
+    /// write actually applied.
+    @discardableResult
+    func removeNode(nodeId: String) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentStructureEditBuilder.removeNode(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                nodeId: nodeId
+            )
+        )
+    }
+
+    /// Set (`value` non-nil) or remove (`value == nil`) an attribute/prop at the use-site.
+    /// Returns whether the write actually applied.
+    @discardableResult
+    func setAttr(nodeId: String, name: String, value: String?) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentStructureEditBuilder.setAttr(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                nodeId: nodeId,
+                name: name,
+                value: value
+            )
+        )
+    }
+
+    /// Routes a built `EditMessage` to `context.editRouter` and reconciles the result. Shared by
+    /// both the style writes above and the structure writes above (`insertNode`/`moveNode`/
+    /// `removeNode`/`setAttr`) — the name is a slice-2 holdover, but the reconciliation logic is
+    /// op-agnostic:
     /// - `.applied` with a piggybacked `reply.model` adopts it directly (no second fetch).
     /// - `.applied` without one falls back to `load()`.
     /// - `.failed` with reason `"stale"` (the plugin's machine-readable refusal code — see

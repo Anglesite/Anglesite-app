@@ -43,6 +43,18 @@ public struct EditMessage: Sendable, Equatable {
         /// `"set-rule-selector"` — Component Editor: rewrite a CSS rule's selector. Carries a
         /// `component` payload, not `selector`.
         public static let setRuleSelector = "set-rule-selector"
+        /// `"insert-node"` — Component Editor: insert a new element/component/slot node.
+        /// Carries a `component` payload.
+        public static let insertNode = "insert-node"
+        /// `"move-node"` — Component Editor: reorder/reparent an existing node. Carries a
+        /// `component` payload.
+        public static let moveNode = "move-node"
+        /// `"remove-node"` — Component Editor: delete a node (and prune now-unused imports).
+        /// Carries a `component` payload.
+        public static let removeNode = "remove-node"
+        /// `"set-attr"` — Component Editor: set or remove (nil value) an attribute/prop at
+        /// the use-site. Carries a `component` payload.
+        public static let setAttr = "set-attr"
     }
 
     /// Overlay-generated correlation ID so the JS side can match replies to the original message.

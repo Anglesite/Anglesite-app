@@ -705,7 +705,8 @@ struct SiteWindow: View {
                         // rows via setEditObserver (SiteWindowModel.swift) — a fresh instance here
                         // would silently diverge from that once the Styles panel starts sending
                         // real edits.
-                        editRouter: model.preview.editRouter
+                        editRouter: model.preview.editRouter,
+                        onOpenFile: { file in model.openFile(file) }
                     )
                 )
             } else if case .plist(let plistEditorModel) = model.activeEditor {
