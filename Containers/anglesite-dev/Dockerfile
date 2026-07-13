@@ -7,11 +7,15 @@
 # (the plugin's server/, npm ci'd for the build's native arch so sharp's native binary is
 # correct) so a fresh container needs no in-guest install.
 
-# Per-arch digest pin (reproducible; re-bump periodically for base security updates). TARGETARCH
-# is set automatically by BuildKit/`container build`/podman when building for a given platform;
-# selecting the base by stage name (rather than a single floating digest) keeps the pin exact
-# for whichever arch is being built instead of only covering arm64.
-ARG TARGETARCH
+# Per-arch digest pin (reproducible; re-bump periodically for base security updates). Selecting
+# the base by stage name (rather than a single floating digest) keeps the pin exact for whichever
+# arch is being built instead of only covering arm64. scripts/vendor-container-image.sh and
+# scripts/build-podman-image.sh both pass `--build-arg TARGETARCH=<arch>` explicitly rather than
+# relying on the builder to inject it automatically. The default below covers building this file
+# directly (`podman build .` / `container build .`, e.g. manual testing or a future CI job that
+# doesn't go through either wrapper script) — it falls back to arm64, matching this image's
+# single-arch behavior before this change, rather than failing opaquely on an empty ARG.
+ARG TARGETARCH=arm64
 FROM node:22-bookworm-slim@sha256:6db9be2ebb4bafb687a078ef5ba1b1dd256e8004d246a31fd210b6b848ab6be2 AS base-arm64
 FROM node:22-bookworm-slim@sha256:a149cd71dccd68704a07d4e4ca3e610c27301852b0f556865cfdb6e2856f8bed AS base-amd64
 FROM base-${TARGETARCH} AS base
