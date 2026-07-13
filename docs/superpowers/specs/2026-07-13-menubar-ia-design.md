@@ -28,7 +28,13 @@ Shortcut re-keys (§3) land **with** the skeleton so muscle memory changes only 
 ## 2. Menu-by-menu IA
 
 Top-level lineup: **Anglesite · File · Edit · Insert · Page · Format · Arrange · View ·
-Website · Window · Help**.
+Website · Window · Help** (iWork reference order).
+
+> **Menu-order deviation (decided 2026-07-13):** SwiftUI places all custom `CommandMenu`s
+> between the View and Window menus, so the shipping order is *Anglesite · File · Edit ·
+> View · Insert · Page · Format · Arrange · Website · Window · Help*. Achieving the exact
+> iWork order needs an AppKit `NSApp.mainMenu` reordering shim that survives SwiftUI menu
+> rebuilds — deferred to a follow-up spike; the SwiftUI order is accepted until then.
 
 Global rules:
 
@@ -102,7 +108,8 @@ write path** (plugin `apply-edit`, zone-aware). The whole menu is tag `editor` e
 noted. Menu items are grammar; the editor is the pen — the menu enables wholesale when the
 write path lands.
 
-- **Component ▸** Component Gallery… · *(recently used components listed inline)*
+- **Component ▸** Component Gallery… · New Component… · *(recently used components listed
+  inline)* — *New Component… relocates from today's File ▸ New submenu (#516)*
 - Article · Section · Figure
 - **Heading ▸** Heading 1–6 — *renamed from "Header" to avoid collision with Page ▸ Edit
   Header (site chrome); HTML calls these headings*
@@ -130,7 +137,8 @@ no demonstrated demand in a website builder. May revisit if data tables grow com
 
 | Item | Tag | Notes |
 |---|---|---|
-| New Page… ⌘N | shipped | Re-keyed: the everyday create action gets ⌘N |
+| New Page… ⌘N | shipped | The everyday create action gets ⌘N (relocates from File ▸ New) |
+| New Post… | shipped | Typed-content creation (#516); relocates from File ▸ New |
 | Edit Header / Edit Footer | editor | Opens site-chrome header/footer layout zones in the editor |
 | Styles… | editor | Page/site style editor: theme tokens, type scale — the design-system surface |
 | Collections ▸ New Blog… · New Podcast… · New Inventory… | app | Typed collections from the content-type registry (#335) |
