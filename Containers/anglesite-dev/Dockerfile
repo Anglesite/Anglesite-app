@@ -1,22 +1,35 @@
-# Anglesite local dev-server image (arm64 / Apple Silicon). Built and exported as an OCI layout by
-# scripts/vendor-container-image.sh, then bundled into AnglesiteContainer. Bakes Node + git + socat
-# (the vsock<->TCP bridge) + the app's MCP sidecar (the plugin's server/, npm ci'd for linux-arm64 so
-# sharp's native binary is correct) so a fresh container needs no in-guest install.
+# Anglesite local dev-server image. Two build paths consume this file:
+#   - scripts/vendor-container-image.sh (Apple `container` CLI, arm64 only — bundled into
+#     AnglesiteContainer for Apple Containerization, which is Apple-Silicon-only)
+#   - scripts/build-podman-image.sh (podman, native host arch — arm64 or amd64 — tagged
+#     localhost/anglesite-dev:latest for PodmanContainerControl on Linux)
+# Bakes Node + git + socat (the vsock<->TCP bridge, macOS path only) + the app's MCP sidecar
+# (the plugin's server/, npm ci'd for the build's native arch so sharp's native binary is
+# correct) so a fresh container needs no in-guest install.
 
-# Pinned to linux/arm64 digest for reproducible vendoring. Re-bump periodically for base security updates.
-FROM node:22-bookworm-slim@sha256:6db9be2ebb4bafb687a078ef5ba1b1dd256e8004d246a31fd210b6b848ab6be2
+# Per-arch digest pin (reproducible; re-bump periodically for base security updates). TARGETARCH
+# is set automatically by BuildKit/`container build`/podman when building for a given platform;
+# selecting the base by stage name (rather than a single floating digest) keeps the pin exact
+# for whichever arch is being built instead of only covering arm64.
+ARG TARGETARCH
+FROM node:22-bookworm-slim@sha256:6db9be2ebb4bafb687a078ef5ba1b1dd256e8004d246a31fd210b6b848ab6be2 AS base-arm64
+FROM node:22-bookworm-slim@sha256:a149cd71dccd68704a07d4e4ca3e610c27301852b0f556865cfdb6e2856f8bed AS base-amd64
+FROM base-${TARGETARCH} AS base
+
 # socat is the guest-side vsock<->TCP bridge: the host reaches astro/mcp (guest-local TCP) by
 # dialing AF_VSOCK ports that socat forwards to 127.0.0.1 (no vmnet on the sandboxed host, #60).
+# Unused on the podman path (port-mapping replaces vsock there) but harmless to install.
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates socat \
     && rm -rf /var/lib/apt/lists/*
-# MCP sidecar: staged by scripts/vendor-container-image.sh from the plugin's server/ dir.
-# npm ci runs on linux/arm64 → pulls @img/sharp-linux-arm64 (the native prebuilt) from the
+# MCP sidecar: staged by the build script from the plugin's server/ dir. npm ci runs on the
+# build's native arch → pulls the matching @img/sharp-linux-{arm64,x64} native prebuilt from the
 # lockfile. --omit=dev drops devDependencies. We intentionally do NOT pass --omit=optional
-# because @img/sharp-linux-arm64 is marked optional in the lockfile (platform-specific prebuilt);
-# npm's platform-cpu/os filters already skip macOS-only optionals like fsevents on linux/arm64.
+# because the sharp prebuilts are marked optional in the lockfile (platform-specific); npm's
+# platform-cpu/os filters already skip the other arch's prebuilt and macOS-only optionals like
+# fsevents.
 COPY mcp-sidecar/ /usr/local/lib/anglesite-mcp/
 # Playwright is an unused optionalDependency of the plugin. We keep `npm ci` (reproducible; lock-exact)
-# and cannot pass --omit=optional because @img/sharp-linux-arm64 is also optional (platform prebuilt).
+# and cannot pass --omit=optional because the sharp prebuilt is also optional (platform prebuilt).
 # ENV prevents playwright's postinstall from downloading ~300 MB of browsers; rm strips the pkg dirs.
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN cd /usr/local/lib/anglesite-mcp \
