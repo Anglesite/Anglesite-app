@@ -195,13 +195,15 @@ describe("dropTargetAt", () => {
   it("measures the drop zone against the annotated ancestor's box, not a deeper unannotated child's", () => {
     document.body.innerHTML =
       `<article data-astro-source-file="/src/components/Card.astro" data-astro-source-loc="1:1" style="position:absolute;left:0;top:0;width:100px;height:90px;">` +
-      `<span style="position:absolute;left:40px;top:40px;width:10px;height:5px;"></span>` +
+      `<span style="position:absolute;left:10px;top:0px;width:20px;height:10px;"></span>` +
       `</article>`;
     installComponentCanvas();
-    // Point hits the inner <span> (a tiny box near the article's top edge), but the zone must
-    // be computed against the <article>'s own box (the element that owns the source loc), where
-    // this y falls in the middle third, not the span's box, where it would be near an edge.
-    const target = (window as any).anglesiteCanvas.dropTargetAt(45, 42);
-    expect(target).toEqual({ file: "/src/components/Card.astro", line: 1, column: 1, zone: "into" });
+    // Point (20, 8) hits the inner <span>, which spans y 0-10. Measured against the SPAN's own
+    // box that y falls in its bottom third (zone "after"). Measured against the <article>'s box
+    // (the element that actually owns the source loc, spanning y 0-90) that same y falls in the
+    // top third (zone "before"). The two boxes disagree, so this only passes if the
+    // implementation resolves geometry from the loc-owning ancestor, not the point-hit element.
+    const target = (window as any).anglesiteCanvas.dropTargetAt(20, 8);
+    expect(target).toEqual({ file: "/src/components/Card.astro", line: 1, column: 1, zone: "before" });
   });
 });
