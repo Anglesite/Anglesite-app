@@ -51,7 +51,7 @@ public actor WorkerCatalogFetcher {
             throw WorkerCatalogFetchError.fetchFailed("bad response from \(catalogURL)")
         }
         let descriptors = try WorkerCatalogReader.parse(data)
-        try Self.writeCache(data, to: cacheURL, fileManager: fileManager)
+        try? Self.writeCache(data, to: cacheURL, fileManager: fileManager)
         return descriptors
     }
 
