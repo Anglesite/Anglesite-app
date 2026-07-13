@@ -54,6 +54,7 @@ export function installComponentCanvas(): void {
     clear: clearRing,
     scrub,
     clearScrub,
+    dropTargetAt,
   };
 }
 
@@ -111,6 +112,42 @@ function findByLoc(line: number, column: number): Element | null {
     }
   }
   return best ?? candidates[0] ?? null;
+}
+
+export interface DropTarget extends SourceLoc {
+  zone: "before" | "after" | "into";
+}
+
+/**
+ * Nearest droppable element at a canvas-local point, plus which third of its bounding box the
+ * point falls in — top third = "before" (insert as a preceding sibling), bottom third =
+ * "after" (following sibling), middle third = "into" (append as the last child). Used during
+ * a native drag-over to drive drop-target highlighting and, on drop, to resolve the insertion
+ * point for a palette→canvas insert-node.
+ */
+function dropTargetAt(x: number, y: number): DropTarget | null {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return null;
+  const loc = sourceLoc(el);
+  if (!loc) return null;
+  const rect = (sourceLocElement(el) ?? el).getBoundingClientRect();
+  const relativeY = y - rect.top;
+  const zone: DropTarget["zone"] =
+    relativeY < rect.height / 3 ? "before" : relativeY > (rect.height * 2) / 3 ? "after" : "into";
+  return { ...loc, zone };
+}
+
+/** Walks up from `el` to the nearest ancestor (inclusive) actually carrying the
+ *  `data-astro-source-loc` attribute `sourceLoc` resolved from — needed because `sourceLoc`
+ *  itself only returns the loc value, not which element it was found on, and drop-zone
+ *  geometry must be measured against THAT element's box, not the original event target's. */
+function sourceLocElement(el: Element): Element | null {
+  let node: Element | null = el;
+  while (node && node !== document.body) {
+    if (node.hasAttribute("data-astro-source-loc")) return node;
+    node = node.parentElement;
+  }
+  return null;
 }
 
 function onClick(event: MouseEvent): void {
