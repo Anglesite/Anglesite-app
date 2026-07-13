@@ -5,10 +5,10 @@
 
 ## ⚠️ Known blockers (must land before this part can pass)
 
-Two app-side gaps mean a freshly scaffolded site **cannot currently complete this journey without manual intervention** (details + proposed issues in the [overview](e2e-acceptance-overview.md)):
+Two app-side gaps mean a freshly scaffolded site **cannot currently complete this journey without manual intervention** (details in the [overview](e2e-acceptance-overview.md)):
 
-1. **No wrangler config is materialized.** `Source/` ships only `worker/wrangler.toml.template` with `{{SITE_NAME}}` unsubstituted; the app runs bare `npx wrangler deploy`, which aborts without a config. Until fixed, testers must hand-write `Source/wrangler.toml` (copy the template, set a unique `name`) — record that workaround in evidence.
-2. **`SITE_URL` is never written by the app deploy**, so the built site's canonical URLs/feeds carry `https://example.com` (case 8 documents the expected post-fix behavior).
+1. **#701 — no wrangler config is materialized.** `Source/` ships only `worker/wrangler.toml.template` with `{{SITE_NAME}}` unsubstituted; the app runs bare `npx wrangler deploy`, which aborts without a config. Until fixed, testers must hand-write `Source/wrangler.toml` (copy the template, set a unique `name`) — record that workaround in evidence.
+2. **#702 — `SITE_URL` is never written by the app deploy**, so the built site's canonical URLs/feeds carry `https://example.com` (case 8 documents the expected post-fix behavior).
 
 ## Purpose
 
@@ -115,5 +115,5 @@ Expected: it must land on a **different** workers.dev subdomain than "QA Bakery"
 
 ## Run closeout
 
-- File the evidence (matrix, timings, URL, screenshots) on the tracking issue for this run.
-- On full PASS: close #586, #491, and #656 with links to the Part 3 evidence; report Part 4 results on the wrangler-config and SITE_URL issues.
+- File the evidence (matrix, timings, URL, screenshots) on the tracking issue for this run, #706.
+- On full PASS: close #586, #491, and #656 with links to the Part 3 evidence; report Part 4 results on #701 and #702.

@@ -1,5 +1,6 @@
 # End-to-End QA Acceptance Run — Overview
 
+**Tracking issue:** [#706](https://github.com/Anglesite/Anglesite-app/issues/706) — record all evidence there.
 **Scope:** the core owner journey, first launch through first publish, as four sequential parts:
 
 | Part | Doc | Journey |
@@ -36,8 +37,8 @@ For each part: commit SHA + build config, macOS/Xcode versions, PASS/FAIL per ma
 
 ### Blockers — must land before the full run can pass
 
-- **Missing (file it): scaffolded sites have no deployable wrangler config.** The template ships only `Resources/Template/worker/wrangler.toml.template` with an unsubstituted `{{SITE_NAME}}` placeholder; neither `SiteScaffolder` nor the deploy pipeline renders it to `wrangler.toml`, `.site-config` gets no `CF_PROJECT_NAME`, and `DeployCommand` runs bare `npx wrangler deploy` — which aborts with no config. The plugin deploy SKILL (the retiring `claude --print` path, epic #459) is the only thing that ever wrote a Worker name, and it edits a `wrangler.jsonc` the template doesn't ship. Deterministic fix belongs in the scaffold (render the template with a slugified, uniquified site name) per the #459 "tool before brain" direction. Blocks Part 4 entirely.
-- **Missing (file it): app deploy never writes `SITE_URL`.** `astro.config.ts` reads `SITE_URL` from `.site-config` ("the deploy step writes the real domain… before build" — only the plugin skill did). On the no-custom-domain path the app should set it to the workers.dev URL (first deploy: after URL discovery; or derive from the Worker name pre-build). Until then, canonical URLs/feeds on a published site carry `https://example.com`. Blocks Part 4 case 8 (could be folded into the wrangler-config issue as one "app-native deploy config" issue).
+- **#701 — scaffolded sites have no deployable wrangler config.** The template ships only `Resources/Template/worker/wrangler.toml.template` with an unsubstituted `{{SITE_NAME}}` placeholder; neither `SiteScaffolder` nor the deploy pipeline renders it to `wrangler.toml`, `.site-config` gets no `CF_PROJECT_NAME`, and `DeployCommand` runs bare `npx wrangler deploy` — which aborts with no config. The plugin deploy SKILL (the retiring `claude --print` path, epic #459) is the only thing that ever wrote a Worker name, and it edits a `wrangler.jsonc` the template doesn't ship. Deterministic fix belongs in the scaffold (render the template with a slugified, uniquified site name) per the #459 "tool before brain" direction. Blocks Part 4 entirely.
+- **#702 — app deploy never writes `SITE_URL`.** `astro.config.ts` reads `SITE_URL` from `.site-config` ("the deploy step writes the real domain… before build" — only the plugin skill did). On the no-custom-domain path the app should set it to the workers.dev URL (first deploy: after URL discovery; or derive from the Worker name pre-build). Until then, canonical URLs/feeds on a published site carry `https://example.com`. Blocks Part 4 case 8.
 
 ### Open issues this run verifies (closable on PASS with evidence)
 
@@ -52,9 +53,9 @@ For each part: commit SHA + build config, macOS/Xcode versions, PASS/FAIL per ma
 - **#679 / #680** — keyboard-only pass and Mac-assed polish audit; overlap Part 1/3 surfaces but have their own checklists.
 - **#654 / #655** — GitHub publish / backup transport under sandbox: out of scope (Part 3 notes Backup is excluded from the minimal loop).
 
-### Smaller gaps observed while authoring (candidate issues / cleanups)
+### Smaller gaps observed while authoring (filed)
 
-- Wizard "Set this up later" copy and analytics-host fallbacks say **`<slug>.pages.dev`** (`NewSiteWizardModel.swift:51`, `PlistEditorModel.swift:286`) but the deploy target is **Workers → `*.workers.dev`**. User-visible copy inconsistency.
-- `DeployCommand.extractDeployedURL` anchors on wrangler's `Published` output line; a wrangler output-format change turns a successful deploy into "wrangler exited cleanly but no deployed URL was found". Robustness follow-up.
-- `ComponentEditorView` header comment still says "Read-only (slice 1)" though slice-2 style writes shipped — stale-comment cleanup.
-- No `representedURL`/proxy-icon wiring was found on the site window; verify in Part 2 case 9 and fold into #680 if missing.
+- **#703** — wizard "Set this up later" copy and analytics-host fallbacks say **`<slug>.pages.dev`** (`NewSiteWizardModel.swift:51`, `PlistEditorModel.swift:286`) but the deploy target is **Workers → `*.workers.dev`**.
+- **#704** — `DeployCommand.extractDeployedURL` anchors on wrangler's `Published` output line; a wrangler output-format change turns a successful deploy into "wrangler exited cleanly but no deployed URL was found".
+- **#705** — `ComponentEditorView` header comment still says "Read-only (slice 1)" though slice-2 style writes shipped.
+- No `representedURL`/proxy-icon wiring was found on the site window; verify in Part 2 case 9 and fold into #680 if missing (noted on #680).
