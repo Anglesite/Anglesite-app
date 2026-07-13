@@ -373,6 +373,11 @@ struct SitesLauncherView: View {
                 // forward to LogCenter here.
                 try GitInitRunner.run(in: sourceDir)
             },
+            gitCommit: { sourceDir in
+                // Local init+commit only (no GitHub) — lands a real initial commit so the site
+                // has a HEAD immediately and can be cloned into a container runtime for preview.
+                try await RepoBootstrap.live().commitAll(source: sourceDir)
+            },
             register: { package in
                 let site = try await SiteStore.shared.record(package)
                 #if ANGLESITE_MAS

@@ -18,12 +18,16 @@ public actor SiteScaffolder {
     public typealias Register = @Sendable (_ package: AnglesitePackage) async throws -> SiteStore.Site
     /// Initialize a git repo in the source dir (production: `git init` via ProcessSupervisor).
     public typealias GitInit = @Sendable (_ sourceDirectory: URL) async throws -> Void
+    /// Land the initial commit once template/theme/content are all written (production:
+    /// `RepoBootstrap.commitAll` — local init+commit only, no GitHub).
+    public typealias GitCommit = @Sendable (_ sourceDirectory: URL) async throws -> Void
 
     private let sitesRoot: URL
     private let templateURL: URL
     private let catalog: ThemeCatalog
     private let run: CommandRunner
     private let gitInit: GitInit
+    private let gitCommit: GitCommit
     private let register: Register
     private let fileManager: FileManager
     private let appVersion: @Sendable () -> String?
@@ -34,6 +38,7 @@ public actor SiteScaffolder {
     /// has no `CFBundleShortVersionString`.
     public init(sitesRoot: URL, templateURL: URL, catalog: ThemeCatalog,
                 run: @escaping CommandRunner, gitInit: @escaping GitInit,
+                gitCommit: @escaping GitCommit,
                 register: @escaping Register, fileManager: FileManager = .default,
                 appVersion: @escaping @Sendable () -> String? = { AppVersion.current() }) {
         self.sitesRoot = sitesRoot
@@ -41,6 +46,7 @@ public actor SiteScaffolder {
         self.catalog = catalog
         self.run = run
         self.gitInit = gitInit
+        self.gitCommit = gitCommit
         self.register = register
         self.fileManager = fileManager
         self.appVersion = appVersion
@@ -147,6 +153,13 @@ public actor SiteScaffolder {
                 emit(.warning(step: "writingContent", message: "Hero image not added: \(humanize(error))"))
             }
         }
+
+        // 4c. Initial commit, once all template/theme/content writes above have landed (non-fatal,
+        // matching git init's handling above). Without this, a freshly scaffolded site has no
+        // commits, so a container runtime that clones it and runs `git checkout HEAD` fails and
+        // the site can never preview.
+        do { try await gitCommit(siteDir) }
+        catch { emit(.warning(step: "writingContent", message: "Initial commit skipped: \(humanize(error))")) }
 
         // 5. Dependency install is handled by the selected runtime after scaffold.
         emit(.installing)
