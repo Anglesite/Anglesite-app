@@ -17,7 +17,7 @@ struct DebugPaneView: View {
     @State private var searchQuery: String = ""
     @State private var autoScroll: Bool = true
     @State private var subscriberTask: Task<Void, Never>?
-    @AppStorage(AppSettings.Key.esiPreviewUnprocessed) private var esiPreviewUnprocessed: Bool = false
+    @Bindable private var esiPreviewMode = EsiPreviewMode.shared
 
     private static let allSourcesTag = "All"
     private let center: LogCenter
@@ -112,7 +112,7 @@ struct DebugPaneView: View {
     private var serverSection: some View {
         HStack(spacing: 12) {
             Text("Server").font(.headline)
-            Picker("ESI Fragments", selection: $esiPreviewUnprocessed) {
+            Picker("ESI Fragments", selection: $esiPreviewMode.unprocessed) {
                 Text("Live").tag(false)
                 Text("Unprocessed (show fallbacks)").tag(true)
             }

@@ -312,7 +312,7 @@ final class PreviewModel {
     var displayURL: URL? {
         guard let base = readyURL else { return nil }
         let target = activeRoute.map { PreviewNavigation.targetURL(base: base, route: $0) } ?? base
-        return PreviewNavigation.applyingEsiPreviewMode(target, unprocessed: AppSettings.shared.esiPreviewUnprocessed)
+        return PreviewNavigation.applyingEsiPreviewMode(target, unprocessed: EsiPreviewMode.shared.unprocessed)
     }
 
     /// Open the Web Inspector for the live preview. No-ops when the weak `webView` is nil
