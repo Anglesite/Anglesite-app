@@ -136,7 +136,44 @@ browser, so a cross-origin `src` needs that origin's own CORS headers to resolve
 in preview — the production edge Worker fetch has no such restriction, since
 `safeFetch` runs server-side. Worth a one-line note in `EsiInclude`'s doc comment
 so a site owner isn't confused why a fragment resolves in production but shows
-empty in dev preview.
+empty in dev preview. (A real local Worker execution path would sidestep this
+entirely — see §4a for why that's out of scope here.)
+
+## 4a. Forcing the unprocessed/fallback state
+
+The dev shim in §4 only ever shows the *live* state (fetch succeeds, or the
+`onerror`/`alt` rules kick in on failure) — there's no way to deliberately preview
+what `EsiRemove`'s fallback content looks like without actually breaking the
+fragment URL. A site owner needs to preview that state on purpose, not by
+sabotaging their own config.
+
+**v1 control:** the existing Debug Pane
+([`DebugPaneView.swift`](../../../Sources/AnglesiteApp/DebugPaneView.swift),
+backed by [`LogCenter.swift`](../../../Sources/AnglesiteCore/LogCenter.swift))
+gains a new "Server" section with one control: **ESI Fragments: Live |
+Unprocessed (show fallbacks)**. This reuses the existing debug window rather than
+introducing a new one, and is deliberately the seed of a broader server debug
+panel — see the follow-up issue in §8.
+
+- **Live** (default): today's §4 behavior, unchanged.
+- **Unprocessed:** the dev shim's step 3 (§4) is skipped entirely — no fetch is
+  attempted, `EsiInclude` renders empty exactly as it would to a browser with no
+  ESI-aware layer in front, and `EsiRemove`'s slotted content is what's visible.
+  This exactly matches the real "unprocessed" case from §3, just forced on demand
+  instead of depending on the fragment URL actually being unreachable.
+
+The setting is stored per-site (`SiteConfigStore` / `Config/settings.plist`, app-
+owned state, never in git per this repo's package model) and reaches the running
+page as a query parameter the app appends when it loads the preview URL into the
+WKWebView (e.g. `?esiPreview=unprocessed`); the dev shim script reads
+`location.search` before deciding whether to run its fetch step at all.
+
+**Explicitly not v1:** actually running the composed Worker (and so `@dwk/esi`
+itself) locally to get real server-side resolution without the dev shim's CORS
+limitation. That's a genuinely new runtime capability — nothing in the local
+container runtime executes `worker/worker.ts` today, it's a production-deploy
+artifact (`#353`, closed) with no local execution path — and is filed separately
+rather than folded into this spec; see §8.
 
 ## 5. Component Editor integration
 
@@ -197,8 +234,13 @@ Editor code of its own, only the one type-parsing refinement folded into #494.
 - **Dev shim test:** stub `fetch`, render `EsiInclude` in dev mode, assert resolved
   content lands in the DOM; a second case asserts the shim's `<script>` tag is
   entirely absent from a production build's output (not just inert).
-- No new Swift-side tests for this spec's own deliverable — Component Editor
-  integration rides on #493/#494's own test coverage.
+- **Unprocessed-toggle test:** with `?esiPreview=unprocessed` set, assert the dev
+  shim never calls `fetch` at all and `EsiRemove`'s slotted content is what
+  renders.
+- **Swift-side:** a test for the new Debug Pane "Server" section's Live/Unprocessed
+  control persisting to `SiteConfigStore` and producing the right query parameter
+  when the app builds the preview URL. No other new Swift-side tests — Component
+  Editor integration rides on #493/#494's own test coverage.
 
 ## 8. Explicitly out of scope / follow-ups
 
@@ -208,3 +250,9 @@ Editor code of its own, only the one type-parsing refinement folded into #494.
   proposes refinements to those issues, doesn't implement against them.
 - Choosing `@dwk` endpoints as fragment sources, and the `@dwk/esi` processor
   itself — both remain `workers`-repo concerns.
+- **General server debug panel** — running the composed Worker locally,
+  configuring production behavior beyond ESI's one toggle, and viewing worker +
+  analytics logs. Filed as
+  [#699](https://github.com/Anglesite/Anglesite-app/issues/699) for its own
+  design pass; this spec's §4a is deliberately the minimal slice of that
+  eventual panel, not a preview of its full shape.
