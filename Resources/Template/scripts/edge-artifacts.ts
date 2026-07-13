@@ -41,12 +41,16 @@ export const aiCrawlers = [
  */
 export function normalizeContentSignal(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
-  const pairs: string[] = [];
+  // Map preserves first-seen key order while letting a later occurrence of the
+  // same key overwrite its value, so a typo'd repeat (e.g. "search=yes, search=no")
+  // resolves to one unambiguous pair instead of two contradictory ones.
+  const pairs = new Map<string, string>();
   for (const part of raw.split(",")) {
     const match = part.trim().match(/^(search|ai-input|ai-train)=(yes|no)$/);
-    if (match) pairs.push(`${match[1]}=${match[2]}`);
+    if (match) pairs.set(match[1], match[2]);
   }
-  return pairs.length > 0 ? pairs.join(", ") : undefined;
+  if (pairs.size === 0) return undefined;
+  return [...pairs].map(([key, value]) => `${key}=${value}`).join(", ");
 }
 
 /**
@@ -61,7 +65,10 @@ User-agent: *
 Disallow:
 `;
   if (contentSignal) {
-    body += `\n# Content Signals — usage preferences for crawlers that honor this directive
+    // No leading blank line: under the classic (non-Google) robots.txt grouping
+    // convention a blank line ends the current record, which would strand this
+    // directive outside the `User-agent: *` group it's meant to apply to.
+    body += `# Content Signals — usage preferences for crawlers that honor this directive
 # https://blog.cloudflare.com/content-signals-policy/
 Content-Signal: ${contentSignal}
 `;

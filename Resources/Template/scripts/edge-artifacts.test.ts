@@ -52,6 +52,16 @@ test("buildRobotsTxt: Content-Signal directive precedes any AI-blocking User-age
   assert.ok(signalIndex < secondUserAgentIndex, "Content-Signal must stay in the User-agent: * group");
 });
 
+test("buildRobotsTxt: no blank line between Disallow: and Content-Signal (stays in the same group)", () => {
+  const out = buildRobotsTxt(false, "search=yes, ai-train=no");
+  const between = out.slice(out.indexOf("Disallow:"), out.indexOf("Content-Signal:"));
+  assert.doesNotMatch(
+    between,
+    /\n\n/,
+    "a blank line here would end the User-agent: * record under classic robots.txt grouping",
+  );
+});
+
 test("normalizeContentSignal: undefined/empty input yields undefined", () => {
   assert.equal(normalizeContentSignal(undefined), undefined);
   assert.equal(normalizeContentSignal(""), undefined);
@@ -71,6 +81,14 @@ test("normalizeContentSignal: drops unrecognized keys and values", () => {
 
 test("normalizeContentSignal: all-invalid input yields undefined", () => {
   assert.equal(normalizeContentSignal("bogus=yes, ai-train=maybe"), undefined);
+});
+
+test("normalizeContentSignal: a later duplicate key wins, keeping first-seen key order", () => {
+  assert.equal(normalizeContentSignal("search=yes, search=no"), "search=no");
+  assert.equal(
+    normalizeContentSignal("search=yes, ai-train=no, search=no"),
+    "search=no, ai-train=no",
+  );
 });
 
 const NOW = new Date("2026-06-28T12:00:00Z");
