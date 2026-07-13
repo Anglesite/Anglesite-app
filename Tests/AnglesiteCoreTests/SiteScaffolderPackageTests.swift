@@ -10,16 +10,18 @@ struct SiteScaffolderPackageTests {
         return d
     }
 
-    @Test("scaffold creates a package and runs the template + git init inside Source/")
+    @Test("scaffold creates a package and runs the template + git init + initial commit inside Source/")
     func scaffoldsIntoSource() async throws {
         let root = try tempDir(); defer { try? FileManager.default.removeItem(at: root) }
         let template = root.appendingPathComponent("Template", isDirectory: true)
         try FileManager.default.createDirectory(at: template.appendingPathComponent("scripts"), withIntermediateDirectories: true)
 
-        // Record the cwd each injected command was run in, and which dir got `git init`.
-        actor Spy { var cwds: [URL] = []; var gitInits: [URL] = []
+        // Record the cwd each injected command was run in, which dir got `git init`, and which
+        // dir got the initial commit.
+        actor Spy { var cwds: [URL] = []; var gitInits: [URL] = []; var gitCommits: [URL] = []
             func cwd(_ u: URL?) { if let u { cwds.append(u) } }
             func git(_ u: URL) { gitInits.append(u) }
+            func commit(_ u: URL) { gitCommits.append(u) }
         }
         let spy = Spy()
 
@@ -29,6 +31,7 @@ struct SiteScaffolderPackageTests {
             catalog: ThemeCatalog(themes: []),
             run: { _, _, cwd in await spy.cwd(cwd); return .init(stdout: "", stderr: "", exitCode: 0) },
             gitInit: { src in await spy.git(src) },
+            gitCommit: { src in await spy.commit(src) },
             register: { pkg in try SiteStore.Site.make(package: pkg) }
         )
 
@@ -45,5 +48,7 @@ struct SiteScaffolderPackageTests {
         // Template scaffold + npm install ran with cwd == Source/, and git init targeted Source/.
         #expect(await spy.cwds.allSatisfy { $0 == pkg.sourceURL })
         #expect(await spy.gitInits == [pkg.sourceURL])
+        // The initial commit also targeted Source/, after git init.
+        #expect(await spy.gitCommits == [pkg.sourceURL])
     }
 }

@@ -22,6 +22,7 @@ final class SiteScaffolderTests: XCTestCase {
             catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(calls: calls),
             gitInit: { _ in },
+            gitCommit: { _ in },
             register: { pkg in try SiteStore.Site.make(package: pkg) }
         )
     }
@@ -155,6 +156,7 @@ final class SiteScaffolderTests: XCTestCase {
             sitesRoot: root, templateURL: URL(fileURLWithPath: "/template"), catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(scaffoldExit: 1, calls: CallRecorder()),
             gitInit: { _ in },
+            gitCommit: { _ in },
             register: { _ in XCTFail("must not register on scaffold failure"); fatalError() }
         )
         var steps: [SiteScaffolder.ScaffoldStep] = []
@@ -173,6 +175,7 @@ final class SiteScaffolderTests: XCTestCase {
             sitesRoot: root, templateURL: templateURL, catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(calls: calls),
             gitInit: { _ in },
+            gitCommit: { _ in },
             register: { pkg in try SiteStore.Site.make(package: pkg) },
             appVersion: { "9.9.9" }
         )
@@ -251,6 +254,7 @@ final class SiteScaffolderTests: XCTestCase {
             sitesRoot: root, templateURL: URL(fileURLWithPath: "/template"), catalog: ThemeCatalog(themes: [theme]),
             run: fakeRunner(calls: CallRecorder()),
             gitInit: { _ in throw CocoaError(.fileWriteUnknown) },
+            gitCommit: { _ in },
             register: { pkg in
                 registered.withLock { $0 = true }
                 return try SiteStore.Site.make(package: pkg)
@@ -261,6 +265,65 @@ final class SiteScaffolderTests: XCTestCase {
         XCTAssertTrue(registered.withLock { $0 }, "git init failure should not block registration")
         XCTAssertTrue(steps.contains { if case .warning(let s, _) = $0 { return s == "copyingTemplate" }; return false })
         guard case .done? = steps.last else { return XCTFail("expected .done despite git init failure") }
+    }
+
+    func testGitCommitFailureIsNonFatalAndStillRegisters() async throws {
+        let root = tmpDir()
+        let registered = OSAllocatedUnfairLock<Bool>(initialState: false)
+        let scaffolder = SiteScaffolder(
+            sitesRoot: root, templateURL: URL(fileURLWithPath: "/template"), catalog: ThemeCatalog(themes: [theme]),
+            run: fakeRunner(calls: CallRecorder()),
+            gitInit: { _ in },
+            gitCommit: { _ in throw CocoaError(.fileWriteUnknown) },
+            register: { pkg in
+                registered.withLock { $0 = true }
+                return try SiteStore.Site.make(package: pkg)
+            }
+        )
+        var steps: [SiteScaffolder.ScaffoldStep] = []
+        for await s in scaffolder.scaffold(makeDraft()) { steps.append(s) }
+        XCTAssertTrue(registered.withLock { $0 }, "initial-commit failure should not block registration")
+        XCTAssertTrue(steps.contains { if case .warning(let s, let m) = $0 { return s == "writingContent" && m.contains("Initial commit skipped") }; return false })
+        guard case .done? = steps.last else { return XCTFail("expected .done despite initial-commit failure") }
+    }
+
+    /// Regression coverage for the missing-initial-commit bug: a brand-new site's `gitInit`
+    /// closure creates a real `.git` (via `GitInitRunner`, same as production) and `gitCommit`
+    /// creates a real commit (via `RepoBootstrap.commitAll`, same as production) — asserting the
+    /// scaffolded repo actually has a `HEAD` afterward, not just that the closures were called.
+    /// Without the fix, `Source/` had a `.git` but zero commits, so a container runtime cloning
+    /// it and running `git checkout HEAD` failed and the site could never preview.
+    func testHappyPathLandsARealInitialCommit() async throws {
+        let root = tmpDir()
+        let scaffolder = SiteScaffolder(
+            sitesRoot: root, templateURL: URL(fileURLWithPath: "/template"), catalog: ThemeCatalog(themes: [theme]),
+            run: fakeRunner(calls: CallRecorder()),
+            gitInit: { sourceDir in
+                try GitInitRunner.run(in: sourceDir)
+                // Deterministic local identity so RepoBootstrap.commitAll's defaultSignature()
+                // doesn't depend on ambient global git config (which CI runners may not have) —
+                // same fixture pattern as RepoBootstrapTests.makeSourceDir.
+                let git = URL(fileURLWithPath: "/usr/bin/git")
+                _ = try await ProcessSupervisor.shared.run(
+                    executable: git, arguments: ["config", "user.email", "t@t.io"], currentDirectoryURL: sourceDir)
+                _ = try await ProcessSupervisor.shared.run(
+                    executable: git, arguments: ["config", "user.name", "t"], currentDirectoryURL: sourceDir)
+            },
+            gitCommit: { sourceDir in try await RepoBootstrap.live().commitAll(source: sourceDir) },
+            register: { pkg in try SiteStore.Site.make(package: pkg) }
+        )
+        var steps: [SiteScaffolder.ScaffoldStep] = []
+        for await s in scaffolder.scaffold(makeDraft()) { steps.append(s) }
+        guard case .done? = steps.last else { return XCTFail("expected .done, got \(String(describing: steps.last))") }
+
+        let pkgURL = root.appendingPathComponent("acme-co.anglesite")
+        let sourceDir = pkgURL.appendingPathComponent("Source")
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        let log = try await ProcessSupervisor.shared.run(
+            executable: git, arguments: ["log", "--oneline"], currentDirectoryURL: sourceDir)
+        XCTAssertEqual(log.exitCode, 0, "git log failed — no initial commit was created: \(log.stderr)")
+        XCTAssertFalse(log.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       "expected at least one commit in the freshly scaffolded Source/ repo")
     }
 }
 
