@@ -210,7 +210,73 @@ final class ComponentEditorModel {
         return styles[index].span
     }
 
-    /// Routes a built `EditMessage` to `context.editRouter` and reconciles the result:
+    // MARK: - Structure writes
+
+    /// Insert a new node as the child at `index` under `parentId` (the fragment root's id for
+    /// a top-level insert). Returns whether the write actually applied.
+    @discardableResult
+    func insertNode(parentId: String, index: Int, node: ComponentStructureEditBuilder.NodeSpec) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentStructureEditBuilder.insertNode(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                parentId: parentId,
+                index: index,
+                node: node
+            )
+        )
+    }
+
+    /// Reorder/reparent an existing node. Returns whether the write actually applied.
+    @discardableResult
+    func moveNode(nodeId: String, newParentId: String, newIndex: Int) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentStructureEditBuilder.moveNode(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                nodeId: nodeId,
+                newParentId: newParentId,
+                newIndex: newIndex
+            )
+        )
+    }
+
+    /// Delete a node (the plugin prunes any now-unused component imports). Returns whether the
+    /// write actually applied.
+    @discardableResult
+    func removeNode(nodeId: String) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentStructureEditBuilder.removeNode(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                nodeId: nodeId
+            )
+        )
+    }
+
+    /// Set (`value` non-nil) or remove (`value == nil`) an attribute/prop at the use-site.
+    /// Returns whether the write actually applied.
+    @discardableResult
+    func setAttr(nodeId: String, name: String, value: String?) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentStructureEditBuilder.setAttr(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                nodeId: nodeId,
+                name: name,
+                value: value
+            )
+        )
+    }
+
+    /// Routes a built `EditMessage` to `context.editRouter` and reconciles the result. Shared by
+    /// both the style writes above and the structure writes above (`insertNode`/`moveNode`/
+    /// `removeNode`/`setAttr`) — the name is a slice-2 holdover, but the reconciliation logic is
+    /// op-agnostic:
     /// - `.applied` with a piggybacked `reply.model` adopts it directly (no second fetch).
     /// - `.applied` without one falls back to `load()`.
     /// - `.failed` with reason `"stale"` (the plugin's machine-readable refusal code — see
