@@ -162,11 +162,20 @@ panel — see the follow-up issue in §8.
   This exactly matches the real "unprocessed" case from §3, just forced on demand
   instead of depending on the fragment URL actually being unreachable.
 
-The setting is stored per-site (`SiteConfigStore` / `Config/settings.plist`, app-
-owned state, never in git per this repo's package model) and reaches the running
-page as a query parameter the app appends when it loads the preview URL into the
-WKWebView (e.g. `?esiPreview=unprocessed`); the dev shim script reads
-`location.search` before deciding whether to run its fetch step at all.
+**Correction from the approved draft:** the setting is stored globally via
+`AppSettings`/`UserDefaults` (`Sources/AnglesiteCore/AppSettings.swift`, same
+pattern as `Key.debugPaneEnabled`), not per-site `SiteConfigStore`. The Debug
+Pane is a single global window (`DebugPaneView`, fed by `LogCenter.shared`) with
+no per-site scoping mechanism today — it filters log lines by source tag, not by
+open site — so a per-site plist setting has nowhere to attach in that UI without
+inventing a site-selector this spec doesn't otherwise need. Since this is a
+developer preview convenience rather than a persisted production setting, a
+global toggle (affecting whichever site is currently loaded, same as every other
+Debug Pane control) is both simpler and a better fit for the existing
+architecture. It reaches the running page as a query parameter the app appends
+when it loads the preview URL into the WKWebView (e.g. `?esiPreview=unprocessed`);
+the dev shim script reads `location.search` before deciding whether to run its
+fetch step at all.
 
 **Explicitly not v1:** actually running the composed Worker (and so `@dwk/esi`
 itself) locally to get real server-side resolution without the dev shim's CORS
@@ -237,10 +246,14 @@ Editor code of its own, only the one type-parsing refinement folded into #494.
 - **Unprocessed-toggle test:** with `?esiPreview=unprocessed` set, assert the dev
   shim never calls `fetch` at all and `EsiRemove`'s slotted content is what
   renders.
-- **Swift-side:** a test for the new Debug Pane "Server" section's Live/Unprocessed
-  control persisting to `SiteConfigStore` and producing the right query parameter
-  when the app builds the preview URL. No other new Swift-side tests — Component
-  Editor integration rides on #493/#494's own test coverage.
+- **Swift-side:** an `AnglesiteCoreTests` test for the new pure `PreviewNavigation`
+  helper that appends the `esiPreview=unprocessed` query parameter, covering the
+  on/off cases and a URL that already carries other query items. No test for
+  `DebugPaneView` itself (an `AnglesiteApp`-target SwiftUI view, consistent with
+  this repo's existing lack of coverage there) or for `AppSettings`'s new key
+  (trivial `UserDefaults` get/set, same shape as every existing key, not worth a
+  dedicated test). Component Editor integration rides on #493/#494's own test
+  coverage.
 
 ## 8. Explicitly out of scope / follow-ups
 
