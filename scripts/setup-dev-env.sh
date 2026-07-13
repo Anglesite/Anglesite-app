@@ -130,6 +130,7 @@ setup_linux() {
 
     if command -v podman >/dev/null 2>&1; then
         ok "podman $(podman --version | awk '{ print $NF }') (needed for the Linux MVP site runtime)"
+        note "provision the dev-server image PodmanContainerControl expects: scripts/build-podman-image.sh"
     else
         note "podman not found — not needed for the purity phase; required later for PodmanSiteRuntime (Linux MVP)"
     fi
