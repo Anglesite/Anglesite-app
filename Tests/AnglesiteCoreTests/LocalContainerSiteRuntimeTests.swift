@@ -21,6 +21,40 @@ struct LocalContainerSiteRuntimeTests {
         previewURL: URL(string: "http://127.0.0.1:51001")!,
         mcpURL: URL(string: "http://127.0.0.1:51002/mcp")!)
 
+    @Test("a booted container holds sudden termination disabled until stop")
+    func containerBracketsSuddenTermination() async {
+        let controller = SuddenTerminationController(disable: {}, enable: {})
+        let fake = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let runtime = LocalContainerSiteRuntime(
+            ref: "HEAD",
+            control: fake,
+            mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
+            connect: { _, _ in },
+            suddenTerminationController: controller
+        )
+
+        await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+        #expect(controller.activeLeaseCount == 1)
+        await runtime.stop()
+        #expect(controller.activeLeaseCount == 0)
+    }
+
+    @Test("a failed container boot does not leak its sudden-termination lease")
+    func failedContainerDoesNotLeakSuddenTerminationLease() async {
+        let controller = SuddenTerminationController(disable: {}, enable: {})
+        let fake = FakeLocalContainerControl(startResult: .failure(.bootFailed("no boot")))
+        let runtime = LocalContainerSiteRuntime(
+            ref: "HEAD",
+            control: fake,
+            mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
+            connect: { _, _ in },
+            suddenTerminationController: controller
+        )
+
+        await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+        #expect(controller.activeLeaseCount == 0)
+    }
+
     @Test("start settles to .ready with the preview URL")
     func startReady() async {
         let (rt, _) = makeRuntime(.success(Self.ok))

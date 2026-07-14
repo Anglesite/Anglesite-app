@@ -30,6 +30,8 @@
 	<string>Copyright © 2026 David W. Keith. ISC License.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSSupportsSuddenTermination</key>
+	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Anglesite needs to coordinate with helper processes (Astro dev server, MCP server) to preview and edit your site.</string>
 	<key>NSUserActivityTypes</key>

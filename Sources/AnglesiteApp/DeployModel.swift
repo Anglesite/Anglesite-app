@@ -79,6 +79,7 @@ final class DeployModel {
     /// `generateStructured` doesn't honour cooperative cancellation.
     private var summarizationGeneration: UInt = 0
     private var inFlight: Task<Void, Never>?
+    private let suddenTerminationController: SuddenTerminationController
     /// Site to retry once the user pastes a token. `nil` outside the prompt flow.
     /// Carries the container control (if any) so the parked-then-retried deploy
     /// uses the same executor as the original dispatch.
@@ -95,13 +96,15 @@ final class DeployModel {
         logCenter: LogCenter = .shared,
         keychain: KeychainStore = KeychainStore(),
         verifier: TokenVerifying = CloudflareAPITokenVerifier(),
-        summarizer: any DeployFailureSummarizing = DeploySummarizerFactory.makeDefault()
+        summarizer: any DeployFailureSummarizing = DeploySummarizerFactory.makeDefault(),
+        suddenTerminationController: SuddenTerminationController = .shared
     ) {
         self.command = command
         self.logCenter = logCenter
         self.keychain = keychain
         self.onboarding = TokenOnboarding(verifier: verifier)
         self.summarizer = summarizer
+        self.suddenTerminationController = suddenTerminationController
     }
 
     var isRunning: Bool {
@@ -143,11 +146,13 @@ final class DeployModel {
         // on the same actor hop (e.g. a rapid re-invocation before this Task starts running)
         // sees `isRunning == true` and bails via the guard above instead of racing runDeploy.
         phase = .running(siteID: siteID, since: Date())
-        inFlight = Task { @MainActor [weak self] in
+        let suddenTerminationLease = suddenTerminationController.acquire()
+        inFlight = Task { @MainActor [weak self, suddenTerminationLease] in
             await self?.runDeploy(
                 siteID: siteID, siteDirectory: siteDirectory,
                 configDirectory: configDirectory, currentRoutes: currentRoutes,
-                containerControl: containerControl)
+                containerControl: containerControl,
+                suddenTerminationLease: suddenTerminationLease)
         }
     }
 
@@ -234,8 +239,10 @@ final class DeployModel {
         siteDirectory: URL,
         configDirectory: URL,
         currentRoutes: [String],
-        containerControl: (siteID: String, control: any LocalContainerControl)? = nil
+        containerControl: (siteID: String, control: any LocalContainerControl)? = nil,
+        suddenTerminationLease: SuddenTerminationController.Lease
     ) async {
+        defer { suddenTerminationLease.release() }
         transition(siteID: siteID, to: .running(siteID: siteID, since: Date()))
         logLines = []
         currentMilestone = nil

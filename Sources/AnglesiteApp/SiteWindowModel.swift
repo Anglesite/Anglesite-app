@@ -374,7 +374,7 @@ final class SiteWindowModel {
         mainPaneMode = .preview
     }
 
-    func close() {
+    func close(suddenTerminationLease: SuddenTerminationController.Lease? = nil) {
         preview.close()
         startup.stop()
         // Note: an in-flight Deploy/Backup/Audit is intentionally NOT cancelled or cleaned up
@@ -401,17 +401,30 @@ final class SiteWindowModel {
         // Window closing: persist unsaved edits unconditionally (consistent with
         // auto-save-on-leave). No conflict dialog is possible during teardown, so we don't gate
         // on a flush return value — just write the buffer best-effort, off the main actor.
-        persistEditorBufferBestEffort()
+        let editorSaveTask = persistEditorBufferBestEffort()
         activeEditor = nil
         // Overwrite unconditionally on teardown (save(), not flushBeforeLeaving): no conflict
         // alert can be shown on a closing window, so a conflict-gated flush would silently drop
         // the edits. Last-writer-wins, matching the .text/.plist teardown above.
-        if let model = inspectorContext?.model { Task { await model.save() } }
+        let inspectorWasDirty = inspectorContext?.model.isDirty == true
+        let inspectorSaveTask = (inspectorContext?.model).map { model in
+            Task { await model.save() }
+        }
         inspectorContext = nil
+        let closeTerminationLease = suddenTerminationLease
+            ?? ((editorSaveTask != nil || inspectorWasDirty) ? SuddenTerminationController.shared.acquire() : nil)
         #if ANGLESITE_MAS
-        scopedURL?.stopAccessingSecurityScopedResource()
-        scopedURL = nil
+        let closingScopedURL = scopedURL
+        self.scopedURL = nil
         #endif
+        Task { @MainActor in
+            await editorSaveTask?.value
+            _ = await inspectorSaveTask?.value
+            #if ANGLESITE_MAS
+            closingScopedURL?.stopAccessingSecurityScopedResource()
+            #endif
+            closeTerminationLease?.release()
+        }
     }
 
     /// Flush the open editor before leaving it: auto-saves a dirty buffer, but returns false (and the
@@ -615,20 +628,22 @@ final class SiteWindowModel {
     /// Best-effort off-main save of the open editor's buffer when the editor is torn down (window
     /// close or site replay), where no conflict dialog can be shown. Consistent with the
     /// auto-save-on-leave model; last-writer-wins on the rare teardown-time external conflict.
-    private func persistEditorBufferBestEffort() {
+    @discardableResult
+    private func persistEditorBufferBestEffort() -> Task<Void, Never>? {
         switch activeEditor {
         case .text(let model) where model.isDirty:
             let url = model.file.url
             let contents = model.text
-            Task.detached(priority: .userInitiated) { try? FileDocumentIO.save(contents, to: url) }
+            return Task.detached(priority: .userInitiated) { _ = try? FileDocumentIO.save(contents, to: url) }
         case .plist(let model):
             if model.isDirty, model.validationMessage == nil {
                 let url = model.file.url
                 let entries = model.entriesForSaving()
-                Task.detached(priority: .userInitiated) { try? PlistDocumentIO.save(entries, to: url) }
+                return Task.detached(priority: .userInitiated) { _ = try? PlistDocumentIO.save(entries, to: url) }
             }
+            return nil
         case .text, nil:
-            break
+            return nil
         }
     }
 

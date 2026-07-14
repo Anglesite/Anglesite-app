@@ -3,6 +3,22 @@ import Foundation
 @testable import AnglesiteCore
 
 struct ProcessSupervisorShutdownTests {
+    @Test("A live child holds sudden termination disabled until shutdown")
+    func liveChildBracketsSuddenTermination() async throws {
+        let controller = SuddenTerminationController(disable: {}, enable: {})
+        let supervisor = ProcessSupervisor(suddenTerminationController: controller)
+        _ = try await supervisor.launch(
+            source: "sudden-termination-test",
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "exec sleep 30"],
+            logCenter: LogCenter()
+        )
+
+        #expect(controller.activeLeaseCount == 1)
+        await supervisor.shutdownAll(timeout: 2)
+        #expect(controller.activeLeaseCount == 0)
+    }
+
     @Test("Shutdown all terminates every supervised process") func shutdownAllTerminatesEverySupervisedProcess() async throws {
         let supervisor = ProcessSupervisor()
         let center = LogCenter()
