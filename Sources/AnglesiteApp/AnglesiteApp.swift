@@ -249,6 +249,8 @@ struct AnglesiteApp: App {
             PageCommands()
             // Format menu skeleton (menu-bar spec §2.6) — editor-gated.
             FormatCommands()
+            // Arrange menu skeleton (menu-bar spec §2.7) — editor-gated, contextual.
+            ArrangeCommands()
             // Website menu: the site window's operations, regrouped (menu-bar spec §2.9).
             WebsiteCommands()
             // View ▸ pane switching ⌘1–3 + panel toggles (Chat ⌘K, Related Pages, Inspector ⌥⌘I) —
