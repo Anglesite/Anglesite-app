@@ -46,6 +46,36 @@ struct SiteWindowModelTests {
         #expect(model.site == nil)
         #expect(model.paneSelection == 0)
     }
+
+    @Test("close retains its sudden-termination lease until a dirty editor is saved")
+    func closeRetainsLeaseUntilEditorSaveFinishes() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("site-window-close-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let fileURL = root.appendingPathComponent("page.astro")
+        try Data("original".utf8).write(to: fileURL)
+        let editor = FileEditorModel(
+            file: FileRef(url: fileURL, group: .pages, name: "page.astro")
+        )
+        await editor.load()
+        editor.text = "saved during close"
+
+        let model = makeModel()
+        model.activeEditor = .text(editor)
+        let controller = SuddenTerminationController(disable: {}, enable: {})
+        let lease = controller.acquire()
+
+        model.close(suddenTerminationLease: lease)
+        while controller.activeLeaseCount > 0 {
+            await Task.yield()
+        }
+
+        let saved = try String(contentsOf: fileURL, encoding: .utf8)
+        #expect(saved == "saved during close")
+        #expect(controller.activeLeaseCount == 0)
+    }
 }
 
 extension SiteWindowModelTests {

@@ -80,6 +80,7 @@ final class DeployModel {
     private var summarizationGeneration: UInt = 0
     private var inFlight: Task<Void, Never>?
     private let suddenTerminationController: SuddenTerminationController
+    private let tokenAvailabilityOverride: (() -> Bool)?
     /// Site to retry once the user pastes a token. `nil` outside the prompt flow.
     /// Carries the container control (if any) so the parked-then-retried deploy
     /// uses the same executor as the original dispatch.
@@ -97,7 +98,8 @@ final class DeployModel {
         keychain: KeychainStore = KeychainStore(),
         verifier: TokenVerifying = CloudflareAPITokenVerifier(),
         summarizer: any DeployFailureSummarizing = DeploySummarizerFactory.makeDefault(),
-        suddenTerminationController: SuddenTerminationController = .shared
+        suddenTerminationController: SuddenTerminationController = .shared,
+        tokenAvailabilityOverride: (() -> Bool)? = nil
     ) {
         self.command = command
         self.logCenter = logCenter
@@ -105,6 +107,7 @@ final class DeployModel {
         self.onboarding = TokenOnboarding(verifier: verifier)
         self.summarizer = summarizer
         self.suddenTerminationController = suddenTerminationController
+        self.tokenAvailabilityOverride = tokenAvailabilityOverride
     }
 
     var isRunning: Bool {
@@ -216,6 +219,9 @@ final class DeployModel {
     /// True if either the env var or the Keychain currently holds a non-empty Cloudflare token.
     /// Keychain errors are treated as "no token" — the user can recover by pasting fresh.
     private func hasUsableToken() -> Bool {
+        if let tokenAvailabilityOverride {
+            return tokenAvailabilityOverride()
+        }
         if let env = ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"], !env.isEmpty {
             return true
         }
