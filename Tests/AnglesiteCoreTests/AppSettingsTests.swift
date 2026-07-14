@@ -205,4 +205,15 @@ final class AppSettingsTests {
         #expect(settings.cloudflareAccount == nil)
         #expect(defaults.string(forKey: AppSettings.Key.cloudflareAccountName) == nil)
     }
+
+    @Test("Active assistant backend defaults to foundationModels") func activeAssistantBackendDefaultsToFoundationModels() {
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.activeAssistantBackend == "foundationModels")
+    }
+
+    @Test("Active assistant backend round trip") func activeAssistantBackendRoundTrip() {
+        let settings = AppSettings(defaults: defaults)
+        settings.activeAssistantBackend = "acp:\(UUID().uuidString)"
+        #expect(settings.activeAssistantBackend.hasPrefix("acp:"))
+    }
 }
