@@ -43,12 +43,14 @@ struct ViewMenuCommands: Commands {
 
             Divider()
 
-            // ⌘K lives here, not on the toolbar chat button — a shortcut on a toolbar item is
-            // invisible in the menu bar (the discoverability gap #512 exists to close).
+            // ⌃⌘K — ⌘K is reserved for Format ▸ Add Link… per the macOS editing
+            // convention (menu-bar spec §3). The shortcut lives here, not on the
+            // toolbar chat button — a shortcut on a toolbar item is invisible in
+            // the menu bar (the discoverability gap #512 exists to close).
             Button(model?.chatPresented == true ? "Hide Chat" : "Show Chat") {
                 model?.chatPresented.toggle()
             }
-            .keyboardShortcut("k")
+            .keyboardShortcut("k", modifiers: [.command, .control])
             .disabled(model == nil)
 
             Button(model?.relatedPagesPresented == true ? "Hide Related Pages" : "Show Related Pages") {
