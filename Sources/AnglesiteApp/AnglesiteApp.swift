@@ -247,6 +247,8 @@ struct AnglesiteApp: App {
             // Page menu (menu-bar spec §2.5) — declared before SiteMenuCommands so it
             // renders left of it (CommandMenus appear in declaration order).
             PageCommands()
+            // Format menu skeleton (menu-bar spec §2.6) — editor-gated.
+            FormatCommands()
             // Website menu: the site window's operations, regrouped (menu-bar spec §2.9).
             WebsiteCommands()
             // View ▸ pane switching ⌘1–3 + panel toggles (Chat ⌘K, Related Pages, Inspector ⌥⌘I) —
