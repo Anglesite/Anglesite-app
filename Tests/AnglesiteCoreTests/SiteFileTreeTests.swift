@@ -69,4 +69,23 @@ struct SiteFileTreeTests {
         #expect(groups[.styles]?.count == 1)
         #expect(groups[.components] == nil)
     }
+
+    @Test("feedCollections finds collections with an rss.xml.ts route and ignores everything else")
+    func feedCollections() throws {
+        let root = try makeTempDir(); defer { try? FileManager.default.removeItem(at: root) }
+        // notes has a feed; photos has a directory but no rss route; the root rss.xml.ts is site-wide.
+        try write("src/pages/notes/rss.xml.ts", under: root)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("src/pages/photos"),
+                                                 withIntermediateDirectories: true)
+        try write("src/pages/rss.xml.ts", under: root)
+
+        #expect(SiteFileTree.feedCollections(siteRoot: root) == ["notes"])
+    }
+
+    @Test("feedCollections is empty for a missing src/pages")
+    func feedCollectionsMissingDir() {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("anglesite-filetree-absent-\(UUID().uuidString)", isDirectory: true)
+        #expect(SiteFileTree.feedCollections(siteRoot: root) == [])
+    }
 }
