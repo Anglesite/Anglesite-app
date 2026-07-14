@@ -81,5 +81,9 @@
 			</dict>
 		</dict>
 	</array>
+	<key>NSAppleScriptEnabled</key>
+	<true/>
+	<key>OSAScriptingDefinition</key>
+	<string>Anglesite.sdef</string>
 </dict>
 </plist>

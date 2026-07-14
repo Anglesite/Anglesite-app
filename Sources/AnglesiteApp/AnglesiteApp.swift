@@ -44,6 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let contentIndexerStore = ContentIndexerStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Task { await AppleScriptCommandEnvironment.shared.configure(contentGraph: contentGraph) }
+
         // Register App Intents dependencies before the app surface comes up so backgrounded
         // intent processes (and #101's system MCP entry, later) can resolve immediately.
         // `bootstrap()` is async (it awaits the Spotlight handler installation on `SiteStore`);

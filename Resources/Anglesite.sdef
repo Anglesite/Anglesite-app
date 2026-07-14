@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<dictionary title="Anglesite Terminology">
+    <suite name="Anglesite Suite" code="AngS" description="Commands for automating Anglesite.">
+        
+        <command name="open site" code="AngSopns" description="Open a site in Anglesite.">
+            <cocoa class="OpenSiteCommand"/>
+            <direct-parameter type="text" description="The name, UUID, or package path of the site."/>
+            <result type="text" description="Result message."/>
+        </command>
+        
+        <command name="deploy site" code="AngSdepl" description="Deploy a site.">
+            <cocoa class="DeploySiteCommand"/>
+            <direct-parameter type="text" description="The name, UUID, or package path of the site."/>
+            <parameter name="allowing unattended" code="alun" type="boolean" optional="yes" description="Set to true to allow a non-interactive production deploy."/>
+            <result type="text" description="Result message."/>
+        </command>
+        
+        <command name="backup site" code="AngSback" description="Back up a site.">
+            <cocoa class="BackupSiteCommand"/>
+            <direct-parameter type="text" description="The name, UUID, or package path of the site."/>
+            <result type="text" description="Result message."/>
+        </command>
+
+        <command name="audit site" code="AngSaudt" description="Audit/check a site.">
+            <cocoa class="AuditSiteCommand"/>
+            <direct-parameter type="text" description="The name, UUID, or package path of the site."/>
+            <result type="text" description="Result message."/>
+        </command>
+
+        <command name="site status" code="AngSstat" description="Get status info for a site.">
+            <cocoa class="SiteStatusCommand"/>
+            <direct-parameter type="text" description="The name, UUID, or package path of the site."/>
+            <result type="text" description="Status text."/>
+        </command>
+
+        <command name="add page" code="AngSadpg" description="Create a new page on a site.">
+            <cocoa class="AddPageCommand"/>
+            <direct-parameter type="text" description="The name, UUID, or package path of the site."/>
+            <parameter name="name" code="name" type="text" description="The page title."/>
+            <parameter name="route" code="rout" type="text" optional="yes" description="Optional route path."/>
+            <result type="text" description="Result message."/>
+        </command>
+
+        <command name="add post" code="AngSadps" description="Create a new post on a site.">
+            <cocoa class="AddPostCommand"/>
+            <direct-parameter type="text" description="The name, UUID, or package path of the site."/>
+            <parameter name="title" code="titl" type="text" description="The post title."/>
+            <parameter name="collection" code="coll" type="text" optional="yes" description="Optional collection name."/>
+            <parameter name="slug" code="slug" type="text" optional="yes" description="Optional slug."/>
+            <result type="text" description="Result message."/>
+        </command>
+        
+    </suite>
+</dictionary>
