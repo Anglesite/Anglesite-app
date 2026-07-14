@@ -10,6 +10,11 @@ import Foundation
 /// code under test — off-Darwin, where `RepoBootstrap` itself still uses subprocess git, that
 /// distinction disappears but the fixtures remain valid.
 @Suite struct RepoBootstrapTests {
+    @Test func bootstrapErrorUsesItsReasonAsTheUserFacingDescription() {
+        let error = RepoBootstrapError(reason: "No git identity configured.")
+        #expect(error.localizedDescription == "No git identity configured.")
+    }
+
     struct StubProvider: RepoProvider {
         let authed: Bool
         let result: Result<RemoteRepo, RepoBootstrapError>
@@ -124,6 +129,24 @@ import Foundation
         #expect(events.contains(.progress(step: .committing, message: "Committing your site…")))
         // Never took the init path — the repo was already there.
         #expect(!events.contains(.progress(step: .initializing, message: "Initializing git repository…")))
+    }
+
+    @Test func scaffoldCommitPreservesConfiguredIdentity() async throws {
+        let source = try await makeSourceDir(initialized: true)
+        try "hello".write(to: source.appendingPathComponent("index.md"), atomically: true, encoding: .utf8)
+
+        let bootstrap = RepoBootstrap(
+            provider: StubProvider(authed: true, result: .success(repo())),
+            run: unusedRunner()
+        )
+        try await bootstrap.commitAll(source: source)
+
+        let result = try await ProcessSupervisor.shared.run(
+            executable: URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: ["log", "-1", "--format=%an <%ae>"],
+            currentDirectoryURL: source
+        )
+        #expect(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "t <t@t.io>")
     }
 
     @Test func publishSurfacesProviderError() async throws {

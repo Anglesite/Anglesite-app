@@ -7,18 +7,13 @@
 # (the plugin's server/, npm ci'd for the build's native arch so sharp's native binary is
 # correct) so a fresh container needs no in-guest install.
 
-# Per-arch digest pin (reproducible; re-bump periodically for base security updates). Selecting
-# the base by stage name (rather than a single floating digest) keeps the pin exact for whichever
-# arch is being built instead of only covering arm64. scripts/vendor-container-image.sh and
-# scripts/build-podman-image.sh both pass `--build-arg TARGETARCH=<arch>` explicitly rather than
-# relying on the builder to inject it automatically. The default below covers building this file
-# directly (`podman build .` / `container build .`, e.g. manual testing or a future CI job that
-# doesn't go through either wrapper script) — it falls back to arm64, matching this image's
-# single-arch behavior before this change, rather than failing opaquely on an empty ARG.
-ARG TARGETARCH=arm64
-FROM node:22-bookworm-slim@sha256:6db9be2ebb4bafb687a078ef5ba1b1dd256e8004d246a31fd210b6b848ab6be2 AS base-arm64
-FROM node:22-bookworm-slim@sha256:a149cd71dccd68704a07d4e4ca3e610c27301852b0f556865cfdb6e2856f8bed AS base-amd64
-FROM base-${TARGETARCH} AS base
+# Per-arch digest pin (reproducible; re-bump periodically for base security updates). The build
+# scripts pass the matching pinned reference as BASE_IMAGE. Do not declare both architectures as
+# separate FROM stages: Apple container 1.1 resolves even the unused stage for the requested
+# platform, so an arm64 build fails while trying to fetch the amd64-only digest. The default keeps
+# direct/manual builds on arm64, matching the macOS runtime.
+ARG BASE_IMAGE=node:22-bookworm-slim@sha256:6db9be2ebb4bafb687a078ef5ba1b1dd256e8004d246a31fd210b6b848ab6be2
+FROM ${BASE_IMAGE} AS base
 
 # socat is the guest-side vsock<->TCP bridge: the host reaches astro/mcp (guest-local TCP) by
 # dialing AF_VSOCK ports that socat forwards to 127.0.0.1 (no vmnet on the sandboxed host, #60).
@@ -46,12 +41,19 @@ RUN cd /usr/local/lib/anglesite-mcp \
 # zero install (anglesite-hydrate), AND leaves npm's cache (/root/.npm) in the layer so a
 # drifted-lockfile site's `npm ci --prefer-offline` mostly avoids the network. Full closure
 # (no --omit=dev): astro dev/check need devDependencies (tsx, @astrojs/check, typescript).
+#
+# Keep node_modules as one tar entry in the OCI layer instead of ~19,000 individual entries.
+# Apple Containerization's Swift EXT4 formatter performs path-tree lookups for every OCI entry;
+# the expanded tree made first boot take tens of minutes. Linux tar expands the same trusted,
+# build-time archive into the writable site workspace much faster during hydration.
 ENV ANGLESITE_HOME=/opt/anglesite
 COPY template/package.json template/package-lock.json ${ANGLESITE_HOME}/baked/
 RUN cd ${ANGLESITE_HOME}/baked \
     && ( npm ci \
          || { echo "WARN: template lockfile out of sync — falling back to npm install" >&2; \
-              npm install; } )
+              npm install; } ) \
+    && tar -cf ${ANGLESITE_HOME}/baked-node-modules.tar node_modules \
+    && rm -rf node_modules
 COPY hydrate.sh /usr/local/bin/anglesite-hydrate
 RUN chmod +x /usr/local/bin/anglesite-hydrate
 

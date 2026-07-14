@@ -26,12 +26,16 @@ IMAGE_TAG="localhost/anglesite-dev:latest"
 
 stage_dev_image_context "$CTX"
 
-# podman's `--arch` defaults to the host's native architecture; TARGETARCH is passed explicitly
-# as a build-arg (matching vendor-container-image.sh) since it drives the Dockerfile's per-arch
-# base-image stage selection rather than relying on podman to inject it automatically.
+# Podman's `--arch` defaults to the host's native architecture. Select the corresponding pinned
+# base explicitly so the Dockerfile declares only one FROM image.
 HOST_ARCH="$(podman info --format '{{.Host.Arch}}')"
 case "$HOST_ARCH" in
-    arm64|amd64) ;;
+    arm64)
+        BASE_IMAGE="node:22-bookworm-slim@sha256:6db9be2ebb4bafb687a078ef5ba1b1dd256e8004d246a31fd210b6b848ab6be2"
+        ;;
+    amd64)
+        BASE_IMAGE="node:22-bookworm-slim@sha256:a149cd71dccd68704a07d4e4ca3e610c27301852b0f556865cfdb6e2856f8bed"
+        ;;
     *)
         echo "ERROR: unsupported host arch '$HOST_ARCH' (Dockerfile only pins arm64/amd64 bases)." >&2
         exit 1
@@ -40,7 +44,7 @@ esac
 
 echo "Building $IMAGE_TAG (linux/$HOST_ARCH, native)…"
 podman build \
-    --build-arg "TARGETARCH=$HOST_ARCH" \
+    --build-arg "BASE_IMAGE=$BASE_IMAGE" \
     --tag "$IMAGE_TAG" \
     "$CTX"
 

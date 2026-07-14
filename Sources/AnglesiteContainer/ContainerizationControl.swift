@@ -241,9 +241,17 @@ public struct ContainerizationControl: LocalContainerControl {
             let appImage = try await loadOrGet(
                 store, layout: stagedImageLayout, reference: BundledImage.imageReference,
                 artifactName: "app-image", storeRoot: storeURL)
-            onOutput("[boot] unpacking app image to ext4 rootfs", .stdout)
-            rootfs = try await EXT4Unpacker(blockSizeInBytes: 8 * 1024 * 1024 * 1024)
-                .unpack(appImage, for: .current, at: rootfsURL)
+            // Materialize one pristine rootfs per image digest, then APFS-clone it for each boot.
+            // `EXT4Unpacker` walks every OCI entry through an in-memory path tree; the bundled
+            // toolchain makes that first import expensive, while `Mount.clone(to:)` is copy-on-write
+            // and near-instant. The digest-keyed template stays immutable and automatically rolls
+            // forward when an app update ships a different image.
+            rootfs = try await RootfsTemplateCache.shared.clone(
+                image: appImage,
+                storeRoot: storeURL,
+                destination: rootfsURL,
+                onOutput: onOutput
+            )
 
             // vminit initfs OCI layout -> ext4 init mount (the guest-agent root filesystem).
             let stagedInitfsLayout = try BundledImage.stagedLayoutURL(source: initfsLayoutURL, name: "vminit-initfs")
@@ -760,6 +768,115 @@ public struct ContainerizationControl: LocalContainerControl {
             config.stderr = stderrSink
         }
         try await proc.start()
+    }
+}
+
+/// Builds one immutable EXT4 rootfs per OCI image digest, then gives every container boot an APFS
+/// copy-on-write clone. The actor plus `inFlight` task are both required: actors are re-entrant at
+/// `await`, so actor isolation alone would still let two windows start two expensive unpack jobs.
+private actor RootfsTemplateCache {
+    static let shared = RootfsTemplateCache()
+
+    private static let prefix = "rootfs-template-"
+    private static let size: UInt64 = 8 * 1024 * 1024 * 1024
+    private var inFlight: [String: Task<URL, Error>] = [:]
+
+    func clone(
+        image: Containerization.Image,
+        storeRoot: URL,
+        destination: URL,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> Containerization.Mount {
+        let digest = image.digest.replacingOccurrences(of: ":", with: "-")
+        let templateURL = storeRoot.appendingPathComponent(Self.prefix + digest + ".ext4")
+        let fileManager = FileManager.default
+
+        if !fileManager.fileExists(atPath: templateURL.path) {
+            let task: Task<URL, Error>
+            if let existing = inFlight[digest] {
+                onOutput("[boot] waiting for another window to prepare the app rootfs", .stdout)
+                task = existing
+            } else {
+                onOutput("[boot] preparing app rootfs for this image (first launch only)", .stdout)
+                let buildingURL = storeRoot.appendingPathComponent(
+                    Self.prefix + digest + ".building-" + UUID().uuidString + ".ext4"
+                )
+                task = Task<URL, Error> {
+                    defer { try? fileManager.removeItem(at: buildingURL) }
+                    _ = try await EXT4Unpacker(blockSizeInBytes: Self.size)
+                        .unpack(image, for: .current, at: buildingURL)
+
+                    // A second app process may have won the same race. Its completed template is
+                    // equivalent (the digest is the identity), so discard ours instead of replacing it.
+                    if fileManager.fileExists(atPath: templateURL.path) {
+                        return templateURL
+                    }
+                    do {
+                        try fileManager.moveItem(at: buildingURL, to: templateURL)
+                    } catch {
+                        // `fileExists` + `moveItem` cannot be atomic across app processes. If a
+                        // peer published the same digest in that gap, its immutable template is
+                        // exactly equivalent; reuse it instead of failing this site's boot.
+                        guard fileManager.fileExists(atPath: templateURL.path) else { throw error }
+                    }
+                    return templateURL
+                }
+                inFlight[digest] = task
+            }
+
+            do {
+                _ = try await task.value
+                inFlight[digest] = nil
+            } catch {
+                inFlight[digest] = nil
+                throw error
+            }
+        } else {
+            onOutput("[boot] reusing cached app rootfs", .stdout)
+        }
+
+        onOutput("[boot] cloning app rootfs for this site", .stdout)
+        let templateMount = Containerization.Mount.block(
+            format: "ext4",
+            source: templateURL.path,
+            destination: "/"
+        )
+        let cloned = try templateMount.clone(to: destination.path)
+        removeSupersededTemplates(keeping: templateURL, in: storeRoot, onOutput: onOutput)
+        return cloned
+    }
+
+    /// Reclaim completed templates from older bundled-image digests. Site VMs mount their own
+    /// copy-on-write clones, never the immutable template, so cleanup is safe after this boot's
+    /// clone exists. `.building-*` files are deliberately excluded because another app process
+    /// may still be producing one; its own task removes that file on success or failure.
+    private func removeSupersededTemplates(
+        keeping current: URL,
+        in storeRoot: URL,
+        onOutput: @Sendable (String, LogCenter.Stream) -> Void
+    ) {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: storeRoot,
+            includingPropertiesForKeys: nil
+        ) else { return }
+
+        var removed = 0
+        for candidate in contents {
+            let name = candidate.lastPathComponent
+            guard candidate != current,
+                  name.hasPrefix(Self.prefix),
+                  name.hasSuffix(".ext4"),
+                  !name.contains(".building-") else { continue }
+            do {
+                try FileManager.default.removeItem(at: candidate)
+                removed += 1
+            } catch {
+                onOutput("[boot] stale rootfs-template cleanup failed for \(name): \(error)", .stderr)
+            }
+        }
+        if removed > 0 {
+            onOutput("[boot] reclaimed \(removed) superseded rootfs template(s)", .stdout)
+        }
     }
 }
 

@@ -35,12 +35,12 @@ mkdir -p "$OUT"
 # the store keeps anglesite-dev:latest between runs, so rebuilds are incremental — the same role
 # the old docker-container buildx builder's cache played.
 ARCHIVE="$OUT/image.tar"
-# --build-arg TARGETARCH is explicit rather than relying on the builder to auto-inject it
-# (unlike BuildKit, container CLI 1.1.0's docs don't confirm it sets platform ARGs
-# automatically) — the Dockerfile's per-arch base-image stage selection needs it either way.
+# Pass only the arm64 base digest. Apple container 1.1 tries to resolve every declared FROM stage,
+# including an unused amd64 stage, against the requested platform.
+ARM64_BASE="node:22-bookworm-slim@sha256:6db9be2ebb4bafb687a078ef5ba1b1dd256e8004d246a31fd210b6b848ab6be2"
 container build \
     --os linux --arch arm64 \
-    --build-arg TARGETARCH=arm64 \
+    --build-arg "BASE_IMAGE=$ARM64_BASE" \
     --tag anglesite-dev:latest \
     "$CTX"
 container image save --platform linux/arm64 --output "$ARCHIVE" anglesite-dev:latest

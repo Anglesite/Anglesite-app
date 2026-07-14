@@ -53,9 +53,10 @@ public struct RemoteRepo: Sendable, Equatable {
 }
 
 /// User-facing failure from the bootstrap pipeline.
-public struct RepoBootstrapError: Error, Equatable, Sendable {
+public struct RepoBootstrapError: LocalizedError, Equatable, Sendable {
     public let reason: String
     public init(reason: String) { self.reason = reason }
+    public var errorDescription: String? { reason }
 }
 
 /// Run a subprocess and capture its output. Production: `ProcessSupervisor.shared.run`.
