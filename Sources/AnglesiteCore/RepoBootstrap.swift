@@ -48,7 +48,7 @@ public actor RepoBootstrap {
     /// bulk `addAll` at the pinned revision (it lands with `push`/`addRemote` in #659).
     func ensureCommittable(
         source: URL,
-        signatureOverride: Signature? = nil,
+        signatureFallback: Signature? = nil,
         emit: @Sendable (Event) -> Void
     ) async throws {
         SwiftGit2Bootstrap.ensureInitialized
@@ -108,13 +108,12 @@ public actor RepoBootstrap {
             }
         }
         let signature: Signature
-        if let signatureOverride {
-            signature = signatureOverride
-        } else {
-            guard case .success(let configuredSignature) = repo.defaultSignature() else {
-                throw RepoBootstrapError(reason: "No git identity configured (user.name/user.email).")
-            }
+        if case .success(let configuredSignature) = repo.defaultSignature() {
             signature = configuredSignature
+        } else if let signatureFallback {
+            signature = signatureFallback
+        } else {
+            throw RepoBootstrapError(reason: "No git identity configured (user.name/user.email).")
         }
         guard case .success = repo.commit(message: "Initial commit", signature: signature) else {
             throw RepoBootstrapError(reason: "git commit failed.")
@@ -198,11 +197,11 @@ public actor RepoBootstrap {
     /// source of truth" (#72).
     public func commitAll(source: URL) async throws {
         #if canImport(Darwin)
-        // The app creates this snapshot, so give it an app identity instead of depending on the
-        // user's global git config. A sandboxed build cannot read ~/.gitconfig even when Terminal
-        // can, and a commit-less new site cannot be cloned into the container runtime.
+        // Preserve the user's configured identity when libgit2 can resolve one. The app identity
+        // is only a fallback: a sandboxed build cannot necessarily read ~/.gitconfig even when
+        // Terminal can, and a commit-less new site cannot be cloned into the container runtime.
         let signature = Signature(name: "Anglesite", email: "noreply@anglesite.app")
-        try await ensureCommittable(source: source, signatureOverride: signature, emit: { _ in })
+        try await ensureCommittable(source: source, signatureFallback: signature, emit: { _ in })
         #else
         try await ensureCommittable(source: source, emit: { _ in })
         #endif

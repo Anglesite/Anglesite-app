@@ -316,10 +316,6 @@ final class SiteScaffolderTests: XCTestCase {
         XCTAssertEqual(log.exitCode, 0, "git log failed — no initial commit was created: \(log.stderr)")
         XCTAssertFalse(log.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                        "expected at least one commit in the freshly scaffolded Source/ repo")
-        let author = try await ProcessSupervisor.shared.run(
-            executable: git, arguments: ["log", "-1", "--format=%an <%ae>"], currentDirectoryURL: sourceDir)
-        XCTAssertEqual(author.stdout.trimmingCharacters(in: .whitespacesAndNewlines),
-                       "Anglesite <noreply@anglesite.app>")
     }
 }
 

@@ -131,6 +131,24 @@ import Foundation
         #expect(!events.contains(.progress(step: .initializing, message: "Initializing git repository…")))
     }
 
+    @Test func scaffoldCommitPreservesConfiguredIdentity() async throws {
+        let source = try await makeSourceDir(initialized: true)
+        try "hello".write(to: source.appendingPathComponent("index.md"), atomically: true, encoding: .utf8)
+
+        let bootstrap = RepoBootstrap(
+            provider: StubProvider(authed: true, result: .success(repo())),
+            run: unusedRunner()
+        )
+        try await bootstrap.commitAll(source: source)
+
+        let result = try await ProcessSupervisor.shared.run(
+            executable: URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: ["log", "-1", "--format=%an <%ae>"],
+            currentDirectoryURL: source
+        )
+        #expect(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "t <t@t.io>")
+    }
+
     @Test func publishSurfacesProviderError() async throws {
         let source = try await makeSourceDir(initialized: true, commit: true)   // clean, has commits
         let b = RepoBootstrap(

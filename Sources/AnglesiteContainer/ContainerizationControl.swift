@@ -780,7 +780,14 @@ private actor RootfsTemplateCache {
                     if fileManager.fileExists(atPath: templateURL.path) {
                         return templateURL
                     }
-                    try fileManager.moveItem(at: buildingURL, to: templateURL)
+                    do {
+                        try fileManager.moveItem(at: buildingURL, to: templateURL)
+                    } catch {
+                        // `fileExists` + `moveItem` cannot be atomic across app processes. If a
+                        // peer published the same digest in that gap, its immutable template is
+                        // exactly equivalent; reuse it instead of failing this site's boot.
+                        guard fileManager.fileExists(atPath: templateURL.path) else { throw error }
+                    }
                     return templateURL
                 }
                 inFlight[digest] = task
@@ -804,7 +811,41 @@ private actor RootfsTemplateCache {
             destination: "/"
         )
         let cloned = try templateMount.clone(to: destination.path)
+        removeSupersededTemplates(keeping: templateURL, in: storeRoot, onOutput: onOutput)
         return cloned
+    }
+
+    /// Reclaim completed templates from older bundled-image digests. Site VMs mount their own
+    /// copy-on-write clones, never the immutable template, so cleanup is safe after this boot's
+    /// clone exists. `.building-*` files are deliberately excluded because another app process
+    /// may still be producing one; its own task removes that file on success or failure.
+    private func removeSupersededTemplates(
+        keeping current: URL,
+        in storeRoot: URL,
+        onOutput: @Sendable (String, LogCenter.Stream) -> Void
+    ) {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: storeRoot,
+            includingPropertiesForKeys: nil
+        ) else { return }
+
+        var removed = 0
+        for candidate in contents {
+            let name = candidate.lastPathComponent
+            guard candidate != current,
+                  name.hasPrefix(Self.prefix),
+                  name.hasSuffix(".ext4"),
+                  !name.contains(".building-") else { continue }
+            do {
+                try FileManager.default.removeItem(at: candidate)
+                removed += 1
+            } catch {
+                onOutput("[boot] stale rootfs-template cleanup failed for \(name): \(error)", .stderr)
+            }
+        }
+        if removed > 0 {
+            onOutput("[boot] reclaimed \(removed) superseded rootfs template(s)", .stdout)
+        }
     }
 }
 
