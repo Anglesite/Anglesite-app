@@ -16,37 +16,6 @@ actor AppleScriptCommandEnvironment {
     }
 }
 
-private enum AppleScriptAsyncBridge {
-    static func run<T>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
-        let semaphore = DispatchSemaphore(value: 0)
-        let box = AppleScriptAsyncOutcomeBox<T>()
-
-        Task {
-            do {
-                box.outcome = .success(try await operation())
-            } catch {
-                box.outcome = .failure(error)
-            }
-            semaphore.signal()
-        }
-
-        semaphore.wait()
-
-        switch box.outcome {
-        case .success(let value):
-            return value
-        case .failure(let error):
-            throw error
-        case nil:
-            throw AppleScriptCommandService.CommandError.siteNotFound("unknown")
-        }
-    }
-}
-
-private final class AppleScriptAsyncOutcomeBox<T>: @unchecked Sendable {
-    var outcome: Result<T, Error>?
-}
-
 private extension NSScriptCommand {
     var directTextParameter: String? {
         directParameter as? String
@@ -69,13 +38,13 @@ private extension NSScriptCommand {
     }
 
     func requiredStringArgument(named names: String...) throws -> String {
-        if let value = stringArgument(namedAnyOf: names)?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+        if let value = stringArgument(named: names)?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
             return value
         }
         throw AppleScriptArgumentError.missing(names[0])
     }
 
-    private func stringArgument(namedAnyOf names: [String]) -> String? {
+    private func stringArgument(named names: [String]) -> String? {
         for name in names {
             if let value = evaluatedArguments?[name] as? String {
                 return value
@@ -97,13 +66,33 @@ private extension NSScriptCommand {
     }
 
     func runCommand(_ body: @escaping @Sendable () async throws -> String) -> Any? {
-        do {
-            return try AppleScriptAsyncBridge.run(body)
-        } catch {
-            scriptErrorNumber = -10000
-            scriptErrorString = error.localizedDescription
-            return nil
+        suspendExecution()
+        let command = AppleScriptCommandBox(self)
+
+        Task {
+            do {
+                let result = try await body()
+                await MainActor.run {
+                    command.value.resumeExecution(withResult: result)
+                }
+            } catch {
+                await MainActor.run {
+                    command.value.scriptErrorNumber = -10000
+                    command.value.scriptErrorString = error.localizedDescription
+                    command.value.resumeExecution(withResult: nil)
+                }
+            }
         }
+
+        return nil
+    }
+}
+
+private final class AppleScriptCommandBox: @unchecked Sendable {
+    let value: NSScriptCommand
+
+    init(_ value: NSScriptCommand) {
+        self.value = value
     }
 }
 
@@ -121,32 +110,21 @@ private enum AppleScriptArgumentError: LocalizedError {
 @objc(OpenSiteCommand)
 final class OpenSiteCommand: NSScriptCommand {
     override func performDefaultImplementation() -> Any? {
+        let specifier: String
         do {
-            let specifier = try requiredDirectTextParameter()
-            let site = try AppleScriptAsyncBridge.run {
-                let service = await AppleScriptCommandEnvironment.shared.service()
-                return try await service.openSite(specifier)
-            }
-            openWindow(siteID: site.id)
-            return "Opened \(site.name)."
+            specifier = try requiredDirectTextParameter()
         } catch {
             scriptErrorNumber = -10000
             scriptErrorString = error.localizedDescription
             return nil
         }
-    }
-
-    private func openWindow(siteID: String) {
-        if Thread.isMainThread {
-            MainActor.assumeIsolated {
-                WindowRouter.shared.requestOpen(siteID: siteID)
+        return runCommand {
+            let service = await AppleScriptCommandEnvironment.shared.service()
+            let site = try await service.openSite(specifier)
+            await MainActor.run {
+                WindowRouter.shared.requestOpen(siteID: site.id)
             }
-        } else {
-            DispatchQueue.main.sync {
-                MainActor.assumeIsolated {
-                    WindowRouter.shared.requestOpen(siteID: siteID)
-                }
-            }
+            return "Opened \(site.name)."
         }
     }
 }
