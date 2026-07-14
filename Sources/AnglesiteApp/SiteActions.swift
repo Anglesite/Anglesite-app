@@ -66,15 +66,46 @@ enum SiteActions {
             try PackageTransfer.importDirectory(sourceDir, toPackageAt: dest, displayName: displayName)
         }.value
         do {
+            try ensureImportGitignore(in: pkg.sourceURL)
             try await bootstrapGit(pkg.sourceURL)
             return try await register(pkg)
         } catch {
             // Git bootstrap or record/bookmark failed after importDirectory wrote the package —
             // remove the orphan (we created it this call) so it isn't left invisible-and-unopenable
-            // on disk.
+            // on disk. If registration persisted the recents entry before a later failure (for
+            // example bookmark minting in MAS), unwind that entry too.
+            if let marker = try? pkg.readMarker() {
+                try? await SiteStore.shared.remove(id: marker.siteID.uuidString)
+            }
             try? FileManager.default.removeItem(at: pkg.url)
             throw error
         }
+    }
+
+    /// Import can receive a plain, non-git working directory that already has local build output
+    /// or secrets. Seed the baseline ignores before `RepoBootstrap.commitAll` stages everything.
+    private static func ensureImportGitignore(in sourceDirectory: URL, fileManager: FileManager = .default) throws {
+        let url = sourceDirectory.appendingPathComponent(".gitignore")
+        let required = [
+            "node_modules/",
+            "dist/",
+            ".astro/",
+            ".wrangler/",
+            ".env*",
+        ]
+        var existing = fileManager.fileExists(atPath: url.path)
+            ? try String(contentsOf: url, encoding: .utf8)
+            : ""
+        let lines = Set(existing.split(whereSeparator: \.isNewline).map(String.init))
+        let missing = required.filter { !lines.contains($0) }
+        guard !missing.isEmpty else { return }
+
+        if !existing.isEmpty && !existing.hasSuffix("\n") { existing += "\n" }
+        if !existing.isEmpty { existing += "\n" }
+        existing += "# Local build artifacts and secrets are not committed by Anglesite imports.\n"
+        existing += missing.joined(separator: "\n")
+        existing += "\n"
+        try existing.write(to: url, atomically: true, encoding: .utf8)
     }
 
     /// Pick a plain Anglesite directory, choose where to save the new package, copy it in, and

@@ -73,6 +73,53 @@ struct SiteActionsImportTests {
         #expect(registeredPackage?.url == dest)
     }
 
+    @Test("import seeds gitignore before git bootstrap stages the copied Source")
+    func importSeedsGitignoreBeforeBootstrap() async throws {
+        let root = try tempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("plain-site", isDirectory: true)
+        try makePlainSite(at: source)
+        try "custom-cache/\n".write(to: source.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+        try "SECRET=1\n".write(to: source.appendingPathComponent(".env"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: source.appendingPathComponent("node_modules/@rollup/rollup-darwin-arm64"),
+            withIntermediateDirectories: true
+        )
+        try "binary\n".write(
+            to: source.appendingPathComponent("node_modules/@rollup/rollup-darwin-arm64/index.js"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let dest = root.appendingPathComponent("Imported.anglesite", isDirectory: true)
+        _ = try await SiteActions.importDirectory(
+            source,
+            toPackageAt: dest,
+            displayName: "Imported",
+            bootstrapGit: { sourceDirectory in
+                let gitignore = try String(
+                    contentsOf: sourceDirectory.appendingPathComponent(".gitignore"),
+                    encoding: .utf8
+                )
+                #expect(gitignore.contains("custom-cache/"))
+                #expect(gitignore.contains("node_modules/"))
+                #expect(gitignore.contains("dist/"))
+                #expect(gitignore.contains(".astro/"))
+                #expect(gitignore.contains(".wrangler/"))
+                #expect(gitignore.contains(".env*"))
+            },
+            register: { package in
+                SiteStore.Site(
+                    id: "site-id",
+                    name: "Imported",
+                    packageURL: package.url,
+                    isValid: true,
+                    missingSentinels: []
+                )
+            }
+        )
+    }
+
     @Test("import removes copied package when git bootstrap fails")
     func importCleansUpWhenBootstrapFails() async throws {
         struct Boom: Error {}
