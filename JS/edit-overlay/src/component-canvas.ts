@@ -1,8 +1,8 @@
 /**
  * Component-harness canvas module. Active only on /_anglesite/component/*
- * pages (the Component Editor's isolated canvas). Read-only in slice 1:
- * reports clicks as structured selections + computed styles to native, and
- * exposes highlight hooks so the native outline can drive the canvas.
+ * pages (the Component Editor's isolated canvas). Reports clicks as
+ * structured selections + computed styles to native, and exposes highlight
+ * and interactive structure/style-edit hooks so the native view can drive the canvas.
  */
 
 const HARNESS_PREFIX = "/_anglesite/component/";
