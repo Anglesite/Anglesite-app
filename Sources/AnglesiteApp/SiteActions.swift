@@ -44,6 +44,70 @@ enum SiteActions {
         return site
     }
 
+    /// Copy a plain Anglesite directory into a package, bootstrap its `Source/` as a committable
+    /// git repo, then register the package. Kept separate from the panel flow so the migration
+    /// behavior is unit-testable without driving AppKit.
+    static func importDirectory(
+        _ sourceDir: URL,
+        toPackageAt dest: URL,
+        displayName: String,
+        bootstrapGit: @escaping @Sendable (_ sourceDirectory: URL) async throws -> Void = { sourceDirectory in
+            try await RepoBootstrap.live().commitAll(source: sourceDirectory)
+        },
+        register: @escaping @MainActor @Sendable (_ package: AnglesitePackage) async throws -> SiteStore.Site = { package in
+            try await registerPackage(package)
+        }
+    ) async throws -> SiteStore.Site {
+        // The tree copy can be large (it may include node_modules) — run it off the main actor so
+        // the import doesn't stall the UI. On failure after the copy created the package, clean up
+        // the orphan; a `destinationExists` throw comes from importDirectory itself (before it
+        // creates anything), so it lands in the caller's catch and never deletes a pre-existing dir.
+        let pkg = try await Task.detached {
+            try PackageTransfer.importDirectory(sourceDir, toPackageAt: dest, displayName: displayName)
+        }.value
+        do {
+            try ensureImportGitignore(in: pkg.sourceURL)
+            try await bootstrapGit(pkg.sourceURL)
+            return try await register(pkg)
+        } catch {
+            // Git bootstrap or record/bookmark failed after importDirectory wrote the package —
+            // remove the orphan (we created it this call) so it isn't left invisible-and-unopenable
+            // on disk. If registration persisted the recents entry before a later failure (for
+            // example bookmark minting in MAS), unwind that entry too.
+            if let marker = try? pkg.readMarker() {
+                try? await SiteStore.shared.remove(id: marker.siteID.uuidString)
+            }
+            try? FileManager.default.removeItem(at: pkg.url)
+            throw error
+        }
+    }
+
+    /// Import can receive a plain, non-git working directory that already has local build output
+    /// or secrets. Seed the baseline ignores before `RepoBootstrap.commitAll` stages everything.
+    private static func ensureImportGitignore(in sourceDirectory: URL, fileManager: FileManager = .default) throws {
+        let url = sourceDirectory.appendingPathComponent(".gitignore")
+        let required = [
+            "node_modules/",
+            "dist/",
+            ".astro/",
+            ".wrangler/",
+            ".env*",
+        ]
+        var existing = fileManager.fileExists(atPath: url.path)
+            ? try String(contentsOf: url, encoding: .utf8)
+            : ""
+        let lines = Set(existing.split(whereSeparator: \.isNewline).map(String.init))
+        let missing = required.filter { !lines.contains($0) }
+        guard !missing.isEmpty else { return }
+
+        if !existing.isEmpty && !existing.hasSuffix("\n") { existing += "\n" }
+        if !existing.isEmpty { existing += "\n" }
+        existing += "# Local build artifacts and secrets are not committed by Anglesite imports.\n"
+        existing += missing.joined(separator: "\n")
+        existing += "\n"
+        try existing.write(to: url, atomically: true, encoding: .utf8)
+    }
+
     /// Pick a plain Anglesite directory, choose where to save the new package, copy it in, and
     /// register the package. Returns the new site, or nil if either panel was cancelled.
     static func importPackage() async throws -> SiteStore.Site? {
@@ -62,24 +126,9 @@ enum SiteActions {
         save.directoryURL = AppSettings.shared.sitesRoot
         guard save.runModal() == .OK, let dest = save.url else { return nil }
 
-        // The tree copy can be large (it may include node_modules) — run it off the main actor so
-        // the import doesn't stall the UI. On failure after the copy created the package, clean up
-        // the orphan; a `destinationExists` throw comes from importDirectory itself (before it
-        // creates anything), so it lands in the outer catch and never deletes a pre-existing dir.
-        let pkg: AnglesitePackage
         do {
-            pkg = try await Task.detached {
-                try PackageTransfer.importDirectory(sourceDir, toPackageAt: dest, displayName: name)
-            }.value
+            return try await importDirectory(sourceDir, toPackageAt: dest, displayName: name)
         } catch {
-            throw ImportError(folderName: sourceDir.lastPathComponent, underlying: error)
-        }
-        do {
-            return try await registerPackage(pkg)
-        } catch {
-            // record/bookmark failed after importDirectory wrote the package — remove the orphan
-            // (we created it this call) so it isn't left invisible-and-unopenable on disk.
-            try? FileManager.default.removeItem(at: pkg.url)
             throw ImportError(folderName: sourceDir.lastPathComponent, underlying: error)
         }
     }
