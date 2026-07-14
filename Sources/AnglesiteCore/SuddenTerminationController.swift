@@ -1,10 +1,19 @@
 import Foundation
+#if canImport(os)
+import os
+#endif
 
 /// Process-wide reference counting for work that must finish before macOS may suddenly terminate
 /// Anglesite. Callers retain the returned lease for exactly as long as their critical state exists;
 /// releasing (or deinitializing) the last lease re-enables sudden termination.
 public final class SuddenTerminationController: @unchecked Sendable {
     public static let shared = SuddenTerminationController()
+#if canImport(os)
+    private static let logger = Logger(
+        subsystem: "io.dwk.anglesite",
+        category: "SuddenTerminationController"
+    )
+#endif
 
     public final class Lease: @unchecked Sendable {
         private let lock = NSLock()
@@ -68,6 +77,9 @@ public final class SuddenTerminationController: @unchecked Sendable {
         lock.lock()
         guard leaseCount > 0 else {
             lock.unlock()
+#if canImport(os)
+            Self.logger.fault("Ignoring an unbalanced sudden-termination lease release")
+#endif
             assertionFailure("Sudden-termination lease count became unbalanced")
             return
         }
