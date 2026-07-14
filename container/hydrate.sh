@@ -3,7 +3,9 @@
 # Install a cloned site's npm dependencies as fast as possible by reusing the
 # image's pre-baked toolchain (design decision #5b — skip npm ci on cold start).
 #
-#   • node_modules already present            -> nothing to do.
+#   • usable node_modules already present     -> nothing to do.
+#   • node_modules has a foreign/broken Rollup native binding
+#                                               -> discard and reinstall.
 #   • lockfile identical to the baked template -> expand the baked node_modules
 #                                                 archive (zero install — the common
 #                                                 case for template-derived sites).
@@ -18,8 +20,18 @@ BAKED_ARCHIVE="${ANGLESITE_HOME:-/opt/anglesite}/baked-node-modules.tar"
 cd "$SITE_DIR"
 
 if [ -d node_modules ]; then
-    echo "==> node_modules already present; skipping install"
-    exit 0
+    # A site repo may have been initialized after `npm install` on the host. If
+    # that host-built tree was committed, Rollup's optional native dependency is
+    # for macOS/Windows rather than this Linux guest. Requiring Rollup's loader is
+    # a cheap architecture check and also catches an incomplete native install.
+    if [ -f node_modules/rollup/dist/native.js ] \
+       && ! node -e "require('./node_modules/rollup/dist/native.js')" >/dev/null 2>&1; then
+        echo "WARN: existing node_modules has no usable Rollup native binding for this container; reinstalling dependencies" >&2
+        rm -rf node_modules
+    else
+        echo "==> node_modules already present and usable; skipping install"
+        exit 0
+    fi
 fi
 
 if [ -f package-lock.json ] && [ -f "$BAKED/package-lock.json" ] \
