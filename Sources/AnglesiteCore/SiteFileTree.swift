@@ -70,6 +70,27 @@ public enum SiteFileTree {
         return result
     }
 
+    /// Collections that ship a per-collection RSS route. The template materializes
+    /// `src/pages/<collection>/rss.xml.ts` for every feed-bearing collection (its
+    /// `FEED_COLLECTIONS` map in src/lib/feeds.ts), so a shallow one-level probe is the cheapest
+    /// reliable "this directory has a feed" signal (#714). The root-level site-wide feed is not a
+    /// collection and is ignored.
+    public static func feedCollections(siteRoot: URL, fileManager: FileManager = .default) -> Set<String> {
+        let pagesDir = layout(for: siteRoot, fileManager: fileManager)
+            .sourceDir.appendingPathComponent("src/pages")
+        guard let children = try? fileManager.contentsOfDirectory(
+            at: pagesDir, includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]) else { return [] }
+        var result: Set<String> = []
+        for dir in children where (try? dir.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            let rss = dir.appendingPathComponent("rss.xml.ts")
+            if fileManager.fileExists(atPath: rss.path(percentEncoded: false)) {
+                result.insert(dir.lastPathComponent)
+            }
+        }
+        return result
+    }
+
     /// Recursively lists files under `dir`, skipping excluded dirs/files. Returns [] if `dir` is absent.
     private static func files(in dir: URL, group: FileGroup, fileManager: FileManager) -> [FileRef] {
         guard let enumerator = fileManager.enumerator(

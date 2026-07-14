@@ -3,88 +3,12 @@ import Foundation
 @testable import AnglesiteCore
 
 struct NavigatorTreeTests {
-    private func page(_ route: String, title: String?) -> SiteContentGraph.Page {
-        SiteContentGraph.Page(id: "s:page:\(route)", siteID: "s", route: route,
-            filePath: "/tmp\(route).astro", title: title, lastModified: Date(timeIntervalSince1970: 0))
-    }
-    private func post(_ collection: String, _ slug: String, _ title: String) -> SiteContentGraph.Post {
-        SiteContentGraph.Post(id: "s:post:\(slug)", siteID: "s", collection: collection, slug: slug,
-            title: title, draft: false, publishDate: nil, tags: [],
-            filePath: "/tmp/\(slug).md", lastModified: Date(timeIntervalSince1970: 0))
-    }
-
     @Test("post route derives /collection/slug/")
     func postRouteDerivation() {
-        #expect(postRoute(for: post("blog", "hello-world", "Hello")) == "/blog/hello-world/")
-    }
-
-    @Test("sections appear in canonical order and only when non-empty")
-    func sectionOrderAndEmpties() {
-        let sections = buildNavigatorTree(
-            pages: [page("/about/", title: "About")],
-            posts: [],
-            fileGroups: [.styles: [FileRef(url: URL(fileURLWithPath: "/tmp/g.css"), group: .styles, name: "g.css")]]
-        )
-        #expect(sections.map(\.id) == [.pages, .styles])   // posts/components/metadata empty → omitted
-    }
-
-    @Test("page item uses title when present and route as fallback; target is the route")
-    func pageItems() throws {
-        let sections = buildNavigatorTree(
-            pages: [page("/about/", title: "About"), page("/contact/", title: nil)],
-            posts: [], fileGroups: [:])
-        let pages = try #require(sections.first { $0.id == .pages })
-        #expect(pages.items.map(\.title) == ["About", "/contact/"])
-        #expect(pages.items.first?.target == .route("/about/"))
-    }
-
-    @Test("file item target carries the FileRef")
-    func fileItems() throws {
-        let ref = FileRef(url: URL(fileURLWithPath: "/tmp/Base.astro"), group: .components, name: "Base.astro")
-        let sections = buildNavigatorTree(pages: [], posts: [], fileGroups: [.components: [ref]])
-        let components = try #require(sections.first { $0.id == .components })
-        let item = try #require(components.items.first)
-        #expect(item.title == "Base.astro")
-        #expect(item.target == .file(ref))
-    }
-
-    @Test("blog posts and collection entries land in separate sections (#586)")
-    func collectionEntriesSeparateFromPosts() throws {
-        let sections = buildNavigatorTree(
-            pages: [],
-            posts: [post("posts", "hello-world", "Hello World"), post("notes", "aside", "An aside")],
-            fileGroups: [:]
-        )
-        let posts = try #require(sections.first { $0.id == .posts })
-        #expect(posts.items.map(\.title) == ["Hello World"])
-
-        let collections = try #require(sections.first { $0.id == .collections })
-        #expect(collections.items.map(\.title) == ["Note: An aside"])
-    }
-
-    @Test("collection section omitted when every post is a blog post")
-    func noCollectionSectionWhenOnlyBlogPosts() {
-        let sections = buildNavigatorTree(
-            pages: [], posts: [post("posts", "hello-world", "Hello World")], fileGroups: [:])
-        #expect(sections.map(\.id) == [.posts])
-    }
-
-    @Test("package Info.plist appears as the headerless first website item")
-    func packageMetadataAppearsAsWebsiteItem() throws {
-        let info = FileRef(url: URL(fileURLWithPath: "/tmp/Site.anglesite/Info.plist"), group: .metadata, name: "Info.plist")
-        let settings = FileRef(url: URL(fileURLWithPath: "/tmp/Site.anglesite/Config/settings.plist"), group: .metadata, name: "settings.plist")
-
-        let sections = buildNavigatorTree(
-            pages: [page("/about/", title: "About")],
-            posts: [],
-            fileGroups: [.metadata: [settings, info]],
-            websiteTitle: "Acme"
-        )
-
-        let site = try #require(sections.first)
-        #expect(site.id == .metadata)
-        #expect(site.title == nil)
-        #expect(site.items.map(\.title) == ["Acme"])
-        #expect(site.items.first?.target == .file(info))
+        let post = SiteContentGraph.Post(
+            id: "s:post:hello-world", siteID: "s", collection: "blog", slug: "hello-world",
+            title: "Hello", draft: false, publishDate: nil, tags: [],
+            filePath: "/tmp/hello-world.md", lastModified: Date(timeIntervalSince1970: 0))
+        #expect(postRoute(for: post) == "/blog/hello-world/")
     }
 }

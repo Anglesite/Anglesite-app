@@ -394,3 +394,192 @@ extension SiteWindowModelTests {
         #expect(pages.map(\.route) == ["/about"])
     }
 }
+
+extension SiteWindowModelTests {
+    /// #714 slice 1, Task 3 review finding: `applyNavigatorSelection`'s two new cases
+    /// (`.websiteSettings`, `.directory`) had zero coverage. Both tests below drive a real
+    /// `SiteNavigatorModel` built from `buildSiteURLTree` (not a hand-rolled `NavigatorItem` stub),
+    /// so `navigator.target(for:)` resolves through the same code path the live sidebar uses —
+    /// and each asserts the target really is `.websiteSettings`/`.directory` before exercising the
+    /// selection, so a future change to the tree builder can't silently turn these into a no-op.
+    private func makeSitePackage(named name: String = "Test") throws -> (root: URL, packageURL: URL, package: AnglesitePackage) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("site-window-model-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let packageURL = root.appendingPathComponent("\(name).anglesite", isDirectory: true)
+        let (package, _) = try AnglesitePackage.createSkeleton(at: packageURL, displayName: name)
+        return (root, packageURL, package)
+    }
+
+    @Test("applyNavigatorSelection opens the package Info.plist for .websiteSettings, same as the old Metadata row")
+    func applyNavigatorSelectionWebsiteSettingsOpensInfoPlist() async throws {
+        let (root, packageURL, package) = try makeSitePackage()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: "site-a",
+            pages: [SiteContentGraph.Page(
+                id: "site-a:page:/about", siteID: "site-a", route: "/about",
+                filePath: "src/pages/about.astro", title: "About", lastModified: Date()
+            )],
+            posts: [], images: []
+        )
+        let model = makeModel(contentGraph: graph)
+        model.site = SiteStore.Site(
+            id: "site-a", name: "Test", packageURL: packageURL,
+            isValid: true, missingSentinels: [], lastSeen: Date(), bookmarkData: nil
+        )
+        let navModel = SiteNavigatorModel(graph: graph)
+        navModel.start(siteID: "site-a", siteRoot: packageURL, sourceDirectory: package.sourceURL, websiteTitle: "Test")
+        while navModel.nodes.isEmpty { await Task.yield() }
+        #expect(navModel.target(for: "website") == .websiteSettings)
+        model.navigator = navModel
+
+        model.applyNavigatorSelection("website")
+
+        // `applyNavigatorSelection` calls `openFile`, which sets `activeEditor`/`mainPaneMode` from
+        // inside its own `Task { ... }` after awaiting `leaveCurrentEditor`/`leaveCurrentInspector` —
+        // both no-ops here, but still real suspension points, so poll rather than assert inline.
+        while model.activeEditor == nil { await Task.yield() }
+        guard case .plist(let plistModel) = model.activeEditor else {
+            Issue.record("expected the Info.plist to open as a .plist editor")
+            return
+        }
+        #expect(plistModel.file.url == package.infoPlistURL)
+        #expect(plistModel.file.group == .metadata)
+        #expect(model.mainPaneMode == .editor(plistModel.file))
+        #expect(model.inspectorContext == nil)
+    }
+
+    @Test("applyNavigatorSelection navigates the preview to a directory's route for .directory, clearing any open editor/inspector")
+    func applyNavigatorSelectionDirectoryNavigatesPreview() async throws {
+        let (root, packageURL, package) = try makeSitePackage()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: "site-a", pages: [],
+            posts: [SiteContentGraph.Post(
+                id: "site-a:post:hello", siteID: "site-a", collection: "notes", slug: "hello",
+                title: "Hello", draft: false, publishDate: nil, tags: [],
+                filePath: "src/content/notes/hello.md", lastModified: Date()
+            )],
+            images: []
+        )
+        let model = makeModel(contentGraph: graph)
+        model.site = SiteStore.Site(
+            id: "site-a", name: "Test", packageURL: packageURL,
+            isValid: true, missingSentinels: [], lastSeen: Date(), bookmarkData: nil
+        )
+        // Seed a real open editor + inspector first, so the post-selection assertions prove
+        // `.directory` actually clears them rather than trivially finding them already nil.
+        let priorFile = FileRef(url: root.appendingPathComponent("dummy.astro"), group: .components, name: "dummy.astro")
+        model.activeEditor = .text(FileEditorModel(file: priorFile))
+        model.mainPaneMode = .editor(priorFile)
+        model.inspectorContext = .page(PageMetadataModel(file: priorFile, sourceDirectory: package.sourceURL))
+
+        let navModel = SiteNavigatorModel(graph: graph)
+        navModel.start(siteID: "site-a", siteRoot: packageURL, sourceDirectory: package.sourceURL, websiteTitle: "Test")
+        while navModel.nodes.count < 2 { await Task.yield() }
+        let directoryID = "dir:/notes/"
+        #expect(navModel.target(for: directoryID) == .directory(collection: "notes", route: "/notes/"))
+        model.navigator = navModel
+
+        model.applyNavigatorSelection(directoryID)
+
+        // `.directory`'s body runs inside its own `Task { ... }`, same reasoning as the
+        // `.websiteSettings` test above — poll for the final state rather than asserting inline.
+        while model.mainPaneMode != .preview { await Task.yield() }
+        #expect(model.activeEditor == nil)
+        #expect(model.inspectorContext == nil)
+        #expect(model.preview.activeRoute == "/notes/")
+    }
+}
+
+extension SiteWindowModelTests {
+    /// Review finding (#714 slice 1, Task 4): `presentCleanup()` — the Site ▸ Cleanup… entry
+    /// point that replaced the old sidebar Cleanup row — had zero coverage. Mirrors `showGraph()`'s
+    /// leave-current-surface-first guard, so these tests follow the same conventions as the
+    /// `.websiteSettings`/`.directory` `applyNavigatorSelection` tests above (real package fixture,
+    /// poll for the async `Task { ... }` body to land) and the `revealCitationInGraph` conflict test
+    /// (real dirty-editor-with-external-change fixture to prove the guard actually aborts).
+    @Test("presentCleanup switches the main pane to Cleanup, clearing any open editor/inspector")
+    func presentCleanupSwitchesPane() async throws {
+        let (root, packageURL, package) = try makeSitePackage()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let model = makeModel()
+        model.site = SiteStore.Site(
+            id: "site-a", name: "Test", packageURL: packageURL,
+            isValid: true, missingSentinels: [], lastSeen: Date(), bookmarkData: nil
+        )
+        // Seed a real open editor + inspector first, so the post-call assertions prove
+        // `presentCleanup()` actually clears them rather than trivially finding them already nil
+        // (same anti-tautology technique as `applyNavigatorSelectionDirectoryNavigatesPreview`).
+        let priorFile = FileRef(url: root.appendingPathComponent("dummy.astro"), group: .components, name: "dummy.astro")
+        model.activeEditor = .text(FileEditorModel(file: priorFile))
+        model.mainPaneMode = .editor(priorFile)
+        model.inspectorContext = .page(PageMetadataModel(file: priorFile, sourceDirectory: package.sourceURL))
+
+        model.presentCleanup()
+
+        // `presentCleanup()`'s body runs inside its own `Task { ... }` after awaiting
+        // `leaveCurrentEditor()`/`leaveCurrentInspector()` — both no-ops here, but still real
+        // suspension points, so poll rather than assert inline (same pattern as
+        // `applyNavigatorSelection`'s `.websiteSettings`/`.directory` tests).
+        while model.mainPaneMode != .cleanup { await Task.yield() }
+        #expect(model.activeEditor == nil)
+        #expect(model.inspectorContext == nil)
+        // PR #723 review: paneSelection previously fell through to 0 (Preview) for `.cleanup`,
+        // so the toolbar pane Picker (tags 0/1/2 only) and the View-menu Preview/Editor/Graph
+        // Toggles all misread Cleanup as Preview being selected — silently breaking ⌘1 from the
+        // Cleanup pane (its Toggle read as already-on, so toggling it off was a no-op). 3 is
+        // deliberately out of the Picker's/Toggles' 0–2 range so nothing shows selected instead.
+        #expect(model.paneSelection == 3)
+    }
+
+    /// Mirrors `revealCitationInGraphSkipsRevealWhenShowGraphAborts`'s real external-conflict
+    /// fixture: a dirty editor whose file changed on disk under it makes `flushBeforeLeaving()`
+    /// (invoked via `leaveCurrentEditor()`) return `false`, so `presentCleanup()`'s guard should
+    /// abort before touching `mainPaneMode`/`activeEditor`.
+    @Test("presentCleanup doesn't switch panes when leaveCurrentEditor aborts on an editor conflict")
+    func presentCleanupAbortsOnEditorConflict() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let model = makeModel()
+        let editedFile = root.appendingPathComponent("conflict.txt")
+        try Data("original".utf8).write(to: editedFile)
+        let fileRef = FileRef(url: editedFile, group: .components, name: "conflict.txt")
+        let editorModel = FileEditorModel(file: fileRef)
+        await editorModel.load()
+        editorModel.text = "dirty edit"
+        try Data("changed on disk".utf8).write(to: editedFile)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(2)], ofItemAtPath: editedFile.path
+        )
+        model.mainPaneMode = .editor(fileRef)
+        model.activeEditor = .text(editorModel)
+
+        model.presentCleanup()
+
+        // Bounded poll for the conflict to surface — the signal that `presentCleanup()`'s
+        // deferred Task has finished running and aborted (same bounded-poll reasoning as
+        // `revealCitationInGraphSkipsRevealWhenShowGraphAborts`, since on the abort path there's
+        // no discriminating state change other than the editor's own conflict flag to poll on).
+        var iterations = 0
+        while editorModel.conflictDiskContents == nil, iterations < 10_000 {
+            await Task.yield()
+            iterations += 1
+        }
+        guard editorModel.conflictDiskContents != nil else {
+            Issue.record("flushBeforeLeaving never surfaced the external conflict")
+            return
+        }
+
+        #expect(model.mainPaneMode == .editor(fileRef))
+        #expect(model.activeEditor != nil)
+    }
+}

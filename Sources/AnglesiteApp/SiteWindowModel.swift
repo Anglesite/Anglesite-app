@@ -10,6 +10,7 @@ enum MainPaneMode: Equatable {
     case preview
     case editor(FileRef)
     case graph
+    case cleanup        // Site ▸ Cleanup… (#714 moved it out of the sidebar)
 }
 
 enum ActiveEditor {
@@ -105,8 +106,9 @@ final class SiteWindowModel {
     }
     var relatedPages: RelatedPagesModel
     var relatedPagesPresented = false
-    /// Drives the Navigator's "Cleanup" section. On-demand only — `scan()` is never called
-    /// automatically, only from the Navigator's "Scan for Cleanup Opportunities" action.
+    /// Drives the main-pane Cleanup view (Site ▸ Cleanup…, #714 moved it out of the sidebar).
+    /// `scan()` runs once automatically when `ProjectCleanupView` first appears; the manual
+    /// Rescan button re-runs it on demand afterward.
     var cleanup: ProjectCleanupModel
     var harden = HardenModel()
     var domain = DomainModel()
@@ -209,6 +211,11 @@ final class SiteWindowModel {
     var paneSelection: Int {
         if case .editor = mainPaneMode { return 1 }
         if case .graph = mainPaneMode { return 2 }
+        // Cleanup has no toolbar/View-menu segment of its own (Site ▸ Cleanup… is the only way
+        // in) — an out-of-range value so the pane Picker and the Preview/Editor/Graph Toggles
+        // all correctly read as unselected instead of Cleanup falsely appearing as Preview (#723
+        // review).
+        if case .cleanup = mainPaneMode { return 3 }
         return 0
     }
 
@@ -234,6 +241,17 @@ final class SiteWindowModel {
         inspectorContext = nil
         mainPaneMode = .graph
         return true
+    }
+
+    /// Switches the main pane to Cleanup (Site ▸ Cleanup…, #714 moved it out of the sidebar).
+    /// Mirrors `showGraph()`'s leave-current-surface-first guard.
+    func presentCleanup() {
+        Task {
+            guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+            activeEditor = nil
+            inspectorContext = nil
+            mainPaneMode = .cleanup
+        }
     }
 
     /// Resolves a chat citation's file path to a Site Graph Explorer node and reveals it there
@@ -696,6 +714,24 @@ final class SiteWindowModel {
             }
         case .file(let file):
             openFile(file)
+        case .websiteSettings:
+            // Slice-1 interim: the website row opens the package Info.plist — exactly what the
+            // old sidebar Metadata row opened. The full Website Settings surface is slice 2
+            // (spec §7, docs/superpowers/specs/2026-07-13-website-design-window-cleanup-design.md).
+            guard let site else { return }
+            let layout = SiteFileTree.layout(for: site.packageURL)
+            guard let infoPlist = layout.infoPlist else { return }
+            openFile(FileRef(url: infoPlist, group: .metadata, name: "Info.plist"))
+        case .directory(_, let route):
+            // Slice-1 interim: show the directory in the preview (its index page if one exists).
+            // Slice 2 replaces this with the Collection Settings surface (spec §6).
+            Task {
+                guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+                activeEditor = nil
+                inspectorContext = nil
+                mainPaneMode = .preview
+                preview.navigate(toRoute: route)
+            }
         }
     }
 

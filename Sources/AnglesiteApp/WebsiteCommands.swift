@@ -49,6 +49,9 @@ struct WebsiteCommands: Commands {
             Button("Audit") { model?.auditSite() }
                 .disabled(model?.canRunAudit != true)
 
+            Button("Cleanup…") { model?.presentCleanup() }
+                .disabled(model == nil)
+
             // Ellipsis items open a sheet for further input, per the HIG.
             Button("Harden…") { model?.harden.openSheet() }
                 .disabled(model?.canRunHarden != true)
