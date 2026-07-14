@@ -394,3 +394,105 @@ extension SiteWindowModelTests {
         #expect(pages.map(\.route) == ["/about"])
     }
 }
+
+extension SiteWindowModelTests {
+    /// #714 slice 1, Task 3 review finding: `applyNavigatorSelection`'s two new cases
+    /// (`.websiteSettings`, `.directory`) had zero coverage. Both tests below drive a real
+    /// `SiteNavigatorModel` built from `buildSiteURLTree` (not a hand-rolled `NavigatorItem` stub),
+    /// so `navigator.target(for:)` resolves through the same code path the live sidebar uses —
+    /// and each asserts the target really is `.websiteSettings`/`.directory` before exercising the
+    /// selection, so a future change to the tree builder can't silently turn these into a no-op.
+    private func makeSitePackage(named name: String = "Test") throws -> (root: URL, packageURL: URL, package: AnglesitePackage) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("site-window-model-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let packageURL = root.appendingPathComponent("\(name).anglesite", isDirectory: true)
+        let (package, _) = try AnglesitePackage.createSkeleton(at: packageURL, displayName: name)
+        return (root, packageURL, package)
+    }
+
+    @Test("applyNavigatorSelection opens the package Info.plist for .websiteSettings, same as the old Metadata row")
+    func applyNavigatorSelectionWebsiteSettingsOpensInfoPlist() async throws {
+        let (root, packageURL, package) = try makeSitePackage()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: "site-a",
+            pages: [SiteContentGraph.Page(
+                id: "site-a:page:/about", siteID: "site-a", route: "/about",
+                filePath: "src/pages/about.astro", title: "About", lastModified: Date()
+            )],
+            posts: [], images: []
+        )
+        let model = makeModel(contentGraph: graph)
+        model.site = SiteStore.Site(
+            id: "site-a", name: "Test", packageURL: packageURL,
+            isValid: true, missingSentinels: [], lastSeen: Date(), bookmarkData: nil
+        )
+        let navModel = SiteNavigatorModel(graph: graph)
+        navModel.start(siteID: "site-a", siteRoot: packageURL, sourceDirectory: package.sourceURL, websiteTitle: "Test")
+        while navModel.nodes.isEmpty { await Task.yield() }
+        #expect(navModel.target(for: "website") == .websiteSettings)
+        model.navigator = navModel
+
+        model.applyNavigatorSelection("website")
+
+        // `applyNavigatorSelection` calls `openFile`, which sets `activeEditor`/`mainPaneMode` from
+        // inside its own `Task { ... }` after awaiting `leaveCurrentEditor`/`leaveCurrentInspector` —
+        // both no-ops here, but still real suspension points, so poll rather than assert inline.
+        while model.activeEditor == nil { await Task.yield() }
+        guard case .plist(let plistModel) = model.activeEditor else {
+            Issue.record("expected the Info.plist to open as a .plist editor")
+            return
+        }
+        #expect(plistModel.file.url == package.infoPlistURL)
+        #expect(plistModel.file.group == .metadata)
+        #expect(model.mainPaneMode == .editor(plistModel.file))
+        #expect(model.inspectorContext == nil)
+    }
+
+    @Test("applyNavigatorSelection navigates the preview to a directory's route for .directory, clearing any open editor/inspector")
+    func applyNavigatorSelectionDirectoryNavigatesPreview() async throws {
+        let (root, packageURL, package) = try makeSitePackage()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: "site-a", pages: [],
+            posts: [SiteContentGraph.Post(
+                id: "site-a:post:hello", siteID: "site-a", collection: "notes", slug: "hello",
+                title: "Hello", draft: false, publishDate: nil, tags: [],
+                filePath: "src/content/notes/hello.md", lastModified: Date()
+            )],
+            images: []
+        )
+        let model = makeModel(contentGraph: graph)
+        model.site = SiteStore.Site(
+            id: "site-a", name: "Test", packageURL: packageURL,
+            isValid: true, missingSentinels: [], lastSeen: Date(), bookmarkData: nil
+        )
+        // Seed a real open editor + inspector first, so the post-selection assertions prove
+        // `.directory` actually clears them rather than trivially finding them already nil.
+        let priorFile = FileRef(url: root.appendingPathComponent("dummy.astro"), group: .components, name: "dummy.astro")
+        model.activeEditor = .text(FileEditorModel(file: priorFile))
+        model.mainPaneMode = .editor(priorFile)
+        model.inspectorContext = .page(PageMetadataModel(file: priorFile, sourceDirectory: package.sourceURL))
+
+        let navModel = SiteNavigatorModel(graph: graph)
+        navModel.start(siteID: "site-a", siteRoot: packageURL, sourceDirectory: package.sourceURL, websiteTitle: "Test")
+        while navModel.nodes.count < 2 { await Task.yield() }
+        let directoryID = "dir:/notes/"
+        #expect(navModel.target(for: directoryID) == .directory(collection: "notes", route: "/notes/"))
+        model.navigator = navModel
+
+        model.applyNavigatorSelection(directoryID)
+
+        // `.directory`'s body runs inside its own `Task { ... }`, same reasoning as the
+        // `.websiteSettings` test above — poll for the final state rather than asserting inline.
+        while model.mainPaneMode != .preview { await Task.yield() }
+        #expect(model.activeEditor == nil)
+        #expect(model.inspectorContext == nil)
+        #expect(model.preview.activeRoute == "/notes/")
+    }
+}
