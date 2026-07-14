@@ -4,10 +4,39 @@
     "" : {
 
     },
+    ":" : {
+
+    },
+    "“%@”\n\nbecomes\n\n“%@”" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "“%1$@”\n\nbecomes\n\n“%2$@”"
+          }
+        }
+      }
+    },
+    "“%@” → “%@”" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "“%1$@” → “%2$@”"
+          }
+        }
+      }
+    },
     "@media %@" : {
 
     },
     "/" : {
+
+    },
+    "/new-path" : {
+
+    },
+    "/old-path" : {
 
     },
     "%@ %@" : {
@@ -59,16 +88,6 @@
         }
       }
     },
-    "%@: %@;" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@: %2$@;"
-          }
-        }
-      }
-    },
     "%@. %@" : {
       "localizations" : {
         "en" : {
@@ -92,6 +111,12 @@
         }
       }
     },
+    "%lld chars" : {
+
+    },
+    "%lld incoming references" : {
+
+    },
     "%lld refs" : {
 
     },
@@ -101,7 +126,16 @@
     "%lld%%" : {
 
     },
+    "301" : {
+
+    },
+    "302" : {
+
+    },
     "A custom token named “Anglesite” should be pre-filled with all permissions Anglesite uses. If it isn’t, add at least the “Edit Cloudflare Workers” template’s permissions so deploying works — Anglesite will ask again when a feature needs more access. Click **Continue to summary**." : {
+
+    },
+    "A few questions so copy suggestions sound like you. Leave anything blank to skip it." : {
 
     },
     "A full, growing catalog" : {
@@ -123,6 +157,9 @@
 
     },
     "Accessibility" : {
+
+    },
+    "Actual Size" : {
 
     },
     "Add" : {
@@ -149,6 +186,9 @@
     "Add comments to ${site}" : {
 
     },
+    "Add declaration" : {
+
+    },
     "Add donations to ${site}" : {
 
     },
@@ -173,10 +213,19 @@
     "Add record" : {
 
     },
+    "Add Redirect" : {
+
+    },
+    "Add rule" : {
+
+    },
     "Add Site" : {
 
     },
     "Advanced" : {
+
+    },
+    "AI explanation" : {
 
     },
     "AI summary — verify against the log below" : {
@@ -209,6 +258,18 @@
     "API token" : {
 
     },
+    "Apple Intelligence Required" : {
+
+    },
+    "Applied" : {
+
+    },
+    "Applied." : {
+
+    },
+    "Apply" : {
+
+    },
     "Apply %lld change%@" : {
       "localizations" : {
         "en" : {
@@ -219,7 +280,25 @@
         }
       }
     },
+    "Apply ${themeID} theme to ${site}" : {
+
+    },
+    "Apply a Theme" : {
+
+    },
+    "Apply This Design" : {
+
+    },
+    "Apply this rewrite?" : {
+
+    },
+    "Apply…" : {
+
+    },
     "Applying hardening changes…" : {
+
+    },
+    "Applying…" : {
 
     },
     "Ask Assistant" : {
@@ -264,6 +343,15 @@
     "Body" : {
 
     },
+    "Brand terms (exact capitalization)" : {
+
+    },
+    "Brand Voice" : {
+
+    },
+    "Browse freedesignmd.com" : {
+
+    },
     "Build failed" : {
 
     },
@@ -271,6 +359,9 @@
 
     },
     "Building your website…" : {
+
+    },
+    "Built-in themes" : {
 
     },
     "Buy a domain" : {
@@ -345,6 +436,9 @@
     "Choose Logo" : {
 
     },
+    "Choose Undo now to bring it back, or OK to keep it deleted." : {
+
+    },
     "Choose where to save the local .anglesite file." : {
 
     },
@@ -355,6 +449,9 @@
 
     },
     "Choose…" : {
+
+    },
+    "Cleanup" : {
 
     },
     "Clear" : {
@@ -372,13 +469,13 @@
     "Click Recheck to run the pre-deploy scan against this site." : {
 
     },
+    "Click to select the nearest node" : {
+
+    },
     "Close" : {
 
     },
     "Cloudflare" : {
-
-    },
-    "Cloudflare API token" : {
 
     },
     "Collection" : {
@@ -393,6 +490,15 @@
     "Commit and push working-tree changes to your current branch" : {
 
     },
+    "Component" : {
+
+    },
+    "Component…" : {
+
+    },
+    "Components" : {
+
+    },
     "Computed" : {
 
     },
@@ -403,6 +509,9 @@
 
     },
     "Connected to %@" : {
+
+    },
+    "Contains slot-fill content — double-click to edit %@" : {
 
     },
     "Content" : {
@@ -426,6 +535,12 @@
     "Copy markdown link to clipboard" : {
 
     },
+    "Copy Review" : {
+
+    },
+    "Copy Rewrite" : {
+
+    },
     "Copy SHA" : {
 
     },
@@ -441,6 +556,15 @@
           }
         }
       }
+    },
+    "Couldn't apply that design: %@" : {
+
+    },
+    "Couldn't apply that theme: %@" : {
+
+    },
+    "Couldn't complete that action" : {
+
     },
     "Couldn't finish setup" : {
 
@@ -487,6 +611,9 @@
     "Delete a DNS record from ${domain}" : {
 
     },
+    "Delete failed" : {
+
+    },
     "Dependency Updates Available" : {
 
     },
@@ -508,13 +635,37 @@
     "Deploying needs a one-time API token. It takes about a minute." : {
 
     },
+    "Describe what you're going for…" : {
+
+    },
     "Description" : {
+
+    },
+    "Design Axes" : {
+
+    },
+    "Design Interview" : {
+
+    },
+    "Design Interview…" : {
+
+    },
+    "Design It For Me" : {
 
     },
     "Destination" : {
 
     },
+    "Destination path (e.g. /new-page)" : {
+
+    },
     "Dev Server Starting…" : {
+
+    },
+    "Dev server stopped" : {
+
+    },
+    "Dev/test only: when this Mac can't boot the local container runtime (e.g. inside a VM without nested virtualization), Anglesite connects preview and editing to a dev server already running on the named host over the trusted local network. Leave the host blank to disable. Takes effect the next time a site window opens." : {
 
     },
     "Diagnostics" : {
@@ -541,6 +692,27 @@
     "Done" : {
 
     },
+    "Drafts platform-sized posts for this article. Anglesite never posts for you — copy each one out, then record the published URLs below." : {
+
+    },
+    "Duplicate" : {
+
+    },
+    "e.g. artisanal, world-class" : {
+
+    },
+    "e.g. busy parents in Oakland" : {
+
+    },
+    "e.g. SourdoughLab" : {
+
+    },
+    "e.g. warm, expert, playful" : {
+
+    },
+    "edited" : {
+
+    },
     "Editing" : {
 
     },
@@ -559,13 +731,25 @@
     "Error" : {
 
     },
+    "ESI Fragments" : {
+
+    },
     "example.com" : {
+
+    },
+    "Explain" : {
+
+    },
+    "Explain This Node" : {
 
     },
     "Explicitly not included" : {
 
     },
     "Explore pages, layouts, components, collections, and assets" : {
+
+    },
+    "Explorer" : {
 
     },
     "Export Site Source…" : {
@@ -598,13 +782,25 @@
     "First words" : {
 
     },
+    "Forward" : {
+
+    },
+    "From %@" : {
+
+    },
+    "Frontmatter (read from content.config.ts)" : {
+
+    },
     "General" : {
 
     },
     "Generate hero image…" : {
 
     },
-    "GitHub" : {
+    "Generate Plan" : {
+
+    },
+    "Generates recommended platforms, bios, content pillars, and a weekly calendar — saved into your site repo, never posted for you." : {
 
     },
     "Got it" : {
@@ -658,6 +854,18 @@
     "Icons" : {
 
     },
+    "Ignore" : {
+
+    },
+    "Images" : {
+
+    },
+    "Impact" : {
+
+    },
+    "Impact analysis" : {
+
+    },
     "Import existing site…" : {
 
     },
@@ -685,7 +893,22 @@
     "Kind" : {
 
     },
+    "LAN runtime host" : {
+
+    },
+    "LAN runtime MCP port" : {
+
+    },
+    "LAN runtime preview port" : {
+
+    },
+    "LAN site runtime" : {
+
+    },
     "Last checked %@" : {
+
+    },
+    "Learning %@’s conventions…" : {
 
     },
     "Lemon Squeezy" : {
@@ -697,13 +920,25 @@
     "List DNS records for ${domain}" : {
 
     },
+    "Live" : {
+
+    },
     "Load records" : {
 
     },
     "Loading site…" : {
 
     },
+    "low confidence" : {
+
+    },
     "Lower numbers are preferred mail servers, e.g. 10." : {
+
+    },
+    "mac-studio.local" : {
+
+    },
+    "MCP port" : {
 
     },
     "Missing Reciprocal Links" : {
@@ -718,16 +953,34 @@
     "My Website" : {
 
     },
+    "MyComponent" : {
+
+    },
     "Name" : {
+
+    },
+    "Naming" : {
 
     },
     "New" : {
 
     },
+    "New attribute name" : {
+
+    },
     "New Collection" : {
 
     },
+    "New Component" : {
+
+    },
     "New Page" : {
+
+    },
+    "New Post" : {
+
+    },
+    "New selector, e.g. .card-footer" : {
 
     },
     "New Site" : {
@@ -742,7 +995,16 @@
     "No Collection Types" : {
 
     },
+    "No component usage learned yet." : {
+
+    },
+    "No content collections found." : {
+
+    },
     "No content yet" : {
+
+    },
+    "No copy issues found across %lld pages — nice work." : {
 
     },
     "No DNS records found." : {
@@ -760,10 +1022,16 @@
     "No Recent Sites" : {
 
     },
+    "No redirects yet. Add one below." : {
+
+    },
     "No scoped styles" : {
 
     },
     "No Suggestions" : {
+
+    },
+    "No unused files found" : {
 
     },
     "No website details" : {
@@ -772,7 +1040,16 @@
     "None" : {
 
     },
+    "Not reviewed" : {
+
+    },
     "Not Set" : {
+
+    },
+    "Notifications" : {
+
+    },
+    "Notify when site operations finish" : {
 
     },
     "Off" : {
@@ -835,7 +1112,16 @@
     "Opens %@ in the default editor" : {
 
     },
+    "Opens the live log of the running dev server and dependency installation." : {
+
+    },
+    "Opens the log of the failed dev server launch." : {
+
+    },
     "optional" : {
+
+    },
+    "Overview of the whole graph — click to jump to a node" : {
 
     },
     "Page" : {
@@ -853,16 +1139,31 @@
     "Pause" : {
 
     },
+    "Permanent (301)" : {
+
+    },
     "Physical goods" : {
 
     },
     "Pick a color scheme" : {
 
     },
+    "Plan social media for ${site}" : {
+
+    },
     "Point at a checkout of the plugin (e.g. `../anglesite`) to iterate without rebuilding the app." : {
 
     },
     "Polar" : {
+
+    },
+    "Post" : {
+
+    },
+    "Post…" : {
+
+    },
+    "Posts a notification when a Deploy, Backup, or Audit finishes while Anglesite is in the background — success or failure. Clicking the notification brings the site's window to the front. Delivery starts quietly; promote or silence Anglesite in System Settings › Notifications." : {
 
     },
     "Preview" : {
@@ -874,13 +1175,28 @@
     "Preview and apply Cloudflare security hardening for this site" : {
 
     },
+    "Preview port" : {
+
+    },
     "Primary color" : {
+
+    },
+    "Print…" : {
 
     },
     "Priority" : {
 
     },
+    "Project Style Guide" : {
+
+    },
+    "property" : {
+
+    },
     "Provider" : {
+
+    },
+    "Published URL (paste after posting)" : {
 
     },
     "Re-check" : {
@@ -892,7 +1208,13 @@
     "Recheck Deploy Readiness" : {
 
     },
+    "Record Published URLs" : {
+
+    },
     "Refresh" : {
+
+    },
+    "Regenerate" : {
 
     },
     "Regenerate…" : {
@@ -905,6 +1227,9 @@
 
     },
     "Reload from Disk" : {
+
+    },
+    "Reload Preview" : {
 
     },
     "Reload site list" : {
@@ -940,6 +1265,24 @@
     "Rename…" : {
 
     },
+    "Replace" : {
+
+    },
+    "Repurpose “%@”" : {
+
+    },
+    "Repurpose ${slug} from ${site}" : {
+
+    },
+    "Repurpose Post…" : {
+
+    },
+    "Rescan" : {
+
+    },
+    "Rescan Now" : {
+
+    },
     "Reset conversation" : {
 
     },
@@ -950,6 +1293,9 @@
 
     },
     "Resolving zone and reading current state…" : {
+
+    },
+    "Restart Dev Server" : {
 
     },
     "Result" : {
@@ -980,6 +1326,18 @@
     "Revert to the last saved version?" : {
 
     },
+    "Review Copy" : {
+
+    },
+    "Review copy on ${site}" : {
+
+    },
+    "Review Copy…" : {
+
+    },
+    "Reviewing your site's copy, page by page…" : {
+
+    },
     "Route" : {
 
     },
@@ -995,28 +1353,49 @@
     "running…" : {
 
     },
+    "Runtime host" : {
+
+    },
     "Save" : {
+
+    },
+    "Save as Annotation" : {
 
     },
     "Save the imported site package." : {
 
     },
-    "Save Website…" : {
+    "Save to docs/social-calendar.md" : {
 
     },
-    "Save Your Website" : {
+    "Save Voice" : {
+
+    },
+    "Save Website…" : {
 
     },
     "Save your website" : {
 
     },
+    "Save Your Website" : {
+
+    },
     "Save…" : {
+
+    },
+    "Saved" : {
 
     },
     "Scan" : {
 
     },
     "Scan couldn't run" : {
+
+    },
+    "Scan for Cleanup Opportunities" : {
+
+    },
+    "Scanning…" : {
 
     },
     "Search" : {
@@ -1026,6 +1405,12 @@
 
     },
     "Search graph" : {
+
+    },
+    "Searching freedesignmd.com…" : {
+
+    },
+    "See and edit this site's learned writing, image, and naming conventions" : {
 
     },
     "Select a node" : {
@@ -1040,10 +1425,19 @@
     "Selection" : {
 
     },
+    "selector" : {
+
+    },
     "Send" : {
 
     },
     "Send (⏎)" : {
+
+    },
+    "SEO" : {
+
+    },
+    "Server" : {
 
     },
     "Set this up later" : {
@@ -1053,6 +1447,9 @@
 
     },
     "Set up a third-party integration for this site" : {
+
+    },
+    "Set Up Brand Voice…" : {
 
     },
     "Sets a display name just for Anglesite. Leave blank to use the site's built-in name." : {
@@ -1088,6 +1485,9 @@
     "Show Inspector" : {
 
     },
+    "Show Logs" : {
+
+    },
     "Show or hide %@" : {
 
     },
@@ -1106,6 +1506,9 @@
     "Shows the most recent pre-deploy scan results" : {
 
     },
+    "Signed in as %@" : {
+
+    },
     "Siri AI" : {
 
     },
@@ -1122,6 +1525,9 @@
 
     },
     "Site Graph" : {
+
+    },
+    "Site graph overview" : {
 
     },
     "Site is missing required files" : {
@@ -1148,6 +1554,12 @@
     "Slug" : {
 
     },
+    "Social Media Plan" : {
+
+    },
+    "Social Media Plan…" : {
+
+    },
     "Software or SaaS" : {
 
     },
@@ -1166,13 +1578,25 @@
     "Standard output" : {
 
     },
+    "Start a design interview for ${site}" : {
+
+    },
+    "Start Dev Server" : {
+
+    },
     "Status of ${site}" : {
+
+    },
+    "Stop Dev Server" : {
 
     },
     "Stored in the macOS Keychain under `io.dwk.anglesite`. The token is passed to `wrangler deploy` as `CLOUDFLARE_API_TOKEN` and never written to logs. An exported `CLOUDFLARE_API_TOKEN` in the shell that launched Anglesite takes precedence over this entry." : {
 
     },
     "Stream" : {
+
+    },
+    "Style Guide" : {
 
     },
     "Styles" : {
@@ -1190,13 +1614,16 @@
     "Switch between Preview, Editor, and Graph" : {
 
     },
+    "Syndication recorded" : {
+
+    },
     "Tag" : {
 
     },
     "Template" : {
 
     },
-    "The App Store build doesn't bundle `gh`. Anglesite uses whatever `git` credentials are already configured on your Mac (Keychain or SSH key) when pushing." : {
+    "Temporary (302)" : {
 
     },
     "The build produced no output." : {
@@ -1211,10 +1638,25 @@
     "The pre-deploy scan found issues that need fixing before this site can ship." : {
 
     },
+    "The preview is paused for %@. Start the dev server to resume." : {
+
+    },
+    "Theme applied." : {
+
+    },
     "There are no editable website details." : {
 
     },
+    "Thinking…" : {
+
+    },
     "This can't be undone." : {
+
+    },
+    "This component changed outside Anglesite — your edit wasn't applied, reloaded the latest version." : {
+
+    },
+    "This file appears unused and will be permanently removed." : {
 
     },
     "This page already links to all related content." : {
@@ -1223,13 +1665,22 @@
     "This page has no inbound links from other pages." : {
 
     },
+    "This page has no incoming links and will be permanently removed." : {
+
+    },
     "This removes it from Anglesite's list only. The files in %@ are left on disk." : {
 
     },
     "This site does not have any collection-backed content types." : {
 
     },
+    "This will remove the file from your site. You can undo it right after deleting." : {
+
+    },
     "This zone already has all recommended hardening settings." : {
+
+    },
+    "Three personality words" : {
 
     },
     "Title" : {
@@ -1245,6 +1696,9 @@
 
     },
     "Try again" : {
+
+    },
+    "Try Again" : {
 
     },
     "TTL" : {
@@ -1268,10 +1722,16 @@
     "Undone" : {
 
     },
+    "Unprocessed (show fallbacks)" : {
+
+    },
     "Unsaved changes" : {
 
     },
     "Unsaved changes in the editor and inspector will be discarded." : {
+
+    },
+    "Unused Assets" : {
 
     },
     "Update" : {
@@ -1286,13 +1746,19 @@
     "Use a temporary Cloudflare Pages domain later, such as %@." : {
 
     },
+    "Used to push backups and publish sites to GitHub over HTTPS (the sandboxed app can't run `git` or `gh`, so it pushes in-process with this token). Create a fine-grained token with Contents read/write access at github.com/settings/tokens. Stored in the macOS Keychain under `io.dwk.anglesite` and never written to logs." : {
+
+    },
     "Uses Apple Intelligence on your device. No content leaves your Mac without your say-so." : {
 
     },
-    "Uses your existing `git` credentials" : {
+    "Uses on-device Apple Intelligence. Nothing leaves your Mac." : {
 
     },
     "Valid" : {
+
+    },
+    "value" : {
 
     },
     "View" : {
@@ -1314,6 +1780,9 @@
 
     },
     "Website name" : {
+
+    },
+    "Weeks: %lld" : {
 
     },
     "Welcome to …" : {
@@ -1340,10 +1809,25 @@
     "Which platform?" : {
 
     },
+    "Who does this site speak to?" : {
+
+    },
+    "Words or phrases to avoid" : {
+
+    },
+    "Writing" : {
+
+    },
     "Your website was created with warnings. You can open it anyway and fix it from the website window." : {
 
     },
     "Your website was created, but something above needs attention before it can preview. You can open it anyway and fix it from the website window." : {
+
+    },
+    "Zoom In" : {
+
+    },
+    "Zoom Out" : {
 
     }
   },
