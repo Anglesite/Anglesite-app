@@ -46,7 +46,11 @@ public actor RepoBootstrap {
     /// on git error. Stages by walking `status(options: [.includeUntracked])` and calling
     /// `add(path:)`/`remove(path:)` per entry — the `git add -A` equivalent; SwiftGit2 has no
     /// bulk `addAll` at the pinned revision (it lands with `push`/`addRemote` in #659).
-    func ensureCommittable(source: URL, emit: @Sendable (Event) -> Void) async throws {
+    func ensureCommittable(
+        source: URL,
+        signatureOverride: Signature? = nil,
+        emit: @Sendable (Event) -> Void
+    ) async throws {
         SwiftGit2Bootstrap.ensureInitialized
         let repo: Repository
         switch Repository.at(source) {
@@ -103,8 +107,14 @@ public actor RepoBootstrap {
                 }
             }
         }
-        guard case .success(let signature) = repo.defaultSignature() else {
-            throw RepoBootstrapError(reason: "No git identity configured (user.name/user.email).")
+        let signature: Signature
+        if let signatureOverride {
+            signature = signatureOverride
+        } else {
+            guard case .success(let configuredSignature) = repo.defaultSignature() else {
+                throw RepoBootstrapError(reason: "No git identity configured (user.name/user.email).")
+            }
+            signature = configuredSignature
         }
         guard case .success = repo.commit(message: "Initial commit", signature: signature) else {
             throw RepoBootstrapError(reason: "git commit failed.")
@@ -187,7 +197,15 @@ public actor RepoBootstrap {
     /// (an empty, commit-less repo fails `git checkout HEAD`) — see CLAUDE.md's "Git is the
     /// source of truth" (#72).
     public func commitAll(source: URL) async throws {
+        #if canImport(Darwin)
+        // The app creates this snapshot, so give it an app identity instead of depending on the
+        // user's global git config. A sandboxed build cannot read ~/.gitconfig even when Terminal
+        // can, and a commit-less new site cannot be cloned into the container runtime.
+        let signature = Signature(name: "Anglesite", email: "noreply@anglesite.app")
+        try await ensureCommittable(source: source, signatureOverride: signature, emit: { _ in })
+        #else
         try await ensureCommittable(source: source, emit: { _ in })
+        #endif
     }
 
     /// Detect → (auth) → ensure committable → create + push. Streams progress; settles to

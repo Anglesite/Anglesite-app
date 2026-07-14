@@ -10,6 +10,11 @@ import Foundation
 /// code under test — off-Darwin, where `RepoBootstrap` itself still uses subprocess git, that
 /// distinction disappears but the fixtures remain valid.
 @Suite struct RepoBootstrapTests {
+    @Test func bootstrapErrorUsesItsReasonAsTheUserFacingDescription() {
+        let error = RepoBootstrapError(reason: "No git identity configured.")
+        #expect(error.localizedDescription == "No git identity configured.")
+    }
+
     struct StubProvider: RepoProvider {
         let authed: Bool
         let result: Result<RemoteRepo, RepoBootstrapError>

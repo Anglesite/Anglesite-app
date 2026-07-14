@@ -300,14 +300,6 @@ final class SiteScaffolderTests: XCTestCase {
             run: fakeRunner(calls: CallRecorder()),
             gitInit: { sourceDir in
                 try GitInitRunner.run(in: sourceDir)
-                // Deterministic local identity so RepoBootstrap.commitAll's defaultSignature()
-                // doesn't depend on ambient global git config (which CI runners may not have) —
-                // same fixture pattern as RepoBootstrapTests.makeSourceDir.
-                let git = URL(fileURLWithPath: "/usr/bin/git")
-                _ = try await ProcessSupervisor.shared.run(
-                    executable: git, arguments: ["config", "user.email", "t@t.io"], currentDirectoryURL: sourceDir)
-                _ = try await ProcessSupervisor.shared.run(
-                    executable: git, arguments: ["config", "user.name", "t"], currentDirectoryURL: sourceDir)
             },
             gitCommit: { sourceDir in try await RepoBootstrap.live().commitAll(source: sourceDir) },
             register: { pkg in try SiteStore.Site.make(package: pkg) }
@@ -324,6 +316,10 @@ final class SiteScaffolderTests: XCTestCase {
         XCTAssertEqual(log.exitCode, 0, "git log failed — no initial commit was created: \(log.stderr)")
         XCTAssertFalse(log.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                        "expected at least one commit in the freshly scaffolded Source/ repo")
+        let author = try await ProcessSupervisor.shared.run(
+            executable: git, arguments: ["log", "-1", "--format=%an <%ae>"], currentDirectoryURL: sourceDir)
+        XCTAssertEqual(author.stdout.trimmingCharacters(in: .whitespacesAndNewlines),
+                       "Anglesite <noreply@anglesite.app>")
     }
 }
 
