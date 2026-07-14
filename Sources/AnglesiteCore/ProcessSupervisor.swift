@@ -39,6 +39,9 @@ public actor ProcessSupervisor {
 
     private let backend: SupervisorBackend
 
+    private let suddenTerminationController: SuddenTerminationController
+    private var processLeases: [UUID: SuddenTerminationController.Lease] = [:]
+
     /// Environment for spawns that don't pass one. Injectable for tests.
     private let defaultEnvironment: @Sendable () -> [String: String]?
 
@@ -58,18 +61,21 @@ public actor ProcessSupervisor {
     /// Convenience for the app and tests: the default in-process backend. The app is sandboxed and
     /// still uses subprocesses for non-Node helper tools, holding a per-`SiteWindow`
     /// security-scoped grant so spawned children inherit folder access.
-    public init() {
+    public init(suddenTerminationController: SuddenTerminationController = .shared) {
         _ = Self.ignoreSIGPIPE
         self.backend = InProcessBackend()
         self.defaultEnvironment = { nil }
+        self.suddenTerminationController = suddenTerminationController
     }
 
     /// Inject a backend explicitly (tests, future MAS wiring); `defaultEnvironment` applies to spawns that don't pass one.
     public init(backend: SupervisorBackend,
-                defaultEnvironment: @escaping @Sendable () -> [String: String]? = { nil }) {
+                defaultEnvironment: @escaping @Sendable () -> [String: String]? = { nil },
+                suddenTerminationController: SuddenTerminationController = .shared) {
         _ = Self.ignoreSIGPIPE
         self.backend = backend
         self.defaultEnvironment = defaultEnvironment
+        self.suddenTerminationController = suddenTerminationController
     }
 
     // MARK: One-shot run
@@ -101,6 +107,8 @@ public actor ProcessSupervisor {
         environment: [String: String]? = nil,
         currentDirectoryURL: URL? = nil
     ) async throws -> RunResult {
+        let suddenTerminationLease = suddenTerminationController.acquire()
+        defer { suddenTerminationLease.release() }
         let spec = SpawnSpec(
             executable: executable,
             arguments: arguments,
@@ -151,6 +159,7 @@ public actor ProcessSupervisor {
         onRespawn: RespawnHandler? = nil,
         logCenter: LogCenter = .shared
     ) async throws -> Handle {
+        let suddenTerminationLease = suddenTerminationController.acquire()
         let spec = SpawnSpec(
             executable: executable,
             arguments: arguments,
@@ -168,7 +177,17 @@ public actor ProcessSupervisor {
                 logCenter: logCenter
             )
         } catch let error as SupervisorBackendError {
+            suddenTerminationLease.release()
             throw Self.translate(error)
+        } catch {
+            suddenTerminationLease.release()
+            throw error
+        }
+        processLeases[spawned.id] = suddenTerminationLease
+        let backend = self.backend
+        Task { [weak self] in
+            _ = await backend.waitForExit(spawned)
+            await self?.releaseProcessLease(id: spawned.id)
         }
         return Handle(id: spawned.id, source: source)
     }
@@ -199,6 +218,9 @@ public actor ProcessSupervisor {
     /// Node / Astro / MCP child outlives the app process.
     public func shutdownAll(timeout: TimeInterval = 5) async {
         await backend.shutdownAll(timeout: timeout)
+        for id in Array(processLeases.keys) {
+            releaseProcessLease(id: id)
+        }
     }
 
     public func isRunning(_ handle: Handle) async -> Bool {
@@ -221,6 +243,10 @@ public actor ProcessSupervisor {
         } catch let error as SupervisorBackendError {
             throw Self.translate(error)
         }
+    }
+
+    private func releaseProcessLease(id: UUID) {
+        processLeases.removeValue(forKey: id)?.release()
     }
 
     // MARK: Error translation

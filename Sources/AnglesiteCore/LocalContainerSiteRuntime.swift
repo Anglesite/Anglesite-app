@@ -14,7 +14,9 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private let logCenter: LogCenter
     private let connect: @Sendable (MCPClient, URL) async throws -> Void
     private let makeFileWatcher: @Sendable () -> any SiteFileWatching
+    private let suddenTerminationController: SuddenTerminationController
     private var fileWatcher: (any SiteFileWatching)?
+    private var containerTerminationLease: SuddenTerminationController.Lease?
 
     private var current: SiteRuntimeState = .idle
     private var observers: [UUID: AsyncStream<SiteRuntimeState>.Continuation] = [:]
@@ -37,7 +39,8 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         conventionsEngine: ProjectConventionsEngine? = nil,
         logCenter: LogCenter = .shared,
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) },
-        makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { PlatformFileWatcher.make() }
+        makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { PlatformFileWatcher.make() },
+        suddenTerminationController: SuddenTerminationController = .shared
     ) {
         self.ref = ref
         self.control = control
@@ -48,6 +51,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         self.logCenter = logCenter
         self.connect = connect
         self.makeFileWatcher = makeFileWatcher
+        self.suddenTerminationController = suddenTerminationController
     }
 
     public var state: SiteRuntimeState { current }
@@ -102,6 +106,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             setState(.idle)
         }
         setState(.starting(siteID: siteID))
+        let suddenTerminationLease = suddenTerminationController.acquire()
 
         // Wire the container's boot/guest-process output (repo clone, npm install + astro dev, the
         // MCP sidecar, the vsock bridge) into LogCenter under a per-site source tag, live, the same
@@ -129,14 +134,17 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         // that discovers it has been superseded must clean up after itself.
         func abandonSupersededAttempt() async {
             try? await control.stop(siteID: siteID)
+            suddenTerminationLease.release()
             continuation.finish()
             await drainTask.value
         }
 
+        var containerStarted = false
         do {
             let session = try await control.start(
                 siteID: siteID, sourceRepo: siteDirectory, ref: ref,
                 onOutput: { line, stream in continuation.yield((line, stream)) })
+            containerStarted = true
             guard gen == generation else { await abandonSupersededAttempt(); return }
             try await connect(mcpClient, session.mcpURL)
             guard gen == generation else { await abandonSupersededAttempt(); return }
@@ -161,6 +169,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             loadedKnowledgeSiteID = siteID
             startFileWatcher(siteID: siteID, projectRoot: siteDirectory, generation: gen)
             activeSiteID = siteID
+            containerTerminationLease = suddenTerminationLease
             setState(.ready(siteID: siteID, url: session.previewURL))
         } catch {
             // Finish this attempt's own (locally-captured) boot log stream immediately rather than
@@ -172,6 +181,10 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             // those would tear down the wrong stream.
             continuation.finish()
             await drainTask.value
+            if containerStarted {
+                try? await control.stop(siteID: siteID)
+            }
+            suddenTerminationLease.release()
             guard gen == generation else { return }
             bootLogContinuation = nil
             bootLogDrainTask = nil
@@ -208,6 +221,8 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         loadedKnowledgeSiteID = nil
         let containerSiteID = activeSiteID
         activeSiteID = nil
+        let containerTerminationLease = self.containerTerminationLease
+        self.containerTerminationLease = nil
         let bootLogContinuation = self.bootLogContinuation
         let bootLogDrainTask = self.bootLogDrainTask
         self.bootLogContinuation = nil
@@ -222,6 +237,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         if let id = containerSiteID {
             try? await control.stop(siteID: id)
         }
+        containerTerminationLease?.release()
         // Stop the container first (above) so no more guest output can arrive, then finish the
         // stream and await the drain so already-buffered lines land in LogCenter — mirrors
         // `ContainerDeployExecutor`'s finish-then-await-drain discipline.

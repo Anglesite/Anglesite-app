@@ -30,6 +30,7 @@ struct SiteWindow: View {
     /// `model.pendingDeleteUndo` for the same dismiss-animation-stability reason as
     /// `contentDeleteTitle` above.
     @State private var deleteUndoTitle: String = ""
+    @State private var unsavedEditsTerminationLease: SuddenTerminationController.Lease?
 
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -68,7 +69,11 @@ struct SiteWindow: View {
                 let openWindow = openWindow
                 WindowRouter.shared.openSitesWindow = { openWindow(id: "sites") }
             }
-            .onDisappear { model.close() }
+            .onDisappear {
+                let terminationLease = unsavedEditsTerminationLease
+                unsavedEditsTerminationLease = nil
+                model.close(suddenTerminationLease: terminationLease)
+            }
     }
 
     /// The Group + lifecycle-task/onChange chain, factored out of `body` as its own type-checking
@@ -108,6 +113,16 @@ struct SiteWindow: View {
         }
         .onChange(of: model.preview.state) { _, newState in
             model.startup.ingest(state: newState)
+        }
+        .onChange(of: model.hasUnsavedEdits, initial: true) { _, hasUnsavedEdits in
+            if hasUnsavedEdits {
+                if unsavedEditsTerminationLease == nil {
+                    unsavedEditsTerminationLease = SuddenTerminationController.shared.acquire()
+                }
+            } else {
+                unsavedEditsTerminationLease?.release()
+                unsavedEditsTerminationLease = nil
+            }
         }
     }
 
