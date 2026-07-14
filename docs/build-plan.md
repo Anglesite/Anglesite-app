@@ -166,7 +166,7 @@ These issues target macOS 27 APIs available with Xcode 27 / Swift 6.4 (all lande
 `gh issue list` remains the source of truth; this is the snapshot of open tracks beyond Phase 10 release work.
 
 - **Claude Code removal (#459)** — Slices 1–4 (#460–463) landed; Slices 5–7 (#464–466) queued: theme/design on PCC, content help on FM/PCC, then the cleanup slice that deletes `ClaudeAgent` and converts the plugin repo. Runtime inbox capture (#587) split out of Slice 3, blocked on `@dwk/workers`.
-- **Component Editor (#496)** — slice 1 (read-only editor, plugin v1.3.0) landed; next: slice-1 manual GUI smoke (#491) and slice 2 Styles panel (#492), then structure ops (#493), props/zone code editors (#494), extract-to-component (#495). Fast-follows: #489, #490.
+- **Component Editor (#496)** — slice 1 (read-only editor, plugin v1.3.0), slice 2 (Styles panel, plugin v1.4.0), and slice 3 (structure ops + palette, plugin v1.5.0) landed; next: props/zone code editors (#494), extract-to-component (#495). Fast-follows: #489, #490.
 - **Personal Publishing OS pivot (#334)** — V-1 typed content + feeds (#335) shipped. V-2 outbound social (#336: #354–357), V-3 inbound (#337: #358–362), V-4 federation + reader (#338: #363–366), V-5 communities (#339: #367–371) are all gated on a stable, conformant `@dwk/workers` release.
 - **Cross-platform Swift port (#571)** — Windows/Linux v2 in five phases (#566–570), Linux first; P5 carries `ExternalLLMBackend` + Phi Silica under the revised LLM policy.
 - **UTM-VM dev/test rig (#589)** — Phase-1 LAN runtime (#601): guest side + wiring landed, host-side LAN-bound dev-server process remains. Later phases pull in iOS and (unscoped) Android validation.

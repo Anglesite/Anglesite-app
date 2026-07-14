@@ -3,7 +3,7 @@ import WebKit
 import AnglesiteCore
 import AnglesiteBridge
 
-/// Read-only Component Editor (slice 1): outline + harness canvas + inspector.
+/// Component Editor: outline + harness canvas + inspector (with interactive Styles panel and structure edits).
 struct ComponentEditorView: View {
     let file: FileRef
     let context: ComponentEditorContext
@@ -741,7 +741,7 @@ struct ComponentEditorView: View {
 
 /// Harness-page WKWebView: same bridge as the preview, wired to the
 /// component-canvas handlers. Routes edits (e.g. a Styles panel change)
-/// through `editRouter` when the site window has wired one up (slice 2);
+/// through `editRouter` when the site window has wired one up;
 /// falls back to `LoggingEditRouter()` — logs to the Debug pane instead of
 /// applying — when it hasn't (dev server not started yet, or a context that
 /// intentionally has no write capability).
