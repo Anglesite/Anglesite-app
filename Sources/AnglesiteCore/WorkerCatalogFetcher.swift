@@ -1,9 +1,13 @@
 import Foundation
-import OSLog
 // URLSession/URLRequest/HTTPURLResponse live in FoundationNetworking on non-Darwin
 // platforms (swift-corelibs-foundation); this import is a no-op on macOS.
 #if canImport(FoundationNetworking)
 import FoundationNetworking
+#endif
+// OSLog is Darwin-only; AnglesiteCore is part of the Linux-portable target set (Package.swift,
+// cross-platform port design §9/§10), so logging falls back to stderr off-Darwin.
+#if canImport(OSLog)
+import OSLog
 #endif
 
 public enum WorkerCatalogFetchError: Error, Sendable, Equatable {
@@ -19,7 +23,19 @@ public enum WorkerCatalogFetchError: Error, Sendable, Equatable {
 ///   yet published `catalog.json` — callers must supply the real manifest URL once the monorepo
 ///   publishes one.
 public actor WorkerCatalogFetcher {
+    #if canImport(OSLog)
     private static let logger = Logger(subsystem: "io.dwk.anglesite", category: "WorkerCatalogFetcher")
+    #endif
+
+    /// Degraded-path logging, portable off-Darwin (no OSLog on Linux — cross-platform port
+    /// design §9/§10).
+    private static func logDegradation(_ message: String) {
+        #if canImport(OSLog)
+        logger.error("\(message, privacy: .public)")
+        #else
+        FileHandle.standardError.write(Data("[WorkerCatalogFetcher] \(message)\n".utf8))
+        #endif
+    }
 
     private let catalogURL: URL
     private let cacheURL: URL
@@ -45,12 +61,12 @@ public actor WorkerCatalogFetcher {
         do {
             return try await fetchAndCache()
         } catch {
-            Self.logger.error("catalog fetch failed, falling back to cache: \(String(describing: error), privacy: .public)")
+            Self.logDegradation("catalog fetch failed, falling back to cache: \(error)")
         }
         do {
             return try Self.readCache(cacheURL)
         } catch {
-            Self.logger.error("catalog cache read failed, falling back to empty catalog: \(String(describing: error), privacy: .public)")
+            Self.logDegradation("catalog cache read failed, falling back to empty catalog: \(error)")
             return []
         }
     }
@@ -64,7 +80,7 @@ public actor WorkerCatalogFetcher {
         do {
             try Self.writeCache(data, to: cacheURL, fileManager: fileManager)
         } catch {
-            Self.logger.error("catalog cache write failed (serving fresh data anyway): \(String(describing: error), privacy: .public)")
+            Self.logDegradation("catalog cache write failed (serving fresh data anyway): \(error)")
         }
         return descriptors
     }
