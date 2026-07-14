@@ -1138,3 +1138,6 @@ gh issue comment 518 --body "Menu-bar skeleton (spec 2026-07-13) shipped: Insert
 - Not in phase 1 (explicit): Website Settings…/Analytics…/Logs… backends, named-browser
   preview, single-file/password, git version browser, annotations, typed collections,
   Import from Phone submenu, component-library variant submenus.
+- Edit ▸ system submenus (Spelling and Grammar/Substitutions/Transformations/Speech) and
+  Paste and Match Style — SwiftUI provides no placeholder surface for system text menus;
+  they arrive with the editor (spec §2.3).

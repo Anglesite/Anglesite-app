@@ -200,7 +200,7 @@ struct AnglesiteApp: App {
                 Button("About Anglesite") { showAboutPanel() }
             }
 
-            CommandGroup(after: .appSettings) {
+            CommandGroup(before: .systemServices) {
                 Divider()
 
                 Button("Provide Anglesite Feedback…") {
@@ -220,8 +220,8 @@ struct AnglesiteApp: App {
             EditMenuSkeletonCommands()
             // Both groups anchor `before: .importExport`; later declarations insert ABOVE earlier
             // ones, so FileItemCommands is declared first to land BELOW SaveCommands, giving the
-            // order Save · Duplicate · Rename… · Move To… · Revert To ▸ · Reveal in Finder · Share….
-            // File ▸ Rename… / Reveal in Finder for the focused window (#513).
+            // order Save · Duplicate · Rename… · Move To… · Revert To ▸ · Reveal in Finder · Share…
+            // (FileItemCommands: Rename/Move To/Revert To/Reveal/Share, #513).
             FileItemCommands()
             // File ▸ Save ⌘S / Duplicate for the focused window's editors (#509; Revert To lives in FileItemCommands).
             SaveCommands()
@@ -259,8 +259,8 @@ struct AnglesiteApp: App {
             PrintCommands()
             // Insert menu (menu-bar spec §2.4) — leftmost of the custom menus.
             InsertCommands()
-            // Page menu (menu-bar spec §2.5) — declared before SiteMenuCommands so it
-            // renders left of it (CommandMenus appear in declaration order).
+            // Page menu (menu-bar spec §2.5) — CommandMenus render in declaration order:
+            // Insert · Page · Format · Arrange · Website.
             PageCommands()
             // Format menu skeleton (menu-bar spec §2.6) — editor-gated.
             FormatCommands()
