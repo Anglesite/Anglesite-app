@@ -107,4 +107,25 @@ struct FrontmatterTests {
         let fm = Frontmatter.parse("---\ntitle: plain value\n---")
         #expect(fm["title"] == .string("plain value"))
     }
+
+    // MARK: - Body accessor (Slice 6, #465)
+
+    @Test("body: everything after the closing fence")
+    func bodyAfterFence() {
+        let body = Frontmatter.body("---\ntitle: Our Story\ndescription: How we started\n---\n\n# Hello\nBody text.")
+        #expect(body.contains("Body text."))
+        #expect(!body.contains("title:"))
+    }
+
+    @Test("body: unfenced input is returned whole")
+    func bodyUnfenced() {
+        #expect(Frontmatter.body("just text") == "just text")
+        #expect(Frontmatter.body("# Just a heading\n\nbody") == "# Just a heading\n\nbody")
+    }
+
+    @Test("body: unterminated fence returns whole input")
+    func bodyUnterminatedFence() {
+        let src = "---\ntitle: x\nno closing fence"
+        #expect(Frontmatter.body(src) == src)
+    }
 }

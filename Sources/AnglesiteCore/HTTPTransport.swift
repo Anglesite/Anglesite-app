@@ -1,4 +1,9 @@
 import Foundation
+// URLSession/URLRequest/HTTPURLResponse live in FoundationNetworking on non-Darwin
+// platforms (swift-corelibs-foundation); this import is a no-op on macOS.
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// `MCPTransport` over MCP Streamable HTTP. Each `send` POSTs one JSON-RPC message to the `/mcp`
 /// endpoint; the response (single `application/json` object, or one-or-more messages over a
@@ -47,11 +52,13 @@ public actor HTTPTransport: MCPTransport {
         if let bearerToken { request.setValue("Bearer \(bearerToken.value)", forHTTPHeaderField: "Authorization") }
         request.httpBody = try JSONSerialization.data(withJSONObject: message.rawValue, options: [])
 
-        // Use `bytes(for:)`, NOT `data(for:)`: a `text/event-stream` response is treated by
-        // URLSession as an indefinite stream on a keep-alive connection, so `data(for:)` never
-        // completes (it waits for the socket to close, which doesn't happen) — it hangs. With
-        // `bytes(for:)` we read SSE events incrementally and return after the first complete event
-        // (the response to this request) without waiting for the stream to end.
+        // Must not fully buffer a `text/event-stream` response: URLSession treats it as an
+        // indefinite stream on a keep-alive connection, so reading the whole body (`data(for:)`)
+        // never completes (it waits for the socket to close, which doesn't happen) — it hangs.
+        // Both platform paths below read incrementally and return after the first complete SSE
+        // event (the response to this request) without waiting for the stream to end.
+        #if canImport(Darwin)
+        // `bytes(for:)` gives an incremental AsyncSequence of the response body.
         let asyncBytes: URLSession.AsyncBytes
         let response: URLResponse
         do {
@@ -61,6 +68,19 @@ public actor HTTPTransport: MCPTransport {
             throw HTTPError.sessionLost
         }
         guard let http = response as? HTTPURLResponse else { throw HTTPError.badResponse }
+        #else
+        // `FoundationNetworking` has no `bytes(for:)`/`AsyncBytes`; ``HTTPStreamingRunner``
+        // gets the same incremental behavior via `URLSessionDataDelegate`.
+        let runner = HTTPStreamingRunner()
+        let response: URLResponse
+        do {
+            response = try await runner.start(request, configuration: urlSession.configuration)
+        } catch {
+            sessionID = nil
+            throw HTTPError.sessionLost
+        }
+        guard let http = response as? HTTPURLResponse else { throw HTTPError.badResponse }
+        #endif
 
         if let sid = http.value(forHTTPHeaderField: "Mcp-Session-Id"), !sid.isEmpty {
             sessionID = sid
@@ -83,18 +103,21 @@ public actor HTTPTransport: MCPTransport {
             // Parse SSE line-by-line; emit the first complete event's data payload and return.
             // (One POSTed request yields exactly one response message on its request-scoped stream.)
             var dataLines: [String] = []
+            #if canImport(Darwin)
             for try await line in asyncBytes.lines {
-                if line.isEmpty {
-                    if !dataLines.isEmpty {
-                        if let value = decode(dataLines.joined(separator: "\n")) { continuation.yield(value) }
-                        return
-                    }
-                } else if line.hasPrefix("data:") {
-                    let v = line.dropFirst("data:".count)
-                    dataLines.append(v.hasPrefix(" ") ? String(v.dropFirst()) : String(v))
+                if case .complete(let value) = accumulateSSELine(line, into: &dataLines) {
+                    if let value { continuation.yield(value) }
+                    return
                 }
-                // event:/id:/retry:/comment lines are ignored.
             }
+            #else
+            for try await line in runner.lines() {
+                if case .complete(let value) = accumulateSSELine(line, into: &dataLines) {
+                    if let value { continuation.yield(value) }
+                    return
+                }
+            }
+            #endif
             // Stream ended without a trailing blank line — flush whatever accumulated.
             if !dataLines.isEmpty, let value = decode(dataLines.joined(separator: "\n")) {
                 continuation.yield(value)
@@ -102,9 +125,34 @@ public actor HTTPTransport: MCPTransport {
         } else {
             // application/json (or other): accumulate the bounded body and decode one message.
             var data = Data()
+            #if canImport(Darwin)
             for try await byte in asyncBytes { data.append(byte) }
+            #else
+            for try await chunk in runner.bodyStream { data.append(chunk) }
+            #endif
             if !data.isEmpty, let value = decodeData(data) { continuation.yield(value) }
         }
+    }
+
+    /// One line of SSE parsing shared by both platform read loops: accumulates `data:` payload
+    /// lines, and on a blank line (event terminator) reports the decoded event so the caller can
+    /// yield it and stop reading (one POSTed request yields exactly one response message).
+    /// `event:`/`id:`/`retry:`/comment lines are ignored.
+    private enum SSELineResult {
+        case continueReading
+        case complete(JSONValue?)
+    }
+
+    private func accumulateSSELine(_ line: String, into dataLines: inout [String]) -> SSELineResult {
+        if line.isEmpty {
+            guard !dataLines.isEmpty else { return .continueReading }
+            return .complete(decode(dataLines.joined(separator: "\n")))
+        }
+        if line.hasPrefix("data:") {
+            let v = line.dropFirst("data:".count)
+            dataLines.append(v.hasPrefix(" ") ? String(v.dropFirst()) : String(v))
+        }
+        return .continueReading
     }
 
     public nonisolated func inbound() -> AsyncStream<JSONValue> { stream }

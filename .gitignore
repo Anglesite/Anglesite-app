@@ -58,11 +58,12 @@ Resources/Template/.astro/
 Resources/container-image/
 !Resources/container-image/.gitkeep
 
-# Transient MCP sidecar staging dir (populated from the plugin by scripts/vendor-container-image.sh,
-# cleaned up on exit; never committed — plugin source lives in the sibling anglesite repo).
+# Transient MCP sidecar staging dir (populated from the plugin by scripts/vendor-container-image.sh
+# or scripts/build-podman-image.sh, cleaned up on exit; never committed — plugin source lives in
+# the sibling anglesite repo).
 Containers/anglesite-dev/mcp-sidecar/
 
-# Transient template + hydrate-script staging (populated by scripts/vendor-container-image.sh from
+# Transient template + hydrate-script staging (populated by the same two scripts from
 # Resources/Template/ and container/hydrate.sh, cleaned up on exit; never committed — both are
 # already tracked at their real, single-source locations).
 Containers/anglesite-dev/template/

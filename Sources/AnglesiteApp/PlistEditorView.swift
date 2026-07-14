@@ -9,6 +9,7 @@ struct PlistEditorView: View {
     private enum SettingsTab: String, CaseIterable, Identifiable {
         case website = "Website"
         case analytics = "Analytics"
+        case redirects = "Redirects"
         var id: Self { self }
     }
 
@@ -32,6 +33,8 @@ struct PlistEditorView: View {
         .onChange(of: selectedTab) { oldValue, _ in
             if oldValue == .analytics {
                 Task { await model.saveAnalytics() }
+            } else if oldValue == .redirects {
+                Task { await model.saveRedirects() }
             }
         }
         .onChange(of: controlActiveState) { _, new in
@@ -49,7 +52,7 @@ struct PlistEditorView: View {
         HStack {
             Label("Settings", systemImage: "gearshape")
                 .font(.headline)
-            if model.isDirty || model.isAnalyticsDirty {
+            if model.isDirty || model.isAnalyticsDirty || model.isRedirectsDirty {
                 Circle().fill(.secondary).frame(width: 7, height: 7)
                     .help("Unsaved changes")
             }
@@ -98,12 +101,19 @@ struct PlistEditorView: View {
                             .foregroundStyle(.orange)
                             .font(.callout)
                     }
+                    if selectedTab != .redirects, let redirectsError = model.redirectsError {
+                        Label(redirectsError, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+                    }
 
                     switch selectedTab {
                     case .website:
                         websiteTab
                     case .analytics:
                         analyticsTab
+                    case .redirects:
+                        redirectsTab
                     }
                 }
                 .padding()
@@ -228,6 +238,93 @@ struct PlistEditorView: View {
         }
     }
 
+    /// Stable per-row identity for the in-progress editing table below: `RedirectsStore.RedirectEntry.id`
+    /// is `source`, which two freshly-added blank rows both share until the user types something, so it
+    /// can't be used as SwiftUI row identity here. The array index is stable for the lifetime of a single
+    /// render pass and doesn't collide, so every binding and the delete action key off it instead.
+    private struct RedirectRow: Identifiable {
+        let id: Int
+        let entry: RedirectsStore.RedirectEntry
+    }
+
+    private var redirectRows: [RedirectRow] {
+        model.redirectEntries.enumerated().map { RedirectRow(id: $0.offset, entry: $0.element) }
+    }
+
+    private var redirectsTab: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if model.redirectEntries.isEmpty {
+                Text("No redirects yet. Add one below.")
+                    .foregroundStyle(.secondary)
+            } else {
+                Table(redirectRows) {
+                    TableColumn("Source") { row in
+                        TextField("/old-path", text: sourceBinding(at: row.id))
+                    }
+                    TableColumn("Destination") { row in
+                        TextField("/new-path", text: destinationBinding(at: row.id))
+                    }
+                    TableColumn("Type") { row in
+                        Picker("Type", selection: codeBinding(at: row.id)) {
+                            Text("301").tag(RedirectsStore.RedirectEntry.Code.permanent)
+                            Text("302").tag(RedirectsStore.RedirectEntry.Code.temporary)
+                        }
+                        .labelsHidden()
+                    }
+                    TableColumn("") { row in
+                        Button(role: .destructive) {
+                            model.redirectEntries.remove(at: row.id)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(minHeight: 120)
+            }
+            HStack(spacing: 8) {
+                Button {
+                    model.redirectEntries.append(RedirectsStore.RedirectEntry(source: "", destination: "", code: .permanent))
+                } label: {
+                    Label("Add Redirect", systemImage: "plus")
+                }
+                if model.isSavingRedirects {
+                    ProgressView().controlSize(.small)
+                }
+            }
+        }
+    }
+
+    private func sourceBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { model.redirectEntries.indices.contains(index) ? model.redirectEntries[index].source : "" },
+            set: { newValue in
+                if model.redirectEntries.indices.contains(index) {
+                    model.redirectEntries[index].source = newValue
+                }
+            })
+    }
+
+    private func destinationBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { model.redirectEntries.indices.contains(index) ? model.redirectEntries[index].destination : "" },
+            set: { newValue in
+                if model.redirectEntries.indices.contains(index) {
+                    model.redirectEntries[index].destination = newValue
+                }
+            })
+    }
+
+    private func codeBinding(at index: Int) -> Binding<RedirectsStore.RedirectEntry.Code> {
+        Binding(
+            get: { model.redirectEntries.indices.contains(index) ? model.redirectEntries[index].code : .permanent },
+            set: { newValue in
+                if model.redirectEntries.indices.contains(index) {
+                    model.redirectEntries[index].code = newValue
+                }
+            })
+    }
+
     private var conflictBinding: Binding<Bool> {
         Binding(get: { model.conflictDiskContents != nil }, set: { _ in })
     }
@@ -258,7 +355,7 @@ struct PlistEditorView: View {
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = WebsiteIconInstaller.allowedContentTypes
-        panel.prompt = model.hasWebsiteIcons ? "Change" : "Choose"
+        panel.prompt = model.hasWebsiteIcons ? String(localized: "Change") : String(localized: "Choose")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         Task { await model.installWebsiteIcons(from: url) }
     }

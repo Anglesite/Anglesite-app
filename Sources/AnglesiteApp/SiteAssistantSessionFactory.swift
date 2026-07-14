@@ -15,12 +15,18 @@ struct SiteAssistantSession {
 enum SiteAssistantSessionFactory {
     typealias MCPClientProvider = @Sendable () async -> MCPClient?
     typealias EditRouterProvider = @Sendable (_ siteID: String) async -> (any EditRouter)?
+    typealias GraphSnapshotProvider = @Sendable () async -> SiteGraphExplorerSnapshot
     typealias AssistantBuilder = @Sendable (
         _ editBridge: IntentEditBridge,
         _ contentGraph: SiteContentGraph,
         _ knowledgeIndex: SiteKnowledgeIndex,
         _ semanticRanker: SemanticRanker?,
-        _ integrationService: any IntegrationOperationsService
+        _ integrationService: any IntegrationOperationsService,
+        _ conventionsEngine: ProjectConventionsEngine?,
+        _ conventionsStore: ProjectConventionsStore,
+        _ themeCatalog: ThemeCatalog?,
+        _ designInterviewFactory: FoundationModelAssistant.DesignInterviewModelFactory?,
+        _ graphSnapshotProvider: @escaping GraphSnapshotProvider
     ) -> any ConversationalAssistant
 
     struct Dependencies {
@@ -32,7 +38,8 @@ enum SiteAssistantSessionFactory {
         var altTextGenerator: @Sendable (
             _ siteID: String,
             _ sourceDirectory: URL,
-            _ mcpClient: @escaping MCPClientProvider
+            _ mcpClient: @escaping MCPClientProvider,
+            _ conventionsEngine: ProjectConventionsEngine?
         ) -> AltTextGenerator
 
         static let live: Dependencies = {
@@ -48,17 +55,25 @@ enum SiteAssistantSessionFactory {
             let editRouterProvider: EditRouterProvider = { siteID in
                 await EditRouterRegistry.shared.router(for: siteID)
             }
-            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService in
-                KnowledgeAugmentedAssistant(
+            let assistant: AssistantBuilder = { editBridge, contentGraph, knowledgeIndex, semanticRanker, integrationService, conventionsEngine, conventionsStore, themeCatalog, designInterviewFactory, graphSnapshotProvider in
+                CombinedAugmentedAssistant(
                     base: FoundationModelAssistant(
                         tier: .onDevice,
                         editBridge: editBridge,
                         contentGraph: contentGraph,
                         knowledgeIndex: knowledgeIndex,
                         semanticRanker: semanticRanker,
-                        integrationService: integrationService
+                        integrationService: integrationService,
+                        conventionsEngine: conventionsEngine,
+                        conventionsStore: conventionsStore,
+                        copyEditAuditor: CopyEditAuditorFactory.makeDefault(),
+                        socialMediaPlanner: SocialMediaPlannerFactory.makeDefault(),
+                        postRepurposer: PostRepurposerFactory.makeDefault(),
+                        themeCatalog: themeCatalog,
+                        designInterviewFactory: designInterviewFactory
                     ),
-                    index: knowledgeIndex
+                    index: knowledgeIndex,
+                    graphSnapshotProvider: graphSnapshotProvider
                 )
             }
             return Dependencies(
@@ -67,14 +82,19 @@ enum SiteAssistantSessionFactory {
                 undoCommand: undoCommand,
                 editRouterProvider: editRouterProvider,
                 assistant: assistant,
-                altTextGenerator: { siteID, sourceDirectory, mcpClient in
+                altTextGenerator: { siteID, sourceDirectory, mcpClient, conventionsEngine in
                     AltTextGenerator(
                         siteID: siteID,
                         siteDirectory: sourceDirectory,
                         isEnabled: { AppSettings.shared.autoGenerateAltText },
                         produce: { imageURL, context in
-                            try await FoundationModelAssistant(tier: .onDevice).generateStructured(
-                                prompt: "Generate concise, descriptive alt text for this image as it would appear on a website. If the image is purely decorative, mark it decorative and use empty alt text.",
+                            let conventions = await conventionsEngine?.conventions(siteID: siteID)
+                            let prompt = AltTextPromptBuilder.build(
+                                basePrompt: "Generate concise, descriptive alt text for this image as it would appear on a website. If the image is purely decorative, mark it decorative and use empty alt text.",
+                                conventions: conventions
+                            )
+                            return try await FoundationModelAssistant(tier: .onDevice).generateStructured(
+                                prompt: prompt,
                                 imageURL: imageURL,
                                 context: context,
                                 resultType: GeneratedAltText.self
@@ -103,14 +123,46 @@ enum SiteAssistantSessionFactory {
         siteID: String,
         sourceDirectory: URL,
         configDirectory: URL,
+        packageURL: URL? = nil,
         mcpClient: @escaping MCPClientProvider,
         contentGraph: SiteContentGraph,
         knowledgeIndex: SiteKnowledgeIndex,
         semanticRanker: SemanticRanker?,
+        conventionsEngine: ProjectConventionsEngine?,
         integrationService: any IntegrationOperationsService,
-        dependencies: Dependencies = .live
+        themeCatalog: ThemeCatalog? = nil,
+        dependencies: Dependencies = .live,
+        graphSnapshotProvider: @escaping GraphSnapshotProvider
     ) -> SiteAssistantSession {
         let editBridge = IntentEditBridge(routerProvider: dependencies.editRouterProvider)
+        // A second `ProjectConventionsStore` instance pointed at the same `configDirectory` as
+        // `SiteWindowModel`'s Style Guide store (rather than threading that instance through this
+        // factory's parameter list) — harmless because all writes now flow through the shared
+        // `conventionsEngine` (#465): `BrandVoiceWriter`/`ProjectConventionsModel` only ever persist
+        // the engine's merged snapshot to whichever store instance they hold, so a second store
+        // pointed at the same `conventions.json` never observes a stale value.
+        let conventionsStore = ProjectConventionsStore(configDirectory: configDirectory)
+        // The chat front door's design-interview factory (#665), invoked lazily by
+        // `FoundationModelAssistant` on `DesignInterviewTool`'s first call. Mirrors
+        // `SiteWindowModel.presentDesignInterview()`: a **standalone** on-device assistant, because
+        // the interview is its own model conversation — routing it through the hosting chat
+        // assistant would both append interview turns to the chat session's transcript and
+        // re-enter that actor's single-flight session mid-drain.
+        let designInterviewFactory: FoundationModelAssistant.DesignInterviewModelFactory? = packageURL.map { packageURL in
+            {
+                // Read off the main actor — only DesignInterviewModel's init needs MainActor,
+                // and `.site-config` may live on slow (e.g. iCloud-backed) storage.
+                let businessType = SiteBusinessType.read(sourceDirectory: sourceDirectory) ?? ""
+                return await MainActor.run {
+                    DesignInterviewModel(
+                        businessType: businessType,
+                        assistant: FoundationModelAssistant(tier: .onDevice),
+                        package: AnglesitePackage(url: packageURL),
+                        siteID: siteID
+                    )
+                }
+            }
+        }
         let chat = ChatModel(
             siteID: siteID,
             siteDirectory: sourceDirectory,
@@ -120,7 +172,12 @@ enum SiteAssistantSessionFactory {
                 contentGraph,
                 knowledgeIndex,
                 semanticRanker,
-                integrationService
+                integrationService,
+                conventionsEngine,
+                conventionsStore,
+                themeCatalog,
+                designInterviewFactory,
+                graphSnapshotProvider
             ),
             annotationFeed: dependencies.annotationFeed(sourceDirectory),
             annotationResolver: { [resolveAnnotation = dependencies.resolveAnnotation] id in
@@ -129,7 +186,7 @@ enum SiteAssistantSessionFactory {
             undoCommand: dependencies.undoCommand(mcpClient)
         )
 
-        let altTextGenerator = dependencies.altTextGenerator(siteID, sourceDirectory, mcpClient)
+        let altTextGenerator = dependencies.altTextGenerator(siteID, sourceDirectory, mcpClient, conventionsEngine)
         let postProcessor: MCPApplyEditRouter.PostProcessor? = { reply, message in
             await altTextGenerator.postProcess(reply: reply, message: message)
         }

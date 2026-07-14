@@ -23,6 +23,16 @@ public struct EditReply: Sendable, Equatable, Encodable {
     public let after: String?
     /// The op the preview/apply was for (e.g. "edit-style"). `nil` outside preview.
     public let op: String?
+    /// Piggybacked component model — present when the plugin's structured `.applied` reply
+    /// included a `model` key (Component Editor CSS write ops), sparing the app a second
+    /// `get_component_model` round-trip after the edit. `nil` otherwise.
+    public let model: ComponentModel?
+    /// Machine-readable refusal code from the plugin's `anglesite:edit-failed` body (e.g.
+    /// `"stale"`, `"no-match"`, `"invalid-input"`) — present whenever the router could parse a
+    /// structured failure. Callers that need to distinguish failure kinds (e.g. staleness vs. a
+    /// routine refusal) should switch on this instead of substring-matching `message`, which is
+    /// free-form prose the plugin is free to reword.
+    public let reason: String?
 
     public struct ImageResult: Sendable, Equatable, Encodable {
         public let src: String
@@ -47,7 +57,9 @@ public struct EditReply: Sendable, Equatable, Encodable {
         result: ImageResult? = nil,
         before: String? = nil,
         after: String? = nil,
-        op: String? = nil
+        op: String? = nil,
+        model: ComponentModel? = nil,
+        reason: String? = nil
     ) {
         self.id = id
         self.status = status
@@ -58,6 +70,8 @@ public struct EditReply: Sendable, Equatable, Encodable {
         self.before = before
         self.after = after
         self.op = op
+        self.model = model
+        self.reason = reason
     }
 }
 
@@ -66,6 +80,14 @@ public struct EditReply: Sendable, Equatable, Encodable {
 /// default is `LoggingEditRouter`.
 public protocol EditRouter: Sendable {
     func apply(_ message: EditMessage) async -> EditReply
+}
+
+/// Resolves an optional configured router to a router that's always safe to call —
+/// falls back to `LoggingEditRouter` (fails safe, never silently drops an edit) when
+/// nothing was wired. Named and tested separately from `ComponentCanvasView.makeNSView`
+/// so the fallback behavior has coverage independent of the untestable NSViewRepresentable.
+public func resolveEditRouter(_ configured: EditRouter?) -> EditRouter {
+    configured ?? LoggingEditRouter()
 }
 
 /// Development default: logs the message to `LogCenter` (so it shows up in the Debug pane) and
@@ -79,10 +101,11 @@ public struct LoggingEditRouter: EditRouter {
     }
 
     public func apply(_ message: EditMessage) async -> EditReply {
+        let target = message.selector.map { "\($0)" } ?? message.component.map { "\($0)" } ?? "?"
         await logCenter.append(
             source: "bridge",
             stream: .stdout,
-            text: "(stub) would apply \(message.op) on \(message.selector) at \(message.path) [id=\(message.id)]"
+            text: "(stub) would apply \(message.op) on \(target) at \(message.path) [id=\(message.id)]"
         )
         return EditReply(
             id: message.id,

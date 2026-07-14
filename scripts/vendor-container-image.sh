@@ -2,85 +2,24 @@
 # Build the active macOS Apple Containerization image and export it as an OCI layout into
 # Resources/container-image/.
 #
-# Docker/buildx is only the image builder. At runtime Anglesite imports this OCI layout and
-# boots it with Apple's Containerization framework; Docker is not used by the app.
+# Apple's `container` CLI is the image builder. At runtime Anglesite imports this OCI layout
+# and boots it with Apple's Containerization framework — builder and runtime share the same
+# OCI implementation. Docker is not used anywhere on this path.
 #
-# Produces a gitignored, bundled app resource. Requires Docker (or a compatible buildx)
-# with linux/arm64 support, run on an Apple-Silicon Mac.
+# Produces a gitignored, bundled app resource. Requires the Apple `container` CLI (≥ 1.1,
+# https://github.com/apple/container) on an Apple-Silicon Mac.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib/container-cli.sh"
+source "$ROOT/scripts/lib/stage-dev-image-context.sh"
+# Fail fast, before staging work: no point copying the sidecar/template if the CLI is missing.
+ensure_container_cli
 CTX="$ROOT/Containers/anglesite-dev"
 OUT="$ROOT/Resources/container-image"
 
-# ---------------------------------------------------------------------------
-# Stage the MCP sidecar source into the Docker build context.
-# The plugin source is outside the build context (sibling repo), so we copy
-# it in before building and clean up after. Mirror scripts/copy-plugin.sh's
-# resolution: honor $ANGLESITE_PLUGIN_SRC, default to ../anglesite (sibling
-# under the same parent dir as this repo).
-# ---------------------------------------------------------------------------
-DEFAULT_PLUGIN_SRC="$(cd "$ROOT/.." && pwd)/anglesite"
-PLUGIN_SRC="${ANGLESITE_PLUGIN_SRC:-$DEFAULT_PLUGIN_SRC}"
-
-if [[ ! -d "$PLUGIN_SRC" ]]; then
-    echo "ERROR: plugin source not found at $PLUGIN_SRC" >&2
-    echo "       Set ANGLESITE_PLUGIN_SRC or clone github.com/Anglesite/anglesite as a sibling." >&2
-    exit 1
-fi
-if [[ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]]; then
-    echo "ERROR: $PLUGIN_SRC does not look like the Anglesite plugin (no .claude-plugin/plugin.json)" >&2
-    exit 1
-fi
-
-SIDECAR_STAGE="$CTX/mcp-sidecar"
-echo "Staging MCP sidecar from $PLUGIN_SRC → $SIDECAR_STAGE"
-rm -rf "$SIDECAR_STAGE"
-mkdir -p "$SIDECAR_STAGE"
-
-# Copy the plugin's server/ directory + package manifests (no node_modules, no .git).
-rsync -a --delete \
-    --exclude='node_modules/' \
-    --exclude='.git/' \
-    "$PLUGIN_SRC/server/" "$SIDECAR_STAGE/server/"
-cp "$PLUGIN_SRC/package.json" "$SIDECAR_STAGE/"
-cp "$PLUGIN_SRC/package-lock.json" "$SIDECAR_STAGE/"
-
-echo "Sidecar staged: $(ls "$SIDECAR_STAGE")"
-
-# ---------------------------------------------------------------------------
-# Stage the website template's dependency manifests + the hydrate script into
-# the build context, so the image can bake the template's full node_modules
-# (design §5b, same pattern as container/Dockerfile). hydrate.sh is shared
-# with the Cloudflare image — container/hydrate.sh is the single source.
-# ---------------------------------------------------------------------------
-TEMPLATE_STAGE="$CTX/template"
-echo "Staging template manifests from $ROOT/Resources/Template → $TEMPLATE_STAGE"
-rm -rf "$TEMPLATE_STAGE"
-mkdir -p "$TEMPLATE_STAGE"
-cp "$ROOT/Resources/Template/package.json" "$TEMPLATE_STAGE/"
-cp "$ROOT/Resources/Template/package-lock.json" "$TEMPLATE_STAGE/"
-cp "$ROOT/container/hydrate.sh" "$CTX/hydrate.sh"
-
-# Clean up the staged sidecar + template + hydrate script on exit (success or
-# failure) so they don't accumulate in the build context. These are gitignored.
-cleanup_sidecar() { rm -rf "$SIDECAR_STAGE" "$TEMPLATE_STAGE" "$CTX/hydrate.sh"; }
-trap cleanup_sidecar EXIT
+stage_dev_image_context "$CTX"
 
 echo "Building anglesite-dev:latest (linux/arm64)…"
-
-# The brief's original export path used `docker save` + `skopeo copy` to produce an OCI layout.
-# skopeo is not a standard install and is absent on many dev Macs. Instead we use a buildx
-# docker-container driver builder which supports `--output type=oci` natively — the default
-# `docker` driver does not support OCI output, so a separate builder is required. This avoids
-# the skopeo dependency entirely and produces the same OCI layout on disk.
-#
-# Guard: create the builder only if it doesn't already exist (idempotent).
-# Note: we do NOT call `docker buildx use` — it would mutate the developer's global active
-# builder and persist after this script exits. The `--builder anglesite-oci` flag on the
-# build command below is sufficient and side-effect-free.
-if ! docker buildx inspect anglesite-oci >/dev/null 2>&1; then
-    docker buildx create --name anglesite-oci --driver docker-container
-fi
 
 echo "Exporting OCI layout → $OUT"
 # Wipe any stale layout contents but preserve the committed .gitkeep placeholder so
@@ -88,15 +27,23 @@ echo "Exporting OCI layout → $OUT"
 find "$OUT" -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
 mkdir -p "$OUT"
 
-# Build for linux/arm64 and emit an OCI archive (tar) directly into a temp file, then untar it
-# into the layout directory. `--output type=oci,dest=...` emits a spec-compliant OCI image layout
-# (index.json + oci-layout + blobs/sha256/) as a tar archive. We untar and remove the archive.
+# Build into the CLI's local image store, then export with `container image save`, which emits
+# a spec-compliant OCI image layout (index.json + oci-layout + blobs/sha256/) as a tar archive.
+# Two steps instead of `container build --output type=oci,dest=…` because that flag is broken in
+# container CLI 1.1.0 (the build completes, then the CLI errors "image.tar doesn't exist" —
+# the tarball never lands at dest; reproduced with a trivial FROM-alpine build). Side benefit:
+# the store keeps anglesite-dev:latest between runs, so rebuilds are incremental — the same role
+# the old docker-container buildx builder's cache played.
 ARCHIVE="$OUT/image.tar"
-docker buildx build \
-    --platform linux/arm64 \
-    --output "type=oci,name=anglesite-dev:latest,dest=${ARCHIVE}" \
-    --builder anglesite-oci \
+# --build-arg TARGETARCH is explicit rather than relying on the builder to auto-inject it
+# (unlike BuildKit, container CLI 1.1.0's docs don't confirm it sets platform ARGs
+# automatically) — the Dockerfile's per-arch base-image stage selection needs it either way.
+container build \
+    --os linux --arch arm64 \
+    --build-arg TARGETARCH=arm64 \
+    --tag anglesite-dev:latest \
     "$CTX"
+container image save --platform linux/arm64 --output "$ARCHIVE" anglesite-dev:latest
 
 tar -xf "$ARCHIVE" -C "$OUT"
 rm -f "$ARCHIVE"

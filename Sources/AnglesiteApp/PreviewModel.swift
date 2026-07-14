@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import AnglesiteBridge
 import AnglesiteCore
 
 /// SwiftUI-facing wrapper over a `SiteRuntime` actor: mirrors the runtime's `SiteRuntimeState` into
@@ -15,6 +16,16 @@ final class PreviewModel {
     /// the runtime is still `.starting`.
     private(set) var openSiteID: String?
 
+    /// The `Source/` directory of the last-opened site, kept so the Site ▸ Start/Restart Dev
+    /// Server commands (#515) can re-launch the runtime without re-resolving the site. Cleared
+    /// in `close()` alongside `openSiteID`.
+    private(set) var openSiteDirectory: URL?
+
+    /// True after Site ▸ Stop Dev Server: distinguishes an owner-stopped `.idle` (show the
+    /// stopped pane with a Start button) from the transient pre-boot `.idle` (show the spinner).
+    /// Cleared by every start path (`open`/`startDevServer`/`restartDevServer`).
+    private(set) var devServerStoppedByUser = false
+
     /// Set by SiteWindowModel right before calling `open()` following an accepted
     /// dependency update (Task 9) — that boot will hit the slow `npm install` path
     /// instead of the instant hardlink path (the lockfile was just deleted), so the
@@ -29,10 +40,44 @@ final class PreviewModel {
 
     private let runtime: any SiteRuntime
 
-    /// The live preview `WKWebView`, registered by `PreviewView` when it's created. Weak: SwiftUI's
-    /// `NSViewRepresentable` owns the web view's lifetime; the model only borrows it to open the Web
-    /// Inspector from the "Show Web Inspector" View-menu command (`showWebInspector()`).
-    weak var webView: WKWebView?
+    /// The live preview `WKWebView`, registered by `PreviewView` when it's created and detached
+    /// via `detachWebView(_:)` when SwiftUI dismantles it. Weak: SwiftUI's `NSViewRepresentable`
+    /// owns the web view's lifetime; the model only borrows it for the View-menu commands — Show
+    /// Web Inspector (`showWebInspector()`) and the preview navigation commands (#514: reload,
+    /// back/forward, zoom). Setting it (re)installs the KVO mirrors for `canGoBack`/`canGoForward`
+    /// and re-applies the persisted `zoomLevel`, so a web view recreated across a dev-server
+    /// restart keeps the user's zoom.
+    ///
+    /// The explicit detach path matters: ARC zeroing a weak var does NOT fire `didSet`, so
+    /// relying on zeroing alone would leave the KVO mirrors frozen at their last values whenever
+    /// the web view is torn down without a replacement (dev-server restart/failure switches
+    /// `previewPane` off the `.ready` branch) — Back/Forward would stay enabled with no web view.
+    weak var webView: WKWebView? {
+        didSet {
+            guard oldValue !== webView else { return }
+            observeNavigationState()
+            webView?.pageZoom = CGFloat(zoomLevel)
+        }
+    }
+
+    /// Mirrors of `WKWebView.canGoBack`/`.canGoForward`, observable so the View-menu Back/Forward
+    /// items enable/disable live. KVO-fed by `observeNavigationState()`; reset to false when the
+    /// web view detaches (`detachWebView(_:)`) or is replaced.
+    private(set) var canGoBack = false
+    private(set) var canGoForward = false
+
+    /// The preview's page-zoom level (View ▸ Zoom In/Out/Actual Size, #514). Owned by the model —
+    /// not read back from the web view — so it survives web-view recreation. Always one of
+    /// `PreviewZoom.levels`.
+    private(set) var zoomLevel: Double = PreviewZoom.actualSize
+
+    /// KVO tokens for the `canGoBack`/`canGoForward` mirrors; replaced whenever `webView` changes
+    /// and cleared on `detachWebView(_:)`. Note the modern closure-based `observe(...)` token does
+    /// NOT retain the observed object — it holds it weakly and auto-invalidates when the observed
+    /// object deallocates (verified empirically on the Swift 6.4 toolchain), so a stale token here
+    /// cannot keep a torn-down web view alive; clearing on detach is about resetting the mirrors,
+    /// not about breaking a retain.
+    private var webViewObservations: [NSKeyValueObservation] = []
 
     /// The `EditRouter` that the WKWebView's `AnglesiteScriptHandler` forwards overlay edits to.
     /// Wired to the runtime's `MCPClient` via a weak getter so the router doesn't outlive the
@@ -47,12 +92,14 @@ final class PreviewModel {
         contentGraph: SiteContentGraph? = nil,
         knowledgeIndex: SiteKnowledgeIndex? = nil,
         semanticRanker: SemanticRanker? = nil,
+        conventionsEngine: ProjectConventionsEngine? = nil,
         runtimeFactory: any SiteRuntimeFactory
     ) {
         self.init(runtime: runtimeFactory.makeRuntime(
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
-            semanticRanker: semanticRanker
+            semanticRanker: semanticRanker,
+            conventionsEngine: conventionsEngine
         ))
     }
 
@@ -67,6 +114,9 @@ final class PreviewModel {
         Task { @MainActor [weak self] in
             for await newState in await runtime.observe() {
                 self?.state = newState
+                // Any transition acknowledges the last dispatched dev-server command — every
+                // accepted start/stop produces at least one (see `devServerCommandInFlight`).
+                self?.devServerCommandInFlight = false
                 switch newState {
                 case .ready, .failed:
                     self?.isUpdatingDependencies = false
@@ -108,6 +158,12 @@ final class PreviewModel {
 
     func open(siteID: String, siteDirectory: URL) {
         openSiteID = siteID
+        openSiteDirectory = siteDirectory
+        devServerStoppedByUser = false
+        // `open` dispatches a boot just like the menu commands do, and `siteOpenForDevServer`
+        // just became true while `state` may still read `.idle` — without this, Site ▸ Start
+        // would be enabled during the dispatch gap and could race the opening boot.
+        let token = markDevServerCommandInFlight()
         let router = self.editRouter
         Task {
             // Register before starting the runtime so a Siri edit fired during dev-server boot
@@ -115,17 +171,123 @@ final class PreviewModel {
             // returning the bridge's no-router fallback message.
             await EditRouterRegistry.shared.register(router, for: siteID)
             await runtime.start(siteID: siteID, siteDirectory: siteDirectory)
+            // #587: pull any visitor submissions staged since the site was last open and commit
+            // them into the git working copy. No-ops for sites without inbox capture configured
+            // (SiteSettings.inboxCapture{AccountID,KVNamespaceID} unset).
+            let configDirectory = siteDirectory.deletingLastPathComponent()
+                .appendingPathComponent("Config", isDirectory: true)
+            _ = await InboxSubmissionSync.pullAndCommitIfConfigured(
+                siteDirectory: siteDirectory, configDirectory: configDirectory)
+            clearDevServerCommandInFlight(token: token)
         }
     }
 
     func close() {
         let previousSiteID = openSiteID
         openSiteID = nil
+        openSiteDirectory = nil
+        devServerStoppedByUser = false
         Task {
             if let previousSiteID {
                 await EditRouterRegistry.shared.unregister(siteID: previousSiteID)
             }
             await runtime.stop()
+        }
+    }
+
+    // MARK: - Dev-server controls (Site menu, #515)
+
+    /// True from dispatching a Start/Stop/Restart command (or `open`'s initial boot) until the
+    /// runtime acknowledges it. `canStart…`/`canStop…`/`canRestart…` read `state`, which only
+    /// updates asynchronously via the `observe()` stream — without this flag, a rapid
+    /// double-click (or a second command fired before the first's transition lands) would pass
+    /// the stale-state guard and dispatch two racing runtime calls (PR #542 review).
+    ///
+    /// Cleared by whichever acknowledgement arrives first:
+    /// - any observed state transition (the wedged-boot case: `start` emits `.starting` long
+    ///   before it returns, so Restart re-enables while the boot is still in flight), or
+    /// - the dispatched runtime call returning (the no-transition case: e.g.
+    ///   `UnavailableSiteRuntime` re-settling into an identical `.failed`, which `setState`
+    ///   dedups — without this, the flag would stick and permanently disable Start/Retry).
+    ///   Token-guarded so a superseded call's late return can't clear a newer command's flag.
+    private(set) var devServerCommandInFlight = false
+
+    /// Monotonic token identifying the latest dispatched dev-server command — see
+    /// `devServerCommandInFlight`'s completion-clear path.
+    @ObservationIgnored private var devServerCommandToken = 0
+
+    private func markDevServerCommandInFlight() -> Int {
+        devServerCommandToken += 1
+        devServerCommandInFlight = true
+        return devServerCommandToken
+    }
+
+    private func clearDevServerCommandInFlight(token: Int) {
+        if token == devServerCommandToken { devServerCommandInFlight = false }
+    }
+
+    /// Whether a site is open enough to (re)start its dev server: both fields are captured by
+    /// `open(siteID:siteDirectory:)`, so this is true from first open until `close()`.
+    private var siteOpenForDevServer: Bool {
+        openSiteID != nil && openSiteDirectory != nil
+    }
+
+    /// Enablement mirrors `DevServerControls` (AnglesiteCore) — the CI-tested rules — so the
+    /// menu, the stopped pane's Start button, and any future toolbar affordance stay consistent.
+    var canStartDevServer: Bool {
+        DevServerControls.canStart(state: state, siteOpen: siteOpenForDevServer, commandInFlight: devServerCommandInFlight)
+    }
+    var canStopDevServer: Bool {
+        DevServerControls.canStop(state: state, siteOpen: siteOpenForDevServer, commandInFlight: devServerCommandInFlight)
+    }
+    var canRestartDevServer: Bool {
+        DevServerControls.canRestart(state: state, siteOpen: siteOpenForDevServer, commandInFlight: devServerCommandInFlight)
+    }
+
+    /// Site ▸ Start Dev Server: relaunch the runtime for the already-open site (after an explicit
+    /// Stop, or as a recovery from `.failed` — same effect as the preview pane's Retry button).
+    func startDevServer() {
+        guard canStartDevServer else { return }
+        relaunchDevServer()
+    }
+
+    /// Site ▸ Restart Dev Server: for a wedged Astro process that hasn't died. Same body as
+    /// Start — `SiteRuntime.start` tears down any previous run first (protocol contract), so a
+    /// restart is a plain re-start on every runtime; only the enablement differs (see
+    /// `DevServerControls`). Both funnel into `relaunchDevServer()` so the two can't drift.
+    func restartDevServer() {
+        guard canRestartDevServer else { return }
+        relaunchDevServer()
+    }
+
+    /// Shared Start/Restart dispatch. The edit router stays registered across a stop, so no
+    /// re-registration is needed here (unlike `open(siteID:siteDirectory:)`).
+    private func relaunchDevServer() {
+        guard let siteID = openSiteID, let siteDirectory = openSiteDirectory else { return }
+        devServerStoppedByUser = false
+        let token = markDevServerCommandInFlight()
+        Task {
+            await runtime.start(siteID: siteID, siteDirectory: siteDirectory)
+            clearDevServerCommandInFlight(token: token)
+        }
+    }
+
+    /// Site ▸ Stop Dev Server: tear down the runtime but keep the site open in the window
+    /// (unlike `close()`, which also unregisters the edit router and forgets the site). Frees
+    /// the container/dev-server resources for a backgrounded site window; the runtime settles
+    /// to `.idle` and the preview pane shows the stopped state with a Start button.
+    func stopDevServer() {
+        guard canStopDevServer else { return }
+        devServerStoppedByUser = true
+        // Clear here (not just on `.ready`/`.failed`): stopping mid-boot never reaches either of
+        // those, so without this a Stop issued during a dependency-update boot would leave the
+        // flag stuck true — the next Start/Restart would then show "Updating dependencies…" for
+        // what's actually a plain restart.
+        isUpdatingDependencies = false
+        let token = markDevServerCommandInFlight()
+        Task {
+            await runtime.stop()
+            clearDevServerCommandInFlight(token: token)
         }
     }
 
@@ -145,10 +307,12 @@ final class PreviewModel {
 
     /// The URL the preview WKWebView should load: the active page route against the ready base
     /// URL, or the base URL itself when no route is active. `nil` until the runtime is `.ready`.
+    /// Also carries the Debug Pane's global ESI preview mode (spec §4a) as a query parameter, so
+    /// `EsiInclude`'s dev shim can read it.
     var displayURL: URL? {
         guard let base = readyURL else { return nil }
-        guard let route = activeRoute else { return base }
-        return PreviewNavigation.targetURL(base: base, route: route)
+        let target = activeRoute.map { PreviewNavigation.targetURL(base: base, route: $0) } ?? base
+        return PreviewNavigation.applyingEsiPreviewMode(target, unprocessed: EsiPreviewMode.shared.unprocessed)
     }
 
     /// Open the Web Inspector for the live preview. No-ops when the weak `webView` is nil
@@ -157,6 +321,111 @@ final class PreviewModel {
     func showWebInspector() {
         guard let webView else { return }
         PreviewWebInspector.show(webView)
+    }
+
+    // MARK: Preview navigation (#514)
+
+    /// True once the preview web view exists — the enablement gate for the View-menu preview
+    /// navigation commands. The web view is created when the dev server first becomes ready.
+    var hasWebView: Bool { webView != nil }
+
+    /// Explicit teardown signal from `PreviewView.dismantleNSView` — the counterpart to the
+    /// `onWebView` registration. Required because ARC zeroing the weak `webView` does not fire
+    /// its `didSet`, so without this call the `canGoBack`/`canGoForward` mirrors (and the KVO
+    /// tokens) would outlive the web view they mirror.
+    ///
+    /// Identity-checked: SwiftUI may create a replacement view (`makeNSView` → `onWebView`)
+    /// before dismantling the old one, in which case `webView` already points at the new
+    /// instance and the stale dismantle must not clobber it. The `nil` case is accepted too —
+    /// ARC may have zeroed the reference before the dismantle callback runs, leaving stale
+    /// mirrors that still need the reset (the `didSet` skips its work when old and new are both
+    /// nil, so `observeNavigationState()` is called directly).
+    func detachWebView(_ dismantled: WKWebView) {
+        guard webView === dismantled || webView == nil else { return }
+        webView = nil
+        observeNavigationState()
+    }
+
+    /// Reload the current preview page (View ▸ Reload Preview, ⌘R). No-ops when the web view
+    /// doesn't exist yet, so it's always safe to call.
+    func reloadPreview() {
+        webView?.reload()
+    }
+
+    /// Navigate the preview's history (View ▸ Back ⌘[ / Forward ⌘]). WKWebView no-ops these when
+    /// there's nowhere to go, and the menu items are additionally disabled via
+    /// `canGoBack`/`canGoForward`.
+    func goBack() {
+        webView?.goBack()
+    }
+
+    func goForward() {
+        webView?.goForward()
+    }
+
+    /// Zoom commands (View ▸ Zoom In ⌘+ / Zoom Out ⌘− / Actual Size ⌘0). The step policy lives in
+    /// `PreviewZoom` (AnglesiteCore, CI-tested); this glue just applies the chosen detent to
+    /// `WKWebView.pageZoom`.
+    var canZoomIn: Bool { PreviewZoom.canZoomIn(from: zoomLevel) }
+    var canZoomOut: Bool { PreviewZoom.canZoomOut(from: zoomLevel) }
+
+    func zoomIn() {
+        setZoomLevel(PreviewZoom.zoomIn(from: zoomLevel))
+    }
+
+    func zoomOut() {
+        setZoomLevel(PreviewZoom.zoomOut(from: zoomLevel))
+    }
+
+    func zoomActualSize() {
+        setZoomLevel(PreviewZoom.actualSize)
+    }
+
+    private func setZoomLevel(_ level: Double) {
+        zoomLevel = level
+        webView?.pageZoom = CGFloat(level)
+    }
+
+    /// (Re)install the KVO mirrors of the web view's history state. `canGoBack`/`canGoForward`
+    /// are KVO-compliant on WKWebView and fire on the main thread (`assumeIsolated` asserts that);
+    /// mirroring them into observable properties lets the SwiftUI Commands enable/disable without
+    /// polling the web view.
+    private func observeNavigationState() {
+        webViewObservations = []
+        canGoBack = false
+        canGoForward = false
+        guard let webView else { return }
+        webViewObservations = [
+            webView.observe(\.canGoBack, options: [.initial, .new]) { [weak self] _, change in
+                let value = change.newValue ?? false
+                MainActor.assumeIsolated { self?.canGoBack = value }
+            },
+            webView.observe(\.canGoForward, options: [.initial, .new]) { [weak self] _, change in
+                let value = change.newValue ?? false
+                MainActor.assumeIsolated { self?.canGoForward = value }
+            },
+        ]
+    }
+
+    /// Whether File ▸ Print… has something to print: the preview web view exists and the runtime
+    /// is ready with a page to show. The rule itself lives in `PreviewPrinting` (AnglesiteBridge)
+    /// so it's covered by `swift test` — this is just the glue reading this model's fields (#525).
+    var canPrintPreview: Bool {
+        PreviewPrinting.isAvailable(webView: webView, displayURL: displayURL)
+    }
+
+    /// Print the previewed page (File ▸ Print ⌘P, #525). Runs the operation as a sheet on the
+    /// preview's window when it has one, else app-modal. No-ops when the preview isn't printable
+    /// yet (weak `webView` nil or runtime not ready), so this is always safe to call.
+    @MainActor
+    func printPreview() {
+        guard canPrintPreview, let webView else { return }
+        let operation = PreviewPrinting.makeOperation(for: webView)
+        if let window = webView.window {
+            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        } else {
+            operation.run()
+        }
     }
 
     /// Exposes the runtime's `MCPClient` via the same weak-getter pattern `editRouter` uses,

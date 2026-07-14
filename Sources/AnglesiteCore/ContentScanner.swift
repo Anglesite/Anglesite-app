@@ -27,10 +27,11 @@ public enum ContentScanner {
     )).sorted()
 
     public static func scan(projectRoot: URL, siteID: String) -> ContentListing {
-        ContentListing(
+        let referencedPaths = DeadAssetScanner.referencedPaths(projectRoot: projectRoot)
+        return ContentListing(
             pages: scanPages(projectRoot, siteID: siteID),
             posts: scanPosts(projectRoot, siteID: siteID),
-            images: scanImages(projectRoot, siteID: siteID)
+            images: scanImages(projectRoot, siteID: siteID, referencedPaths: referencedPaths)
         )
     }
 
@@ -141,19 +142,22 @@ public enum ContentScanner {
 
     // MARK: - Images
 
-    private static func scanImages(_ projectRoot: URL, siteID: String) -> [SiteContentGraph.Image] {
+    private static func scanImages(
+        _ projectRoot: URL, siteID: String, referencedPaths: [String: Set<String>]
+    ) -> [SiteContentGraph.Image] {
         let imagesDir = projectRoot.appendingPathComponent("public/images")
         var out: [SiteContentGraph.Image] = []
         for abs in walk(imagesDir) {
             if !imageExtensions.contains(fileExtension(abs)) { continue }
             let relPosix = relativePosix(abs, from: projectRoot)
+            let usedOnPages = (referencedPaths[relPosix.lowercased()] ?? []).sorted()
             out.append(SiteContentGraph.Image(
                 id: "\(siteID):image:\(relPosix)",
                 siteID: siteID,
                 relativePath: relPosix,
                 fileName: abs.lastPathComponent,
                 byteSize: fileSize(abs),
-                usedOnPages: [],  // reverse "which pages use this image" is deferred (#140)
+                usedOnPages: usedOnPages,
                 lastModified: mtime(abs)
             ))
         }
@@ -244,4 +248,43 @@ public enum ContentScanner {
         f.dateFormat = "yyyy-MM-dd"
         return f
     }()
+}
+
+extension SiteContentGraph {
+    /// Scans `projectRoot` off the main actor and loads the result for `siteID` — the shared
+    /// "keep me in sync with disk" glue both `ContentCreationWorkflow`'s post-mutation rescan
+    /// and `SiteWindowModel`'s site-open scan (#660) need, kept off the actor itself per its
+    /// documented "no I/O surface" invariant.
+    ///
+    /// Returns `false` without touching `siteID`'s existing state if `projectRoot` can't even be
+    /// listed — a stale/revoked security-scoped bookmark, a deleted or unmounted directory — so
+    /// `isPopulated` never lies about "scanned and empty" when the scan never actually ran.
+    ///
+    /// Claims a scan generation (#666) before the filesystem walk starts, so a slower rescan
+    /// racing against a faster, newer one from another call site (`ContentCreationWorkflow`'s
+    /// post-mutation rescan) never clobbers the newer result.
+    @discardableResult
+    public func rescan(siteID: String, projectRoot: URL) async -> Bool {
+        let generation = beginScan(siteID: siteID)
+        let listing = await Task.detached(priority: .utility) { () async -> ContentListing? in
+            guard (try? FileManager.default.contentsOfDirectory(atPath: projectRoot.path)) != nil else {
+                await LogCenter.shared.append(
+                    source: "content-graph:\(siteID)", stream: .stderr,
+                    text: "Couldn't list \(projectRoot.path) — leaving the content graph unpopulated "
+                        + "for this scan (stale bookmark, or the directory is missing/unmounted?)"
+                )
+                return nil
+            }
+            return ContentScanner.scan(projectRoot: projectRoot, siteID: siteID)
+        }.value
+        guard let listing else { return false }
+        await load(
+            siteID: siteID,
+            pages: listing.pages,
+            posts: listing.posts,
+            images: listing.images,
+            generation: generation
+        )
+        return true
+    }
 }

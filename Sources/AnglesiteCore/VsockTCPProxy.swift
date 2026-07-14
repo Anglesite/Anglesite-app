@@ -1,3 +1,8 @@
+// vsock proxies are the macOS Apple Containerization runtime's seam; off-Darwin runtimes
+// (PodmanSiteRuntime, per the cross-platform port design doc §7) use plain port-mapping
+// instead, so this file — and its Glibc-vs-Darwin socket-constant differences — compiles out
+// elsewhere. Its only consumer, AnglesiteContainer, is already Darwin-only (Package.swift).
+#if canImport(Darwin)
 import Foundation
 
 /// Dials a guest vsock port and returns a `FileHandle` for the bidirectional byte stream.
@@ -254,3 +259,4 @@ final class ProxyConnection: @unchecked Sendable {
         onClose?(self)
     }
 }
+#endif

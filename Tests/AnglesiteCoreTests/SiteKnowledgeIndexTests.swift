@@ -96,38 +96,6 @@ struct SiteKnowledgeIndexTests {
         #expect(results.isEmpty)
     }
 
-    @Test("project style guide cache invalidates after incremental changes")
-    func projectStyleGuideInvalidatesAfterIncrementalChanges() async {
-        let root = makeSite([
-            "src/pages/about.md": "---\ntitle: About\n---\n## About",
-        ])
-        let index = SiteKnowledgeIndex()
-        await index.rebuild(siteID: "site-1", projectRoot: root)
-
-        let original = await index.projectStyleGuide(siteID: "site-1")
-        #expect(original.rules.contains { $0.id == "frontmatter-pages" })
-
-        try! Data("# About\nNo frontmatter here.".utf8).write(
-            to: root.appendingPathComponent("src/pages/about.md")
-        )
-        await index.upsertFile(siteID: "site-1", projectRoot: root, relativePath: "src/pages/about.md")
-
-        let afterUpsert = await index.projectStyleGuide(siteID: "site-1")
-        #expect(!afterUpsert.rules.contains { $0.id == "frontmatter-pages" })
-
-        let post = root.appendingPathComponent("src/content/posts/news.md")
-        try! FileManager.default.createDirectory(at: post.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try! Data("---\ntitle: News\n---\n## News".utf8).write(to: post)
-        await index.upsertFile(siteID: "site-1", projectRoot: root, relativePath: "src/content/posts/news.md")
-
-        let afterInsert = await index.projectStyleGuide(siteID: "site-1")
-        #expect(afterInsert.rules.contains { $0.id == "frontmatter-posts" })
-
-        await index.removeFile(siteID: "site-1", relativePath: "src/content/posts/news.md")
-        let afterRemove = await index.projectStyleGuide(siteID: "site-1")
-        #expect(!afterRemove.rules.contains { $0.id == "frontmatter-posts" })
-    }
-
     @Test("rebuild stores bounded excerpts instead of full source")
     func rebuildStoresBoundedExcerpts() async {
         let longBody = String(repeating: "a", count: 9_000)

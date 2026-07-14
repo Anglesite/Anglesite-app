@@ -5,27 +5,20 @@ import AnglesiteCore
 /// changes and either navigates the preview or opens the editor.
 struct SiteNavigatorView: View {
     @Bindable var model: SiteNavigatorModel
+    var onDeleteRequested: (NavigatorItem) -> Void
+    var onDuplicateRequested: (NavigatorItem) -> Void
+    var onRepurposeRequested: (NavigatorItem) -> Void
     @FocusState private var editingFocused: Bool
 
     var body: some View {
         List(selection: $model.selection) {
-            ForEach(model.sections) { section in
-                if let title = section.title {
-                    Section(title) {
-                        ForEach(section.items) { item in
-                            row(for: item, in: section)
-                        }
-                    }
-                } else {
-                    ForEach(section.items) { item in
-                        row(for: item, in: section)
-                    }
-                }
+            OutlineGroup(model.nodes, children: \.children) { node in
+                row(for: node)
             }
         }
         .listStyle(.sidebar)
         .overlay {
-            if model.sections.isEmpty {
+            if model.nodes.isEmpty {
                 ContentUnavailableView("No content yet", systemImage: "sidebar.left")
             }
         }
@@ -58,8 +51,8 @@ struct SiteNavigatorView: View {
     }
 
     @ViewBuilder
-    private func row(for item: NavigatorItem, in section: NavigatorSection) -> some View {
-        if model.editingItemID == item.id {
+    private func row(for node: URLTreeNode) -> some View {
+        if model.editingItemID == node.id {
             TextField("Title", text: $model.draftTitle)
                 .textFieldStyle(.plain)
                 .focused($editingFocused)
@@ -70,32 +63,58 @@ struct SiteNavigatorView: View {
                     // consumed by the list and only surfaces as focus loss. So commit on focus loss
                     // (Return / Tab / click-away, Finder-style). Esc cancels first via onExitCommand,
                     // which clears editingItemID, so this guard then skips the commit.
-                    if !focused && model.editingItemID == item.id {
+                    if !focused && model.editingItemID == node.id {
                         Task { await model.commitEditing() }
                     }
                 }
                 .task { editingFocused = true }
-                .tag(item.id)
+                .tag(node.id)
         } else {
-            Label(item.title, systemImage: icon(for: section.id))
-                .tag(item.id)
+            Label { Text(node.title) } icon: { icon(for: node) }
+                .tag(node.id)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .contextMenu {
-                    if model.canRename(item.id) {
-                        Button("Rename") { model.beginEditing(item.id) }
+                    if model.canRename(node.id) {
+                        Button("Rename") { model.beginEditing(node.id) }
+                    }
+                    if model.canDuplicate(node.id), let item = model.item(for: node.id) {
+                        Button("Duplicate") { onDuplicateRequested(item) }
+                    }
+                    if model.canRepurpose(node.id), let item = model.item(for: node.id) {
+                        Button("Repurpose Post…") { onRepurposeRequested(item) }
+                    }
+                    if model.canDelete(node.id), let item = model.item(for: node.id) {
+                        Button("Delete", role: .destructive) { onDeleteRequested(item) }
                     }
                 }
         }
     }
 
-    private func icon(for group: FileGroup) -> String {
-        switch group {
-        case .pages: return "doc.richtext"
-        case .posts: return "text.document"
-        case .components: return "square.stack.3d.up"
-        case .styles: return "paintbrush"
-        case .metadata: return "globe"
+    /// #714 icon table: globe (website settings) / house (home) / doc.richtext (pages, entries) /
+    /// folder (directory) — with a radio-waves badge composed on feed-bearing directories until
+    /// the custom symbol from docs/art-briefs/2026-07-13-folder-rss-symbol.md ships.
+    @ViewBuilder
+    private func icon(for node: URLTreeNode) -> some View {
+        switch node.kind {
+        case .website:
+            Image(systemName: "globe")
+        case .home:
+            Image(systemName: "house")
+        case .page:
+            Image(systemName: "doc.richtext")
+        case .directory(_, hasFeed: false):
+            Image(systemName: "folder")
+        case .directory(_, hasFeed: true):
+            Image(systemName: "folder")
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: "dot.radiowaves.up.forward")
+                        .font(.system(size: 7, weight: .bold))
+                        .symbolRenderingMode(.monochrome)
+                        .padding(1)
+                        .background(.background, in: .circle)
+                        .accessibilityLabel("Has RSS feed")
+                }
         }
     }
 }

@@ -1,4 +1,9 @@
 import Foundation
+// URLSession/URLRequest/HTTPURLResponse live in FoundationNetworking on non-Darwin
+// platforms (swift-corelibs-foundation); this import is a no-op on macOS.
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Minimal JSON value used at the MCP boundary so request/response shapes stay `Sendable` and
 /// `Equatable` without forcing every caller to define a `Codable` model.
@@ -32,7 +37,16 @@ public indirect enum JSONValue: Sendable, Equatable {
         // NSNumber must be checked BEFORE Bool/Int/Double casts — `NSNumber(1) as? Bool`
         // succeeds, which would silently turn integer 1 into .bool(true).
         if let n = value as? NSNumber {
-            if CFGetTypeID(n) == CFBooleanGetTypeID() { return .bool(n.boolValue) }
+            #if canImport(Darwin)
+            let isBool = CFGetTypeID(n) == CFBooleanGetTypeID()
+            #else
+            // CFGetTypeID/CFBooleanGetTypeID (CoreFoundation) don't exist off Darwin. Empirically,
+            // swift-corelibs-foundation's JSONSerialization boxes JSON booleans with objCType "c"
+            // and every JSON number (int or double) with "i"/"q"/"d"/"f" — never "c" — so the
+            // objCType check just below already distinguishes them; this only names that branch.
+            let isBool = String(cString: n.objCType) == "c"
+            #endif
+            if isBool { return .bool(n.boolValue) }
             // JSONSerialization uses NSNumber for both ints and doubles; pick based on the
             // CFNumber type so 1.0 stays a double and 1 stays an int.
             let typeChar = String(cString: n.objCType)

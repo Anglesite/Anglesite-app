@@ -3,9 +3,10 @@ import Foundation
 // `FoundationModels` ships in the macOS 26 SDK but is absent from GitHub's `macos-15`
 // runner at *runtime* — linking it into the package makes the whole test bundle fail to
 // `dlopen`. Gate it behind the Xcode-27 toolchain (Swift 6.4) so CI on Xcode 26.3 builds
-// without it, while production (always Xcode 27) gets these types. See #128 and
+// without it, while production (always Xcode 27) gets these types. Also gate on canImport
+// for genuine off-Darwin portability (cross-platform port design §5). See #128 and
 // ContentAssistant.swift for the same pattern.
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 /// The kind of mutation a ``GeneratedEditCommand`` performs. The cases correspond 1:1 to
@@ -119,5 +120,96 @@ public struct GeneratedDeployFailureSummary: Equatable, Sendable {
 public struct GeneratedPageCopySuggestion: Equatable, Sendable {
     @Guide(description: "A single concise SEO meta description sentence, under 160 characters, that does not repeat the title verbatim.")
     public var description: String
+}
+
+/// On-device guided-generation result for the throttled project-conventions enrichment pass
+/// (tone/brand-term fields the deterministic extractor can't compute from text alone).
+@Generable
+public struct GeneratedProjectConventions: Equatable, Sendable {
+    @Guide(description: "Three to five adjectives describing this site's writing tone, e.g. ['concise', 'playful', 'technical'].")
+    public var toneDescriptors: [String]
+
+    @Guide(description: "Up to five brand or product terms with their canonical capitalization as used in the text, e.g. ['Anglesite', 'Astro'].")
+    public var brandTerms: [String]
+}
+
+/// On-device guided-generation result for a single copy-edit checklist finding (#465). Mapped to
+/// the non-gated `CopyFindingDraft` before it crosses the FoundationModels gate.
+@Generable
+public struct GeneratedCopyFinding: Equatable, Sendable {
+    @Guide(description: "Checklist category: clarity, benefits, voice, cta, scannability, reader-focus, jargon, social-proof, missing-info, or mobile.")
+    public var category: String
+    @Guide(description: "Severity: high, medium, or low.")
+    public var severity: String
+    @Guide(description: "Short excerpt of the problematic copy, quoted verbatim from the page text — exact characters, no paraphrase.")
+    public var excerpt: String
+    @Guide(description: "One-sentence plain-language description of the issue.")
+    public var issue: String
+    @Guide(description: "Suggested replacement copy in the site's voice.")
+    public var suggestedRewrite: String
+}
+
+/// On-device guided-generation result for a whole page's copy-edit audit (#465): up to 5
+/// highest-impact findings, per `CopyEditPrompt`.
+@Generable
+public struct GeneratedPageCopyFindings: Equatable, Sendable {
+    @Guide(description: "Up to 5 highest-impact findings for this page. Empty when the copy is strong.")
+    public var findings: [GeneratedCopyFinding]
+}
+
+/// On-device guided-generation result for a single social platform bio (#465). Mapped to
+/// `SocialMediaPlan.bios` before it crosses the FoundationModels gate.
+@Generable
+public struct GeneratedSocialBio: Equatable, Sendable {
+    @Guide(description: "The profile bio text, within the stated character limit. No hashtags unless the platform calls for them.")
+    public var bio: String
+}
+
+/// On-device guided-generation result for a single social content pillar (#465). Mapped to
+/// the non-gated `SocialPillar` before it crosses the FoundationModels gate.
+@Generable
+public struct GeneratedSocialPillar: Equatable, Sendable {
+    @Guide(description: "Short pillar name, e.g. 'Behind the scenes'.")
+    public var name: String
+    @Guide(description: "One sentence on what this pillar covers and why followers care.")
+    public var detail: String
+}
+
+/// On-device guided-generation result for the full set of social content pillars (#465).
+@Generable
+public struct GeneratedSocialPillars: Equatable, Sendable {
+    @Guide(description: "3 to 5 content pillars. Roughly 80% value/story content, 20% promotional.")
+    public var pillars: [GeneratedSocialPillar]
+}
+
+/// On-device guided-generation result for a single social calendar entry (#465). Mapped to
+/// the non-gated `SocialCalendarEntry` before it crosses the FoundationModels gate.
+@Generable
+public struct GeneratedSocialWeekEntry: Equatable, Sendable {
+    @Guide(description: "Day of week, e.g. 'Monday'.")
+    public var day: String
+    @Guide(description: "Platform name, exactly as given in the prompt.")
+    public var platform: String
+    @Guide(description: "Pillar name, exactly as given in the prompt.")
+    public var pillar: String
+    @Guide(description: "One concrete post idea the owner could shoot/write that day.")
+    public var idea: String
+}
+
+/// On-device guided-generation result for one week's social calendar (#465), one call per week
+/// (chunk-first — see `SocialPlanPrompt`).
+@Generable
+public struct GeneratedSocialWeek: Equatable, Sendable {
+    @Guide(description: "The week's post schedule, respecting each platform's posts-per-week cadence.")
+    public var entries: [GeneratedSocialWeekEntry]
+}
+
+/// On-device guided-generation result for one platform's repurposed blog-post copy (#465).
+/// Mapped to the non-gated `PlatformPostVariant` before it crosses the FoundationModels gate;
+/// the char-limit policy (spec §5.3) is enforced in Swift, never trusted to the model.
+@Generable
+public struct GeneratedPlatformPost: Equatable, Sendable {
+    @Guide(description: "The complete post text for the platform, within the stated character limit, ready to copy-paste.")
+    public var text: String
 }
 #endif

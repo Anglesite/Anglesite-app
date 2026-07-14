@@ -51,9 +51,11 @@ import Foundation
                   "integrations/pages/podcast.astro",
                   "integrations/pages/buy.astro", "integrations/pages/shop.astro", "integrations/pages/pricing.astro",
                   "integrations/pages/store.astro", "integrations/pages/products.astro",
+                  "integrations/pages/members.astro", "integrations/components/MemberCard.astro",
                   "integrations/public/sw.js",
                   "integrations/worker/subscribe-worker.js", "integrations/worker/subscribe-wrangler.toml",
-                  "integrations/docs/newsletter-setup.md", "integrations/docs/pwa-setup.md"] {
+                  "integrations/docs/newsletter-setup.md", "integrations/docs/pwa-setup.md",
+                  "integrations/docs/inbox-setup.md"] {
             #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "missing staged \(p)")
         }
         // NOT base-scaffolded: every staged asset must be absent from src/ (covers all five —
@@ -74,8 +76,9 @@ import Foundation
                   "src/pages/podcast.astro",
                   "src/pages/buy.astro", "src/pages/shop.astro", "src/pages/pricing.astro",
                   "src/pages/store.astro", "src/pages/products.astro",
+                  "src/pages/members.astro", "src/components/MemberCard.astro",
                   "worker/subscribe-worker.js", "worker/subscribe-wrangler.toml",
-                  "docs/newsletter-setup.md", "docs/pwa-setup.md"] {
+                  "docs/newsletter-setup.md", "docs/pwa-setup.md", "docs/inbox-setup.md"] {
             #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(p).path), "should be staged, not in src: \(p)")
         }
     }
@@ -152,6 +155,13 @@ import Foundation
         for line in excludeLines {
             #expect(allowedExcludes.contains { line.contains($0) }, "unexpected exclude in scaffold.sh: \(line)")
         }
+    }
+
+    @Test func astroConfigRegistersRedirectsIntegration() throws {
+        let configURL = templateRoot().appendingPathComponent("astro.config.ts")
+        let source = try String(contentsOf: configURL, encoding: .utf8)
+        #expect(source.contains("import redirects from \"./scripts/redirects.ts\""))
+        #expect(source.contains("redirects()"))
     }
 
     /// Guard test: config keys referenced by each integration page must be a subset of the

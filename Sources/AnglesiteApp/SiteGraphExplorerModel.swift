@@ -1,33 +1,74 @@
 import Foundation
 import Observation
+import OSLog
 import AnglesiteCore
+
+/// Lifecycle of the AI explanation for the selected node (#614). `unavailable` is deliberately
+/// distinct from `failed`: the on-device model being off (Apple Intelligence disabled, model not
+/// downloaded) is an expected state with a user-facing remedy, not an error — and per the LLM
+/// policy it must surface as such rather than silently falling back to any cloud call.
+enum SiteGraphExplainState: Equatable {
+    case idle
+    /// Streaming in progress; the associated text grows as chunks arrive (empty until the first).
+    case generating(String)
+    case complete(String)
+    case unavailable(String)
+    case failed(String)
+}
 
 @MainActor
 @Observable
 final class SiteGraphExplorerModel {
     private(set) var snapshot = SiteGraphExplorerSnapshot(nodes: [], edges: [])
-    var selectedNodeID: String?
+    var selectedNodeID: String? {
+        didSet {
+            // A new selection invalidates the previous node's explanation — reset instead of
+            // showing stale prose (or a stale error) under the new node's inspector.
+            if oldValue != selectedNodeID { resetExplain() }
+        }
+    }
     var searchText = ""
     var enabledKinds = Set(SiteGraphNodeKind.allCases)
+    private(set) var explainState: SiteGraphExplainState = .idle
 
     private let graph: SiteContentGraph
+    private let explainer: (any SiteGraphNodeExplaining)?
+    private let logger = Logger(subsystem: "dev.anglesite.app", category: "SiteGraphExplorer")
     private var observeTask: Task<Void, Never>?
+    private var explainTask: Task<Void, Never>?
     private var siteID: String?
     private var sourceDirectory: URL?
 
-    init(graph: SiteContentGraph) {
+    init(
+        graph: SiteContentGraph,
+        explainer: (any SiteGraphNodeExplaining)? = SiteGraphExplainerFactory.makeDefault()
+    ) {
         self.graph = graph
+        self.explainer = explainer
     }
 
     var filteredNodes: [SiteGraphNode] {
+        snapshot.nodes.filter { enabledKinds.contains($0.kind) && matchesSearch($0) }
+    }
+
+    private func matchesSearch(_ node: SiteGraphNode) -> Bool {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return snapshot.nodes.filter { node in
-            guard enabledKinds.contains(node.kind) else { return false }
-            guard !query.isEmpty else { return true }
-            return node.title.lowercased().contains(query)
-                || node.detail?.lowercased().contains(query) == true
-                || node.filePath?.lowercased().contains(query) == true
-        }
+        guard !query.isEmpty else { return true }
+        return node.title.lowercased().contains(query)
+            || node.detail?.lowercased().contains(query) == true
+            || node.filePath?.lowercased().contains(query) == true
+    }
+
+    /// Selects a node navigated to from the Impact section. Impact is computed over the *full*
+    /// snapshot, so the target may currently be hidden by the toolbar kind filter or the search
+    /// query — a plain `selectedNodeID = …` would then leave the explorer visibly inconsistent:
+    /// no canvas highlight, and `selectedIncoming`/`selectedOutgoing` silently empty because
+    /// `filteredEdges` drops edges touching hidden nodes. Re-enable the node's kind and clear a
+    /// search that hides it, so the rest of the explorer can actually show the new selection.
+    func revealNode(_ node: SiteGraphNode) {
+        enabledKinds.insert(node.kind)
+        if !matchesSearch(node) { searchText = "" }
+        selectedNodeID = node.id
     }
 
     var filteredEdges: [SiteGraphEdge] {
@@ -40,6 +81,14 @@ final class SiteGraphExplorerModel {
         return snapshot.nodes.first { $0.id == selectedNodeID }
     }
 
+    /// Impact analysis for the selected node (#309): what on the site changes if this file is
+    /// edited. Computed over the *full* snapshot, not the filtered view — impact is factual and
+    /// must not shrink because a node kind is toggled off in the toolbar.
+    var selectedImpact: ImpactAnalysis.Report? {
+        guard let selectedNodeID else { return nil }
+        return ImpactAnalysis.analyze(snapshot: snapshot, targetID: selectedNodeID)
+    }
+
     var selectedIncoming: [SiteGraphEdge] {
         guard let selectedNodeID else { return [] }
         return filteredEdges.filter { $0.targetID == selectedNodeID }
@@ -48,6 +97,27 @@ final class SiteGraphExplorerModel {
     var selectedOutgoing: [SiteGraphEdge] {
         guard let selectedNodeID else { return [] }
         return filteredEdges.filter { $0.sourceID == selectedNodeID }
+    }
+
+    /// Incoming-edge counts recomputed from `filteredEdges`, not the global
+    /// `SiteGraphNode.referencedByCount` baked in at `SiteGraphExplorer.build()` time. Badges and
+    /// the "Unused Assets" grouping must reflect the *visible* graph (matching `visibleSummary`'s
+    /// framing) — otherwise an asset referenced only by a currently kind-filtered-out node still
+    /// shows a stale "used" badge (#552).
+    var visibleReferenceCounts: [String: Int] {
+        Dictionary(grouping: filteredEdges, by: \.targetID).mapValues(\.count)
+    }
+
+    var groupedFilteredNodes: [(kind: SiteGraphNodeKind, nodes: [SiteGraphNode])] {
+        SiteGraphExplorerGrouping.grouped(nodes: filteredNodes, referenceCounts: visibleReferenceCounts)
+    }
+
+    var unusedAssets: [SiteGraphNode] {
+        SiteGraphExplorerGrouping.unusedAssets(nodes: filteredNodes, referenceCounts: visibleReferenceCounts)
+    }
+
+    var visibleSummary: String {
+        SiteGraphExplorerGrouping.summary(nodeCount: filteredNodes.count, edgeCount: filteredEdges.count)
     }
 
     func start(siteID: String, sourceDirectory: URL) {
@@ -69,6 +139,20 @@ final class SiteGraphExplorerModel {
     func stop() {
         observeTask?.cancel()
         observeTask = nil
+        // Wind down an in-flight explanation too, or its task (strongly capturing self for
+        // explainState writes) keeps draining the model stream for a window that's gone.
+        resetExplain()
+    }
+
+    /// Forces an immediate re-scan using the already-stored `siteID`/`sourceDirectory` from the
+    /// last `start(...)`, without touching the observe-task subscription. Used after a mutation
+    /// this model has no other way to learn about — e.g. a Cleanup delete, which doesn't touch
+    /// `SiteContentGraph` for component/layout candidates, so nothing would otherwise trigger a
+    /// refresh and a deleted node would stay open-able (and, if edited and saved, resurrect the
+    /// file via a raw non-git write).
+    func refreshNow() async {
+        guard let siteID, let sourceDirectory else { return }
+        await refresh(siteID: siteID, sourceDirectory: sourceDirectory)
     }
 
     func setKind(_ kind: SiteGraphNodeKind, enabled: Bool) {
@@ -85,6 +169,83 @@ final class SiteGraphExplorerModel {
     func node(id: String) -> SiteGraphNode? {
         snapshot.nodes.first { $0.id == id }
     }
+
+    // MARK: AI explanation (#614)
+
+    /// Whether the Explain action can run — mirrors every precondition `explainSelectedNode()`
+    /// itself guards on, so the two can't drift apart if `start()`'s sequencing ever changes.
+    /// Runtime unavailability (Apple Intelligence off) is not gated here — the action stays
+    /// offered and resolves to ``SiteGraphExplainState/unavailable(_:)``, which tells the user how
+    /// to fix it.
+    var canExplain: Bool {
+        explainer != nil && selectedNode != nil && selectedImpact != nil
+            && siteID != nil && sourceDirectory != nil
+    }
+
+    /// Streams an on-device AI explanation of the selected node into ``explainState``, grounded
+    /// in the node's edges and its ``ImpactAnalysis.Report`` (never a free-form guess about the
+    /// site). Neighbors are read from the *full* snapshot, matching `selectedImpact` — facts must
+    /// not shrink because a kind is toggled off in the toolbar.
+    func explainSelectedNode() {
+        guard let explainer, let node = selectedNode, let impact = selectedImpact,
+              let siteID, let sourceDirectory else { return }
+        explainTask?.cancel()
+        // Single edge pass + ID-keyed lookup, not a linear node scan per matched edge — a hub
+        // node on a large site would otherwise do O(edges × nodes) work on the main actor.
+        let nodesByID = Dictionary(snapshot.nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var dependsOn: [SiteGraphNode] = []
+        var referencedBy: [SiteGraphNode] = []
+        for edge in snapshot.edges {
+            if edge.sourceID == node.id, let target = nodesByID[edge.targetID] { dependsOn.append(target) }
+            if edge.targetID == node.id, let source = nodesByID[edge.sourceID] { referencedBy.append(source) }
+        }
+        let prompt = SiteGraphExplainPrompt.prompt(
+            node: node,
+            impact: impact,
+            dependsOn: dependsOn,
+            referencedBy: referencedBy
+        )
+        explainState = .generating("")
+        // Weak self: a live FoundationModels stream is deliberately never cancelled mid-iteration
+        // (see resetExplain()), so this task can outlive the model (e.g. the window closes while
+        // streaming) — it must not keep the whole model alive for that duration, matching the
+        // observeTask pattern in start() above.
+        explainTask = Task { [weak self, explainer] in
+            do {
+                var text = ""
+                let stream = try await explainer.explain(prompt: prompt, siteID: siteID, siteDirectory: sourceDirectory)
+                for try await chunk in stream {
+                    if Task.isCancelled { return }
+                    text += chunk
+                    guard let self else { return }
+                    self.explainState = .generating(text)
+                }
+                guard !Task.isCancelled, let self else { return }
+                self.explainState = .complete(text)
+            } catch AssistantError.unavailable(let message) {
+                guard !Task.isCancelled, let self else { return }
+                self.explainState = .unavailable(message)
+            } catch {
+                guard !Task.isCancelled, let self else { return }
+                // The site owner, not a developer, reads this — a raw NSError/Foundation
+                // description isn't actionable for them. Keep it in the debug log only.
+                self.logger.error("Site graph explanation failed: \(error.localizedDescription, privacy: .public)")
+                self.explainState = .failed("Something went wrong generating this explanation. Please try again.")
+            }
+        }
+    }
+
+    /// Cancels delivery of an in-flight explanation and clears the state. Only consumption stops —
+    /// an underlying FoundationModels stream is never cancelled mid-iteration (that traps the
+    /// process); its detached drain finishes harmlessly, matching `FoundationModelAssistant`.
+    private func resetExplain() {
+        explainTask?.cancel()
+        explainTask = nil
+        explainState = .idle
+    }
+
+    /// Test-only: the in-flight explain task, so tests can await completion deterministically.
+    var explainTaskForTesting: Task<Void, Never>? { explainTask }
 
     private func refresh(siteID: String, sourceDirectory: URL) async {
         let pages = await graph.pages(for: siteID)
@@ -104,6 +265,10 @@ final class SiteGraphExplorerModel {
         }.value
         if Task.isCancelled { return }
         snapshot = next
+        // The explanation was grounded in the snapshot just replaced; even when the selected node
+        // survives (so the didSet won't fire), keeping it risks stale prose contradicting the
+        // freshly-recomputed Impact section right above it.
+        resetExplain()
         if let selectedNodeID, !next.nodes.contains(where: { $0.id == selectedNodeID }) {
             self.selectedNodeID = nil
         }

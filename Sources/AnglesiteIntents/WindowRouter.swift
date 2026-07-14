@@ -36,6 +36,25 @@ public final class WindowRouter {
         pendingNavigation.removeValue(forKey: siteID)
     }
 
+    /// Pending "open the design-interview sheet" request per site, set by
+    /// `StartDesignInterviewIntent` and consumed once by that site's window — mirrors
+    /// `pendingNavigation`'s set-then-consume shape. Kept as its own `Set` (not folded into
+    /// `pendingNavigation`) because it targets a different surface (the design-interview sheet,
+    /// not the preview's page route) and carries no route value of its own.
+    public private(set) var pendingDesignInterview: Set<String> = []
+
+    /// Requests that `siteID`'s window open (or focus), then present the design-interview sheet.
+    public func requestDesignInterview(siteID: String) {
+        pendingDesignInterview.insert(siteID)
+        requested = siteID
+    }
+
+    /// Take (and clear) the pending design-interview request for `siteID`. `true` when one was
+    /// pending, `false` otherwise.
+    public func consumeDesignInterviewRequest(for siteID: String) -> Bool {
+        pendingDesignInterview.remove(siteID) != nil
+    }
+
     /// Set by File ▸ New Site (which can't host the wizard sheet itself). The "Sites"
     /// launcher observes this, runs `presentNewSite()`, then clears it via
     /// `clearNewSiteRequest()`. `private(set)` so only the two methods below mutate it —
@@ -47,4 +66,11 @@ public final class WindowRouter {
 
     /// Called by the launcher once it has consumed the request.
     public func clearNewSiteRequest() { newSiteRequested = false }
+
+    /// Opens (or focuses) the "Sites" launcher window. AppKit callers — the Dock menu (#522) —
+    /// can't reach SwiftUI's `openWindow`, so the launcher root stashes a captured
+    /// `OpenWindowAction` here on appear. `OpenWindowAction` is scene-independent, so the closure
+    /// stays valid after the capturing view disappears. Nil only before the launcher's first
+    /// appearance — and the launcher is the app's default first scene.
+    @ObservationIgnored public var openSitesWindow: (@MainActor () -> Void)?
 }

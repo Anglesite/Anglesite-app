@@ -1,4 +1,9 @@
 import Foundation
+// URLSession/URLRequest/HTTPURLResponse live in FoundationNetworking on non-Darwin
+// platforms (swift-corelibs-foundation); this import is a no-op on macOS.
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Observes which permission groups a stored Cloudflare token actually has, by issuing one cheap
 /// authenticated GET per group. 401/403 means the group is missing; any other response (including

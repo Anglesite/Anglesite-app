@@ -165,6 +165,26 @@ struct SitesLauncherView: View {
             }
         }
         .listStyle(.inset)
+        // Accept `.anglesite` packages dragged from Finder (#524) — same register path as
+        // Finder double-click (`onOpenURL`), including the MAS bookmark mint (a user drag
+        // conveys sandbox access to the dragged item).
+        .dropDestination(for: URL.self) { urls, _ in
+            let packages = urls.filter { $0.pathExtension == AnglesitePackage.packageExtension }
+            guard !packages.isEmpty else { return false }
+            Task { @MainActor in
+                for url in packages {
+                    do {
+                        let site = try await SiteActions.registerPackage(at: url)
+                        openWindow(value: site.id)
+                    } catch {
+                        NSAlert(error: SiteActions.ImportError(
+                            folderName: url.lastPathComponent, underlying: error
+                        )).runModal()
+                    }
+                }
+            }
+            return true
+        }
         .confirmationDialog(
             "Remove “\(siteToRemoveName)” from Anglesite?",
             isPresented: Binding(
@@ -346,8 +366,17 @@ struct SitesLauncherView: View {
                 try await ProcessSupervisor.shared.run(executable: exe, arguments: args, currentDirectoryURL: cwd)
             },
             gitInit: { sourceDir in
-                let git = URL(fileURLWithPath: "/usr/bin/git")
-                _ = try await ProcessSupervisor.shared.run(executable: git, arguments: ["init"], currentDirectoryURL: sourceDir)
+                // Route through GitInitRunner so a failure throws instead of being discarded —
+                // see #548, where this used to `_ = try await ...run(...)` and silently kept a
+                // Source/ with no .git that could never preview. SwiftGit2 (in-process libgit2,
+                // #640) rather than a /usr/bin/git subprocess, so there's no subprocess output to
+                // forward to LogCenter here.
+                try GitInitRunner.run(in: sourceDir)
+            },
+            gitCommit: { sourceDir in
+                // Local init+commit only (no GitHub) — lands a real initial commit so the site
+                // has a HEAD immediately and can be cloned into a container runtime for preview.
+                try await RepoBootstrap.live().commitAll(source: sourceDir)
             },
             register: { package in
                 let site = try await SiteStore.shared.record(package)
@@ -380,8 +409,8 @@ struct SitesLauncherView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.directoryURL = sitesRoot
-        panel.prompt = "Grant Access"
-        panel.message = "Choose your Sites folder so Anglesite can create the new site there."
+        panel.prompt = String(localized: "Grant Access")
+        panel.message = String(localized: "Choose your Sites folder so Anglesite can create the new site there.")
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         if let data = try? SecurityScopedBookmark.create(for: url) {
             AppSettings.shared.sitesRootBookmark = data

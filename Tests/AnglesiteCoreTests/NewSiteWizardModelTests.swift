@@ -93,6 +93,7 @@ final class NewSiteWizardModelTests: XCTestCase {
                 return ProcessSupervisor.RunResult(stdout: "", stderr: "", exitCode: 0)
             },
             gitInit: { _ in throw CocoaError(.fileWriteUnknown) },
+            gitCommit: { _ in },
             register: { pkg in SiteStore.Site(id: pkg.url.path, name: pkg.url.lastPathComponent, packageURL: pkg.url, isValid: true, missingSentinels: []) }
         )
     }

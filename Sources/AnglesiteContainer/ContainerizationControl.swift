@@ -43,16 +43,32 @@ public struct ContainerizationControl: LocalContainerControl {
         ref: String,
         onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> LocalContainerSession {
+        try SourceRepoPrecondition.requireGitRepo(at: sourceRepo)
+
         let container = try await makeBareContainer(siteID: siteID, sourceRepo: sourceRepo, onOutput: onOutput)
 
         // 3. Hydrate from the repo: clone the virtio-fs-shared host repo into /workspace/site, then
         //    check out ref. Cloning from the read-only share (not in place) keeps /workspace writable
         //    and preserves full git history — native, no network. Two steps because `git clone
         //    --branch` rejects "HEAD"/bare SHAs; `git checkout` accepts both.
+        // The image ships no /etc/hosts: docker/containerd write one at container create, but
+        // Apple Containerization boots the rootfs as-is — without it even `localhost` becomes a
+        // real DNS query (vite does dns.lookup("localhost") at astro config load → EAI_AGAIN,
+        // astro exits, and the preview never becomes ready). Write the standard entries first.
+        // Wrapped separately from the clone below so a hosts failure reads as a boot problem,
+        // not a misleading `cloneFailed`.
         do {
-            try await runToCompletion(container, id: "clone",
+            try await runToCompletion(container, id: "hosts", onOutput: onOutput,
+                ["sh", "-c", "printf '127.0.0.1\\tlocalhost\\n::1\\tlocalhost\\n' > /etc/hosts"])
+        } catch {
+            await stopBareContainer(container, siteID: siteID)
+            throw LocalContainerError.bootFailed("guest /etc/hosts setup failed: \(error)")
+        }
+
+        do {
+            try await runToCompletion(container, id: "clone", onOutput: onOutput,
                 ["git", "clone", Self.repoSharePath, "/workspace/site"])
-            try await runToCompletion(container, id: "checkout",
+            try await runToCompletion(container, id: "checkout", onOutput: onOutput,
                 ["git", "-C", "/workspace/site", "checkout", ref])
         } catch {
             await stopBareContainer(container, siteID: siteID)
@@ -136,7 +152,7 @@ public struct ContainerizationControl: LocalContainerControl {
         //    doesn't get connection-refused. Poll the preview URL through the host proxy until it
         //    answers (or time out). Cancellation-friendly: `Task.sleep` throws on cancel.
         do {
-            try await waitUntilServing(previewURL)
+            try await waitUntilServing(previewURL, timeout: Self.previewReadyTimeout)
         } catch {
             await previewProxy.stop()
             await mcpProxy.stop()
@@ -207,18 +223,24 @@ public struct ContainerizationControl: LocalContainerControl {
         try? FileManager.default.removeItem(at: initfsURL)
 
         // 1. Import the bundled OCI layouts into the on-disk ImageStore and unpack to bootable mounts.
-        //    `load(from:)` is idempotent against an existing store (re-import returns the same image),
-        //    but it also needs to write into the layout directory itself (not just the store), so both
-        //    layouts are staged to a writable copy first — the bundled originals are read-only.
+        //    `loadOrGet` re-imports whenever the bundled layout changed since the last import (#549),
+        //    so app updates that ship a new image actually take effect. `load(from:)` also needs to
+        //    write into the layout directory itself (not just the store), so both layouts are staged
+        //    to a writable copy first — the bundled originals are read-only.
         let rootfs: Containerization.Mount
         let initfs: Containerization.Mount
         do {
             onOutput("[boot] importing OCI layouts into image store", .stdout)
-            let store = try ImageStore(path: storeURL)
+            // Process-shared, NOT constructed per boot: ImageStore's internal AsyncLock is
+            // per-instance, and the orphaned-blob cleanup below is only safe against another
+            // window's concurrent import if both go through the same lock (#573).
+            let store = try SharedImageStore.store(at: storeURL)
 
             // App image -> ext4 rootfs mount.
             let stagedImageLayout = try BundledImage.stagedLayoutURL(source: imageLayoutURL, name: "app-image")
-            let appImage = try await loadOrGet(store, layout: stagedImageLayout, reference: BundledImage.imageReference)
+            let appImage = try await loadOrGet(
+                store, layout: stagedImageLayout, reference: BundledImage.imageReference,
+                artifactName: "app-image", storeRoot: storeURL)
             onOutput("[boot] unpacking app image to ext4 rootfs", .stdout)
             rootfs = try await EXT4Unpacker(blockSizeInBytes: 8 * 1024 * 1024 * 1024)
                 .unpack(appImage, for: .current, at: rootfsURL)
@@ -226,9 +248,31 @@ public struct ContainerizationControl: LocalContainerControl {
             // vminit initfs OCI layout -> ext4 init mount (the guest-agent root filesystem).
             let stagedInitfsLayout = try BundledImage.stagedLayoutURL(source: initfsLayoutURL, name: "vminit-initfs")
             let initImageRef = "vminit:latest"
-            let initImage = InitImage(image: try await loadOrGet(store, layout: stagedInitfsLayout, reference: initImageRef))
+            let initImage = InitImage(image: try await loadOrGet(
+                store, layout: stagedInitfsLayout, reference: initImageRef,
+                artifactName: "vminit-initfs", storeRoot: storeURL))
             onOutput("[boot] unpacking vminit initfs to ext4", .stdout)
             initfs = try await initImage.initBlock(at: initfsURL, for: .linuxArm)
+
+            // Reclaim blobs orphaned by a #549 re-import — after one, the previous image's whole
+            // blob set (hundreds of MB) sits unreferenced in the content store forever (#573).
+            // Runs every boot (not just after a re-import) so it also self-heals orphans left by
+            // app updates that predate this cleanup, and a failed pass just retries next boot.
+            // Safe while other windows boot concurrently: the shared store above means this
+            // serializes on the same AsyncLock as their imports, so it can never delete blobs an
+            // in-flight load has ingested but not yet referenced — and it never touches running
+            // containers, which read from unpacked ext4 files, not the blob store. Best-effort:
+            // a cleanup failure must not fail the boot.
+            do {
+                let (deleted, freed) = try await store.cleanUpOrphanedBlobs()
+                if !deleted.isEmpty {
+                    let freedText = ByteCountFormatter.string(
+                        fromByteCount: Int64(clamping: freed), countStyle: .file)
+                    onOutput("[boot] reclaimed \(deleted.count) orphaned image blob(s), \(freedText)", .stdout)
+                }
+            } catch {
+                onOutput("[boot] orphaned-blob cleanup failed (will retry next boot): \(error)", .stderr)
+            }
         } catch {
             // Unpacking may have created partial ext4 files before failing; don't leak them.
             try? FileManager.default.removeItem(at: rootfsURL)
@@ -324,6 +368,14 @@ public struct ContainerizationControl: LocalContainerControl {
 
     /// Bound on `container.create()`/`.start()` — see the call site's comment on why this exists.
     private static let vmBootTimeout: Duration = .seconds(30)
+
+    /// Bound on `waitUntilServing`'s poll of the preview URL after `astro dev` is launched. Covers
+    /// `anglesite-hydrate` rsyncing baked `node_modules` into the freshly-cloned workspace plus astro's
+    /// own cold start — the rootfs is recreated per start (#59), so every boot pays this in full, not
+    /// just the first. #550's field data: a *minimal* throwaway site took 186s wall-clock; a real
+    /// template site with more integrations took 220s. 90s (the old default) failed both. 300s keeps
+    /// meaningful margin over the worst observed case without masking a truly hung guest for minutes.
+    private static let previewReadyTimeout: Duration = .seconds(300)
 
     /// Races `operation` against a `timeout`, resolving to whichever finishes first. Unlike a
     /// `withThrowingTaskGroup`-based race, this does NOT wait for `operation` to finish once the
@@ -485,13 +537,29 @@ public struct ContainerizationControl: LocalContainerControl {
 
     // MARK: - Helpers
 
-    /// Import an OCI layout into the store, tolerating a prior import (idempotent): if `load` fails
-    /// because the reference already resolves, fall back to `get`.
-    private func loadOrGet(_ store: ImageStore, layout: URL, reference: String) async throws -> Containerization.Image {
-        if let existing = try? await store.get(reference: reference) {
+    /// Resolve `reference` from the store, importing (or re-importing) the OCI layout as needed.
+    ///
+    /// The `get(reference:)` fast path is taken only while `OCILayoutImportMarker` confirms the
+    /// store's import came from this exact layout. Without that check the first-ever import is
+    /// served forever: an app update that ships a new bundled image never reaches the store, and
+    /// the guest keeps booting the old rootfs (#549). On mismatch `load(from:)` re-imports —
+    /// `ImageStore`'s reference state is an overwrite-on-create map, so loading repoints the tag
+    /// to the new image. `artifactName` must match the staging name so marker and staged copy
+    /// describe the same artifact.
+    private func loadOrGet(
+        _ store: ImageStore,
+        layout: URL,
+        reference: String,
+        artifactName: String,
+        storeRoot: URL
+    ) async throws -> Containerization.Image {
+        if OCILayoutImportMarker.isCurrent(layout: layout, name: artifactName, storeRoot: storeRoot),
+            let existing = try? await store.get(reference: reference) {
             return existing
         }
         let loaded = try await store.load(from: layout)
+        // Best-effort: a failed marker write only costs a redundant re-import next boot.
+        try? OCILayoutImportMarker.recordImported(layout: layout, name: artifactName, storeRoot: storeRoot)
         if let match = try? await store.get(reference: reference) {
             return match
         }
@@ -593,13 +661,37 @@ public struct ContainerizationControl: LocalContainerControl {
         return nil
     }
 
-    /// Run a guest process to completion, throwing if it exits non-zero.
-    private func runToCompletion(_ container: LinuxContainer, id: String, _ argv: [String]) async throws {
+    /// Run a guest process to completion, throwing if it exits non-zero. When `onOutput` is
+    /// provided, the process's stdout/stderr stream to it line-by-line tagged `[id]` — without
+    /// this, a failing step (e.g. `git clone`) dies with only an exit code and no diagnostic.
+    private func runToCompletion(
+        _ container: LinuxContainer, id: String,
+        onOutput: (@Sendable (String, LogCenter.Stream) -> Void)? = nil,
+        _ argv: [String]
+    ) async throws {
+        let stdoutSink: LineStreamingWriter?
+        let stderrSink: LineStreamingWriter?
+        if let onOutput {
+            let tag: @Sendable (String, LogCenter.Stream) -> Void = { line, stream in
+                onOutput("[\(id)] \(line)", stream)
+            }
+            stdoutSink = LineStreamingWriter(stream: .stdout, onLine: tag)
+            stderrSink = LineStreamingWriter(stream: .stderr, onLine: tag)
+        } else {
+            stdoutSink = nil
+            stderrSink = nil
+        }
         let proc = try await container.exec(id) { config in
             config.arguments = argv
+            if let stdoutSink { config.stdout = stdoutSink }
+            if let stderrSink { config.stderr = stderrSink }
         }
         try await proc.start()
         let status = try await proc.wait()
+        // `wait()` returns only after the IO streams have drained — flush any trailing partial
+        // (unterminated) line on each stream, same as `exec()` below.
+        stdoutSink?.flush()
+        stderrSink?.flush()
         try? await proc.delete()
         guard status.exitCode == 0 else {
             throw LocalContainerError.cloneFailed("`\(argv.joined(separator: " "))` exited \(status.exitCode)")

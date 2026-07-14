@@ -52,10 +52,17 @@ final class FileEditorModel {
         }
     }
 
+    /// True while `save()`'s off-main write is in flight. Read by
+    /// `SiteWindowModel.editCommandInFlight` so File ▸ Save / Revert to Saved disable instead of
+    /// racing the write with a concurrent `load()` (PR #532 review).
+    private(set) var isSaving = false
+
     /// Explicit ⌘S / Save. Writes off the main actor. Returns true when the buffer is clean afterward.
     @discardableResult
     func save() async -> Bool {
-        guard isDirty else { return true }
+        guard isDirty, !isSaving else { return true }
+        isSaving = true
+        defer { isSaving = false }
         let url = file.url
         let contents = text
         do {

@@ -1,3 +1,9 @@
+// Compiled out off-Darwin (cross-platform port design §5): there is no package-UTI concept
+// on Linux/Windows — `.anglesite` is a plain directory there, and identity comes from the
+// Info.plist UUID (AnglesiteSiteModel), which is fully portable. No AnglesiteCore code
+// references this extension; its consumers (NSOpenPanel, Finder integration) live in the
+// Darwin-only app shell.
+#if canImport(UniformTypeIdentifiers)
 import UniformTypeIdentifiers
 
 public extension UTType {
@@ -10,4 +16,17 @@ public extension UTType {
     /// `NSOpenPanel.allowedContentTypes` silently makes the panel accept every file type. All
     /// call sites should use `.anglesiteSite`.
     static let anglesiteSite = UTType(exportedAs: "io.dwk.anglesite.site")
+
+    /// Content types for the Component Editor's drag-and-drop payloads (`ComponentOutline.swift`,
+    /// Task 15/16/17/18). Unlike `.anglesiteSite`, these are **not** declared in any
+    /// `UTExportedTypeDeclarations` Info.plist array, and shouldn't be: they only ever travel
+    /// through `Transferable`'s `CodableRepresentation` between a `.draggable` source and a
+    /// `.dropDestination` in the *same running app*, so the content-type identifier only needs to
+    /// match by string between those two in-process call sites — there's no file to open, no
+    /// filename extension, and no cross-process/Launch Services resolution (Finder, Quick Look,
+    /// Spotlight) involved, which is what Info.plist registration is for.
+    static let anglesiteComponentDragItem = UTType(exportedAs: "io.dwk.anglesite.component-drag-item")
+    static let anglesitePaletteDragPayload = UTType(exportedAs: "io.dwk.anglesite.palette-drag-payload")
+    static let anglesiteOutlineDragPayload = UTType(exportedAs: "io.dwk.anglesite.outline-drag-payload")
 }
+#endif

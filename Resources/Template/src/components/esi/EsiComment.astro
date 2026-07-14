@@ -1,0 +1,12 @@
+---
+import { buildEsiCommentTag } from "./esi-markup";
+
+export interface Props {
+  /** Authoring note dropped by the `@dwk/esi` processor — never reaches a client, in dev or prod. */
+  text: string;
+}
+
+const { text } = Astro.props;
+const tag = buildEsiCommentTag(text);
+---
+<Fragment set:html={tag} />

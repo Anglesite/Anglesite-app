@@ -4,14 +4,18 @@
 # Kernel: downloads the Kata Containers 3.17.0 arm64 static bundle and extracts the container-
 #   optimised vmlinux (VIRTIO built in) from opt/kata/share/kata-containers/vmlinux.container.
 #   This is the same kernel apple/containerization's `make fetch-default-kernel` uses.
-# initfs: exports ghcr.io/apple/containerization/vminit:0.34.0 (linux/arm64) as an OCI layout
-#   using a FROM-only Dockerfile via the existing anglesite-oci docker-container buildx builder.
+# initfs: pulls ghcr.io/apple/containerization/vminit:0.34.0 (linux/arm64) with the Apple
+#   `container` CLI and re-exports it as an OCI layout via `container image save`.
 #
 # Mirrors scripts/vendor-container-image.sh: produces gitignored, bundled app resources.
-# Requires Docker (or compatible buildx) with linux/arm64 support on an Apple-Silicon Mac.
+# Requires the Apple `container` CLI (≥ 1.1, https://github.com/apple/container) on an
+# Apple-Silicon Mac. (The kernel half needs only curl/tar.)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib/container-cli.sh"
+# Fail fast, before the ~290 MB kernel download: the initfs half needs the CLI regardless.
+ensure_container_cli
 KERNEL_OUT="$ROOT/Resources/container-kernel"
 INITFS_OUT="$ROOT/Resources/container-initfs"
 
@@ -84,25 +88,16 @@ file "$KERNEL_OUT/vmlinux" || true
 echo ""
 echo "=== Vendoring vminit initfs (${VMINIT_IMAGE}) ==="
 
-# Guard: create the anglesite-oci buildx builder only if it doesn't already exist (idempotent).
-# Do not make it the global active builder; pass --builder on the build below so this script does
-# not leave the developer's Docker environment changed after it exits.
-if ! docker buildx inspect anglesite-oci >/dev/null 2>&1; then
-    echo "Creating docker-container builder 'anglesite-oci'…"
-    docker buildx create --name anglesite-oci --driver docker-container
-fi
-
 # Wipe stale layout but preserve .gitkeep.
 find "$INITFS_OUT" -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
 mkdir -p "$INITFS_OUT"
 
 INITFS_ARCHIVE="$TMP/initfs.tar"
 echo "Exporting OCI layout from ${VMINIT_IMAGE} (linux/arm64)…"
-docker buildx build \
-    --builder anglesite-oci \
-    --platform linux/arm64 \
-    --output "type=oci,dest=${INITFS_ARCHIVE}" \
-    - <<<"FROM ${VMINIT_IMAGE}"
+# Pull then save: `container image save` emits an OCI-compatible tar archive directly —
+# no FROM-only Dockerfile build needed (that was a buildx workaround).
+container image pull --platform linux/arm64 "$VMINIT_IMAGE"
+container image save --platform linux/arm64 --output "$INITFS_ARCHIVE" "$VMINIT_IMAGE"
 
 echo "Untarring OCI layout → ${INITFS_OUT}"
 tar -xf "$INITFS_ARCHIVE" -C "$INITFS_OUT"
@@ -117,11 +112,12 @@ missing_initfs_entry() {
     return 1
 }
 
-# Verify the OCI layout is structurally valid. If buildx fails to emit a complete layout, fall back
-# to skopeo once, then always re-validate so failures name the missing entry clearly.
+# Verify the OCI layout is structurally valid. If the container-CLI export fails to emit a
+# complete layout, fall back to skopeo once, then always re-validate so failures name the
+# missing entry clearly.
 if missing="$(missing_initfs_entry)"; then
     echo "ERROR: OCI layout missing required entry: $missing" >&2
-    # Fall back to skopeo if available. NOTE: this recovery path is only hit if the buildx
+    # Fall back to skopeo if available. NOTE: this recovery path is only hit if the container-CLI
     # OCI export above fails to produce a valid layout. The `oci:dir:tag` form skopeo writes
     # is a tagged single-entry index; it has not been exercised against the Containerization
     # initfs loader, so if you ever land here, verify the produced layout boots before relying on it.

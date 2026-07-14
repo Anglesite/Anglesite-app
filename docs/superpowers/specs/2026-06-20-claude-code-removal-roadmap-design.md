@@ -2,6 +2,7 @@
 
 **Date:** 2026-06-20
 **Status:** Design / roadmap (no implementation yet)
+**Amended:** 2026-07-08 — the "no external LLM APIs, ever" rule was revised by the owner: platform-native on-device AI remains the default, but external LLMs are supported as an explicit Settings opt-in, and frontier-only features are clearly labeled. See §2 and [`2026-07-08-cross-platform-swift-port-design.md`](2026-07-08-cross-platform-swift-port-design.md) §8.
 **Goal:** Make Anglesite usable by non-technical people by removing the Claude Code
 dependency entirely and replacing it with deterministic Swift/TypeScript plus Apple
 Intelligence (on-device Foundation Models, escalating to Private Cloud Compute).
@@ -27,10 +28,10 @@ These were settled during brainstorming and constrain everything below.
 | Decision | Choice |
 |---|---|
 | **End-state for Claude Code** | Full removal. No `claude` binary, no Claude-plugin loading, `ClaudeAgent` deleted. |
-| **Generative backstop** | Apple Intelligence only — on-device Foundation Models, escalating to Private Cloud Compute (PCC). **No external LLM APIs, ever.** |
+| **Generative backstop** | Apple Intelligence by default — on-device Foundation Models, escalating to Private Cloud Compute (PCC). **External LLMs are supported only as an explicit opt-in in Settings** (never a silent default); the opt-in covers user-configured endpoints including self-hosted local servers (e.g. Ollama). *(Amended 2026-07-08; originally "No external LLM APIs, ever.")* |
 | **Deterministic substrate** | Port hot paths to native Swift; keep Node only for things that need the JS ecosystem (Astro build, Sharp, Satori, Pagefind, Keystatic). |
 | **JS execution location** | **All JS runs inside the container** (the Node sidecar — Astro, Sharp, Satori, Pagefind, Keystatic, `apply_edit`/`undo_edit`) — in-guest (#59/#66/#69), reached over the in-container MCP HTTP/WS transport (#64), **not** host-spawned. The embedded host Node + JIT re-sign apparatus retires once the container runtimes land (#70). Until then, the sidecar stays host-spawned as today (interim only). |
-| **Anything that exceeds even PCC** | Simplified or retired — not shipped as a degraded cloud call. |
+| **Anything that exceeds even PCC** | May ship as a **clearly labeled frontier feature** (BBEdit-style badging of gated features) that activates only when the user has opted into an external LLM in Settings; shown disabled-with-explanation otherwise — never a silent degraded cloud call. *(Amended 2026-07-08; originally "simplified or retired.")* |
 
 ## 3. The interface today — three layers
 

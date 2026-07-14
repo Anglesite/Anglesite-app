@@ -51,6 +51,10 @@ public actor PreDeployCheck {
             case maintenanceOverdue = "maintenance-overdue"
             case seoCritical = "seo-critical"
             case seoWarning = "seo-warning"
+            /// A route published by the previous deploy is no longer published and has no
+            /// `redirects.json` entry covering it. Computed by `RouteCoverageScanner`, not the
+            /// JS-side scan script — merged into the `Outcome` by `DeployCommand.deploy`.
+            case orphanedRoute = "orphaned-route"
         }
         public let category: Category
         public let detail: String

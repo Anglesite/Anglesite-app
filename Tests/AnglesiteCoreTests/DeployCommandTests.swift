@@ -461,6 +461,94 @@ struct DeployCommandTests {
         #expect(reason.contains("terminated"))
         #expect(await waitForMarker("__SIGTERM__", in: center, timeout: Self.markerObservationTimeout), "wrangler subprocess was not actually SIGTERM'd")
     }
+
+    // MARK: Route coverage (#530)
+
+    @Test("configDirectory nil: no route-coverage warnings, no snapshot write")
+    func routeCoverageSkippedWhenNoConfigDirectory() async {
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "building…")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published s (1.0 sec)\n  https://s.example.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let outcomes = Locked<[PreDeployCheck.Outcome]>([])
+        _ = await cmd.deploy(
+            siteID: "s", siteDirectory: tmpDir,
+            onPreflight: { outcomes.append($0) })
+        guard case .passed(let warnings) = outcomes.get().first else {
+            Issue.record("expected .passed"); return
+        }
+        #expect(warnings.isEmpty)
+    }
+
+    @Test("orphaned route with no redirect adds a warning to the preflight outcome")
+    func orphanedRouteAddsWarning() async {
+        let configDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DeployCommandTests-config-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: configDir) }
+        try? DeployedRoutesSnapshot.save(["/about", "/old-page"], to: configDir)
+
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "building…")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published s (1.0 sec)\n  https://s.example.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let outcomes = Locked<[PreDeployCheck.Outcome]>([])
+        let result = await cmd.deploy(
+            siteID: "s", siteDirectory: tmpDir,
+            configDirectory: configDir, currentRoutes: ["/about"],
+            onPreflight: { outcomes.append($0) })
+
+        guard case .passed(let warnings) = outcomes.get().first else {
+            Issue.record("expected .passed"); return
+        }
+        #expect(warnings.contains { $0.category == .orphanedRoute && $0.detail.contains("/old-page") })
+        guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
+        #expect(DeployedRoutesSnapshot.load(from: configDir) == ["/about"])
+    }
+
+    @Test("a route covered by redirects.json does not warn")
+    func coveredRouteDoesNotWarn() async {
+        let configDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DeployCommandTests-config-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: configDir) }
+        try? DeployedRoutesSnapshot.save(["/about", "/old-page"], to: configDir)
+        // A private site directory, NOT the shared `tmpDir`: this test's redirects.json must not
+        // be visible to `orphanedRouteAddsWarning`, which reads redirects from its own
+        // `siteDirectory` concurrently (suite tests run in parallel).
+        let siteDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DeployCommandTests-site-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        try? RedirectsStore(sourceDirectory: siteDir).save(
+            [RedirectsStore.RedirectEntry(source: "/old-page", destination: "/about", code: .permanent)])
+
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "building…")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published s (1.0 sec)\n  https://s.example.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let outcomes = Locked<[PreDeployCheck.Outcome]>([])
+        _ = await cmd.deploy(
+            siteID: "s", siteDirectory: siteDir,
+            configDirectory: configDir, currentRoutes: ["/about"],
+            onPreflight: { outcomes.append($0) })
+
+        guard case .passed(let warnings) = outcomes.get().first else {
+            Issue.record("expected .passed"); return
+        }
+        #expect(!warnings.contains { $0.category == .orphanedRoute })
+    }
+
+    /// Minimal thread-safe box for recording values appended from `@Sendable` closures.
+    private final class Locked<T>: @unchecked Sendable {
+        private let lock = NSLock(); private var value: T
+        init(_ v: T) { value = v }
+        func append<E>(_ e: E) where T == [E] { lock.lock(); value.append(e); lock.unlock() }
+        func get() -> T { lock.lock(); defer { lock.unlock() }; return value }
+    }
 }
 
 /// Minimal lock wrapper since `onPreflight` fires from inside `DeployCommand`'s actor

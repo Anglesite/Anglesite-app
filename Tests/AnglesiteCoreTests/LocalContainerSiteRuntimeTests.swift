@@ -146,6 +146,40 @@ struct LocalContainerSiteRuntimeTests {
         await gated.release()
         await startTask.value
         #expect(await rt.state == .idle)
+        // The superseded boot must tear down the container it created, not orphan it: at the
+        // time the stop() ran, `activeSiteID` was still unset, so its teardown had nothing to
+        // stop — the abandoned start() alone knows about the just-booted container (PR #542
+        // review; user-reachable via Site ▸ Stop Dev Server during a boot).
+        #expect(await gated.stopped == ["s1"])
+    }
+
+    /// The rapid Stop → Restart race (PR #542 review): `stop()`'s final `.idle` used to be
+    /// emitted unconditionally, so a stop suspended in `control.stop(...)` could resume AFTER a
+    /// superseding `start()` had already settled to `.ready` and overwrite it — stranding the UI
+    /// on the boot spinner while the dev server is actually running.
+    @Test("a stop superseded by a concurrent restart does not clobber the new boot's .ready")
+    func stopSupersededByRestartKeepsReady() async {
+        let control = StopGatedFakeLocalContainerControl(result: .success(Self.ok))
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let rt = LocalContainerSiteRuntime(
+            ref: "HEAD", control: control, mcpClient: mcp, connect: { _, _ in })
+        let dir = URL(fileURLWithPath: "/unused")
+        await rt.start(siteID: "s1", siteDirectory: dir)
+
+        // Park a stop() inside control.stop(...), then restart while it's suspended.
+        let stopTask = Task { await rt.stop() }
+        await control.waitUntilStopParked()
+        await rt.start(siteID: "s1", siteDirectory: dir)
+        #expect(await rt.state == .ready(siteID: "s1", url: Self.ok.previewURL))
+
+        // Let the superseded stop resume: it must NOT overwrite the newer boot's state.
+        await control.releaseStop()
+        await stopTask.value
+        #expect(await rt.state == .ready(siteID: "s1", url: Self.ok.previewURL))
+        // And the old container was stopped exactly once — the restart's teardown found the
+        // bookkeeping already claimed by the in-flight stop (cleared before its suspension),
+        // so it didn't double-stop, and the straggler didn't stop the NEW container either.
+        #expect(await control.stopped == ["s1"])
     }
 
     // MARK: - Observer tests (ported from RemoteSandboxSiteRuntimeTests)

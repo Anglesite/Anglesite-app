@@ -13,8 +13,19 @@ public struct SiteSettings: Sendable, Codable, Equatable {
     /// Owner-facing display name override. `nil` falls back to the package marker's displayName.
     public var displayName: String?
 
-    public init(displayName: String? = nil) {
+    /// Cloudflare account id owning this site's `INBOX_KV` namespace (#587). `nil` until a
+    /// provisioning flow sets it — `InboxSubmissionSync` no-ops without both this and
+    /// `inboxCaptureKVNamespaceID`.
+    public var inboxCaptureAccountID: String?
+
+    /// The provisioned `INBOX_KV` namespace id for this site (#587). See
+    /// `inboxCaptureAccountID`.
+    public var inboxCaptureKVNamespaceID: String?
+
+    public init(displayName: String? = nil, inboxCaptureAccountID: String? = nil, inboxCaptureKVNamespaceID: String? = nil) {
         self.displayName = displayName
+        self.inboxCaptureAccountID = inboxCaptureAccountID
+        self.inboxCaptureKVNamespaceID = inboxCaptureKVNamespaceID
     }
 }
 

@@ -31,10 +31,16 @@ final class PlistEditorModel {
         }
     }
     private(set) var savedAnalyticsSettings = WebsiteAnalyticsAsset.Settings()
+    var redirectEntries: [RedirectsStore.RedirectEntry] = []
+    private(set) var savedRedirectEntries: [RedirectsStore.RedirectEntry] = []
+    private(set) var redirectsError: String?
+    private(set) var isSavingRedirects = false
+    private(set) var redirectsLoadFailed = false
     var conflictDiskContents: String?
 
     var isDirty: Bool { entries != savedEntries && loadError == nil && !isLoading }
     var isAnalyticsDirty: Bool { analyticsSettings != savedAnalyticsSettings && loadError == nil && !isLoading }
+    var isRedirectsDirty: Bool { redirectEntries != savedRedirectEntries && loadError == nil && !isLoading }
     var cloudflareAnalyticsEnabled: Bool { !analyticsSettings.cloudflareToken.isEmpty }
     var customAnalyticsValidationMessage: String? {
         WebsiteAnalyticsAsset.customHeadTagValidationMessage(analyticsSettings.customHeadTag)
@@ -95,15 +101,33 @@ final class PlistEditorModel {
             analyticsSettings = analytics
             savedAnalyticsSettings = analytics
             analyticsError = nil
+            do {
+                let redirects = try RedirectsStore(sourceDirectory: sourceDirectory).load()
+                redirectEntries = redirects
+                savedRedirectEntries = redirects
+                redirectsError = nil
+                redirectsLoadFailed = false
+            } catch {
+                redirectEntries = []
+                savedRedirectEntries = []
+                redirectsError = "Couldn't load existing redirects.json — it may be corrupted or hand-edited with invalid entries. Fix it externally or your next save will discard it. (\(error.localizedDescription))"
+                redirectsLoadFailed = true
+            }
         } catch {
             loadError = error.localizedDescription
         }
     }
 
+    /// True while `save()`'s off-main write is in flight — same contract as
+    /// `FileEditorModel.isSaving` (analytics writes have their own `isSavingAnalytics`).
+    private(set) var isSaving = false
+
     @discardableResult
     func save() async -> Bool {
-        guard isDirty else { return true }
+        guard isDirty, !isSaving else { return true }
         guard validationMessage == nil else { return false }
+        isSaving = true
+        defer { isSaving = false }
         let url = file.url
         let entries = entriesForSaving()
         do {
@@ -134,7 +158,10 @@ final class PlistEditorModel {
             guard await save() else { return false }
         }
         if isAnalyticsDirty {
-            return await saveAnalytics()
+            guard await saveAnalytics() else { return false }
+        }
+        if isRedirectsDirty {
+            return await saveRedirects()
         }
         return true
     }
@@ -210,6 +237,31 @@ final class PlistEditorModel {
             return true
         } catch {
             analyticsError = error.localizedDescription
+            return false
+        }
+    }
+
+    @discardableResult
+    func saveRedirects() async -> Bool {
+        guard isRedirectsDirty else { return true }
+        guard !isSavingRedirects else { return false }
+        guard !redirectsLoadFailed else {
+            redirectsError = "Refusing to save: the existing redirects.json failed to load and may contain valid entries this save would discard. Fix or back up the file, then reload this site's settings."
+            return false
+        }
+        isSavingRedirects = true
+        redirectsError = nil
+        defer { isSavingRedirects = false }
+        let sourceDirectory = sourceDirectory
+        let entries = redirectEntries
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try RedirectsStore(sourceDirectory: sourceDirectory).save(entries)
+            }.value
+            savedRedirectEntries = entries
+            return true
+        } catch {
+            redirectsError = "Couldn't save redirects: \(error.localizedDescription)"
             return false
         }
     }

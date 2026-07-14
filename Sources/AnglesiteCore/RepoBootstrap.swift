@@ -1,11 +1,17 @@
 import Foundation
+#if canImport(Darwin)
+import SwiftGit2
+#endif
 
 /// One-tap "Publish to GitHub". Owns the git-side preflight (detect remote, init, commit) and
 /// delegates the create-remote-and-push step to a `RepoProvider`. See #68 / the design doc.
 ///
 /// The git `origin` is the source of truth for published state — `remote(of:)` reads it; nothing
-/// is persisted app-side. Every `git`/`gh` invocation goes through the injected `RepoCommandRunner`
-/// (production: `ProcessSupervisor.shared.run`), so tests drive the flow without spawning anything.
+/// is persisted app-side. On Darwin, the preflight (`remote(of:)`, `ensureCommittable`) runs
+/// in-process via SwiftGit2 — `/usr/bin/git` cannot execute at all under App Sandbox (#640/#654).
+/// `RepoCommandRunner` remains the seam for the remaining subprocess calls (off-Darwin preflight,
+/// and `GHRepoProvider`'s `gh`/`git remote get-url` calls, which are a separate, still-blocked
+/// half of #654 pending SwiftGit2 `addRemote`/`push` support, #659).
 public actor RepoBootstrap {
     public enum Step: Sendable, Equatable { case checkingRemote, initializing, committing, creatingRepo, pushing }
 
@@ -26,7 +32,105 @@ public actor RepoBootstrap {
         self.run = run
     }
 
-    /// Reads `origin`; nil if there's no remote or `source` isn't a git repo.
+    #if canImport(Darwin)
+    /// Reads `origin` via SwiftGit2 (in-process libgit2); nil if there's no remote or `source`
+    /// isn't a git repo.
+    public func remote(of source: URL) async -> RemoteRepo? {
+        SwiftGit2Bootstrap.ensureInitialized
+        guard case .success(let repo) = Repository.at(source) else { return nil }
+        guard case .success(let remote) = repo.remote(named: "origin") else { return nil }
+        return RemoteRepo.parse(remoteURL: remote.URL)
+    }
+
+    /// `Repository.create` if needed, then commit if there are no commits or a dirty tree. Throws
+    /// on git error. Stages by walking `status(options: [.includeUntracked])` and calling
+    /// `add(path:)`/`remove(path:)` per entry — the `git add -A` equivalent; SwiftGit2 has no
+    /// bulk `addAll` at the pinned revision (it lands with `push`/`addRemote` in #659).
+    func ensureCommittable(source: URL, emit: @Sendable (Event) -> Void) async throws {
+        SwiftGit2Bootstrap.ensureInitialized
+        let repo: Repository
+        switch Repository.at(source) {
+        case .success(let existing):
+            repo = existing
+        case .failure:
+            emit(.progress(step: .initializing, message: "Initializing git repository…"))
+            switch Repository.create(at: source) {
+            case .success(let created):
+                repo = created
+            case .failure(let error):
+                throw RepoBootstrapError(reason: "git init failed.\n\(error.localizedDescription)")
+            }
+        }
+
+        let noCommits: Bool
+        if case .failure = repo.HEAD() { noCommits = true } else { noCommits = false }
+
+        // .recurseUntrackedDirs: without it, libgit2 reports a whole new directory as a single
+        // untracked entry rather than walking into it — a .env-secret nested inside a new
+        // directory (e.g. config/.env.local) would be invisible to both the check below and the
+        // staging loop, silently committing it.
+        guard case .success(let entries) = repo.status(options: [.includeUntracked, .recurseUntrackedDirs]) else {
+            throw RepoBootstrapError(reason: "Couldn't read git status.")
+        }
+        let dirty = !entries.isEmpty
+        guard noCommits || dirty else { return }
+        // A git-init'd-but-truly-empty directory (no commits, nothing to stage) must fail loudly
+        // rather than create a content-less root commit — matching the old subprocess `git commit`
+        // path, which reliably failed with "nothing to commit" in this case. Silently proceeding
+        // would create a real (but empty) GitHub repository where publish previously refused.
+        guard dirty else {
+            throw RepoBootstrapError(reason: "Nothing to commit — the site directory is empty.")
+        }
+
+        // Refuse to stage likely-secret files. Staging everything would otherwise sweep
+        // .env/.env.local etc. into the repo; "private by default" doesn't protect a repo later
+        // made public or visible org-wide, and secrets persist in history even after a force-push.
+        let secrets = Self.dotenvFiles(inStatus: entries)
+        guard secrets.isEmpty else {
+            throw RepoBootstrapError(reason: "Refusing to publish: \(secrets.joined(separator: ", ")) "
+                + "would be committed. Add \(secrets.count == 1 ? "it" : "them") to .gitignore first.")
+        }
+
+        emit(.progress(step: .committing, message: "Committing your site…"))
+        for entry in entries {
+            if entry.status.contains(.workTreeDeleted), let path = Self.statusPath(entry) {
+                if case .failure(let error) = repo.remove(path: path) {
+                    throw RepoBootstrapError(reason: "git rm failed for \(path).\n\(error.localizedDescription)")
+                }
+            } else if let path = Self.statusPath(entry) {
+                if case .failure(let error) = repo.add(path: path) {
+                    throw RepoBootstrapError(reason: "git add failed for \(path).\n\(error.localizedDescription)")
+                }
+            }
+        }
+        guard case .success(let signature) = repo.defaultSignature() else {
+            throw RepoBootstrapError(reason: "No git identity configured (user.name/user.email).")
+        }
+        guard case .success = repo.commit(message: "Initial commit", signature: signature) else {
+            throw RepoBootstrapError(reason: "git commit failed.")
+        }
+    }
+
+    /// The path a `StatusEntry` refers to: the working-tree delta's path when present (covers
+    /// untracked/modified/deleted), falling back to the index delta's path for entries that are
+    /// staged but otherwise unchanged in the working tree.
+    private static func statusPath(_ entry: StatusEntry) -> String? {
+        entry.indexToWorkDir?.newFile?.path ?? entry.indexToWorkDir?.oldFile?.path
+            ?? entry.headToIndex?.newFile?.path
+    }
+
+    /// Paths among `status(options:)` entries whose filename is a dotenv secret (`.env` or
+    /// `.env.<anything>`).
+    static func dotenvFiles(inStatus entries: [StatusEntry]) -> [String] {
+        entries.compactMap { entry -> String? in
+            guard let path = statusPath(entry) else { return nil }
+            let name = (path as NSString).lastPathComponent
+            return (name == ".env" || name.hasPrefix(".env.")) ? path : nil
+        }
+    }
+    #else
+    /// Reads `origin`; nil if there's no remote or `source` isn't a git repo. Off-Darwin there's
+    /// no App Sandbox to route around, so plain subprocess git remains correct here.
     public func remote(of source: URL) async -> RemoteRepo? {
         guard let r = try? await run(env, ["git", "remote", "get-url", "origin"], source),
               r.exitCode == 0 else { return nil }
@@ -74,6 +178,16 @@ public actor RepoBootstrap {
             let name = (path as NSString).lastPathComponent
             return (name == ".env" || name.hasPrefix(".env.")) ? path : nil
         }
+    }
+    #endif
+
+    /// Local git init+commit only — no GitHub involved. Reuses the same staging/secret-file/
+    /// identity checks as `publish`'s preflight. Entry point for the new-site scaffold, which
+    /// must land a real initial commit before the site can be cloned into a container runtime
+    /// (an empty, commit-less repo fails `git checkout HEAD`) — see CLAUDE.md's "Git is the
+    /// source of truth" (#72).
+    public func commitAll(source: URL) async throws {
+        try await ensureCommittable(source: source, emit: { _ in })
     }
 
     /// Detect → (auth) → ensure committable → create + push. Streams progress; settles to

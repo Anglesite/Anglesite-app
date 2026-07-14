@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 #endif
 
@@ -38,7 +38,7 @@ private actor CapturingConversationalAssistant: ConversationalAssistant {
         }
     }
 
-    #if compiler(>=6.4)
+    #if compiler(>=6.4) && canImport(FoundationModels)
     func generateStructured<T: Generable & Sendable>(
         prompt: String,
         context: AssistantContext,
@@ -137,10 +137,15 @@ struct KnowledgeAugmentedAssistantTests {
         #expect(!hasCitations)
     }
 
-    @Test("generate leaves prompts untouched when there is no context")
-    func generateLeavesPromptUntouchedWithoutContext() async throws {
+    @Test("generate leaves unrelated prompts untouched")
+    func generateLeavesUnmatchedPromptUntouched() async throws {
         let root = try makeSite()
         defer { try? FileManager.default.removeItem(at: root) }
+        try "# About\n".write(
+            to: root.appendingPathComponent("src/pages/about.md"),
+            atomically: true,
+            encoding: .utf8
+        )
 
         let base = CapturingConversationalAssistant()
         let index = SiteKnowledgeIndex()
@@ -149,73 +154,6 @@ struct KnowledgeAugmentedAssistantTests {
             base: base,
             index: index
         )
-        let prompt = "Explain lunar geology."
-        for try await _ in try await assistant.generate(
-            prompt: prompt,
-            context: AssistantContext(siteID: "site", siteDirectory: root)
-        ) {}
-
-        #expect(await base.prompts.first == prompt)
-    }
-
-    @Test("style guide context enriches content prompts even without search hits")
-    func styleGuideEnrichesPromptWithoutSearchHits() async throws {
-        let root = try makeSite()
-        defer { try? FileManager.default.removeItem(at: root) }
-        try """
-        ---
-        title: About
-        draft: false
-        ---
-
-        ## About Us
-
-        We're glad you're here.
-        """.write(
-            to: root.appendingPathComponent("src/pages/about.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-
-        let base = CapturingConversationalAssistant()
-        let index = SiteKnowledgeIndex()
-        await index.rebuild(siteID: "site", projectRoot: root)
-        let assistant = KnowledgeAugmentedAssistant(base: base, index: index)
-        let prompt = "Write brand voice guidance."
-        for try await _ in try await assistant.generate(
-            prompt: prompt,
-            context: AssistantContext(siteID: "site", siteDirectory: root)
-        ) {}
-
-        let enriched = await base.prompts.first
-        #expect(enriched?.contains("Project style guide inferred") == true)
-        #expect(enriched?.contains("Relevant project context retrieved") == false)
-        #expect(enriched?.contains("User request:\n\(prompt)") == true)
-    }
-
-    @Test("style guide context is skipped for unrelated prompts")
-    func styleGuideSkipsUnrelatedPrompts() async throws {
-        let root = try makeSite()
-        defer { try? FileManager.default.removeItem(at: root) }
-        try """
-        ---
-        title: About
-        draft: false
-        ---
-
-        ## About Us
-
-        We're glad you're here.
-        """.write(
-            to: root.appendingPathComponent("src/pages/about.md"),
-            atomically: true,
-            encoding: .utf8
-        )
-
-        let base = CapturingConversationalAssistant()
-        let index = SiteKnowledgeIndex()
-        await index.rebuild(siteID: "site", projectRoot: root)
-        let assistant = KnowledgeAugmentedAssistant(base: base, index: index)
         let prompt = "Explain lunar geology."
         for try await _ in try await assistant.generate(
             prompt: prompt,

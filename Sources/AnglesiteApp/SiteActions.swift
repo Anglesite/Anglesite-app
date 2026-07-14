@@ -15,8 +15,33 @@ enum SiteActions {
         let folderName: String
         let underlying: Error
         var errorDescription: String? {
-            "Couldn't add “\(folderName)”: \(underlying.localizedDescription)"
+            String(localized: "Couldn't add “\(folderName)”: \(underlying.localizedDescription)")
         }
+    }
+
+    /// Register an existing `.anglesite` package and (on MAS) mint its security-scoped bookmark —
+    /// the ONLY mint call site, shared by every open path: Finder-open (`onOpenURL`), launcher
+    /// drag-drop (#524), the Dock menu, File ▸ Open Site… (`pickAndRegisterSite`), and Import
+    /// (`importPackage`). `record` reads and validates the marker, throwing a legible error for
+    /// non-packages.
+    static func registerPackage(at url: URL) async throws -> SiteStore.Site {
+        try await registerPackage(AnglesitePackage(url: url))
+    }
+
+    /// Variant for callers that already hold a constructed package (Import creates one via
+    /// `PackageTransfer` before registering).
+    static func registerPackage(_ package: AnglesitePackage) async throws -> SiteStore.Site {
+        let site = try await SiteStore.shared.record(package)
+        #if ANGLESITE_MAS
+        // The current access grant (open panel, drag, or LaunchServices open) is the only chance
+        // to mint a scoped bookmark — persist it now so the grant survives relaunch. Mint from
+        // `site.packageURL` (the canonicalized path the store recorded) so the bookmark's path
+        // matches what subprocesses are spawned against. Propagate failures (never `try?`): a
+        // grantless site silently fails to preview at open.
+        let bookmark = try SecurityScopedBookmark.create(for: site.packageURL)
+        try await SiteStore.shared.setBookmark(bookmark, for: site.id)
+        #endif
+        return site
     }
 
     /// Pick a plain Anglesite directory, choose where to save the new package, copy it in, and
@@ -26,13 +51,13 @@ enum SiteActions {
         picker.canChooseDirectories = true
         picker.canChooseFiles = false
         picker.allowsMultipleSelection = false
-        picker.prompt = "Choose"
-        picker.message = "Choose an existing Anglesite site folder to import."
+        picker.prompt = String(localized: "Choose")
+        picker.message = String(localized: "Choose an existing Anglesite site folder to import.")
         guard picker.runModal() == .OK, let sourceDir = picker.url else { return nil }
 
         let name = sourceDir.deletingPathExtension().lastPathComponent
         let save = NSSavePanel()
-        save.message = "Save the imported site package."
+        save.message = String(localized: "Save the imported site package.")
         save.nameFieldStringValue = "\(name).anglesite"
         save.directoryURL = AppSettings.shared.sitesRoot
         guard save.runModal() == .OK, let dest = save.url else { return nil }
@@ -50,14 +75,7 @@ enum SiteActions {
             throw ImportError(folderName: sourceDir.lastPathComponent, underlying: error)
         }
         do {
-            let site = try await SiteStore.shared.record(pkg)
-            #if ANGLESITE_MAS
-            // Propagate (don't swallow with try?) — a grantless imported site silently fails to
-            // preview at open. Matches pickAndRegisterSite; mint from the canonicalized packageURL.
-            let bm = try SecurityScopedBookmark.create(for: site.packageURL)
-            try await SiteStore.shared.setBookmark(bm, for: site.id)
-            #endif
-            return site
+            return try await registerPackage(pkg)
         } catch {
             // record/bookmark failed after importDirectory wrote the package — remove the orphan
             // (we created it this call) so it isn't left invisible-and-unopenable on disk.
@@ -69,9 +87,9 @@ enum SiteActions {
     /// Export the given site's source tree to a chosen folder, with an opt-in for `.git` history.
     static func exportSource(of site: SiteStore.Site) {
         let save = NSSavePanel()
-        save.message = "Export this site's source files to a folder."
+        save.message = String(localized: "Export this site's source files to a folder.")
         save.nameFieldStringValue = site.name
-        let gitToggle = NSButton(checkboxWithTitle: "Include Git history (.git)", target: nil, action: nil)
+        let gitToggle = NSButton(checkboxWithTitle: String(localized: "Include Git history (.git)"), target: nil, action: nil)
         gitToggle.state = .off
         let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 28))
         gitToggle.frame = NSRect(x: 12, y: 4, width: 256, height: 20)
@@ -102,21 +120,12 @@ enum SiteActions {
         panel.allowedContentTypes = [.anglesiteSite]
         panel.treatsFilePackagesAsDirectories = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Open"
-        panel.message = "Choose an Anglesite site package."
+        panel.prompt = String(localized: "Open")
+        panel.message = String(localized: "Choose an Anglesite site package.")
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
 
         do {
-            let package = AnglesitePackage(url: url)
-            let site = try await SiteStore.shared.record(package)
-            #if ANGLESITE_MAS
-            // The panel grant is the only chance to mint a scoped bookmark — persist it now so
-            // the grant survives relaunch. Mint from `site.packageURL` (the canonicalized path the
-            // store recorded), so the bookmark's path matches what subprocesses are spawned against.
-            let bookmark = try SecurityScopedBookmark.create(for: site.packageURL)
-            try await SiteStore.shared.setBookmark(bookmark, for: site.id)
-            #endif
-            return site
+            return try await registerPackage(at: url)
         } catch {
             throw ImportError(folderName: url.lastPathComponent, underlying: error)
         }

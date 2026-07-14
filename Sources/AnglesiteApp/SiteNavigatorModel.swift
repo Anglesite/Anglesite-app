@@ -2,24 +2,35 @@ import Foundation
 import Observation
 import AnglesiteCore
 
-/// Drives the Site Navigator sidebar for one window. Reads pages/posts from the shared
-/// `SiteContentGraph` and the filesystem-backed groups from `SiteFileTree`, then merges them via
-/// `buildNavigatorTree`. Refreshes when the content graph emits for this site. App glue only —
-/// all logic under test lives in AnglesiteCore.
+/// Drives the Site Navigator sidebar for one window: the visitor-facing URL tree (#714). Reads
+/// pages/posts from the shared `SiteContentGraph` and the feed-collection probe from
+/// `SiteFileTree`, then builds the tree via `buildSiteURLTree`. Refreshes when the content graph
+/// emits for this site. App glue only — all logic under test lives in AnglesiteCore.
 @MainActor
 @Observable
 final class SiteNavigatorModel {
-    private(set) var sections: [NavigatorSection] = []
+    private(set) var nodes: [URLTreeNode] = []
+    /// Flattened id → node lookup, rebuilt with `nodes` (selection, targets, titles).
+    private var nodesByID: [String: URLTreeNode] = [:]
     var selection: String?
 
     // Inline re-titling (Finder-style). `editingItemID` non-nil → that row shows a TextField.
     var editingItemID: String?
     var draftTitle: String = ""
     var renameError: String?
+    /// Error surface for `saveRedirect` (#530) — distinct from `renameError` since it's a
+    /// different action, not a rename failure.
+    var redirectSaveError: String?
 
     private var sourceDirectory: URL?
     private var websiteTitle: String?
+    private var siteID: String?
+    private var siteRoot: URL?
     private let renameService = NavigatorRenameService()
+    /// Post ids seen in the last `refresh()`, so `canRepurpose` can distinguish post rows from
+    /// page rows without an extra actor hop — both are `.route` targets and `isContentRow` alone
+    /// can't tell them apart (Task 16, #465).
+    private var postIDs: Set<String> = []
 
     private let graph: SiteContentGraph
     private var observeTask: Task<Void, Never>?
@@ -31,9 +42,11 @@ final class SiteNavigatorModel {
     func start(siteID: String, siteRoot: URL, sourceDirectory: URL, websiteTitle: String) {
         self.sourceDirectory = sourceDirectory
         self.websiteTitle = websiteTitle
+        self.siteID = siteID
+        self.siteRoot = siteRoot
         // Cancel any prior observer (window reuse: SwiftUI can replay a different site into the
         // same window) BEFORE starting the new one, so a stale refresh can't overwrite the new
-        // site's sections. The initial load runs as the new task's first step, so it is tracked
+        // site's tree. The initial load runs as the new task's first step, so it is tracked
         // and cancellable too. `[weak self]` so the long-lived stream loop doesn't retain the model.
         observeTask?.cancel()
         observeTask = Task { [weak self, graph, siteID, siteRoot] in
@@ -53,40 +66,58 @@ final class SiteNavigatorModel {
         observeTask = nil
     }
 
-    func target(for id: String) -> NavigatorTarget? {
-        for section in sections {
-            if let item = section.items.first(where: { $0.id == id }) { return item.target }
-        }
-        return nil
+    /// Forces an immediate re-scan using the already-stored `siteID`/`siteRoot` from the last
+    /// `start(...)`, without touching the observe-task subscription. Used after a mutation this
+    /// model has no other way to learn about — e.g. a Cleanup delete, which doesn't touch
+    /// `SiteContentGraph` for component/layout candidates, so nothing would otherwise trigger a
+    /// refresh and a deleted file would stay selectable/openable (and, if edited and saved,
+    /// resurrect the file via a raw non-git write).
+    func refreshNow() async {
+        guard let siteID, let siteRoot else { return }
+        await refresh(siteID: siteID, siteRoot: siteRoot)
+    }
+
+    func target(for id: String) -> NavigatorTarget? { nodesByID[id]?.target }
+
+    /// Bridge for callbacks that still traffic in `NavigatorItem` (delete/duplicate/repurpose
+    /// plumbing in SiteWindow/SiteWindowModel predates the tree).
+    func item(for id: String) -> NavigatorItem? {
+        guard let node = nodesByID[id] else { return nil }
+        return NavigatorItem(id: node.id, title: node.title, target: node.target)
     }
 
     func updateWebsiteTitle(_ title: String) {
         websiteTitle = title
-        sections = sections.map { section in
-            guard section.id == .metadata else { return section }
-            return NavigatorSection(
-                id: section.id,
-                title: section.title,
-                items: section.items.map {
-                    guard case .file(let file) = $0.target, file.name == "Info.plist" else { return $0 }
-                    return NavigatorItem(id: $0.id, title: title, target: $0.target)
-                }
-            )
-        }
+        guard let first = nodes.first, first.kind == .website else { return }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let updated = URLTreeNode(id: first.id, title: trimmed.isEmpty ? "Website" : trimmed,
+                                  route: first.route, kind: .website, children: nil)
+        nodes[0] = updated
+        nodesByID[updated.id] = updated
     }
 
-    /// A row is renamable iff it is a page or post (route target). File rows (components/styles/
-    /// metadata) carry a `.file` target and are out of scope. The astro-without-title case is
-    /// caught at commit, not pre-disabled (pre-checking would read every page file per refresh).
-    func canRename(_ id: String) -> Bool {
+    /// A row is renamable/deletable/duplicable iff it is a page or post (route target) — directory
+    /// and website-settings rows are out of scope. The astro-without-title case is caught at
+    /// commit, not pre-disabled (pre-checking would read every page file per refresh).
+    private func isContentRow(_ id: String) -> Bool {
         guard let target = target(for: id) else { return false }
         if case .route = target { return true }
         return false
     }
 
+    func canRename(_ id: String) -> Bool { isContentRow(id) }
+
+    /// Delete/Duplicate (#516) share Rename's gating exactly — pages and posts only.
+    func canDelete(_ id: String) -> Bool { isContentRow(id) }
+    func canDuplicate(_ id: String) -> Bool { isContentRow(id) }
+
+    /// Repurpose (#465, Task 16) is post-only — unlike Rename/Delete/Duplicate, which apply to
+    /// pages too — so it checks `postIDs` rather than the page-or-post `isContentRow`.
+    func canRepurpose(_ id: String) -> Bool { postIDs.contains(id) }
+
     func beginEditing(_ id: String) {
         guard canRename(id) else { return }
-        let current = sections.flatMap(\.items).first { $0.id == id }?.title ?? ""
+        let current = nodesByID[id]?.title ?? ""
         draftTitle = current
         editingItemID = id
     }
@@ -150,28 +181,60 @@ final class SiteNavigatorModel {
         }
     }
 
-    /// Rebuilds `sections` for the given site. Takes `siteID`/`siteRoot` as parameters (the values
+    /// Rebuilds `nodes` for the given site. Takes `siteID`/`siteRoot` as parameters (the values
     /// captured by `observeTask`) rather than reading mutable state, so a refresh in flight from a
-    /// prior `start()` can't populate sections with data tagged to a newer site. Checks cancellation
+    /// prior `start()` can't populate the tree with data tagged to a newer site. Checks cancellation
     /// at each suspension point so a `stop()` mid-flight doesn't write stale content after teardown.
     private func refresh(siteID: String, siteRoot: URL) async {
         let pages = await graph.pages(for: siteID)
         if Task.isCancelled { return }
         let posts = await graph.posts(for: siteID)
         if Task.isCancelled { return }
-        // Run the filesystem scan off the main actor (it can block on a slow/large tree). Detached
-        // doesn't inherit cancellation and the scan isn't internally cancellable, so we guard the
-        // write below rather than trying to interrupt the scan; `.userInitiated` keeps the
-        // interactive sidebar population from being deprioritized behind background work.
-        let fileGroups = await Task.detached(priority: .userInitiated) {
-            SiteFileTree.scan(siteRoot: siteRoot)
+        // Run the feed-collection probe off the main actor (it touches the filesystem). Detached
+        // doesn't inherit cancellation and the probe isn't internally cancellable, so we guard the
+        // write below rather than trying to interrupt it; `.userInitiated` keeps the interactive
+        // sidebar population from being deprioritized behind background work.
+        let feeds = await Task.detached(priority: .userInitiated) {
+            SiteFileTree.feedCollections(siteRoot: siteRoot)
         }.value
         if Task.isCancelled { return }
-        sections = buildNavigatorTree(
-            pages: pages,
-            posts: posts,
-            fileGroups: fileGroups,
-            websiteTitle: websiteTitle
-        )
+        // Assigned together with `nodes` below so `canRepurpose` never gates against a post
+        // set that's out of sync with what's actually shown in the sidebar.
+        postIDs = Set(posts.map(\.id))
+        let tree = buildSiteURLTree(
+            websiteTitle: websiteTitle, pages: pages, posts: posts, feedCollections: feeds)
+        nodes = tree
+        nodesByID = Self.index(tree)
+    }
+
+    private static func index(_ nodes: [URLTreeNode]) -> [String: URLTreeNode] {
+        var map: [String: URLTreeNode] = [:]
+        func walk(_ node: URLTreeNode) {
+            map[node.id] = node
+            node.children?.forEach(walk)
+        }
+        nodes.forEach(walk)
+        return map
+    }
+
+    /// Appends a redirect for `source` → `destination` to `Source/redirects.json` (#530). Used by
+    /// the "Add Redirect?" prompt `SiteWindow` shows after `SiteWindowModel.confirmDelete()`
+    /// successfully deletes a page or post (#584) — that method captures the deleted item's route
+    /// before the delete call and, on success, offers this via a sheet hosted in `SiteWindow` (not
+    /// here: delete itself is owned by `SiteWindowModel`/`NativeContentOperations` since #516, not
+    /// this model). Returns whether the save succeeded; on failure sets `redirectSaveError`.
+    @discardableResult
+    func saveRedirect(source: String, destination: String, code: RedirectsStore.RedirectEntry.Code) async -> Bool {
+        guard let sourceDirectory else { return false }
+        let store = RedirectsStore(sourceDirectory: sourceDirectory)
+        do {
+            var entries = try store.load()
+            entries.append(RedirectsStore.RedirectEntry(source: source, destination: destination, code: code))
+            try store.save(entries)
+            return true
+        } catch {
+            redirectSaveError = "Couldn't save the redirect: \(error.localizedDescription)"
+            return false
+        }
     }
 }

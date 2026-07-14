@@ -85,7 +85,9 @@ public enum WorkerComposition {
     public static func generateWranglerToml(
         siteName: String,
         features: [Feature],
-        resources: ProvisionedResources = .init()
+        resources: ProvisionedResources = .init(),
+        inboxCaptureEnabled: Bool = false,
+        inboxKVNamespaceID: String? = nil
     ) throws -> String {
         guard isValidSiteName(siteName) else {
             throw ConfigError.invalidSiteName(siteName)
@@ -95,7 +97,7 @@ public enum WorkerComposition {
         lines.append("compatibility_date = \"2025-01-01\"")
 
         let hasSocialFeatures = !features.isEmpty
-        if hasSocialFeatures {
+        if hasSocialFeatures || inboxCaptureEnabled {
             lines.append("main = \"worker/worker.ts\"")
         }
         lines.append("")
@@ -130,6 +132,17 @@ public enum WorkerComposition {
             lines.append("[[r2_buckets]]")
             lines.append("binding = \"MEDIA\"")
             lines.append("bucket_name = \"\(resources.r2BucketName ?? "\(siteName)-media")\"")
+        }
+
+        if inboxCaptureEnabled {
+            lines.append("")
+            lines.append("[[kv_namespaces]]")
+            lines.append("binding = \"INBOX_KV\"")
+            if let id = inboxKVNamespaceID, !id.isEmpty {
+                lines.append("id = \"\(id)\"")
+            } else {
+                lines.append("id = \"\"  # filled by provisioning")
+            }
         }
 
         lines.append("")

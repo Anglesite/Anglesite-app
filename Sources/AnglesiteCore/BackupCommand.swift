@@ -255,10 +255,18 @@ public actor BackupCommand {
 
     // MARK: - Default production seams
 
+    #if canImport(Darwin)
+    /// Default `GitRunner`: in-process SwiftGit2 via `InProcessGit` (#653) — `/usr/bin/git`
+    /// cannot execute at all under the MAS App Sandbox (#640), so the old subprocess default
+    /// was dead code exactly where it mattered.
+    public static let defaultRunner: GitRunner = { siteDirectory, arguments in
+        await InProcessGit.run(siteDirectory: siteDirectory, arguments: arguments)
+    }
+    #else
     /// Default `GitRunner`: shells out to `git` via `ProcessSupervisor.shared.run(...)`.
     /// Uses `/usr/bin/env` so the user's shell-resolved `git` is used (matches what they'd
-    /// run in Terminal). Under the MAS sandbox this still spawns directly from the app, so
-    /// the per-site security-scoped grant is inherited.
+    /// run in Terminal). Off-Darwin there's no App Sandbox to route around, so subprocess
+    /// git remains correct here rather than a gap to fill.
     public static let defaultRunner: GitRunner = { siteDirectory, arguments in
         try await ProcessSupervisor.shared.run(
             executable: URL(fileURLWithPath: "/usr/bin/env"),
@@ -266,7 +274,17 @@ public actor BackupCommand {
             currentDirectoryURL: siteDirectory
         )
     }
+    #endif
 
+    #if canImport(Darwin)
+    /// Default `GitStreamer`: in-process SwiftGit2 via `InProcessGit` (#653). Step-level
+    /// progress lines land in `LogCenter` under `source` (so the drawer still narrates the
+    /// backup), and failure detail comes back directly as `stderr` — no subprocess, no
+    /// subscription dance.
+    public static let defaultStreamer: GitStreamer = { siteDirectory, arguments, source in
+        await InProcessGit.stream(siteDirectory: siteDirectory, arguments: arguments, source: source)
+    }
+    #else
     /// Default `GitStreamer`: launches `git` via `ProcessSupervisor.shared.launch(...)` so
     /// stdout/stderr flow into `LogCenter` line-by-line under `source`. Waits for exit and
     /// returns the code; `git push`'s auth-prompt back-and-forth is therefore visible in
@@ -310,8 +328,10 @@ public actor BackupCommand {
         case .retriesExhausted(let lastCode):   return (lastCode, stderr)
         }
     }
+    #endif
 }
 
+#if !canImport(Darwin)
 /// Accumulates streamed stderr lines for `BackupCommand.defaultStreamer`. An actor so the
 /// `@Sendable` collect Task can append without a lock.
 private actor StderrCollector {
@@ -319,3 +339,4 @@ private actor StderrCollector {
     func append(_ line: String) { lines.append(line) }
     func joined() -> String { lines.joined(separator: "\n") }
 }
+#endif

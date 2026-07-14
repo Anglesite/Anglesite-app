@@ -77,15 +77,18 @@ public enum SiteGraphExplorer {
     private static let sourceExtensions: Set<String> = [
         ".astro", ".md", ".mdx", ".markdown", ".js", ".jsx", ".ts", ".tsx", ".css"
     ]
+    private static let assetExtensions: Set<String> = [
+        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".avif"
+    ]
     private static let dynamicImportRegex = try! NSRegularExpression(
         pattern: #"import\(\s*['"]([^'"]+)['"]\s*\)"#
     )
     private static let srcHrefRegex = try! NSRegularExpression(
-        pattern: #"\b(?:src|href)\s*=\s*["']([^"']+\.(?:jpg|jpeg|png|webp|gif|svg|avif))["']"#,
+        pattern: #"\b(?:src|href)\s*=\s*["']([^"']+\.(?:jpg|jpeg|png|webp|gif|svg|avif))(?:[?#][^"']*)?["']"#,
         options: [.caseInsensitive]
     )
     private static let urlAssetRegex = try! NSRegularExpression(
-        pattern: #"url\(\s*['"]?([^'")]+\.(?:jpg|jpeg|png|webp|gif|svg|avif))['"]?\s*\)"#,
+        pattern: #"url\(\s*['"]?([^'")]+\.(?:jpg|jpeg|png|webp|gif|svg|avif))(?:[?#][^'")]*)?['"]?\s*\)"#,
         options: [.caseInsensitive]
     )
 
@@ -165,9 +168,17 @@ public enum SiteGraphExplorer {
 
         for file in walk(projectRoot, fileManager: fileManager) {
             let relativePath = relativePosix(file, from: projectRoot)
-            guard sourceExtensions.contains(fileExtension(file)) else { continue }
             guard nodesByID[nodeIDByRelativePath[relativePath] ?? ""] == nil else { continue }
-            guard let kind = kind(for: relativePath) else { continue }
+            let ext = fileExtension(file)
+            let nodeKind: SiteGraphNodeKind?
+            if sourceExtensions.contains(ext) {
+                nodeKind = kind(for: relativePath)
+            } else if assetExtensions.contains(ext) {
+                nodeKind = .asset
+            } else {
+                nodeKind = nil
+            }
+            guard let kind = nodeKind else { continue }
             addNode(SiteGraphNode(
                 id: "\(siteID):file:\(relativePath)",
                 kind: kind,
@@ -194,14 +205,47 @@ public enum SiteGraphExplorer {
                     fileManager: fileManager
                 ) else { continue }
                 let targetKind = nodesByID[targetID]?.kind
-                let edgeKind: SiteGraphEdgeKind = targetKind == .layout ? .usesLayout : .imports
+                let edgeKind: SiteGraphEdgeKind
+                if targetKind == .layout {
+                    edgeKind = .usesLayout
+                } else if targetKind == .asset {
+                    edgeKind = .referencesAsset
+                } else {
+                    edgeKind = .imports
+                }
                 let edge = SiteGraphEdge(sourceID: node.id, targetID: targetID, kind: edgeKind)
                 edgesByID[edge.id] = edge
             }
             for assetPath in assetReferences(in: text) {
-                guard let targetID = nodeIDByPublicPath[assetPath] else { continue }
+                guard let targetID = resolveAssetReference(
+                    assetPath,
+                    from: filePath,
+                    nodeIDByRelativePath: nodeIDByRelativePath,
+                    nodeIDByPublicPath: nodeIDByPublicPath
+                ) else { continue }
                 let edge = SiteGraphEdge(sourceID: node.id, targetID: targetID, kind: .referencesAsset)
                 edgesByID[edge.id] = edge
+            }
+            // Markdown pages/entries reference their layout through the frontmatter `layout:`
+            // field, not an import statement — without this, editing a layout under-reports its
+            // impact on markdown content (#309). Markdown-ish files only: an `.astro` frontmatter
+            // block is JS, not YAML, and must not go through the YAML parser.
+            if isMarkdownPath(filePath) {
+                let frontmatter = Frontmatter.parse(text)
+                if case .string(let layoutRef)? = frontmatter["layout"],
+                   let targetID = resolveImport(
+                       layoutRef,
+                       from: filePath,
+                       projectRoot: projectRoot,
+                       nodeIDByRelativePath: nodeIDByRelativePath,
+                       nodeIDByPublicPath: nodeIDByPublicPath,
+                       fileManager: fileManager
+                   ) {
+                    let kind: SiteGraphEdgeKind =
+                        nodesByID[targetID]?.kind == .layout ? .usesLayout : .imports
+                    let edge = SiteGraphEdge(sourceID: node.id, targetID: targetID, kind: kind)
+                    edgesByID[edge.id] = edge
+                }
             }
         }
 
@@ -229,6 +273,12 @@ public enum SiteGraphExplorer {
 
     private static func kindRank(_ kind: SiteGraphNodeKind) -> Int {
         SiteGraphNodeKind.allCases.firstIndex(of: kind) ?? Int.max
+    }
+
+    private static let markdownExtensions: Set<String> = [".md", ".mdx", ".mdoc", ".markdown"]
+
+    private static func isMarkdownPath(_ relativePath: String) -> Bool {
+        markdownExtensions.contains(fileExtension(relativePath))
     }
 
     private static func kind(for relativePath: String) -> SiteGraphNodeKind? {
@@ -270,11 +320,31 @@ public enum SiteGraphExplorer {
             regex.matches(in: text, range: range).compactMap { match in
                 guard let found = Range(match.range(at: 1), in: text) else { return nil }
                 let value = String(text[found])
-                if value.hasPrefix("/") { return value }
-                if value.hasPrefix("public/") { return "/" + String(value.dropFirst("public".count + 1)) }
-                return nil
+                return value
             }
         }
+    }
+
+    private static func resolveAssetReference(
+        _ value: String,
+        from relativePath: String,
+        nodeIDByRelativePath: [String: String],
+        nodeIDByPublicPath: [String: String]
+    ) -> String? {
+        if value.hasPrefix("//") {
+            return nil
+        }
+        if value.hasPrefix("/") {
+            return nodeIDByPublicPath[value]
+        }
+        if value.hasPrefix("public/") {
+            return nodeIDByPublicPath["/" + String(value.dropFirst("public".count + 1))]
+        }
+        if !value.contains("://") && !value.hasPrefix("#") {
+            let base = (relativePath as NSString).deletingLastPathComponent
+            return nodeIDByRelativePath[normalizeRelativePath((base as NSString).appendingPathComponent(value))]
+        }
+        return nil
     }
 
     private static func resolveImport(

@@ -5,10 +5,22 @@ import AnglesiteIntents
 
 private struct FocusedSiteIDKey: FocusedValueKey { typealias Value = String }
 private struct FocusedNewContentActionsKey: FocusedValueKey { typealias Value = NewContentActions }
+private struct FocusedNavigatorSelectionActionsKey: FocusedValueKey { typealias Value = NavigatorSelectionActions }
 
 struct NewContentActions {
     let newPage: @MainActor () -> Void
     let newCollection: @MainActor () -> Void
+    let newPost: @MainActor () -> Void
+    let newComponent: @MainActor () -> Void
+}
+
+/// Delete/Duplicate acting on the Navigator's current selection (#516). Each action is `nil` when
+/// there is no selection, or the selection isn't a page/post (`SiteNavigatorModel.canDelete`/
+/// `canDuplicate`) — that's what lets the Edit-menu items enable/disable correctly without the
+/// menu needing to know Navigator internals.
+struct NavigatorSelectionActions {
+    let delete: (@MainActor () -> Void)?
+    let duplicate: (@MainActor () -> Void)?
 }
 
 extension FocusedValues {
@@ -21,35 +33,24 @@ extension FocusedValues {
         get { self[FocusedNewContentActionsKey.self] }
         set { self[FocusedNewContentActionsKey.self] = newValue }
     }
+
+    var navigatorSelectionActions: NavigatorSelectionActions? {
+        get { self[FocusedNavigatorSelectionActionsKey.self] }
+        set { self[FocusedNavigatorSelectionActionsKey.self] = newValue }
+    }
 }
 
 /// Must be `Commands` (not `App`) so the focused scene values can flow into the menu state.
 struct NewContentCommands: Commands {
     @Environment(\.openWindow) private var openWindow
-    // SwiftUI exposes `.focusedSceneValue(...)` as the publishing modifier; command readers still
-    // use `@FocusedValue`. There is no `@FocusedSceneValue` property wrapper in the macOS 27 SDK.
-    @FocusedValue(\.newContentActions) private var focusedActions
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Menu("New") {
-                Button("Site") {
-                    openWindow(id: "sites")
-                    WindowRouter.shared.requestNewSite()
-                }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-
-                Button("Page…") {
-                    focusedActions?.newPage()
-                }
-                .keyboardShortcut("n")
-                .disabled(focusedActions == nil)
-
-                Button("Collection…") {
-                    focusedActions?.newCollection()
-                }
-                .disabled(focusedActions == nil)
+            Button("New Site…") {
+                openWindow(id: "sites")
+                WindowRouter.shared.requestNewSite()
             }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
 
             Button("Open Site…") {
                 Task { await openSiteFromMenu() }
@@ -65,10 +66,33 @@ struct NewContentCommands: Commands {
             openWindow(value: site.id)
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Couldn't open that site"
+            alert.messageText = String(localized: "Couldn't open that site")
             alert.informativeText = error.localizedDescription
             alert.alertStyle = .warning
             alert.runModal()
+        }
+    }
+}
+
+/// Edit ▸ Delete (⌘⌫) / Duplicate (⌘D) for the focused window's Navigator selection (#516).
+/// Placed in the Edit menu next to Cut/Copy/Paste — the macOS convention for selection-scoped
+/// destructive/duplicate actions — rather than the File menu.
+struct NavigatorEditCommands: Commands {
+    @FocusedValue(\.navigatorSelectionActions) private var actions
+
+    var body: some Commands {
+        CommandGroup(after: .pasteboard) {
+            Button("Delete") {
+                actions?.delete?()
+            }
+            .keyboardShortcut(.delete, modifiers: [.command])
+            .disabled(actions?.delete == nil)
+
+            Button("Duplicate") {
+                actions?.duplicate?()
+            }
+            .keyboardShortcut("d", modifiers: [.command])
+            .disabled(actions?.duplicate == nil)
         }
     }
 }
@@ -80,16 +104,39 @@ struct ExportSiteCommands: Commands {
     var body: some Commands {
         // Export lives after the standard Save items. Enabled only when a site window is focused.
         CommandGroup(after: .importExport) {
-            Button("Export Site Source…") {
-                // Capture now — focus may shift between press and Task execution.
-                guard let id = focusedSiteID else { return }
-                Task { @MainActor in
-                    if let site = await SiteStore.shared.find(id: id) {
-                        SiteActions.exportSource(of: site)
+            Menu("Export To") {
+                Button("Astro Website…") {
+                    // Capture now — focus may shift between press and Task execution.
+                    guard let id = focusedSiteID else { return }
+                    Task { @MainActor in
+                        if let site = await SiteStore.shared.find(id: id) {
+                            SiteActions.exportSource(of: site)
+                        }
                     }
                 }
+                .disabled(focusedSiteID == nil)
+
+                // Runs the build in the site runtime and saves dist/ (spec §2.2).
+                PlannedItem("Built HTML…")
             }
-            .disabled(focusedSiteID == nil)
+
+            // Git-repo size reduction — unused binary blobs (spec §4.3).
+            PlannedItem("Reduce File Size…")
+
+            Menu("Advanced") {
+                Menu("Change File Type") {
+                    // Keynote semantics; single-file is an at-rest state (spec §4.2).
+                    PlannedItem("Single File")
+                    PlannedItem("Package")
+                }
+
+                PlannedItem("Language & Region…")
+            }
+
+            Divider()
+
+            // iWork-style package encryption; at-rest state (spec §4.2).
+            PlannedItem("Set Password…")
         }
     }
 }

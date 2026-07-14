@@ -10,6 +10,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     public let mcpClient: MCPClient
     private let knowledgeIndex: SiteKnowledgeIndex?
     private let semanticRanker: SemanticRanker?
+    private let conventionsEngine: ProjectConventionsEngine?
     private let logCenter: LogCenter
     private let connect: @Sendable (MCPClient, URL) async throws -> Void
     private let makeFileWatcher: @Sendable () -> any SiteFileWatching
@@ -33,15 +34,17 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         mcpClient: MCPClient,
         knowledgeIndex: SiteKnowledgeIndex? = nil,
         semanticRanker: SemanticRanker? = nil,
+        conventionsEngine: ProjectConventionsEngine? = nil,
         logCenter: LogCenter = .shared,
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) },
-        makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { FSEventsFileWatcher() }
+        makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { PlatformFileWatcher.make() }
     ) {
         self.ref = ref
         self.control = control
         self.mcpClient = mcpClient
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
+        self.conventionsEngine = conventionsEngine
         self.logCenter = logCenter
         self.connect = connect
         self.makeFileWatcher = makeFileWatcher
@@ -89,6 +92,15 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         await teardown()
         generation += 1
         let gen = generation
+        // `setState` dedups against the current value, so re-entering `.starting(siteID:)` for the
+        // same site (Restart while already `.starting` — the "wedged boot" case this command exists
+        // for) would otherwise be silently dropped: observers never see a change, so the progress
+        // bar stays frozen on the superseded attempt. Force a transient `.idle` first only in that
+        // specific case — `.ready`/`.failed`/`.idle` already differ from the new `.starting` value
+        // and don't need it.
+        if case .starting(let existingSiteID) = current, existingSiteID == siteID {
+            setState(.idle)
+        }
         setState(.starting(siteID: siteID))
 
         // Wire the container's boot/guest-process output (repo clone, npm install + astro dev, the
@@ -99,22 +111,41 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         bootLogContinuation = continuation
         let logCenter = self.logCenter
         let source = "container:\(siteID)"
-        bootLogDrainTask = Task.detached(priority: .utility) {
+        let drainTask = Task.detached(priority: .utility) {
             for await (line, stream) in lines {
                 await logCenter.append(source: source, stream: stream, text: line)
             }
+        }
+        bootLogDrainTask = drainTask
+
+        // Tears down this attempt's own container and finishes its own (locally-captured, not
+        // instance-var) boot log stream. Instance vars aren't used here because by the time an
+        // abandoned attempt resumes past a `gen == generation` check, a superseding start()/stop()
+        // may already have overwritten `bootLogContinuation`/`bootLogDrainTask` with its own —
+        // finishing those would tear down the wrong stream. Actors are reentrant at `await` points,
+        // so a superseding call's `teardown()` can run to completion while this attempt is still
+        // suspended inside `control.start()`/`connect(...)`, before `activeSiteID` is assigned —
+        // `teardown()` alone can't find this attempt's container in that window. Every exit path
+        // that discovers it has been superseded must clean up after itself.
+        func abandonSupersededAttempt() async {
+            try? await control.stop(siteID: siteID)
+            continuation.finish()
+            await drainTask.value
         }
 
         do {
             let session = try await control.start(
                 siteID: siteID, sourceRepo: siteDirectory, ref: ref,
                 onOutput: { line, stream in continuation.yield((line, stream)) })
-            guard gen == generation else { return }
+            guard gen == generation else { await abandonSupersededAttempt(); return }
             try await connect(mcpClient, session.mcpURL)
-            guard gen == generation else { return }
+            guard gen == generation else { await abandonSupersededAttempt(); return }
             await knowledgeIndex?.rebuild(siteID: siteID, projectRoot: siteDirectory)
+            await conventionsEngine?.rebuild(siteID: siteID, projectRoot: siteDirectory)
             guard gen == generation else {
                 await knowledgeIndex?.unload(siteID: siteID)
+                await conventionsEngine?.unload(siteID: siteID)
+                await abandonSupersededAttempt()
                 return
             }
             if let documents = await knowledgeIndex?.documents(siteID: siteID) {
@@ -123,6 +154,8 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             guard gen == generation else {
                 await knowledgeIndex?.unload(siteID: siteID)
                 await semanticRanker?.unload(siteID: siteID)
+                await conventionsEngine?.unload(siteID: siteID)
+                await abandonSupersededAttempt()
                 return
             }
             loadedKnowledgeSiteID = siteID
@@ -130,12 +163,18 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             activeSiteID = siteID
             setState(.ready(siteID: siteID, url: session.previewURL))
         } catch {
-            // Finish the boot log stream immediately rather than leaving it for the next start()/
-            // stop() call to clean up via teardown() — every other exit path in this method is
-            // scrupulous about this, and control.start() has already stopped the container on its
-            // own failure paths, so no further guest output can arrive here.
-            await finishBootLogStream()
+            // Finish this attempt's own (locally-captured) boot log stream immediately rather than
+            // leaving it for the next start()/stop() call to clean up via teardown() — control.start()
+            // has already stopped the container on its own failure paths, so no further guest output
+            // can arrive here. Using the local capture, not the instance vars, matters if this attempt
+            // was itself superseded while `control.start()` was in flight: a newer attempt may already
+            // have overwritten `bootLogContinuation`/`bootLogDrainTask` with its own, and finishing
+            // those would tear down the wrong stream.
+            continuation.finish()
+            await drainTask.value
             guard gen == generation else { return }
+            bootLogContinuation = nil
+            bootLogDrainTask = nil
             setState(.failed(siteID: siteID, message: Self.friendlyMessage(for: error)))
         }
     }
@@ -145,45 +184,53 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     /// are idempotent; in-flight bytes are not drained by design.
     public func stop() async {
         generation += 1
+        let gen = generation
         await teardown()
+        // Actors are reentrant, so a start()/stop() issued while teardown() was suspended has
+        // superseded this stop and owns the state now — emitting `.idle` here would clobber its
+        // `.starting`/`.ready` (the rapid Stop → Restart race, PR #542 review): the UI would show
+        // the boot spinner forever while the dev server is actually running.
+        guard gen == generation else { return }
         setState(.idle)
     }
 
     // MARK: Internals
 
     private func teardown() async {
-        await mcpClient.stop()
+        // Snapshot-and-clear all bookkeeping before the first suspension: actors are reentrant,
+        // so a superseding start()'s/stop()'s teardown can interleave while this one is suspended,
+        // and a successful boot from a superseding start() can complete and install fresh
+        // bookkeeping before this teardown resumes. Clearing first means each resource is stopped
+        // by exactly one teardown, and a straggling teardown can't stop the newer boot's
+        // container, kill its file watcher, or finish its live boot-log stream (PR #542 review).
         stopFileWatcher()
-        if let siteID = loadedKnowledgeSiteID {
+        let knowledgeSiteID = loadedKnowledgeSiteID
+        loadedKnowledgeSiteID = nil
+        let containerSiteID = activeSiteID
+        activeSiteID = nil
+        let bootLogContinuation = self.bootLogContinuation
+        let bootLogDrainTask = self.bootLogDrainTask
+        self.bootLogContinuation = nil
+        self.bootLogDrainTask = nil
+
+        await mcpClient.stop()
+        if let siteID = knowledgeSiteID {
             await knowledgeIndex?.unload(siteID: siteID)
             await semanticRanker?.unload(siteID: siteID)
-            loadedKnowledgeSiteID = nil
+            await conventionsEngine?.unload(siteID: siteID)
         }
-        if let id = activeSiteID {
+        if let id = containerSiteID {
             try? await control.stop(siteID: id)
-            activeSiteID = nil
         }
         // Stop the container first (above) so no more guest output can arrive, then finish the
-        // stream — see finishBootLogStream().
-        await finishBootLogStream()
-    }
-
-    /// Finishes the boot-log continuation and awaits its drain task so any already-buffered lines
-    /// land in `LogCenter` before returning — mirrors `ContainerDeployExecutor`'s finish-then-await-
-    /// drain discipline. Idempotent (safe to call when nothing is running). Called from both
-    /// `teardown()` and `start()`'s catch block, so a failed start cleans up its own stream
-    /// immediately rather than leaking it to whatever the next `start()`/`stop()` happens to be.
-    private func finishBootLogStream() async {
-        if let continuation = bootLogContinuation {
-            continuation.finish()
-            bootLogContinuation = nil
-        }
+        // stream and await the drain so already-buffered lines land in LogCenter — mirrors
+        // `ContainerDeployExecutor`'s finish-then-await-drain discipline.
+        bootLogContinuation?.finish()
         await bootLogDrainTask?.value
-        bootLogDrainTask = nil
     }
 
     private func startFileWatcher(siteID: String, projectRoot: URL, generation gen: Int) {
-        guard knowledgeIndex != nil else { return }
+        guard knowledgeIndex != nil || conventionsEngine != nil else { return }
         stopFileWatcher()  // defensive: never orphan a running watcher if called while one is active
         let watcher = makeFileWatcher()
         do {
@@ -206,15 +253,45 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     }
 
     private func applyFileChanges(_ batch: FileChangeBatch, siteID: String, projectRoot: URL, generation gen: Int) async {
-        guard gen == generation, let knowledgeIndex else { return }
-        await KnowledgeReindex.apply(batch, to: knowledgeIndex, ranker: semanticRanker, siteID: siteID, projectRoot: projectRoot)
+        guard gen == generation else { return }
+        if let knowledgeIndex {
+            await KnowledgeReindex.apply(batch, to: knowledgeIndex, ranker: semanticRanker, siteID: siteID, projectRoot: projectRoot)
+        }
+        if let conventionsEngine {
+            await Self.applyToConventions(batch, engine: conventionsEngine, siteID: siteID, projectRoot: projectRoot)
+        }
         // A stop()/site-switch may have superseded us during the apply above; if so, drop anything
         // we re-added for a site this runtime no longer owns — mirroring populateSharedIndexes'
         // post-await unload discipline.
         guard gen == generation else {
-            await knowledgeIndex.unload(siteID: siteID)
+            await knowledgeIndex?.unload(siteID: siteID)
             await semanticRanker?.unload(siteID: siteID)
+            await conventionsEngine?.unload(siteID: siteID)
             return
+        }
+    }
+
+    /// Mirrors `KnowledgeReindex.apply`'s batch-translation logic for `ProjectConventionsEngine`.
+    /// Kept as a small static helper (not a shared type with `KnowledgeReindex`) since the two
+    /// indexes have different upsert/remove signatures and no shared ranker to keep in sync.
+    private static func applyToConventions(
+        _ batch: FileChangeBatch, engine: ProjectConventionsEngine, siteID: String, projectRoot: URL
+    ) async {
+        if batch.needsFullRescan {
+            await engine.rebuild(siteID: siteID, projectRoot: projectRoot)
+            return
+        }
+        var seen = Set<String>()
+        for url in batch.paths {
+            guard let relativePath = SiteIndexPaths.relativePOSIXPath(of: url, under: projectRoot),
+                  !SiteIndexPaths.isSkipped(relativePath: relativePath),
+                  seen.insert(relativePath).inserted
+            else { continue }
+            if FileManager.default.fileExists(atPath: url.path) {
+                await engine.upsertFile(siteID: siteID, projectRoot: projectRoot, relativePath: relativePath)
+            } else {
+                await engine.removeFile(siteID: siteID, relativePath: relativePath)
+            }
         }
     }
 

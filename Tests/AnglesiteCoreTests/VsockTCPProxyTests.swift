@@ -5,12 +5,27 @@ import Foundation
 /// `.serialized`: this suite drives real sockets and per-connection `DispatchIO`/`DispatchQueue`
 /// pumps. Under CI's full parallel test run (1087 tests across 163 suites on a resource-constrained
 /// macos-15 runner), the global GCD thread pool gets so oversubscribed that some of these tests'
-/// read/write handlers never get scheduled within their generous (10-20s) polling deadlines — the
-/// same 3 of 9 tests failed identically, with 0 bytes ever received, on two consecutive CI runs of
-/// an unmodified commit, while a local `swift test --filter VsockTCPProxyTests` run passes every
-/// test in under 200ms. Serializing this suite's own tests removes its largest source of internal
-/// GCD contention so it isn't competing with itself on top of the rest of the parallel test binary.
-@Suite(.serialized)
+/// read/write handlers went unscheduled for 10+ seconds — the same 3 of 9 tests failed identically,
+/// with 0 bytes ever received, on two consecutive CI runs of an unmodified commit, while a local
+/// `swift test --filter VsockTCPProxyTests` run passes every test in under 200ms. Serializing this
+/// suite's own tests removes its largest source of internal GCD contention so it isn't competing
+/// with itself on top of the rest of the parallel test binary.
+///
+/// `.timeLimit`: the ONLY wall-clock bound in this file, and deliberately so. The wait helpers
+/// below (`readExactly`, `readUntilEOF`, `waitUntilConnectionCount`) carry NO per-call deadlines:
+/// they wait for the event they assert on (byte count reached, peer EOF, connection count) and
+/// exit on cancellation, which is exactly what the time limit triggers if a splice is genuinely
+/// stuck. The per-helper deadlines this replaces were really encoding "worst-case CI scheduler
+/// latency" — an unknowable — and got bumped every time a busier runner disproved the current
+/// guess (a fixed sleep, then a 10s poll that flaked at 10.7s, then 20s; see #556 and PR #558's
+/// CI failure). A stuck splice now fails as an unambiguous time-limit violation, not a
+/// data-assertion mirage.
+///
+/// Scope note: a suite-level `TimeLimitTrait` is inherited by each test INDIVIDUALLY, not pooled
+/// into one shared budget — so every test here gets its own 1-minute cap, and the worst case for
+/// a fully wedged `.serialized` run of this suite is ~1 minute per test (currently 9 tests ≈ 9
+/// minutes), still inside build-test's 15-minute job timeout. The healthy suite runs in seconds.
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct VsockTCPProxyTests {
     /// Make a connected pair of FileHandles via socketpair(2). One end is handed to the proxy as
     /// the "guest"; the test holds the other to act as the guest peer.
@@ -27,7 +42,8 @@ struct VsockTCPProxyTests {
     private func connectTCPToProxy(to url: URL) throws -> FileHandle {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         #expect(fd >= 0)
-        // Per-read backstop so reads return (EAGAIN) for readExactly to poll; not the deadline.
+        // Per-read backstop so each read tick returns (EAGAIN) and the wait helpers can observe
+        // cancellation; not a deadline.
         var tv = timeval(tv_sec: 1, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         var addr = sockaddr_in()
@@ -44,27 +60,56 @@ struct VsockTCPProxyTests {
     }
 
     /// Set SO_RCVTIMEO on an existing file descriptor (e.g. the guest socketpair peer) so each
-    /// `read` syscall returns (with EAGAIN) rather than blocking forever — this is what lets
-    /// `readExactly` poll. It is a per-read backstop, NOT the overall deadline.
+    /// `read` syscall returns (with EAGAIN) rather than blocking forever — this is what lets the
+    /// wait helpers loop and observe cancellation. It is a per-read backstop, NOT a deadline.
     private func setRecvTimeout(_ fh: FileHandle, seconds: Int = 1) {
         var tv = timeval(tv_sec: seconds, tv_usec: 0)
         setsockopt(fh.fileDescriptor, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     }
 
-    /// Read exactly `count` bytes from `fh`, accumulating across reads until the deadline. The
-    /// proxy's splice pipeline is event-driven (DispatchSource accept → actor hop → readability
-    /// handler) and can lag well past a second under heavy *parallel* test load on a small CI
-    /// runner, so a single timed `read` races the pipeline and fails spuriously (errno 35 / EAGAIN).
-    /// Polling against a generous deadline never fails on scheduling jitter, yet still bounds a
-    /// genuinely-stuck splice instead of hanging CI forever. Requires SO_RCVTIMEO on `fh` so each
-    /// `read` returns promptly to let the loop spin.
-    private func readExactly(_ count: Int, from fh: FileHandle, timeout: Duration = .seconds(10)) async -> Data {
-        let deadline = ContinuousClock.now + timeout
+    /// One `read(2)` tick against `fh`. Raw POSIX (not `FileHandle.read(upToCount:)`) because the
+    /// wait loops must distinguish "nothing yet, keep waiting" (EAGAIN from SO_RCVTIMEO) from the
+    /// terminal peer-gone conditions (EOF, ECONNRESET) — `FileHandle` collapses all three into
+    /// nil/empty, which is why the old helpers could only give up by deadline.
+    private enum ReadTick {
+        case bytes(Data)    // n > 0
+        case eof            // n == 0: peer closed cleanly
+        case wouldBlock     // EAGAIN/EINTR: nothing available this tick, keep waiting
+        case failed(Int32)  // any other errno: peer gone abnormally (e.g. ECONNRESET)
+    }
+
+    private func readTick(_ fh: FileHandle, max: Int) -> ReadTick {
+        var buf = [UInt8](repeating: 0, count: max)
+        let n = read(fh.fileDescriptor, &buf, max)
+        if n > 0 { return .bytes(Data(buf[..<n])) }
+        if n == 0 { return .eof }
+        // __error().pointee, NOT `errno`: Swift's `errno` accessor is an overlay symbol that lives
+        // in libswift_DarwinFoundation1.dylib on current SDKs, which CI's Xcode 26.2 runner image
+        // does not ship — referencing it makes the whole test bundle fail to dlopen (same class of
+        // breakage as #69's raw-POSIX pump). __error() is the plain C call behind the macro.
+        let err = __error().pointee
+        switch err {
+        case EAGAIN, EWOULDBLOCK, EINTR: return .wouldBlock
+        default: return .failed(err)
+        }
+    }
+
+    /// Read exactly `count` bytes from `fh`, waiting as long as it takes for the event-driven
+    /// splice (DispatchSource accept → actor hop → DispatchIO handlers) to deliver them. The
+    /// proxy's pipeline can lag tens of seconds under heavy parallel test load on a small CI
+    /// runner, so no per-call deadline: correctness is asserted on events (bytes arrived, or the
+    /// terminal EOF/reset that returns short and fails the content assertion immediately), and
+    /// liveness is bounded once, by the suite `.timeLimit`, whose cancellation exits the loop.
+    /// Requires SO_RCVTIMEO on `fh` so each read tick returns and cancellation is observed.
+    private func readExactly(_ count: Int, from fh: FileHandle) async -> Data {
         var acc = Data()
-        while acc.count < count && ContinuousClock.now < deadline {
-            if let chunk = try? fh.read(upToCount: count - acc.count), !chunk.isEmpty {
+        while acc.count < count && !Task.isCancelled {
+            switch readTick(fh, max: count - acc.count) {
+            case .bytes(let chunk):
                 acc.append(chunk)
-            } else {
+            case .eof, .failed:
+                return acc      // terminal: the caller's #expect reports the shortfall
+            case .wouldBlock:
                 await Task.yield()
                 try? await Task.sleep(for: .milliseconds(5))
             }
@@ -72,11 +117,31 @@ struct VsockTCPProxyTests {
         return acc
     }
 
-    /// Poll `proxy.connectionCount` until it equals `n` or the timeout elapses, then return the
-    /// final count. Replaces a fixed `Task.sleep` to avoid flaky CI timing.
-    private func waitUntilConnectionCount(_ proxy: VsockTCPProxy, _ n: Int, timeout: Duration = .seconds(10)) async -> Int {
-        let deadline = ContinuousClock.now + timeout
-        while ContinuousClock.now < deadline {
+    /// Accumulate bytes from `fh` until the peer closes (EOF or reset). The event-driven
+    /// replacement for "expect no bytes within N seconds": the proxy closing the connection IS the
+    /// observable outcome, so this returns the moment it happens instead of burning a fixed wait on
+    /// every run. Same liveness story as `readExactly`: suite `.timeLimit` + cancellation.
+    private func readUntilEOF(from fh: FileHandle) async -> Data {
+        var acc = Data()
+        while !Task.isCancelled {
+            switch readTick(fh, max: 4096) {
+            case .bytes(let chunk):
+                acc.append(chunk)
+            case .eof, .failed:
+                return acc
+            case .wouldBlock:
+                await Task.yield()
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+        }
+        return acc
+    }
+
+    /// Poll `proxy.connectionCount` until it equals `n`, then return it. No per-call deadline
+    /// (see `readExactly`): cancellation from the suite `.timeLimit` exits the loop, returning the
+    /// current count so the caller's assertion reports the actual value.
+    private func waitUntilConnectionCount(_ proxy: VsockTCPProxy, _ n: Int) async -> Int {
+        while !Task.isCancelled {
             let count = await proxy.connectionCount
             if count == n { return count }
             await Task.yield()
@@ -174,8 +239,11 @@ struct VsockTCPProxyTests {
         let client = try connectTCPToProxy(to: url)
         setRecvTimeout(client)
 
-        // The client's connection should be closed (no bytes ever sent) once the dial fails.
-        let got = await readExactly(1, from: client, timeout: .seconds(5))
+        // The failed dial closes the client's connection with no bytes ever sent. EOF is the event
+        // to wait for — not "no bytes within N seconds", which burned the full N on every green run
+        // and still guessed at CI latency. `handleAccepted` invokes `onDialError` synchronously
+        // BEFORE closing the TCP side, so observing EOF also guarantees the report has landed.
+        let got = await readUntilEOF(from: client)
         #expect(got.isEmpty)
 
         // The dial failure must have been reported, not swallowed.
@@ -330,9 +398,10 @@ struct VsockTCPProxyTests {
         try guestPeer.write(contentsOf: payload)
         try guestPeer.close()
 
-        // The client must receive every byte before its side of the proxy closes. readExactly polls
-        // to a generous deadline; a truncated forward returns fewer than payloadSize bytes.
-        let got = await readExactly(payloadSize, from: client, timeout: .seconds(20))
+        // The client must receive every byte before its side of the proxy closes. A truncated
+        // forward ends in EOF, so readExactly returns short immediately and the count assertion
+        // fails with the actual byte count — no deadline to wait out in either direction.
+        let got = await readExactly(payloadSize, from: client)
         #expect(got.count == payloadSize)
         #expect(got == payload)
         await proxy.stop()

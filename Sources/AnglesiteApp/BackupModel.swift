@@ -25,6 +25,13 @@ final class BackupModel {
     /// worth letting the user see + copy, and on `.noChanges` the user explicitly asked.
     var drawerPresented: Bool = false
 
+    /// Fires on every phase change — start and terminal alike — with the site id of the run the
+    /// transition belongs to (delivered per-run, not captured at wiring time, so a window
+    /// replayed onto a different site can't mis-attribute an in-flight backup's outcome).
+    /// `SiteWindowModel` wires this to the completion notifier (#526); the model stays
+    /// UserNotifications-free.
+    @ObservationIgnored var onPhaseTransition: ((_ siteID: String, _ phase: Phase) -> Void)?
+
     private let command: BackupCommand
     private let logCenter: LogCenter
     private var inFlight: Task<Void, Never>?
@@ -58,9 +65,15 @@ final class BackupModel {
         drawerPresented = false
     }
 
+    /// Set `phase` and notify the transition hook.
+    private func transition(siteID: String, to newPhase: Phase) {
+        phase = newPhase
+        onPhaseTransition?(siteID, newPhase)
+    }
+
     private func runBackup(siteID: String, siteDirectory: URL) async {
         let started = Date()
-        phase = .running(siteID: siteID, since: started)
+        transition(siteID: siteID, to: .running(siteID: siteID, since: started))
         logLines = []
         currentMilestone = nil
         drawerPresented = true
@@ -91,11 +104,11 @@ final class BackupModel {
         let duration = Date().timeIntervalSince(started)
         switch result {
         case .succeeded(let sha, let branch, let remote):
-            phase = .succeeded(commitSHA: sha, branch: branch, remote: remote, duration: duration)
+            transition(siteID: siteID, to: .succeeded(commitSHA: sha, branch: branch, remote: remote, duration: duration))
         case .noChanges:
-            phase = .noChanges
+            transition(siteID: siteID, to: .noChanges)
         case .failed(let reason, let exit):
-            phase = .failed(reason: reason, exitCode: exit)
+            transition(siteID: siteID, to: .failed(reason: reason, exitCode: exit))
         }
     }
 }

@@ -24,6 +24,17 @@ public struct ComponentModel: Sendable, Equatable, Codable {
             case fragment, element, component, expression, slot, text
         }
 
+        public init(id: String, kind: Kind, tag: String?, attrs: [Attr], span: Span, loc: Loc?, text: String?, children: [Node]) {
+            self.id = id
+            self.kind = kind
+            self.tag = tag
+            self.attrs = attrs
+            self.span = span
+            self.loc = loc
+            self.text = text
+            self.children = children
+        }
+
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = try c.decode(String.self, forKey: .id)

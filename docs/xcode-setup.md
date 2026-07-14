@@ -49,9 +49,10 @@ xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug b
 ## App Store Release
 
 Release builds use `Apple Distribution` signing and require a paid Apple
-Developer account, a Mac App Store provisioning profile for `io.dwk.anglesite`,
-and approval for restricted entitlements such as
-`com.apple.security.virtualization`.
+Developer account and a standard Mac App Store provisioning profile for
+`io.dwk.anglesite`. No entitlement approval is involved:
+`com.apple.security.virtualization` is unrestricted (it even works on ad-hoc
+Debug builds).
 
 The release flow is documented in [release.md](release.md) and driven by:
 

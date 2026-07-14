@@ -50,7 +50,6 @@ public actor SiteKnowledgeIndex {
     }
 
     private var documentsBySite: [String: [String: Document]] = [:]
-    private var styleGuidesBySite: [String: ProjectStyleGuide] = [:]
     private static let maxExcerptCharacters = 8_192
 
     public init() {}
@@ -61,25 +60,14 @@ public actor SiteKnowledgeIndex {
             Self.scan(siteID: siteID, projectRoot: projectRoot)
         }.value
         documentsBySite[siteID] = Dictionary(uniqueKeysWithValues: documents.map { ($0.path, $0) })
-        styleGuidesBySite[siteID] = nil
     }
 
     public func unload(siteID: String) {
         documentsBySite[siteID] = nil
-        styleGuidesBySite[siteID] = nil
     }
 
     public func documents(siteID: String) -> [Document] {
         (documentsBySite[siteID] ?? [:]).values.sorted { $0.path < $1.path }
-    }
-
-    public func projectStyleGuide(siteID: String) -> ProjectStyleGuide {
-        if let guide = styleGuidesBySite[siteID] {
-            return guide
-        }
-        let guide = ProjectStyleGuide.infer(siteID: siteID, documents: documents(siteID: siteID))
-        styleGuidesBySite[siteID] = guide
-        return guide
     }
 
     public func upsertFile(siteID: String, projectRoot: URL, relativePath: String) async {
@@ -88,18 +76,15 @@ public actor SiteKnowledgeIndex {
         }.value
         guard let document = scanned else {
             documentsBySite[siteID]?[relativePath] = nil
-            styleGuidesBySite[siteID] = nil
             return
         }
         var siteDocs = documentsBySite[siteID] ?? [:]
         siteDocs[relativePath] = document
         documentsBySite[siteID] = siteDocs
-        styleGuidesBySite[siteID] = nil
     }
 
     public func removeFile(siteID: String, relativePath: String) {
         documentsBySite[siteID]?[relativePath] = nil
-        styleGuidesBySite[siteID] = nil
     }
 
     /// The currently-indexed document for a path, or `nil` if none is held. Lets incremental

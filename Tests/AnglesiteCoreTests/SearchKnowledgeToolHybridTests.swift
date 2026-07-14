@@ -5,7 +5,7 @@ import Testing
 // Gated like the type under test — FoundationModels (and thus SearchKnowledgeTool) is only
 // compiled under the Xcode-27 toolchain (#128). The hybrid path needs no live model: the
 // embedding providers below are deterministic test doubles.
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 @Suite("SearchKnowledgeTool hybrid")

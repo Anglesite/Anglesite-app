@@ -15,13 +15,24 @@ public final class AppSettings: @unchecked Sendable {
         public static let pluginPathOverride   = "anglesite.pluginPathOverride"
         public static let templatePathOverride = "anglesite.templatePathOverride"
         public static let sitesRootOverride    = "anglesite.sitesRootOverride"
+        public static let lanRuntimeHost        = "anglesite.lanRuntimeHost"
+        public static let lanRuntimePreviewPort = "anglesite.lanRuntimePreviewPort"
+        public static let lanRuntimeMCPPort     = "anglesite.lanRuntimeMCPPort"
         public static let debugPaneEnabled   = "anglesite.debugPaneEnabled"
+        public static let esiPreviewUnprocessed = "anglesite.esiPreviewUnprocessed"
         public static let lastOpenedSiteID   = "anglesite.lastOpenedSiteID"
         public static let sitesRootBookmark  = "anglesite.sitesRootBookmark"
         public static let autoGenerateAltText = "anglesite.autoGenerateAltText"
         public static let autoGeneratePageCopy = "anglesite.autoGeneratePageCopy"
         public static let announcesLiveUpdates = "anglesite.announcesLiveUpdates"
+        public static let notifiesOnCompletion = "anglesite.notifiesOnCompletion"
         public static let didCleanLegacyChatBackendDefaults = "anglesite.didCleanLegacyChatBackendDefaults"
+        public static let gitHubAccountLogin = "anglesite.gitHubAccount.login"
+        public static let gitHubAccountName = "anglesite.gitHubAccount.name"
+        public static let gitHubAccountAvatarURL = "anglesite.gitHubAccount.avatarURL"
+        public static let cloudflareAccountVerified = "anglesite.cloudflareAccount.verified"
+        public static let cloudflareAccountName = "anglesite.cloudflareAccount.name"
+        public static let cloudflareAccountEmail = "anglesite.cloudflareAccount.email"
     }
 
     private enum LegacyKey {
@@ -84,6 +95,27 @@ public final class AppSettings: @unchecked Sendable {
         }
     }
 
+    /// Optional dev/test override pointing preview + MCP at a LAN-hosted runtime (#589/#601):
+    /// `nil` (the default) unless a host is configured, so runtime selection is untouched for
+    /// real users. Ports fall back to the container-guest convention when blank or invalid.
+    /// See `LANRuntimeConfiguration` and `docs/specs/2026-07-09-lan-site-runtime-design.md`.
+    public var lanRuntimeConfiguration: LANRuntimeConfiguration? {
+        guard let host = defaults.string(forKey: Key.lanRuntimeHost)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !host.isEmpty else { return nil }
+        return LANRuntimeConfiguration(
+            host: host,
+            previewPort: port(forKey: Key.lanRuntimePreviewPort, default: LANRuntimeConfiguration.defaultPreviewPort),
+            mcpPort: port(forKey: Key.lanRuntimeMCPPort, default: LANRuntimeConfiguration.defaultMCPPort))
+    }
+
+    /// Ports are stored as strings (the Settings UI uses plain text fields whose empty state
+    /// means "default"); `UserDefaults.string(forKey:)` also coerces a number if one was stored.
+    private func port(forKey key: String, default defaultPort: Int) -> Int {
+        guard let raw = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespaces),
+              let port = Int(raw), (1...65535).contains(port) else { return defaultPort }
+        return port
+    }
+
     /// Effective root for site discovery. Returns the override when set, otherwise `~/Sites/`.
     public var sitesRoot: URL {
         sitesRootOverride
@@ -96,6 +128,16 @@ public final class AppSettings: @unchecked Sendable {
     public var debugPaneEnabled: Bool {
         get { defaults.bool(forKey: Key.debugPaneEnabled) }
         set { defaults.set(newValue, forKey: Key.debugPaneEnabled) }
+    }
+
+    /// Forces local preview to skip `EsiInclude`'s dev-only fetch shim, so `EsiRemove`'s fallback
+    /// content can be previewed on demand instead of only by sabotaging the fragment URL
+    /// (docs/superpowers/specs/2026-07-13-esi-astro-component-design.md §4a). Global rather than
+    /// per-site: the Debug Pane this control lives in has no per-site scoping today. Defaults to
+    /// `false` (live/resolved preview, today's existing behavior).
+    public var esiPreviewUnprocessed: Bool {
+        get { defaults.bool(forKey: Key.esiPreviewUnprocessed) }
+        set { defaults.set(newValue, forKey: Key.esiPreviewUnprocessed) }
     }
 
     /// Security-scoped bookmark for the sites root, persisted so the sandboxed (MAS) build only
@@ -145,6 +187,19 @@ public final class AppSettings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Key.announcesLiveUpdates) }
     }
 
+    /// Whether the app posts a completion notification (Notification Center) when a
+    /// long-running site operation — Deploy, Backup, Audit — finishes while the app is in the
+    /// background (#526). On by default; delivery starts quietly via provisional authorization,
+    /// so the user manages prominence from System Settings. Stored inverted-from-absent so an
+    /// untouched install defaults to `true`.
+    public var notifiesOnCompletion: Bool {
+        get {
+            guard defaults.object(forKey: Key.notifiesOnCompletion) != nil else { return true }
+            return defaults.bool(forKey: Key.notifiesOnCompletion)
+        }
+        set { defaults.set(newValue, forKey: Key.notifiesOnCompletion) }
+    }
+
     /// The site that was most-recently focused. Used by the Sites launcher to auto-open
     /// the user's last working window on a fresh launch instead of showing the picker.
     /// Cleared when the site disappears from `SiteStore`.
@@ -160,6 +215,59 @@ public final class AppSettings: @unchecked Sendable {
                 defaults.removeObject(forKey: Key.lastOpenedSiteID)
             }
         }
+    }
+
+    /// Best-effort GitHub identity from the last successful token verification, shown in Settings
+    /// instead of a bare "token stored" — the same "who am I signed in as" surfacing Xcode's
+    /// Accounts pane does. Non-secret display fields only; the token itself lives in the Keychain,
+    /// never here. `nil` until a token verifies at least once (see `GitHubAPITokenVerifier`).
+    public var gitHubAccount: GitHubAccount? {
+        get {
+            guard let login = defaults.string(forKey: Key.gitHubAccountLogin), !login.isEmpty else { return nil }
+            let name = defaults.string(forKey: Key.gitHubAccountName)
+            let avatarURL = defaults.string(forKey: Key.gitHubAccountAvatarURL).flatMap(URL.init(string:))
+            return GitHubAccount(login: login, name: name, avatarURL: avatarURL)
+        }
+        set {
+            guard let account = newValue else {
+                defaults.removeObject(forKey: Key.gitHubAccountLogin)
+                defaults.removeObject(forKey: Key.gitHubAccountName)
+                defaults.removeObject(forKey: Key.gitHubAccountAvatarURL)
+                return
+            }
+            defaults.set(account.login, forKey: Key.gitHubAccountLogin)
+            setOptionalString(account.name, forKey: Key.gitHubAccountName)
+            setOptionalString(account.avatarURL?.absoluteString, forKey: Key.gitHubAccountAvatarURL)
+        }
+    }
+
+    /// Best-effort Cloudflare identity from the last successful token verification. A dedicated
+    /// "verified" flag (rather than inferring presence from `name`/`email`) distinguishes a
+    /// verified-but-uninformative token — a scoped token lacking `account:read` still verifies,
+    /// just with nothing to show — from a token that's never been checked at all.
+    public var cloudflareAccount: CloudflareAccount? {
+        get {
+            guard defaults.bool(forKey: Key.cloudflareAccountVerified) else { return nil }
+            return CloudflareAccount(
+                name: defaults.string(forKey: Key.cloudflareAccountName),
+                email: defaults.string(forKey: Key.cloudflareAccountEmail)
+            )
+        }
+        set {
+            guard let account = newValue else {
+                defaults.removeObject(forKey: Key.cloudflareAccountVerified)
+                defaults.removeObject(forKey: Key.cloudflareAccountName)
+                defaults.removeObject(forKey: Key.cloudflareAccountEmail)
+                return
+            }
+            defaults.set(true, forKey: Key.cloudflareAccountVerified)
+            setOptionalString(account.name, forKey: Key.cloudflareAccountName)
+            setOptionalString(account.email, forKey: Key.cloudflareAccountEmail)
+        }
+    }
+
+    private func setOptionalString(_ value: String?, forKey key: String) {
+        if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
     }
 
     /// One-time cleanup for settings removed when chat became Foundation Models-only.

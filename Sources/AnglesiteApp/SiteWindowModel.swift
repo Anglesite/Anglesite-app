@@ -10,7 +10,7 @@ enum MainPaneMode: Equatable {
     case preview
     case editor(FileRef)
     case graph
-    case styleGuide
+    case cleanup        // Site ▸ Cleanup… (#714 moved it out of the sidebar)
 }
 
 enum ActiveEditor {
@@ -25,6 +25,17 @@ enum ActiveEditor {
     }
 }
 
+/// A just-deleted page/post's contents, held so `SiteWindowModel.undoDelete()` can restore it
+/// (#586). `redirectRoute` carries the "Add Redirect?" offer through — deferred until the user
+/// declines to undo, see `dismissDeleteUndo()`.
+struct DeleteUndoOffer: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let relativePath: String
+    let contents: String
+    let redirectRoute: String?
+}
+
 /// Per-site coordinator for `SiteWindow`. Owns runtime startup, child model wiring,
 /// selection transitions, editor persistence, and teardown; `SiteWindow` owns only
 /// SwiftUI layout and scene storage.
@@ -34,6 +45,7 @@ final class SiteWindowModel {
     private let contentGraph: SiteContentGraph
     private let knowledgeIndex: SiteKnowledgeIndex
     private let semanticRanker: SemanticRanker?
+    private let conventionsEngine: ProjectConventionsEngine
     private let contentIndexerStore: ContentIndexerStore
     private let integrationOps = IntegrationOperations.live()
     private let contentCreation: ContentCreationWorkflow
@@ -65,8 +77,39 @@ final class SiteWindowModel {
     // the panel UI is target-agnostic.
     var chat: ChatModel?
     var chatPresented = false
+    /// Created once the site resolves in `loadAndStart` (needs `siteDirectory`/`configDirectory`),
+    /// same lifecycle as `chat`. Its own `sheetPresented` drives the `.sheet(isPresented:)` in
+    /// `SiteWindow`, following `AuditModel`'s pattern rather than the item-based sheets.
+    var styleGuide: ProjectConventionsModel?
+    /// Non-nil ⟺ the Review Copy sheet is presented (`.sheet(item:)`), following the same
+    /// coupling-presentation-to-the-model pattern as `siriReadinessModel`/`integrationWizardModel`.
+    /// Built fresh each time (`presentCopyEdit`) with a new `ProjectConventionsStore` scoped to
+    /// this site's `configDirectory` — the store is a stateless, file-backed actor (Task 10, #465).
+    var copyEditModel: CopyEditReportModel?
+    /// Non-nil ⟺ the Social Media Plan sheet is presented (`.sheet(item:)`), same coupling and
+    /// fresh-`ProjectConventionsStore` pattern as `copyEditModel` (Task 13, #465).
+    var socialPlanModel: SocialPlanModel?
+    /// Non-nil ⟺ the Repurpose Post sheet is presented (`.sheet(item:)`), same coupling and
+    /// fresh-`ProjectConventionsStore` pattern as `copyEditModel`/`socialPlanModel` (Task 16, #465).
+    var repurposeModel: RepurposeModel?
+    /// Non-nil ⟺ the Design Interview sheet is presented (`.sheet(item:)`), same fresh-
+    /// construction-from-`site` pattern as `copyEditModel`/`socialPlanModel`/`repurposeModel` (#631).
+    var designInterviewModel: DesignInterviewModel?
+    /// The window's `UndoManager`, published down from `SiteWindow`'s
+    /// `@Environment(\.undoManager)` so applied edits register for Edit ▸ Undo (#527). Weak +
+    /// `@ObservationIgnored`: the window owns it and it isn't render state. Forwarded on set
+    /// (environment arrives/changes) and again in `loadAndStart` (chat is created after the
+    /// first set on cold open).
+    @ObservationIgnored
+    weak var windowUndoManager: UndoManager? {
+        didSet { chat?.editUndoCoordinator.undoManager = windowUndoManager }
+    }
     var relatedPages: RelatedPagesModel
     var relatedPagesPresented = false
+    /// Drives the main-pane Cleanup view (Site ▸ Cleanup…, #714 moved it out of the sidebar).
+    /// `scan()` runs once automatically when `ProjectCleanupView` first appears; the manual
+    /// Rescan button re-runs it on demand afterward.
+    var cleanup: ProjectCleanupModel
     var harden = HardenModel()
     var domain = DomainModel()
     var health = HealthModel(runner: DefaultHealthCheckRunner())
@@ -85,9 +128,39 @@ final class SiteWindowModel {
     var dependencyUpdateModel: DependencyUpdateModel?
     var newPagePresented = false
     var newCollectionPresented = false
+    var newPostPresented = false
+    var newComponentPresented = false
+    /// Non-nil ⟺ the Delete confirmation dialog is showing for this navigator item (#516).
+    /// Hosted in `SiteWindow` (mirrors `revertConfirmationPresented`'s alert-hosting pattern) —
+    /// set from both the navigator's row context menu and the Edit ▸ Delete menu command.
+    var deleteConfirmation: NavigatorItem?
+    /// Surfaces a Delete/Duplicate failure — mirrors `cleanup.deleteError`, but for content
+    /// (page/post) delete/duplicate rather than Cleanup's dead-asset delete.
+    var contentActionError: String?
+    /// Non-nil ⟺ the "Add Redirect?" prompt is showing (#530), holding the route that was just
+    /// deleted (a page's `route`, or a post's `postRoute(for:)`) — set by `confirmDelete()` only
+    /// when the delete actually succeeded. Never break an inbound URL a user didn't choose to
+    /// abandon (#584).
+    var pendingRedirectOfferRoute: String?
+    /// Non-nil ⟺ the post-delete "Undo" affordance is showing (#586) — set by `confirmDelete()`
+    /// only when the delete actually succeeded and the deleted file's contents were captured before
+    /// the delete call. Deliberately app-level recovery (re-write + re-commit), not a "use git"
+    /// instruction: the delete dialog no longer mentions git at all, so this is the only way a user
+    /// gets the file back.
+    var pendingDeleteUndo: DeleteUndoOffer?
+    /// Editor/inspector state open on the file `pendingDeleteUndo` covers, snapshotted by
+    /// `confirmDelete()` at the same moment as the `.failed`-path snapshot below it. Consumed by
+    /// `undoDelete()` (restored, mirroring the `.failed` path) or discarded by
+    /// `dismissDeleteUndo()` (the file stays deleted, so there's nothing to reopen). Not stored on
+    /// `DeleteUndoOffer` itself: `ActiveEditor`/`InspectorContext` aren't `Equatable`, which
+    /// `DeleteUndoOffer` needs for the alert's `onChange(of:)` title capture.
+    private var pendingDeleteUndoEditor: (mode: MainPaneMode, editor: ActiveEditor)?
+    private var pendingDeleteUndoInspector: InspectorContext?
+    /// File ▸ Revert to Saved is destructive, so it routes through a confirmation alert hosted by
+    /// `SiteWindow` (#509).
+    var revertConfirmationPresented = false
     var navigator: SiteNavigatorModel?
     var graphExplorer: SiteGraphExplorerModel
-    var styleGuide: ProjectStyleGuideModel
     var mainPaneMode: MainPaneMode = .preview
     /// The open file's editor state. Owned here (not in `MainPaneEditorView`) so navigating away can
     /// auto-save it and the Preview/Editor toggle keeps the buffer alive. Replaced when a different
@@ -101,17 +174,20 @@ final class SiteWindowModel {
         contentGraph: SiteContentGraph,
         knowledgeIndex: SiteKnowledgeIndex,
         semanticRanker: SemanticRanker?,
+        conventionsEngine: ProjectConventionsEngine,
         runtimeFactory: any SiteRuntimeFactory,
         contentIndexerStore: ContentIndexerStore
     ) {
         self.contentGraph = contentGraph
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
+        self.conventionsEngine = conventionsEngine
         self.contentIndexerStore = contentIndexerStore
         self.preview = PreviewModel(
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
+            conventionsEngine: conventionsEngine,
             runtimeFactory: runtimeFactory
         )
         self.contentCreation = ContentCreationWorkflow.native(
@@ -120,8 +196,12 @@ final class SiteWindowModel {
             siteDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory }
         )
         self.graphExplorer = SiteGraphExplorerModel(graph: contentGraph)
-        self.styleGuide = ProjectStyleGuideModel(index: knowledgeIndex, graph: contentGraph)
         self.relatedPages = RelatedPagesModel(index: knowledgeIndex, ranker: semanticRanker)
+        self.cleanup = ProjectCleanupModel(knowledgeIndex: knowledgeIndex, contentGraph: contentGraph)
+        // Wired once here (not per-site in loadAndStart): the hooks capture nothing from self
+        // and receive the run's site id from the model, so there is nothing to rebind on
+        // window replay — see wireCompletionHooks.
+        wireCompletionHooks()
     }
 
     var activeEditorFile: FileRef? {
@@ -131,7 +211,11 @@ final class SiteWindowModel {
     var paneSelection: Int {
         if case .editor = mainPaneMode { return 1 }
         if case .graph = mainPaneMode { return 2 }
-        if case .styleGuide = mainPaneMode { return 3 }
+        // Cleanup has no toolbar/View-menu segment of its own (Site ▸ Cleanup… is the only way
+        // in) — an out-of-range value so the pane Picker and the Preview/Editor/Graph Toggles
+        // all correctly read as unselected instead of Cleanup falsely appearing as Preview (#723
+        // review).
+        if case .cleanup = mainPaneMode { return 3 }
         return 0
     }
 
@@ -144,22 +228,50 @@ final class SiteWindowModel {
             mainPaneMode = .editor(file)
         } else if value == 2 {
             Task { await showGraph() }
-        } else if value == 3 {
-            Task { await showStyleGuide() }
         }
     }
 
-    func showGraph() async {
-        guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+    /// Returns whether the pane actually switched to Graph — `false` when `leaveCurrentEditor()`/
+    /// `leaveCurrentInspector()` aborted (e.g. an external-change conflict dialog is now showing),
+    /// so callers that queue follow-up work (like `revealCitationInGraph`) can skip it rather than
+    /// mutating `graphExplorer` state the user never navigated to see.
+    @discardableResult
+    func showGraph() async -> Bool {
+        guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return false }
         inspectorContext = nil
         mainPaneMode = .graph
+        return true
     }
 
-    func showStyleGuide() async {
-        guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
-        inspectorContext = nil
-        mainPaneMode = .styleGuide
-        Task { await styleGuide.refresh() }
+    /// Switches the main pane to Cleanup (Site ▸ Cleanup…, #714 moved it out of the sidebar).
+    /// Mirrors `showGraph()`'s leave-current-surface-first guard.
+    func presentCleanup() {
+        Task {
+            guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+            activeEditor = nil
+            inspectorContext = nil
+            mainPaneMode = .cleanup
+        }
+    }
+
+    /// Resolves a chat citation's file path to a Site Graph Explorer node and reveals it there
+    /// (#314): switches the main pane to Graph and selects the node. Returns `false` — and does
+    /// nothing — when the path doesn't match any node in the current snapshot, so the caller
+    /// (`ChatView`'s citation click handler) can fall back to opening the file directly.
+    ///
+    /// The pane switch and selection happen asynchronously (matching `setPaneSelection`'s
+    /// existing fire-and-forget `Task { await showGraph() }` pattern) — the `Bool` this returns
+    /// reflects only whether a matching node was found, not whether the navigation has finished.
+    @discardableResult
+    func revealCitationInGraph(_ path: String) -> Bool {
+        guard let node = graphExplorer.snapshot.nodes.first(where: { $0.filePath == path }) else {
+            return false
+        }
+        Task { [weak self] in
+            guard let self, await self.showGraph() else { return }
+            self.graphExplorer.revealNode(node)
+        }
+        return true
     }
 
     func openSiriReadiness() {
@@ -170,7 +282,7 @@ final class SiteWindowModel {
     }
 
     var canOpenSiriReadiness: Bool {
-        contentIndexerStore.indexer != nil
+        contentIndexerStore.indexer != nil && site != nil
     }
 
     func openIntegrationWizard() {
@@ -178,9 +290,75 @@ final class SiteWindowModel {
         integrationWizardModel = IntegrationWizardModel(service: integrationOps, siteID: site.id)
     }
 
+    func openStyleGuide() {
+        guard let styleGuide else { return }
+        Task { await styleGuide.presentSheet() }
+    }
+
+    var canOpenCopyEdit: Bool { site != nil }
+
+    /// Presents the Review Copy sheet (#465). Reconstructs a `ProjectConventionsStore` from the
+    /// site's `configDirectory` — the same expression `ProjectConventionsModel.init` uses for
+    /// `styleGuide` at `loadAndStart` (~line 1068) — rather than reaching into that model's
+    /// private store, since the store is a stateless file-backed actor keyed off the directory.
+    func presentCopyEdit() {
+        guard copyEditModel == nil, let site else { return }
+        copyEditModel = CopyEditReportModel(
+            siteID: site.id,
+            sourceDirectory: site.sourceDirectory,
+            conventionsStore: ProjectConventionsStore(configDirectory: site.configDirectory)
+        )
+    }
+
+    var canOpenSocialPlan: Bool { site != nil }
+
+    var canOpenDesignInterview: Bool { site != nil }
+
+    /// Presents the Social Media Plan sheet (#465), same pattern as `presentCopyEdit`.
+    func presentSocialPlan() {
+        guard socialPlanModel == nil, let site else { return }
+        socialPlanModel = SocialPlanModel(
+            siteID: site.id,
+            sourceDirectory: site.sourceDirectory,
+            conventionsStore: ProjectConventionsStore(configDirectory: site.configDirectory)
+        )
+    }
+
+    /// Presents the Design Interview sheet (#631), same fresh-construction-from-`site` pattern as
+    /// `presentCopyEdit`/`presentSocialPlan`. Builds a standalone `FoundationModelAssistant`
+    /// rather than reusing the site's shared `chat` assistant — the interview is its own
+    /// independent conversation, not a turn appended to the main chat's session/transcript.
+    func presentDesignInterview() {
+        guard designInterviewModel == nil, let site else { return }
+        designInterviewModel = DesignInterviewModel(
+            businessType: SiteBusinessType.read(sourceDirectory: site.sourceDirectory) ?? "",
+            assistant: FoundationModelAssistant(tier: .onDevice),
+            package: AnglesitePackage(url: site.packageURL),
+            siteID: site.id
+        )
+    }
+
+    /// Presents the Repurpose Post sheet (#465), same pattern as `presentCopyEdit`/`presentSocialPlan`.
+    func presentRepurpose(slug: String) {
+        guard repurposeModel == nil, let site else { return }
+        repurposeModel = RepurposeModel(
+            siteID: site.id, sourceDirectory: site.sourceDirectory, slug: slug,
+            conventionsStore: ProjectConventionsStore(configDirectory: site.configDirectory)
+        )
+    }
+
+    /// Resolves a Navigator row id to its post's slug, then presents — mirrors `duplicate(id:)`'s
+    /// id→Post resolution pattern for reaching the actor-isolated `SiteContentGraph` from the
+    /// Navigator's context menu, which only carries a `NavigatorItem.id` (Task 16, #465).
+    func presentRepurpose(postRowID id: String) async {
+        guard let post = await contentGraph.post(id: id) else { return }
+        presentRepurpose(slug: post.slug)
+    }
+
+    /// The `.failed`-state pane's Retry button — same recovery as Site ▸ Start Dev Server (#515),
+    /// kept as one code path rather than two that could drift.
     func retryPreview() {
-        guard let site else { return }
-        preview.open(siteID: site.id, siteDirectory: site.sourceDirectory)
+        preview.startDevServer()
     }
 
     func handleSiteChanged() {
@@ -199,6 +377,12 @@ final class SiteWindowModel {
     func close() {
         preview.close()
         startup.stop()
+        // Note: an in-flight Deploy/Backup/Audit is intentionally NOT cancelled or cleaned up
+        // here. The operation's Task retains its model through the async call, so it runs to a
+        // real terminal phase after the window closes — and its completion hooks (wired in init,
+        // capturing nothing from self) still post the notification and clear the Dock token then
+        // (#526). An eager Dock clear here would be wrong: the still-running deploy's next
+        // milestone would simply re-add it.
         // Unregister the annotation provider from the shared registry so
         // `ElementEntityQuery` stops resolving stale entity ids for a window that's no
         // longer on screen.
@@ -207,10 +391,13 @@ final class SiteWindowModel {
             annotationProvider = nil
         }
         chat = nil
+        styleGuide = nil
+        copyEditModel = nil
+        socialPlanModel = nil
+        repurposeModel = nil
         navigator?.stop()
         navigator = nil
         graphExplorer.stop()
-        styleGuide.stop()
         // Window closing: persist unsaved edits unconditionally (consistent with
         // auto-save-on-leave). No conflict dialog is possible during teardown, so we don't gate
         // on a flush return value — just write the buffer best-effort, off the main actor.
@@ -231,6 +418,180 @@ final class SiteWindowModel {
     /// model raises its conflict alert) when the file changed externally — so the caller aborts the
     /// switch instead of clobbering the other tool's edit. Safe to call when not editing. Async
     /// because the save/check IO runs off the main actor.
+    // MARK: - Site operations (shared by the toolbar and the Site menu, #511)
+
+    /// Deploy, Backup, and Audit are mutually exclusive: each is unavailable while any of the
+    /// three runs (matches the long-standing toolbar behavior).
+    private var siteOperationRunning: Bool {
+        deploy.isRunning || backup.isRunning || audit.isRunning
+    }
+
+    var canRunDeploy: Bool { site?.isValid == true && !siteOperationRunning && preview.canDeploy }
+    var canRunBackup: Bool { site?.isValid == true && !siteOperationRunning }
+    var canRunAudit: Bool { site?.isValid == true && !siteOperationRunning }
+    var canRunHarden: Bool { site?.isValid == true && !harden.isRunning }
+    var canRecheckHealth: Bool { site != nil }
+    var canOpenDomain: Bool { site != nil && !domain.isRunning }
+    var canOpenIntegrationWizard: Bool { site != nil }
+    var canOpenPreviewInBrowser: Bool { preview.readyURL != nil }
+    var canShowGraph: Bool { site != nil }
+    #if !ANGLESITE_MAS
+    var canPublishToGitHub: Bool { site?.isValid == true && !publish.isRunning }
+    #endif
+
+    /// Build, scan, and `wrangler deploy` — resolves the active container control first, like the
+    /// toolbar button always has.
+    func deploySite() {
+        guard let site, canRunDeploy else { return }
+        Task { @MainActor in
+            let containerControl = await preview.activeContainerControl()
+            // Posts are routed too (#584) — a vanished post's URL must trip the same
+            // orphaned-route scan as a vanished page's, not vanish silently from the snapshot.
+            let pageRoutes = await contentGraph.pages(for: site.id).map(\.route)
+            let postRoutes = await contentGraph.posts(for: site.id).map(postRoute(for:))
+            let currentRoutes = pageRoutes + postRoutes
+            deploy.deploy(
+                siteID: site.id, siteDirectory: site.sourceDirectory,
+                configDirectory: site.configDirectory, currentRoutes: currentRoutes,
+                containerControl: containerControl)
+        }
+    }
+
+    func backupSite() {
+        guard let site, canRunBackup else { return }
+        backup.backup(siteID: site.id, siteDirectory: site.sourceDirectory)
+    }
+
+    func auditSite() {
+        guard let site, canRunAudit else { return }
+        audit.audit(siteID: site.id, siteDirectory: site.sourceDirectory)
+    }
+
+    func recheckHealth() {
+        guard let site else { return }
+        health.recheck(siteID: site.id, siteDirectory: site.sourceDirectory)
+    }
+
+    func openPreviewInBrowser() {
+        guard let url = preview.readyURL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - Dev-server commands (Site menu, #515)
+
+    /// Thin pass-throughs so `WebsiteCommands` reads one focused model, like every other Site
+    /// item. Enablement rules live in `DevServerControls` (AnglesiteCore, CI-tested); the state
+    /// plumbing lives in `PreviewModel`.
+    var canStartDevServer: Bool { preview.canStartDevServer }
+    var canStopDevServer: Bool { preview.canStopDevServer }
+    var canRestartDevServer: Bool { preview.canRestartDevServer }
+
+    func startDevServer() { preview.startDevServer() }
+    func stopDevServer() { preview.stopDevServer() }
+    func restartDevServer() { preview.restartDevServer() }
+
+    // MARK: - File-menu targets (#513)
+
+    var canRevealInFinder: Bool {
+        activeEditorFile != nil || inspectorContext != nil || site != nil
+    }
+
+    /// File ▸ Reveal in Finder: the most specific focused surface wins — the open editor's file,
+    /// else the inspected page's source file, else the site's `Source/` directory (the package
+    /// itself is opaque in Finder, so revealing its contents is the useful target).
+    func revealInFinder() {
+        if let file = activeEditorFile {
+            NSWorkspace.shared.activateFileViewerSelecting([file.url])
+        } else if let model = inspectorContext?.model {
+            NSWorkspace.shared.activateFileViewerSelecting([model.file.url])
+        } else if let site {
+            NSWorkspace.shared.activateFileViewerSelecting([site.sourceDirectory])
+        }
+    }
+
+    var canRenameNavigatorItem: Bool {
+        guard let navigator, let selection = navigator.selection else { return false }
+        return navigator.canRename(selection)
+    }
+
+    /// File ▸ Rename…: begins the navigator's inline-edit flow for the selected item (same path as
+    /// its context menu). Site display-name rename stays in the launcher's context menu.
+    func renameNavigatorItem() {
+        guard let navigator, let selection = navigator.selection, navigator.canRename(selection) else { return }
+        navigator.beginEditing(selection)
+    }
+
+    /// True when the main-pane editor or the inspector holds unsaved edits — drives File ▸ Save /
+    /// Revert to Saved enablement (#509). The `.plist` editor has two independent dirty flags:
+    /// plist entries (`isDirty`) and analytics settings (`isAnalyticsDirty`) — both count, matching
+    /// `PlistEditorModel.flushBeforeLeaving()` (PR #532 review).
+    var hasUnsavedEdits: Bool {
+        let editorDirty = switch activeEditor {
+        case .text(let model): model.isDirty
+        case .plist(let model): model.isDirty || model.isAnalyticsDirty
+        case nil: false
+        }
+        return editorDirty || (inspectorContext?.model.isDirty ?? false)
+    }
+
+    /// True while any save/revert IO is in flight on either editing surface. File ▸ Save / Revert
+    /// disable during it: none of the editor models guard `load()` against a concurrent in-flight
+    /// `save()`, so a revert racing a slow save could desync the buffer from disk (PR #532 review).
+    var editCommandInFlight: Bool {
+        if menuEditCommandRunning { return true }
+        switch activeEditor {
+        case .text(let model): if model.isSaving { return true }
+        case .plist(let model): if model.isSaving || model.isSavingAnalytics { return true }
+        case nil: break
+        }
+        return inspectorContext?.model.isSaving ?? false
+    }
+
+    /// Serializes File ▸ Save / Revert themselves (the per-model `isSaving` flags only cover each
+    /// model's own write).
+    private var menuEditCommandRunning = false
+
+    /// File ▸ Save. Writes every dirty editing surface: a page's content (main-pane editor) and its
+    /// metadata (inspector) are one document to the user, so Save covers both. Each model's `save()`
+    /// no-ops when clean; the plist editor's analytics settings save separately (`saveAnalytics()`).
+    func saveAllEdits() async {
+        guard !menuEditCommandRunning else { return }
+        menuEditCommandRunning = true
+        defer { menuEditCommandRunning = false }
+        switch activeEditor {
+        case .text(let model):
+            await model.save()
+        case .plist(let model):
+            await model.save()
+            if model.isAnalyticsDirty { await model.saveAnalytics() }
+        case nil: break
+        }
+        if let model = inspectorContext?.model { await model.save() }
+    }
+
+    /// File ▸ Revert to Saved: present the confirmation alert (no-op when nothing is dirty, so a
+    /// stale-enabled menu item can't surface a pointless prompt).
+    func requestRevertToSaved() {
+        guard hasUnsavedEdits, !editCommandInFlight else { return }
+        revertConfirmationPresented = true
+    }
+
+    /// Discard unsaved edits by re-reading each dirty surface from disk. Uses `load()` — not
+    /// `reloadFromDisk()`, which is conflict-flow-specific and no-ops without a pending conflict.
+    /// `load()` also re-reads the plist editor's analytics settings, so the `isAnalyticsDirty`
+    /// surface reverts too.
+    func confirmRevertToSaved() async {
+        guard !menuEditCommandRunning else { return }
+        menuEditCommandRunning = true
+        defer { menuEditCommandRunning = false }
+        switch activeEditor {
+        case .text(let model) where model.isDirty: await model.load()
+        case .plist(let model) where model.isDirty || model.isAnalyticsDirty: await model.load()
+        default: break
+        }
+        if let model = inspectorContext?.model, model.isDirty { await model.load() }
+    }
+
     func leaveCurrentEditor() async -> Bool {
         guard case .editor = mainPaneMode else { return true }
         switch activeEditor {
@@ -311,6 +672,16 @@ final class SiteWindowModel {
         }
     }
 
+    /// Apply (and clear) any pending `StartDesignInterviewIntent` request for `siteID`: presents
+    /// the design-interview sheet if it isn't already up. Same dual cold/warm calling convention
+    /// as `applyPendingNavigation` — called from `loadAndStart` (cold-open) and from
+    /// `.onChange(of: router.pendingDesignInterview)` (an already-open window).
+    @MainActor
+    func applyPendingDesignInterviewRequest(for siteID: String) {
+        guard router.consumeDesignInterviewRequest(for: siteID) else { return }
+        presentDesignInterview()
+    }
+
     /// Route a navigator selection: pages/posts switch to preview and navigate; files open the editor.
     /// Async — leaving the current editor flushes it to disk off the main actor first, and aborts the
     /// switch if an external conflict needs resolving.
@@ -343,6 +714,24 @@ final class SiteWindowModel {
             }
         case .file(let file):
             openFile(file)
+        case .websiteSettings:
+            // Slice-1 interim: the website row opens the package Info.plist — exactly what the
+            // old sidebar Metadata row opened. The full Website Settings surface is slice 2
+            // (spec §7, docs/superpowers/specs/2026-07-13-website-design-window-cleanup-design.md).
+            guard let site else { return }
+            let layout = SiteFileTree.layout(for: site.packageURL)
+            guard let infoPlist = layout.infoPlist else { return }
+            openFile(FileRef(url: infoPlist, group: .metadata, name: "Info.plist"))
+        case .directory(_, let route):
+            // Slice-1 interim: show the directory in the preview (its index page if one exists).
+            // Slice 2 replaces this with the Collection Settings surface (spec §6).
+            Task {
+                guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+                activeEditor = nil
+                inspectorContext = nil
+                mainPaneMode = .preview
+                preview.navigate(toRoute: route)
+            }
         }
     }
 
@@ -394,6 +783,73 @@ final class SiteWindowModel {
         }
     }
 
+    /// Routes a Cleanup-section row: components/layouts/pages open in the existing in-app editor
+    /// (reusing `openFile`, so `.astro` components still get the rich Component Editor via
+    /// `EditorKind.resolve`'s `.components`-group check); images have no in-app editor, so Open
+    /// reveals the file in Finder instead.
+    @MainActor
+    func openCleanupCandidate(_ candidate: DeadAssetScanner.CleanupCandidate) {
+        guard let site else { return }
+        let url = site.sourceDirectory.appendingPathComponent(candidate.path)
+        switch candidate.kind {
+        case .image:
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        case .component, .layout:
+            openFile(FileRef(url: url, group: .components, name: url.lastPathComponent))
+        case .page:
+            openFile(FileRef(url: url, group: .pages, name: url.lastPathComponent))
+        }
+    }
+
+    /// Deletes a Cleanup-section candidate, discarding (without saving) any editor tab *or*
+    /// Inspector context open on that same file — flushing either via its normal leave path would
+    /// re-write the buffer to disk and silently resurrect the file `cleanup.delete` removes. A
+    /// page selected via the navigator's `.route` branch populates `inspectorContext` (not
+    /// `activeEditor`), so both are checked independently.
+    ///
+    /// Discarded *before* calling `cleanup.delete`, not after: `delete` suspends across two
+    /// awaited git subprocess calls, and Swift frees the `@MainActor` during that suspension — any
+    /// other main-actor action (the Preview/Editor toggle, closing the window) could otherwise
+    /// flush a still-open dirty buffer back to disk while the delete is in flight or immediately
+    /// after, resurrecting the file. Discarding first closes that window entirely. Tradeoff: if
+    /// the delete subsequently fails, an unsaved edit in that editor/inspector is already gone —
+    /// in the ordinary failure case (dirty tree, no HEAD copy, rejecting hook) the file itself is
+    /// still untouched, though not in the rare double-failure case `processGitDelete` itself logs
+    /// (commit *and* its rollback both fail). Either way this is accepted as strictly preferable
+    /// to a silent, undetected resurrection of a file git already recorded as removed.
+    ///
+    /// On success, also force-refreshes `navigator` and `graphExplorer`: neither observes anything
+    /// that fires for a component/layout/page deleted this way (the only thing that does,
+    /// `SiteContentGraph`, is never touched here), so without this a stale entry for the deleted
+    /// file would stay selectable/openable in the main Navigator tree or the Site Graph explorer —
+    /// the same resurrection risk this method just closed for the editor/inspector, reachable
+    /// through a different surface.
+    ///
+    /// **Known residual risk:** the guards above only cover editor/inspector state open *at the
+    /// moment this method starts*. Nothing stops a *new* selection on `deletedURL` from
+    /// (re)populating `activeEditor`/`inspectorContext` while `cleanup.delete` is still suspended
+    /// on its git subprocess calls — the Navigator isn't disabled or told a delete is in flight for
+    /// this path. Closing that fully would need a "deleting" set consulted by
+    /// `applyNavigatorSelection`/`openFile`/`openCleanupCandidate`, or disabling Navigator
+    /// selection for the duration; not attempted here given how narrow the window is in practice
+    /// (a `git rm` + `commit` pair, not user-perceptible latency) relative to the scope of that
+    /// change.
+    @MainActor
+    func deleteCleanupCandidate(_ candidate: DeadAssetScanner.CleanupCandidate) async {
+        guard let site else { return }
+        let deletedURL = site.sourceDirectory.appendingPathComponent(candidate.path)
+        if activeEditorFile?.url == deletedURL {
+            activeEditor = nil
+            mainPaneMode = .preview
+        }
+        if inspectorContext?.model.file.url == deletedURL {
+            inspectorContext = nil
+        }
+        guard await cleanup.delete(candidate) else { return }
+        await navigator?.refreshNow()
+        await graphExplorer.refreshNow()
+    }
+
     /// Build the inspector context for a content navigator id: the typed descriptor form when the
     /// file resolves to a content type, the plain title/description form for a frontmatter-bearing
     /// markdown page, or nil (plain `.astro`/other → preview only, no inspector).
@@ -442,32 +898,248 @@ final class SiteWindowModel {
         }
     }
 
+    /// `contentCreation`'s successful create already rescans `SiteContentGraph` and publishes a
+    /// change event, but the Navigator consumes that event on its own long-running observer `Task`
+    /// (`SiteNavigatorModel.start()`) — decoupled from this call, so nothing guarantees it has
+    /// drained and rebuilt `sections` before the New-content sheet reads `.created` and dismisses
+    /// itself. Force-refreshing here closes that race, same as `createComponent` already did (#586).
     func createPage(
         title: String,
         route: String?,
         template: ContentScaffold.PageTemplate
     ) async -> ContentCreateResult {
         guard let site else { return .siteNotFound }
-        return await contentCreation.createPage(
+        let result = await contentCreation.createPage(
             siteID: site.id,
             title: title,
             route: route,
             template: template
         )
+        if case .created = result {
+            await navigator?.refreshNow()
+        }
+        return result
     }
 
+    /// See `createPage`'s force-refresh note (#586) — same race, same fix.
     func createCollectionEntry(
         title: String,
         slug: String?,
         descriptor: ContentTypeDescriptor
     ) async -> ContentCreateResult {
         guard let site else { return .siteNotFound }
-        return await contentCreation.createTyped(
+        let result = await contentCreation.createTyped(
             siteID: site.id,
             typeID: descriptor.id,
             title: title,
             slug: slug
         )
+        if case .created = result {
+            await navigator?.refreshNow()
+        }
+        return result
+    }
+
+    /// See `createPage`'s force-refresh note (#586) — same race, same fix.
+    func createPost(title: String) async -> ContentCreateResult {
+        guard let site else { return .siteNotFound }
+        let result = await contentCreation.createPost(siteID: site.id, title: title, collection: nil, slug: nil)
+        if case .created = result {
+            await navigator?.refreshNow()
+        }
+        return result
+    }
+
+    /// Components aren't tracked in `SiteContentGraph` at all, so there's no change-stream event to
+    /// race with — this force-refresh is the *only* way the Navigator learns about a new component.
+    /// Same reasoning as `deleteCleanupCandidate`'s force-refresh for non-graph-tracked files.
+    func createComponent(name: String) async -> ContentCreateResult {
+        guard let site else { return .siteNotFound }
+        let result = await contentCreation.createComponent(siteID: site.id, name: name)
+        if case .created = result {
+            await navigator?.refreshNow()
+        }
+        return result
+    }
+
+    /// Resolves `deleteConfirmation` to its page/post record, deletes via
+    /// `contentCreation.deleteContent`, and clears the confirmation. Mirrors
+    /// `deleteCleanupCandidate`'s ordering: editor/inspector state open on the file being deleted
+    /// is discarded *before* the delete call (not after), so a suspended flush across the git
+    /// subprocess calls can't resurrect the file. Unlike `deleteCleanupCandidate` (dead assets,
+    /// rarely under active edit), pages/posts routinely are — so the discarded state is snapshotted
+    /// and restored on `.failed`, rather than silently dropped, since a failed delete never
+    /// actually touched the file (PR #585 review).
+    @MainActor
+    func confirmDelete() async {
+        guard let item = deleteConfirmation else { return }
+        deleteConfirmation = nil
+        guard let site, case .route = item.target else { return }
+
+        let relPath: String
+        // Captured before the delete call, not derived after: `.deleted(filePath:)` doesn't carry
+        // a route. Both pages and posts are redirect-offer candidates (#584) — a post's route is
+        // derived via `postRoute(for:)`, the same helper the navigator uses to give posts a
+        // `.route` target in the first place.
+        var deletedRoute: String?
+        if let page = await contentGraph.page(id: item.id) {
+            relPath = page.filePath
+            deletedRoute = page.route
+        } else if let post = await contentGraph.post(id: item.id) {
+            relPath = post.filePath
+            deletedRoute = postRoute(for: post)
+        } else {
+            return
+        }
+
+        let deletedURL = site.sourceDirectory.appendingPathComponent(relPath)
+        // Read before the delete call, not after: the file is gone from disk once the delete
+        // succeeds. Best-effort — a read failure (unreadable encoding, permissions) just means no
+        // Undo offer, not a blocked delete.
+        let savedContents = try? String(contentsOf: deletedURL, encoding: .utf8)
+        var savedEditor: (mode: MainPaneMode, editor: ActiveEditor)?
+        if activeEditorFile?.url == deletedURL, let editor = activeEditor {
+            savedEditor = (mainPaneMode, editor)
+            activeEditor = nil
+            mainPaneMode = .preview
+        }
+        let savedInspector = inspectorContext?.model.file.url == deletedURL ? inspectorContext : nil
+        if savedInspector != nil {
+            inspectorContext = nil
+        }
+
+        let result = await contentCreation.deleteContent(siteID: site.id, relativePath: relPath)
+        switch result {
+        case .deleted:
+            if navigator?.selection == item.id { navigator?.selection = nil }
+            // `deleteContent` only rescans `SiteContentGraph`; the Navigator's own consumption of
+            // that change is a decoupled async observer task, so nothing guarantees it has rebuilt
+            // `sections` yet — force it, same race/fix as the create paths (#586).
+            await navigator?.refreshNow()
+            // The Undo offer and the "Add Redirect?" offer are mutually exclusive at any one
+            // moment (both are presented as modal UI): Undo takes priority, and choosing not to
+            // undo (`dismissDeleteUndo()`) is what surfaces the redirect offer instead.
+            if let savedContents {
+                pendingDeleteUndo = DeleteUndoOffer(
+                    id: relPath, title: item.title, relativePath: relPath,
+                    contents: savedContents, redirectRoute: deletedRoute)
+                pendingDeleteUndoEditor = savedEditor
+                pendingDeleteUndoInspector = savedInspector
+            } else if let deletedRoute {
+                pendingRedirectOfferRoute = deletedRoute
+            }
+        case .failed(let reason):
+            contentActionError = reason
+            if let savedEditor {
+                activeEditor = savedEditor.editor
+                mainPaneMode = savedEditor.mode
+            }
+            if let savedInspector {
+                inspectorContext = savedInspector
+            }
+        case .siteNotFound:
+            break
+        }
+    }
+
+    /// Restores the file captured by `pendingDeleteUndo` — the app-level "recover the last version"
+    /// affordance (#586) the delete dialog's copy now points to instead of git. Re-writes the exact
+    /// captured contents and re-commits, mirroring every other content mutation in this model.
+    /// Also reopens the editor/inspector `confirmDelete()` snapshotted, same as its own `.failed`
+    /// path restores them — an undo that brings the file back but leaves the user staring at
+    /// Preview would be only half a restore (PR #608 review).
+    @MainActor
+    func undoDelete() async {
+        guard let offer = pendingDeleteUndo else { return }
+        pendingDeleteUndo = nil
+        let savedEditor = pendingDeleteUndoEditor
+        let savedInspector = pendingDeleteUndoInspector
+        pendingDeleteUndoEditor = nil
+        pendingDeleteUndoInspector = nil
+        // Cleared above regardless of `site`, mirroring `confirmDelete()`'s
+        // clear-before-guard ordering — an offer for a site that's since closed shouldn't linger.
+        guard let site else { return }
+
+        let result = await contentCreation.restoreContent(
+            siteID: site.id, relativePath: offer.relativePath, contents: offer.contents)
+        switch result {
+        case .created:
+            await navigator?.refreshNow()
+        case .failed(let reason):
+            contentActionError = reason
+        case .siteNotFound:
+            break
+        }
+
+        // Reopen iff the file is actually back on disk — true both when `restoreContent` fully
+        // succeeds and when only its best-effort recommit fails (the write itself still landed);
+        // not true if the write itself failed, in which case there's nothing to reopen.
+        let restoredURL = site.sourceDirectory.appendingPathComponent(offer.relativePath)
+        guard FileManager.default.fileExists(atPath: restoredURL.path) else { return }
+        if let savedEditor {
+            activeEditor = savedEditor.editor
+            mainPaneMode = savedEditor.mode
+        }
+        if let savedInspector {
+            inspectorContext = savedInspector
+        }
+    }
+
+    /// Dismisses the Undo offer without restoring — the deferred half of `confirmDelete()`'s
+    /// mutual-exclusion with the redirect offer: only now (Undo declined) does a deleted page/post
+    /// get its "Add Redirect?" prompt. The snapshotted editor/inspector state is discarded, not
+    /// restored: the file stays deleted, so there's nothing valid to reopen it onto.
+    @MainActor
+    func dismissDeleteUndo() {
+        guard let offer = pendingDeleteUndo else { return }
+        pendingDeleteUndo = nil
+        pendingDeleteUndoEditor = nil
+        pendingDeleteUndoInspector = nil
+        if let route = offer.redirectRoute {
+            pendingRedirectOfferRoute = route
+        }
+    }
+
+    /// Duplicates the page/post at `id`. Non-destructive, so no confirmation. On success, refreshes
+    /// the Navigator (deterministic — doesn't rely on `SiteContentGraph`'s change-stream having
+    /// already been drained by the time this returns) and selects the new item, whose id follows
+    /// the documented `SiteContentGraph.Page`/`Post` format (`"{siteID}:page:{route}"` /
+    /// `"{siteID}:post:{slug}"`) — `identifier` in `ContentCreateResult.created` is exactly the
+    /// route (page) or slug (post) per that type's own doc comment.
+    @MainActor
+    func duplicate(id: String) async {
+        guard let site else { return }
+
+        let result: ContentCreateResult
+        let isPost: Bool
+        if let page = await contentGraph.page(id: id) {
+            isPost = false
+            result = await contentCreation.duplicatePage(
+                siteID: site.id, relativePath: page.filePath, title: page.title ?? page.route)
+        } else if let post = await contentGraph.post(id: id) {
+            isPost = true
+            result = await contentCreation.duplicatePost(
+                siteID: site.id, relativePath: post.filePath, collection: post.collection, title: post.title)
+        } else {
+            return
+        }
+
+        switch result {
+        case .created(_, let identifier):
+            await navigator?.refreshNow()
+            navigator?.selection = isPost ? "\(site.id):post:\(identifier)" : "\(site.id):page:\(identifier)"
+        case .failed(let reason):
+            contentActionError = reason
+        case .siteNotFound:
+            break
+        }
+    }
+
+    /// Scan `sourceDirectory` and load the result into `contentGraph`. Called from `loadAndStart`
+    /// so the graph is warm (`isPopulated(siteID:) == true`) before the first chat turn, not just
+    /// after the first content create/delete (#660).
+    func refreshContentGraph(siteID: String, sourceDirectory: URL) async {
+        await contentGraph.rescan(siteID: siteID, projectRoot: sourceDirectory)
     }
 
     func loadAndStart(siteID: String?, openSitesWindow: () -> Void, dismissSiteWindow: @escaping () -> Void) async {
@@ -549,7 +1221,30 @@ final class SiteWindowModel {
                 }
             }
         }
+        styleGuide = ProjectConventionsModel(
+            engine: conventionsEngine,
+            siteID: resolved.id,
+            siteDirectory: resolved.sourceDirectory,
+            configDirectory: resolved.configDirectory
+        )
+        // Seed the shared engine from any persisted override BEFORE preview.open() below
+        // triggers the runtime's own boot-time rebuild — engine.seed(...) is a no-op once a
+        // value is present, so seeding order matters: seed first, or a restored override is
+        // silently discarded by the runtime's fresh scan (#313).
+        await styleGuide?.seedFromDisk()
         preview.open(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
+        // Warm the content graph now rather than waiting for the first create/delete (#660), so
+        // `SearchContentTool`'s `isPopulated` check is already reliable by the time the chat
+        // assistant is wired up below. Kicked off in the background (not awaited here) so its
+        // filesystem walk runs concurrently with the Navigator's and Graph Explorer's own,
+        // independent scans just below rather than serializing three full-tree walks; only
+        // awaited right before `SiteAssistantSessionFactory.makeSession` constructs
+        // `SearchContentTool`, the one thing that actually needs it done. Runs unconditionally —
+        // the scan is deterministic filesystem I/O, independent of whether a container runtime
+        // is available.
+        let contentGraphRefresh = Task {
+            await refreshContentGraph(siteID: resolved.id, sourceDirectory: resolved.sourceDirectory)
+        }
         // Scan from the package ROOT (not Source/): SiteFileTree's adaptive layout detects the
         // `.anglesite` package here and resolves Source/ for Components/Styles plus the sibling
         // Config/ + Info.plist for the Metadata group. Handing it Source/ would hide Metadata.
@@ -567,24 +1262,43 @@ final class SiteWindowModel {
         )
         navigator = navModel
         graphExplorer.start(siteID: resolved.id, sourceDirectory: resolved.sourceDirectory)
-        styleGuide.start(siteID: resolved.id)
+        cleanup.configure(siteID: resolved.id, sourceDirectory: resolved.sourceDirectory)
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
         applyPendingNavigation(for: resolved.id)
+        applyPendingDesignInterviewRequest(for: resolved.id)
         let mcpClient: @Sendable () async -> MCPClient? = { [preview] in
             await preview.mcpClient()
         }
+        // Best-effort: SetupThemeTool only attaches to the chat assistant when a catalog loads
+        // successfully. A missing/unreadable template must not block opening the site — the
+        // assistant simply runs without the theme-apply tool, same as before this catalog existed.
+        let themeCatalog: ThemeCatalog? = {
+            guard let templateURL = TemplateRuntime.resolve().url else { return nil }
+            return try? ThemeCatalog.load(templateURL: templateURL)
+        }()
+        await contentGraphRefresh.value
         let assistantSession = SiteAssistantSessionFactory.makeSession(
             siteID: resolved.id,
             sourceDirectory: resolved.sourceDirectory,
             configDirectory: resolved.configDirectory,
+            packageURL: resolved.packageURL,
             mcpClient: mcpClient,
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
-            integrationService: integrationOps
+            conventionsEngine: conventionsEngine,
+            integrationService: integrationOps,
+            themeCatalog: themeCatalog,
+            graphSnapshotProvider: { [weak self] in
+                guard let self else { return SiteGraphExplorerSnapshot(nodes: [], edges: []) }
+                return await MainActor.run { self.graphExplorer.snapshot }
+            }
         )
         chat = assistantSession.chat
+        // The environment undo manager usually lands before the chat exists (cold open) —
+        // attach it now so edits applied with the chat panel closed still register for ⌘Z.
+        assistantSession.chat.editUndoCoordinator.undoManager = windowUndoManager
         preview.setEditObserver(
             assistantSession.editObserver,
             postProcess: assistantSession.editPostProcessor
@@ -595,6 +1309,122 @@ final class SiteWindowModel {
         #if !ANGLESITE_MAS
         publish.refreshRemote(source: resolved.sourceDirectory)
         #endif
+    }
+
+    /// Wire Deploy/Backup/Audit phase transitions to the completion notifier and the Dock-tile
+    /// progress bar (#526). Thin glue by design: wording lives in `CompletionNoticeBuilder` and
+    /// the milestone→fraction mapping in `DeployDockProgress` (both unit-tested in
+    /// AnglesiteCore); these closures only forward phase data.
+    ///
+    /// Deliberately captures **nothing** from `self`. Closing a window does *not* stop an
+    /// in-flight operation: the models' `Task { [weak self] in await self?.run…() }` retains the
+    /// model strongly for the whole async call (the optional-chained receiver is kept alive
+    /// across every suspension inside it), so an abandoned operation runs to a real terminal
+    /// phase after this window model is gone — and must still notify, since "the window is no
+    /// longer watching" is exactly the case the feature covers. The site id therefore arrives
+    /// from the model per-run (so a window replayed onto a different site can't mis-attribute a
+    /// still-in-flight run), and the display name is resolved fresh from `SiteStore` at post
+    /// time (so a rename mid-run notifies under the current name). Dock state is likewise
+    /// driven entirely by the run's own transitions — every terminal phase clears its token, so
+    /// no close-time cleanup is needed (or correct: an eager clear would just be re-added by
+    /// the still-running deploy's next milestone).
+    private func wireCompletionHooks() {
+        deploy.onPhaseTransition = { siteID, phase in
+            let dockToken = "deploy:\(siteID)"
+            switch phase {
+            case .idle:
+                DockProgressController.shared.clear(token: dockToken)
+            case .running:
+                // Indeterminate until the first structured milestone arrives.
+                DockProgressController.shared.update(fraction: nil, for: dockToken)
+            case .succeeded(let url, let duration):
+                DockProgressController.shared.clear(token: dockToken)
+                Self.postNotice(siteID: siteID) { name in
+                    CompletionNoticeBuilder.deploy(
+                        siteName: name, siteID: siteID,
+                        outcome: .succeeded(url: url.absoluteString, duration: duration)
+                    )
+                }
+            case .failed(let reason, _):
+                // Command-produced reasons already carry the exit code where it matters
+                // ("npm run build failed (exit 1)"), so don't append it again here.
+                DockProgressController.shared.clear(token: dockToken)
+                Self.postNotice(siteID: siteID) { name in
+                    CompletionNoticeBuilder.deploy(siteName: name, siteID: siteID, outcome: .failed(reason: reason))
+                }
+            case .blocked(let failures, _):
+                DockProgressController.shared.clear(token: dockToken)
+                Self.postNotice(siteID: siteID) { name in
+                    CompletionNoticeBuilder.deploy(
+                        siteName: name, siteID: siteID, outcome: .blocked(failureCount: failures.count)
+                    )
+                }
+            }
+        }
+        deploy.onMilestone = { siteID, progress in
+            guard progress.kind == .deploy else { return }
+            DockProgressController.shared.update(
+                fraction: DeployDockProgress.fraction(forPhase: progress.phase),
+                for: "deploy:\(siteID)"
+            )
+        }
+
+        backup.onPhaseTransition = { siteID, phase in
+            switch phase {
+            case .idle, .running:
+                break
+            case .succeeded(let sha, let branch, let remote, _):
+                Self.postNotice(siteID: siteID) { name in
+                    CompletionNoticeBuilder.backup(
+                        siteName: name, siteID: siteID,
+                        outcome: .succeeded(commitSHA: sha, branch: branch, remote: remote)
+                    )
+                }
+            case .noChanges:
+                Self.postNotice(siteID: siteID) { name in
+                    CompletionNoticeBuilder.backup(siteName: name, siteID: siteID, outcome: .noChanges)
+                }
+            case .failed(let reason, _):
+                Self.postNotice(siteID: siteID) { name in
+                    CompletionNoticeBuilder.backup(siteName: name, siteID: siteID, outcome: .failed(reason: reason))
+                }
+            }
+        }
+
+        audit.onPhaseTransition = { siteID, phase in
+            switch phase {
+            case .idle, .running:
+                break
+            case .succeeded(let report, _):
+                let counts = Dictionary(grouping: report.findings, by: \.severity).mapValues(\.count)
+                Self.postNotice(siteID: siteID) { name in
+                    CompletionNoticeBuilder.audit(
+                        siteName: name, siteID: siteID,
+                        outcome: .succeeded(
+                            criticalCount: counts[.critical, default: 0],
+                            warningCount: counts[.warning, default: 0],
+                            infoCount: counts[.info, default: 0]
+                        )
+                    )
+                }
+            case .failed(let reason, _, _):
+                Self.postNotice(siteID: siteID) { name in
+                    CompletionNoticeBuilder.audit(siteName: name, siteID: siteID, outcome: .failed(reason: reason))
+                }
+            }
+        }
+    }
+
+    /// Resolve the site's *current* display name from the registry and hand the notice to the
+    /// notifier (which applies the settings toggle and the not-frontmost gate). `static` on
+    /// purpose: the posting path must not depend on the window model still existing — an
+    /// operation whose window closed mid-run finishes later and still notifies. A site removed
+    /// from the registry mid-run posts with an empty subtitle rather than not at all.
+    private static func postNotice(siteID: String, _ make: @escaping @MainActor (String) -> CompletionNotice) {
+        Task { @MainActor in
+            let name = await SiteStore.shared.find(id: siteID)?.name ?? ""
+            CompletionNotifier.shared.post(make(name))
+        }
     }
 
     #if ANGLESITE_MAS

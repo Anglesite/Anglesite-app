@@ -25,9 +25,17 @@ struct PreviewView: NSViewRepresentable {
     let annotationProvider: PreviewAnnotationProvider?
 
     /// Called with the `WKWebView` once it's created, so the owning `PreviewModel` can hold a weak
-    /// reference and open the Web Inspector from the View menu. Defaults to a no-op for callers
-    /// (e.g. tests) that don't need it.
+    /// reference and drive the View-menu preview commands (Web Inspector, reload/history/zoom).
+    /// Defaults to a no-op for callers (e.g. tests) that don't need it.
     var onWebView: (WKWebView) -> Void = { _ in }
+
+    /// Called with the `WKWebView` when SwiftUI tears this view down (`dismantleNSView`) — e.g. a
+    /// dev-server restart or failure switches `previewPane` away from the `.ready` branch. The
+    /// owning `PreviewModel` needs this explicit signal: its `webView` reference is weak, and ARC
+    /// zeroing a weak var does NOT fire `didSet`, so without it the model's KVO-fed
+    /// `canGoBack`/`canGoForward` mirrors would freeze at their last values (#546 review).
+    /// Defaults to a no-op for callers that don't track the web view.
+    var onWebViewDismantled: (WKWebView) -> Void = { _ in }
 
     func makeNSView(context: Context) -> WKWebView {
         let onVisibleElements: AnglesiteScriptHandler.VisibleElementsHandler? = annotationProvider.map { provider in
@@ -52,19 +60,28 @@ struct PreviewView: NSViewRepresentable {
         }
         webView.load(URLRequest(url: url))
         context.coordinator.loadedURL = url
+        // Stashed on the coordinator because `dismantleNSView` is static — it has no access to
+        // this instance's closures at teardown time.
+        context.coordinator.onDismantle = onWebViewDismantled
         onWebView(webView)
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
+        context.coordinator.onDismantle = onWebViewDismantled
         guard context.coordinator.loadedURL != url else { return }
         context.coordinator.loadedURL = url
         webView.load(URLRequest(url: url))
+    }
+
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.onDismantle?(webView)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator {
         var loadedURL: URL?
+        var onDismantle: ((WKWebView) -> Void)?
     }
 }

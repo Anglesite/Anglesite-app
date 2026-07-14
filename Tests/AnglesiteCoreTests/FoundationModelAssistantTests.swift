@@ -4,11 +4,12 @@ import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
 @testable import AnglesiteCore
+import AnglesiteSiteModel
 
 // Gated like the type under test (#128). Capability/tier assertions run on any toolchain≥6.4;
 // the generate/generateStructured tests are live-model and skip when unavailable.
 // TODO(#104/#161): migrate the live tests to the mock LanguageModel session once #104 lands.
-#if compiler(>=6.4)
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 
 @Suite("FoundationModelAssistant")
@@ -64,6 +65,67 @@ struct FoundationModelAssistantTests {
         #expect(FoundationModelAssistant(maxRetainedTurns: 0).maxRetainedTurnsForTesting == 1)
         #expect(FoundationModelAssistant(maxRetainedTurns: -5).maxRetainedTurnsForTesting == 1)
         #expect(FoundationModelAssistant(maxRetainedTurns: 3).maxRetainedTurnsForTesting == 3)
+    }
+
+    // MARK: Design-interview chat tool (#665) — no model required
+
+    /// Counts factory invocations from a `@Sendable` closure without data races.
+    private actor InvocationCounter {
+        var count = 0
+        func increment() { count += 1 }
+    }
+
+    /// A design-interview factory whose inner assistant is never exercised — these tests only
+    /// cover the hosting actor's lazy-build/cache/reset lifecycle, not the interview itself.
+    private func makeInterviewFactory(counting counter: InvocationCounter) -> @Sendable () async -> DesignInterviewModel {
+        {
+            await counter.increment()
+            return await MainActor.run {
+                DesignInterviewModel(
+                    businessType: "bakery",
+                    assistant: FoundationModelAssistant(tier: .onDevice),
+                    package: AnglesitePackage(url: FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString)),
+                    siteID: "site-1"
+                )
+            }
+        }
+    }
+
+    @Test("design-interview model is built lazily, cached across calls, and cleared by resetSession (#665)")
+    func designInterviewModelLifecycle() async throws {
+        let counter = InvocationCounter()
+        let assistant = FoundationModelAssistant(designInterviewFactory: makeInterviewFactory(counting: counter))
+        // Lazy: nothing built at init.
+        #expect(await counter.count == 0)
+        let first = try #require(await assistant.currentDesignInterviewModel())
+        let second = try #require(await assistant.currentDesignInterviewModel())
+        // Cached: one interview per chat session, not one per turn.
+        #expect(first === second)
+        #expect(await counter.count == 1)
+        // resetSession starts a fresh interview along with the fresh chat.
+        await assistant.resetSession()
+        let third = try #require(await assistant.currentDesignInterviewModel())
+        #expect(third !== first)
+        #expect(await counter.count == 2)
+    }
+
+    @Test("no factory means no design-interview model and no advertised tool (#665)")
+    func designInterviewAbsentWithoutFactory() async {
+        let assistant = FoundationModelAssistant()
+        #expect(await assistant.currentDesignInterviewModel() == nil)
+        #expect(await !assistant.attachedToolNamesForTesting.contains(DesignInterviewTool.toolName))
+    }
+
+    @Test("a supplied factory attaches DesignInterviewTool to the conversational session (#665)")
+    func designInterviewToolAttachedWithFactory() async {
+        let counter = InvocationCounter()
+        let assistant = FoundationModelAssistant(designInterviewFactory: makeInterviewFactory(counting: counter))
+        #expect(await assistant.attachedToolNamesForTesting.contains(DesignInterviewTool.toolName))
+        let tools = await assistant.conversationToolsForTesting(for: makeContext())
+        #expect(tools.contains { $0 is DesignInterviewTool })
+        // Attaching the tool must not eagerly build the interview model.
+        #expect(await counter.count == 0)
     }
 
     @Test("PCC-tier assistant constructs and remains usable (falls back to on-device)")
@@ -147,12 +209,21 @@ struct FoundationModelAssistantTests {
         let assistant = FoundationModelAssistant()
         // Proves the image→guided-generation path runs end-to-end. Exact content is model-dependent;
         // the contract is that it returns a valid `GeneratedAltText` (decorative ⇒ empty alt).
-        let alt = try await assistant.generateStructured(
-            prompt: "Generate concise alt text for this image.",
-            imageURL: imageURL,
-            context: makeContext(),
-            resultType: GeneratedAltText.self
-        )
+        let alt: GeneratedAltText
+        do {
+            alt = try await assistant.generateStructured(
+                prompt: "Generate concise alt text for this image.",
+                imageURL: imageURL,
+                context: makeContext(),
+                resultType: GeneratedAltText.self
+            )
+        } catch AssistantError.unavailable {
+            // #541: an Xcode SDK ahead of the installed macOS beta seed can drop
+            // `Attachment(imageURL:)` out from under this call even though the model itself is
+            // available; that's a toolchain/OS skew, not a regression in this path, so skip rather
+            // than fail.
+            return
+        }
         if alt.isDecorative {
             #expect(alt.altText.isEmpty)
         } else {
@@ -417,6 +488,44 @@ struct FoundationModelAssistantTests {
             if case .textDelta(let text) = event { reply += text }
         }
         #expect(reply.localizedCaseInsensitiveContains("Falkor"))
+    }
+
+    @Test("converse proactively trims once the transcript's estimated weight nears budget, even below maxRetainedTurns (#657)")
+    func converseProactivelyTrimsOverTokenBudget() async throws {
+        guard modelAvailable() else { return }
+        // maxRetainedTurns is high enough that the existing turn-count trim (#456) would never
+        // fire within this test — any shrinkage observed here is attributable only to the
+        // token-budget check added for #657.
+        let assistant = FoundationModelAssistant(maxRetainedTurns: 50)
+        let context = makeContext()
+
+        // Plant several bulky-but-bounded turns. Each is well within the real on-device budget on
+        // its own, but their combined weight (plus the always-attached Spotlight tool schema)
+        // crosses the proactive threshold well before 50 turns land — the #657 scenario, where a
+        // heavy attached tool set left little headroom for even a handful of turns.
+        let bulky = String(repeating: "The quick brown fox jumps over the lazy dog. ", count: 150)
+            + " Reply with just 'ok'."
+        for _ in 1...3 {
+            for await _ in try await assistant.converse(prompt: bulky, context: context) {}
+        }
+
+        // Without the proactive trim, this turn would extend an already-near-budget transcript and
+        // risk the hard "transcript exceeded the model's context size" failure reported in #657.
+        // With it, the cached session is shrunk *before* this turn runs, so it still completes.
+        var events: [AssistantEvent] = []
+        for await event in try await assistant.converse(prompt: "Reply with just 'ok'.", context: context) {
+            events.append(event)
+        }
+        guard case .turnComplete = events.last else {
+            Issue.record("Expected .turnComplete (proactive trim kept the turn within budget), got \(String(describing: events.last))")
+            return
+        }
+
+        // The count-based ceiling (50) was never reached, so any window smaller than the 4 turns
+        // submitted is attributable only to the token-budget check.
+        let promptCount = await assistant.promptCountForTesting
+        #expect(promptCount != nil)
+        if let promptCount { #expect(promptCount < 4) }
     }
 
     @Test("cancel mid-stream yields .cancelled and ends the turn")

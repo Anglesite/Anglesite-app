@@ -4,18 +4,6 @@ import AnglesiteCore
 import AnglesiteBridge
 import AnglesiteIntents
 
-/// Owns process-level lifecycle that SwiftUI's `App` value type can't: drain every supervised
-/// child on quit so nothing outlives the app.
-/// Holds the app-lifetime `ContentSpotlightIndexer` once `bootstrap` finishes populating it.
-/// `@Observable` so a `SiteWindow` constructed *before* bootstrap completes still reacts when the
-/// indexer arrives (enabling its Siri AI Readiness button) — passing the bare optional through the
-/// `WindowGroup` constructor would freeze whatever value existed at body-eval time.
-@MainActor
-@Observable
-final class ContentIndexerStore {
-    var indexer: ContentSpotlightIndexer?
-}
-
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Single shared `SiteContentGraph` for the app's lifetime. Passed into
@@ -40,6 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// can derive, which is a follow-up.
     var semanticRanker: SemanticRanker?
 
+    /// Shared project-conventions index, learned from each open site's content and consumed by
+    /// on-device generation (starting with alt text, #313). Mirrors `knowledgeIndex`'s lifecycle.
+    let conventionsEngine = ProjectConventionsEngine(enrich: ProjectConventionsEnricherFactory.makeDefault())
+
     /// On-device embedding provider, best-first: the multilingual transformer
     /// (`NLContextualEmbedding`), then the lighter `NLEmbedding.sentenceEmbedding`, then `nil`
     /// (→ pure-lexical retrieval). Never the test-double fake. Runs the model load, so call it off
@@ -52,6 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let contentIndexerStore = ContentIndexerStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Task { await AppleScriptCommandEnvironment.shared.configure(contentGraph: contentGraph) }
+
         // Register App Intents dependencies before the app surface comes up so backgrounded
         // intent processes (and #101's system MCP entry, later) can resolve immediately.
         // `bootstrap()` is async (it awaits the Spotlight handler installation on `SiteStore`);
@@ -73,6 +67,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // and stays current. Idempotent; safe on the main actor.
         Task { @MainActor in RecentSitesModel.shared.start() }
 
+        // Route notification-center activations (clicks on Deploy/Backup/Audit completion
+        // notifications, #526) back to the matching site window. Delegate installation only —
+        // authorization is requested lazily on the first posted notice, not at launch.
+        CompletionNotifier.shared.install()
+
+    }
+
+    /// Dynamic Dock menu (#522): recent sites + New Site, mirroring File ▸ Open Recent. Recent
+    /// sites open via `NSWorkspace.open` on the package URL — the same LaunchServices → `onOpenURL`
+    /// path as a Finder double-click, so it works (and mints MAS bookmarks) regardless of which
+    /// windows exist. AppKit calls this on the main thread, matching `RecentSitesModel`'s actor.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for site in RecentSitesModel.shared.sites {
+            let item = NSMenuItem(title: site.name, action: #selector(openRecentSiteFromDock(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = site.packageURL
+            item.isEnabled = site.isValid
+            menu.addItem(item)
+        }
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        let newSite = NSMenuItem(title: String(localized: "New Site"), action: #selector(newSiteFromDock), keyEquivalent: "")
+        newSite.target = self
+        menu.addItem(newSite)
+        return menu
+    }
+
+    @objc private func openRecentSiteFromDock(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        // "Logs are sacred": a declined open (e.g. the package moved since the last registry
+        // revalidation) has no other UI feedback loop from a Dock menu — record it.
+        if !NSWorkspace.shared.open(url) {
+            Task {
+                await LogCenter.shared.append(
+                    source: "dock-menu", stream: .stderr,
+                    text: "open \(url.lastPathComponent) failed: NSWorkspace declined the open"
+                )
+            }
+        }
+    }
+
+    @objc private func newSiteFromDock() {
+        NSApp.activate()
+        // Surface the launcher (it hosts the wizard sheet), then request the wizard — the same
+        // two-step used by File ▸ New ▸ Site (FocusedSite.swift).
+        WindowRouter.shared.openSitesWindow?()
+        WindowRouter.shared.requestNewSite()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -144,13 +186,9 @@ struct AnglesiteApp: App {
                     guard url.pathExtension == AnglesitePackage.packageExtension else { return }
                     Task { @MainActor in
                         do {
-                            let site = try await SiteStore.shared.record(AnglesitePackage(url: url))
-                            #if ANGLESITE_MAS
-                            // Mint from the canonicalized recorded path; let a failure surface to the
-                            // catch (logged) rather than silently leaving the site grantless.
-                            let bm = try SecurityScopedBookmark.create(for: site.packageURL)
-                            try await SiteStore.shared.setBookmark(bm, for: site.id)
-                            #endif
+                            // Shared with launcher drag-drop and the Dock menu (#524/#522);
+                            // includes the MAS bookmark mint.
+                            let site = try await SiteActions.registerPackage(at: url)
                             openWindow(value: site.id)
                         } catch {
                             await LogCenter.shared.append(source: "open-url", stream: .stderr, text: "open \(url.lastPathComponent) failed: \(error.localizedDescription)")
@@ -164,7 +202,35 @@ struct AnglesiteApp: App {
                 Button("About Anglesite") { showAboutPanel() }
             }
 
+            CommandGroup(before: .systemServices) {
+                Divider()
+
+                Button("Provide Anglesite Feedback…") {
+                    NSWorkspace.shared.open(URL(string: "https://anglesite.dwk.io/feedback/")!)
+                }
+
+                Divider()
+
+                // Opens the App Store analytics-consent pane when it exists (spec §2.1).
+                PlannedItem("Privacy & Analytics…")
+            }
+
             NewContentCommands()
+            // Edit ▸ Delete ⌘⌫ / Duplicate ⌘D for the focused window's Navigator selection (#516).
+            NavigatorEditCommands()
+            // Edit-menu skeleton: selection walkers, annotations, Find ▸ (menu-bar spec §2.3).
+            EditMenuSkeletonCommands()
+            // Both groups anchor `before: .importExport`; later declarations insert ABOVE earlier
+            // ones, so FileItemCommands is declared first to land BELOW SaveCommands, giving the
+            // order Save · Duplicate · Rename… · Move To… · Revert To ▸ · Reveal in Finder · Share…
+            // (FileItemCommands: Rename/Move To/Revert To/Reveal/Share, #513).
+            FileItemCommands()
+            // File ▸ Save ⌘S / Duplicate for the focused window's editors (#509; Revert To lives in FileItemCommands).
+            SaveCommands()
+            // Standard View-menu items: Show/Hide Sidebar ⌃⌘S and Customize Toolbar… (#510).
+            // Customize Toolbar… stays inert until the toolbar adopts .toolbar(id:) — see #519.
+            SidebarCommands()
+            ToolbarCommands()
             CommandGroup(after: .newItem) {
                 Menu("Open Recent") {
                     ForEach(recent.sites) { site in
@@ -190,6 +256,30 @@ struct AnglesiteApp: App {
             }
             // Export is its own Commands type so @FocusedValue tracks scene focus (see ExportSiteCommands).
             ExportSiteCommands()
+            // File ▸ Print… ⌘P for the previewed page — declared after ExportSiteCommands so it
+            // renders below Export To… (`after:` groups render in declaration order, #525).
+            PrintCommands()
+            // Insert menu (menu-bar spec §2.4) — leftmost of the custom menus.
+            InsertCommands()
+            // Page menu (menu-bar spec §2.5) — CommandMenus render in declaration order:
+            // Insert · Page · Format · Arrange · Website.
+            PageCommands()
+            // Format menu skeleton (menu-bar spec §2.6) — editor-gated.
+            FormatCommands()
+            // Arrange menu skeleton (menu-bar spec §2.7) — editor-gated, contextual.
+            ArrangeCommands()
+            // Website menu: the site window's operations, regrouped (menu-bar spec §2.9).
+            WebsiteCommands()
+            // View ▸ pane switching ⌘1–3 + panel toggles (Chat ⌘K, Related Pages, Inspector ⌥⌘I) —
+            // declared before WebInspectorCommands so they sit above the developer tools (#512).
+            // NOTE the anchor asymmetry (verified in the running app): `after:` groups render in
+            // DECLARATION order (this one above Web Inspector/Debug Pane), while `before:` groups
+            // render in REVERSE declaration order (see FileItemCommands/SaveCommands above).
+            ViewMenuCommands()
+            // Preview navigation — Reload ⌘R, Back/Forward, zoom (#514) — between the pane/panel
+            // toggles above and the developer tools below (`after:` groups render in declaration
+            // order, see the note above).
+            PreviewNavigationCommands()
             // "Show Web Inspector" in the View menu — its own Commands type for the same focus reason.
             WebInspectorCommands()
             // Debug pane lives off the View menu — `⌥⌘D` keeps it discoverable without crowding
@@ -200,6 +290,14 @@ struct AnglesiteApp: App {
                         openWindow(id: "debug")
                     }
                     .keyboardShortcut("d", modifiers: [.command, .option])
+                }
+            }
+
+            CommandGroup(after: .help) {
+                PlannedItem("What's New in Anglesite")
+
+                Button("Anglesite Website") {
+                    NSWorkspace.shared.open(URL(string: "https://anglesite.dwk.io/")!)
                 }
             }
         }
@@ -218,6 +316,7 @@ struct AnglesiteApp: App {
                 contentGraph: appDelegate.contentGraph,
                 knowledgeIndex: appDelegate.knowledgeIndex,
                 semanticRanker: appDelegate.semanticRanker,
+                conventionsEngine: appDelegate.conventionsEngine,
                 runtimeFactory: LiveSiteRuntimeFactory(),
                 contentIndexerStore: appDelegate.contentIndexerStore
             )

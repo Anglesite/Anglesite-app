@@ -17,8 +17,13 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
+    "@astrojs/react": "^4.2.0",
+    "@keystatic/astro": "^5.0.4",
+    "@keystatic/core": "^0.5.34",
     "@types/node": "^24.0.0",
     "microformats-parser": "^2.0.4",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
     "schema-dts": "^1.1.5",
     "tsx": "^4.0.0",
     "typescript": "^5.9.3"

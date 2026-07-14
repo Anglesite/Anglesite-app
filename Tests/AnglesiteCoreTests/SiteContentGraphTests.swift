@@ -362,6 +362,169 @@ struct SiteContentGraphTests {
         #expect(last == Self.siteA)
     }
 
+    // MARK: - isPopulated (#658)
+
+    @Test("isPopulated is false for a siteID that has never been loaded")
+    func isPopulatedFalseByDefault() async {
+        let graph = SiteContentGraph()
+        #expect(await graph.isPopulated(siteID: Self.siteA) == false)
+    }
+
+    @Test("isPopulated becomes true after load(siteID:...), even with an empty payload")
+    func isPopulatedTrueAfterLoad() async {
+        let graph = SiteContentGraph()
+        await graph.load(siteID: Self.siteA, pages: [], posts: [], images: [])
+        #expect(await graph.isPopulated(siteID: Self.siteA) == true)
+    }
+
+    @Test("isPopulated flips back to false after unload(siteID:)")
+    func isPopulatedFalseAfterUnload() async {
+        let graph = SiteContentGraph()
+        await graph.load(siteID: Self.siteA, pages: [Self.page()], posts: [], images: [])
+        await graph.unload(siteID: Self.siteA)
+        #expect(await graph.isPopulated(siteID: Self.siteA) == false)
+    }
+
+    @Test("isPopulated is scoped per siteID: loading one site does not mark another populated")
+    func isPopulatedIsPerSiteIsolated() async {
+        let graph = SiteContentGraph()
+        await graph.load(siteID: Self.siteA, pages: [], posts: [], images: [])
+        #expect(await graph.isPopulated(siteID: Self.siteA) == true)
+        #expect(await graph.isPopulated(siteID: Self.siteB) == false)
+    }
+
+    @Test("upsertPage/upsertPost/upsertImage alone do not mark a siteID populated — only a full load does")
+    func isPopulatedNotSetByIncrementalUpserts() async {
+        // #660: upserts (e.g. the navigator's rename path) can add real entries without a scan
+        // ever having run — isPopulated intentionally stays false in that case, since it can't
+        // distinguish "this is the whole site's content" from "this is one edited entry."
+        let graph = SiteContentGraph()
+        await graph.upsertPage(Self.page())
+        await graph.upsertPost(Self.post())
+        await graph.upsertImage(Self.image())
+        #expect(await graph.isPopulated(siteID: Self.siteA) == false)
+    }
+
+    // MARK: - rescan (#660)
+
+    @Test("rescan scans a real project root and populates the graph")
+    func rescanPopulatesFromRealProjectRoot() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("site-content-graph-\(UUID().uuidString)")
+        let pagesDir = root.appendingPathComponent("src/pages")
+        try FileManager.default.createDirectory(at: pagesDir, withIntermediateDirectories: true)
+        try Data().write(to: pagesDir.appendingPathComponent("about.astro"))
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let graph = SiteContentGraph()
+        let scanned = await graph.rescan(siteID: Self.siteA, projectRoot: root)
+
+        #expect(scanned == true)
+        #expect(await graph.isPopulated(siteID: Self.siteA) == true)
+        let pages = await graph.pages(for: Self.siteA)
+        #expect(pages.map(\.route) == ["/about"])
+    }
+
+    @Test("rescan against a project root that can't be listed leaves the site unpopulated")
+    func rescanUnreadableProjectRootDoesNotMarkPopulated() async {
+        // #660 follow-up: a stale/revoked security-scoped bookmark (MAS) or a deleted/unmounted
+        // source directory must not silently report "scanned and empty" — that would make
+        // `isPopulated` lie to `SearchContentTool`, which trusts it to mean "a miss is reliable."
+        let missingRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("site-content-graph-missing-\(UUID().uuidString)")
+
+        let graph = SiteContentGraph()
+        let scanned = await graph.rescan(siteID: Self.siteA, projectRoot: missingRoot)
+
+        #expect(scanned == false)
+        #expect(await graph.isPopulated(siteID: Self.siteA) == false)
+    }
+
+    // MARK: - scan generation guard (#666)
+
+    @Test("beginScan returns increasing tokens per siteID, starting at 1")
+    func beginScanReturnsIncreasingTokens() async {
+        let graph = SiteContentGraph()
+        let first = await graph.beginScan(siteID: Self.siteA)
+        let second = await graph.beginScan(siteID: Self.siteA)
+        #expect(first == 1)
+        #expect(second == 2)
+    }
+
+    @Test("load without a generation token bypasses the freshness guard (back-compat default)")
+    func loadWithoutGenerationAlwaysApplies() async {
+        let graph = SiteContentGraph()
+        _ = await graph.beginScan(siteID: Self.siteA)
+        await graph.load(siteID: Self.siteA, pages: [Self.page()], posts: [], images: [])
+        let pages = await graph.pages(for: Self.siteA)
+        #expect(pages.count == 1)
+    }
+
+    @Test("load with the current generation applies normally")
+    func loadWithCurrentGenerationApplies() async {
+        let graph = SiteContentGraph()
+        let gen = await graph.beginScan(siteID: Self.siteA)
+        await graph.load(siteID: Self.siteA, pages: [Self.page()], posts: [], images: [], generation: gen)
+        let pages = await graph.pages(for: Self.siteA)
+        #expect(pages.count == 1)
+        #expect(await graph.isPopulated(siteID: Self.siteA) == true)
+    }
+
+    @Test("""
+    simulates the #666 race: a slower site-open scan started first must not clobber a \
+    faster, newer create-triggered rescan
+    """)
+    func staleGenerationLoadIsDiscarded() async {
+        let graph = SiteContentGraph()
+
+        // Site-open scan starts first (older generation)...
+        let openScanGeneration = await graph.beginScan(siteID: Self.siteA)
+
+        // ...but a Shortcut creates a page and its rescan starts — and finishes — while the
+        // site-open scan is still walking the filesystem.
+        let createRescanGeneration = await graph.beginScan(siteID: Self.siteA)
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [Self.page(route: "/new-from-shortcut")],
+            posts: [],
+            images: [],
+            generation: createRescanGeneration
+        )
+
+        // The slower site-open scan finally finishes and calls load with its stale snapshot,
+        // captured before the Shortcut's page existed — this must be discarded, not applied.
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [Self.page(route: "/about")],
+            posts: [],
+            images: [],
+            generation: openScanGeneration
+        )
+
+        let routes = await graph.pages(for: Self.siteA).map(\.route)
+        #expect(routes == ["/new-from-shortcut"])
+    }
+
+    @Test("scan generations are tracked independently per siteID, not a single shared counter")
+    func scanGenerationsArePerSiteIsolated() async {
+        let graph = SiteContentGraph()
+        let siteAGeneration = await graph.beginScan(siteID: Self.siteA)
+        // Advance siteB's counter ahead of siteA's — if generations were a single shared
+        // counter instead of keyed per siteID, siteA's load below would be wrongly discarded.
+        _ = await graph.beginScan(siteID: Self.siteB)
+        _ = await graph.beginScan(siteID: Self.siteB)
+
+        await graph.load(
+            siteID: Self.siteA,
+            pages: [Self.page(site: Self.siteA)],
+            posts: [],
+            images: [],
+            generation: siteAGeneration
+        )
+
+        #expect(await graph.pages(for: Self.siteA).count == 1)
+    }
+
     @Test("searchPages matches title and route case-insensitively")
     func searchPagesMatchesTitleAndRouteCaseInsensitive() async {
         let graph = SiteContentGraph()

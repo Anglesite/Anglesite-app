@@ -214,6 +214,419 @@ struct NativeContentOperationsTests {
         let sha = await NativeContentOperations.processGitCommit(repo, "p.astro", "anglesite: add page /p")
         #expect(sha?.count == 40)
     }
+
+    @Test("processGitCommit returns nil when the configured git identity can't be resolved")
+    func realGitNoIdentity() async throws {
+        // Forcing "genuinely no user.name/user.email anywhere in the config chain" isn't
+        // reliably constructible here: SwiftGit2's resolution goes through libgit2's own
+        // process-global config-search-path cache (populated once, at first SwiftGit2Init()), so
+        // mutating HOME/XDG_CONFIG_HOME mid-test doesn't retroactively affect it. Making the local
+        // repo config merely unreadable doesn't work either — empirically verified: libgit2
+        // silently skips an inaccessible local config and falls through to this dev/CI machine's
+        // real ambient global config instead of failing. What *does* reliably fail is malformed
+        // config syntax: a config file libgit2 can open but not parse is a hard error, not a
+        // silently-skipped level. This is a different trigger than "no identity configured
+        // anywhere" but exercises the exact thing this test actually cares about: a
+        // `defaultSignature()` failure, for any reason, must make `processGitCommit` return nil
+        // rather than crash or silently misbehave (finding #2 in PR #649's review).
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        _ = try await ProcessSupervisor.shared.run(executable: git, arguments: ["init"], currentDirectoryURL: repo)
+        // Deliberately no `git config user.email`/`user.name` this time — and the config file's
+        // contents are overwritten with unparseable garbage below, so it can't fall back to
+        // whatever `git init` itself wrote there either.
+        let configPath = repo.appendingPathComponent(".git/config")
+        try "[core\nthis is not valid git-config syntax".write(to: configPath, atomically: true, encoding: .utf8)
+
+        try "page".write(to: repo.appendingPathComponent("p.astro"), atomically: true, encoding: .utf8)
+        let sha = await NativeContentOperations.processGitCommit(repo, "p.astro", "anglesite: add page /p")
+        #expect(sha == nil)
+    }
+
+    @Test("processGitDelete removes and commits the file, nil outside a repo")
+    func realGitDelete() async throws {
+        // Outside a repo → nil (best-effort), file untouched.
+        let bare = FileManager.default.temporaryDirectory.appendingPathComponent("nogit-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: bare, withIntermediateDirectories: true)
+        try "hi".write(to: bare.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8)
+        let none = await NativeContentOperations.processGitDelete(bare, "f.txt", "msg")
+        #expect(none == nil)
+        #expect(FileManager.default.fileExists(atPath: bare.appendingPathComponent("f.txt").path))
+
+        // Inside a repo with a committed file → delete succeeds, returns a 40-char SHA, file gone.
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        for args in [["init"], ["config", "user.email", "t@t.io"], ["config", "user.name", "t"]] {
+            _ = try await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: repo)
+        }
+        let filePath = repo.appendingPathComponent("unused.astro")
+        try "<div></div>".write(to: filePath, atomically: true, encoding: .utf8)
+        _ = await NativeContentOperations.processGitCommit(repo, "unused.astro", "add unused.astro")
+
+        let sha = await NativeContentOperations.processGitDelete(repo, "unused.astro", "Remove unused component: unused.astro")
+        #expect(sha?.count == 40)
+        #expect(!FileManager.default.fileExists(atPath: filePath.path))
+    }
+
+    @Test("processGitDelete restores the file from HEAD when commit fails after rm succeeds")
+    func rollbackOnCommitFailure() async throws {
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        for args in [["init"], ["config", "user.email", "t@t.io"], ["config", "user.name", "t"]] {
+            _ = try await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: repo)
+        }
+        let filePath = repo.appendingPathComponent("unused.astro")
+        try "<div>original</div>".write(to: filePath, atomically: true, encoding: .utf8)
+        _ = await NativeContentOperations.processGitCommit(repo, "unused.astro", "add unused.astro")
+
+        // Force the commit step to fail after the remove already succeeds: make the object
+        // database unwritable, so writing the new tree/commit objects fails. This used to be a
+        // rejecting `.git/hooks/pre-commit` hook, but SwiftGit2/libgit2 never runs shell hooks —
+        // a documented, accepted difference from the subprocess-git implementation this replaced
+        // (see processGitCommit's doc comment) — so a hook no longer exercises this path at all.
+        // Read access is untouched (0o555), so the rollback's restore-from-HEAD (which only reads
+        // existing objects, not writes new ones) still works.
+        let objectsDir = repo.appendingPathComponent(".git/objects")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: objectsDir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: objectsDir.path) }
+
+        let sha = await NativeContentOperations.processGitDelete(repo, "unused.astro", "Remove unused.astro")
+        #expect(sha == nil)
+        #expect(FileManager.default.fileExists(atPath: filePath.path))
+        #expect(try String(contentsOf: filePath, encoding: .utf8) == "<div>original</div>")
+
+        let status = try await ProcessSupervisor.shared.run(executable: git, arguments: ["status", "--porcelain"], currentDirectoryURL: repo)
+        #expect(status.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    @Test("processGitDelete refuses a staged-but-never-committed file (no HEAD copy to roll back to)")
+    func refusesUncommittedFile() async throws {
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        for args in [["init"], ["config", "user.email", "t@t.io"], ["config", "user.name", "t"]] {
+            _ = try await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: repo)
+        }
+        // A first commit so the repo has a HEAD at all.
+        try "root".write(to: repo.appendingPathComponent("root.txt"), atomically: true, encoding: .utf8)
+        _ = await NativeContentOperations.processGitCommit(repo, "root.txt", "initial")
+
+        // Staged via `git add`, but never committed.
+        let filePath = repo.appendingPathComponent("staged-only.astro")
+        try "<div></div>".write(to: filePath, atomically: true, encoding: .utf8)
+        _ = try await ProcessSupervisor.shared.run(executable: git, arguments: ["add", "staged-only.astro"], currentDirectoryURL: repo)
+
+        let sha = await NativeContentOperations.processGitDelete(repo, "staged-only.astro", "Remove staged-only.astro")
+        #expect(sha == nil)
+        #expect(FileManager.default.fileExists(atPath: filePath.path))
+    }
+}
+
+@Suite("NativeContentOperations.deleteContent")
+struct NativeContentOperationsDeleteTests {
+    private func makeRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("native-content-ops-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test("deletes an existing file via the injected gitDelete closure")
+    func deletesExistingFile() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/about.astro"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("stub".utf8).write(to: abs)
+
+        var deletedArgs: (URL, String, String)?
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitDelete: { projectRoot, path, message in
+                deletedArgs = (projectRoot, path, message)
+                return "deadbeef"
+            }
+        )
+
+        let result = await ops.deleteContent(siteID: "site-1", relativePath: relPath)
+
+        #expect(result == .deleted(filePath: relPath))
+        #expect(deletedArgs?.0 == root)
+        #expect(deletedArgs?.1 == relPath)
+    }
+
+    @Test("fails when the file does not exist")
+    func failsWhenMissing() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitDelete: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.deleteContent(siteID: "site-1", relativePath: "src/pages/missing.astro")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
+
+    @Test("fails when gitDelete refuses (dirty tree, no HEAD copy, etc.)")
+    func failsWhenGitDeleteRefuses() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/about.astro"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("stub".utf8).write(to: abs)
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitDelete: { _, _, _ in nil }
+        )
+
+        let result = await ops.deleteContent(siteID: "site-1", relativePath: relPath)
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
+
+    @Test("reports siteNotFound when siteDirectory resolves nil")
+    func siteNotFound() async {
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in nil },
+            gitDelete: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.deleteContent(siteID: "missing-site", relativePath: "src/pages/about.astro")
+
+        #expect(result == .siteNotFound)
+    }
+
+    @Test("restoreContent writes the given contents back and commits via the injected closure")
+    func restoresContent() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/about.astro"
+
+        var committedArgs: (URL, String, String)?
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { projectRoot, path, message in
+                committedArgs = (projectRoot, path, message)
+                return "deadbeef"
+            }
+        )
+
+        let result = await ops.restoreContent(siteID: "site-1", relativePath: relPath, contents: "restored body")
+
+        #expect(result == .created(filePath: relPath, identifier: relPath))
+        let written = try String(contentsOf: root.appendingPathComponent(relPath), encoding: .utf8)
+        #expect(written == "restored body")
+        #expect(committedArgs?.1 == relPath)
+    }
+
+    @Test("restoreContent reports .failed when the recommit fails, even though the write itself landed")
+    func restoreContentFailsWhenCommitFails() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/about.astro"
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { _, _, _ in nil }
+        )
+
+        let result = await ops.restoreContent(siteID: "site-1", relativePath: relPath, contents: "restored body")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+        // The write itself is not rolled back on a commit failure — the caller (SiteWindowModel)
+        // relies on this to decide whether to reopen the editor/inspector on the restored file.
+        let written = try String(contentsOf: root.appendingPathComponent(relPath), encoding: .utf8)
+        #expect(written == "restored body")
+    }
+
+    @Test("restoreContent reports siteNotFound when siteDirectory resolves nil")
+    func restoreContentSiteNotFound() async {
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in nil },
+            gitCommit: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.restoreContent(siteID: "missing-site", relativePath: "src/pages/about.astro", contents: "x")
+
+        #expect(result == .siteNotFound)
+    }
+}
+
+@Suite("NativeContentOperations.duplicatePage/duplicatePost")
+struct NativeContentOperationsDuplicateTests {
+    private func makeRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("native-content-ops-dup-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test("duplicatePage writes a -copy suffixed file with the retitled contents")
+    func duplicatesPage() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/about.astro"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let original = ContentScaffold.renderPage(title: "About", layoutImport: "../layouts/BaseLayout.astro")
+        try original.write(to: abs, atomically: true, encoding: .utf8)
+
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.duplicatePage(siteID: "site-1", relativePath: relPath, title: "About")
+
+        guard case .created(let filePath, let identifier) = result else {
+            Issue.record("expected .created, got \(result)"); return
+        }
+        #expect(filePath == "src/pages/about-copy.astro")
+        #expect(identifier == "/about-copy")
+        let copied = try String(contentsOf: root.appendingPathComponent(filePath), encoding: .utf8)
+        #expect(copied.contains("title=\"About Copy\""))
+    }
+
+    @Test("duplicatePage bumps the suffix on collision")
+    func duplicatesPageWithCollision() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/about.astro"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try ContentScaffold.renderPage(title: "About", layoutImport: "../layouts/BaseLayout.astro")
+            .write(to: abs, atomically: true, encoding: .utf8)
+        try ContentScaffold.renderPage(title: "About Copy", layoutImport: "../layouts/BaseLayout.astro")
+            .write(to: root.appendingPathComponent("src/pages/about-copy.astro"), atomically: true, encoding: .utf8)
+
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.duplicatePage(siteID: "site-1", relativePath: relPath, title: "About")
+
+        guard case .created(let filePath, _) = result else { Issue.record("expected .created, got \(result)"); return }
+        #expect(filePath == "src/pages/about-copy-2.astro")
+    }
+
+    @Test("duplicatePost writes into the same collection with a -copy slug")
+    func duplicatesPost() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/content/posts/hello-world.md"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try ContentScaffold.renderPost(title: "Hello World", now: Date(timeIntervalSince1970: 0))
+            .write(to: abs, atomically: true, encoding: .utf8)
+
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.duplicatePost(siteID: "site-1", relativePath: relPath, collection: "posts", title: "Hello World")
+
+        guard case .created(let filePath, let identifier) = result else {
+            Issue.record("expected .created, got \(result)"); return
+        }
+        #expect(filePath == "src/content/posts/hello-world-copy.md")
+        #expect(identifier == "hello-world-copy")
+        let copied = try String(contentsOf: root.appendingPathComponent(filePath), encoding: .utf8)
+        #expect(copied.contains("title: \"Hello World Copy\""))
+    }
+
+    @Test("duplicatePage falls back to a verbatim copy when the extension has no editable title location")
+    func duplicatesPageWithUnrecognizedExtensionVerbatim() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/pages/notes.txt"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let original = "Just some plain notes.\nNo frontmatter, no title attribute.\n"
+        try original.write(to: abs, atomically: true, encoding: .utf8)
+
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { _, _, _ in "deadbeef" }
+        )
+
+        let result = await ops.duplicatePage(siteID: "site-1", relativePath: relPath, title: "Notes")
+
+        guard case .created(let filePath, _) = result else {
+            Issue.record("expected .created, got \(result)"); return
+        }
+        let copied = try String(contentsOf: root.appendingPathComponent(filePath), encoding: .utf8)
+        #expect(copied == original)
+    }
+
+    @Test("duplicatePage fails when the source file does not exist")
+    func duplicateMissingSourceFails() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ops = NativeContentOperations(siteDirectory: { _ in root })
+
+        let result = await ops.duplicatePage(siteID: "site-1", relativePath: "src/pages/missing.astro", title: "Missing")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
+}
+
+@Suite("NativeContentOperations.createComponent")
+struct NativeContentOperationsComponentTests {
+    private func makeRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("native-content-ops-component-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test("creates a PascalCase-named blank component")
+    func createsComponent() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ops = NativeContentOperations(siteDirectory: { _ in root }, gitCommit: { _, _, _ in "deadbeef" })
+
+        let result = await ops.createComponent(siteID: "site-1", name: "call to action")
+
+        guard case .created(let filePath, let identifier) = result else {
+            Issue.record("expected .created, got \(result)"); return
+        }
+        #expect(filePath == "src/components/CallToAction.astro")
+        #expect(identifier == "CallToAction")
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(filePath).path))
+    }
+
+    @Test("fails when a component already exists at that path")
+    func failsOnCollision() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let existing = root.appendingPathComponent("src/components/CallToAction.astro")
+        try FileManager.default.createDirectory(at: existing.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("stub".utf8).write(to: existing)
+        let ops = NativeContentOperations(siteDirectory: { _ in root })
+
+        let result = await ops.createComponent(siteID: "site-1", name: "Call To Action")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
+
+    @Test("fails on an empty name")
+    func failsOnEmptyName() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ops = NativeContentOperations(siteDirectory: { _ in root })
+
+        let result = await ops.createComponent(siteID: "site-1", name: "   ")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
 }
 
 private struct StubPageCopyGenerator: PageCopyGenerating {

@@ -195,7 +195,7 @@ extension ContentTypeRegistry {
     /// The built-in content types: the personal IndieWeb post types (#344) and the small-business
     /// types (#345), declared as data here in V-1.1. Templates and editors for them land in their
     /// own tasks; this is the shared vocabulary they consume.
-    public static let builtIns: [ContentTypeDescriptor] = personalTypes + identityTypes + businessTypes
+    public static let builtIns: [ContentTypeDescriptor] = personalTypes + identityTypes + businessTypes + identityAndDirectoryTypes
 
     // MARK: Personal (h-entry family)
 
@@ -492,6 +492,35 @@ extension ContentTypeRegistry {
                 "publishDate": "dt-published",
             ],
             schemaType: "Review"
+        )
+    )
+
+    // MARK: Identity and directory (h-card collections, #462)
+
+    static let identityAndDirectoryTypes: [ContentTypeDescriptor] = [member]
+
+    static let member = ContentTypeDescriptor(
+        id: "member",
+        displayName: "Member",
+        storage: .collection("members"),
+        fields: [
+            ContentTypeField("name", .string, required: true),
+            ContentTypeField("role", .string),
+            ContentTypeField("joinedDate", .date, required: true),
+            ContentTypeField("photo", .image),
+            ContentTypeField("links", .stringArray),
+            ContentTypeField("bio", .markdown),
+        ],
+        projections: ContentTypeProjections(
+            microformat: "h-card",
+            microformatProperties: [
+                "name": "p-name",
+                "role": "p-job-title",
+                "photo": "u-photo",
+                "links": "u-url",
+                "bio": "p-note",
+            ],
+            schemaType: "Person"
         )
     )
 }

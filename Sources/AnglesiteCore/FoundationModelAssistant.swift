@@ -1,16 +1,21 @@
 import Foundation
-import OSLog
 
 /// Which Apple model substrate a ``FoundationModelAssistant`` targets.
 ///
 /// Declared *outside* the `#if compiler(>=6.4)` gate because it has no `FoundationModels`
 /// dependency and can be referenced from package code compiled on older CI toolchains.
 ///
-/// - Important: The public `FoundationModels` framework is **on-device**. There is no
-///   caller-selectable Private Cloud Compute session; PCC is used transparently by some system
-///   APIs. `.privateCloudCompute` is therefore *modeled* here so future call sites can express
-///   intent, but **v1 backs it with the same on-device session**. The only observable difference
-///   today is the advertised ``AssistantCapabilities``.
+/// - Important: A 2026-07-10 feasibility spike
+///   (`docs/specs/2026-07-10-pcc-escalation-spike-notes.md`) found that a real, public
+///   `PrivateCloudComputeLanguageModel` API exists in the macOS 27 SDK's `FoundationModels`
+///   framework, conforming to `LanguageModel` and usable via `LanguageModelSession(model:)` —
+///   it is not aspirational or SPI. However, using it requires a manually-requested Apple
+///   developer entitlement this project has not yet obtained, plus undesigned quota- and
+///   availability-fallback handling (the type carries its own `QuotaUsage`/`Availability`
+///   states). `.privateCloudCompute` remains backed by the on-device session until that
+///   entitlement is granted and the integration is designed — this is a deliberate near-term
+///   scope choice, not an API limitation. The only observable difference today is the
+///   advertised ``AssistantCapabilities``.
 public enum FoundationModelTier: String, Sendable, Equatable, CaseIterable {
     /// `SystemLanguageModel.default` — the ~3B on-device model. Free, no network.
     case onDevice            = "onDevice"
@@ -19,11 +24,47 @@ public enum FoundationModelTier: String, Sendable, Equatable, CaseIterable {
     case privateCloudCompute = "privateCloudCompute"
 }
 
-// Gated to the Xcode-27 toolchain — FoundationModels is absent at runtime on CI (#128).
-// See ContentAssistant.swift for the same pattern.
-#if compiler(>=6.4)
+/// Deterministic context-budget helpers, usable without `FoundationModels`. Declared as a
+/// standalone type (not an extension on ``FoundationModelAssistant``) because that actor is
+/// declared inside the `#if compiler(>=6.4)` gate below and is therefore unavailable at this
+/// point in the file on older toolchains — extending it here would break compilation on CI's
+/// pre-6.4 `swift test` runners (#128).
+///
+/// Per the 2026-07-10 spike (see ``FoundationModelTier``'s doc comment), real PCC escalation is
+/// not yet wired up, so "escalation" here means the caller (e.g. the design-interview
+/// conversation) should chunk or summarize a prompt deterministically before it overruns the
+/// on-device context window — there is no larger-model request to make yet.
+public enum FoundationModelContextBudget {
+    /// Conservative characters-per-token proxy (~4 chars/token for English), matching the
+    /// existing character-based approach in `maxPageContentCharacters` — no on-device tokenizer
+    /// is available to measure the real count.
+    public static let onDeviceTokenBudget = 4_096
+    private static let charsPerTokenEstimate = 4
+
+    public static func estimatedTokens(for text: String) -> Int {
+        text.count / charsPerTokenEstimate
+    }
+
+    /// Whether a prompt is estimated to exceed the on-device context budget.
+    ///
+    /// - Note: this is currently unconsumed scaffolding — `DesignInterviewModel`/
+    ///   `DesignInterviewPrompts` don't call it yet; they apply their own independent, smaller
+    ///   character cap directly on the user's raw message instead (see
+    ///   `DesignInterviewPrompts.truncatedUserMessage`). Wiring this budget check into the actual
+    ///   conversation flow is tracked alongside design-interview's other app-integration gaps in
+    ///   Anglesite-app#631.
+    public static func shouldEscalate(prompt: String) -> Bool {
+        estimatedTokens(for: prompt) > onDeviceTokenBudget
+    }
+}
+
+// Gated to the Xcode-27 toolchain — FoundationModels is absent at runtime on CI (#128) — and to
+// canImport for genuine off-Darwin portability (cross-platform port design §5). See
+// ContentAssistant.swift for the same pattern.
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 import CoreSpotlight
+import OSLog
 
 /// A ``ContentAssistant`` backed by Apple's on-device `FoundationModels`. Streams free-form text
 /// and produces ``Generable`` structured output via guided generation.
@@ -31,12 +72,50 @@ import CoreSpotlight
 /// Compiled into AnglesiteCore on both build targets; it needs no subprocess, so it is the
 /// on-device path usable from the sandboxed MAS build.
 public actor FoundationModelAssistant: ConversationalAssistant {
+    // TODO(#623): this hardcoded mangled-symbol check is a workaround for a beta Xcode/macOS SDK-OS
+    // skew (#541). Verified still live 2026-07-09 (#618, Xcode 27A5209h / macOS 26A5378j): the OS
+    // now exports this same initializer under a *different* mangling (the extension signature's
+    // Copyable requirement marker was dropped, `Rszrl` → `Rszl`), while the SDK still emits — and
+    // this binary therefore still references — the old one. The hardcoded name must track what the
+    // SDK emits, not what the OS exports; #623 has the re-sync recipe and the exit condition for
+    // deleting this guard plus the weak-link settings in Package.swift/project.yml.
+    /// Whether `Attachment(imageURL:orientation:)` actually resolves on this host. FoundationModels
+    /// is weak-linked (#541), so a mangled name the installed OS doesn't export binds to a NULL
+    /// pointer rather than failing to load — `dlsym` against the already-loaded image is the way to
+    /// tell the two cases apart before calling through it.
+    private static let imageAttachmentInitializerIsAvailable: Bool = {
+        dlsym(
+            dlopen(nil, RTLD_NOW),
+            "_$s16FoundationModels10AttachmentVA2A05ImageC7ContentVRszrlE8imageURL11orientationACyAEG0A00G0V_So26CGImagePropertyOrientationVSgtcfC"
+        ) != nil
+    }()
+
     private let tier: FoundationModelTier
     private let editBridge: IntentEditBridge?
     private let contentGraph: SiteContentGraph?
     private let knowledgeIndex: SiteKnowledgeIndex?
     private let semanticRanker: SemanticRanker?
     private let integrationService: (any IntegrationOperationsService)?
+    private let conventionsEngine: ProjectConventionsEngine?
+    private let conventionsStore: ProjectConventionsStore?
+    private let copyEditAuditor: (any CopyEditAuditing)?
+    private let socialMediaPlanner: (any SocialMediaPlanning)?
+    private let postRepurposer: (any PostRepurposing)?
+    /// Builds a fresh ``DesignInterviewModel`` for the chat front door (#665). Infallible —
+    /// distinct from ``DesignInterviewTool/ModelProvider``, which may throw when its backing
+    /// state is gone. Named so the app-side wiring and this actor spell one type.
+    public typealias DesignInterviewModelFactory = @Sendable () async -> DesignInterviewModel
+
+    private let themeCatalog: ThemeCatalog?
+    private let designInterviewFactory: DesignInterviewModelFactory?
+    /// The chat session's design interview, built lazily by ``currentDesignInterviewModel()`` on
+    /// the tool's first call. One interview per chat session: unlike every other tool dependency
+    /// on this actor (window-lifetime, stateless), the interview is conversation-lifetime mutable
+    /// state (#665) — it survives session trims (``trimSessionIfNeeded(current:context:)`` must
+    /// not reset an in-flight interview) and is cleared only by ``resetSession()``. Deliberately
+    /// a *separate* instance from the GUI sheet's `SiteWindowModel.designInterviewModel`: each
+    /// front door owns its own conversation, and sharing would pop the sheet from a chat turn.
+    private var designInterviewModel: DesignInterviewModel?
     private let logger = Logger(subsystem: "io.dwk.anglesite", category: "FoundationModelAssistant")
     /// The current conversational turn's consumer-facing ``TurnRelay``, retained so ``cancel()`` can
     /// wind it down. Cancelling stops *delivery* only — it never cancels the model stream, because
@@ -72,6 +151,13 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         knowledgeIndex: SiteKnowledgeIndex? = nil,
         semanticRanker: SemanticRanker? = nil,
         integrationService: (any IntegrationOperationsService)? = nil,
+        conventionsEngine: ProjectConventionsEngine? = nil,
+        conventionsStore: ProjectConventionsStore? = nil,
+        copyEditAuditor: (any CopyEditAuditing)? = nil,
+        socialMediaPlanner: (any SocialMediaPlanning)? = nil,
+        postRepurposer: (any PostRepurposing)? = nil,
+        themeCatalog: ThemeCatalog? = nil,
+        designInterviewFactory: DesignInterviewModelFactory? = nil,
         maxRetainedTurns: Int = 12
     ) {
         self.tier = tier
@@ -80,6 +166,13 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
         self.integrationService = integrationService
+        self.conventionsEngine = conventionsEngine
+        self.conventionsStore = conventionsStore
+        self.copyEditAuditor = copyEditAuditor
+        self.socialMediaPlanner = socialMediaPlanner
+        self.postRepurposer = postRepurposer
+        self.themeCatalog = themeCatalog
+        self.designInterviewFactory = designInterviewFactory
         // `trimSessionIfNeeded`'s cutoff indexing (`promptIndices.count - maxRetainedTurns`) assumes
         // at least 1: `<= 0` would index at or past the end of `promptIndices` and crash. Clamp
         // rather than crash so a caller passing e.g. `0` ("keep no history") degrades to the
@@ -177,6 +270,17 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         context: AssistantContext,
         resultType: T.Type
     ) async throws -> T {
+        // #541: FoundationModels is weak-linked (Package.swift/project.yml) so an Xcode SDK ahead of
+        // the installed OS beta seed can't abort dyld at launch. `Attachment(imageURL:)` is the one
+        // symbol in this file that skew has actually broken — a weakly-linked symbol the OS doesn't
+        // export binds to NULL, so calling it directly would still crash. Guard with dlsym so a
+        // mismatched pair degrades to `.unavailable` instead.
+        guard Self.imageAttachmentInitializerIsAvailable else {
+            // Expected on a skewed beta host (#541); if this fires on a matched SDK/OS pair the
+            // hardcoded mangled symbol has gone stale and needs re-verifying against the current SDK.
+            logger.error("Attachment(imageURL:orientation:) unresolved at runtime — vision path degraded to .unavailable (#541)")
+            throw AssistantError.unavailable("FoundationModels vision API unavailable on this OS/SDK pair")
+        }
         let oneShotSession = try makeSession(context: context)
         let image = Attachment(imageURL: imageURL)
         return try await oneShotSession.respond(generating: T.self) {
@@ -208,7 +312,12 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         // it and keep history.)
         if activeDrains > 0 { session = nil }
 
-        let session = try conversationSession(for: context)
+        // Proactively trim *before* this turn extends the transcript further — a heavy attached
+        // tool set (#657) can already have pushed the cached session within reach of the on-device
+        // budget even though `maxRetainedTurns` hasn't been crossed, and the existing post-turn,
+        // turn-count-only trim below only protects *future* turns, not the one about to run.
+        let session = sessionFittingBudget(try conversationSession(for: context), context: context)
+        self.session = session
         let providerName = capabilities.providerName
         let toolNames = attachedToolNames
 
@@ -269,6 +378,28 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         activeRelay?.cancel()
         activeRelay = nil
         session = nil
+        // Resetting the chat also starts a fresh design interview (#665) — the interview is
+        // conversation-lifetime state, and "reset" means the whole conversation to the user.
+        designInterviewModel = nil
+    }
+
+    /// Returns the chat session's ``DesignInterviewModel``, lazily building it via the injected
+    /// `designInterviewFactory` on first use, or `nil` when no factory was supplied. Cached so
+    /// every ``DesignInterviewTool`` call within one chat session continues the same interview;
+    /// ``resetSession()`` clears it. See `designInterviewModel`'s doc comment for the lifetime
+    /// rationale (#665).
+    func currentDesignInterviewModel() async -> DesignInterviewModel? {
+        guard let designInterviewFactory else { return nil }
+        if let designInterviewModel { return designInterviewModel }
+        let created = await designInterviewFactory()
+        // Actor reentrancy: a concurrent tool call may have built one while the factory ran —
+        // first writer wins so both calls continue the same interview. The losing build is
+        // discarded outright; that's intentional and cheap while `DesignInterviewModel.init` is
+        // plain property assignment — keep the factory free of heavy work (I/O is fine, it's
+        // rare) or add dedup before the `await` if that ever changes.
+        if let existing = designInterviewModel { return existing }
+        designInterviewModel = created
+        return created
     }
 
     /// Test-only: the clamped ``maxRetainedTurns`` actually stored, so tests can assert `init`
@@ -292,7 +423,13 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// Tool names for the `.started` event (emitted only on the `converse` path) so the chat UI can
     /// reflect what's wired. Never empty — the conversational session always carries
     /// `SpotlightSearchTool`; the edit/search pair is added only when both deps are present;
-    /// `SetupIntegrationTool` is added when an `integrationService` is provided.
+    /// `SetupIntegrationTool` is added when an `integrationService` is provided; `SaveBrandVoiceTool`
+    /// is added when both a `conventionsEngine` and a `conventionsStore` are provided;
+    /// `ReviewCopyTool` is added when a `copyEditAuditor` is provided. `PlanSocialMediaTool` is
+    /// added when a `socialMediaPlanner` is provided. `RepurposePostTool`/`SaveSyndicationTool` are
+    /// added together when a `postRepurposer` is provided. `SetupThemeTool` is added when a
+    /// `themeCatalog` is provided. `DesignInterviewTool` is added when a
+    /// `designInterviewFactory` is provided (#665).
     private var attachedToolNames: [String] {
         var names = [Self.spotlightToolDisplayName]
         if editBridge != nil && contentGraph != nil {
@@ -306,7 +443,36 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         if integrationService != nil {
             names.append(SetupIntegrationTool.toolName)
         }
+        if conventionsEngine != nil, conventionsStore != nil {
+            names.append(SaveBrandVoiceTool.toolName)
+        }
+        if copyEditAuditor != nil {
+            names.append(ReviewCopyTool.toolName)
+        }
+        if socialMediaPlanner != nil {
+            names.append(PlanSocialMediaTool.toolName)
+        }
+        if postRepurposer != nil {
+            names.append(RepurposePostTool.toolName)
+            names.append(SaveSyndicationTool.toolName)
+        }
+        if themeCatalog != nil {
+            names.append(SetupThemeTool.toolName)
+        }
+        if designInterviewFactory != nil {
+            names.append(DesignInterviewTool.toolName)
+        }
         return names
+    }
+
+    /// Test-only: exposes ``attachedToolNames`` so tests can assert optional-tool advertising
+    /// without a live model turn (the production surface is the `.started` event).
+    var attachedToolNamesForTesting: [String] { attachedToolNames }
+
+    /// Test-only: exposes ``conversationTools(for:includeSpotlight:)`` so tests can assert which
+    /// tool types a conversational session would carry without constructing a live session.
+    func conversationToolsForTesting(for context: AssistantContext) -> [any Tool] {
+        conversationTools(for: context, includeSpotlight: false)
     }
 
     /// Returns the cached conversational session, lazily creating it from `context` on first use.
@@ -383,6 +549,42 @@ public actor FoundationModelAssistant: ConversationalAssistant {
         if let integrationService {
             tools.append(SetupIntegrationTool(service: integrationService, siteID: context.siteID))
         }
+        if let conventionsEngine, let conventionsStore {
+            tools.append(SaveBrandVoiceTool(engine: conventionsEngine, store: conventionsStore, siteID: context.siteID))
+        }
+        if let copyEditAuditor {
+            tools.append(ReviewCopyTool(
+                auditor: copyEditAuditor, conventionsStore: conventionsStore,
+                siteID: context.siteID, siteDirectory: context.siteDirectory))
+        }
+        if let socialMediaPlanner {
+            tools.append(PlanSocialMediaTool(
+                planner: socialMediaPlanner, conventionsStore: conventionsStore,
+                siteID: context.siteID, siteDirectory: context.siteDirectory))
+        }
+        if let postRepurposer {
+            tools.append(RepurposePostTool(
+                repurposer: postRepurposer, conventionsStore: conventionsStore,
+                siteID: context.siteID, siteDirectory: context.siteDirectory))
+            tools.append(SaveSyndicationTool(siteDirectory: context.siteDirectory))
+        }
+        if let themeCatalog {
+            tools.append(SetupThemeTool(catalog: themeCatalog, sourceDirectory: context.siteDirectory))
+        }
+        if designInterviewFactory != nil {
+            // The provider routes through the actor's cache so every call in this chat session
+            // continues one interview (#665). `[weak self]` because the actor retains the
+            // session, the session retains its tools, and a strong capture would close a
+            // self-retain cycle. A nil `self` means the tool outlived its actor — unreachable
+            // today (the session's lifetime is bounded by the actor's); fail the call loudly
+            // rather than silently fabricating an uncached interview with no history.
+            tools.append(DesignInterviewTool(provider: { [weak self] in
+                guard let self, let model = await self.currentDesignInterviewModel() else {
+                    throw CancellationError()
+                }
+                return model
+            }))
+        }
         return tools
     }
 
@@ -391,24 +593,83 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// compaction API (#456). Runs after each turn drains so the *next* turn (not the one that just
     /// finished) benefits from the smaller transcript. `current === session` guards against
     /// clobbering a session a newer turn already replaced while this drain was still in flight (see
-    /// `activeDrains` in ``converse(prompt:context:)``).
+    /// `activeDrains` in ``converse(prompt:context:)``). Pure turn-count: the pre-turn
+    /// ``sessionFittingBudget(_:context:)`` check (#657) is what protects the turn about to run
+    /// from a heavy tool set overflowing the budget before this ceiling is even crossed.
     private func trimSessionIfNeeded(current: LanguageModelSession, context: AssistantContext) {
         guard session === current else { return }
-        let transcript = current.transcript
+        guard let trimmed = Self.trimmedTranscript(current.transcript, retaining: maxRetainedTurns) else { return }
+        let tools = conversationTools(for: context, includeSpotlight: true)
+        session = LanguageModelSession(tools: tools, transcript: trimmed)
+    }
+
+    /// Rebuilds `transcript` keeping only its most recent `turns` `.prompt` entries (and everything
+    /// after the cutoff), plus the leading `.instructions` entry if present — so a trimmed session
+    /// still carries the route/page context and tool schemas it was created with. Returns `nil` when
+    /// `transcript` doesn't hold more than `turns` prompts (nothing to trim). Shared by the
+    /// turn-count trim (``trimSessionIfNeeded(current:context:)``) and the token-budget trim
+    /// (``sessionFittingBudget(_:context:)``, #657) so both rebuild a session identically.
+    private static func trimmedTranscript(_ transcript: Transcript, retaining turns: Int) -> Transcript? {
         let promptIndices = transcript.indices.filter {
             if case .prompt = transcript[$0] { return true }
             return false
         }
-        guard promptIndices.count > maxRetainedTurns else { return }
-        let cutoff = promptIndices[promptIndices.count - maxRetainedTurns]
+        guard promptIndices.count > turns else { return nil }
+        let cutoff = promptIndices[promptIndices.count - turns]
         var retained = Array(transcript[cutoff...])
-        // Keep the leading instructions entry so the trimmed session still carries the route/page
-        // context it was created with.
         if let first = transcript.first, case .instructions = first {
             retained.insert(first, at: 0)
         }
-        let tools = conversationTools(for: context, includeSpotlight: true)
-        session = LanguageModelSession(tools: tools, transcript: Transcript(entries: retained))
+        return Transcript(entries: retained)
+    }
+
+    /// Estimated token weight of a transcript's entries, including tool schemas baked into a
+    /// leading `.instructions` entry — `Transcript.Entry` is `CustomStringConvertible`, so its
+    /// `description` captures the actual segments/tool definitions sent to the model, letting this
+    /// reuse ``FoundationModelContextBudget``'s character-based token proxy rather than needing a
+    /// real on-device tokenizer.
+    private static func estimatedTranscriptTokens(_ transcript: Transcript) -> Int {
+        transcript.reduce(into: 0) { total, entry in
+            total += FoundationModelContextBudget.estimatedTokens(for: String(describing: entry))
+        }
+    }
+
+    /// Fraction of ``FoundationModelContextBudget/onDeviceTokenBudget`` the cached session is
+    /// allowed to reach before a turn proactively trims it further — kept below 1.0 so trimming
+    /// leaves headroom for the turn about to run (its own prompt plus the model's response),
+    /// rather than reacting only once the budget is already blown.
+    private static let transcriptBudgetHeadroom = 0.7
+
+    /// Token ceiling a candidate transcript must fit under, derived from
+    /// ``transcriptBudgetHeadroom``.
+    private static var transcriptBudgetThreshold: Int {
+        Int(Double(FoundationModelContextBudget.onDeviceTokenBudget) * transcriptBudgetHeadroom)
+    }
+
+    /// Proactively shrinks `session`'s retained-turn window below ``maxRetainedTurns`` when its
+    /// estimated token weight is already within reach of the on-device budget (#657). A heavy
+    /// attached tool set (11 tools, per the chat front door) can push a cached session's estimated
+    /// weight over budget well before ``maxRetainedTurns`` prompts accumulate — the existing
+    /// post-turn, count-only ``trimSessionIfNeeded(current:context:)`` can't prevent that, since it
+    /// only ever protects the turn *after* the one that overflowed. Shrinks the window one turn at a
+    /// time (rather than jumping straight to ``trimmedTranscript(_:retaining:)``'s single-shot cut)
+    /// so it stops as soon as the transcript fits, instead of over-trimming history that wasn't the
+    /// problem. Returns `session` unchanged once it fits, or once shrunk to a single retained turn —
+    /// the smallest useful window, past which the tool schemas (not history) are what dominate.
+    private func sessionFittingBudget(_ session: LanguageModelSession, context: AssistantContext) -> LanguageModelSession {
+        guard Self.estimatedTranscriptTokens(session.transcript) > Self.transcriptBudgetThreshold else {
+            return session
+        }
+        var window = maxRetainedTurns
+        while window > 1 {
+            window -= 1
+            guard let candidate = Self.trimmedTranscript(session.transcript, retaining: window) else { continue }
+            if window == 1 || Self.estimatedTranscriptTokens(candidate) <= Self.transcriptBudgetThreshold {
+                let tools = conversationTools(for: context, includeSpotlight: true)
+                return LanguageModelSession(tools: tools, transcript: candidate)
+            }
+        }
+        return session
     }
 
     /// Character cap on how much of ``AssistantContext/currentPageContent`` is folded into a

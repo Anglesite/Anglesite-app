@@ -58,6 +58,16 @@ final class DeployModel {
     /// cases that don't surface through `phase`.
     var onScanComplete: ((PreDeployCheck.Outcome) -> Void)?
 
+    /// Fires on every phase change — start and terminal alike — with the site id of the run the
+    /// transition belongs to. The id is delivered per-run (not captured at wiring time) so a
+    /// window replayed onto a different site can't mis-attribute a still-in-flight deploy's
+    /// outcome. `SiteWindowModel` wires this to the completion notifier and Dock progress
+    /// (#526); the model stays UserNotifications- and AppKit-free.
+    @ObservationIgnored var onPhaseTransition: ((_ siteID: String, _ phase: Phase) -> Void)?
+    /// Fires (on the main actor) for each structured milestone of the identified run, after
+    /// `currentMilestone` updates. Drives the determinate Dock-tile progress bar (#526).
+    @ObservationIgnored var onMilestone: ((_ siteID: String, _ progress: OperationProgress) -> Void)?
+
     private let command: DeployCommand
     private let logCenter: LogCenter
     private let keychain: KeychainStore
@@ -75,6 +85,8 @@ final class DeployModel {
     private var pendingDeploy: (
         siteID: String,
         siteDirectory: URL,
+        configDirectory: URL,
+        currentRoutes: [String],
         containerControl: (siteID: String, control: any LocalContainerControl)?
     )?
 
@@ -116,11 +128,13 @@ final class DeployModel {
     func deploy(
         siteID: String,
         siteDirectory: URL,
+        configDirectory: URL,
+        currentRoutes: [String],
         containerControl: (siteID: String, control: any LocalContainerControl)? = nil
     ) {
         guard !isRunning else { return }
         if !hasUsableToken() {
-            pendingDeploy = (siteID, siteDirectory, containerControl)
+            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl)
             tokenVerification = .idle
             tokenPromptPresented = true
             return
@@ -130,7 +144,10 @@ final class DeployModel {
         // sees `isRunning == true` and bails via the guard above instead of racing runDeploy.
         phase = .running(siteID: siteID, since: Date())
         inFlight = Task { @MainActor [weak self] in
-            await self?.runDeploy(siteID: siteID, siteDirectory: siteDirectory, containerControl: containerControl)
+            await self?.runDeploy(
+                siteID: siteID, siteDirectory: siteDirectory,
+                configDirectory: configDirectory, currentRoutes: currentRoutes,
+                containerControl: containerControl)
         }
     }
 
@@ -165,7 +182,10 @@ final class DeployModel {
             pendingDeploy = nil
             tokenPromptPresented = false
             tokenVerification = .idle
-            deploy(siteID: pending.siteID, siteDirectory: pending.siteDirectory, containerControl: pending.containerControl)
+            deploy(
+                siteID: pending.siteID, siteDirectory: pending.siteDirectory,
+                configDirectory: pending.configDirectory, currentRoutes: pending.currentRoutes,
+                containerControl: pending.containerControl)
         case .stay(let message):
             tokenVerification = .failed(message: message)
         case .abort:
@@ -200,12 +220,23 @@ final class DeployModel {
         return false
     }
 
+    /// Set `phase` and notify the transition hook. All of `runDeploy`'s phase changes route
+    /// through here; the synchronous pre-Task `.running` set in `deploy(...)` intentionally does
+    /// not (it exists only to close a re-entrancy race and is immediately superseded by
+    /// `runDeploy`'s own `.running`), so consumers see exactly one start transition per run.
+    private func transition(siteID: String, to newPhase: Phase) {
+        phase = newPhase
+        onPhaseTransition?(siteID, newPhase)
+    }
+
     private func runDeploy(
         siteID: String,
         siteDirectory: URL,
+        configDirectory: URL,
+        currentRoutes: [String],
         containerControl: (siteID: String, control: any LocalContainerControl)? = nil
     ) async {
-        phase = .running(siteID: siteID, since: Date())
+        transition(siteID: siteID, to: .running(siteID: siteID, since: Date()))
         logLines = []
         currentMilestone = nil
         failureSummary = nil
@@ -249,6 +280,8 @@ final class DeployModel {
         let result = await activeCommand.deploy(
             siteID: siteID,
             siteDirectory: siteDirectory,
+            configDirectory: configDirectory,
+            currentRoutes: currentRoutes,
             onPreflight: { [weak self] outcome in
                 // The callback fires inside DeployCommand's actor isolation; hop to
                 // MainActor before touching our @Observable state or the consumer's
@@ -259,7 +292,10 @@ final class DeployModel {
             },
             onProgress: { [weak self] progress in
                 // last-write-wins: each milestone fully replaces the label, so out-of-order delivery across these hops is benign
-                Task { @MainActor in self?.currentMilestone = progress.label }
+                Task { @MainActor in
+                    self?.currentMilestone = progress.label
+                    self?.onMilestone?(siteID, progress)
+                }
             }
         )
 
@@ -269,9 +305,9 @@ final class DeployModel {
         currentMilestone = nil
         switch result {
         case .succeeded(let url, let duration):
-            phase = .succeeded(url: url, duration: duration)
+            transition(siteID: siteID, to: .succeeded(url: url, duration: duration))
         case .failed(let reason, let exit):
-            phase = .failed(reason: reason, exitCode: exit)
+            transition(siteID: siteID, to: .failed(reason: reason, exitCode: exit))
             let capturedLog = logText   // snapshot before the suspension; a later deploy clears logLines
             summarizing = true
             let summary = await DeployFailureSummaryRequest.run(
@@ -286,7 +322,7 @@ final class DeployModel {
             failureSummary = summary
             summarizing = false
         case .blocked(let failures, let warnings):
-            phase = .blocked(failures: failures, warnings: warnings)
+            transition(siteID: siteID, to: .blocked(failures: failures, warnings: warnings))
             // For the blocked outcome the modal sheet carries the actionable info; the
             // streaming-log drawer would just be noise.
             drawerPresented = false

@@ -9,6 +9,7 @@ import AnglesiteCore
 public enum ContentTypeAppEnum: String, AppEnum, Sendable, CaseIterable {
     case note, article, photo, album, bookmark, reply, like
     case announcement, event, review
+    case member
 
     public static var typeDisplayRepresentation: TypeDisplayRepresentation { "Content Type" }
 
@@ -16,6 +17,7 @@ public enum ContentTypeAppEnum: String, AppEnum, Sendable, CaseIterable {
         .note: "Note", .article: "Article", .photo: "Photo", .album: "Album",
         .bookmark: "Bookmark", .reply: "Reply", .like: "Like",
         .announcement: "Announcement", .event: "Event", .review: "Review",
+        .member: "Member",
     ]
 
     /// The Astro content collection backing this type (e.g. `.event` → "events"), via the registry.

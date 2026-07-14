@@ -159,15 +159,16 @@ public actor SiteStore {
     /// if any entry's verdict changed (so the caller can persist the correction).
     private static func revalidate(_ sites: inout [Site], fileManager: FileManager) -> Bool {
         var changed = false
+        let bookmarker = PlatformSecurityScopedBookmark.make()
         for index in sites.indices {
             var scoped: URL?
             if let bookmark = sites[index].bookmarkData,
-               let resolved = try? SecurityScopedBookmark.resolve(bookmark),
-               resolved.url.startAccessingSecurityScopedResource() {
+               let resolved = try? bookmarker.resolve(bookmark),
+               bookmarker.startAccessing(resolved.url) {
                 scoped = resolved.url
             }
             let validation = AnglesitePackage(url: sites[index].packageURL).sourceValidation(fileManager: fileManager)
-            scoped?.stopAccessingSecurityScopedResource()
+            if let scoped { bookmarker.stopAccessing(scoped) }
             if sites[index].isValid != validation.isValid || sites[index].missingSentinels != validation.missing {
                 sites[index].isValid = validation.isValid
                 sites[index].missingSentinels = validation.missing

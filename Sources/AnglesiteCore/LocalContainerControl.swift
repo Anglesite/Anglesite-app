@@ -18,6 +18,21 @@ public enum LocalContainerError: Error, Equatable {
     case cloneFailed(String)            // git clone of Source/ into the guest failed
 }
 
+/// Hydration precondition: a `LocalContainerControl.start()` implementation hard-depends on
+/// `sourceRepo` being a real git repo (it clones it into the guest). Kept as a plain, always-CI-
+/// tested `AnglesiteCore` check rather than living inline in `ContainerizationControl` (whose test
+/// target is excluded from CI's `swift test` unless `ANGLESITE_CONTAINER_TESTS=1`) — see #548,
+/// where a `Source/` without `.git` (a failed scaffold git-init, or a pre-existing site) died
+/// inside the guest with a raw `git clone ... exited 128` and no indication why.
+public enum SourceRepoPrecondition {
+    public static func requireGitRepo(at sourceRepo: URL, fileManager: FileManager = .default) throws {
+        guard fileManager.fileExists(atPath: sourceRepo.appendingPathComponent(".git").path) else {
+            throw LocalContainerError.cloneFailed(
+                "this site has no git repository — recreate it, or run `git init` in its Source folder")
+        }
+    }
+}
+
 /// The captured output of a guest `exec` call. No `Containerization`/`Virtualization` types cross
 /// this boundary — only `String` and `Int32`.
 public struct ContainerExecResult: Sendable, Equatable {

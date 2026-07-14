@@ -7,12 +7,16 @@ struct SiteGraphExplorerView: View {
 
     var body: some View {
         HSplitView {
+            SiteGraphTree(model: model)
+                .frame(minWidth: 220, idealWidth: 260, maxWidth: 340)
+
             VStack(spacing: 0) {
                 SiteGraphToolbar(model: model)
                 Divider()
                 SiteGraphCanvas(
                     nodes: model.filteredNodes,
                     edges: model.filteredEdges,
+                    referenceCounts: model.visibleReferenceCounts,
                     selectedNodeID: model.selectedNodeID,
                     onSelect: { model.selectedNodeID = $0 }
                 )
@@ -37,6 +41,9 @@ private struct SiteGraphToolbar: View {
             HStack(spacing: 8) {
                 Label("Site Graph", systemImage: "point.3.connected.trianglepath.dotted")
                     .font(.headline)
+                Text(model.visibleSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 TextField("Search graph", text: $model.searchText)
                     .textFieldStyle(.roundedBorder)
@@ -63,9 +70,91 @@ private struct SiteGraphToolbar: View {
     }
 }
 
+private struct SiteGraphTree: View {
+    @Bindable var model: SiteGraphExplorerModel
+
+    var body: some View {
+        let referenceCounts = model.visibleReferenceCounts
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Label("Explorer", systemImage: "list.bullet.indent")
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            Divider()
+            List(selection: $model.selectedNodeID) {
+                ForEach(model.groupedFilteredNodes, id: \.kind) { group in
+                    Section {
+                        ForEach(group.nodes) { node in
+                            SiteGraphTreeRow(
+                                node: node,
+                                referenceCount: referenceCounts[node.id, default: 0]
+                            )
+                            .tag(Optional(node.id))
+                        }
+                    } header: {
+                        Label(group.kind.title, systemImage: group.kind.systemImage)
+                    }
+                }
+                if !model.unusedAssets.isEmpty {
+                    Section {
+                        ForEach(model.unusedAssets) { node in
+                            SiteGraphTreeRow(node: node, referenceCount: 0, badge: "unused")
+                                .tag(Optional(node.id))
+                        }
+                    } header: {
+                        Label("Unused Assets", systemImage: "exclamationmark.triangle")
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+        }
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+}
+
+private struct SiteGraphTreeRow: View {
+    let node: SiteGraphNode
+    var referenceCount: Int
+    var badge: String?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: node.kind.systemImage)
+                .foregroundStyle(node.kind.tint)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(node.title)
+                    .lineLimit(1)
+                if let detail = node.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 4)
+            if let badge {
+                Text(badge)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else if referenceCount > 0 {
+                Text("\(referenceCount)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .help("\(referenceCount) incoming references")
+            }
+        }
+        .help(node.filePath ?? node.detail ?? node.title)
+    }
+}
+
 private struct SiteGraphCanvas: View {
     let nodes: [SiteGraphNode]
     let edges: [SiteGraphEdge]
+    let referenceCounts: [String: Int]
     let selectedNodeID: String?
     let onSelect: (String) -> Void
 
@@ -95,6 +184,7 @@ private struct SiteGraphCanvas: View {
                     if let point = positions[node.id] {
                         SiteGraphNodeButton(
                             node: node,
+                            referenceCount: referenceCounts[node.id, default: 0],
                             selected: node.id == selectedNodeID,
                             related: isRelated(node.id, selectedNodeID: selectedNodeID)
                         ) {
@@ -108,6 +198,19 @@ private struct SiteGraphCanvas: View {
             .overlay {
                 if nodes.isEmpty {
                     ContentUnavailableView("No matching graph nodes", systemImage: "point.3.connected.trianglepath.dotted")
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if SiteGraphMiniMapGeometry.shouldShow(nodeCount: nodes.count) {
+                    SiteGraphMiniMap(
+                        nodes: nodes,
+                        edges: edges,
+                        positions: positions,
+                        canvasSize: proxy.size,
+                        selectedNodeID: selectedNodeID,
+                        onSelect: onSelect
+                    )
+                    .padding(12)
                 }
             }
         }
@@ -137,8 +240,70 @@ private struct SiteGraphCanvas: View {
     }
 }
 
+/// Scaled-down overview of the whole visible graph (#613), overlaid bottom-trailing on the main
+/// canvas once the node count crosses `SiteGraphMiniMapGeometry.nodeCountThreshold`. Nodes render
+/// as kind-tinted dots and edges as hairlines at the same relative positions as the main canvas;
+/// clicking selects the nearest node there. No viewport rectangle yet — the main canvas has no
+/// pan/zoom to reflect (see #613's "if/when" note).
+///
+/// Like any corner mini-map, it occludes the canvas region beneath it (where `SiteGraphLayout`
+/// clamps overflow rows). Accepted tradeoff: a click there lands on the mini-map, whose scaled
+/// coordinates put the tap next to the *same* node's dot, so click-to-jump still selects the
+/// intended node; the bounded hit radius makes genuinely empty space a no-op.
+private struct SiteGraphMiniMap: View {
+    let nodes: [SiteGraphNode]
+    let edges: [SiteGraphEdge]
+    let positions: [String: CGPoint]
+    let canvasSize: CGSize
+    let selectedNodeID: String?
+    let onSelect: (String) -> Void
+
+    private static let size = CGSize(width: 180, height: 120)
+
+    var body: some View {
+        let miniPositions = positions.mapValues {
+            SiteGraphMiniMapGeometry.scaledPoint($0, from: canvasSize, to: Self.size)
+        }
+        Canvas { context, _ in
+            for edge in edges {
+                guard let start = miniPositions[edge.sourceID], let end = miniPositions[edge.targetID] else { continue }
+                var path = Path()
+                path.move(to: start)
+                path.addLine(to: end)
+                context.stroke(path, with: .color(.secondary.opacity(0.25)), lineWidth: 0.5)
+            }
+            for node in nodes {
+                guard let point = miniPositions[node.id] else { continue }
+                let selected = node.id == selectedNodeID
+                let radius: CGFloat = selected ? 3.5 : 2
+                context.fill(
+                    Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)),
+                    with: .color(selected ? Color.accentColor : node.kind.tint.opacity(0.9))
+                )
+            }
+        }
+        .frame(width: Self.size.width, height: Self.size.height)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+        }
+        .onTapGesture { location in
+            // Bounded hit radius: a click on empty mini-map space is a no-op, not a jump to
+            // whatever node happens to be least far away.
+            if let id = SiteGraphMiniMapGeometry.nearestNodeID(to: location, positions: miniPositions, maxDistance: 16) {
+                onSelect(id)
+            }
+        }
+        .accessibilityLabel("Site graph overview")
+        .accessibilityHint("Click to select the nearest node")
+        .help("Overview of the whole graph — click to jump to a node")
+    }
+}
+
 private struct SiteGraphNodeButton: View {
     let node: SiteGraphNode
+    let referenceCount: Int
     let selected: Bool
     let related: Bool
     let action: () -> Void
@@ -153,8 +318,8 @@ private struct SiteGraphNodeButton: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .frame(width: 112)
-                if node.referencedByCount > 0 {
-                    Text("\(node.referencedByCount) refs")
+                if referenceCount > 0 {
+                    Text("\(referenceCount) refs")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -203,6 +368,14 @@ private struct SiteGraphInspector: View {
                             }
                             .buttonStyle(.borderedProminent)
                         }
+                        if let impact = model.selectedImpact {
+                            Divider()
+                            SiteGraphImpactSection(impact: impact, model: model)
+                        }
+                        if model.canExplain {
+                            Divider()
+                            SiteGraphExplainSection(model: model)
+                        }
                         Divider()
                         SiteGraphEdgeList(
                             title: "Depends On",
@@ -225,6 +398,184 @@ private struct SiteGraphInspector: View {
             }
         }
         .background(Color(NSColor.controlBackgroundColor))
+    }
+}
+
+/// AI explanation of the selected node (#614): a plain-language synthesis of the structured
+/// Impact Analysis above it, generated on-device by Apple Intelligence (never a network call —
+/// see the LLM policy under #459). Runtime unavailability renders as guidance, not an error.
+private struct SiteGraphExplainSection: View {
+    @Bindable var model: SiteGraphExplorerModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Explain", systemImage: "sparkles")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+            switch model.explainState {
+            case .idle:
+                Button("Explain This Node", systemImage: "sparkles") {
+                    model.explainSelectedNode()
+                }
+                .buttonStyle(.bordered)
+                Text("Uses on-device Apple Intelligence. Nothing leaves your Mac.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .generating(let text):
+                if text.isEmpty {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Thinking…")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    explanationText(text)
+                }
+            case .complete(let text):
+                explanationText(text)
+                retryButton("Regenerate")
+            case .unavailable(let message):
+                Label(message, systemImage: "info.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                // The message names a remedy (enable Apple Intelligence); once the user has
+                // applied it they must be able to retry without changing the selection.
+                retryButton("Try Again")
+            case .failed(let message):
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                retryButton("Try Again")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("AI explanation")
+    }
+
+    private func explanationText(_ text: String) -> some View {
+        Text(text)
+            .font(.callout)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func retryButton(_ title: LocalizedStringKey) -> some View {
+        Button(title, systemImage: "arrow.clockwise") {
+            model.explainSelectedNode()
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
+    }
+}
+
+/// Project Impact Analysis (#309): shows what editing the selected node would affect — pages
+/// (transitively, through any depth of layouts/components), plus dependent layouts, components,
+/// styles, containing collections, and directly referenced assets. Every row navigates to that
+/// node so the blast radius can be explored in place.
+private struct SiteGraphImpactSection: View {
+    let impact: ImpactAnalysis.Report
+    @Bindable var model: SiteGraphExplorerModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Impact", systemImage: "dot.radiowaves.left.and.right")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+            Text(summary)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            SiteGraphImpactNodeList(
+                title: "Affects \(count(impact.affectedPages.count, "Page"))",
+                nodes: impact.affectedPages, model: model)
+            SiteGraphImpactNodeList(
+                title: "Affects \(count(impact.affectedEntries.count, "Entry", plural: "Entries"))",
+                nodes: impact.affectedEntries, model: model)
+            SiteGraphImpactNodeList(
+                title: "Included in \(count(impact.affectedCollections.count, "Collection"))",
+                nodes: impact.affectedCollections, model: model)
+            SiteGraphImpactNodeList(
+                title: "Used by \(count(impact.dependentLayouts.count, "Layout"))",
+                nodes: impact.dependentLayouts, model: model)
+            SiteGraphImpactNodeList(
+                title: "Used by \(count(impact.dependentComponents.count, "Component"))",
+                nodes: impact.dependentComponents, model: model)
+            SiteGraphImpactNodeList(
+                title: "Used by \(count(impact.dependentStyles.count, "Style"))",
+                nodes: impact.dependentStyles, model: model)
+            SiteGraphImpactNodeList(
+                title: "References \(count(impact.referencedAssets.count, "Asset"))",
+                nodes: impact.referencedAssets, model: model)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Impact analysis")
+    }
+
+    /// "This change would affect 18 pages." — the issue's headline number, pages + entries.
+    /// The zero-dependents copy acknowledges a non-empty collection membership shown right
+    /// below it (membership isn't a dependency, but "nothing else depends on it" directly above
+    /// an "Included in 1 Collection" list reads as self-contradictory).
+    private var summary: String {
+        let routes = impact.affectedPages.count + impact.affectedEntries.count
+        if routes > 0 {
+            return "Editing this would affect \(count(routes, "page"))."
+        }
+        if impact.hasDependents {
+            return "Editing this would affect other site files, but no rendered pages."
+        }
+        if !impact.affectedCollections.isEmpty {
+            return "Nothing else on this site depends on it — editing it affects only this entry within its collection."
+        }
+        return "Nothing else on this site depends on it — editing it affects only this file."
+    }
+
+    private func count(_ n: Int, _ singular: String, plural: String? = nil) -> String {
+        "\(n) \(n == 1 ? singular : (plural ?? singular + "s"))"
+    }
+}
+
+/// A titled, clickable node list for one impact group. Hidden entirely when the group is empty —
+/// unlike `SiteGraphEdgeList`, an empty impact group is noise, not information.
+private struct SiteGraphImpactNodeList: View {
+    let title: String
+    let nodes: [SiteGraphNode]
+    @Bindable var model: SiteGraphExplorerModel
+
+    var body: some View {
+        if !nodes.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                ForEach(nodes) { node in
+                    Button {
+                        // Not a plain `selectedNodeID = …`: the impact list is computed over the
+                        // full snapshot, so the node may be hidden by the toolbar kind filter or
+                        // search — revealNode un-hides it so the canvas and edge lists can show
+                        // the new selection (PR #545 review).
+                        model.revealNode(node)
+                    } label: {
+                        HStack {
+                            Label(node.title, systemImage: node.kind.systemImage)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                            if let route = node.route {
+                                Text(route)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help(node.detail ?? node.title)
+                }
+            }
+        }
     }
 }
 

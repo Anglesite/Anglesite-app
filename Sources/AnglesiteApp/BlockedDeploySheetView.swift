@@ -142,6 +142,7 @@ private struct WarningCard: View {
         case .maintenanceOverdue: return "Maintenance overdue"
         case .seoCritical: return "SEO — critical"
         case .seoWarning: return "SEO — warning"
+        case .orphanedRoute: return "Orphaned route"
         }
     }
 }

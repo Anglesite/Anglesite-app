@@ -28,6 +28,10 @@ See [`docs/build-plan.md`](docs/build-plan.md) for the full phased status.
 
 ## Requirements
 
+These are the requirements for building the macOS app — the primary development flow. For working on the portable core from a Linux machine, see [Developing on Linux](#developing-on-linux).
+
+On either platform, `scripts/setup-dev-env.sh` checks the prerequisites below, fixes what it safely can (generating the Xcode project, enabling git hooks, the Linux libxml2 shim), and prints instructions for the rest.
+
 - macOS 27+
 - Xcode 27+ (Swift 6.4; required for the SwiftUI 27 `@State` macro semantics audited in [`docs/specs/2026-06-10-xcode27-state-macro-audit-notes.md`](docs/specs/2026-06-10-xcode27-state-macro-audit-notes.md))
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`) — the `.xcodeproj` is generated from [`project.yml`](project.yml)
@@ -39,6 +43,10 @@ See [`docs/build-plan.md`](docs/build-plan.md) for the full phased status.
 # Clone alongside the plugin repo
 git clone https://github.com/Anglesite/Anglesite-app.git
 cd Anglesite-app
+
+# One-shot environment check/bootstrap (generates the Xcode project, enables the
+# git hooks below, and reports anything missing) — or follow the steps manually:
+scripts/setup-dev-env.sh
 
 # Generate the Xcode project
 xcodegen generate
@@ -69,6 +77,30 @@ There is one app target, ad-hoc-signed in Debug so it builds without an Apple ac
 > **Don't `xed .`** — this repo contains both a `Package.swift` and an `Anglesite.xcodeproj`. `xed .` opens the package, whose scheme picker only shows `Anglesite-Package` (libraries only, no runnable target). Open the `.xcodeproj` explicitly; the scheme picker should then show `Anglesite`, `AnglesiteCore`, `AnglesiteBridge`, `AnglesiteSiteModel`, `AnglesiteIntents`, and `AnglesiteContainer`, and ⌘R should run the app.
 
 The Debug configuration uses ad-hoc signing so contributors can build and run locally without any Apple Developer enrollment. App Store Release builds require a paid Apple Developer account and a provisioning profile with the app's restricted entitlements; see [`docs/release.md`](docs/release.md).
+
+## Developing on Linux
+
+The app shell is macOS-only today, but Anglesite is going multi-platform — Linux first — per the [cross-platform port design](docs/superpowers/specs/2026-07-08-cross-platform-swift-port-design.md). On Linux, `Package.swift` exposes only the **portable SwiftPM targets** (currently `AnglesiteSiteModel`; the set grows as the "purity phase" lands seam by seam), and CI runs `swift build && swift test` on Ubuntu to enforce that boundary.
+
+```sh
+git clone https://github.com/Anglesite/Anglesite-app.git
+cd Anglesite-app
+
+# Checks for a Swift 6.3+ toolchain (installable via swiftly: https://www.swift.org/install/linux/),
+# creates the libxml2 soname shim if your distro needs it (see below), enables git hooks,
+# and runs a smoke build of the portable targets.
+scripts/setup-dev-env.sh
+
+swift build   # portable targets only
+swift test
+```
+
+Notes:
+
+- **Toolchain:** Swift 6.3+ (via [swiftly](https://www.swift.org/install/linux/)). No Xcode, XcodeGen, or Node needed on Linux.
+- **libxml2 on newer distros:** distros shipping libxml2 ≥ 2.15 (e.g. Ubuntu 26.04) provide `libxml2.so.16`, but the swift.org toolchain links `libxml2.so.2`. The setup script creates a user-level symlink shim and prints the `LD_LIBRARY_PATH` export to activate it; loader warnings about "no version information" are expected and harmless. (CI is unaffected — the `swift:*` container images ship a matching libxml2.)
+- **Working on the port itself:** `ANGLESITE_PORT_WIP=1 swift build --target AnglesiteCore` opts the not-yet-portable core into the manifest so in-flight seam work can be compile-checked locally. Apple-only targets (`AnglesiteBridge`, `AnglesiteIntents`, `AnglesiteContainer`, …) never build off-Darwin.
+- **Containers:** `podman` is not needed for the purity phase; it becomes relevant with the Linux MVP's `PodmanSiteRuntime`.
 
 ## Relationship to the plugin repo
 

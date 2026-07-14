@@ -31,6 +31,30 @@ public struct EditMessage: Sendable, Equatable {
         /// interpretation. Used by Foundation Models' chat `ApplyEditTool` (#251). Siri AI's
         /// `EditContentIntent` (B.5 / #149) now emits concrete ops instead.
         public static let applyInstruction = "apply-instruction"
+        /// `"set-style-property"` — Component Editor: set a CSS declaration's value (or add it if
+        /// absent) within a `<style>` rule. Carries a `component` payload, not `selector`.
+        public static let setStyleProperty = "set-style-property"
+        /// `"remove-style-property"` — Component Editor: remove a CSS declaration from a rule.
+        /// Carries a `component` payload, not `selector`.
+        public static let removeStyleProperty = "remove-style-property"
+        /// `"add-style-rule"` — Component Editor: add a new CSS rule to a `<style>` block. Carries
+        /// a `component` payload, not `selector`.
+        public static let addStyleRule = "add-style-rule"
+        /// `"set-rule-selector"` — Component Editor: rewrite a CSS rule's selector. Carries a
+        /// `component` payload, not `selector`.
+        public static let setRuleSelector = "set-rule-selector"
+        /// `"insert-node"` — Component Editor: insert a new element/component/slot node.
+        /// Carries a `component` payload.
+        public static let insertNode = "insert-node"
+        /// `"move-node"` — Component Editor: reorder/reparent an existing node. Carries a
+        /// `component` payload.
+        public static let moveNode = "move-node"
+        /// `"remove-node"` — Component Editor: delete a node (and prune now-unused imports).
+        /// Carries a `component` payload.
+        public static let removeNode = "remove-node"
+        /// `"set-attr"` — Component Editor: set or remove (nil value) an attribute/prop at
+        /// the use-site. Carries a `component` payload.
+        public static let setAttr = "set-attr"
     }
 
     /// Overlay-generated correlation ID so the JS side can match replies to the original message.
@@ -39,10 +63,15 @@ public struct EditMessage: Sendable, Equatable {
     /// Page path (e.g. `/about/`).
     public let path: String
     /// Structured element metadata (`ElementInfo`) — the plugin's `server/selector.mjs` resolves
-    /// this to a CSS selector server-side. The bridge is a relay; #18 records the decision.
-    public let selector: JSONValue
+    /// this to a CSS selector server-side. The bridge is a relay; #18 records the decision. `nil`
+    /// for Component Editor ops, which address a component/rule via `component` instead.
+    public let selector: JSONValue?
     /// Edit operation — `"replace-text"`, `"replace-attr"`, etc. Phase 5 finalizes the taxonomy.
     public let op: String
+    /// Component Editor payload — `{ path, baseVersion, ruleSpan, ... }`, op-specific. Carried by
+    /// the CSS write ops (`set-style-property`, `remove-style-property`, `add-style-rule`,
+    /// `set-rule-selector`) instead of `selector`.
+    public let component: JSONValue?
     /// Operation payload — varies by `op`. Optional because some ops (e.g. `"delete"`) won't carry one.
     public let value: JSONValue?
     /// When `true`, the plugin performs a dry run and returns an `anglesite:edit-preview` body
@@ -50,12 +79,22 @@ public struct EditMessage: Sendable, Equatable {
     /// before committing. Defaults `false` so all existing call sites are unaffected.
     public let dryRun: Bool
 
-    public init(id: String, type: MessageType, path: String, selector: JSONValue, op: String, value: JSONValue?, dryRun: Bool = false) {
+    public init(
+        id: String,
+        type: MessageType = .applyEdit,
+        path: String,
+        selector: JSONValue? = nil,
+        op: String,
+        component: JSONValue? = nil,
+        value: JSONValue?,
+        dryRun: Bool = false
+    ) {
         self.id = id
         self.type = type
         self.path = path
         self.selector = selector
         self.op = op
+        self.component = component
         self.value = value
         self.dryRun = dryRun
     }
@@ -69,9 +108,10 @@ public struct EditMessage: Sendable, Equatable {
             "id": .string(id),
             "type": .string(type.rawValue),
             "path": .string(path),
-            "selector": selector,
             "op": .string(op),
         ]
+        if let selector { obj["selector"] = selector }
+        if let component { obj["component"] = component }
         if let value { obj["value"] = value }
         if dryRun { obj["dry_run"] = .bool(true) }
         return .object(obj)
@@ -116,13 +156,30 @@ public struct EditMessage: Sendable, Equatable {
         case .failure(let e): return .failure(e)
         }
 
-        // `selector` is structured (`ElementInfo` shape) — require an object so it's
-        // routable to the plugin's `selector.mjs.buildSelector(info)` unchanged. See #18.
-        guard let rawSelector = dict["selector"] else { return .failure(.missingField("selector")) }
-        guard let jv = JSONValue.from(rawSelector), case .object = jv else {
-            return .failure(.wrongType(field: "selector", expected: "object"))
+        // `selector` is structured (`ElementInfo` shape) — require an object when present so it's
+        // routable to the plugin's `selector.mjs.buildSelector(info)` unchanged. See #18. Absent
+        // for Component Editor ops, which address a component/rule via `component` instead.
+        let selector: JSONValue?
+        if let rawSelector = dict["selector"] {
+            guard let jv = JSONValue.from(rawSelector), case .object = jv else {
+                return .failure(.wrongType(field: "selector", expected: "object"))
+            }
+            selector = jv
+        } else {
+            selector = nil
         }
-        let selector = jv
+
+        // `component` is structured (`{ path, baseVersion, ruleSpan, ... }`) — require an object
+        // when present, mirroring `selector`.
+        let component: JSONValue?
+        if let rawComponent = dict["component"] {
+            guard let jv = JSONValue.from(rawComponent), case .object = jv else {
+                return .failure(.wrongType(field: "component", expected: "object"))
+            }
+            component = jv
+        } else {
+            component = nil
+        }
 
         guard let type = MessageType(rawValue: typeRaw) else {
             return .failure(.unknownType(typeRaw))
@@ -139,6 +196,6 @@ public struct EditMessage: Sendable, Equatable {
             value = nil
         }
 
-        return .success(EditMessage(id: id, type: type, path: path, selector: selector, op: op, value: value))
+        return .success(EditMessage(id: id, type: type, path: path, selector: selector, op: op, component: component, value: value))
     }
 }

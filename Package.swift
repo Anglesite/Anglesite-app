@@ -13,6 +13,32 @@ let strictConcurrency: [SwiftSetting] = [
     .enableUpcomingFeature("StrictConcurrency")
 ]
 
+// #541: an Xcode 27 beta SDK can add symbols (e.g. FoundationModels' `Attachment(imageURL:orientation:)`)
+// that the installed macOS 27 beta seed doesn't yet export. Without this, dyld aborts at process
+// launch for *any* binary that transitively links AnglesiteCore — including every `swift test`
+// bundle — since the missing symbol is resolved eagerly at load time. Weak-linking the framework
+// defers that resolution: the binary launches, and only the (narrow, vision-only) code path that
+// actually calls the missing symbol would fail if invoked on a mismatched OS/SDK pair.
+// `.when(platforms: [.macOS])`: `-weak_framework` is a Darwin ld option — ld.gold on the Linux
+// CI leg rejects it, and AnglesiteBridgeCoreTests (which carries this setting) is in the
+// off-Darwin portable target set, so the flag must never reach a non-Darwin link.
+let weakLinkFoundationModels: [LinkerSetting] = [
+    .unsafeFlags(
+        ["-Xlinker", "-weak_framework", "-Xlinker", "FoundationModels"],
+        .when(platforms: [.macOS])
+    )
+]
+
+// AnglesiteCore and AnglesiteAppCore (ChatView.swift) `import` FoundationModels. Swift embeds a *hard*
+// `-framework FoundationModels` autolink hint in its compiled object code, which wins over the
+// app target's explicit `-weak_framework FoundationModels` (project.yml) when the final app
+// binary is linked — so the app still hard-links FoundationModels despite that flag. Disabling
+// the autolink hint at the source makes the app target's weak-link flag the only (and effective)
+// link request. See #541.
+let disableFoundationModelsAutolink: [SwiftSetting] = [
+    .unsafeFlags(["-Xfrontend", "-disable-autolink-framework", "-Xfrontend", "FoundationModels"])
+]
+
 // AnglesiteContainer imports apple/containerization — a Swift 6.2, macOS-15+ package that pulls in
 // the native NIO/gRPC/protobuf graph and only links on Apple-Silicon machines with the
 // virtualization entitlement. `swift build` / `swift test` compile ALL of a package's products, so
@@ -22,7 +48,14 @@ let strictConcurrency: [SwiftSetting] = [
 // inject env, gets the product to link — and dropped only when ANGLESITE_SKIP_CONTAINER=1, which
 // CI sets at the workflow level. The virtualization entitlement, not this flag, gates the runtime
 // at launch (see the #69 design §3 / §2.6).
+#if canImport(Darwin)
 let includeContainer = ProcessInfo.processInfo.environment["ANGLESITE_SKIP_CONTAINER"] != "1"
+#else
+// Apple Containerization is the macOS substrate; off-Darwin platforms get their own
+// SiteRuntime implementations (cross-platform port design §7), so the container target —
+// and its apple/containerization dependency — never enter the manifest there.
+let includeContainer = false
+#endif
 
 // AnglesiteIntentsTests is conditionally included only on Swift 6.4+ (Xcode 27).
 // The test binary loads `AnglesiteIntents` whose AppIntent metadata references
@@ -30,6 +63,15 @@ let includeContainer = ProcessInfo.processInfo.environment["ANGLESITE_SKIP_CONTA
 // runtime of GH's `macos-15` runner (which currently caps at Xcode 26.3).
 // Locally on Xcode 27 the tests build + run normally; on the older toolchain
 // we drop them so `swift test` still passes. Tracking removal in #128.
+// SwiftGit2 (Anglesite's patched fork — see #640) is Darwin-only: it has no Linux platform
+// entry, and the App Sandbox problem it solves doesn't exist off-macOS in the first place.
+// GitInitRunner/NativeContentOperations keep the plain subprocess-git path as their
+// #if !canImport(Darwin) branch, which is correct there, not just a fallback.
+var anglesiteCoreDependencies: [Target.Dependency] = ["AnglesiteSiteModel"]
+#if canImport(Darwin)
+anglesiteCoreDependencies.append(.product(name: "SwiftGit2", package: "SwiftGit2"))
+#endif
+
 var packageTargets: [Target] = [
     .target(
         name: "AnglesiteSiteModel",
@@ -37,14 +79,30 @@ var packageTargets: [Target] = [
         swiftSettings: strictConcurrency
     ),
     .target(
-        name: "AnglesiteCore",
+        name: "AnglesiteQuickLookSupport",
         dependencies: ["AnglesiteSiteModel"],
+        path: "Sources/AnglesiteQuickLookSupport",
+        swiftSettings: strictConcurrency
+    ),
+    .target(
+        name: "AnglesiteCore",
+        dependencies: anglesiteCoreDependencies,
         path: "Sources/AnglesiteCore",
+        swiftSettings: strictConcurrency + disableFoundationModelsAutolink
+    ),
+    // Webview-agnostic message schema + overlay-bundle lookup (cross-platform port design §6
+    // "AnglesiteBridgeCore split") — no WebKit import, so it's portable off-Darwin. Each
+    // platform's webview adapter (AnglesiteBridge/WKWebView today; WebKitGTK/WebView2 later)
+    // wraps this in its own script-injection/message-handler API.
+    .target(
+        name: "AnglesiteBridgeCore",
+        dependencies: ["AnglesiteCore"],
+        path: "Sources/AnglesiteBridgeCore",
         swiftSettings: strictConcurrency
     ),
     .target(
         name: "AnglesiteBridge",
-        dependencies: ["AnglesiteCore"],
+        dependencies: ["AnglesiteCore", "AnglesiteBridgeCore"],
         path: "Sources/AnglesiteBridge",
         swiftSettings: strictConcurrency
     ),
@@ -59,6 +117,13 @@ var packageTargets: [Target] = [
         dependencies: ["AnglesiteCore"],
         path: "Sources/AnglesiteIntents",
         swiftSettings: strictConcurrency
+    ),
+    .executableTarget(
+        name: "AnglesiteLANHost",
+        dependencies: ["AnglesiteCore"],
+        path: "Sources/AnglesiteLANHost",
+        swiftSettings: strictConcurrency,
+        linkerSettings: weakLinkFoundationModels
     ),
     // Test-only support shared across the test targets (e.g. the e2e prerequisite probes used by
     // both AnglesiteCoreTests and AnglesiteBridgeTests). Not exposed as a `.library` product, so
@@ -76,16 +141,33 @@ var packageTargets: [Target] = [
         swiftSettings: strictConcurrency
     ),
     .testTarget(
+        name: "AnglesiteQuickLookSupportTests",
+        dependencies: ["AnglesiteQuickLookSupport"],
+        path: "Tests/AnglesiteQuickLookSupportTests",
+        swiftSettings: strictConcurrency
+    ),
+    .testTarget(
         name: "AnglesiteCoreTests",
         dependencies: ["AnglesiteCore", "AnglesiteSiteModel", "AnglesiteTestSupport"],
         path: "Tests/AnglesiteCoreTests",
-        swiftSettings: strictConcurrency
+        swiftSettings: strictConcurrency,
+        linkerSettings: weakLinkFoundationModels
+    ),
+    .testTarget(
+        name: "AnglesiteBridgeCoreTests",
+        dependencies: ["AnglesiteBridgeCore", "AnglesiteCore"],
+        path: "Tests/AnglesiteBridgeCoreTests",
+        swiftSettings: strictConcurrency,
+        // Depends on AnglesiteCore, so the bundle needs the same #541 weak link as its siblings —
+        // without it dyld can't load the bundle on an SDK/OS mangling-skewed Xcode 27 beta host.
+        linkerSettings: weakLinkFoundationModels
     ),
     .testTarget(
         name: "AnglesiteBridgeTests",
         dependencies: ["AnglesiteBridge", "AnglesiteTestSupport"],
         path: "Tests/AnglesiteBridgeTests",
-        swiftSettings: strictConcurrency
+        swiftSettings: strictConcurrency,
+        linkerSettings: weakLinkFoundationModels
     )
 ]
 
@@ -128,18 +210,44 @@ if includeContainer {
                 .product(name: "Containerization", package: "containerization")
             ],
             path: "Sources/AnglesiteContainerProbe",
-            swiftSettings: strictConcurrency
+            swiftSettings: strictConcurrency,
+            linkerSettings: weakLinkFoundationModels
         )
     )
 }
 
-#if compiler(>=6.4)
+// canImport(Darwin) joins the compiler gate: these targets depend on AnglesiteBridge /
+// AnglesiteIntents (WKWebView / AppIntents), so a future Swift 6.4 Linux toolchain must
+// not pull them in.
+#if compiler(>=6.4) && canImport(Darwin)
+packageTargets.append(
+    .target(
+        name: "AnglesiteAppCore",
+        dependencies: ["AnglesiteCore", "AnglesiteBridge", "AnglesiteIntents"],
+        path: "Sources/AnglesiteApp",
+        exclude: ["AnglesiteApp.swift", "LiveSiteRuntimeFactory.swift"],
+        // #541: ChatView.swift imports FoundationModels, so without this its object code embeds a
+        // hard `-framework FoundationModels` autolink hint that overrides the test bundle's
+        // weak-link flag below (same mechanism as AnglesiteCore's setting).
+        swiftSettings: strictConcurrency + [.define("ANGLESITE_MAS")] + disableFoundationModelsAutolink
+    )
+)
+packageTargets.append(
+    .testTarget(
+        name: "AnglesiteAppTests",
+        dependencies: ["AnglesiteAppCore", "AnglesiteTestSupport"],
+        path: "Tests/AnglesiteAppTests",
+        swiftSettings: strictConcurrency,
+        linkerSettings: weakLinkFoundationModels
+    )
+)
 packageTargets.append(
     .testTarget(
         name: "AnglesiteIntentsTests",
         dependencies: ["AnglesiteIntents", "AnglesiteCore"],
         path: "Tests/AnglesiteIntentsTests",
-        swiftSettings: strictConcurrency
+        swiftSettings: strictConcurrency,
+        linkerSettings: weakLinkFoundationModels
     )
 )
 #endif
@@ -157,20 +265,34 @@ if includeContainer && ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_
             name: "AnglesiteContainerLocalTests",
             dependencies: ["AnglesiteContainer", "AnglesiteCore"],
             path: "Tests/AnglesiteContainerLocalTests",
-            swiftSettings: strictConcurrency
+            swiftSettings: strictConcurrency,
+            linkerSettings: weakLinkFoundationModels
         )
     )
 }
 
 var packageProducts: [Product] = [
     .library(name: "AnglesiteSiteModel", targets: ["AnglesiteSiteModel"]),
+    .library(name: "AnglesiteQuickLookSupport", targets: ["AnglesiteQuickLookSupport"]),
     .library(name: "AnglesiteCore", targets: ["AnglesiteCore"]),
+    .library(name: "AnglesiteBridgeCore", targets: ["AnglesiteBridgeCore"]),
     .library(name: "AnglesiteBridge", targets: ["AnglesiteBridge"]),
     .library(name: "AnglesiteIOS", targets: ["AnglesiteIOS"]),
-    .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"])
+    .library(name: "AnglesiteIntents", targets: ["AnglesiteIntents"]),
+    .executable(name: "anglesite-lan-host", targets: ["AnglesiteLANHost"])
 ]
 
 var packageDependencies: [Package.Dependency] = []
+
+#if canImport(Darwin)
+// Anglesite's patched fork of mbernson/SwiftGit2 — see #640 and Spikes/GitPackageSpike. Pinned
+// to a commit rather than a tag or branch: SwiftGit2 upstream has no tagged SPM release yet, and
+// pinning to anglesite/main's tip would silently pick up unreviewed future commits. Bump
+// deliberately.
+packageDependencies.append(
+    .package(url: "https://github.com/Anglesite/SwiftGit2.git", revision: "65a16e39b09c16770a684ca29f3d5b242b9d0313")
+)
+#endif
 
 // Keep the AnglesiteContainer product and its native dependency together with the target above:
 // excluded as one unit under ANGLESITE_SKIP_CONTAINER=1 so the manifest never references a missing
@@ -182,6 +304,70 @@ if includeContainer {
         .package(url: "https://github.com/apple/containerization.git", .upToNextMinor(from: "0.35.0"))
     )
 }
+
+// Cross-platform port, phase 1 "purity" (docs/superpowers/specs/2026-07-08-cross-platform-
+// swift-port-design.md §10): off-Darwin, expose only the targets that actually compile
+// there, so `swift build && swift test` stays green on the Linux CI leg and the compiler is
+// the purity lint as seam PRs expand the portable set. AnglesiteSiteModel and
+// AnglesiteQuickLookSupport (both pure Foundation) were first; AnglesiteCore joined once its
+// Apple-only imports (FoundationModels, OSLog, Security, NSFileCoordinator, UndoManager,
+// URLSession.bytes(for:), CFGetTypeID, security-scoped bookmarks, vsock proxies, …) all grew
+// Platform/ seams or #if canImport gates (#566) — ANGLESITE_PORT_WIP no longer needs to opt it
+// back in. AnglesiteCoreTests is not yet in this set: its test files aren't purity-swept.
+// AnglesiteBridgeCore joined at phase 2 (#567): it's the webview-agnostic message-schema half
+// of the former AnglesiteBridge (no WebKit import), split out so the message dispatch logic —
+// and its tests — run on every platform; AnglesiteBridge itself (the WKWebView adapter) stays
+// Darwin-only.
+// Filtering by name here (rather than duplicating target definitions in per-platform
+// lists) keeps the single source of truth above.
+#if !canImport(Darwin)
+let portableTargets: Set<String> = [
+    "AnglesiteSiteModel", "AnglesiteSiteModelTests",
+    "AnglesiteQuickLookSupport", "AnglesiteQuickLookSupportTests",
+    "AnglesiteCore",
+    "AnglesiteBridgeCore", "AnglesiteBridgeCoreTests",
+]
+packageTargets.removeAll { !portableTargets.contains($0.name) }
+// Every library product above is named after its single target, so the same name set
+// filters products. (The container probe executable breaks that convention, but it is
+// Darwin-only and already excluded via includeContainer.)
+packageProducts.removeAll { !portableTargets.contains($0.name) }
+
+// Cross-platform port phase 2 (#567): the Linux shell — GTK4/libadwaita via Adwaita for Swift,
+// with a WebKitGTK preview (design §6). Opt-in via ANGLESITE_LINUX_SHELL=1 rather than
+// default-on: building it needs GTK system headers (libadwaita ≥ 1.7 for adwaita-swift main's
+// generated widgets, plus webkitgtk-6.0) that the Linux CI purity leg's swift:*-noble image
+// doesn't carry (noble caps libadwaita at 1.5), so — mirroring ANGLESITE_CONTAINER_TESTS —
+// the shell only enters the manifest when explicitly requested. Until a Flatpak-based CI lane
+// exists (the packaging item on #567), a GTK-provisioned Linux box is the real verification,
+// the same status PodmanContainerControl shipped with (#647).
+if ProcessInfo.processInfo.environment["ANGLESITE_LINUX_SHELL"] == "1" {
+    // Pinned to a commit, matching the SwiftGit2 policy above: adwaita-swift's only tag
+    // (0.1.0) predates its current API, and tracking main would silently pick up unreviewed
+    // commits. Bump deliberately. (Its own dependencies are branch-based, which SwiftPM
+    // permits under a revision pin.)
+    packageDependencies.append(
+        .package(url: "https://git.aparoksha.dev/aparoksha/adwaita-swift", revision: "15fe44efffa5c9ad5c2c5a703b104d0180c6af5e")
+    )
+    packageTargets.append(
+        .systemLibrary(name: "CWebKitGTK", path: "Sources/CWebKitGTK", pkgConfig: "webkitgtk-6.0")
+    )
+    packageTargets.append(
+        .executableTarget(
+            name: "AnglesiteLinux",
+            dependencies: [
+                "AnglesiteCore",
+                "AnglesiteBridgeCore",
+                "CWebKitGTK",
+                .product(name: "Adwaita", package: "adwaita-swift")
+            ],
+            path: "Sources/AnglesiteLinux",
+            swiftSettings: strictConcurrency
+        )
+    )
+    packageProducts.append(.executable(name: "anglesite-linux", targets: ["AnglesiteLinux"]))
+}
+#endif
 
 let package = Package(
     name: "Anglesite",

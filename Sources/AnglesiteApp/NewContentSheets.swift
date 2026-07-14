@@ -252,3 +252,121 @@ struct NewCollectionEntrySheet: View {
         }
     }
 }
+
+struct NewPostSheet: View {
+    let onCreate: (String) async -> ContentCreateResult
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var isCreating = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Post") {
+                    TextField("Title", text: $title)
+                }
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                }
+            }
+            .formStyle(.grouped)
+            .frame(minWidth: 380, minHeight: 160)
+            .navigationTitle("New Post")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(isCreating)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isCreating ? "Creating…" : "Create") {
+                        create()
+                    }
+                    .disabled(isCreating || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func create() {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        isCreating = true
+        errorMessage = nil
+        Task {
+            let result = await onCreate(cleanTitle)
+            await MainActor.run {
+                isCreating = false
+                switch result {
+                case .created:
+                    dismiss()
+                case .siteNotFound:
+                    errorMessage = "This site is no longer available."
+                case .failed(let reason):
+                    errorMessage = reason
+                }
+            }
+        }
+    }
+}
+
+struct NewComponentSheet: View {
+    let onCreate: (String) async -> ContentCreateResult
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var isCreating = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Component") {
+                    TextField("Name", text: $name, prompt: Text("MyComponent"))
+                }
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                }
+            }
+            .formStyle(.grouped)
+            .frame(minWidth: 380, minHeight: 160)
+            .navigationTitle("New Component")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(isCreating)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isCreating ? "Creating…" : "Create") {
+                        create()
+                    }
+                    .disabled(isCreating || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func create() {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        isCreating = true
+        errorMessage = nil
+        Task {
+            let result = await onCreate(cleanName)
+            await MainActor.run {
+                isCreating = false
+                switch result {
+                case .created:
+                    dismiss()
+                case .siteNotFound:
+                    errorMessage = "This site is no longer available."
+                case .failed(let reason):
+                    errorMessage = reason
+                }
+            }
+        }
+    }
+}

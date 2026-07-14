@@ -1,6 +1,8 @@
 import Foundation
 
-#if compiler(>=6.4)
+// Gated to the Xcode-27 toolchain (FoundationModels absent at runtime on CI, #128) and to
+// canImport for genuine off-Darwin portability (cross-platform port design §5).
+#if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
 #endif
 
@@ -39,7 +41,7 @@ public actor KnowledgeAugmentedAssistant: ConversationalAssistant {
         return try await base.generate(prompt: enriched, context: context)
     }
 
-    #if compiler(>=6.4)
+    #if compiler(>=6.4) && canImport(FoundationModels)
     public func generateStructured<T: Generable & Sendable>(
         prompt: String,
         context: AssistantContext,
@@ -63,39 +65,34 @@ public actor KnowledgeAugmentedAssistant: ConversationalAssistant {
     }
 
     private func enrichedContext(_ prompt: String, context: AssistantContext) async -> (prompt: String, citations: [RetrievedCitation]) {
+        guard let (block, citations) = await Self.contentBlock(prompt: prompt, context: context, index: index) else {
+            return (prompt, [])
+        }
+        let enriched = """
+        \(block)
+
+        User request:
+        \(prompt)
+        """
+        return (enriched, citations)
+    }
+
+    /// Builds the content-search block and citations for `prompt`, or `nil` when nothing
+    /// matches. Exposed (not `private`) so ``CombinedAugmentedAssistant`` can run this retrieval
+    /// directly against the original user question instead of a prompt another decorator already
+    /// rewrote (#314).
+    static func contentBlock(
+        prompt: String,
+        context: AssistantContext,
+        index: SiteKnowledgeIndex
+    ) async -> (block: String, citations: [RetrievedCitation])? {
         let results = await index.search(
             siteID: context.siteID,
             query: prompt,
             options: context.searchOptions
         )
-        let styleGuide: String?
-        if Self.shouldIncludeStyleGuide(for: prompt) {
-            styleGuide = await index.projectStyleGuide(siteID: context.siteID).assistantInstructions
-        } else {
-            styleGuide = nil
-        }
-        let contextBlocks = [
-            styleGuide,
-            results.isEmpty ? nil : Self.formatContext(results),
-        ].compactMap { $0 }
-        guard !contextBlocks.isEmpty else { return (prompt, []) }
-        let enriched = contextBlocks.joined(separator: "\n\n") + """
-
-        User request:
-        \(prompt)
-        """
-        return (enriched, results.map(RetrievedCitation.init))
-    }
-
-    private static func shouldIncludeStyleGuide(for prompt: String) -> Bool {
-        let normalized = prompt.lowercased()
-        let contentIntentMarkers = [
-            "article", "blog", "callout", "component", "content", "copy", "draft",
-            "edit", "frontmatter", "heading", "homepage", "landing", "markdown",
-            "mdx", "page", "post", "publish", "rewrite", "seo", "slug", "style guide",
-            "summary", "tag", "title", "tone", "voice", "write",
-        ]
-        return contentIntentMarkers.contains { normalized.contains($0) }
+        guard !results.isEmpty else { return nil }
+        return (formatContext(results), results.map(RetrievedCitation.init))
     }
 
     private static func formatContext(_ results: [SiteKnowledgeIndex.SearchResult]) -> String {

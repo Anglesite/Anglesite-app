@@ -1,0 +1,1351 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "" : {
+
+    },
+    "@media %@" : {
+
+    },
+    "/" : {
+
+    },
+    "%@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ %2$@"
+          }
+        }
+      }
+    },
+    "%@ %@ → %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ %2$@ → %3$@"
+          }
+        }
+      }
+    },
+    "%@ → %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ → %2$@"
+          }
+        }
+      }
+    },
+    "%@ changed on disk" : {
+
+    },
+    "%@ has been changed since this edit. Undoing will overwrite those changes." : {
+
+    },
+    "%@ tool" : {
+
+    },
+    "%@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "%@: %@;" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@: %2$@;"
+          }
+        }
+      }
+    },
+    "%@. %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@. %2$@"
+          }
+        }
+      }
+    },
+    "%lld" : {
+
+    },
+    "%lld change%@ applied successfully." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld change%2$@ applied successfully."
+          }
+        }
+      }
+    },
+    "%lld refs" : {
+
+    },
+    "%lld selected" : {
+
+    },
+    "%lld%%" : {
+
+    },
+    "A custom token named “Anglesite” should be pre-filled with all permissions Anglesite uses. If it isn’t, add at least the “Edit Cloudflare Workers” template’s permissions so deploying works — Anglesite will ask again when a feature needs more access. Click **Continue to summary**." : {
+
+    },
+    "A full, growing catalog" : {
+
+    },
+    "A service or one-off" : {
+
+    },
+    "About Anglesite" : {
+
+    },
+    "About custom analytics" : {
+
+    },
+    "Abstract shapes in my brand colors, no text" : {
+
+    },
+    "Accent color" : {
+
+    },
+    "Accessibility" : {
+
+    },
+    "Add" : {
+
+    },
+    "Add a ${type} record to ${domain}" : {
+
+    },
+    "Add a link back to **%@**" : {
+
+    },
+    "Add a Store" : {
+
+    },
+    "Add a store to ${site}" : {
+
+    },
+    "Add Bluesky verification" : {
+
+    },
+    "Add booking to ${site}" : {
+
+    },
+    "Add comments to ${site}" : {
+
+    },
+    "Add donations to ${site}" : {
+
+    },
+    "Add Google verification" : {
+
+    },
+    "Add Integration" : {
+
+    },
+    "Add Integration…" : {
+
+    },
+    "Add one above to get started." : {
+
+    },
+    "Add page ${name} to ${site}" : {
+
+    },
+    "Add post ${title2} to ${site}" : {
+
+    },
+    "Add record" : {
+
+    },
+    "Add Site" : {
+
+    },
+    "Advanced" : {
+
+    },
+    "AI summary — verify against the log below" : {
+
+    },
+    "All" : {
+
+    },
+    "All types" : {
+
+    },
+    "Anglesite Debug" : {
+
+    },
+    "Anglesite plugin" : {
+
+    },
+    "Announce live updates to VoiceOver" : {
+
+    },
+    "Another tool edited the website details while you had unsaved changes." : {
+
+    },
+    "Another tool edited this file while you had unsaved changes." : {
+
+    },
+    "Answer a couple of questions and we'll pick the right commerce integration." : {
+
+    },
+    "API token" : {
+
+    },
+    "Apply %lld change%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Apply %1$lld change%2$@"
+          }
+        }
+      }
+    },
+    "Applying hardening changes…" : {
+
+    },
+    "Ask Assistant" : {
+
+    },
+    "Ask the assistant…" : {
+
+    },
+    "Audit" : {
+
+    },
+    "Audit summary: %@" : {
+
+    },
+    "Audited: %@." : {
+
+    },
+    "Auditing…" : {
+
+    },
+    "Auto-generate alt text for dropped images" : {
+
+    },
+    "Auto-scroll" : {
+
+    },
+    "Auto-suggest descriptions for new pages and posts" : {
+
+    },
+    "Back" : {
+
+    },
+    "Back up ${site}" : {
+
+    },
+    "Backup" : {
+
+    },
+    "Blocking (%lld)" : {
+
+    },
+    "Body" : {
+
+    },
+    "Build failed" : {
+
+    },
+    "Build, scan, and run wrangler deploy on this site" : {
+
+    },
+    "Building your website…" : {
+
+    },
+    "Buy a domain" : {
+
+    },
+    "By default, Anglesite saves new and imported site packages under `~/Sites/`. Override this for development or testing." : {
+
+    },
+    "Can't open %@" : {
+
+    },
+    "Can't Open Component" : {
+
+    },
+    "Can't open website details" : {
+
+    },
+    "Can't preview %@" : {
+
+    },
+    "Cancel" : {
+
+    },
+    "Cancel response" : {
+
+    },
+    "Change" : {
+
+    },
+    "Change ${element} \\u{2014} ${instruction}" : {
+
+    },
+    "Change Image" : {
+
+    },
+    "Change Logo…" : {
+
+    },
+    "Chat" : {
+
+    },
+    "Check ${site}" : {
+
+    },
+    "Check whether Siri workflows are ready for this site" : {
+
+    },
+    "Checking token…" : {
+
+    },
+    "Checking…" : {
+
+    },
+    "Choose" : {
+
+    },
+    "Choose %@" : {
+
+    },
+    "Choose a provider" : {
+
+    },
+    "Choose an Anglesite site package." : {
+
+    },
+    "Choose an existing Anglesite site folder to import." : {
+
+    },
+    "Choose Image" : {
+
+    },
+    "Choose Logo" : {
+
+    },
+    "Choose where to save the local .anglesite file." : {
+
+    },
+    "Choose your own colors and add a logo." : {
+
+    },
+    "Choose your Sites folder so Anglesite can create the new site there." : {
+
+    },
+    "Choose…" : {
+
+    },
+    "Clear" : {
+
+    },
+    "Clear %@" : {
+
+    },
+    "Clear filter" : {
+
+    },
+    "Click **Create Token**, then copy it and paste it below." : {
+
+    },
+    "Click Recheck to run the pre-deploy scan against this site." : {
+
+    },
+    "Close" : {
+
+    },
+    "Cloudflare" : {
+
+    },
+    "Cloudflare API token" : {
+
+    },
+    "Collection" : {
+
+    },
+    "Collection Entry" : {
+
+    },
+    "Collection…" : {
+
+    },
+    "Commit and push working-tree changes to your current branch" : {
+
+    },
+    "Computed" : {
+
+    },
+    "Connect & deploy" : {
+
+    },
+    "Connect to Cloudflare" : {
+
+    },
+    "Connected to %@" : {
+
+    },
+    "Content" : {
+
+    },
+    "Content type filter" : {
+
+    },
+    "Continue" : {
+
+    },
+    "Copies %@ to the clipboard" : {
+
+    },
+    "Copy" : {
+
+    },
+    "Copy log" : {
+
+    },
+    "Copy markdown link to clipboard" : {
+
+    },
+    "Copy SHA" : {
+
+    },
+    "Copy URL" : {
+
+    },
+    "Couldn't add “%@”: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Couldn't add “%1$@”: %2$@"
+          }
+        }
+      }
+    },
+    "Couldn't finish setup" : {
+
+    },
+    "Couldn't load sites" : {
+
+    },
+    "Couldn't open that site" : {
+
+    },
+    "Couldn't run the check" : {
+
+    },
+    "Create" : {
+
+    },
+    "Create a website" : {
+
+    },
+    "Create new site…" : {
+
+    },
+    "Create one with **Add Site → Create new site…**, or use **Add Site → Import existing site…** to add an existing `.anglesite` package." : {
+
+    },
+    "Creating…" : {
+
+    },
+    "Credentials" : {
+
+    },
+    "Custom" : {
+
+    },
+    "Custom Analytics" : {
+
+    },
+    "Custom. Choose your own colors and add a logo." : {
+
+    },
+    "Delete" : {
+
+    },
+    "Delete a DNS record from ${domain}" : {
+
+    },
+    "Dependency Updates Available" : {
+
+    },
+    "Deploy" : {
+
+    },
+    "Deploy ${site}" : {
+
+    },
+    "Deploy blocked" : {
+
+    },
+    "Deploy readiness" : {
+
+    },
+    "Deploying" : {
+
+    },
+    "Deploying needs a one-time API token. It takes about a minute." : {
+
+    },
+    "Description" : {
+
+    },
+    "Destination" : {
+
+    },
+    "Dev Server Starting…" : {
+
+    },
+    "Diagnostics" : {
+
+    },
+    "Digital downloads" : {
+
+    },
+    "Dismiss" : {
+
+    },
+    "Dismiss suggestion" : {
+
+    },
+    "Domain" : {
+
+    },
+    "Domain…" : {
+
+    },
+    "Donations or fundraising" : {
+
+    },
+    "Done" : {
+
+    },
+    "Editing" : {
+
+    },
+    "Editor" : {
+
+    },
+    "Enter the domain to harden" : {
+
+    },
+    "Enter the domain to manage" : {
+
+    },
+    "Enter the domain you already own." : {
+
+    },
+    "Error" : {
+
+    },
+    "example.com" : {
+
+    },
+    "Explicitly not included" : {
+
+    },
+    "Explore pages, layouts, components, collections, and assets" : {
+
+    },
+    "Export Site Source…" : {
+
+    },
+    "Export this site's source files to a folder." : {
+
+    },
+    "Failed" : {
+
+    },
+    "File" : {
+
+    },
+    "File modified outside Anglesite" : {
+
+    },
+    "Filter retrieval by content type" : {
+
+    },
+    "Filtering: %@" : {
+
+    },
+    "Find ${contentType} in ${site}" : {
+
+    },
+    "Finished" : {
+
+    },
+    "First words" : {
+
+    },
+    "General" : {
+
+    },
+    "Generate hero image…" : {
+
+    },
+    "GitHub" : {
+
+    },
+    "Got it" : {
+
+    },
+    "Grant Access" : {
+
+    },
+    "Graph" : {
+
+    },
+    "Harden" : {
+
+    },
+    "Harden…" : {
+
+    },
+    "Hardening…" : {
+
+    },
+    "Hero image (optional)" : {
+
+    },
+    "Hero image ready" : {
+
+    },
+    "Hide" : {
+
+    },
+    "Hide Chat" : {
+
+    },
+    "Hide chat panel" : {
+
+    },
+    "Hide Inspector" : {
+
+    },
+    "Hide related pages" : {
+
+    },
+    "Hide Related Pages" : {
+
+    },
+    "Homepage headline" : {
+
+    },
+    "How many products?" : {
+
+    },
+    "Icons" : {
+
+    },
+    "Import existing site…" : {
+
+    },
+    "Import Site…" : {
+
+    },
+    "Include Git history (.git)" : {
+
+    },
+    "Input" : {
+
+    },
+    "Inspector" : {
+
+    },
+    "Installed" : {
+
+    },
+    "Just a few" : {
+
+    },
+    "Keep My Changes" : {
+
+    },
+    "Kind" : {
+
+    },
+    "Last checked %@" : {
+
+    },
+    "Lemon Squeezy" : {
+
+    },
+    "Likely cause: %@" : {
+
+    },
+    "List DNS records for ${domain}" : {
+
+    },
+    "Load records" : {
+
+    },
+    "Loading site…" : {
+
+    },
+    "Lower numbers are preferred mail servers, e.g. 10." : {
+
+    },
+    "Missing Reciprocal Links" : {
+
+    },
+    "Missing required files" : {
+
+    },
+    "Mode" : {
+
+    },
+    "My Website" : {
+
+    },
+    "Name" : {
+
+    },
+    "New" : {
+
+    },
+    "New Collection" : {
+
+    },
+    "New Page" : {
+
+    },
+    "New Site" : {
+
+    },
+    "No Anglesite sites found" : {
+
+    },
+    "No changes needed." : {
+
+    },
+    "No Collection Types" : {
+
+    },
+    "No content yet" : {
+
+    },
+    "No DNS records found." : {
+
+    },
+    "No issues found in the most recent scan." : {
+
+    },
+    "No issues found." : {
+
+    },
+    "No matching graph nodes" : {
+
+    },
+    "No Recent Sites" : {
+
+    },
+    "No scoped styles" : {
+
+    },
+    "No Suggestions" : {
+
+    },
+    "No website details" : {
+
+    },
+    "None" : {
+
+    },
+    "Not Set" : {
+
+    },
+    "Off" : {
+
+    },
+    "OK" : {
+
+    },
+    "On" : {
+
+    },
+    "Open" : {
+
+    },
+    "Open %@ in its own window" : {
+
+    },
+    "Open ${target}" : {
+
+    },
+    "Open Cloudflare API tokens" : {
+
+    },
+    "Open Cloudflare Domains" : {
+
+    },
+    "Open Dashboard" : {
+
+    },
+    "Open File" : {
+
+    },
+    "Open in browser" : {
+
+    },
+    "Open in Browser" : {
+
+    },
+    "Open Recent" : {
+
+    },
+    "Open Site…" : {
+
+    },
+    "Open the chat panel for a deeper AI audit of this site" : {
+
+    },
+    "Open the live preview in your default browser" : {
+
+    },
+    "Open the preview first to start the runtime before deploying" : {
+
+    },
+    "Open Website Anyway" : {
+
+    },
+    "Opens %@" : {
+
+    },
+    "Opens %@ in the default editor" : {
+
+    },
+    "optional" : {
+
+    },
+    "Page" : {
+
+    },
+    "Page…" : {
+
+    },
+    "Paste the HTML code from another analytics provider here, such as Google Analytics, Plausible, Fathom, or a conversion tag." : {
+
+    },
+    "paste token" : {
+
+    },
+    "Pause" : {
+
+    },
+    "Physical goods" : {
+
+    },
+    "Pick a color scheme" : {
+
+    },
+    "Point at a checkout of the plugin (e.g. `../anglesite`) to iterate without rebuilding the app." : {
+
+    },
+    "Polar" : {
+
+    },
+    "Preview" : {
+
+    },
+    "Preview ${site}" : {
+
+    },
+    "Preview and apply Cloudflare security hardening for this site" : {
+
+    },
+    "Primary color" : {
+
+    },
+    "Priority" : {
+
+    },
+    "Provider" : {
+
+    },
+    "Re-check" : {
+
+    },
+    "Recheck" : {
+
+    },
+    "Recheck Deploy Readiness" : {
+
+    },
+    "Refresh" : {
+
+    },
+    "Regenerate…" : {
+
+    },
+    "Related Pages" : {
+
+    },
+    "Reload DNS records for this domain" : {
+
+    },
+    "Reload from Disk" : {
+
+    },
+    "Reload site list" : {
+
+    },
+    "Reload sites" : {
+
+    },
+    "Remaining audit findings" : {
+
+    },
+    "Remove" : {
+
+    },
+    "Remove “%@” from Anglesite?" : {
+
+    },
+    "Remove from Anglesite" : {
+
+    },
+    "Remove from Anglesite…" : {
+
+    },
+    "Rename" : {
+
+    },
+    "Rename failed" : {
+
+    },
+    "Rename Site" : {
+
+    },
+    "Rename…" : {
+
+    },
+    "Reset conversation" : {
+
+    },
+    "Resolve" : {
+
+    },
+    "Resolve this annotation" : {
+
+    },
+    "Resolving zone and reading current state…" : {
+
+    },
+    "Result" : {
+
+    },
+    "Retrieved context from %lld file%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Retrieved context from %1$lld file%2$@"
+          }
+        }
+      }
+    },
+    "Retry" : {
+
+    },
+    "Reveal in Finder" : {
+
+    },
+    "Revert" : {
+
+    },
+    "Revert to Saved" : {
+
+    },
+    "Revert to the last saved version?" : {
+
+    },
+    "Route" : {
+
+    },
+    "Run again" : {
+
+    },
+    "Run the structured accessibility audit against this site" : {
+
+    },
+    "Running" : {
+
+    },
+    "running…" : {
+
+    },
+    "Save" : {
+
+    },
+    "Save the imported site package." : {
+
+    },
+    "Save Website…" : {
+
+    },
+    "Save Your Website" : {
+
+    },
+    "Save your website" : {
+
+    },
+    "Save…" : {
+
+    },
+    "Scan" : {
+
+    },
+    "Scan couldn't run" : {
+
+    },
+    "Search" : {
+
+    },
+    "Search ${site} for ${query}" : {
+
+    },
+    "Search graph" : {
+
+    },
+    "Select a node" : {
+
+    },
+    "Select an element in the canvas" : {
+
+    },
+    "Selected" : {
+
+    },
+    "Selection" : {
+
+    },
+    "Send" : {
+
+    },
+    "Send (⏎)" : {
+
+    },
+    "Set this up later" : {
+
+    },
+    "Set Up" : {
+
+    },
+    "Set up a third-party integration for this site" : {
+
+    },
+    "Sets a display name just for Anglesite. Leave blank to use the site's built-in name." : {
+
+    },
+    "Setting up…" : {
+
+    },
+    "Settings" : {
+
+    },
+    "Share deployed URL" : {
+
+    },
+    "Share the deployed site's URL" : {
+
+    },
+    "Short description (optional)" : {
+
+    },
+    "Show Chat" : {
+
+    },
+    "Show chat panel" : {
+
+    },
+    "Show Debug Pane" : {
+
+    },
+    "Show Debug Pane menu item" : {
+
+    },
+    "Show Inspector" : {
+
+    },
+    "Show or hide %@" : {
+
+    },
+    "Show or hide the page inspector" : {
+
+    },
+    "Show related pages" : {
+
+    },
+    "Show Related Pages" : {
+
+    },
+    "Show Web Inspector" : {
+
+    },
+    "Shows the most recent pre-deploy scan results" : {
+
+    },
+    "Siri AI" : {
+
+    },
+    "Siri AI Readiness" : {
+
+    },
+    "Siri AI readiness for “%@”." : {
+
+    },
+    "Siri AI Readiness…" : {
+
+    },
+    "Site" : {
+
+    },
+    "Site Graph" : {
+
+    },
+    "Site is missing required files" : {
+
+    },
+    "Site is missing required files: %@" : {
+
+    },
+    "Site name" : {
+
+    },
+    "Sites" : {
+
+    },
+    "Sites root" : {
+
+    },
+    "Skip" : {
+
+    },
+    "Skipped" : {
+
+    },
+    "Slug" : {
+
+    },
+    "Software or SaaS" : {
+
+    },
+    "Source" : {
+
+    },
+    "Sources" : {
+
+    },
+    "Speaks streaming chat responses (start, and the reply when it finishes) and deploy progress (start, errors, and the final result) as VoiceOver announcements. Turn off if you prefer to read these surfaces by navigating to them yourself." : {
+
+    },
+    "Standard error" : {
+
+    },
+    "Standard output" : {
+
+    },
+    "Status of ${site}" : {
+
+    },
+    "Stored in the macOS Keychain under `io.dwk.anglesite`. The token is passed to `wrangler deploy` as `CLOUDFLARE_API_TOKEN` and never written to logs. An exported `CLOUDFLARE_API_TOKEN` in the shell that launched Anglesite takes precedence over this entry." : {
+
+    },
+    "Stream" : {
+
+    },
+    "Styles" : {
+
+    },
+    "Suggested fix: %@" : {
+
+    },
+    "Suggested Links" : {
+
+    },
+    "Summarizing…" : {
+
+    },
+    "Switch between Preview, Editor, and Graph" : {
+
+    },
+    "Tag" : {
+
+    },
+    "Template" : {
+
+    },
+    "The App Store build doesn't bundle `gh`. Anglesite uses whatever `git` credentials are already configured on your Mac (Keychain or SSH key) when pushing." : {
+
+    },
+    "The build produced no output." : {
+
+    },
+    "The domain must be managed in Cloudflare. Your API token needs Zone DNS Edit, Zone Settings Edit, and WAF Edit permissions." : {
+
+    },
+    "The domain must be managed in Cloudflare. Your API token needs Zone DNS Read and Edit permissions." : {
+
+    },
+    "The pre-deploy scan found issues that need fixing before this site can ship." : {
+
+    },
+    "There are no editable website details." : {
+
+    },
+    "This can't be undone." : {
+
+    },
+    "This page already links to all related content." : {
+
+    },
+    "This page has no inbound links from other pages." : {
+
+    },
+    "This removes it from Anglesite's list only. The files in %@ are left on disk." : {
+
+    },
+    "This site does not have any collection-backed content types." : {
+
+    },
+    "This zone already has all recommended hardening settings." : {
+
+    },
+    "Title" : {
+
+    },
+    "Token usage and cost" : {
+
+    },
+    "Token verified" : {
+
+    },
+    "Transfer an existing domain" : {
+
+    },
+    "Try again" : {
+
+    },
+    "TTL" : {
+
+    },
+    "Type" : {
+
+    },
+    "Unavailable — newer edits have been made since" : {
+
+    },
+    "Undo" : {
+
+    },
+    "Undo anyway" : {
+
+    },
+    "Undo this edit" : {
+
+    },
+    "Undone" : {
+
+    },
+    "Unsaved changes" : {
+
+    },
+    "Unsaved changes in the editor and inspector will be discarded." : {
+
+    },
+    "Update" : {
+
+    },
+    "Upload Logo…" : {
+
+    },
+    "URL" : {
+
+    },
+    "Use a temporary Cloudflare Pages domain later, such as %@." : {
+
+    },
+    "Uses Apple Intelligence on your device. No content leaves your Mac without your say-so." : {
+
+    },
+    "Uses your existing `git` credentials" : {
+
+    },
+    "Valid" : {
+
+    },
+    "View" : {
+
+    },
+    "View and manage this domain's DNS records" : {
+
+    },
+    "Waiting for output…" : {
+
+    },
+    "Warnings" : {
+
+    },
+    "Warnings (%lld)" : {
+
+    },
+    "Website details changed on disk" : {
+
+    },
+    "Website name" : {
+
+    },
+    "Welcome to …" : {
+
+    },
+    "What are you selling?" : {
+
+    },
+    "What kind of website are you creating?" : {
+
+    },
+    "What this website is about, in a sentence" : {
+
+    },
+    "When you create a page or post, Anglesite uses Apple's on-device model to suggest a short SEO description. Runs locally; requires Apple Intelligence to be enabled. Falls back to a title-derived description when off or unavailable." : {
+
+    },
+    "When you drop an image onto the preview, Anglesite uses Apple's on-device vision model to write descriptive alt text and applies it automatically. Runs locally; requires Apple Intelligence to be enabled. Purely decorative images get empty alt text and role=\"presentation\"." : {
+
+    },
+    "Whether this Mac can run Siri-driven Anglesite workflows. Per-site readiness is in each site window (Site ▸ Siri AI Readiness)." : {
+
+    },
+    "Which platform?" : {
+
+    },
+    "Your website was created with warnings. You can open it anyway and fix it from the website window." : {
+
+    },
+    "Your website was created, but something above needs attention before it can preview. You can open it anyway and fix it from the website window." : {
+
+    }
+  },
+  "version" : "1.0"
+}

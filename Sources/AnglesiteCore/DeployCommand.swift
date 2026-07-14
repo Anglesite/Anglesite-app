@@ -74,6 +74,14 @@ public actor DeployCommand {
     public func deploy(
         siteID: String,
         siteDirectory: URL,
+        /// The site's `Config/` directory. `nil` skips route-coverage scanning and the
+        /// deployed-routes snapshot write entirely — callers that don't pass it (tests, and the
+        /// two non-primary deploy paths in `SocialWorkerProvisionCommand`/`SiteOperations`) are
+        /// unaffected (#530).
+        configDirectory: URL? = nil,
+        /// The site's currently published route set (from `SiteContentGraph`), used only when
+        /// `configDirectory` is non-nil.
+        currentRoutes: [String] = [],
         onPreflight: PreflightObserver? = nil,
         onProgress: ProgressHandler? = nil
     ) async -> Result {
@@ -126,7 +134,26 @@ public actor DeployCommand {
             environment: baseEnvironment,
             source: "deploy:\(siteID):preflight"
         )
-        let preflightOutcome = Self.parseScanReport(output: preflightResult.output, exitCode: preflightResult.exitCode)
+        var preflightOutcome = Self.parseScanReport(output: preflightResult.output, exitCode: preflightResult.exitCode)
+        if let configDirectory {
+            let previousRoutes = DeployedRoutesSnapshot.load(from: configDirectory)
+            let redirects = (try? RedirectsStore(sourceDirectory: siteDirectory).load()) ?? []
+            let coverageWarnings = RouteCoverageScanner.scan(
+                currentRoutes: currentRoutes,
+                previousRoutes: previousRoutes,
+                redirectSources: Set(redirects.map(\.source))
+            )
+            if !coverageWarnings.isEmpty {
+                switch preflightOutcome {
+                case .passed(let warnings):
+                    preflightOutcome = .passed(warnings: warnings + coverageWarnings)
+                case .blocked(let failures, let warnings):
+                    preflightOutcome = .blocked(failures: failures, warnings: warnings + coverageWarnings)
+                case .error:
+                    break
+                }
+            }
+        }
         onPreflight?(preflightOutcome)
         switch preflightOutcome {
         case .passed:
@@ -164,6 +191,9 @@ public actor DeployCommand {
         }
         if code == 0 {
             if let url = Self.extractDeployedURL(from: wranglerResult.output) {
+                if let configDirectory {
+                    try? DeployedRoutesSnapshot.save(currentRoutes, to: configDirectory)
+                }
                 return .succeeded(url: url, duration: duration)
             }
             return .failed(reason: "wrangler exited cleanly but no deployed URL was found in its output", exitCode: 0)
@@ -292,14 +322,14 @@ public actor DeployCommand {
     }
 
     /// Default `TokenSource` for production: env var first (so a developer's shell still wins),
-    /// then the user's Keychain. A Keychain error is surfaced to the caller — we'd rather show
-    /// the user "couldn't read token" than silently fall through to `nil` and prompt for a
-    /// re-paste of a token that's actually stored fine.
+    /// then the platform secret store (the user's Keychain on macOS). A store error is surfaced
+    /// to the caller — we'd rather show the user "couldn't read token" than silently fall
+    /// through to `nil` and prompt for a re-paste of a token that's actually stored fine.
     public static let keychainTokenSource: TokenSource = {
         if let env = ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"], !env.isEmpty {
             return env
         }
-        return try KeychainStore().readCloudflareToken()
+        return try PlatformSecretStore.make().readCloudflareToken()
     }
 
     /// Default `PreflightChecker`: host-side preflight was retired with embedded Node. Container
