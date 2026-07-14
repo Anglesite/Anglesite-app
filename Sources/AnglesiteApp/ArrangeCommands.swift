@@ -1,4 +1,3 @@
-// Sources/AnglesiteApp/ArrangeCommands.swift
 import SwiftUI
 
 /// The Arrange menu (menu-bar spec §2.7). Contextual by design: items enable only when the

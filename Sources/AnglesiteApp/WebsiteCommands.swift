@@ -1,4 +1,3 @@
-// Sources/AnglesiteApp/WebsiteCommands.swift
 import SwiftUI
 import AppKit
 

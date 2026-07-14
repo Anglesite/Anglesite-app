@@ -1000,7 +1000,10 @@ Spec §2.1, §2.10, §2.8. Feedback and Anglesite Website are live URL opens; th
 Immediately after the `CommandGroup(replacing: .appInfo) { ... }` block:
 
 ```swift
-            CommandGroup(after: .appSettings) {
+            // NOTE (as shipped): `after: .appSettings` renders ABOVE the automatic
+            // Settings… item at runtime; `before: .systemServices` is what lands the
+            // group between Settings… and Services per spec §2.1 (found in the T11 smoke).
+            CommandGroup(before: .systemServices) {
                 Divider()
 
                 Button("Provide Anglesite Feedback…") {

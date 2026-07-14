@@ -20,8 +20,8 @@ struct FileItemCommands: Commands {
 
             // Revert To nests the shipped editor revert (moved from SaveCommands, same
             // action) beside the git-backed version browser (spec §4.1) — iWork's
-            // File ▸ Revert To shape. Both items also disable while a save/revert is in
-            // flight (PR #532 review).
+            // File ▸ Revert To shape. Revert to Saved disables while a save/revert is
+            // already in flight (PR #532 review).
             Menu("Revert To") {
                 Button("Revert to Saved") {
                     model?.requestRevertToSaved()

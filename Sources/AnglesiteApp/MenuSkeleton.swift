@@ -1,4 +1,3 @@
-// Sources/AnglesiteApp/MenuSkeleton.swift
 import SwiftUI
 
 /// A disabled placeholder for a menu item whose backing feature hasn't landed yet.

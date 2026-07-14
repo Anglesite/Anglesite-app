@@ -1,4 +1,3 @@
-// Sources/AnglesiteApp/InsertCommands.swift
 import SwiftUI
 
 /// The Insert menu (menu-bar spec §2.4). Every item emits semantic HTML/MDX into the page

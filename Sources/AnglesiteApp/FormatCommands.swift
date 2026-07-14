@@ -1,4 +1,3 @@
-// Sources/AnglesiteApp/FormatCommands.swift
 import SwiftUI
 
 /// The Format menu (menu-bar spec §2.6). Font items are semantic elements

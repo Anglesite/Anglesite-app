@@ -1,4 +1,3 @@
-// Sources/AnglesiteApp/EditMenuSkeletonCommands.swift
 import SwiftUI
 
 /// Edit-menu skeleton items (menu-bar spec §2.3): selection walkers and annotations after
