@@ -9,10 +9,11 @@
 Reshape the per-site window toward the Apple Pages model the issue references:
 
 - **Left sidebar** — the site as a *visitor* understands it: a URL tree of the built
-  site's human-visible pages, not a source-file browser. `index.html` pinned first,
-  then other HTML pages, then subdirectories. Differentiated icons for directories
-  with an RSS feed (collections) vs. without, and for HTML files. Images, CSS, and
-  JS are hidden.
+  site's human-visible pages, not a source-file browser. A single entry named for
+  the website's title sits at the very top and opens site-wide settings in the
+  main editor (§7); below it, `index.html` pinned first, then other HTML pages,
+  then subdirectories. Differentiated icons for directories with an RSS feed
+  (collections) vs. without, and for HTML files. Images, CSS, and JS are hidden.
 - **Right inspector** — tabbed **Metadata | Style** for the current selection.
 - **Toolbar** — common editing tools by default; site operations recede to the
   customization palette and menus.
@@ -26,12 +27,11 @@ keeps its menu equivalent, per that epic's conventions.
 
 Explicitly out of scope here, by decision on 2026-07-13:
 
-- **Navigator access to components, styles, and site-wide config.** Removing the
-  Components / Styles / Metadata sidebar sections leaves component and CSS editing
-  and the `Info.plist` editor with **no navigator entry point** until the next
-  phase designs their access path (candidates discussed: selection-driven entry,
-  a "Show Development Files" toggle, a sidebar mode switch). This is an accepted,
-  temporary regression for power users.
+- **Selection-driven style/component entry from the preview.** Site-wide styles,
+  metadata, and installed components are reachable through the Website Settings
+  entry (§7), so removing the Components / Styles / Metadata sidebar sections no
+  longer strands them — but richer, selection-driven entry (click an element,
+  land in its owning component) remains a next-phase design.
 - **Editable directory settings.** §6's settings surface is read-mostly in v1;
   making template, feed, and sitemap configuration *writable* requires template
   code changes and lands with the deferred phase.
@@ -70,6 +70,10 @@ public func buildSiteURLTree(
 
 Rules:
 
+- **Website entry pinned at the very top:** a single node named for the website's
+  title (falling back to "Website", as the old metadata row did) that opens the
+  Website Settings surface (§7) in the main editor. It is not part of the URL
+  hierarchy — it renders above home, unindented, with the `globe` icon.
 - **Sources:** page routes from `SiteContentGraph.Page.route` (ContentScanner
   already handles nested `src/pages` folders) and collection-entry routes from
   `postRoute(for:)` (`/<collection>/<slug>/`). Nothing else enters the tree — so
@@ -96,15 +100,17 @@ Rules:
 
 ### Selection semantics
 
-`NavigatorTarget` gains a case:
+`NavigatorTarget` gains two cases:
 
 - `.route(String)` — unchanged: pages and entries navigate the preview and
   populate the inspector.
 - `.directory(collection: String?, route: String)` — new: opens the directory
   settings surface in the main pane (§6). `collection` is set for
   `src/content`-backed directories, nil for plain nested page folders.
-- `.file(FileRef)` — retained in the enum for the editor pipeline, but no sidebar
-  row produces it any more.
+- `.websiteSettings` — new: the website-title row; opens the Website Settings
+  surface in the main pane (§7).
+- `.file(FileRef)` — retained for the editor pipeline; no sidebar row produces
+  it directly any more, but rows inside the Website Settings surface do (§7).
 
 ### What leaves the sidebar
 
@@ -127,6 +133,7 @@ Rules:
 
 | Node | Symbol | Notes |
 |---|---|---|
+| Website settings (title row) | `globe` | already the app's canonical site icon |
 | Home (`/`) | `house` | new to the app |
 | HTML page / entry | `doc.richtext` | already the app's canonical page icon |
 | Directory, no feed | `folder` | |
@@ -190,23 +197,50 @@ folders (no collection) show the page list and route only. A directory
 selection clears the inspector context (as non-route selections do today) —
 directory configuration lives in this main-pane surface, not the inspector.
 
+## 7. Website Settings (main pane)
+
+Selecting the website-title row at the top of the sidebar opens a **Website
+Settings** surface in the main editor — the single home for everything
+site-wide. Three sections:
+
+- **Metadata** — the site-wide configuration the old sidebar Metadata row
+  reached: the package `Info.plist` / `SiteConfigStore` fields (display name,
+  domain, and the existing `PlistEditorView` content, embedded or linked).
+- **Site-wide styles** — the stylesheets from `src/styles`, listed; opening one
+  uses the existing `.file` → main-pane editor pipeline.
+- **Installed components** — the components from `src/components` +
+  `src/layouts`, listed; opening one uses the existing `.astro` editor path
+  (Component Editor).
+
+This is where the content of the removed Components / Styles / Metadata sidebar
+sections lands: browsing moves out of the navigator into a settings surface,
+while the editors themselves are unchanged. Like a directory selection, the
+website row clears the inspector context.
+
+Slice 1 wires the row to the existing `PlistEditorView` (exactly what the old
+metadata row opened) so nothing is stranded; the full three-section surface
+ships in slice 2.
+
 ## Slices
 
 1. **URL-tree navigator** — `URLTreeNode` + `buildSiteURLTree` + feed probe in
    AnglesiteCore; `SiteNavigatorView`/`SiteNavigatorModel` swap to the tree;
-   icons + composite feed badge; Cleanup moves to Site menu; art brief committed.
-2. **Directory selection + settings v1** — `.directory` target, Collection
-   Settings surface.
+   website-title row (interim: opens `PlistEditorView`); icons + composite feed
+   badge; Cleanup moves to Site menu; art brief committed.
+2. **Settings surfaces** — the full Website Settings surface (§7) and the
+   Collection Settings surface (§6) behind the `.websiteSettings` and
+   `.directory` targets.
 3. **Inspector tabs** — segmented Metadata | Style, Style-tab shell.
 4. **Toolbar re-curation** — `insert` item, default set change, demotions.
 
-Each slice is independently shippable. Slice 2 depends on slice 1 (the
-`.directory` target exists only in the new tree); slices 3 and 4 are fully
+Each slice is independently shippable. Slice 2 depends on slice 1 (its
+selection targets exist only in the new tree); slices 3 and 4 are fully
 independent of the others and of each other.
 
 ## Testing
 
-- Unit tests for `buildSiteURLTree`: home pinning (root and per-directory),
+- Unit tests for `buildSiteURLTree`: website row first with title fallback,
+  home pinning (root and per-directory),
   top-level vs. directory sorting, reverse-chron entry order with undated
   fallback, feed-badge propagation, nested `src/pages` folders, percent-encoded
   collection/slug routes, empty site.
@@ -217,8 +251,10 @@ independent of the others and of each other.
 
 ## Risks
 
-- **Power-user regression (accepted):** no navigator path to components/styles/
-  config until the next phase; the deferral is deliberate and recorded above.
+- **Extra click for dev files (accepted):** components and styles move from
+  always-visible sidebar rows to lists inside Website Settings — one step
+  further away for power users, in exchange for a visitor-comprehensible
+  sidebar. Selection-driven entry (next phase) is the durable answer.
 - **Feed probe couples to template layout:** if the template moves its feed
   routes, badges silently vanish. The probe is one function with fixture tests,
   so the coupling is cheap to update; a registry-level feed flag is the likely
