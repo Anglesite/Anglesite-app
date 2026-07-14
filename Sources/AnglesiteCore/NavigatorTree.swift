@@ -1,9 +1,12 @@
 import Foundation
 
-/// What selecting a navigator row does: navigate the preview to a route, or open a file in the editor.
+/// What selecting a navigator row does: navigate the preview to a route, open a file in the
+/// editor, open a directory's settings, or open the site-wide Website Settings (#714).
 public enum NavigatorTarget: Sendable, Equatable {
     case route(String)
     case file(FileRef)
+    case directory(collection: String?, route: String)
+    case websiteSettings
 }
 
 public struct NavigatorItem: Sendable, Equatable, Identifiable {

@@ -696,6 +696,9 @@ final class SiteWindowModel {
             }
         case .file(let file):
             openFile(file)
+        case .directory, .websiteSettings:
+            // No-op for now — Task 3/4 (#714) wire these into the directory/website settings panes.
+            break
         }
     }
 
