@@ -242,6 +242,9 @@ struct AnglesiteApp: App {
             // File ▸ Print… ⌘P for the previewed page — declared after ExportSiteCommands so it
             // renders below Export Site Source… (`after:` groups render in declaration order, #525).
             PrintCommands()
+            // Page menu (menu-bar spec §2.5) — declared before SiteMenuCommands so it
+            // renders left of it (CommandMenus appear in declaration order).
+            PageCommands()
             // Site menu: the site window's primary operations (#511).
             SiteMenuCommands()
             // View ▸ pane switching ⌘1–3 + panel toggles (Chat ⌘K, Related Pages, Inspector ⌥⌘I) —

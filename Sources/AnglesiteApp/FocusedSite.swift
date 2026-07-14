@@ -49,34 +49,18 @@ struct NewContentCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Menu("New") {
-                Button("Site") {
-                    openWindow(id: "sites")
-                    WindowRouter.shared.requestNewSite()
-                }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-
-                Button("Page…") {
-                    focusedActions?.newPage()
-                }
-                .keyboardShortcut("n")
-                .disabled(focusedActions == nil)
-
-                Button("Collection…") {
-                    focusedActions?.newCollection()
-                }
-                .disabled(focusedActions == nil)
-
-                Button("Post…") {
-                    focusedActions?.newPost()
-                }
-                .disabled(focusedActions == nil)
-
-                Button("Component…") {
-                    focusedActions?.newComponent()
-                }
-                .disabled(focusedActions == nil)
+            Button("New Site…") {
+                openWindow(id: "sites")
+                WindowRouter.shared.requestNewSite()
             }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+
+            // Temporary home — relocates to Insert ▸ Component when the Insert menu
+            // lands (menu-bar spec §2.4).
+            Button("New Component…") {
+                focusedActions?.newComponent()
+            }
+            .disabled(focusedActions == nil)
 
             Button("Open Site…") {
                 Task { await openSiteFromMenu() }
