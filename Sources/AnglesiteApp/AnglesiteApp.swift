@@ -247,8 +247,8 @@ struct AnglesiteApp: App {
             // Page menu (menu-bar spec §2.5) — declared before SiteMenuCommands so it
             // renders left of it (CommandMenus appear in declaration order).
             PageCommands()
-            // Site menu: the site window's primary operations (#511).
-            SiteMenuCommands()
+            // Website menu: the site window's operations, regrouped (menu-bar spec §2.9).
+            WebsiteCommands()
             // View ▸ pane switching ⌘1–3 + panel toggles (Chat ⌘K, Related Pages, Inspector ⌥⌘I) —
             // declared before WebInspectorCommands so they sit above the developer tools (#512).
             // NOTE the anchor asymmetry (verified in the running app): `after:` groups render in
