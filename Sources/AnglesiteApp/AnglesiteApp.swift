@@ -204,11 +204,11 @@ struct AnglesiteApp: App {
             // Edit ▸ Delete ⌘⌫ / Duplicate ⌘D for the focused window's Navigator selection (#516).
             NavigatorEditCommands()
             // Both groups anchor `before: .importExport`; later declarations insert ABOVE earlier
-            // ones, so FileItemCommands is declared first to land BELOW Save/Revert in the menu
-            // (Close · Save · Revert · Rename… · Reveal — TextEdit's File-menu order).
+            // ones, so FileItemCommands is declared first to land BELOW SaveCommands, giving the
+            // order Save · Duplicate · Rename… · Move To… · Revert To ▸ · Reveal in Finder · Share….
             // File ▸ Rename… / Reveal in Finder for the focused window (#513).
             FileItemCommands()
-            // File ▸ Save ⌘S / Revert to Saved for the focused window's editors (#509).
+            // File ▸ Save ⌘S / Duplicate for the focused window's editors (#509; Revert To lives in FileItemCommands).
             SaveCommands()
             // Standard View-menu items: Show/Hide Sidebar ⌃⌘S and Customize Toolbar… (#510).
             // Customize Toolbar… stays inert until the toolbar adopts .toolbar(id:) — see #519.
@@ -240,7 +240,7 @@ struct AnglesiteApp: App {
             // Export is its own Commands type so @FocusedValue tracks scene focus (see ExportSiteCommands).
             ExportSiteCommands()
             // File ▸ Print… ⌘P for the previewed page — declared after ExportSiteCommands so it
-            // renders below Export Site Source… (`after:` groups render in declaration order, #525).
+            // renders below Export To… (`after:` groups render in declaration order, #525).
             PrintCommands()
             // Insert menu (menu-bar spec §2.4) — leftmost of the custom menus.
             InsertCommands()

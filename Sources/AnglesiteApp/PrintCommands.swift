@@ -14,7 +14,7 @@ struct PrintCommands: Commands {
         // `after:` (verified empirically for SaveCommands, #509), and `.printItem` is the same
         // machinery. `after: .importExport` groups render in DECLARATION order (see the anchor
         // note in AnglesiteApp.swift), so declaring this after ExportSiteCommands lands
-        // Print… below Export Site Source… — the bottom of the File menu, where the HIG puts it.
+        // Print… below Export To ▸ — the bottom of the File menu, where the HIG puts it.
         CommandGroup(after: .importExport) {
             Divider()
             Button("Print…") {
