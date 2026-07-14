@@ -158,8 +158,8 @@ final class SiteWindowModel {
     func showStyleGuide() async {
         guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
         inspectorContext = nil
-        await styleGuide.refresh()
         mainPaneMode = .styleGuide
+        Task { await styleGuide.refresh() }
     }
 
     func openSiriReadiness() {

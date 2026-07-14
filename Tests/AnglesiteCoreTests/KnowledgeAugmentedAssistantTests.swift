@@ -158,8 +158,43 @@ struct KnowledgeAugmentedAssistantTests {
         #expect(await base.prompts.first == prompt)
     }
 
-    @Test("style guide context enriches prompts even without search hits")
+    @Test("style guide context enriches content prompts even without search hits")
     func styleGuideEnrichesPromptWithoutSearchHits() async throws {
+        let root = try makeSite()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try """
+        ---
+        title: About
+        draft: false
+        ---
+
+        ## About Us
+
+        We're glad you're here.
+        """.write(
+            to: root.appendingPathComponent("src/pages/about.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let base = CapturingConversationalAssistant()
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
+        let assistant = KnowledgeAugmentedAssistant(base: base, index: index)
+        let prompt = "Write brand voice guidance."
+        for try await _ in try await assistant.generate(
+            prompt: prompt,
+            context: AssistantContext(siteID: "site", siteDirectory: root)
+        ) {}
+
+        let enriched = await base.prompts.first
+        #expect(enriched?.contains("Project style guide inferred") == true)
+        #expect(enriched?.contains("Relevant project context retrieved") == false)
+        #expect(enriched?.contains("User request:\n\(prompt)") == true)
+    }
+
+    @Test("style guide context is skipped for unrelated prompts")
+    func styleGuideSkipsUnrelatedPrompts() async throws {
         let root = try makeSite()
         defer { try? FileManager.default.removeItem(at: root) }
         try """
@@ -187,9 +222,7 @@ struct KnowledgeAugmentedAssistantTests {
             context: AssistantContext(siteID: "site", siteDirectory: root)
         ) {}
 
-        let enriched = await base.prompts.first
-        #expect(enriched?.contains("Project style guide inferred") == true)
-        #expect(enriched?.contains("User request:\n\(prompt)") == true)
+        #expect(await base.prompts.first == prompt)
     }
 
     private func makeSite() throws -> URL {

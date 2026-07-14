@@ -63,12 +63,17 @@ public actor KnowledgeAugmentedAssistant: ConversationalAssistant {
     }
 
     private func enrichedContext(_ prompt: String, context: AssistantContext) async -> (prompt: String, citations: [RetrievedCitation]) {
-        let styleGuide = await index.projectStyleGuide(siteID: context.siteID).assistantInstructions
         let results = await index.search(
             siteID: context.siteID,
             query: prompt,
             options: context.searchOptions
         )
+        let styleGuide: String?
+        if Self.shouldIncludeStyleGuide(for: prompt) {
+            styleGuide = await index.projectStyleGuide(siteID: context.siteID).assistantInstructions
+        } else {
+            styleGuide = nil
+        }
         let contextBlocks = [
             styleGuide,
             results.isEmpty ? nil : Self.formatContext(results),
@@ -80,6 +85,17 @@ public actor KnowledgeAugmentedAssistant: ConversationalAssistant {
         \(prompt)
         """
         return (enriched, results.map(RetrievedCitation.init))
+    }
+
+    private static func shouldIncludeStyleGuide(for prompt: String) -> Bool {
+        let normalized = prompt.lowercased()
+        let contentIntentMarkers = [
+            "article", "blog", "callout", "component", "content", "copy", "draft",
+            "edit", "frontmatter", "heading", "homepage", "landing", "markdown",
+            "mdx", "page", "post", "publish", "rewrite", "seo", "slug", "style guide",
+            "summary", "tag", "title", "tone", "voice", "write",
+        ]
+        return contentIntentMarkers.contains { normalized.contains($0) }
     }
 
     private static func formatContext(_ results: [SiteKnowledgeIndex.SearchResult]) -> String {

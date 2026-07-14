@@ -94,7 +94,7 @@ private struct Builder {
                 id: "frontmatter-\(group)",
                 title: "\(group) frontmatter",
                 detail: "Common fields are \(details.joined(separator: ", ")).",
-                evidence: samplePaths(frontmatters: frontmatters, group: group)
+                evidence: samplePaths(group: group)
             )
         }
     }
@@ -243,7 +243,7 @@ private struct Builder {
         return "content"
     }
 
-    private func samplePaths(frontmatters: [[String: FrontmatterValue]], group: String) -> [String] {
+    private func samplePaths(group: String) -> [String] {
         documents.filter { doc in
             groupName(for: doc.path) == group && !doc.frontmatter.isEmpty
         }.prefix(3).map(\.path)
