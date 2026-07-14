@@ -219,8 +219,8 @@ public struct ContainerizationControl: LocalContainerControl {
         // refuses to overwrite an existing block device file, so a stale leftover would otherwise
         // block every subsequent start for the same site. A fresh boot never wants to reuse the
         // previous run's rootfs, so clear both unconditionally before unpacking.
-        try? FileManager.default.removeItem(at: rootfsURL)
-        try? FileManager.default.removeItem(at: initfsURL)
+        try Self.removeStaleExt4Artifact(at: rootfsURL, label: "rootfs", onOutput: onOutput)
+        try Self.removeStaleExt4Artifact(at: initfsURL, label: "initfs", onOutput: onOutput)
 
         // 1. Import the bundled OCI layouts into the on-disk ImageStore and unpack to bootable mounts.
         //    `loadOrGet` re-imports whenever the bundled layout changed since the last import (#549),
@@ -376,6 +376,37 @@ public struct ContainerizationControl: LocalContainerControl {
     /// template site with more integrations took 220s. 90s (the old default) failed both. 300s keeps
     /// meaningful margin over the worst observed case without masking a truly hung guest for minutes.
     private static let previewReadyTimeout: Duration = .seconds(300)
+
+    /// Remove a site-scoped ext4 artifact left by an interrupted prior boot before the next unpack.
+    ///
+    /// `EXT4Unpacker.unpack(at:)` and `InitImage.initBlock(at:)` do not own stale-file recovery:
+    /// passing a leftover block device path can fail late with a vague NSPOSIXErrorDomain/ENOTSUP
+    /// after the expensive image import/unpack path has already run (#721). Treat inability to clear
+    /// the old path as a provisioning failure up front, with the exact artifact path in the log.
+    static func removeStaleExt4Artifact(
+        at url: URL,
+        label: String,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        removeItem: (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) },
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void = { _, _ in }
+    ) throws {
+        guard fileExists(url.path) else { return }
+
+        onOutput("[boot] removing stale \(label) ext4 artifact at \(url.path)", .stdout)
+        do {
+            try removeItem(url)
+        } catch {
+            let message = "could not remove stale \(label) ext4 artifact at \(url.path): \(error)"
+            onOutput("[boot] \(message)", .stderr)
+            throw LocalContainerError.imageUnavailable(message)
+        }
+
+        guard !fileExists(url.path) else {
+            let message = "stale \(label) ext4 artifact still exists after removal at \(url.path)"
+            onOutput("[boot] \(message)", .stderr)
+            throw LocalContainerError.imageUnavailable(message)
+        }
+    }
 
     /// Races `operation` against a `timeout`, resolving to whichever finishes first. Unlike a
     /// `withThrowingTaskGroup`-based race, this does NOT wait for `operation` to finish once the
