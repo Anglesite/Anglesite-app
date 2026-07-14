@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 // URLSession/URLRequest/HTTPURLResponse live in FoundationNetworking on non-Darwin
 // platforms (swift-corelibs-foundation); this import is a no-op on macOS.
 #if canImport(FoundationNetworking)
@@ -18,6 +19,8 @@ public enum WorkerCatalogFetchError: Error, Sendable, Equatable {
 ///   yet published `catalog.json` — callers must supply the real manifest URL once the monorepo
 ///   publishes one.
 public actor WorkerCatalogFetcher {
+    private static let logger = Logger(subsystem: "io.dwk.anglesite", category: "WorkerCatalogFetcher")
+
     private let catalogURL: URL
     private let cacheURL: URL
     private let session: URLSession
@@ -39,10 +42,17 @@ public actor WorkerCatalogFetcher {
     /// failure (network error, non-2xx response, malformed JSON), falls back to the last cached
     /// catalog; if there is no cache either, returns an empty catalog. Never throws.
     public func catalog() async -> [WorkerDescriptor] {
-        if let fresh = try? await fetchAndCache() {
-            return fresh
+        do {
+            return try await fetchAndCache()
+        } catch {
+            Self.logger.error("catalog fetch failed, falling back to cache: \(String(describing: error), privacy: .public)")
         }
-        return (try? Self.readCache(cacheURL)) ?? []
+        do {
+            return try Self.readCache(cacheURL)
+        } catch {
+            Self.logger.error("catalog cache read failed, falling back to empty catalog: \(String(describing: error), privacy: .public)")
+            return []
+        }
     }
 
     private func fetchAndCache() async throws -> [WorkerDescriptor] {
@@ -51,7 +61,11 @@ public actor WorkerCatalogFetcher {
             throw WorkerCatalogFetchError.fetchFailed("bad response from \(catalogURL)")
         }
         let descriptors = try WorkerCatalogReader.parse(data)
-        try? Self.writeCache(data, to: cacheURL, fileManager: fileManager)
+        do {
+            try Self.writeCache(data, to: cacheURL, fileManager: fileManager)
+        } catch {
+            Self.logger.error("catalog cache write failed (serving fresh data anyway): \(String(describing: error), privacy: .public)")
+        }
         return descriptors
     }
 

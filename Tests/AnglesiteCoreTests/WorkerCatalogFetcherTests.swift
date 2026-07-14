@@ -133,4 +133,44 @@ private final class WorkerCatalogStubURLProtocol: URLProtocol, @unchecked Sendab
         let workers = await fetcher.catalog()
         #expect(workers.isEmpty)
     }
+
+    @Test("falls back to the cached catalog when the response is 200 but the body is malformed JSON")
+    func fallsBackToCacheOnMalformedJSONBody() async throws {
+        let cacheURL = tempCacheURL()
+        defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(
+            at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(sampleJSON.utf8).write(to: cacheURL)
+
+        WorkerCatalogStubURLProtocol.shouldFailToLoad = false
+        WorkerCatalogStubURLProtocol.statusCode = 200
+        WorkerCatalogStubURLProtocol.body = "{ not valid json"
+        let fetcher = WorkerCatalogFetcher(
+            catalogURL: URL(string: "https://example.invalid/catalog.json")!,
+            cacheURL: cacheURL,
+            session: WorkerCatalogStubURLProtocol.makeSession()
+        )
+
+        let workers = await fetcher.catalog()
+        #expect(workers.map(\.id) == ["webmention"])
+    }
+
+    @Test("returns an empty catalog when the cache file on disk is corrupted and the fetch also fails")
+    func returnsEmptyWhenCacheIsCorruptedAndFetchFails() async throws {
+        let cacheURL = tempCacheURL()
+        defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(
+            at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{ not valid json".utf8).write(to: cacheURL)
+
+        WorkerCatalogStubURLProtocol.shouldFailToLoad = true
+        let fetcher = WorkerCatalogFetcher(
+            catalogURL: URL(string: "https://example.invalid/catalog.json")!,
+            cacheURL: cacheURL,
+            session: WorkerCatalogStubURLProtocol.makeSession()
+        )
+
+        let workers = await fetcher.catalog()
+        #expect(workers.isEmpty)
+    }
 }
