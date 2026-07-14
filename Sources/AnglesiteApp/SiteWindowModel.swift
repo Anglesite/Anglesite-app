@@ -211,6 +211,11 @@ final class SiteWindowModel {
     var paneSelection: Int {
         if case .editor = mainPaneMode { return 1 }
         if case .graph = mainPaneMode { return 2 }
+        // Cleanup has no toolbar/View-menu segment of its own (Site ▸ Cleanup… is the only way
+        // in) — an out-of-range value so the pane Picker and the Preview/Editor/Graph Toggles
+        // all correctly read as unselected instead of Cleanup falsely appearing as Preview (#723
+        // review).
+        if case .cleanup = mainPaneMode { return 3 }
         return 0
     }
 
@@ -474,7 +479,7 @@ final class SiteWindowModel {
 
     // MARK: - Dev-server commands (Site menu, #515)
 
-    /// Thin pass-throughs so `SiteMenuCommands` reads one focused model, like every other Site
+    /// Thin pass-throughs so `WebsiteCommands` reads one focused model, like every other Site
     /// item. Enablement rules live in `DevServerControls` (AnglesiteCore, CI-tested); the state
     /// plumbing lives in `PreviewModel`.
     var canStartDevServer: Bool { preview.canStartDevServer }

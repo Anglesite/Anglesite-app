@@ -531,6 +531,12 @@ extension SiteWindowModelTests {
         while model.mainPaneMode != .cleanup { await Task.yield() }
         #expect(model.activeEditor == nil)
         #expect(model.inspectorContext == nil)
+        // PR #723 review: paneSelection previously fell through to 0 (Preview) for `.cleanup`,
+        // so the toolbar pane Picker (tags 0/1/2 only) and the View-menu Preview/Editor/Graph
+        // Toggles all misread Cleanup as Preview being selected — silently breaking ⌘1 from the
+        // Cleanup pane (its Toggle read as already-on, so toggling it off was a no-op). 3 is
+        // deliberately out of the Picker's/Toggles' 0–2 range so nothing shows selected instead.
+        #expect(model.paneSelection == 3)
     }
 
     /// Mirrors `revealCitationInGraphSkipsRevealWhenShowGraphAborts`'s real external-conflict

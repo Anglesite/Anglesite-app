@@ -120,7 +120,7 @@ struct SiteWindow: View {
         content
             // `focusedSceneValue`, not `focusedValue`: keyboard focus often sits in an AppKit
             // responder (the WKWebView preview) where nothing in SwiftUI's focus system is
-            // focused, so a plain focusedValue resolves to nil and File ▸ Export Site Source…
+            // focused, so a plain focusedValue resolves to nil and File ▸ Export To ▸ Astro Website…
             // stays disabled even with the site window frontmost (same trap documented for
             // `\.preview` below).
             .focusedSceneValue(\.siteID, model.site?.id ?? siteID)

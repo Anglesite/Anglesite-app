@@ -43,12 +43,14 @@ struct ViewMenuCommands: Commands {
 
             Divider()
 
-            // ⌘K lives here, not on the toolbar chat button — a shortcut on a toolbar item is
-            // invisible in the menu bar (the discoverability gap #512 exists to close).
+            // ⌃⌘K — ⌘K is reserved for Format ▸ Add Link… per the macOS editing
+            // convention (menu-bar spec §3). The shortcut lives here, not on the
+            // toolbar chat button — a shortcut on a toolbar item is invisible in
+            // the menu bar (the discoverability gap #512 exists to close).
             Button(model?.chatPresented == true ? "Hide Chat" : "Show Chat") {
                 model?.chatPresented.toggle()
             }
-            .keyboardShortcut("k")
+            .keyboardShortcut("k", modifiers: [.command, .control])
             .disabled(model == nil)
 
             Button(model?.relatedPagesPresented == true ? "Hide Related Pages" : "Show Related Pages") {
@@ -57,12 +59,26 @@ struct ViewMenuCommands: Commands {
             .disabled(model == nil)
 
             // ⌥⌘I per the HIG-standard inspector shortcut — reserved for this in #510, when the
-            // Web Inspector moved to ⌥⇧⌘I.
-            Button(inspectorPanel?.isShown == true ? "Hide Inspector" : "Show Inspector") {
-                inspectorPanel?.toggle()
+            // Web Inspector moved to ⌥⇧⌘I. Submenu shape per menu-bar spec §2.8; the tab items
+            // are planned until the inspector grows Style/Animation/Attributes tabs.
+            Menu("Inspector") {
+                PlannedItem("Style")
+                PlannedItem("Animation")
+                PlannedItem("Attributes")
+
+                Divider()
+
+                PlannedItem("Show Next Inspector Tab")
+                PlannedItem("Show Previous Inspector Tab")
+
+                Divider()
+
+                Button(inspectorPanel?.isShown == true ? "Hide Inspector" : "Show Inspector") {
+                    inspectorPanel?.toggle()
+                }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .disabled(inspectorPanel?.isAvailable != true)
             }
-            .keyboardShortcut("i", modifiers: [.command, .option])
-            .disabled(inspectorPanel?.isAvailable != true)
 
             Divider()
         }
