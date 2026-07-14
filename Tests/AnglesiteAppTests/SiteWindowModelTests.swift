@@ -496,3 +496,84 @@ extension SiteWindowModelTests {
         #expect(model.preview.activeRoute == "/notes/")
     }
 }
+
+extension SiteWindowModelTests {
+    /// Review finding (#714 slice 1, Task 4): `presentCleanup()` — the Site ▸ Cleanup… entry
+    /// point that replaced the old sidebar Cleanup row — had zero coverage. Mirrors `showGraph()`'s
+    /// leave-current-surface-first guard, so these tests follow the same conventions as the
+    /// `.websiteSettings`/`.directory` `applyNavigatorSelection` tests above (real package fixture,
+    /// poll for the async `Task { ... }` body to land) and the `revealCitationInGraph` conflict test
+    /// (real dirty-editor-with-external-change fixture to prove the guard actually aborts).
+    @Test("presentCleanup switches the main pane to Cleanup, clearing any open editor/inspector")
+    func presentCleanupSwitchesPane() async throws {
+        let (root, packageURL, package) = try makeSitePackage()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let model = makeModel()
+        model.site = SiteStore.Site(
+            id: "site-a", name: "Test", packageURL: packageURL,
+            isValid: true, missingSentinels: [], lastSeen: Date(), bookmarkData: nil
+        )
+        // Seed a real open editor + inspector first, so the post-call assertions prove
+        // `presentCleanup()` actually clears them rather than trivially finding them already nil
+        // (same anti-tautology technique as `applyNavigatorSelectionDirectoryNavigatesPreview`).
+        let priorFile = FileRef(url: root.appendingPathComponent("dummy.astro"), group: .components, name: "dummy.astro")
+        model.activeEditor = .text(FileEditorModel(file: priorFile))
+        model.mainPaneMode = .editor(priorFile)
+        model.inspectorContext = .page(PageMetadataModel(file: priorFile, sourceDirectory: package.sourceURL))
+
+        model.presentCleanup()
+
+        // `presentCleanup()`'s body runs inside its own `Task { ... }` after awaiting
+        // `leaveCurrentEditor()`/`leaveCurrentInspector()` — both no-ops here, but still real
+        // suspension points, so poll rather than assert inline (same pattern as
+        // `applyNavigatorSelection`'s `.websiteSettings`/`.directory` tests).
+        while model.mainPaneMode != .cleanup { await Task.yield() }
+        #expect(model.activeEditor == nil)
+        #expect(model.inspectorContext == nil)
+    }
+
+    /// Mirrors `revealCitationInGraphSkipsRevealWhenShowGraphAborts`'s real external-conflict
+    /// fixture: a dirty editor whose file changed on disk under it makes `flushBeforeLeaving()`
+    /// (invoked via `leaveCurrentEditor()`) return `false`, so `presentCleanup()`'s guard should
+    /// abort before touching `mainPaneMode`/`activeEditor`.
+    @Test("presentCleanup doesn't switch panes when leaveCurrentEditor aborts on an editor conflict")
+    func presentCleanupAbortsOnEditorConflict() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let model = makeModel()
+        let editedFile = root.appendingPathComponent("conflict.txt")
+        try Data("original".utf8).write(to: editedFile)
+        let fileRef = FileRef(url: editedFile, group: .components, name: "conflict.txt")
+        let editorModel = FileEditorModel(file: fileRef)
+        await editorModel.load()
+        editorModel.text = "dirty edit"
+        try Data("changed on disk".utf8).write(to: editedFile)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(2)], ofItemAtPath: editedFile.path
+        )
+        model.mainPaneMode = .editor(fileRef)
+        model.activeEditor = .text(editorModel)
+
+        model.presentCleanup()
+
+        // Bounded poll for the conflict to surface — the signal that `presentCleanup()`'s
+        // deferred Task has finished running and aborted (same bounded-poll reasoning as
+        // `revealCitationInGraphSkipsRevealWhenShowGraphAborts`, since on the abort path there's
+        // no discriminating state change other than the editor's own conflict flag to poll on).
+        var iterations = 0
+        while editorModel.conflictDiskContents == nil, iterations < 10_000 {
+            await Task.yield()
+            iterations += 1
+        }
+        guard editorModel.conflictDiskContents != nil else {
+            Issue.record("flushBeforeLeaving never surfaced the external conflict")
+            return
+        }
+
+        #expect(model.mainPaneMode == .editor(fileRef))
+        #expect(model.activeEditor != nil)
+    }
+}
