@@ -12,7 +12,7 @@ extension FocusedValues {
     }
 }
 
-/// File ▸ Save / Revert to Saved for the focused site window's editing surfaces (main-pane editor
+/// File ▸ Save / Duplicate / Save As for the focused site window's editing surfaces (main-pane editor
 /// and inspector). Replaces the hidden per-view ⌘S buttons, which double-registered the shortcut
 /// whenever the editor and inspector were both on screen (#509).
 struct SaveCommands: Commands {
@@ -36,10 +36,13 @@ struct SaveCommands: Commands {
             .keyboardShortcut("s")
             .disabled(siteWindowModel?.hasUnsavedEdits != true || siteWindowModel?.editCommandInFlight == true)
 
-            Button("Revert to Saved") {
-                siteWindowModel?.requestRevertToSaved()
-            }
-            .disabled(siteWindowModel?.hasUnsavedEdits != true || siteWindowModel?.editCommandInFlight == true)
+            // Duplicate copies the package with a fresh site UUID (#242 identity rule);
+            // Save As… is its ⌥-alternate, per modern macOS document conventions
+            // (menu-bar spec §2.2). Both planned until the package-copy flow exists.
+            PlannedItem("Duplicate", shortcut: "s", modifiers: [.command, .shift])
+                .modifierKeyAlternate(.option) {
+                    PlannedItem("Save As…")
+                }
         }
     }
 }

@@ -1,8 +1,7 @@
 import SwiftUI
 import AnglesiteCore
 
-/// Browser-style View-menu commands for the live preview (#514): Reload Preview ⌘R, Back ⌘[ /
-/// Forward ⌘], and page zoom (Actual Size ⌘0, Zoom In ⌘+, Zoom Out ⌘−).
+/// Browser-style View-menu commands for the live preview (#514): Reload Preview ⌘R, Back ⌃⌘← / Forward ⌃⌘→, and page zoom (Actual Size ⌘0, Zoom In ⌘+, Zoom Out ⌘−).
 ///
 /// Reads the focused site window's `PreviewModel` through the same `\.preview` focused value as
 /// `WebInspectorCommands`. Everything is disabled until that window's preview web view exists
@@ -21,16 +20,18 @@ struct PreviewNavigationCommands: Commands {
             .keyboardShortcut("r")
             .disabled(focusedPreview?.hasWebView != true)
 
+            // ⌃⌘←/⌃⌘→ — Xcode's navigation-history keys. ⌘[/⌘] are reserved for
+            // Format ▸ Text indent per the macOS editor convention (menu-bar spec §3).
             Button("Back") {
                 focusedPreview?.goBack()
             }
-            .keyboardShortcut("[")
+            .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
             .disabled(focusedPreview?.canGoBack != true)
 
             Button("Forward") {
                 focusedPreview?.goForward()
             }
-            .keyboardShortcut("]")
+            .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
             .disabled(focusedPreview?.canGoForward != true)
 
             Divider()

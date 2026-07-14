@@ -200,15 +200,30 @@ struct AnglesiteApp: App {
                 Button("About Anglesite") { showAboutPanel() }
             }
 
+            CommandGroup(before: .systemServices) {
+                Divider()
+
+                Button("Provide Anglesite Feedback…") {
+                    NSWorkspace.shared.open(URL(string: "https://anglesite.dwk.io/feedback/")!)
+                }
+
+                Divider()
+
+                // Opens the App Store analytics-consent pane when it exists (spec §2.1).
+                PlannedItem("Privacy & Analytics…")
+            }
+
             NewContentCommands()
             // Edit ▸ Delete ⌘⌫ / Duplicate ⌘D for the focused window's Navigator selection (#516).
             NavigatorEditCommands()
+            // Edit-menu skeleton: selection walkers, annotations, Find ▸ (menu-bar spec §2.3).
+            EditMenuSkeletonCommands()
             // Both groups anchor `before: .importExport`; later declarations insert ABOVE earlier
-            // ones, so FileItemCommands is declared first to land BELOW Save/Revert in the menu
-            // (Close · Save · Revert · Rename… · Reveal — TextEdit's File-menu order).
-            // File ▸ Rename… / Reveal in Finder for the focused window (#513).
+            // ones, so FileItemCommands is declared first to land BELOW SaveCommands, giving the
+            // order Save · Duplicate · Rename… · Move To… · Revert To ▸ · Reveal in Finder · Share…
+            // (FileItemCommands: Rename/Move To/Revert To/Reveal/Share, #513).
             FileItemCommands()
-            // File ▸ Save ⌘S / Revert to Saved for the focused window's editors (#509).
+            // File ▸ Save ⌘S / Duplicate for the focused window's editors (#509; Revert To lives in FileItemCommands).
             SaveCommands()
             // Standard View-menu items: Show/Hide Sidebar ⌃⌘S and Customize Toolbar… (#510).
             // Customize Toolbar… stays inert until the toolbar adopts .toolbar(id:) — see #519.
@@ -240,10 +255,19 @@ struct AnglesiteApp: App {
             // Export is its own Commands type so @FocusedValue tracks scene focus (see ExportSiteCommands).
             ExportSiteCommands()
             // File ▸ Print… ⌘P for the previewed page — declared after ExportSiteCommands so it
-            // renders below Export Site Source… (`after:` groups render in declaration order, #525).
+            // renders below Export To… (`after:` groups render in declaration order, #525).
             PrintCommands()
-            // Site menu: the site window's primary operations (#511).
-            SiteMenuCommands()
+            // Insert menu (menu-bar spec §2.4) — leftmost of the custom menus.
+            InsertCommands()
+            // Page menu (menu-bar spec §2.5) — CommandMenus render in declaration order:
+            // Insert · Page · Format · Arrange · Website.
+            PageCommands()
+            // Format menu skeleton (menu-bar spec §2.6) — editor-gated.
+            FormatCommands()
+            // Arrange menu skeleton (menu-bar spec §2.7) — editor-gated, contextual.
+            ArrangeCommands()
+            // Website menu: the site window's operations, regrouped (menu-bar spec §2.9).
+            WebsiteCommands()
             // View ▸ pane switching ⌘1–3 + panel toggles (Chat ⌘K, Related Pages, Inspector ⌥⌘I) —
             // declared before WebInspectorCommands so they sit above the developer tools (#512).
             // NOTE the anchor asymmetry (verified in the running app): `after:` groups render in
@@ -264,6 +288,14 @@ struct AnglesiteApp: App {
                         openWindow(id: "debug")
                     }
                     .keyboardShortcut("d", modifiers: [.command, .option])
+                }
+            }
+
+            CommandGroup(after: .help) {
+                PlannedItem("What's New in Anglesite")
+
+                Button("Anglesite Website") {
+                    NSWorkspace.shared.open(URL(string: "https://anglesite.dwk.io/")!)
                 }
             }
         }

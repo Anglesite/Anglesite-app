@@ -15,7 +15,7 @@ import Foundation
 /// own emission arrives instead), so the flag always clears.
 ///
 /// Lives in `AnglesiteCore` (not the app target) so the rules run under `swift test` on CI; the
-/// app-side `PreviewModel`/`SiteWindowModel`/`SiteMenuCommands` glue stays thin.
+/// app-side `PreviewModel`/`SiteWindowModel`/`WebsiteCommands` glue stays thin.
 public enum DevServerControls {
     /// Start applies when nothing is running: the server was explicitly stopped (`.idle`) or it
     /// crashed / never came up (`.failed` — same recovery as the preview pane's Retry button).

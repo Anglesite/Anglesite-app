@@ -461,7 +461,7 @@ final class SiteWindowModel {
 
     // MARK: - Dev-server commands (Site menu, #515)
 
-    /// Thin pass-throughs so `SiteMenuCommands` reads one focused model, like every other Site
+    /// Thin pass-throughs so `WebsiteCommands` reads one focused model, like every other Site
     /// item. Enablement rules live in `DevServerControls` (AnglesiteCore, CI-tested); the state
     /// plumbing lives in `PreviewModel`.
     var canStartDevServer: Bool { preview.canStartDevServer }
