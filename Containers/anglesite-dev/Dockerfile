@@ -46,12 +46,19 @@ RUN cd /usr/local/lib/anglesite-mcp \
 # zero install (anglesite-hydrate), AND leaves npm's cache (/root/.npm) in the layer so a
 # drifted-lockfile site's `npm ci --prefer-offline` mostly avoids the network. Full closure
 # (no --omit=dev): astro dev/check need devDependencies (tsx, @astrojs/check, typescript).
+#
+# Keep node_modules as one tar entry in the OCI layer instead of ~19,000 individual entries.
+# Apple Containerization's Swift EXT4 formatter performs path-tree lookups for every OCI entry;
+# the expanded tree made first boot take tens of minutes. Linux tar expands the same trusted,
+# build-time archive into the writable site workspace much faster during hydration.
 ENV ANGLESITE_HOME=/opt/anglesite
 COPY template/package.json template/package-lock.json ${ANGLESITE_HOME}/baked/
 RUN cd ${ANGLESITE_HOME}/baked \
     && ( npm ci \
          || { echo "WARN: template lockfile out of sync — falling back to npm install" >&2; \
-              npm install; } )
+              npm install; } ) \
+    && tar -cf ${ANGLESITE_HOME}/baked-node-modules.tar node_modules \
+    && rm -rf node_modules
 COPY hydrate.sh /usr/local/bin/anglesite-hydrate
 RUN chmod +x /usr/local/bin/anglesite-hydrate
 

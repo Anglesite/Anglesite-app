@@ -53,6 +53,9 @@ ENV ANGLESITE_MCP_ENTRY=${ANGLESITE_HOME}/plugin/server/index.mjs
 # Install the template's full dependency closure once, at build time. This warms
 # the npm cache for any cloned site AND keeps the resolved node_modules so a site
 # whose lockfile matches the template reuses it with zero install (hydrate.sh).
+# Store that tree as one tar entry in the OCI layer: besides shrinking the layer's
+# entry count, this avoids pathological first-boot EXT4 import time in the local
+# Apple Containerization runtime. Hydration expands it in the Linux guest.
 # `npm ci` is preferred (reproducible, and it's what hydrate.sh's zero-install
 # fast path compares against). If the template's committed lockfile has drifted
 # out of sync with its package.json, fall back to `npm install` with a loud
@@ -62,7 +65,9 @@ COPY template/package.json template/package-lock.json ${ANGLESITE_HOME}/baked/
 RUN cd ${ANGLESITE_HOME}/baked \
  && ( npm ci \
       || { echo "WARN: template lockfile out of sync — falling back to npm install" >&2; \
-           npm install; } )
+           npm install; } ) \
+ && tar -cf ${ANGLESITE_HOME}/baked-node-modules.tar node_modules \
+ && rm -rf node_modules
 
 # ---- Hydration + start helpers ------------------------------------------------
 COPY entrypoint.sh hydrate.sh start-dev-server.sh /usr/local/bin/
