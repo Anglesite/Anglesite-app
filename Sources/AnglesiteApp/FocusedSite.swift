@@ -104,16 +104,39 @@ struct ExportSiteCommands: Commands {
     var body: some Commands {
         // Export lives after the standard Save items. Enabled only when a site window is focused.
         CommandGroup(after: .importExport) {
-            Button("Export Site Source…") {
-                // Capture now — focus may shift between press and Task execution.
-                guard let id = focusedSiteID else { return }
-                Task { @MainActor in
-                    if let site = await SiteStore.shared.find(id: id) {
-                        SiteActions.exportSource(of: site)
+            Menu("Export To") {
+                Button("Astro Website…") {
+                    // Capture now — focus may shift between press and Task execution.
+                    guard let id = focusedSiteID else { return }
+                    Task { @MainActor in
+                        if let site = await SiteStore.shared.find(id: id) {
+                            SiteActions.exportSource(of: site)
+                        }
                     }
                 }
+                .disabled(focusedSiteID == nil)
+
+                // Runs the build in the site runtime and saves dist/ (spec §2.2).
+                PlannedItem("Built HTML…")
             }
-            .disabled(focusedSiteID == nil)
+
+            // Git-repo size reduction — unused binary blobs (spec §4.3).
+            PlannedItem("Reduce File Size…")
+
+            Menu("Advanced") {
+                Menu("Change File Type") {
+                    // Keynote semantics; single-file is an at-rest state (spec §4.2).
+                    PlannedItem("Single File")
+                    PlannedItem("Package")
+                }
+
+                PlannedItem("Language & Region…")
+            }
+
+            Divider()
+
+            // iWork-style package encryption; at-rest state (spec §4.2).
+            PlannedItem("Set Password…")
         }
     }
 }

@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// File ▸ Rename… / Reveal in Finder for the focused site window (#513). Rename targets the
-/// navigator's selected item (the same inline-edit flow as its context menu); Reveal targets the
-/// most specific focused surface — the open editor's file, else the inspected page's file, else
-/// the site's `Source/` directory. Declared BEFORE `SaveCommands` in AnglesiteApp.swift: groups
-/// sharing a `before:` anchor insert above earlier declarations, so declaring this one first is
-/// what lands Rename/Reveal below Save/Revert (between them and Export Site Source…).
+/// File ▸ Rename… / Move To… / Revert To ▸ / Reveal in Finder / Share… for the focused site
+/// window (#513). Rename targets the navigator's selected item (the same inline-edit flow as its
+/// context menu); Reveal targets the most specific focused surface — the open editor's file, else
+/// the inspected page's file, else the site's `Source/` directory. Declared BEFORE `SaveCommands`
+/// in AnglesiteApp.swift: groups sharing a `before:` anchor insert above earlier declarations, so
+/// declaring this one first is what lands these items below Save/Duplicate/Save As.
 struct FileItemCommands: Commands {
     @FocusedValue(\.siteWindowModel) private var model
 
@@ -14,8 +14,35 @@ struct FileItemCommands: Commands {
             Button("Rename…") { model?.renameNavigatorItem() }
                 .disabled(model?.canRenameNavigatorItem != true)
 
+            // Relocates the package; recents + (MAS) security-scoped bookmark update
+            // (menu-bar spec §2.2). Planned until the move flow exists.
+            PlannedItem("Move To…")
+
+            // Revert To nests the shipped editor revert (moved from SaveCommands, same
+            // action) beside the git-backed version browser (spec §4.1) — iWork's
+            // File ▸ Revert To shape. Both items also disable while a save/revert is in
+            // flight (PR #532 review).
+            Menu("Revert To") {
+                Button("Revert to Saved") {
+                    model?.requestRevertToSaved()
+                }
+                .disabled(model?.hasUnsavedEdits != true || model?.editCommandInFlight == true)
+
+                Divider()
+
+                PlannedItem("Browse All Versions…")
+            }
+
+            Divider()
+
             Button("Reveal in Finder") { model?.revealInFinder() }
                 .disabled(model?.canRevealInFinder != true)
+
+            Divider()
+
+            // ShareLink ships in the toolbar (#523); the menu item is planned until the
+            // File-menu share popover (incl. "Package as Single File", spec §4.2) exists.
+            PlannedItem("Share…")
         }
     }
 }
