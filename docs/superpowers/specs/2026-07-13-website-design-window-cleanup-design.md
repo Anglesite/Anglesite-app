@@ -53,7 +53,10 @@ public struct URLTreeNode: Identifiable, Sendable, Equatable {
         case page                       // any other HTML page or collection entry
         case directory(hasFeed: Bool)   // URL path segment with children
     }
-    public let id: String               // the route, e.g. "/notes/", "/about"
+    public let id: String               // graph entity id for pages/entries (rename &
+                                        // context-menu machinery resolves rows via
+                                        // graph.page(id:)/post(id:)); "dir:<route>" for
+                                        // directories, "website" for the settings row
     public let title: String
     public let route: String
     public let kind: Kind
@@ -61,6 +64,7 @@ public struct URLTreeNode: Identifiable, Sendable, Equatable {
 }
 
 public func buildSiteURLTree(
+    websiteTitle: String?,
     pages: [SiteContentGraph.Page],
     posts: [SiteContentGraph.Post],
     feedCollections: Set<String>,
