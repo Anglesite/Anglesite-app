@@ -52,7 +52,7 @@ public func buildSiteURLTree(
         title: (trimmed?.isEmpty == false ? trimmed! : "Website"),
         route: "/", kind: .website, children: nil)
 
-    let root = DirectoryBuilder(route: "/", collection: nil)
+    let root = DirectoryBuilder(route: "/")
     for page in pages {
         let segments = pathSegments(of: page.route)
         root.insert(page: page, remainingSegments: segments)
@@ -76,24 +76,22 @@ private func pathSegments(of route: String) -> [String] {
 /// Mutable accumulation node; `build*` converts to immutable `URLTreeNode`s.
 private final class DirectoryBuilder {
     let route: String
-    let collection: String?
     var indexPage: SiteContentGraph.Page?
     var pages: [SiteContentGraph.Page] = []
     var entries: [SiteContentGraph.Post] = []
     var subdirectories: [String: DirectoryBuilder] = [:]
 
-    init(route: String, collection: String?) {
-        self.route = route; self.collection = collection
+    init(route: String) {
+        self.route = route
     }
 
     func child(for segment: String) -> DirectoryBuilder {
         if let existing = subdirectories[segment] { return existing }
-        let encoded = segment.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? segment
-        let child = DirectoryBuilder(
-            route: route + encoded + "/",
-            // A first-level directory that receives entries is a collection; the name is set
-            // lazily when the first entry arrives (see `collectionName`).
-            collection: nil)
+        // Not percent-encoded: this route is matched against page routes in `mergeIndexPages`,
+        // and `SiteContentGraph.Page.route` values (from `ContentScanner.routeFromPagePath`)
+        // are never encoded either. Encoding is only needed for entry routes (`postRoute(for:)`),
+        // which are built and matched independently of directory routes.
+        let child = DirectoryBuilder(route: route + segment + "/")
         subdirectories[segment] = child
         return child
     }
@@ -116,9 +114,8 @@ private final class DirectoryBuilder {
     func mergeIndexPages() {
         pages.removeAll { page in
             let normalized = page.route.hasSuffix("/") ? String(page.route.dropLast()) : page.route
-            for (segment, builder) in subdirectories {
+            for builder in subdirectories.values {
                 let dirNormalized = String(builder.route.dropLast())
-                _ = segment
                 if normalized == dirNormalized || page.route == builder.route {
                     builder.indexPage = page
                     return true

@@ -121,6 +121,17 @@ struct SiteURLTreeTests {
         #expect(dir.children?.first?.target == .route(postRoute(for: post("notes", "héllo wörld", "Hello"))))
     }
 
+    @Test("a directory index page merges correctly even when the segment needs percent-encoding")
+    func directoryIndexPinnedWithEncodedSegment() throws {
+        let nodes = build(
+            pages: [page("/", title: "Home"), page("/my notes", title: "All My Notes")],
+            posts: [post("my notes", "n1", "First", date: Date(timeIntervalSince1970: 1))])
+        let dir = try #require(nodes.first { $0.id == "dir:/my notes/" })
+        #expect(dir.children?.map(\.title) == ["All My Notes", "First"])
+        // The merged /my notes page is a child, not a top-level sibling.
+        #expect(!nodes.contains { $0.id == "s:page:/my notes" })
+    }
+
     @Test("leaf ids are graph entity ids")
     func leafIDs() throws {
         let nodes = build(pages: [page("/", title: "Home")],
