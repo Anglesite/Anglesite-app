@@ -43,9 +43,6 @@ extension FocusedValues {
 /// Must be `Commands` (not `App`) so the focused scene values can flow into the menu state.
 struct NewContentCommands: Commands {
     @Environment(\.openWindow) private var openWindow
-    // SwiftUI exposes `.focusedSceneValue(...)` as the publishing modifier; command readers still
-    // use `@FocusedValue`. There is no `@FocusedSceneValue` property wrapper in the macOS 27 SDK.
-    @FocusedValue(\.newContentActions) private var focusedActions
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -54,13 +51,6 @@ struct NewContentCommands: Commands {
                 WindowRouter.shared.requestNewSite()
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
-
-            // Temporary home — relocates to Insert ▸ Component when the Insert menu
-            // lands (menu-bar spec §2.4).
-            Button("New Component…") {
-                focusedActions?.newComponent()
-            }
-            .disabled(focusedActions == nil)
 
             Button("Open Site…") {
                 Task { await openSiteFromMenu() }

@@ -242,6 +242,8 @@ struct AnglesiteApp: App {
             // File ▸ Print… ⌘P for the previewed page — declared after ExportSiteCommands so it
             // renders below Export Site Source… (`after:` groups render in declaration order, #525).
             PrintCommands()
+            // Insert menu (menu-bar spec §2.4) — leftmost of the custom menus.
+            InsertCommands()
             // Page menu (menu-bar spec §2.5) — declared before SiteMenuCommands so it
             // renders left of it (CommandMenus appear in declaration order).
             PageCommands()
