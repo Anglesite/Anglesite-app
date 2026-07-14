@@ -717,6 +717,12 @@ struct SiteWindow: View {
             SiteGraphExplorerView(model: model.graphExplorer) { node in
                 model.openGraphNode(node, site: site)
             }
+        case .cleanup:
+            ProjectCleanupView(
+                cleanup: model.cleanup,
+                onOpen: { model.openCleanupCandidate($0) },
+                onDelete: { await model.deleteCleanupCandidate($0) }
+            )
         case .preview:
             previewPane(for: site)
         }

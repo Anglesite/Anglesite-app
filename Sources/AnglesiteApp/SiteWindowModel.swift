@@ -10,6 +10,7 @@ enum MainPaneMode: Equatable {
     case preview
     case editor(FileRef)
     case graph
+    case cleanup        // Site ▸ Cleanup… (#714 moved it out of the sidebar)
 }
 
 enum ActiveEditor {
@@ -105,8 +106,9 @@ final class SiteWindowModel {
     }
     var relatedPages: RelatedPagesModel
     var relatedPagesPresented = false
-    /// Drives the Navigator's "Cleanup" section. On-demand only — `scan()` is never called
-    /// automatically, only from the Navigator's "Scan for Cleanup Opportunities" action.
+    /// Drives the main-pane Cleanup view (Site ▸ Cleanup…, #714 moved it out of the sidebar).
+    /// `scan()` runs once automatically when `ProjectCleanupView` first appears; the manual
+    /// Rescan button re-runs it on demand afterward.
     var cleanup: ProjectCleanupModel
     var harden = HardenModel()
     var domain = DomainModel()
@@ -234,6 +236,17 @@ final class SiteWindowModel {
         inspectorContext = nil
         mainPaneMode = .graph
         return true
+    }
+
+    /// Switches the main pane to Cleanup (Site ▸ Cleanup…, #714 moved it out of the sidebar).
+    /// Mirrors `showGraph()`'s leave-current-surface-first guard.
+    func presentCleanup() {
+        Task {
+            guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+            activeEditor = nil
+            inspectorContext = nil
+            mainPaneMode = .cleanup
+        }
     }
 
     /// Resolves a chat citation's file path to a Site Graph Explorer node and reveals it there
