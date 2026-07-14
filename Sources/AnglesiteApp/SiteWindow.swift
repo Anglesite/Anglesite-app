@@ -177,6 +177,16 @@ struct SiteWindow: View {
 
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    Task { await model.showStyleGuide() }
+                } label: {
+                    Label("Project Style Guide", systemImage: "text.page.badge.magnifyingglass")
+                }
+                .help("Review the writing and content conventions Anglesite learned from this project")
+            }
+            .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .low))
+
+            ToolbarItem(placement: .primaryAction) {
+                Button {
                     inspectorShown.toggle()
                 } label: {
                     Label("Inspector", systemImage: "sidebar.right")
@@ -470,10 +480,11 @@ struct SiteWindow: View {
                 Text("Preview").tag(0)
                 if model.activeEditorFile != nil { Text("Editor").tag(1) }
                 Text("Graph").tag(2)
+                Text("Style").tag(3)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: model.activeEditorFile == nil ? 220 : 270)
+            .frame(width: model.activeEditorFile == nil ? 280 : 330)
             .padding(6)
             Divider()
             mainPaneContent(for: site)
@@ -506,6 +517,8 @@ struct SiteWindow: View {
             SiteGraphExplorerView(model: model.graphExplorer) { node in
                 model.openGraphNode(node, site: site)
             }
+        case .styleGuide:
+            ProjectStyleGuideView(model: model.styleGuide)
         case .preview:
             previewPane(for: site)
         }

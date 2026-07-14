@@ -63,15 +63,18 @@ public actor KnowledgeAugmentedAssistant: ConversationalAssistant {
     }
 
     private func enrichedContext(_ prompt: String, context: AssistantContext) async -> (prompt: String, citations: [RetrievedCitation]) {
+        let styleGuide = await index.projectStyleGuide(siteID: context.siteID).assistantInstructions
         let results = await index.search(
             siteID: context.siteID,
             query: prompt,
             options: context.searchOptions
         )
-        guard !results.isEmpty else { return (prompt, []) }
-        let formatted = Self.formatContext(results)
-        let enriched = """
-        \(formatted)
+        let contextBlocks = [
+            styleGuide,
+            results.isEmpty ? nil : Self.formatContext(results),
+        ].compactMap { $0 }
+        guard !contextBlocks.isEmpty else { return (prompt, []) }
+        let enriched = contextBlocks.joined(separator: "\n\n") + """
 
         User request:
         \(prompt)

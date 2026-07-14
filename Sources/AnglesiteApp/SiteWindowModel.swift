@@ -10,6 +10,7 @@ enum MainPaneMode: Equatable {
     case preview
     case editor(FileRef)
     case graph
+    case styleGuide
 }
 
 enum ActiveEditor {
@@ -86,6 +87,7 @@ final class SiteWindowModel {
     var newCollectionPresented = false
     var navigator: SiteNavigatorModel?
     var graphExplorer: SiteGraphExplorerModel
+    var styleGuide: ProjectStyleGuideModel
     var mainPaneMode: MainPaneMode = .preview
     /// The open file's editor state. Owned here (not in `MainPaneEditorView`) so navigating away can
     /// auto-save it and the Preview/Editor toggle keeps the buffer alive. Replaced when a different
@@ -118,6 +120,7 @@ final class SiteWindowModel {
             siteDirectory: { id in await SiteStore.shared.find(id: id)?.sourceDirectory }
         )
         self.graphExplorer = SiteGraphExplorerModel(graph: contentGraph)
+        self.styleGuide = ProjectStyleGuideModel(index: knowledgeIndex, graph: contentGraph)
         self.relatedPages = RelatedPagesModel(index: knowledgeIndex, ranker: semanticRanker)
     }
 
@@ -128,6 +131,7 @@ final class SiteWindowModel {
     var paneSelection: Int {
         if case .editor = mainPaneMode { return 1 }
         if case .graph = mainPaneMode { return 2 }
+        if case .styleGuide = mainPaneMode { return 3 }
         return 0
     }
 
@@ -140,6 +144,8 @@ final class SiteWindowModel {
             mainPaneMode = .editor(file)
         } else if value == 2 {
             Task { await showGraph() }
+        } else if value == 3 {
+            Task { await showStyleGuide() }
         }
     }
 
@@ -147,6 +153,13 @@ final class SiteWindowModel {
         guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
         inspectorContext = nil
         mainPaneMode = .graph
+    }
+
+    func showStyleGuide() async {
+        guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+        inspectorContext = nil
+        await styleGuide.refresh()
+        mainPaneMode = .styleGuide
     }
 
     func openSiriReadiness() {
@@ -197,6 +210,7 @@ final class SiteWindowModel {
         navigator?.stop()
         navigator = nil
         graphExplorer.stop()
+        styleGuide.stop()
         // Window closing: persist unsaved edits unconditionally (consistent with
         // auto-save-on-leave). No conflict dialog is possible during teardown, so we don't gate
         // on a flush return value — just write the buffer best-effort, off the main actor.
@@ -553,6 +567,7 @@ final class SiteWindowModel {
         )
         navigator = navModel
         graphExplorer.start(siteID: resolved.id, sourceDirectory: resolved.sourceDirectory)
+        styleGuide.start(siteID: resolved.id)
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
         applyPendingNavigation(for: resolved.id)

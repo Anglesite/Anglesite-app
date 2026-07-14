@@ -70,6 +70,10 @@ public actor SiteKnowledgeIndex {
         (documentsBySite[siteID] ?? [:]).values.sorted { $0.path < $1.path }
     }
 
+    public func projectStyleGuide(siteID: String) -> ProjectStyleGuide {
+        ProjectStyleGuide.infer(siteID: siteID, documents: documents(siteID: siteID))
+    }
+
     public func upsertFile(siteID: String, projectRoot: URL, relativePath: String) async {
         let scanned = await Task.detached(priority: .utility) {
             Self.document(siteID: siteID, projectRoot: projectRoot, relativePath: relativePath)

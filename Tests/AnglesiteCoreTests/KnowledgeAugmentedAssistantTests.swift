@@ -137,15 +137,10 @@ struct KnowledgeAugmentedAssistantTests {
         #expect(!hasCitations)
     }
 
-    @Test("generate leaves unrelated prompts untouched")
-    func generateLeavesUnmatchedPromptUntouched() async throws {
+    @Test("generate leaves prompts untouched when there is no context")
+    func generateLeavesPromptUntouchedWithoutContext() async throws {
         let root = try makeSite()
         defer { try? FileManager.default.removeItem(at: root) }
-        try "# About\n".write(
-            to: root.appendingPathComponent("src/pages/about.md"),
-            atomically: true,
-            encoding: .utf8
-        )
 
         let base = CapturingConversationalAssistant()
         let index = SiteKnowledgeIndex()
@@ -161,6 +156,40 @@ struct KnowledgeAugmentedAssistantTests {
         ) {}
 
         #expect(await base.prompts.first == prompt)
+    }
+
+    @Test("style guide context enriches prompts even without search hits")
+    func styleGuideEnrichesPromptWithoutSearchHits() async throws {
+        let root = try makeSite()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try """
+        ---
+        title: About
+        draft: false
+        ---
+
+        ## About Us
+
+        We're glad you're here.
+        """.write(
+            to: root.appendingPathComponent("src/pages/about.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let base = CapturingConversationalAssistant()
+        let index = SiteKnowledgeIndex()
+        await index.rebuild(siteID: "site", projectRoot: root)
+        let assistant = KnowledgeAugmentedAssistant(base: base, index: index)
+        let prompt = "Explain lunar geology."
+        for try await _ in try await assistant.generate(
+            prompt: prompt,
+            context: AssistantContext(siteID: "site", siteDirectory: root)
+        ) {}
+
+        let enriched = await base.prompts.first
+        #expect(enriched?.contains("Project style guide inferred") == true)
+        #expect(enriched?.contains("User request:\n\(prompt)") == true)
     }
 
     private func makeSite() throws -> URL {
