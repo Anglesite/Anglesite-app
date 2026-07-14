@@ -200,6 +200,19 @@ struct AnglesiteApp: App {
                 Button("About Anglesite") { showAboutPanel() }
             }
 
+            CommandGroup(after: .appSettings) {
+                Divider()
+
+                Button("Provide Anglesite Feedback…") {
+                    NSWorkspace.shared.open(URL(string: "https://anglesite.dwk.io/feedback/")!)
+                }
+
+                Divider()
+
+                // Opens the App Store analytics-consent pane when it exists (spec §2.1).
+                PlannedItem("Privacy & Analytics…")
+            }
+
             NewContentCommands()
             // Edit ▸ Delete ⌘⌫ / Duplicate ⌘D for the focused window's Navigator selection (#516).
             NavigatorEditCommands()
@@ -275,6 +288,14 @@ struct AnglesiteApp: App {
                         openWindow(id: "debug")
                     }
                     .keyboardShortcut("d", modifiers: [.command, .option])
+                }
+            }
+
+            CommandGroup(after: .help) {
+                PlannedItem("What's New in Anglesite")
+
+                Button("Anglesite Website") {
+                    NSWorkspace.shared.open(URL(string: "https://anglesite.dwk.io/")!)
                 }
             }
         }
