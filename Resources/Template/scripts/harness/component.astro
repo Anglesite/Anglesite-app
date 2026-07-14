@@ -3,15 +3,25 @@
 // Dev-only (injected by anglesite-harness.ts); never part of a build.
 export const prerender = false;
 
+import { HarnessComponent, namedSlotSamples, parseProps, resolveComponentKey } from "../component-harness";
+import type { SlotSample } from "../component-harness";
+
 const modules = import.meta.glob(["/src/components/**/*.astro", "/src/layouts/**/*.astro"]);
+const sources = import.meta.glob(["/src/components/**/*.astro", "/src/layouts/**/*.astro"], {
+  query: "?raw",
+  import: "default",
+});
 const name = Astro.params.name ?? "";
-const key = [`/src/components/${name}.astro`, `/src/layouts/${name}.astro`].find((k) => k in modules);
+const key = resolveComponentKey(name, modules);
 
 let Component: any = null;
 let error: string | null = null;
+let slotSamples: SlotSample[] = [];
 if (key) {
   try {
     Component = ((await modules[key]()) as { default: unknown }).default;
+    const source = ((await sources[key]()) as string | undefined) ?? "";
+    slotSamples = namedSlotSamples(source);
   } catch (err) {
     error = String(err);
   }
@@ -19,15 +29,7 @@ if (key) {
   error = `No component named "${name}" under src/components/ or src/layouts/.`;
 }
 
-let props: Record<string, unknown> = {};
-const raw = Astro.url.searchParams.get("props");
-if (raw) {
-  try {
-    props = JSON.parse(raw);
-  } catch {
-    /* malformed props param: render with defaults */
-  }
-}
+const props = parseProps(Astro.url.searchParams.get("props"));
 ---
 
 <!doctype html>
@@ -47,9 +49,7 @@ if (raw) {
       error ? (
         <pre class="anglesite-harness-error">{error}</pre>
       ) : (
-        <Component {...props}>
-          <span class="anglesite-harness-slot-sample">Slot content</span>
-        </Component>
+        <HarnessComponent Component={Component} props={props} slotSamples={slotSamples} />
       )
     }
   </body>
