@@ -5,45 +5,20 @@ import AnglesiteCore
 /// changes and either navigates the preview or opens the editor.
 struct SiteNavigatorView: View {
     @Bindable var model: SiteNavigatorModel
-    @Bindable var cleanup: ProjectCleanupModel
-    var onOpenCleanupCandidate: (DeadAssetScanner.CleanupCandidate) -> Void
-    var onDeleteCleanupCandidate: (DeadAssetScanner.CleanupCandidate) async -> Void
     var onDeleteRequested: (NavigatorItem) -> Void
     var onDuplicateRequested: (NavigatorItem) -> Void
     var onRepurposeRequested: (NavigatorItem) -> Void
     @FocusState private var editingFocused: Bool
-    @State private var candidateToDelete: DeadAssetScanner.CleanupCandidate?
-    /// The title shown in the confirmation dialog. Held separately from `candidateToDelete` so the
-    /// title stays stable through the dismiss animation — reading `candidateToDelete`'s property
-    /// directly would collapse to "" the instant the dialog clears the optional.
-    @State private var candidateToDeleteTitle: String = ""
 
     var body: some View {
         List(selection: $model.selection) {
-            ForEach(model.sections) { section in
-                if let title = section.title {
-                    Section(title) {
-                        ForEach(section.items) { item in
-                            row(for: item, in: section)
-                        }
-                    }
-                } else {
-                    ForEach(section.items) { item in
-                        row(for: item, in: section)
-                    }
-                }
-            }
-            // Only shown once the site has real content — an empty new site keeps the plain
-            // "No content yet" overlay rather than stacking a Cleanup prompt underneath it.
-            if !model.sections.isEmpty {
-                Section("Cleanup") {
-                    cleanupContent
-                }
+            OutlineGroup(model.nodes, children: \.children) { node in
+                row(for: node)
             }
         }
         .listStyle(.sidebar)
         .overlay {
-            if model.sections.isEmpty {
+            if model.nodes.isEmpty {
                 ContentUnavailableView("No content yet", systemImage: "sidebar.left")
             }
         }
@@ -73,39 +48,11 @@ struct SiteNavigatorView: View {
         } message: { msg in
             Text(msg)
         }
-        .confirmationDialog(
-            candidateToDeleteTitle,
-            isPresented: Binding(
-                get: { candidateToDelete != nil },
-                set: { if !$0 { candidateToDelete = nil } }),
-            titleVisibility: .visible,
-            presenting: candidateToDelete
-        ) { candidate in
-            Button("Delete", role: .destructive) {
-                Task { await onDeleteCleanupCandidate(candidate) }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { candidate in
-            Text(candidate.kind == .page
-                ? "This page has no incoming links and will be permanently removed."
-                : "This file appears unused and will be permanently removed.")
-        }
-        .alert(
-            "Delete failed",
-            isPresented: Binding(
-                get: { cleanup.deleteError != nil },
-                set: { if !$0 { cleanup.deleteError = nil } }),
-            presenting: cleanup.deleteError
-        ) { _ in
-            Button("OK", role: .cancel) { cleanup.deleteError = nil }
-        } message: { msg in
-            Text(msg)
-        }
     }
 
     @ViewBuilder
-    private func row(for item: NavigatorItem, in section: NavigatorSection) -> some View {
-        if model.editingItemID == item.id {
+    private func row(for node: URLTreeNode) -> some View {
+        if model.editingItemID == node.id {
             TextField("Title", text: $model.draftTitle)
                 .textFieldStyle(.plain)
                 .focused($editingFocused)
@@ -116,94 +63,58 @@ struct SiteNavigatorView: View {
                     // consumed by the list and only surfaces as focus loss. So commit on focus loss
                     // (Return / Tab / click-away, Finder-style). Esc cancels first via onExitCommand,
                     // which clears editingItemID, so this guard then skips the commit.
-                    if !focused && model.editingItemID == item.id {
+                    if !focused && model.editingItemID == node.id {
                         Task { await model.commitEditing() }
                     }
                 }
                 .task { editingFocused = true }
-                .tag(item.id)
+                .tag(node.id)
         } else {
-            Label(item.title, systemImage: icon(for: section.id))
-                .tag(item.id)
+            Label { Text(node.title) } icon: { icon(for: node) }
+                .tag(node.id)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .contextMenu {
-                    if model.canRename(item.id) {
-                        Button("Rename") { model.beginEditing(item.id) }
+                    if model.canRename(node.id) {
+                        Button("Rename") { model.beginEditing(node.id) }
                     }
-                    if model.canDuplicate(item.id) {
+                    if model.canDuplicate(node.id), let item = model.item(for: node.id) {
                         Button("Duplicate") { onDuplicateRequested(item) }
                     }
-                    if model.canRepurpose(item.id) {
+                    if model.canRepurpose(node.id), let item = model.item(for: node.id) {
                         Button("Repurpose Post…") { onRepurposeRequested(item) }
                     }
-                    if model.canDelete(item.id) {
+                    if model.canDelete(node.id), let item = model.item(for: node.id) {
                         Button("Delete", role: .destructive) { onDeleteRequested(item) }
                     }
                 }
         }
     }
 
-    private func icon(for group: FileGroup) -> String {
-        switch group {
-        case .pages: return "doc.richtext"
-        case .posts: return "text.document"
-        case .collections: return "rectangle.stack"
-        case .components: return "square.stack.3d.up"
-        case .styles: return "paintbrush"
-        case .metadata: return "globe"
-        }
-    }
-
+    /// #714 icon table: globe (website settings) / house (home) / doc.richtext (pages, entries) /
+    /// folder (directory) — with a radio-waves badge composed on feed-bearing directories until
+    /// the custom symbol from docs/art-briefs/2026-07-13-folder-rss-symbol.md ships.
     @ViewBuilder
-    private var cleanupContent: some View {
-        if !cleanup.hasScanned {
-            Button {
-                Task { await cleanup.scan() }
-            } label: {
-                Label(
-                    cleanup.isScanning ? "Scanning…" : "Scan for Cleanup Opportunities",
-                    systemImage: "sparkle.magnifyingglass")
-            }
-            .disabled(cleanup.isBusy)
-        } else if cleanup.candidates.isEmpty {
-            Text("No unused files found")
-                .foregroundStyle(.secondary)
-        } else {
-            ForEach(cleanup.candidates) { candidate in
-                Label(candidate.path, systemImage: cleanupIcon(for: candidate.kind))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .contextMenu {
-                        Button("Open") { onOpenCleanupCandidate(candidate) }
-                        Button("Ignore") { cleanup.ignore(candidate) }
-                        Button("Delete", role: .destructive) {
-                            candidateToDeleteTitle = deleteConfirmationTitle(for: candidate)
-                            candidateToDelete = candidate
-                        }
-                    }
-            }
-            Button {
-                Task { await cleanup.scan() }
-            } label: {
-                Label(cleanup.isScanning ? "Scanning…" : "Rescan", systemImage: "arrow.clockwise")
-            }
-            .disabled(cleanup.isBusy)
+    private func icon(for node: URLTreeNode) -> some View {
+        switch node.kind {
+        case .website:
+            Image(systemName: "globe")
+        case .home:
+            Image(systemName: "house")
+        case .page:
+            Image(systemName: "doc.richtext")
+        case .directory(_, hasFeed: false):
+            Image(systemName: "folder")
+        case .directory(_, hasFeed: true):
+            Image(systemName: "folder")
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: "dot.radiowaves.up.forward")
+                        .font(.system(size: 7, weight: .bold))
+                        .symbolRenderingMode(.monochrome)
+                        .padding(1)
+                        .background(.background, in: .circle)
+                        .accessibilityLabel("Has RSS feed")
+                }
         }
-    }
-
-    private func cleanupIcon(for kind: DeadAssetScanner.CleanupCandidate.Kind) -> String {
-        switch kind {
-        case .component: return "square.stack.3d.up"
-        case .layout: return "rectangle.stack"
-        case .image: return "photo"
-        case .page: return "doc.richtext"
-        }
-    }
-
-    private func deleteConfirmationTitle(for candidate: DeadAssetScanner.CleanupCandidate) -> String {
-        candidate.kind == .page
-            ? "Delete “\(candidate.path)”?"
-            : "Delete unused \(candidate.kind.rawValue) “\(candidate.path)”?"
     }
 }

@@ -3,6 +3,11 @@ import Foundation
 import AnglesiteCore
 @testable import AnglesiteAppCore
 
+/// Flattens the tree so tests can find a node by title regardless of nesting depth.
+private func flatten(_ nodes: [URLTreeNode]) -> [URLTreeNode] {
+    nodes.flatMap { [$0] + flatten($0.children ?? []) }
+}
+
 @Suite("SiteNavigatorModel")
 @MainActor
 struct SiteNavigatorModelTests {
@@ -21,27 +26,36 @@ struct SiteNavigatorModelTests {
         )
         let model = SiteNavigatorModel(graph: graph)
         model.start(siteID: "site-1", siteRoot: root, sourceDirectory: root, websiteTitle: "Test")
-        while model.sections.isEmpty { await Task.yield() }
+        while model.nodes.isEmpty { await Task.yield() }
 
-        let id = try #require(model.sections.flatMap(\.items).first { $0.title == "About" }?.id)
+        let id = try #require(flatten(model.nodes).first { $0.title == "About" }?.id)
 
         #expect(model.canDelete(id) == true)
         #expect(model.canDuplicate(id) == true)
     }
 
-    @Test("canDelete and canDuplicate are false for a file (component/style/metadata) target")
-    func canDeleteAndDuplicateFileTargetIsFalse() async throws {
+    /// Components/styles no longer appear in the tree at all (#714 slice 1 — they move to the
+    /// Website Settings surface in a later slice), so the non-content-row case this used to cover
+    /// with a component file is now exercised via the website-settings row, which is always
+    /// present once the tree is non-empty and carries a `.websiteSettings` (non-route) target.
+    @Test("canDelete and canDuplicate are false for the website-settings row")
+    func canDeleteAndDuplicateWebsiteSettingsRowIsFalse() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(
-            at: root.appendingPathComponent("src/components"), withIntermediateDirectories: true)
-        try Data().write(to: root.appendingPathComponent("src/components/Widget.astro"))
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let graph = SiteContentGraph()
+        await graph.load(
+            siteID: "site-1",
+            pages: [SiteContentGraph.Page(
+                id: "site-1:page:/about", siteID: "site-1", route: "/about",
+                filePath: "src/pages/about.astro", title: "About", lastModified: Date())],
+            posts: [], images: []
+        )
         let model = SiteNavigatorModel(graph: graph)
         model.start(siteID: "site-1", siteRoot: root, sourceDirectory: root, websiteTitle: "Test")
-        while model.sections.isEmpty { await Task.yield() }
+        while model.nodes.isEmpty { await Task.yield() }
 
-        let id = try #require(model.sections.flatMap(\.items).first { $0.title == "Widget.astro" }?.id)
+        let id = try #require(model.nodes.first { $0.kind == .website }?.id)
 
         #expect(model.canDelete(id) == false)
         #expect(model.canDuplicate(id) == false)

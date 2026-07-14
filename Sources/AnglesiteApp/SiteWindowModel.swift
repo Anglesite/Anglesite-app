@@ -696,9 +696,24 @@ final class SiteWindowModel {
             }
         case .file(let file):
             openFile(file)
-        case .directory, .websiteSettings:
-            // No-op for now — Task 3/4 (#714) wire these into the directory/website settings panes.
-            break
+        case .websiteSettings:
+            // Slice-1 interim: the website row opens the package Info.plist — exactly what the
+            // old sidebar Metadata row opened. The full Website Settings surface is slice 2
+            // (spec §7, docs/superpowers/specs/2026-07-13-website-design-window-cleanup-design.md).
+            guard let site else { return }
+            let layout = SiteFileTree.layout(for: site.packageURL)
+            guard let infoPlist = layout.infoPlist else { return }
+            openFile(FileRef(url: infoPlist, group: .metadata, name: "Info.plist"))
+        case .directory(_, let route):
+            // Slice-1 interim: show the directory in the preview (its index page if one exists).
+            // Slice 2 replaces this with the Collection Settings surface (spec §6).
+            Task {
+                guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
+                activeEditor = nil
+                inspectorContext = nil
+                mainPaneMode = .preview
+                preview.navigate(toRoute: route)
+            }
         }
     }
 

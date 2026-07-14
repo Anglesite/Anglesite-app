@@ -162,9 +162,6 @@ struct SiteWindow: View {
             if let navigator = model.navigator {
                 SiteNavigatorView(
                     model: navigator,
-                    cleanup: model.cleanup,
-                    onOpenCleanupCandidate: { model.openCleanupCandidate($0) },
-                    onDeleteCleanupCandidate: { await model.deleteCleanupCandidate($0) },
                     onDeleteRequested: { item in
                         contentDeleteTitle = "Delete “\(item.title)”?"
                         model.deleteConfirmation = item
@@ -811,7 +808,7 @@ struct SiteWindow: View {
         let deleteAction: (() -> Void)?
         if navigator.canDelete(id) {
             deleteAction = {
-                guard let item = navigator.sections.flatMap(\.items).first(where: { $0.id == id }) else { return }
+                guard let item = navigator.item(for: id) else { return }
                 contentDeleteTitle = "Delete “\(item.title)”?"
                 model.deleteConfirmation = item
             }
