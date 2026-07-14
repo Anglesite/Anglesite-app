@@ -1,5 +1,5 @@
 import { createComponent, renderComponent, renderTemplate } from "astro/runtime/server/index.js";
-import type { ComponentSlots } from "astro/runtime/server/index.js";
+import type { AstroComponentFactory, ComponentSlots } from "astro/runtime/server/index.js";
 
 export type ComponentModuleMap = Record<string, () => Promise<unknown>>;
 
@@ -14,8 +14,8 @@ interface HarnessComponentProps {
   slotSamples: SlotSample[];
 }
 
-const renderHarnessComponent = (
-  $$result: any,
+const renderHarnessComponent: AstroComponentFactory = (
+  $$result,
   { Component, props, slotSamples }: HarnessComponentProps,
 ) => {
   const slots: ComponentSlots = {
@@ -27,10 +27,10 @@ const renderHarnessComponent = (
       renderTemplate`<span class="anglesite-harness-slot-sample">${sample.label}</span>`;
   }
 
-  return renderComponent($$result, "HarnessComponent", Component, props, slots);
+  return renderTemplate`${renderComponent($$result, "HarnessComponent", Component, props, slots)}`;
 };
 
-export const HarnessComponent = createComponent(renderHarnessComponent as any);
+export const HarnessComponent = createComponent(renderHarnessComponent);
 
 export function resolveComponentKey(name: string, modules: ComponentModuleMap): string | undefined {
   return [`/src/components/${name}.astro`, `/src/layouts/${name}.astro`].find((key) => key in modules);
@@ -51,15 +51,24 @@ export function namedSlotSamples(source: string): SlotSample[] {
   const names = new Set<string>();
   const slotPattern = /<slot\b[^>]*\bname\s*=\s*(?:"([^"]+)"|'([^']+)'|{["']([^"']+)["']})[^>]*>/g;
 
-  for (const match of source.matchAll(slotPattern)) {
+  for (const match of templateMarkup(source).matchAll(slotPattern)) {
     const name = match[1] ?? match[2] ?? match[3];
-    if (name) names.add(name);
+    if (name && name !== "default") names.add(name);
   }
 
   return Array.from(names, (name) => ({
     name,
     label: `${labelForSlot(name)} slot content`,
   }));
+}
+
+function templateMarkup(source: string): string {
+  if (!source.startsWith("---")) return source;
+
+  const frontmatterEnd = source.indexOf("\n---", 3);
+  if (frontmatterEnd === -1) return source;
+
+  return source.slice(frontmatterEnd + "\n---".length);
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

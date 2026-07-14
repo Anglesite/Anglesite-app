@@ -51,6 +51,18 @@ test("namedSlotSamples extracts labeled unique named slots", () => {
   ]);
 });
 
+test("namedSlotSamples ignores frontmatter literals and explicit default slots", () => {
+  const source = `---
+const example = '<slot name="from-frontmatter" />';
+---
+<slot />
+<slot name="default" />
+<slot name="aside" />
+`;
+
+  assert.deepEqual(namedSlotSamples(source), [{ name: "aside", label: "Aside slot content" }]);
+});
+
 test("anglesiteHarness injects the component route only in dev", async () => {
   const integration = anglesiteHarness();
   const setup = integration.hooks["astro:config:setup"];
