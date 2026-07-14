@@ -152,8 +152,10 @@ cat <<EOF
        then the pre-deploy scan runs. A real 'wrangler deploy' needs a Cloudflare
        token; if no token is configured, capture the prompt/error instead of
        treating it as a sandbox failure.
-    4. Drag an image onto an <img> in the preview → bytes write to public/images/
-       through the container-backed edit path. Record any sandbox denial.
+    4. Open the example photo page, then drag an image from Finder. Existing
+       images highlight as drop targets; drop onto the example image and confirm
+       the optimized bytes write to public/images/ through the container-backed
+       edit path. Record any sandbox denial.
     5. Close the window → runtime children reaped. Quit → no orphan runtime process.
     6. Foundation Models chat should be present. Settings → no GitHub Connect
        row, and updates are handled by the App Store.

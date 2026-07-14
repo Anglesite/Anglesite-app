@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title description">
+  <title id="title">A coastal landscape</title>
+  <desc id="description">A warm sunset over blue hills and the ocean.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f5b67f"/>
+      <stop offset="0.55" stop-color="#f8d9a7"/>
+      <stop offset="1" stop-color="#8ec5d6"/>
+    </linearGradient>
+    <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4b91aa"/>
+      <stop offset="1" stop-color="#20566f"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#sky)"/>
+  <circle cx="880" cy="235" r="82" fill="#fff1bd" opacity="0.95"/>
+  <path d="M0 510 210 330 390 505 570 285 820 515 1015 355 1200 495V800H0Z" fill="#436e78"/>
+  <path d="M0 555 260 435 455 570 690 410 905 565 1090 470 1200 540V800H0Z" fill="#315968"/>
+  <path d="M0 590C250 550 430 635 650 580s370-60 550 5v215H0Z" fill="url(#water)"/>
+  <path d="M0 650c260-55 405 45 655-10 210-46 365-36 545 20" fill="none" stroke="#cbe7e5" stroke-width="12" opacity="0.55"/>
+</svg>

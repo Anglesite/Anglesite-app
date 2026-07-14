@@ -17,6 +17,9 @@ import { installVisibleElementsReporter } from "./visible-elements.js";
 
 export const HOVER_CLASS = "anglesite-hover";
 export const EDITABLE_CLASS = "anglesite-editing";
+export const IMAGE_DROP_TARGET_CLASS = "anglesite-image-drop-target";
+export const IMAGE_DROP_ACTIVE_CLASS = "anglesite-image-drop-active";
+export const IMAGE_DROP_HINT_ATTRIBUTE = "data-anglesite-image-drop-hint";
 const INSTALLED_FLAG = "__anglesiteOverlayInstalled" as const;
 const STYLE_TAG_MARKER = "data-anglesite-overlay";
 
@@ -36,6 +39,9 @@ function installStyles(): void {
   style.textContent = [
     `.${HOVER_CLASS} { outline: 2px solid rgba(0, 122, 255, 0.8); outline-offset: 2px; cursor: text; }`,
     `.${EDITABLE_CLASS} { outline: 2px solid rgba(0, 122, 255, 1); outline-offset: 2px; background: rgba(0, 122, 255, 0.05); }`,
+    `.${IMAGE_DROP_TARGET_CLASS} { outline: 3px dashed rgba(0, 122, 255, 0.9) !important; outline-offset: 4px !important; filter: brightness(0.9); }`,
+    `.${IMAGE_DROP_ACTIVE_CLASS} { outline-style: solid !important; filter: brightness(1.05); cursor: copy; }`,
+    `[${IMAGE_DROP_HINT_ATTRIBUTE}] { position: fixed; z-index: 2147483647; left: 50%; top: 16px; transform: translateX(-50%); padding: 8px 12px; border-radius: 9px; background: rgba(28, 28, 30, 0.92); color: white; font: 600 13px/1.25 -apple-system, BlinkMacSystemFont, sans-serif; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25); pointer-events: none; }`,
   ].join("\n");
   document.head.appendChild(style);
 }
@@ -108,17 +114,87 @@ function attachClickToEdit(awaitReply: (id: string, handler: (r: { status: strin
 }
 
 function attachImageDrop(awaitReply: (id: string, handler: (r: EditReply) => void) => void): void {
+  let dragIsFile = false;
+  let dragDepth = 0;
+  let activeTarget: HTMLImageElement | null = null;
+
+  const imageTargets = (): HTMLImageElement[] => Array.from(document.querySelectorAll("img"));
+
+  const isFileDrag = (dataTransfer: DataTransfer | null): boolean => {
+    if (!dataTransfer) return false;
+    if (Array.from(dataTransfer.types).includes("Files")) return true;
+    return Array.from(dataTransfer.items).some((item) => item.kind === "file");
+  };
+
+  const setActiveTarget = (target: HTMLImageElement | null): void => {
+    if (activeTarget === target) return;
+    activeTarget?.classList.remove(IMAGE_DROP_ACTIVE_CLASS);
+    target?.classList.add(IMAGE_DROP_ACTIVE_CLASS);
+    activeTarget = target;
+  };
+
+  const showTargets = (): void => {
+    const targets = imageTargets();
+    for (const target of targets) target.classList.add(IMAGE_DROP_TARGET_CLASS);
+
+    let hint = document.querySelector(`[${IMAGE_DROP_HINT_ATTRIBUTE}]`) as HTMLDivElement | null;
+    if (!hint) {
+      hint = document.createElement("div");
+      hint.setAttribute(IMAGE_DROP_HINT_ATTRIBUTE, "");
+      document.body.appendChild(hint);
+    }
+    hint.textContent = targets.length > 0
+      ? "Drop onto a highlighted image to replace it"
+      : "This page has no images to replace";
+  };
+
+  const clearTargets = (): void => {
+    setActiveTarget(null);
+    for (const target of imageTargets()) target.classList.remove(IMAGE_DROP_TARGET_CLASS);
+    document.querySelector(`[${IMAGE_DROP_HINT_ATTRIBUTE}]`)?.remove();
+    dragIsFile = false;
+    dragDepth = 0;
+  };
+
+  const imageAtEvent = (ev: DragEvent): HTMLImageElement | null => {
+    const element = ev.target instanceof Element ? ev.target : null;
+    return element?.closest("img") as HTMLImageElement | null;
+  };
+
+  document.addEventListener("dragenter", (ev) => {
+    if (!isFileDrag(ev.dataTransfer)) return;
+    dragIsFile = true;
+    dragDepth += 1;
+    showTargets();
+  });
   document.addEventListener("dragover", (ev) => {
-    const target = ev.target as Element | null;
-    if (target?.tagName !== "IMG") return;
+    if (!dragIsFile && !isFileDrag(ev.dataTransfer)) return;
+    dragIsFile = true;
+    showTargets();
+    const target = imageAtEvent(ev);
+    setActiveTarget(target);
+    // Prevent WKWebView from navigating to a dropped local file. A target outside an image is
+    // still handled below with guidance instead of silently discarding the gesture.
     ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = target ? "copy" : "none";
   });
   document.addEventListener("drop", (ev) => {
-    const target = ev.target as HTMLImageElement | null;
-    if (target?.tagName !== "IMG") return;
     const file = (ev as DragEvent).dataTransfer?.files[0];
-    if (!file || !file.type.startsWith("image/")) return;
+    if (!file) return;
     ev.preventDefault();
+    const target = imageAtEvent(ev as DragEvent);
+    const hadTargets = imageTargets().length > 0;
+    clearTargets();
+    if (!file.type.startsWith("image/")) {
+      showToast("Choose an image file to replace this image");
+      return;
+    }
+    if (!target) {
+      showToast(hadTargets
+        ? "Drop onto a highlighted image to replace it"
+        : "This page has no images to replace");
+      return;
+    }
 
     // Save originals before the optimistic swap so we can revert on failure.
     const savedSrc = target.src;
@@ -191,6 +267,12 @@ function attachImageDrop(awaitReply: (id: string, handler: (r: EditReply) => voi
     reader.onerror = () => revertWithToast("Couldn't read the dropped file");
     reader.readAsDataURL(file);
   });
+  document.addEventListener("dragleave", () => {
+    if (!dragIsFile) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) clearTargets();
+  });
+  document.addEventListener("dragend", clearTargets);
 }
 
 /** Mount the overlay onto `window`/`document`. Safe to call more than once. */

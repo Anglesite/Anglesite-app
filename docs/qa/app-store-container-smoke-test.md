@@ -60,7 +60,7 @@ The script prints the built app path and the interactive steps. Copy the built a
 | No host Node preview fallback starts |  |  |
 | Preview loads through loopback proxy |  |  |
 | MCP/edit path applies a text edit through the in-container sidecar |  |  |
-| Image drop writes optimized assets under `Source/public/images/` |  |  |
+| Example photo highlights as an image drop target; dropping a Finder image writes optimized assets under `Source/public/images/` |  |  |
 | Build/preflight/deploy path reaches the expected Cloudflare token or wrangler result |  |  |
 | Foundation Models chat is present |  |  |
 | GitHub `gh` settings/auth UI is absent in App Store build |  |  |
@@ -88,4 +88,3 @@ Also save the app debug pane logs for these sources when present:
 ## Acceptance
 
 #81 can close when the matrix passes on a real-signed App Store-target build, or when every failure has a follow-up issue with captured logs and a clear owner.
-
