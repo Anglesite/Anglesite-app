@@ -99,5 +99,30 @@ final class KeychainStoreTests: XCTestCase {
         try store.clearCloudflareToken()
         XCTAssertNil(try store.readCloudflareToken())
     }
+
+    // MARK: ACP agent token convenience
+
+    func testACPAgentTokenConvenienceRoundTrips() throws {
+        let agentID = UUID()
+        defer { try? store.clearACPAgentToken(id: agentID) }
+        XCTAssertNil(try store.readACPAgentToken(id: agentID))
+        try store.writeACPAgentToken("acp-token-xyz", id: agentID)
+        XCTAssertEqual(try store.readACPAgentToken(id: agentID), "acp-token-xyz")
+        try store.clearACPAgentToken(id: agentID)
+        XCTAssertNil(try store.readACPAgentToken(id: agentID))
+    }
+
+    func testACPAgentTokensAreIndependentPerAgentID() throws {
+        let a = UUID()
+        let b = UUID()
+        defer {
+            try? store.clearACPAgentToken(id: a)
+            try? store.clearACPAgentToken(id: b)
+        }
+        try store.writeACPAgentToken("token-a", id: a)
+        try store.writeACPAgentToken("token-b", id: b)
+        XCTAssertEqual(try store.readACPAgentToken(id: a), "token-a")
+        XCTAssertEqual(try store.readACPAgentToken(id: b), "token-b")
+    }
 }
 #endif
