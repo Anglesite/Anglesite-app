@@ -168,6 +168,9 @@ function attachImageDrop(awaitReply: (id: string, handler: (r: EditReply) => voi
     dragIsFile = true;
     dragDepth += 1;
     showTargets();
+    // Prevented here too (not just on dragover below) so WKWebView doesn't show a "not allowed"
+    // cursor for the first frame of the drag, before the first dragover fires.
+    ev.preventDefault();
   });
   document.addEventListener("dragover", (ev) => {
     // showTargets() re-scans the whole document, so only pay for it on the dragenter → dragover
@@ -188,7 +191,18 @@ function attachImageDrop(awaitReply: (id: string, handler: (r: EditReply) => voi
   });
   document.addEventListener("drop", (ev) => {
     const file = (ev as DragEvent).dataTransfer?.files[0];
-    if (!file) return;
+    if (!file) {
+      // dragover already recognized this as a file drag (dragIsFile true) using the always-
+      // available types/items — but dataTransfer.files can still come back empty at drop time
+      // for some promise-backed/multi-item drag sources. Still prevent WKWebView's default file
+      // navigation and clear the stuck highlight state instead of silently discarding the drop.
+      if (dragIsFile) {
+        ev.preventDefault();
+        clearTargets();
+        showToast("Couldn't read the dropped file");
+      }
+      return;
+    }
     ev.preventDefault();
     const target = imageAtEvent(ev as DragEvent);
     const hadTargets = imageTargets().length > 0;

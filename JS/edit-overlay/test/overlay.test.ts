@@ -168,7 +168,7 @@ describe("image drop", () => {
 
   /** jsdom 25 doesn't implement DragEvent or DataTransfer, so we use a plain Event
    *  and define dataTransfer directly on the instance. */
-  function dropOn(target: Element, file: File): void {
+  function dropOn(target: Element, file: File): Event {
     const fakeDataTransfer = {
       files: [file],
       items: [{ kind: "file", type: file.type }],
@@ -178,6 +178,7 @@ describe("image drop", () => {
     const drop = new Event("drop", { bubbles: true, cancelable: true });
     Object.defineProperty(drop, "dataTransfer", { value: fakeDataTransfer });
     target.dispatchEvent(drop);
+    return drop;
   }
 
   function dragOn(type: "dragenter" | "dragover" | "dragleave", target: Element, file: File): Event {
@@ -259,11 +260,31 @@ describe("image drop", () => {
     const img = makeImg("/images/hero.jpg");
     const file = new File(["notes"], "notes.txt", { type: "text/plain" });
 
-    dropOn(img, file);
+    const event = dropOn(img, file);
 
+    expect(event.defaultPrevented).toBe(true);
     expect(sent.length).toBe(0);
     expect(img.src.endsWith("/images/hero.jpg")).toBe(true);
     expect(document.querySelector(".anglesite-toast")?.textContent).toMatch(/choose an image file/i);
+  });
+
+  it("still prevents WKWebView navigation and clears the highlight when dataTransfer.files is empty at drop time", () => {
+    // A recognized file drag (dragenter/dragover already saw "Files" in dataTransfer.types) can
+    // still arrive at drop with an empty .files — e.g. a promise-backed/multi-item drag source.
+    const img = makeImg("/images/hero.jpg");
+    const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+    dragOn("dragenter", document.body, file);
+
+    const fakeDataTransfer = { files: [], items: [{ kind: "file", type: "image/jpeg" }], types: ["Files"], dropEffect: "none" };
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "dataTransfer", { value: fakeDataTransfer });
+    document.body.dispatchEvent(drop);
+
+    expect(drop.defaultPrevented).toBe(true);
+    expect(sent.length).toBe(0);
+    expect(img.classList.contains(IMAGE_DROP_TARGET_CLASS)).toBe(false);
+    expect(document.querySelector(`[${IMAGE_DROP_HINT_ATTRIBUTE}]`)).toBeNull();
+    expect(document.querySelector(".anglesite-toast")?.textContent).toMatch(/couldn't read/i);
   });
 
   it("sets img.src to a blob URL immediately on drop", async () => {
