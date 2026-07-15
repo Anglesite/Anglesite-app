@@ -30,8 +30,8 @@ extension AppIntentsTests {
             let (fake, site) = makeFakeAndSite()
             let failure = PreDeployCheck.ScanFailure(
                 category: .exposedToken,
+                message: "API key committed",
                 file: "src/index.md",
-                detail: "API key committed",
                 remediation: "Remove it"
             )
             fake.deployResult = .blocked(failures: [failure], warnings: [])

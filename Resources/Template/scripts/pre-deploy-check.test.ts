@@ -10,18 +10,21 @@ test("missing _headers is an error", () => {
   const issues = checkHeaders(null, "");
   assert.equal(issues.length, 1);
   assert.equal(issues[0].severity, "error");
+  assert.equal(issues[0].category, "csp-misconfigured");
   assert.match(issues[0].message, /not enforced/);
 });
 
 test("_headers without a CSP is an error", () => {
   const issues = checkHeaders("/*\n  X-Frame-Options: DENY\n", "");
   assert.equal(issues.length, 1);
+  assert.equal(issues[0].category, "csp-misconfigured");
   assert.match(issues[0].message, /no Content-Security-Policy/);
 });
 
 test("configured domain missing from CSP is an error naming the domain", () => {
   const issues = checkHeaders(GOOD, "SCRIPT_ALLOW=js.stripe.com,giscus.app");
   assert.equal(issues.length, 1);
+  assert.equal(issues[0].category, "csp-misconfigured");
   assert.match(issues[0].message, /giscus\.app/);
 });
 
@@ -37,6 +40,7 @@ test("multiple configured domains missing from CSP each produce an error", () =>
   const issues = checkHeaders(GOOD, "SCRIPT_ALLOW=giscus.app,assets.calendly.com");
   assert.equal(issues.length, 2);
   assert.ok(issues.every((i) => i.severity === "error"));
+  assert.ok(issues.every((i) => i.category === "csp-misconfigured"));
   assert.ok(issues.some((i) => /giscus\.app/.test(i.message)));
   assert.ok(issues.some((i) => /assets\.calendly\.com/.test(i.message)));
 });
@@ -53,6 +57,7 @@ test("checkPII: flags a bare email in page content", () => {
   const issues = checkPII("<p>Contact us at hello@example.com</p>", "dist/index.html");
   assert.equal(issues.length, 1);
   assert.equal(issues[0].severity, "error");
+  assert.equal(issues[0].category, "pii-email");
   assert.match(issues[0].message, /email/);
 });
 
@@ -65,19 +70,28 @@ test("checkPII: still flags a bare email elsewhere on a page that also has a mai
   const html = '<a href="mailto:hello@example.com">Email us</a><p>debug: admin@internal.example.com</p>';
   const issues = checkPII(html, "dist/contact.html");
   assert.equal(issues.length, 1);
+  assert.equal(issues[0].category, "pii-email");
   assert.match(issues[0].message, /email/);
 });
 
 test("checkPII: still flags phone numbers regardless of mailto content", () => {
   const issues = checkPII('<a href="mailto:hello@example.com">Email</a> Call 555-123-4567', "dist/contact.html");
   assert.equal(issues.length, 1);
+  assert.equal(issues[0].category, "pii-phone");
   assert.match(issues[0].message, /phone/);
+});
+
+test("checkPII: flags an SSN with the pii-ssn category", () => {
+  const issues = checkPII("<p>SSN: 123-45-6789</p>", "dist/contact.html");
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].category, "pii-ssn");
 });
 
 test("checkMixedContent: flags an insecure src", () => {
   const issues = checkMixedContent('<img src="http://example.com/a.png">', "dist/index.html");
   assert.equal(issues.length, 1);
   assert.equal(issues[0].severity, "warning");
+  assert.equal(issues[0].category, "mixed-content");
   assert.match(issues[0].message, /mixed content/i);
   assert.equal(issues[0].file, "dist/index.html");
 });
@@ -106,6 +120,7 @@ test("checkSRI: external script without integrity is a warning", () => {
   const issues = checkSRI('<script src="https://cdn.x.com/a.js"></script>', "dist/index.html");
   assert.equal(issues.length, 1);
   assert.equal(issues[0].severity, "warning");
+  assert.equal(issues[0].category, "sri-missing");
   assert.match(issues[0].message, /integrity/i);
 });
 
@@ -137,6 +152,7 @@ test("checkExternalLinkRel: target=_blank without rel=noopener is a warning", ()
   const issues = checkExternalLinkRel('<a href="https://x.com" target="_blank">x</a>', "dist/index.html");
   assert.equal(issues.length, 1);
   assert.equal(issues[0].severity, "warning");
+  assert.equal(issues[0].category, "external-link-rel");
   assert.match(issues[0].message, /noopener/i);
 });
 
@@ -168,6 +184,7 @@ test("checkArtifactPresence: missing robots.txt is a warning", () => {
   const issues = checkArtifactPresence(["dist/index.html", "dist/.well-known/security.txt"]);
   assert.equal(issues.length, 1);
   assert.equal(issues[0].severity, "warning");
+  assert.equal(issues[0].category, "missing-security-artifact");
   assert.match(issues[0].message, /robots\.txt/);
 });
 

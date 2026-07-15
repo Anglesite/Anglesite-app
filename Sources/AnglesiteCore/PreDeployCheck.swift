@@ -18,27 +18,45 @@ public actor PreDeployCheck {
         case passed(warnings: [ScanWarning])
         case blocked(failures: [ScanFailure], warnings: [ScanWarning])
         /// Script error — couldn't run the scan at all (missing tsx, missing
-        /// dist/, malformed JSON). Distinct from `.blocked` so callers can
-        /// surface the right remediation.
+        /// dist/, malformed JSON, unsupported envelope version). Distinct from
+        /// `.blocked` so callers can surface the right remediation.
         case error(reason: String)
     }
 
     public struct ScanFailure: Sendable, Equatable, Codable {
-        public enum Category: String, Sendable, Codable {
+        public enum Category: String, Sendable, Codable, CaseIterable {
             case piiEmail = "pii-email"
             case piiPhone = "pii-phone"
+            case piiSSN = "pii-ssn"
             case exposedToken = "exposed-token"
             case thirdPartyScript = "third-party-script"
             case keystaticRoute = "keystatic-route"
+            case cspMisconfigured = "csp-misconfigured"
+            /// Any category code this build doesn't recognize yet — decoding falls back here
+            /// instead of throwing, so a future/typo'd category can't crash the whole scan (#742).
+            case other = "other"
+
+            public init(from decoder: Decoder) throws {
+                let raw = try decoder.singleValueContainer().decode(String.self)
+                self = Category(rawValue: raw) ?? .other
+            }
         }
         public let category: Category
+        public let message: String
         /// Repo-relative path of the file where the issue was found, when known.
         public let file: String?
-        public let detail: String
-        public let remediation: String
+        public let detail: String?
+        public let remediation: String?
 
-        public init(category: Category, file: String?, detail: String, remediation: String) {
+        public init(
+            category: Category,
+            message: String,
+            file: String? = nil,
+            detail: String? = nil,
+            remediation: String? = nil
+        ) {
             self.category = category
+            self.message = message
             self.file = file
             self.detail = detail
             self.remediation = remediation
@@ -46,7 +64,7 @@ public actor PreDeployCheck {
     }
 
     public struct ScanWarning: Sendable, Equatable, Codable {
-        public enum Category: String, Sendable, Codable {
+        public enum Category: String, Sendable, Codable, CaseIterable {
             case missingOgImage = "missing-og-image"
             case maintenanceOverdue = "maintenance-overdue"
             case seoCritical = "seo-critical"
@@ -55,16 +73,80 @@ public actor PreDeployCheck {
             /// `redirects.json` entry covering it. Computed by `RouteCoverageScanner`, not the
             /// JS-side scan script — merged into the `Outcome` by `DeployCommand.deploy`.
             case orphanedRoute = "orphaned-route"
+            case mixedContent = "mixed-content"
+            case sriMissing = "sri-missing"
+            case externalLinkRel = "external-link-rel"
+            case missingSecurityArtifact = "missing-security-artifact"
+            case thirdPartyScript = "third-party-script"
+            /// Any category code this build doesn't recognize yet — decoding falls back here
+            /// instead of throwing, so a future/typo'd category can't crash the whole scan (#742).
+            case other = "other"
+
+            public init(from decoder: Decoder) throws {
+                let raw = try decoder.singleValueContainer().decode(String.self)
+                self = Category(rawValue: raw) ?? .other
+            }
         }
         public let category: Category
-        public let detail: String
-        public let remediation: String
+        public let message: String
+        public let file: String?
+        public let detail: String?
+        public let remediation: String?
 
-        public init(category: Category, detail: String, remediation: String) {
+        public init(
+            category: Category,
+            message: String,
+            file: String? = nil,
+            detail: String? = nil,
+            remediation: String? = nil
+        ) {
             self.category = category
+            self.message = message
+            self.file = file
             self.detail = detail
             self.remediation = remediation
         }
+    }
+
+    /// The versioned JSON envelope emitted by `pre-deploy-check.ts --json` (#742).
+    struct ScanReport: Decodable {
+        let version: Int
+        let ok: Bool
+        let failures: [ScanFailure]
+        let warnings: [ScanWarning]
+    }
+
+    /// Checked before a full `ScanReport` decode so an unsupported future envelope version
+    /// reports a specific remediation instead of a generic malformed-JSON error.
+    private struct VersionProbe: Decodable { let version: Int }
+
+    /// The single decoder for `pre-deploy-check.ts --json` output (#742). Both `check` below and
+    /// `DeployCommand.parseScanReport` call this — neither re-declares its own JSON shape.
+    /// Anglesite is pre-1.0, so there is no legacy bare-array fallback: anything that isn't the
+    /// current versioned envelope is an explicit `.error`.
+    public static func parse(output: String, exitCode: Int32?) -> Outcome {
+        let data = Data(output.utf8)
+        guard let probe = try? JSONDecoder().decode(VersionProbe.self, from: data) else {
+            return .error(reason: decodeErrorReason(exitCode: exitCode))
+        }
+        guard probe.version == 1 else {
+            return .error(reason: "pre-deploy scan emitted an unsupported envelope version (\(probe.version)) — run `/anglesite:update`")
+        }
+        guard let report = try? JSONDecoder().decode(ScanReport.self, from: data) else {
+            return .error(reason: decodeErrorReason(exitCode: exitCode))
+        }
+        return report.ok
+            ? .passed(warnings: report.warnings)
+            : .blocked(failures: report.failures, warnings: report.warnings)
+    }
+
+    /// No parseable envelope at all — either fully malformed JSON, or well-formed JSON missing
+    /// `version` (including the pre-#742 bare-array shape, which has no `version` key).
+    private static func decodeErrorReason(exitCode: Int32?) -> String {
+        let exit = exitCode ?? -1
+        return exit == 0
+            ? "pre-deploy scan emitted no JSON (exit 0) — is the site's scripts/pre-deploy-check.ts up to date?"
+            : "pre-deploy scan failed (exit \(exit)) — run `npm run build` and try again, or run `/anglesite:update` if the script is outdated"
     }
 
     /// Spawns the scan script and returns its stdout + exit code. Tests inject
@@ -85,28 +167,6 @@ public actor PreDeployCheck {
         } catch {
             return .error(reason: "couldn't run pre-deploy scan: \(error)")
         }
-
-        struct RawReport: Decodable {
-            let ok: Bool
-            let failures: [ScanFailure]
-            let warnings: [ScanWarning]
-        }
-
-        let stdoutData = Data(result.stdout.utf8)
-        let report: RawReport
-        do {
-            report = try JSONDecoder().decode(RawReport.self, from: stdoutData)
-        } catch {
-            // No parseable JSON — the script most likely errored out. Exit
-            // code 1 with no JSON typically means missing dist/ or missing tsx.
-            return .error(reason: result.exitCode == 0
-                ? "pre-deploy scan emitted no JSON (exit 0) — is the site's scripts/pre-deploy-check.ts up to date?"
-                : "pre-deploy scan failed (exit \(result.exitCode)) — run `npm run build` and try again, or run `/anglesite:update` if the script is outdated")
-        }
-
-        if report.ok {
-            return .passed(warnings: report.warnings)
-        }
-        return .blocked(failures: report.failures, warnings: report.warnings)
+        return Self.parse(output: result.stdout, exitCode: result.exitCode)
     }
 }

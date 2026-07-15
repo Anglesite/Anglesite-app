@@ -67,8 +67,8 @@ struct DeployCommandTests {
 
     /// Build the JSON payload the plugin's `pre-deploy-check.ts --json` emits.
     private func scanJSON(ok: Bool) -> String {
-        ok ? #"{"ok":true,"failures":[],"warnings":[]}"#
-           : #"{"ok":false,"failures":[{"category":"pii-email","file":"dist/index.html","detail":"email","remediation":"wrap it"}],"warnings":[]}"#
+        ok ? #"{"version":1,"ok":true,"failures":[],"warnings":[]}"#
+           : #"{"version":1,"ok":false,"failures":[{"category":"pii-email","message":"email","file":"dist/index.html","remediation":"wrap it"}],"warnings":[]}"#
     }
 
     @Test("default host resolvers fail explicitly after host Node retirement")
@@ -271,7 +271,7 @@ struct DeployCommandTests {
     func firesOnPreflight() async {
         let exec = FakeExecutor()
             .set(.build, exitCode: 0, output: "")
-            .set(.preflight, exitCode: 0, output: #"{"ok":true,"failures":[],"warnings":[{"category":"missing-og-image","detail":"no og image","remediation":"add one"}]}"#)
+            .set(.preflight, exitCode: 0, output: #"{"version":1,"ok":true,"failures":[],"warnings":[{"category":"missing-og-image","message":"no og image","remediation":"add one"}]}"#)
             .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
         let observed = Mutex<PreDeployCheck.Outcome?>(nil)
         let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
@@ -366,7 +366,7 @@ struct DeployCommandTests {
                     case .build:
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo building; exit 0"])
                     case .preflight:
-                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"ok":true,"failures":[],"warnings":[]}'; exit 0"#])
+                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"version":1,"ok":true,"failures":[],"warnings":[]}'; exit 0"#])
                     case .wrangler:
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo 'Published angle-app (1.23 sec)'; echo '  https://angle-app.example.workers.dev'; exit 0"])
                     }
@@ -396,7 +396,7 @@ struct DeployCommandTests {
                     case .build:
                         return .run(executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: [])
                     case .preflight:
-                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"ok":true,"failures":[],"warnings":[]}'"#])
+                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"version":1,"ok":true,"failures":[],"warnings":[]}'"#])
                     case .wrangler:
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo \"TOKEN=$CLOUDFLARE_API_TOKEN\"; echo 'Published x (0.1 sec)'; echo '  https://x.workers.dev'"])
                     }
@@ -442,7 +442,7 @@ struct DeployCommandTests {
                     case .build:
                         return .run(executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: [])
                     case .preflight:
-                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"ok":true,"failures":[],"warnings":[]}'"#])
+                        return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"version":1,"ok":true,"failures":[],"warnings":[]}'"#])
                     case .wrangler:
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "trap 'echo __SIGTERM__; exit 143' TERM; echo __STARTED__; sleep 20; echo __COMPLETED__"])
                     }
@@ -503,7 +503,7 @@ struct DeployCommandTests {
         guard case .passed(let warnings) = outcomes.get().first else {
             Issue.record("expected .passed"); return
         }
-        #expect(warnings.contains { $0.category == .orphanedRoute && $0.detail.contains("/old-page") })
+        #expect(warnings.contains { $0.category == .orphanedRoute && $0.message.contains("/old-page") })
         guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
         #expect(DeployedRoutesSnapshot.load(from: configDir) == ["/about"])
     }

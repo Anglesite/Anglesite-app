@@ -16,7 +16,7 @@ public enum RouteCoverageScanner {
         return vanished.sorted().map { route in
             PreDeployCheck.ScanWarning(
                 category: .orphanedRoute,
-                detail: "\(route) is no longer published and has no redirect covering it.",
+                message: "\(route) is no longer published and has no redirect covering it.",
                 remediation: "Add a redirect for \(route) in Site Settings → Redirects, or ignore if the removal is intentional."
             )
         }

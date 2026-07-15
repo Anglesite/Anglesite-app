@@ -179,11 +179,13 @@ struct HealthBadgeView: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(f.detail).font(.callout)
+                            Text(f.detail ?? f.message).font(.callout)
                             if let file = f.file {
                                 Text(file).font(.caption.monospaced()).foregroundStyle(.secondary)
                             }
-                            Text(f.remediation).font(.caption).foregroundStyle(.secondary)
+                            if let remediation = f.remediation {
+                                Text(remediation).font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -196,8 +198,10 @@ struct HealthBadgeView: View {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(w.detail).font(.callout)
-                            Text(w.remediation).font(.caption).foregroundStyle(.secondary)
+                            Text(w.detail ?? w.message).font(.callout)
+                            if let remediation = w.remediation {
+                                Text(remediation).font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
