@@ -172,11 +172,11 @@ final class HealthModelTests: XCTestCase {
     private var tmpURL: URL { URL(fileURLWithPath: "/tmp/health-test") }
 
     private var sampleFailure: PreDeployCheck.ScanFailure {
-        .init(category: .exposedToken, file: "src/x.astro", detail: "token in src", remediation: "remove it")
+        .init(category: .exposedToken, message: "token in src", file: "src/x.astro", remediation: "remove it")
     }
 
     private var sampleWarning: PreDeployCheck.ScanWarning {
-        .init(category: .missingOgImage, detail: "no og image", remediation: "add one")
+        .init(category: .missingOgImage, message: "no og image", remediation: "add one")
     }
 }
 

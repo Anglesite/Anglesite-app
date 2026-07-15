@@ -116,7 +116,7 @@ struct SiteOperationsTests {
     @Test("deploy blocked dialog reports the issue count and never offers an override")
     func deployBlockedDialog() {
         let failure = PreDeployCheck.ScanFailure(
-            category: .exposedToken, file: "src/index.md", detail: "API key committed", remediation: "Remove it"
+            category: .exposedToken, message: "API key committed", file: "src/index.md", remediation: "Remove it"
         )
         let dialog = SiteOperations.dialog(forDeploy: .blocked(failures: [failure], warnings: []))
         #expect(dialog == "Deploy blocked by the pre-deploy security scan (1 issue). Resolve these in Anglesite first.")
@@ -203,8 +203,8 @@ struct SiteOperationsTests {
     func socialWorkerProvisionBlockedDialog() {
         let failure = PreDeployCheck.ScanFailure(
             category: .exposedToken,
+            message: "API key committed",
             file: "dist/index.html",
-            detail: "API key committed",
             remediation: "Remove it"
         )
         let result = SocialWorkerProvisionCommand.Result.blocked(

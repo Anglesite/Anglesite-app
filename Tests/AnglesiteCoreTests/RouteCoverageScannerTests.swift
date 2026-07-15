@@ -23,7 +23,7 @@ struct RouteCoverageScannerTests {
             currentRoutes: ["/about"], previousRoutes: ["/about", "/old-page"], redirectSources: [])
         #expect(warnings.count == 1)
         #expect(warnings[0].category == .orphanedRoute)
-        #expect(warnings[0].detail.contains("/old-page"))
+        #expect(warnings[0].message.contains("/old-page"))
     }
 
     @Test("a vanished route covered by a redirect produces no warning")

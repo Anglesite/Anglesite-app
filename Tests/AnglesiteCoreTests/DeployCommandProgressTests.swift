@@ -25,7 +25,7 @@ private struct BlockingPreflightExecutor: DeployExecutor {
         case .build:
             return DeployStepResult(exitCode: 0, output: "")
         case .preflight:
-            return DeployStepResult(exitCode: 0, output: #"{"ok":false,"failures":[],"warnings":[]}"#)
+            return DeployStepResult(exitCode: 0, output: #"{"version":1,"ok":false,"failures":[],"warnings":[]}"#)
         case .wrangler:
             return DeployStepResult(exitCode: 0, output: "")
         }
