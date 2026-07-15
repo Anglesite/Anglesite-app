@@ -112,7 +112,7 @@ struct SiteWindow: View {
             model.windowUndoManager = newValue
         }
         .onChange(of: model.preview.state) { _, newState in
-            model.startup.ingest(state: newState)
+            model.previewStateChanged(newState)
         }
         .onChange(of: model.hasUnsavedEdits, initial: true) { _, hasUnsavedEdits in
             if hasUnsavedEdits {

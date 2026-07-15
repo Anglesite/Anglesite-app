@@ -168,12 +168,13 @@ struct CompletionNoticeTests {
 /// the Dock bar is determinate per-phase; unknown phases fall back to indeterminate.
 struct DeployDockProgressTests {
 
-    /// The `OperationProgress` deploy milestones in `DeployCommand`'s emission order (build →
-    /// preflight scan → wrangler → finalize). NOTE: that order lives in `DeployCommand`'s control
-    /// flow and is not statically derivable here — if the pipeline is ever reordered, update this
-    /// list (and `DeployDockProgress`'s table) to match, or the Dock bar will move backwards.
+    /// The deploy milestones in emission order (build/feed generation → preflight scan → wrangler
+    /// → finalize → webmentions → POSSE). NOTE: that order lives across `DeployCommand` and
+    /// `DeployModel`'s post-deploy pipeline and is not statically derivable here. If it is ever
+    /// reordered, update this list (and `DeployDockProgress`'s table), or the Dock bar moves back.
     private static let pipelineOrder = [
         OperationProgress.deployBuilding, .deployPreflight, .deployDeploying, .deployFinalizing,
+        .deployWebmentions, .deploySyndicating,
     ]
 
     @Test("Known milestones map to monotonically increasing fractions in pipeline order")

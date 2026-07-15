@@ -94,6 +94,11 @@ final class DeployModel {
         containerControl: (siteID: String, control: any LocalContainerControl)?
     )?
 
+    private enum Presentation: Equatable {
+        case foreground
+        case background
+    }
+
     init(
         command: DeployCommand = DeployCommand(),
         webmentionCommand: WebmentionSendCommand = WebmentionSendCommand(),
@@ -157,11 +162,48 @@ final class DeployModel {
         phase = .running(siteID: siteID, since: Date())
         let suddenTerminationLease = suddenTerminationController.acquire()
         inFlight = Task { @MainActor [weak self, suddenTerminationLease] in
-            await self?.runDeploy(
+            _ = await self?.runDeploy(
                 siteID: siteID, siteDirectory: siteDirectory,
                 configDirectory: configDirectory, currentRoutes: currentRoutes,
                 containerControl: containerControl,
-                suddenTerminationLease: suddenTerminationLease)
+                suddenTerminationLease: suddenTerminationLease,
+                presentation: .foreground)
+        }
+    }
+
+    /// Runs the same ordered publish pipeline without presenting foreground drawers, token sheets,
+    /// or the security-block modal. The durable invisible-publish queue uses the returned result to
+    /// decide whether its pending marker may be cleared. Terminal transitions still fire, so
+    /// completion and security-block notifications use the normal app notification path.
+    func deployAutomatically(
+        siteID: String,
+        siteDirectory: URL,
+        configDirectory: URL,
+        currentRoutes: [String],
+        containerControl: (siteID: String, control: any LocalContainerControl)?
+    ) async -> InvisiblePublishQueue.Result {
+        guard !isRunning else { return .deferred(reason: "another site operation is running") }
+        guard hasUsableToken() else { return .deferred(reason: "Cloudflare credentials are not configured") }
+        guard containerControl != nil else { return .deferred(reason: "the site runtime is not ready") }
+
+        phase = .running(siteID: siteID, since: Date.now)
+        let lease = suddenTerminationController.acquire()
+        let result = await runDeploy(
+            siteID: siteID,
+            siteDirectory: siteDirectory,
+            configDirectory: configDirectory,
+            currentRoutes: currentRoutes,
+            containerControl: containerControl,
+            suddenTerminationLease: lease,
+            presentation: .background
+        )
+        switch result {
+        case .succeeded(let url, _):
+            return .succeeded(url: url)
+        case .blocked(let failures, _):
+            return .blocked(failureCount: failures.count)
+        case .failed(let reason, _):
+            return .failed(reason: reason)
         }
     }
 
@@ -252,8 +294,9 @@ final class DeployModel {
         configDirectory: URL,
         currentRoutes: [String],
         containerControl: (siteID: String, control: any LocalContainerControl)? = nil,
-        suddenTerminationLease: SuddenTerminationController.Lease
-    ) async {
+        suddenTerminationLease: SuddenTerminationController.Lease,
+        presentation: Presentation
+    ) async -> DeployCommand.Result {
         defer { suddenTerminationLease.release() }
         transition(siteID: siteID, to: .running(siteID: siteID, since: Date()))
         logLines = []
@@ -265,7 +308,7 @@ final class DeployModel {
         // this call's summarization branch. Must NOT be re-read later via the live field, which
         // may have moved on if a second `runDeploy` call started concurrently (see guard below).
         let myGeneration = summarizationGeneration
-        drawerPresented = true
+        drawerPresented = presentation == .foreground
         blockedPresented = false
 
         let sources = Set(["deploy:\(siteID)", "deploy:\(siteID):build"])
@@ -324,29 +367,28 @@ final class DeployModel {
         currentMilestone = nil
         switch result {
         case .succeeded(let url, let duration):
+            // Astro's build above regenerates RSS/Atom/JSON feeds. Social delivery is ordered
+            // after the deployed canonical pages exist, and completion is notified only after
+            // both best-effort passes finish.
+            emitPostDeployMilestone(.deployWebmentions, siteID: siteID)
+            await webmentionCommand.send(
+                siteID: siteID,
+                siteDirectory: siteDirectory,
+                configDirectory: configDirectory,
+                siteBase: url
+            )
+            emitPostDeployMilestone(.deploySyndicating, siteID: siteID)
+            await posseCommand.syndicate(
+                siteID: siteID,
+                siteDirectory: siteDirectory,
+                configDirectory: configDirectory,
+                siteBase: url
+            )
+            currentMilestone = nil
             transition(siteID: siteID, to: .succeeded(url: url, duration: duration))
-            // Fire-and-forget: webmention sends are best-effort and must never block or affect
-            // the deploy result the user watches. Progress/failures surface only in LogCenter.
-            Task.detached { [webmentionCommand] in
-                await webmentionCommand.send(
-                    siteID: siteID,
-                    siteDirectory: siteDirectory,
-                    configDirectory: configDirectory,
-                    siteBase: url
-                )
-            }
-            // POSSE is independently best-effort so a slow social API never delays webmentions or
-            // changes the deploy result. Its own actor serializes overlapping runs per site.
-            Task.detached { [posseCommand] in
-                await posseCommand.syndicate(
-                    siteID: siteID,
-                    siteDirectory: siteDirectory,
-                    configDirectory: configDirectory,
-                    siteBase: url
-                )
-            }
         case .failed(let reason, let exit):
             transition(siteID: siteID, to: .failed(reason: reason, exitCode: exit))
+            guard presentation == .foreground else { return result }
             let capturedLog = logText   // snapshot before the suspension; a later deploy clears logLines
             summarizing = true
             let summary = await DeployFailureSummaryRequest.run(
@@ -357,7 +399,7 @@ final class DeployModel {
             )
             // Drop the result if another deploy started while we were summarizing — it has already
             // reset failureSummary/summarizing and we must not clobber its state.
-            guard summarizationGeneration == myGeneration else { return }
+            guard summarizationGeneration == myGeneration else { return result }
             failureSummary = summary
             summarizing = false
         case .blocked(let failures, let warnings):
@@ -365,7 +407,13 @@ final class DeployModel {
             // For the blocked outcome the modal sheet carries the actionable info; the
             // streaming-log drawer would just be noise.
             drawerPresented = false
-            blockedPresented = true
+            blockedPresented = presentation == .foreground
         }
+        return result
+    }
+
+    private func emitPostDeployMilestone(_ progress: OperationProgress, siteID: String) {
+        currentMilestone = progress.label
+        onMilestone?(siteID, progress)
     }
 }
