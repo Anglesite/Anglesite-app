@@ -36,6 +36,11 @@ scripts/run-container-probe.sh boot
 
 (The probe's default ad-hoc signing is sufficient — the entitlement needs no real identity.)
 
+If Apple's `container` CLI apiserver or a UTM VM normally runs on the test Mac, leave it
+running during `boot`. This is the #715 regression gate: the guest must negotiate a distinct
+vmnet subnet and retain outbound DNS/HTTPS while another vmnet NAT consumer is active. The
+runtime log should include the dynamically allocated guest address and gateway/DNS pair.
+
 Both must pass, or the App Store smoke is expected to fail at runtime startup.
 
 ## Build Fixture And App
@@ -88,4 +93,3 @@ Also save the app debug pane logs for these sources when present:
 ## Acceptance
 
 #81 can close when the matrix passes on a real-signed App Store-target build, or when every failure has a follow-up issue with captured logs and a clear owner.
-

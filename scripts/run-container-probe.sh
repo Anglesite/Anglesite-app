@@ -14,6 +14,11 @@
 #   scripts/run-container-probe.sh echo   # THE Task 4b decision gate (vsock round-trip)
 #   scripts/run-container-probe.sh boot    # Task 5's gate (full boot + preview HTTP poll)
 #
+# The boot probe is also the #715 concurrent-vmnet regression gate. If Apple's `container`
+# CLI apiserver or a UTM VM normally runs on this host, leave it running: Anglesite must use
+# vmnet's dynamically allocated subnet and retain outbound npm/DNS connectivity alongside it.
+# Do not stop other vmnet consumers to make this probe pass.
+#
 # The default ad-hoc signing is sufficient: `com.apple.security.virtualization` is an
 # unrestricted entitlement, honored under `codesign --sign -` with no provisioning profile
 # (verified 2026-07-07: the echo gate passed ad-hoc). SIGN_IDENTITY remains as an override for

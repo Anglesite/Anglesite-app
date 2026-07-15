@@ -15,8 +15,9 @@ import ContainerizationExtras
 /// plan's intended shapes. Notably there is no `LinuxContainer(image:networking:)` — booting needs a
 /// `Kernel` + an initfs `Mount` + an unpacked rootfs `Mount`; image import is `ImageStore.load(from:)`
 /// (not `importIfNeeded`); exec is two-phase (`exec` builds, `.start()` runs, `.wait()` blocks);
-/// networking is a `NATInterface` (not `.nat`); and `dialVsock(port:)` already returns a `FileHandle`,
-/// so it slots directly into `VsockDialer`. See `.superpowers/sdd/task-7-report.md` for the full map.
+/// networking is a vmnet-allocated `VmnetNetwork.Interface` (not `.nat`); and
+/// `dialVsock(port:)` already returns a `FileHandle`, so it slots directly into `VsockDialer`.
+/// See `.superpowers/sdd/task-7-report.md` for the full map.
 public struct ContainerizationControl: LocalContainerControl {
     /// Optional explicit OCI layout override; when nil, `start()` resolves it via `BundledImage.layoutURL()`.
     /// Kept off `init` as a non-throwing default so constructing the type can never trap (the old
@@ -294,10 +295,19 @@ public struct ContainerizationControl: LocalContainerControl {
             let kernel = Kernel(path: kernelURL, platform: .linuxArm)
             let vmm = VZVirtualMachineManager(kernel: kernel, initialFilesystem: initfs)
 
-            // Static NAT addressing: VZNATNetworkDeviceAttachment under the hood (resolved #317).
-            let nat = NATInterface(
-                ipv4Address: try CIDRv4("192.168.64.2/24"),
-                ipv4Gateway: try IPv4Address("192.168.64.1")
+            // Let vmnet choose an available shared-mode subnet. Hard-coding 192.168.64.0/24
+            // works only while this is the first vmnet consumer on the host: Apple's container
+            // CLI, UTM, or another VM can already own that network, leaving the guest's static
+            // route and DNS pointed at a nonexistent gateway (#715).
+            var network = try VmnetNetwork()
+            guard let interface = try network.createInterface(siteID),
+                let gateway = interface.ipv4Gateway else {
+                throw LocalContainerError.bootFailed("vmnet did not allocate an IPv4 interface and gateway")
+            }
+            let nameserver = gateway.description
+            onOutput(
+                "[boot] vmnet allocated \(interface.ipv4Address) with gateway/DNS \(nameserver)",
+                .stdout
             )
 
             let container = try LinuxContainer(siteID, rootfs: rootfs, vmm: vmm) { config in
@@ -310,8 +320,8 @@ public struct ContainerizationControl: LocalContainerControl {
                 config.process.workingDirectory = "/"
                 config.cpus = 2
                 config.memoryInBytes = 2 * 1024 * 1024 * 1024
-                config.interfaces = [nat]
-                config.dns = DNS(nameservers: ["192.168.64.1"])
+                config.interfaces = [interface]
+                config.dns = DNS(nameservers: [nameserver])
                 // Host `Source/` repo shared read-only into the guest via virtio-fs so the guest can
                 // `git clone` it (the macOS host path is otherwise invisible to the Linux guest).
                 // `Mount.share(source:destination:)` is the host-directory virtio-fs share — confirmed
