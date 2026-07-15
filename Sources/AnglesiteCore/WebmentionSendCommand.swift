@@ -13,6 +13,14 @@ public actor WebmentionSendCommand {
     private let transport: WebmentionEndpointDiscovery.Transport
     private let logCenter: LogCenter
     private let now: () -> Date
+    /// The latest `send()` call per `siteID`, so a new call for a site already in flight (e.g. a
+    /// quick redeploy before the prior webmention pass finished) chains after it instead of
+    /// racing it. Without this, two overlapping calls could both `WebmentionSentLog.load(...)`
+    /// before either `.save()`s — duplicate POSTs, and whichever save finishes last silently
+    /// drops the other call's newly-recorded entries. Never pruned: bounded by the number of
+    /// distinct sites this instance ever sends for, which is small (each entry is overwritten,
+    /// not appended, on every call for that site).
+    private var inFlight: [String: Task<Void, Never>] = [:]
 
     public init(
         transport: @escaping WebmentionEndpointDiscovery.Transport = WebmentionSendCommand.defaultTransport,
@@ -24,7 +32,22 @@ public actor WebmentionSendCommand {
         self.now = now
     }
 
+    /// Serializes per `siteID`: chains behind any still-running `send()` for the same site before
+    /// starting its own read-diff-send-persist pass, so `Config/webmention-sent.json` never has
+    /// two overlapping readers/writers for the same site. Different sites run fully in parallel.
     public func send(siteID: String, siteDirectory: URL, configDirectory: URL, siteBase: URL) async {
+        let previous = inFlight[siteID]
+        let task = Task<Void, Never> { [weak self] in
+            _ = await previous?.value
+            await self?.performSend(
+                siteID: siteID, siteDirectory: siteDirectory, configDirectory: configDirectory, siteBase: siteBase
+            )
+        }
+        inFlight[siteID] = task
+        await task.value
+    }
+
+    private func performSend(siteID: String, siteDirectory: URL, configDirectory: URL, siteBase: URL) async {
         let logSource = "webmention:\(siteID)"
 
         let plan: SocialPublishPlan.Plan

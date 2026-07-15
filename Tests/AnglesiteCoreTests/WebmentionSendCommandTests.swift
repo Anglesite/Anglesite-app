@@ -102,6 +102,38 @@ struct WebmentionSendCommandTests {
         #expect(count == 2) // no new POSTs on the second run
     }
 
+    @Test("overlapping send() calls for the same site are serialized, not raced")
+    func overlappingSendsAreSerialized() async throws {
+        let (root, siteDirectory, configDirectory) = try makeSite()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let counter = Counter()
+        let baseTransport = transport()
+        let counting: WebmentionEndpointDiscovery.Transport = { request in
+            if request.httpMethod == "POST" { await counter.increment() }
+            return try await baseTransport(request)
+        }
+        let command = WebmentionSendCommand(transport: counting, logCenter: LogCenter())
+        let siteBase = URL(string: "https://mysite.test")!
+
+        // Both calls target the same siteID/content — fired without awaiting either individually,
+        // so they genuinely overlap on the actor. Without per-site serialization, both would read
+        // the sent-log before either saved it, double-POSTing every pending target.
+        async let first: Void = command.send(
+            siteID: "site1", siteDirectory: siteDirectory, configDirectory: configDirectory, siteBase: siteBase
+        )
+        async let second: Void = command.send(
+            siteID: "site1", siteDirectory: siteDirectory, configDirectory: configDirectory, siteBase: siteBase
+        )
+        _ = await (first, second)
+
+        let postCount = await counter.value
+        #expect(postCount == 2) // serialized: the second call sees the first's persisted results, sends nothing new
+
+        let log = WebmentionSentLog.load(from: configDirectory)
+        #expect(log?.sent.count == 2)
+    }
+
     @Test("a failed send is not persisted, so it's retried on the next run")
     func failedSendIsRetried() async throws {
         let (root, siteDirectory, configDirectory) = try makeSite()
