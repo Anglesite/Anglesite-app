@@ -397,7 +397,9 @@ public struct ContainerizationControl: LocalContainerControl {
             onOutput("[boot] VM started", .stdout)
             return bootedContainer
         } catch {
-            onOutput("[boot] VM boot failed: \(error)", .stderr)
+            let errorDescription = "\(error)"
+            let diagnostic = VmnetFailureRecovery.message(for: errorDescription) ?? errorDescription
+            onOutput("[boot] VM boot failed: \(diagnostic)", .stderr)
             // A timeout leaves create/start running. Its operation releases on a late failure;
             // onLateSuccess stops the late VM and releases through stopBareContainer. Releasing
             // here would let another site reuse the address while that VM is still starting.
@@ -406,7 +408,7 @@ public struct ContainerizationControl: LocalContainerControl {
             }
             try? FileManager.default.removeItem(at: rootfsURL)
             try? FileManager.default.removeItem(at: initfsURL)
-            throw LocalContainerError.bootFailed("\(error)")
+            throw LocalContainerError.bootFailed(diagnostic)
         }
     }
 
