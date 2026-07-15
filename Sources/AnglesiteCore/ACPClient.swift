@@ -14,12 +14,19 @@ public actor ACPClient {
     public enum ACPError: Error, Sendable, Equatable {
         case invalidResponse(String)
         case rpcError(code: Int, message: String)
+        /// A call was made after `stop()` (or before the client has ever started). Mirrors
+        /// `MCPClient.MCPError.notInitialized` — fail fast instead of registering a pending
+        /// continuation against a closed transport that will never answer.
+        case stopped
     }
 
     private let transport: any ACPTransport
     private var readerTask: Task<Void, Never>?
     private var nextRequestID: Int = 1
     private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
+    /// Set at the start of `stop()`; guards `sendRequest`/`sendNotification` against sending on an
+    /// already-closed transport (see `MCPClient.transport == nil` for the equivalent guard).
+    private var isStopped: Bool = false
     /// One live `session/update` listener per session — this slice only ever drives one turn at a
     /// time per `ACPAssistant`, so a single continuation per session id is sufficient.
     private var sessionUpdateContinuations: [String: AsyncStream<AssistantEvent>.Continuation] = [:]
@@ -80,6 +87,7 @@ public actor ACPClient {
     }
 
     public func stop() async {
+        isStopped = true
         readerTask?.cancel()
         readerTask = nil
         await transport.close()
@@ -96,6 +104,7 @@ public actor ACPClient {
     }
 
     private func sendRequest(method: String, params: JSONValue?) async throws -> JSONValue {
+        guard !isStopped else { throw ACPError.stopped }
         let id = nextRequestID
         nextRequestID += 1
         var obj: [String: JSONValue] = ["jsonrpc": .string("2.0"), "id": .int(id), "method": .string(method)]
@@ -113,6 +122,7 @@ public actor ACPClient {
     }
 
     private func sendNotification(method: String, params: JSONValue?) async throws {
+        guard !isStopped else { throw ACPError.stopped }
         var obj: [String: JSONValue] = ["jsonrpc": .string("2.0"), "method": .string(method)]
         if let params { obj["params"] = params }
         try await transport.send(.object(obj))

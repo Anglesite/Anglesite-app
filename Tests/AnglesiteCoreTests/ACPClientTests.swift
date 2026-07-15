@@ -3,7 +3,11 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
-@Suite struct ACPClientTests {
+// `.timeLimit`: the only wall-clock bound in this file, and deliberately so — it exists purely to
+// fail a test that regresses into hanging (e.g. a `stop()` guard removed) rather than blocking CI
+// forever, per the sibling `VsockTCPProxyTests` convention. Individual tests assert on events/thrown
+// errors, not elapsed time.
+@Suite(.timeLimit(.minutes(1))) struct ACPClientTests {
     /// In-process fake `ACPTransport`, mirroring `MCPClientTests`'s `FakeMCPServerTransport`:
     /// responses/notifications are yielded synchronously from `send(_:)`, no subprocess, no
     /// wall-clock dependency.
@@ -75,5 +79,36 @@ import Foundation
         for await event in events { collected.append(event) }
         #expect(collected.contains(.textDelta("Hello")))
         #expect(collected.contains(.turnComplete(nil)))
+    }
+
+    // MARK: stop() lifecycle guard
+
+    @Test func callsAfterStopFailFastInsteadOfHangingOnAClosedTransport() async throws {
+        let client = ACPClient(transport: FakeACPAgentTransport())
+        try await client.initialize()
+        await client.stop()
+
+        await #expect(throws: ACPClient.ACPError.stopped) {
+            try await client.initialize()
+        }
+    }
+
+    @Test func sendPromptAfterStopFinishesTheStreamWithFailedInsteadOfHanging() async throws {
+        let transport = FakeACPAgentTransport()
+        let client = ACPClient(transport: transport)
+        try await client.initialize()
+        let sessionID = try await client.newSession(cwd: "/workspace/site")
+        await client.stop()
+
+        // Before the fix, this `sendPrompt` would register a pending continuation and call
+        // `transport.send` on an already-closed transport that never answers, hanging the `for
+        // await` below forever (bounded only by the suite `.timeLimit`). After the fix, the
+        // `session/prompt` request throws `.stopped` immediately, so the stream still terminates.
+        let events = try await client.sendPrompt(sessionID: sessionID, text: "hi")
+        var collected: [AssistantEvent] = []
+        for await event in events { collected.append(event) }
+        #expect(collected.contains(.started(model: nil, toolNames: [])))
+        #expect(collected.contains { if case .failed = $0 { return true } else { return false } })
+        #expect(!collected.contains(.turnComplete(nil)))
     }
 }
