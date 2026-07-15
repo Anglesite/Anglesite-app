@@ -11,7 +11,7 @@
  * Usage: npx tsx scripts/pre-deploy-check.ts [--json]
  *
  * Exit code 0: all clear. Exit code 1: issues found.
- * With --json: prints a JSON array of { severity, message, file } objects.
+ * With --json: prints the versioned {version, ok, failures, warnings} envelope (#742).
  */
 
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -21,8 +21,16 @@ import { parseAllowedDomains } from "./csp";
 
 interface Issue {
   severity: "error" | "warning";
+  category: string;
   message: string;
   file?: string;
+}
+
+interface ScanReport {
+  version: 1;
+  ok: boolean;
+  failures: Issue[];
+  warnings: Issue[];
 }
 
 const JSON_MODE = process.argv.includes("--json");
@@ -69,7 +77,7 @@ async function* walk(dir: string): AsyncGenerator<string> {
 export function checkHeaders(headersContent: string | null, configContent: string): Issue[] {
   const issues: Issue[] = [];
   if (headersContent === null) {
-    issues.push({ severity: "error", message: "No dist/_headers — CSP is not enforced.", file: "_headers" });
+    issues.push({ severity: "error", category: "csp-misconfigured", message: "No dist/_headers — CSP is not enforced.", file: "_headers" });
     return issues;
   }
   const cspLine = headersContent
@@ -77,7 +85,7 @@ export function checkHeaders(headersContent: string | null, configContent: strin
     .map((l) => l.trim())
     .find((l) => l.startsWith("Content-Security-Policy:"));
   if (!cspLine) {
-    issues.push({ severity: "error", message: "dist/_headers has no Content-Security-Policy.", file: "_headers" });
+    issues.push({ severity: "error", category: "csp-misconfigured", message: "dist/_headers has no Content-Security-Policy.", file: "_headers" });
     return issues;
   }
   const cspTokens = new Set(
@@ -91,6 +99,7 @@ export function checkHeaders(headersContent: string | null, configContent: strin
     if (!cspTokens.has(domain)) {
       issues.push({
         severity: "error",
+        category: "csp-misconfigured",
         message: `Configured integration domain "${domain}" is missing from the CSP.`,
         file: "_headers",
       });
@@ -116,7 +125,12 @@ export function checkPII(content: string, file: string): Issue[] {
     pattern.lastIndex = 0;
     const haystack = name === "email" ? withoutMailtoLinks : content;
     if (pattern.test(haystack)) {
-      issues.push({ severity: "error", message: `Possible ${name} found`, file });
+      issues.push({
+        severity: "error",
+        category: `pii-${name.toLowerCase()}`,
+        message: `Possible ${name} found`,
+        file,
+      });
     }
   }
   return issues;
@@ -132,7 +146,7 @@ export function checkMixedContent(content: string, file: string): Issue[] {
   const patterns = [/\bsrc\s*=\s*["']http:\/\//i, /url\(\s*["']?http:\/\//i];
   for (const pattern of patterns) {
     if (pattern.test(content)) {
-      return [{ severity: "warning", message: "Mixed content: insecure http:// resource reference", file }];
+      return [{ severity: "warning", category: "mixed-content", message: "Mixed content: insecure http:// resource reference", file }];
     }
   }
   return [];
@@ -160,10 +174,11 @@ export function checkSRI(content: string, file: string): Issue[] {
     if (!isScript && !/\brel\s*=\s*["'][^"']*stylesheet/i.test(tag)) continue;
     const kind = isScript ? "script" : "stylesheet";
     if (!/\bintegrity\s*=/i.test(tag)) {
-      issues.push({ severity: "warning", message: `External ${kind} without subresource integrity (SRI)`, file });
+      issues.push({ severity: "warning", category: "sri-missing", message: `External ${kind} without subresource integrity (SRI)`, file });
     } else if (!/\scrossorigin\b/i.test(tag)) {
       issues.push({
         severity: "warning",
+        category: "sri-missing",
         message: `External ${kind} has integrity but is missing crossorigin (will fail CORS)`,
         file,
       });
@@ -189,7 +204,7 @@ export function checkExternalLinkRel(content: string, file: string): Issue[] {
     const relMatch = tag.match(/\brel\s*=\s*["']([^"']*)["']/i);
     const rel = relMatch ? relMatch[1].toLowerCase() : "";
     if (!/\bnoopener\b|\bnoreferrer\b/.test(rel)) {
-      issues.push({ severity: "warning", message: 'Link with target="_blank" missing rel="noopener"', file });
+      issues.push({ severity: "warning", category: "external-link-rel", message: 'Link with target="_blank" missing rel="noopener"', file });
     }
   }
   return issues;
@@ -206,7 +221,12 @@ export function checkArtifactPresence(relPaths: string[]): Issue[] {
   const issues: Issue[] = [];
   for (const path of required) {
     if (!set.has(path)) {
-      issues.push({ severity: "warning", message: `Missing security artifact: ${path.replace(/^dist\//, "")}`, file: path });
+      issues.push({
+        severity: "warning",
+        category: "missing-security-artifact",
+        message: `Missing security artifact: ${path.replace(/^dist\//, "")}`,
+        file: path,
+      });
     }
   }
   return issues;
@@ -218,7 +238,7 @@ async function scan(): Promise<Issue[]> {
   try {
     await stat(DIST_DIR);
   } catch {
-    issues.push({ severity: "warning", message: "No dist/ directory found — nothing to scan." });
+    issues.push({ severity: "warning", category: "missing-security-artifact", message: "No dist/ directory found — nothing to scan." });
     return issues;
   }
 
@@ -243,7 +263,7 @@ async function scan(): Promise<Issue[]> {
     for (const { name, pattern } of SECRET_PATTERNS) {
       pattern.lastIndex = 0;
       if (pattern.test(content)) {
-        issues.push({ severity: "error", message: `Possible ${name} exposed`, file: rel });
+        issues.push({ severity: "error", category: "exposed-token", message: `Possible ${name} exposed`, file: rel });
       }
     }
 
@@ -256,6 +276,7 @@ async function scan(): Promise<Issue[]> {
         if (pattern.test(content)) {
           issues.push({
             severity: "warning",
+            category: "third-party-script",
             message: `Third-party tracking script detected: ${pattern.source}`,
             file: rel,
           });
@@ -266,6 +287,7 @@ async function scan(): Promise<Issue[]> {
         if (pattern.test(content)) {
           issues.push({
             severity: "error",
+            category: "keystatic-route",
             message: "Keystatic admin route found in production output",
             file: rel,
           });
@@ -284,9 +306,12 @@ async function scan(): Promise<Issue[]> {
 
 async function main() {
   const issues = await scan();
+  const failures = issues.filter((i) => i.severity === "error");
+  const warnings = issues.filter((i) => i.severity === "warning");
 
   if (JSON_MODE) {
-    process.stdout.write(JSON.stringify(issues, null, 2) + "\n");
+    const report: ScanReport = { version: 1, ok: failures.length === 0, failures, warnings };
+    process.stdout.write(JSON.stringify(report, null, 2) + "\n");
   } else {
     if (issues.length === 0) {
       console.log("Pre-deploy check passed — no issues found.");
@@ -299,8 +324,7 @@ async function main() {
     }
   }
 
-  const hasErrors = issues.some((i) => i.severity === "error");
-  process.exit(hasErrors ? 1 : 0);
+  process.exit(failures.length > 0 ? 1 : 0);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
