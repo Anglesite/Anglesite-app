@@ -53,7 +53,7 @@ struct PreDeployCheckTests {
         #expect(failures[0].remediation?.contains("PII_EMAIL_ALLOW") == true)
     }
 
-    @Test("Parses all five failure categories") func parsesAllFiveFailureCategories() async {
+    @Test("Parses all seven concrete failure categories") func parsesAllSevenConcreteFailureCategories() async {
         let json = """
         {
           "version": 1,
@@ -61,9 +61,11 @@ struct PreDeployCheckTests {
           "failures": [
             {"category": "pii-email", "message": "m", "file": "a", "remediation": "r"},
             {"category": "pii-phone", "message": "m", "file": "a", "remediation": "r"},
+            {"category": "pii-ssn", "message": "m", "file": "a", "remediation": "r"},
             {"category": "exposed-token", "message": "m", "file": "a", "remediation": "r"},
             {"category": "third-party-script", "message": "m", "file": "a", "remediation": "r"},
-            {"category": "keystatic-route", "message": "m", "file": "a", "remediation": "r"}
+            {"category": "keystatic-route", "message": "m", "file": "a", "remediation": "r"},
+            {"category": "csp-misconfigured", "message": "m", "file": "a", "remediation": "r"}
           ],
           "warnings": []
         }
@@ -74,8 +76,12 @@ struct PreDeployCheckTests {
             Issue.record("expected .blocked")
             return
         }
+        // Every concrete ScanFailure.Category case except `.other`, which has its own dedicated
+        // test (`unknownCategoryDecodesToOther`) covering the forward-compatible fallback.
         #expect(
-            Set(failures.map(\.category)) == Set([.piiEmail, .piiPhone, .exposedToken, .thirdPartyScript, .keystaticRoute])
+            Set(failures.map(\.category)) == Set([
+                .piiEmail, .piiPhone, .piiSSN, .exposedToken, .thirdPartyScript, .keystaticRoute, .cspMisconfigured,
+            ])
         )
     }
 
