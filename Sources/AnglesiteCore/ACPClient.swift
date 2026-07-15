@@ -18,6 +18,12 @@ public actor ACPClient {
         /// `MCPClient.MCPError.notInitialized` — fail fast instead of registering a pending
         /// continuation against a closed transport that will never answer.
         case stopped
+        /// No response arrived within the request's timeout. Mirrors `MCPClient.MCPError.timeout` —
+        /// bounds a hang caused by e.g. the in-container agent process crashing mid-turn without
+        /// anything finishing the transport's inbound stream (nothing here currently detects that
+        /// crash directly; this is the general backstop for it, for both the stdio and HTTP
+        /// transports).
+        case timeout
     }
 
     private let transport: any ACPTransport
@@ -30,9 +36,18 @@ public actor ACPClient {
     /// One live `session/update` listener per session — this slice only ever drives one turn at a
     /// time per `ACPAssistant`, so a single continuation per session id is sufficient.
     private var sessionUpdateContinuations: [String: AsyncStream<AssistantEvent>.Continuation] = [:]
+    /// Test-only seam: overrides every `sendRequest` timeout (`initialize`/`session/new`/
+    /// `session/prompt`) so tests proving the timeout mechanism aren't bound by the production
+    /// defaults (10s / 10s / 120s). Not `public` — reachable only via `@testable import`.
+    private var requestTimeoutOverrideForTesting: TimeInterval?
 
     public init(transport: any ACPTransport) {
         self.transport = transport
+    }
+
+    /// Test-only seam — see `requestTimeoutOverrideForTesting`.
+    func setRequestTimeoutOverrideForTesting(_ timeout: TimeInterval?) {
+        requestTimeoutOverrideForTesting = timeout
     }
 
     public func initialize() async throws {
@@ -45,11 +60,15 @@ public actor ACPClient {
             "protocolVersion": .int(1),
             "clientCapabilities": .object(["fs": .object(["readTextFile": .bool(false), "writeTextFile": .bool(false)])]),
         ])
-        _ = try await sendRequest(method: "initialize", params: params)
+        _ = try await sendRequest(method: "initialize", params: params, timeout: requestTimeoutOverrideForTesting ?? 10)
     }
 
     public func newSession(cwd: String) async throws -> String {
-        let result = try await sendRequest(method: "session/new", params: .object(["cwd": .string(cwd), "mcpServers": .array([])]))
+        let result = try await sendRequest(
+            method: "session/new",
+            params: .object(["cwd": .string(cwd), "mcpServers": .array([])]),
+            timeout: requestTimeoutOverrideForTesting ?? 10
+        )
         guard case .object(let obj) = result, case .string(let sessionID)? = obj["sessionId"] else {
             throw ACPError.invalidResponse("session/new missing 'sessionId'")
         }
@@ -59,6 +78,12 @@ public actor ACPClient {
     /// Streams one turn as `AssistantEvent`s: `.started` immediately, `.textDelta`/`.toolUse`/
     /// `.toolResult` as `session/update` notifications arrive for `sessionID`, then `.turnComplete`
     /// (or `.failed`) once the `session/prompt` response itself resolves.
+    ///
+    /// The `session/prompt` request uses a 120s timeout — long enough for a real turn (thinking,
+    /// tool use) to complete normally, but bounding the hang if the in-container agent process
+    /// crashes mid-turn (nothing currently detects that crash directly; this is the general
+    /// backstop, per `ACPError.timeout`). A timeout surfaces here as `.failed(message:)`, same as
+    /// any other `sendRequest` failure.
     public func sendPrompt(sessionID: String, text: String) async throws -> AsyncStream<AssistantEvent> {
         let (stream, continuation) = AsyncStream<AssistantEvent>.makeStream(bufferingPolicy: .unbounded)
         sessionUpdateContinuations[sessionID] = continuation
@@ -68,10 +93,11 @@ public actor ACPClient {
             "sessionId": .string(sessionID),
             "prompt": .array([.object(["type": .string("text"), "text": .string(text)])]),
         ])
+        let promptTimeout = requestTimeoutOverrideForTesting ?? 120
         Task { [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.sendRequest(method: "session/prompt", params: params)
+                _ = try await self.sendRequest(method: "session/prompt", params: params, timeout: promptTimeout)
                 continuation.yield(.turnComplete(nil))
             } catch {
                 continuation.yield(.failed(message: String(describing: error)))
@@ -103,21 +129,40 @@ public actor ACPClient {
         sessionUpdateContinuations.removeValue(forKey: sessionID)
     }
 
-    private func sendRequest(method: String, params: JSONValue?) async throws -> JSONValue {
+    /// Sends a request and awaits its response, bounded by `timeout`. Mirrors
+    /// `MCPClient.sendRequest`'s timeout mechanism exactly: a detached `timeoutTask` fails the
+    /// pending continuation with `.timeout` if no response arrives in time, and is cancelled via
+    /// `defer` once the real response (or an earlier failure) resolves it first. This is what
+    /// bounds a hang if the in-container agent process crashes mid-request without anything else
+    /// noticing (see `ACPError.timeout`).
+    private func sendRequest(method: String, params: JSONValue?, timeout: TimeInterval) async throws -> JSONValue {
         guard !isStopped else { throw ACPError.stopped }
         let id = nextRequestID
         nextRequestID += 1
         var obj: [String: JSONValue] = ["jsonrpc": .string("2.0"), "id": .int(id), "method": .string(method)]
         if let params { obj["params"] = params }
-        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<JSONValue, Error>) in
-            pending[id] = cont
-            Task { [weak self] in
-                do {
-                    try await self?.transport.send(.object(obj))
-                } catch {
-                    await self?.failPending(id: id, error: error)
+
+        let timeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
+            if !Task.isCancelled { await self?.failPending(id: id, error: ACPError.timeout) }
+        }
+        defer { timeoutTask.cancel() }
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<JSONValue, Error>) in
+                // Registers `pending[id]` synchronously on the actor before `send` is even
+                // scheduled, so a response can never race ahead of registration.
+                pending[id] = cont
+                Task { [weak self] in
+                    do {
+                        try await self?.transport.send(.object(obj))
+                    } catch {
+                        await self?.failPending(id: id, error: error)
+                    }
                 }
             }
+        } onCancel: {
+            Task { [self] in await self.failPending(id: id, error: CancellationError()) }
         }
     }
 

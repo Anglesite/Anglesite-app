@@ -111,4 +111,60 @@ import Foundation
         #expect(collected.contains { if case .failed = $0 { return true } else { return false } })
         #expect(!collected.contains(.turnComplete(nil)))
     }
+
+    // MARK: sendRequest timeout (crashed-agent backstop)
+
+    /// Mirrors a real crash: answers `initialize`/`session/new` normally, then goes silent on
+    /// `session/prompt` — as if the in-container agent process died mid-turn — and never finishes
+    /// its `inbound()` stream either, matching `ACPContainerExecTransport`'s current behavior when
+    /// the underlying process exits without anything explicitly closing the transport.
+    private actor FakeACPAgentTransportThatHangsOnPrompt: ACPTransport {
+        private var continuation: AsyncStream<JSONValue>.Continuation?
+        private let stream: AsyncStream<JSONValue>
+
+        init() {
+            var cont: AsyncStream<JSONValue>.Continuation!
+            stream = AsyncStream { cont = $0 }
+            continuation = cont
+        }
+
+        func open() async throws {}
+        nonisolated func inbound() -> AsyncStream<JSONValue> { stream }
+        func close() async { continuation?.finish() }
+
+        func send(_ message: JSONValue) async throws {
+            guard case .object(let obj) = message, case .string(let method)? = obj["method"] else { return }
+            guard case .int(let id)? = obj["id"] else { return }  // notifications get no response
+            switch method {
+            case "initialize":
+                continuation?.yield(.object(["jsonrpc": .string("2.0"), "id": .int(id), "result": .object([:])]))
+            case "session/new":
+                continuation?.yield(.object(["jsonrpc": .string("2.0"), "id": .int(id), "result": .object(["sessionId": .string("sess-1")])]))
+            case "session/prompt":
+                break  // the agent "crashed": no response, ever
+            default:
+                break
+            }
+        }
+    }
+
+    @Test func sendPromptTimesOutAndYieldsFailedWhenTheAgentCrashesMidTurn() async throws {
+        let transport = FakeACPAgentTransportThatHangsOnPrompt()
+        let client = ACPClient(transport: transport)
+        try await client.initialize()
+        let sessionID = try await client.newSession(cwd: "/workspace/site")
+        // Short test-only override — proves the timeout mechanism without waiting out the 120s
+        // production default for `session/prompt`.
+        await client.setRequestTimeoutOverrideForTesting(0.05)
+
+        let events = try await client.sendPrompt(sessionID: sessionID, text: "hi")
+        var collected: [AssistantEvent] = []
+        for await event in events { collected.append(event) }
+        #expect(collected.contains(.started(model: nil, toolNames: [])))
+        #expect(collected.contains { event in
+            if case .failed(let message) = event { return message.contains("timeout") }
+            return false
+        })
+        #expect(!collected.contains(.turnComplete(nil)))
+    }
 }
