@@ -169,11 +169,14 @@ public actor SiteStore {
             var scoped: URL?
             var existenceURL = site.packageURL
             var canDetermineExistence = true
-            if let bookmark = site.bookmarkData,
-               let resolved = try? bookmarker.resolve(bookmark) {
-                existenceURL = resolved.url
-                if bookmarker.startAccessing(resolved.url) {
-                    scoped = resolved.url
+            if let bookmark = site.bookmarkData {
+                if let resolved = try? bookmarker.resolve(bookmark) {
+                    existenceURL = resolved.url
+                    if bookmarker.startAccessing(resolved.url) {
+                        scoped = resolved.url
+                    } else {
+                        canDetermineExistence = false
+                    }
                 } else {
                     canDetermineExistence = false
                 }

@@ -94,6 +94,21 @@ final class SiteStoreTests {
         #expect(loaded?.isValid == false)
     }
 
+    /// A missing path is not proof of deletion when its security-scoped bookmark cannot resolve:
+    /// the package may live on a temporarily unavailable external or network volume (#749).
+    @Test("load retains a missing package when its bookmark cannot resolve")
+    func loadRetainsMissingPackageWithUnresolvableBookmark() async throws {
+        let pkg = try makeValidPackage(named: "temporarily-unavailable")
+        let writer = SiteStore(persistenceURL: persistenceURL)
+        let site = try await writer.record(pkg)
+        try await writer.setBookmark(Data("not-a-bookmark".utf8), for: site.id)
+        try fileManager.removeItem(at: pkg.url)
+
+        let reader = SiteStore(persistenceURL: persistenceURL)
+        try await reader.load()
+        #expect(await reader.find(id: site.id) != nil)
+    }
+
     /// Regression: validity is cached in `recents.json` but recomputed on `load()`. A registry
     /// written by an older build (or before a sentinel-list fix) can hold a stale `isValid:false`
     /// for a package that is actually valid on disk — that left every site greyed-out in the
