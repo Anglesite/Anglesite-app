@@ -61,6 +61,39 @@ final class SiteStoreTests {
         #expect(loaded.map(\.name) == ["alpha"])
     }
 
+    /// Regression for #749: deleting a package in Finder left its cached recents entry visible
+    /// in the launcher, File ▸ Open Recent, and the Dock menu on every subsequent launch.
+    @Test("load removes recents whose package directory was deleted")
+    func loadRemovesDeletedPackage() async throws {
+        let pkg = try makeValidPackage(named: "deleted")
+        let writer = SiteStore(persistenceURL: persistenceURL)
+        _ = try await writer.record(pkg)
+        try fileManager.removeItem(at: pkg.url)
+
+        let reader = SiteStore(persistenceURL: persistenceURL)
+        try await reader.load()
+        #expect(await reader.sites.isEmpty)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let persisted = try decoder.decode([SiteStore.Site].self, from: Data(contentsOf: persistenceURL))
+        #expect(persisted.isEmpty, "load() should heal recents.json so the ghost does not return")
+    }
+
+    @Test("load retains an existing package that is missing project sentinels")
+    func loadRetainsExistingInvalidPackage() async throws {
+        let pkg = try makeValidPackage(named: "broken")
+        let writer = SiteStore(persistenceURL: persistenceURL)
+        let site = try await writer.record(pkg)
+        try fileManager.removeItem(at: pkg.sourceURL.appendingPathComponent(ProjectValidator.requiredSentinels[0]))
+
+        let reader = SiteStore(persistenceURL: persistenceURL)
+        try await reader.load()
+        let loaded = await reader.find(id: site.id)
+        #expect(loaded != nil)
+        #expect(loaded?.isValid == false)
+    }
+
     /// Regression: validity is cached in `recents.json` but recomputed on `load()`. A registry
     /// written by an older build (or before a sentinel-list fix) can hold a stale `isValid:false`
     /// for a package that is actually valid on disk — that left every site greyed-out in the
