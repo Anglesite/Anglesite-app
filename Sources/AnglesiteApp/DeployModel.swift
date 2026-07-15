@@ -69,6 +69,7 @@ final class DeployModel {
     @ObservationIgnored var onMilestone: ((_ siteID: String, _ progress: OperationProgress) -> Void)?
 
     private let command: DeployCommand
+    private let webmentionCommand: WebmentionSendCommand
     private let logCenter: LogCenter
     private let keychain: KeychainStore
     private let onboarding: TokenOnboarding
@@ -94,6 +95,7 @@ final class DeployModel {
 
     init(
         command: DeployCommand = DeployCommand(),
+        webmentionCommand: WebmentionSendCommand = WebmentionSendCommand(),
         logCenter: LogCenter = .shared,
         keychain: KeychainStore = KeychainStore(),
         verifier: TokenVerifying = CloudflareAPITokenVerifier(),
@@ -102,6 +104,7 @@ final class DeployModel {
         tokenAvailabilityOverride: (() -> Bool)? = nil
     ) {
         self.command = command
+        self.webmentionCommand = webmentionCommand
         self.logCenter = logCenter
         self.keychain = keychain
         self.onboarding = TokenOnboarding(verifier: verifier)
@@ -319,6 +322,16 @@ final class DeployModel {
         switch result {
         case .succeeded(let url, let duration):
             transition(siteID: siteID, to: .succeeded(url: url, duration: duration))
+            // Fire-and-forget: webmention sends are best-effort and must never block or affect
+            // the deploy result the user watches. Progress/failures surface only in LogCenter.
+            Task.detached { [webmentionCommand] in
+                await webmentionCommand.send(
+                    siteID: siteID,
+                    siteDirectory: siteDirectory,
+                    configDirectory: configDirectory,
+                    siteBase: url
+                )
+            }
         case .failed(let reason, let exit):
             transition(siteID: siteID, to: .failed(reason: reason, exitCode: exit))
             let capturedLog = logText   // snapshot before the suspension; a later deploy clears logLines
