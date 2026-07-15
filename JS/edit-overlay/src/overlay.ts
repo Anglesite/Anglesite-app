@@ -165,9 +165,12 @@ function attachImageDrop(awaitReply: (id: string, handler: (r: EditReply) => voi
 
   document.addEventListener("dragenter", (ev) => {
     if (!isFileDrag(ev.dataTransfer)) return;
+    // dragenter fires once per DOM element boundary the pointer crosses, not once per page
+    // entry — so only rescan/highlight on the transition into a file drag, same as dragover.
+    const wasFileDrag = dragIsFile;
     dragIsFile = true;
     dragDepth += 1;
-    showTargets();
+    if (!wasFileDrag) showTargets();
     // Prevented here too (not just on dragover below) so WKWebView doesn't show a "not allowed"
     // cursor for the first frame of the drag, before the first dragover fires.
     ev.preventDefault();
