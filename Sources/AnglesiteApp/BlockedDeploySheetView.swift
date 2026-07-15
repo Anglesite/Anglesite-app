@@ -82,9 +82,11 @@ private struct FailureCard: View {
                         .accessibilityValue(file)
                 }
             }
-            Text(failure.detail).font(.callout)
-            Text(failure.remediation)
-                .font(.caption).foregroundStyle(.secondary)
+            Text(failure.detail ?? failure.message).font(.callout)
+            if let remediation = failure.remediation {
+                Text(remediation)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -95,10 +97,12 @@ private struct FailureCard: View {
 
     private func categoryIcon(_ category: PreDeployCheck.ScanFailure.Category) -> String {
         switch category {
-        case .piiEmail, .piiPhone: return "person.crop.circle.badge.exclamationmark"
+        case .piiEmail, .piiPhone, .piiSSN: return "person.crop.circle.badge.exclamationmark"
         case .exposedToken: return "key.fill"
         case .thirdPartyScript: return "network"
         case .keystaticRoute: return "lock.shield"
+        case .cspMisconfigured: return "shield.slash"
+        case .other: return "exclamationmark.triangle"
         }
     }
 
@@ -106,9 +110,12 @@ private struct FailureCard: View {
         switch category {
         case .piiEmail: return "PII — email address"
         case .piiPhone: return "PII — phone number"
+        case .piiSSN: return "PII — SSN"
         case .exposedToken: return "Exposed token"
         case .thirdPartyScript: return "Third-party script"
         case .keystaticRoute: return "Keystatic admin route"
+        case .cspMisconfigured: return "CSP misconfigured"
+        case .other: return "Other"
         }
     }
 }
@@ -125,9 +132,11 @@ private struct WarningCard: View {
                 Text(categoryLabel(warning.category))
                     .font(.subheadline).fontWeight(.semibold)
             }
-            Text(warning.detail).font(.callout)
-            Text(warning.remediation)
-                .font(.caption).foregroundStyle(.secondary)
+            Text(warning.detail ?? warning.message).font(.callout)
+            if let remediation = warning.remediation {
+                Text(remediation)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -143,6 +152,12 @@ private struct WarningCard: View {
         case .seoCritical: return "SEO — critical"
         case .seoWarning: return "SEO — warning"
         case .orphanedRoute: return "Orphaned route"
+        case .mixedContent: return "Mixed content"
+        case .sriMissing: return "Missing subresource integrity"
+        case .externalLinkRel: return "Missing rel=noopener"
+        case .missingSecurityArtifact: return "Missing security artifact"
+        case .thirdPartyScript: return "Third-party script"
+        case .other: return "Other"
         }
     }
 }
