@@ -263,7 +263,12 @@ if includeContainer && ProcessInfo.processInfo.environment["ANGLESITE_CONTAINER_
     packageTargets.append(
         .testTarget(
             name: "AnglesiteContainerLocalTests",
-            dependencies: ["AnglesiteContainer", "AnglesiteCore"],
+            dependencies: [
+                "AnglesiteContainer",
+                "AnglesiteCore",
+                .product(name: "Containerization", package: "containerization"),
+                .product(name: "ContainerizationExtras", package: "containerization")
+            ],
             path: "Tests/AnglesiteContainerLocalTests",
             swiftSettings: strictConcurrency,
             linkerSettings: weakLinkFoundationModels

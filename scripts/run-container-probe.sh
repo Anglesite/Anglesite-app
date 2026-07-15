@@ -14,6 +14,10 @@
 #   scripts/run-container-probe.sh echo   # THE Task 4b decision gate (vsock round-trip)
 #   scripts/run-container-probe.sh boot    # Task 5's gate (full boot + preview HTTP poll)
 #
+# The boot probe is also the #715 concurrent-vmnet regression gate. Before running it, use
+# `container network create anglesite-715-regression` to hold a second vmnet shared-mode network;
+# see docs/qa/app-store-container-smoke-test.md for the deterministic setup and cleanup steps.
+#
 # The default ad-hoc signing is sufficient: `com.apple.security.virtualization` is an
 # unrestricted entitlement, honored under `codesign --sign -` with no provisioning profile
 # (verified 2026-07-07: the echo gate passed ad-hoc). SIGN_IDENTITY remains as an override for
