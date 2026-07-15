@@ -150,13 +150,13 @@ export async function verifyConsentToken(
   return JSON.stringify(decoded) === JSON.stringify(expected);
 }
 
-async function secretsMatch(provided: string, expected: string): Promise<boolean> {
-  const message = new TextEncoder().encode("anglesite-indieauth-owner-password-v1");
-  const [providedSignature, expectedKey] = await Promise.all([
-    crypto.subtle.sign("HMAC", await hmacKey(provided), message),
-    hmacKey(expected),
-  ]);
-  return crypto.subtle.verify("HMAC", expectedKey, providedSignature, message);
+async function secretsMatch(provided: string, expected: string, comparisonSecret: string): Promise<boolean> {
+  const key = await hmacKey(comparisonSecret);
+  const encoder = new TextEncoder();
+  const expectedMAC = await crypto.subtle.sign("HMAC", key, encoder.encode(expected));
+  // Keep both passwords as message data under one server-controlled key and delegate the MAC
+  // comparison to WebCrypto instead of comparing attacker-influenced bytes in JavaScript.
+  return crypto.subtle.verify("HMAC", key, expectedMAC, encoder.encode(provided));
 }
 
 function escapeHTML(value: string): string {
@@ -254,7 +254,11 @@ export async function handleIndieAuthConsent(request: Request, env: WorkerEnv): 
   if (await isConsentRateLimited(request, env)) return new Response("Too Many Requests", { status: 429 });
   const form = await readBoundedForm(request);
   if (!form) return new Response("Invalid consent form", { status: 400 });
-  if (!(await secretsMatch(form.get("password") ?? "", env.INDIEAUTH_OWNER_PASSWORD))) {
+  if (!(await secretsMatch(
+    form.get("password") ?? "",
+    env.INDIEAUTH_OWNER_PASSWORD,
+    env.TOKEN_SIGNING_KEY,
+  ))) {
     console.warn(JSON.stringify({ event: "indieauth.consent_rejected", reason: "password_invalid" }));
     return new Response("Invalid site owner password", { status: 401 });
   }
