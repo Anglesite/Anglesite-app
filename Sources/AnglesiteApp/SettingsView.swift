@@ -10,6 +10,8 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             SiriReadinessSettingsView()
                 .tabItem { Label("Siri AI", systemImage: "sparkles") }
+            AgentsSettingsView()
+                .tabItem { Label("Agents", systemImage: "network") }
             AdvancedSettingsView()
                 .tabItem { Label("Advanced", systemImage: "gearshape.2") }
         }
@@ -53,6 +55,229 @@ private struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+}
+
+/// Configure ACP (Agent Client Protocol) agent connections and pick the active chat backend —
+/// Apple Intelligence (on-device) or one of the registered agents (#602).
+private struct AgentsSettingsView: View {
+    @AppStorage(AppSettings.Key.activeAssistantBackend) private var activeAssistantBackend: String = "foundationModels"
+    @State private var agents: [ACPAgentConnection] = []
+    @State private var editingAgent: ACPAgentConnection?
+    @State private var isPresentingEditor = false
+    @State private var loadError: String?
+
+    private let store = ACPAgentStore()
+
+    var body: some View {
+        Form {
+            Section("Active Model") {
+                Picker("Model", selection: $activeAssistantBackend) {
+                    Text("Apple Intelligence (On-Device)").tag("foundationModels")
+                    ForEach(agents) { agent in
+                        Text(agent.name).tag("acp:\(agent.id.uuidString)")
+                    }
+                }
+                .labelsHidden()
+            }
+
+            Section("ACP Agents") {
+                if agents.isEmpty {
+                    Text("No agents configured.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(agents) { agent in
+                    LabeledContent(agent.name) {
+                        HStack(spacing: 8) {
+                            Text(transportSummary(agent.transport))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button("Edit…") {
+                                editingAgent = agent
+                                isPresentingEditor = true
+                            }
+                            Button("Remove") { remove(agent) }
+                        }
+                    }
+                }
+                Button("Add Agent…") {
+                    editingAgent = nil
+                    isPresentingEditor = true
+                }
+                if let loadError {
+                    Text(loadError).font(.caption).foregroundStyle(.red)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .task { reload() }
+        .sheet(isPresented: $isPresentingEditor) {
+            ACPAgentEditorSheet(existing: editingAgent) { saved in
+                do {
+                    if editingAgent != nil {
+                        try store.update(saved)
+                    } else {
+                        try store.add(saved)
+                    }
+                    reload()
+                } catch {
+                    loadError = "couldn't save: \(error.localizedDescription)"
+                }
+                isPresentingEditor = false
+            } onCancel: {
+                isPresentingEditor = false
+            }
+        }
+    }
+
+    private func reload() {
+        do {
+            agents = try store.load()
+            loadError = nil
+        } catch {
+            loadError = "couldn't load agents: \(error.localizedDescription)"
+        }
+    }
+
+    private func remove(_ agent: ACPAgentConnection) {
+        do {
+            try store.remove(id: agent.id)
+            // Best-effort: clears a `.remote` agent's bearer token so removing the connection
+            // doesn't leave it orphaned in the Keychain forever (no-op for `.stdio` agents, which
+            // never write one — `SecretStore.delete` of a missing entry is defined as a no-op).
+            // A Keychain failure here doesn't block the removal itself, which already succeeded.
+            try? KeychainStore().clearACPAgentToken(id: agent.id)
+            // Selecting Foundation Models back if the removed agent was active avoids leaving
+            // `activeAssistantBackend` pointing at a now-nonexistent agent — `AssistantBackendResolver`
+            // would already fall back gracefully, but resetting the picker keeps the UI honest.
+            if activeAssistantBackend == "acp:\(agent.id.uuidString)" {
+                activeAssistantBackend = "foundationModels"
+            }
+            reload()
+        } catch {
+            loadError = "couldn't remove agent: \(error.localizedDescription)"
+        }
+    }
+
+    private func transportSummary(_ transport: ACPAgentConnection.Transport) -> String {
+        switch transport {
+        case .stdio(let command, _): return "Local · \(command)"
+        case .remote(let url): return "Remote · \(url.absoluteString)"
+        }
+    }
+}
+
+/// Add/edit sheet for one `ACPAgentConnection`. `onSave` receives the fully-formed connection;
+/// the remote credential (if any) is written directly to the Keychain here (not threaded back
+/// through `onSave`) since it never belongs in the non-secret `ACPAgentStore` record.
+private struct ACPAgentEditorSheet: View {
+    enum TransportKind: String, CaseIterable { case local = "Local", remote = "Remote" }
+
+    let existing: ACPAgentConnection?
+    let onSave: (ACPAgentConnection) -> Void
+    let onCancel: () -> Void
+
+    @State private var name: String
+    @State private var kind: TransportKind
+    @State private var command: String
+    @State private var argumentsText: String
+    @State private var urlText: String
+    // A fresh, STABLE id for a new agent — seeded once via `init` below, not a computed
+    // `existing?.id ?? UUID()`. That looks equivalent but is a real bug: `UUID()` in the fallback
+    // branch would mint a NEW random id every time the property is read, so the Keychain write
+    // (`KeychainTokenRow`'s `write` closure, evaluated at Save time) and the
+    // `ACPAgentConnection(id:...)` constructed a few lines later in `save()` would end up with two
+    // DIFFERENT ids — silently orphaning the just-saved token.
+    @State private var agentID: UUID
+
+    /// Seeds every `@State` property synchronously from `existing` before the first render —
+    /// deliberately NOT an `.onAppear { populate() }` pattern, because `KeychainTokenRow`'s own
+    /// `.task { await refreshStatus() }` (which reads `agentID` to look up the stored token) has
+    /// no guaranteed ordering against a parent's `.onAppear`. Seeding in `init` means `agentID` is
+    /// already correct on the very first render, so there is no race to reason about.
+    init(existing: ACPAgentConnection?, onSave: @escaping (ACPAgentConnection) -> Void, onCancel: @escaping () -> Void) {
+        self.existing = existing
+        self.onSave = onSave
+        self.onCancel = onCancel
+
+        var kind: TransportKind = .local
+        var command = ""
+        var argumentsText = ""
+        var urlText = ""
+        switch existing?.transport {
+        case .stdio(let cmd, let arguments):
+            kind = .local
+            command = cmd
+            argumentsText = arguments.joined(separator: " ")
+        case .remote(let url):
+            kind = .remote
+            urlText = url.absoluteString
+        case nil:
+            break
+        }
+
+        _agentID = State(initialValue: existing?.id ?? UUID())
+        _name = State(initialValue: existing?.name ?? "")
+        _kind = State(initialValue: kind)
+        _command = State(initialValue: command)
+        _argumentsText = State(initialValue: argumentsText)
+        _urlText = State(initialValue: urlText)
+    }
+
+    var body: some View {
+        Form {
+            TextField("Name", text: $name)
+            Picker("Transport", selection: $kind) {
+                ForEach(TransportKind.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+
+            if kind == .local {
+                TextField("Command", text: $command, prompt: Text("claude-code-acp"))
+                TextField("Arguments (space-separated)", text: $argumentsText)
+            } else {
+                TextField("URL", text: $urlText, prompt: Text("https://agent.example.com/acp"))
+                KeychainTokenRow(
+                    title: "Bearer token",
+                    read: { try KeychainStore().readACPAgentToken(id: agentID) },
+                    write: { try KeychainStore().writeACPAgentToken($0, id: agentID) },
+                    clear: { try KeychainStore().clearACPAgentToken(id: agentID) }
+                )
+            }
+
+            HStack {
+                Button("Cancel", action: onCancel)
+                Spacer()
+                Button("Save") { save() }
+                    .disabled(!isValid)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .frame(width: 420)
+    }
+
+    private var isValid: Bool {
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        switch kind {
+        case .local: return !command.trimmingCharacters(in: .whitespaces).isEmpty
+        case .remote: return URL(string: urlText) != nil
+        }
+    }
+
+    private func save() {
+        let transport: ACPAgentConnection.Transport
+        switch kind {
+        case .local:
+            let args = argumentsText.split(separator: " ").map(String.init)
+            transport = .stdio(command: command, arguments: args)
+        case .remote:
+            guard let url = URL(string: urlText) else { return }
+            transport = .remote(url: url)
+        }
+        onSave(ACPAgentConnection(id: agentID, name: name, transport: transport))
     }
 }
 

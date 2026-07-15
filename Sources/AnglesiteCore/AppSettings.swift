@@ -33,6 +33,7 @@ public final class AppSettings: @unchecked Sendable {
         public static let cloudflareAccountVerified = "anglesite.cloudflareAccount.verified"
         public static let cloudflareAccountName = "anglesite.cloudflareAccount.name"
         public static let cloudflareAccountEmail = "anglesite.cloudflareAccount.email"
+        public static let activeAssistantBackend = "anglesite.activeAssistantBackend"
     }
 
     private enum LegacyKey {
@@ -138,6 +139,15 @@ public final class AppSettings: @unchecked Sendable {
     public var esiPreviewUnprocessed: Bool {
         get { defaults.bool(forKey: Key.esiPreviewUnprocessed) }
         set { defaults.set(newValue, forKey: Key.esiPreviewUnprocessed) }
+    }
+
+    /// Which backend answers chat/content-help requests: `"foundationModels"` (default) or
+    /// `"acp:<ACPAgentConnection.id>"`. Global, not per-site (#602 design decision). An unresolvable
+    /// value (agent removed, malformed) is handled by `AssistantBackendResolver`, which falls back
+    /// to Foundation Models rather than this property validating its own contents.
+    public var activeAssistantBackend: String {
+        get { defaults.string(forKey: Key.activeAssistantBackend) ?? "foundationModels" }
+        set { defaults.set(newValue, forKey: Key.activeAssistantBackend) }
     }
 
     /// Security-scoped bookmark for the sites root, persisted so the sandboxed (MAS) build only

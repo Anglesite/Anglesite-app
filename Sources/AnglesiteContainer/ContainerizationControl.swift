@@ -597,6 +597,74 @@ public struct ContainerizationControl: LocalContainerControl {
         )
     }
 
+    /// A `ReaderStream` fed by explicit `write(_:)` calls rather than a fixed source — the bridge
+    /// between `InteractiveExecHandle.write(_:)` and the guest process's stdin. `@unchecked Sendable`
+    /// because `AsyncStream.Continuation` is already safe to call concurrently; there is no other
+    /// mutable state here.
+    private final class PipeReaderStream: ReaderStream, @unchecked Sendable {
+        private let backing: AsyncStream<Data>
+        private let continuation: AsyncStream<Data>.Continuation
+
+        init() {
+            (backing, continuation) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
+        }
+
+        func stream() -> AsyncStream<Data> { backing }
+        func write(_ data: Data) { continuation.yield(data) }
+        func finish() { continuation.finish() }
+    }
+
+    /// Like `exec`, but starts the guest process and returns immediately with a live handle instead
+    /// of awaiting completion, and wires `LinuxProcessConfiguration.stdin` so the caller can keep
+    /// feeding the process input (an ACP agent's JSON-RPC stdin) for as long as it runs. A detached
+    /// task drains `proc.wait()` in the background so the process is still reaped (flushing the
+    /// output sinks and calling `proc.delete()`) even though nothing here awaits it synchronously —
+    /// mirrors `runDetached`'s reaping story (container `stop()` also SIGKILLs and deletes every
+    /// vended process, so a caller that never calls `terminate()` still gets cleaned up on teardown).
+    public func execInteractive(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle {
+        guard let container = await live.container(for: siteID) else {
+            throw LocalContainerError.bootFailed("execInteractive: no live container for siteID '\(siteID)'")
+        }
+
+        let stdinStream = PipeReaderStream()
+        let stdoutSink = LineStreamingWriter(stream: .stdout, onLine: onOutput)
+        let stderrSink = LineStreamingWriter(stream: .stderr, onLine: onOutput)
+
+        let label = Self.execLabel(for: argv)
+        let proc = try await container.exec("\(siteID)-interactive-\(label)-\(UUID().uuidString.prefix(8))") { config in
+            config.arguments = argv
+            config.environmentVariables =
+                ["PATH=\(LinuxProcessConfiguration.defaultPath)"]
+                + environment.map { "\($0.key)=\($0.value)" }
+            config.workingDirectory = workingDirectory
+            config.stdin = stdinStream
+            config.stdout = stdoutSink
+            config.stderr = stderrSink
+        }
+        try await proc.start()
+
+        Task {
+            _ = try? await proc.wait()
+            stdoutSink.flush()
+            stderrSink.flush()
+            try? await proc.delete()
+        }
+
+        return InteractiveExecHandle(
+            write: { data in stdinStream.write(data) },
+            terminate: {
+                try? await proc.kill(.term)
+                try? await proc.delete()
+            }
+        )
+    }
+
     /// Maps a step's argv to a short, distinct, readable exec-id label. `npm run build` → `build`,
     /// `npx tsx …pre-deploy-check…` → `preflight`, `npx wrangler deploy` → `wrangler`; anything else
     /// falls back to argv[0]. Both `npx` steps would otherwise collapse to the same prefix.
