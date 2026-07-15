@@ -9,8 +9,10 @@ import FoundationNetworking
 /// where one POST always yields exactly one response message on its request-scoped stream — MAY
 /// carry multiple JSON-RPC messages on that same stream: zero or more `session/update` push
 /// notifications followed eventually by the final JSON-RPC response to the POSTed request. So the
-/// SSE read loop below yields every complete event as it's parsed and only stops when the
-/// underlying stream itself ends, instead of returning after the first event.
+/// SSE read loop below yields every complete event as it's parsed, and stops as soon as it sees
+/// the response whose `id` matches the outgoing request — not by waiting for the underlying
+/// stream/connection to end, which isn't a safe termination signal (see `send`'s `requestID`
+/// doc comment for why).
 /// `ACPClient.consumeInbound` already routes each yielded message correctly regardless of order —
 /// a notification (no "id") to `routeSessionUpdate`, a response (has "id") to `resolvePending`.
 public actor ACPHTTPTransport: ACPTransport {
@@ -35,6 +37,18 @@ public actor ACPHTTPTransport: ACPTransport {
     public func open() async throws { /* no persistent connection; first send does the work */ }
 
     public func send(_ message: JSONValue) async throws {
+        // The id of the outgoing request, if any (absent for notifications). Used below to stop
+        // reading the SSE stream as soon as the matching response arrives, rather than waiting for
+        // the connection itself to close — the latter is not guaranteed to happen promptly (some
+        // servers/proxies keep a connection idle-open after finishing a response), and in test
+        // doubles built on a custom `URLProtocol`, `bytes(for:)`'s `AsyncBytes` iterator may never
+        // observe end-of-stream at all even after the response has fully "finished loading" from
+        // the protocol's own point of view — waiting for that would hang indefinitely.
+        let requestID: JSONValue? = {
+            if case .object(let obj) = message { return obj["id"] }
+            return nil
+        }()
+
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -65,23 +79,30 @@ public actor ACPHTTPTransport: ACPTransport {
         let contentType = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
         if contentType.contains("text/event-stream") {
             // A single POSTed request's SSE stream may carry MULTIPLE messages — zero or more
-            // `session/update` notifications, then the final response to this request. Yield
-            // every complete event as it's parsed; keep reading until the stream itself ends.
+            // `session/update` notifications, then the final response to this request. Yield every
+            // complete event as it's parsed, and stop as soon as we see the response matching
+            // `requestID` (rather than waiting for the stream/connection to end — see the doc
+            // comment on `requestID` above for why that isn't a safe termination condition).
             var dataLines: [String] = []
             #if canImport(Darwin)
             for try await line in asyncBytes.lines {
                 if case .complete(let value) = accumulateSSELine(line, into: &dataLines) {
-                    if let value { continuation.yield(value) }
+                    guard let value else { continue }
+                    continuation.yield(value)
+                    if isMatchingResponse(value, requestID: requestID) { return }
                 }
             }
             #else
             for try await line in runner.lines() {
                 if case .complete(let value) = accumulateSSELine(line, into: &dataLines) {
-                    if let value { continuation.yield(value) }
+                    guard let value else { continue }
+                    continuation.yield(value)
+                    if isMatchingResponse(value, requestID: requestID) { return }
                 }
             }
             #endif
-            // Stream ended without a trailing blank line — flush whatever accumulated.
+            // Stream ended without a trailing blank line (or without ever seeing the matching
+            // response) — flush whatever accumulated so a well-formed final event isn't lost.
             if !dataLines.isEmpty, let value = decode(dataLines.joined(separator: "\n")) {
                 continuation.yield(value)
             }
@@ -120,6 +141,16 @@ public actor ACPHTTPTransport: ACPTransport {
             dataLines.append(v.hasPrefix(" ") ? String(v.dropFirst()) : String(v))
         }
         return .continueReading
+    }
+
+    /// True when `value` is a JSON-RPC response (has `result` or `error`) whose `id` matches
+    /// `requestID` — i.e. it's the reply to the request this `send` call POSTed, as opposed to a
+    /// `session/update` notification (no `id`) or a response to some other in-flight request.
+    /// `requestID` is `nil` for a notification POST, which never matches anything (notifications
+    /// get no reply, so this always falls through to reading until the stream ends).
+    private func isMatchingResponse(_ value: JSONValue, requestID: JSONValue?) -> Bool {
+        guard let requestID, case .object(let obj) = value, let id = obj["id"], id == requestID else { return false }
+        return obj["result"] != nil || obj["error"] != nil
     }
 
     public nonisolated func inbound() -> AsyncStream<JSONValue> { stream }
