@@ -16,16 +16,30 @@ actor FakeLocalContainerControl: LocalContainerControl {
     /// All `exec` invocations recorded for assertion.
     private(set) var execCalls: [(siteID: String, argv: [String], env: [String: String], cwd: String)] = []
 
+    /// Lines replayed to `execInteractive`'s `onOutput` (as `.stdout`) in order before it returns
+    /// the handle — separate from `execStdoutLines`, which only feeds the older `exec`. Pass at
+    /// construction (mirrors `startStdoutLines`/`execStdoutLines`) so a transport test can
+    /// simulate the agent's first stdout lines arriving.
+    var execInteractiveStdoutLines: [String]
+    /// All `execInteractive` invocations recorded for assertion.
+    private(set) var execInteractiveCalls: [(siteID: String, argv: [String], env: [String: String], cwd: String)] = []
+    /// Data written to the most recently returned handle, recorded for assertion.
+    private(set) var execInteractiveWrites: [Data] = []
+    /// Whether the most recently returned handle's `terminate()` was called.
+    private(set) var execInteractiveTerminated = false
+
     init(
         startResult: Result<LocalContainerSession, LocalContainerError>,
         startStdoutLines: [String] = [],
         execResult: ContainerExecResult = ContainerExecResult(exitCode: 0, stdout: "", stderr: ""),
-        execStdoutLines: [String] = []
+        execStdoutLines: [String] = [],
+        execInteractiveStdoutLines: [String] = []
     ) {
         self.startResult = startResult
         self.startStdoutLines = startStdoutLines
         self.execResult = execResult
         self.execStdoutLines = execStdoutLines
+        self.execInteractiveStdoutLines = execInteractiveStdoutLines
     }
 
     func start(
@@ -52,6 +66,24 @@ actor FakeLocalContainerControl: LocalContainerControl {
         for line in execStdoutLines { onOutput(line, .stdout) }
         return execResult
     }
+
+    func execInteractive(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle {
+        execInteractiveCalls.append((siteID: siteID, argv: argv, env: environment, cwd: workingDirectory))
+        for line in execInteractiveStdoutLines { onOutput(line, .stdout) }
+        return InteractiveExecHandle(
+            write: { [weak self] data in await self?.recordExecInteractiveWrite(data) },
+            terminate: { [weak self] in await self?.recordExecInteractiveTerminated() }
+        )
+    }
+
+    private func recordExecInteractiveWrite(_ data: Data) { execInteractiveWrites.append(data) }
+    private func recordExecInteractiveTerminated() { execInteractiveTerminated = true }
 }
 
 actor BundleImportRecorder {
@@ -179,6 +211,16 @@ actor StopGatedFakeLocalContainerControl: LocalContainerControl {
     ) async throws -> ContainerExecResult {
         ContainerExecResult(exitCode: 0, stdout: "", stderr: "")
     }
+
+    func execInteractive(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle {
+        InteractiveExecHandle(write: { _ in }, terminate: {})
+    }
 }
 
 actor GatedFakeLocalContainerControl: LocalContainerControl {
@@ -217,5 +259,15 @@ actor GatedFakeLocalContainerControl: LocalContainerControl {
         onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> ContainerExecResult {
         ContainerExecResult(exitCode: 0, stdout: "", stderr: "")
+    }
+
+    func execInteractive(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle {
+        InteractiveExecHandle(write: { _ in }, terminate: {})
     }
 }

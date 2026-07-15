@@ -247,4 +247,14 @@ private actor StepAwareFakeContainerControl: LocalContainerControl {
         default: return ContainerExecResult(exitCode: 0, stdout: wranglerOut, stderr: "")
         }
     }
+
+    func execInteractive(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle {
+        InteractiveExecHandle(write: { _ in }, terminate: {})
+    }
 }
