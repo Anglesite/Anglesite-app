@@ -14,10 +14,9 @@
 #   scripts/run-container-probe.sh echo   # THE Task 4b decision gate (vsock round-trip)
 #   scripts/run-container-probe.sh boot    # Task 5's gate (full boot + preview HTTP poll)
 #
-# The boot probe is also the #715 concurrent-vmnet regression gate. If Apple's `container`
-# CLI apiserver or a UTM VM normally runs on this host, leave it running: Anglesite must use
-# vmnet's dynamically allocated subnet and retain outbound npm/DNS connectivity alongside it.
-# Do not stop other vmnet consumers to make this probe pass.
+# The boot probe is also the #715 concurrent-vmnet regression gate. Before running it, use
+# `container network create anglesite-715-regression` to hold a second vmnet shared-mode network;
+# see docs/qa/app-store-container-smoke-test.md for the deterministic setup and cleanup steps.
 #
 # The default ad-hoc signing is sufficient: `com.apple.security.virtualization` is an
 # unrestricted entitlement, honored under `codesign --sign -` with no provisioning profile

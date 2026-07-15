@@ -36,10 +36,26 @@ scripts/run-container-probe.sh boot
 
 (The probe's default ad-hoc signing is sufficient — the entitlement needs no real identity.)
 
-If Apple's `container` CLI apiserver or a UTM VM normally runs on the test Mac, leave it
-running during `boot`. This is the #715 regression gate: the guest must negotiate a distinct
-vmnet subnet and retain outbound DNS/HTTPS while another vmnet NAT consumer is active. The
-runtime log should include the dynamically allocated guest address and gateway/DNS pair.
+Make the #715 concurrent-vmnet regression gate deterministic instead of relying on ambient
+machine state. Create and inspect a second shared-mode network, keep it alive during `boot`,
+then remove it:
+
+```sh
+(
+    set -e
+    container system start
+    container network create anglesite-715-regression
+    trap 'container network delete anglesite-715-regression' EXIT
+    container network inspect anglesite-715-regression
+    scripts/run-container-probe.sh boot
+)
+```
+
+The probe runtime log must show an allocated guest subnet that does not overlap the subnet in
+the `container network inspect` output. The probe fixture has no lockfile, so reaching `BOOT:
+PASS` also proves its in-guest `npm install` retained outbound DNS and HTTPS while the second
+vmnet consumer was active. The subshell trap removes the regression network even when the probe
+fails.
 
 Both must pass, or the App Store smoke is expected to fail at runtime startup.
 

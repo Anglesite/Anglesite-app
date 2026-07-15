@@ -4,6 +4,11 @@ import Containerization
 import ContainerizationOCI
 import ContainerizationExtras
 
+private struct VMBootTimeoutError: Error, CustomStringConvertible, Sendable {
+    let message: String
+    var description: String { message }
+}
+
 /// `LocalContainerControl` over Apple Containerization (package version 0.35). Imports the bundled
 /// arm64 OCI layout into an on-disk `ImageStore`, unpacks it to an ext4 rootfs, boots a Linux VM
 /// (`VZVirtualMachineManager`) with NAT outbound + vsock inbound, clones the site's `Source/` repo
@@ -26,6 +31,9 @@ public struct ContainerizationControl: LocalContainerControl {
 
     // One live container + its two proxies per siteID, kept in an actor box so start/stop are safe.
     private let live = LiveContainers()
+
+    // Process-shared and actor-serialized: one vmnet network, one releasable interface per site.
+    private let network = SharedVmnetNetwork.shared
 
     // Guest-side ports the dev server + MCP sidecar listen on (also the vsock ports the bridge maps to).
     private static let previewPort: UInt32 = 4321
@@ -174,6 +182,7 @@ public struct ContainerizationControl: LocalContainerControl {
 
     public func stop(siteID: String) async throws {
         await live.teardown(siteID: siteID)
+        await network.release(siteID: siteID)
     }
 
     /// Phases 0–2 of `start()`: resolve bundled artifacts, unpack rootfs/initfs, boot the VM.
@@ -298,15 +307,13 @@ public struct ContainerizationControl: LocalContainerControl {
             // Let vmnet choose an available shared-mode subnet. Hard-coding 192.168.64.0/24
             // works only while this is the first vmnet consumer on the host: Apple's container
             // CLI, UTM, or another VM can already own that network, leaving the guest's static
-            // route and DNS pointed at a nonexistent gateway (#715).
-            var network = try VmnetNetwork()
-            guard let interface = try network.createInterface(siteID),
-                let gateway = interface.ipv4Gateway else {
-                throw LocalContainerError.bootFailed("vmnet did not allocate an IPv4 interface and gateway")
-            }
-            let nameserver = gateway.description
+            // route and DNS pointed at a nonexistent gateway (#715). SharedVmnetNetwork keeps one
+            // process-wide network, serializes simultaneous site allocations, and releases each
+            // interface when its VM stops.
+            let allocation = try await network.allocate(siteID: siteID)
             onOutput(
-                "[boot] vmnet allocated \(interface.ipv4Address) with gateway/DNS \(nameserver)",
+                "[boot] vmnet allocated \(allocation.interface.ipv4Address) "
+                    + "with gateway/DNS \(allocation.nameserver)",
                 .stdout
             )
 
@@ -320,8 +327,8 @@ public struct ContainerizationControl: LocalContainerControl {
                 config.process.workingDirectory = "/"
                 config.cpus = 2
                 config.memoryInBytes = 2 * 1024 * 1024 * 1024
-                config.interfaces = [interface]
-                config.dns = DNS(nameservers: [nameserver])
+                config.interfaces = [allocation.interface]
+                config.dns = DNS(nameservers: [allocation.nameserver])
                 // Host `Source/` repo shared read-only into the guest via virtio-fs so the guest can
                 // `git clone` it (the macOS host path is otherwise invisible to the Linux guest).
                 // `Mount.share(source:destination:)` is the host-directory virtio-fs share — confirmed
@@ -357,12 +364,14 @@ public struct ContainerizationControl: LocalContainerControl {
             // of leaking it — otherwise nothing else in the process ever holds a reference to it, and
             // it would keep consuming host resources (2 vCPU/2GB) until the app quits, one leak per
             // timed-out retry.
+            let timeoutError = VMBootTimeoutError(
+                message: "VM did not finish booting within \(Self.vmBootTimeout) — the process may carry the "
+                    + "virtualization entitlement without being provisioned to actually use it (ad-hoc/"
+                    + "debug-signed builds); Virtualization framework can hang rather than throw in that case"
+            )
             let bootedContainer = try await Self.racingTimeout(
                 timeout: Self.vmBootTimeout,
-                timeoutError: LocalContainerError.bootFailed(
-                    "VM did not finish booting within \(Self.vmBootTimeout) — the process may carry the "
-                    + "virtualization entitlement without being provisioned to actually use it (ad-hoc/"
-                    + "debug-signed builds); Virtualization framework can hang rather than throw in that case"),
+                timeoutError: timeoutError,
                 onLateSuccess: { lateContainer in
                     onOutput(
                         "[boot] VM finished booting after its \(Self.vmBootTimeout) timeout already failed "
@@ -370,14 +379,26 @@ public struct ContainerizationControl: LocalContainerControl {
                     Task { await self.stopBareContainer(lateContainer, siteID: siteID) }
                 }
             ) {
-                try await container.create()
-                try await container.start()
-                return container
+                do {
+                    try await container.create()
+                    try await container.start()
+                    return container
+                } catch {
+                    // This also covers a failure that arrives after the timeout already won.
+                    await network.release(siteID: siteID)
+                    throw error
+                }
             }
             onOutput("[boot] VM started", .stdout)
             return bootedContainer
         } catch {
             onOutput("[boot] VM boot failed: \(error)", .stderr)
+            // A timeout leaves create/start running. Its operation releases on a late failure;
+            // onLateSuccess stops the late VM and releases through stopBareContainer. Releasing
+            // here would let another site reuse the address while that VM is still starting.
+            if !(error is VMBootTimeoutError) {
+                await network.release(siteID: siteID)
+            }
             try? FileManager.default.removeItem(at: rootfsURL)
             try? FileManager.default.removeItem(at: initfsURL)
             throw LocalContainerError.bootFailed("\(error)")
@@ -485,6 +506,7 @@ public struct ContainerizationControl: LocalContainerControl {
     /// `public` alongside `makeBareContainer` — see its doc comment.
     public func stopBareContainer(_ container: LinuxContainer, siteID: String) async {
         try? await container.stop()
+        await network.release(siteID: siteID)
         guard let storeURL = try? BundledImage.storeURL() else { return }
         try? FileManager.default.removeItem(at: storeURL.appendingPathComponent("rootfs-\(siteID).ext4"))
         try? FileManager.default.removeItem(at: storeURL.appendingPathComponent("initfs-\(siteID).ext4"))
