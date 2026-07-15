@@ -43,6 +43,13 @@ public enum SecretAccounts {
     public static func blueskyAppPassword(siteID: String) -> String {
         "posse:\(siteID):bluesky-app-password"
     }
+
+    /// Bearer token for a `.remote` ACP agent connection, keyed by the connection's `id` — there
+    /// can be many connections, so this is a function, not a single constant like
+    /// `cloudflareToken`/`gitHubToken`.
+    public static func acpAgentToken(id: UUID) -> String {
+        "acp-agent-token-\(id.uuidString)"
+    }
 }
 
 public extension SecretStore {
@@ -74,6 +81,21 @@ public extension SecretStore {
     /// Clear the GitHub personal access token slot.
     func clearGitHubToken() throws {
         try delete(account: SecretAccounts.gitHubToken)
+    }
+
+    /// Read the bearer token for a `.remote` ACP agent connection.
+    func readACPAgentToken(id: UUID) throws -> String? {
+        try read(account: SecretAccounts.acpAgentToken(id: id))
+    }
+
+    /// Store the bearer token for a `.remote` ACP agent connection. Empty string clears.
+    func writeACPAgentToken(_ token: String, id: UUID) throws {
+        try write(token, account: SecretAccounts.acpAgentToken(id: id))
+    }
+
+    /// Clear the bearer token for a `.remote` ACP agent connection.
+    func clearACPAgentToken(id: UUID) throws {
+        try delete(account: SecretAccounts.acpAgentToken(id: id))
     }
 }
 

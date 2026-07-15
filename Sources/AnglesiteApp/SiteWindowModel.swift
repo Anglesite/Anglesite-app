@@ -1285,6 +1285,9 @@ final class SiteWindowModel {
         let mcpClient: @Sendable () async -> MCPClient? = { [preview] in
             await preview.mcpClient()
         }
+        let containerControlProvider: SiteAssistantSessionFactory.ContainerControlProvider = { [preview] in
+            await preview.activeContainerControl()
+        }
         // Best-effort: SetupThemeTool only attaches to the chat assistant when a catalog loads
         // successfully. A missing/unreadable template must not block opening the site — the
         // assistant simply runs without the theme-apply tool, same as before this catalog existed.
@@ -1299,6 +1302,7 @@ final class SiteWindowModel {
             configDirectory: resolved.configDirectory,
             packageURL: resolved.packageURL,
             mcpClient: mcpClient,
+            containerControlProvider: containerControlProvider,
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,

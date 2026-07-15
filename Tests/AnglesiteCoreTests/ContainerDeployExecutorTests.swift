@@ -295,6 +295,16 @@ private actor ThrowingFakeLocalContainerControl: LocalContainerControl {
     ) async throws -> ContainerExecResult {
         throw ExecError.boom
     }
+
+    func execInteractive(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle {
+        throw ExecError.boom
+    }
 }
 
 // MARK: - CancelParkingFakeContainerControl
@@ -331,6 +341,16 @@ private actor CancelParkingFakeContainerControl: LocalContainerControl {
         signalParked()
         try await Task.sleep(for: .seconds(3600))
         return ContainerExecResult(exitCode: 0, stdout: "", stderr: "")
+    }
+
+    func execInteractive(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle {
+        InteractiveExecHandle(write: { _ in }, terminate: {})
     }
 
     private func signalParked() {

@@ -16,7 +16,7 @@ import Foundation
 struct DeployExecutorSelectionTests {
 
     // A successful scan JSON so the full build→preflight→wrangler flow runs without blocking.
-    private let scanOK = #"{"ok":true,"failures":[],"warnings":[]}"#
+    private let scanOK = #"{"version":1,"ok":true,"failures":[],"warnings":[]}"#
     private let wranglerOut = "Published site (1s)\n  https://site.example.workers.dev"
     private let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
 
@@ -216,7 +216,7 @@ private actor StepAwareFakeContainerControl: LocalContainerControl {
     private(set) var calls: [(siteID: String, argv: [String])] = []
     private var callCount = 0
 
-    private let scanOK = #"{"ok":true,"failures":[],"warnings":[]}"#
+    private let scanOK = #"{"version":1,"ok":true,"failures":[],"warnings":[]}"#
     private let wranglerOut = "Published site (1s)\n  https://site.example.workers.dev"
 
     func start(
@@ -246,5 +246,15 @@ private actor StepAwareFakeContainerControl: LocalContainerControl {
         case 1: return ContainerExecResult(exitCode: 0, stdout: scanOK, stderr: "")
         default: return ContainerExecResult(exitCode: 0, stdout: wranglerOut, stderr: "")
         }
+    }
+
+    func execInteractive(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle {
+        InteractiveExecHandle(write: { _ in }, terminate: {})
     }
 }

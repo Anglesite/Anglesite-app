@@ -8,7 +8,7 @@ struct PreDeployCheckTests {
     // MARK: Happy path
 
     @Test("Returns passed when script emits ok-true JSON") func returnsPassedWhenScriptEmitsOkTrueJSON() async {
-        let json = #"{"ok": true, "failures": [], "warnings": []}"#
+        let json = #"{"version": 1, "ok": true, "failures": [], "warnings": []}"#
         let check = PreDeployCheck(invoke: { _ in (stdout: json, exitCode: 0) })
 
         let outcome = await check.check(siteID: "mysite", siteDirectory: siteDir)
@@ -25,12 +25,13 @@ struct PreDeployCheckTests {
     @Test("Returns blocked when script emits ok-false with failures") func returnsBlockedWhenScriptEmitsOkFalseWithFailures() async {
         let json = """
         {
+          "version": 1,
           "ok": false,
           "failures": [
             {
               "category": "pii-email",
+              "message": "Possible email address: jane@yourbusiness.com",
               "file": "dist/index.html",
-              "detail": "Possible email address: jane@yourbusiness.com",
               "remediation": "Wrap the address in a `mailto:` link if it should be published, or add it to PII_EMAIL_ALLOW in .site-config."
             }
           ],
@@ -48,20 +49,23 @@ struct PreDeployCheckTests {
         #expect(failures.count == 1)
         #expect(failures[0].category == .piiEmail)
         #expect(failures[0].file == "dist/index.html")
-        #expect(failures[0].detail.contains("jane@yourbusiness.com"))
-        #expect(failures[0].remediation.contains("PII_EMAIL_ALLOW"))
+        #expect(failures[0].message.contains("jane@yourbusiness.com"))
+        #expect(failures[0].remediation?.contains("PII_EMAIL_ALLOW") == true)
     }
 
-    @Test("Parses all five failure categories") func parsesAllFiveFailureCategories() async {
+    @Test("Parses all seven concrete failure categories") func parsesAllSevenConcreteFailureCategories() async {
         let json = """
         {
+          "version": 1,
           "ok": false,
           "failures": [
-            {"category": "pii-email", "file": "a", "detail": "d", "remediation": "r"},
-            {"category": "pii-phone", "file": "a", "detail": "d", "remediation": "r"},
-            {"category": "exposed-token", "file": "a", "detail": "d", "remediation": "r"},
-            {"category": "third-party-script", "file": "a", "detail": "d", "remediation": "r"},
-            {"category": "keystatic-route", "file": "a", "detail": "d", "remediation": "r"}
+            {"category": "pii-email", "message": "m", "file": "a", "remediation": "r"},
+            {"category": "pii-phone", "message": "m", "file": "a", "remediation": "r"},
+            {"category": "pii-ssn", "message": "m", "file": "a", "remediation": "r"},
+            {"category": "exposed-token", "message": "m", "file": "a", "remediation": "r"},
+            {"category": "third-party-script", "message": "m", "file": "a", "remediation": "r"},
+            {"category": "keystatic-route", "message": "m", "file": "a", "remediation": "r"},
+            {"category": "csp-misconfigured", "message": "m", "file": "a", "remediation": "r"}
           ],
           "warnings": []
         }
@@ -72,9 +76,36 @@ struct PreDeployCheckTests {
             Issue.record("expected .blocked")
             return
         }
+        // Every concrete ScanFailure.Category case except `.other`, which has its own dedicated
+        // test (`unknownCategoryDecodesToOther`) covering the forward-compatible fallback.
         #expect(
-            Set(failures.map(\.category)) == Set([.piiEmail, .piiPhone, .exposedToken, .thirdPartyScript, .keystaticRoute])
+            Set(failures.map(\.category)) == Set([
+                .piiEmail, .piiPhone, .piiSSN, .exposedToken, .thirdPartyScript, .keystaticRoute, .cspMisconfigured,
+            ])
         )
+    }
+
+    @Test("Unknown category decodes to .other instead of failing the scan") func unknownCategoryDecodesToOther() async {
+        let json = """
+        {
+          "version": 1,
+          "ok": false,
+          "failures": [
+            {"category": "some-future-category", "message": "m", "file": "a"}
+          ],
+          "warnings": [
+            {"category": "another-future-category", "message": "m"}
+          ]
+        }
+        """
+        let check = PreDeployCheck(invoke: { _ in (stdout: json, exitCode: 1) })
+
+        guard case .blocked(let failures, let warnings) = await check.check(siteID: "mysite", siteDirectory: siteDir) else {
+            Issue.record("expected .blocked")
+            return
+        }
+        #expect(failures.first?.category == .other)
+        #expect(warnings.first?.category == .other)
     }
 
     // MARK: Error paths
@@ -112,18 +143,40 @@ struct PreDeployCheckTests {
         }
     }
 
+    @Test("Returns error when the version field is missing (no legacy-array fallback)") func returnsErrorWhenVersionIsMissing() async {
+        // Pre-#742 shape: a bare array, no envelope at all.
+        let json = #"[{"severity":"error","message":"Possible email found","file":"dist/index.html"}]"#
+        let check = PreDeployCheck(invoke: { _ in (stdout: json, exitCode: 1) })
+
+        guard case .error = await check.check(siteID: "mysite", siteDirectory: siteDir) else {
+            Issue.record("expected .error for pre-envelope legacy array output")
+            return
+        }
+    }
+
+    @Test("Returns error when the envelope version is unsupported") func returnsErrorWhenVersionIsUnsupported() async {
+        let json = #"{"version": 2, "ok": true, "failures": [], "warnings": []}"#
+        let check = PreDeployCheck(invoke: { _ in (stdout: json, exitCode: 0) })
+
+        guard case .error(let reason) = await check.check(siteID: "mysite", siteDirectory: siteDir) else {
+            Issue.record("expected .error")
+            return
+        }
+        #expect(reason.contains("unsupported envelope version"), "\(reason)")
+    }
+
     // MARK: Warnings pass-through
 
     @Test("Warnings are returned alongside passed and blocked outcomes") func warningsAreReturnedAlongsidePassedAndBlockedOutcomes() async {
         let warningJSON = """
         "warnings": [
-          {"category": "missing-og-image", "detail": "No og:image meta tag.", "remediation": "Run `npm run ai-images`."}
+          {"category": "missing-og-image", "message": "No og:image meta tag.", "remediation": "Run `npm run ai-images`."}
         ]
         """
-        let passedJSON = "{ \"ok\": true, \"failures\": [], \(warningJSON) }"
+        let passedJSON = "{ \"version\": 1, \"ok\": true, \"failures\": [], \(warningJSON) }"
         let blockedJSON = """
-        { "ok": false,
-          "failures": [{"category": "pii-email", "file": "a", "detail": "d", "remediation": "r"}],
+        { "version": 1, "ok": false,
+          "failures": [{"category": "pii-email", "message": "m", "file": "a", "remediation": "r"}],
           \(warningJSON) }
         """
 

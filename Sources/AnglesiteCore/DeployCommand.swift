@@ -205,33 +205,10 @@ public actor DeployCommand {
     // MARK: Scan report parsing
 
     /// Parses the captured stdout of the pre-deploy scan (`scripts/pre-deploy-check.ts --json`)
-    /// into a `PreDeployCheck.Outcome`. Mirrors the JSON contract owned by the plugin; a
-    /// non-decodable payload maps to `.error` with an exit-code-aware remediation (this is the
-    /// decoding that previously lived inside `PreDeployCheck.check` / `defaultPreflight`).
+    /// into a `PreDeployCheck.Outcome`. Thin forwarding wrapper — `PreDeployCheck.parse` is the
+    /// one real decoder (#742); this keeps the existing public call-site signature stable.
     public static func parseScanReport(output: String, exitCode: Int32?) -> PreDeployCheck.Outcome {
-        struct RawReport: Decodable {
-            let ok: Bool
-            let failures: [PreDeployCheck.ScanFailure]
-            let warnings: [PreDeployCheck.ScanWarning]
-        }
-
-        let report: RawReport
-        do {
-            report = try JSONDecoder().decode(RawReport.self, from: Data(output.utf8))
-        } catch {
-            // No parseable JSON — the script most likely errored out (missing dist/, missing tsx,
-            // or an outdated script that predates `--json`). Exit 0 with no JSON is distinct from a
-            // non-zero exit so the remediation can be specific.
-            let exit = exitCode ?? -1
-            return .error(reason: exit == 0
-                ? "pre-deploy scan emitted no JSON (exit 0) — is the site's scripts/pre-deploy-check.ts up to date?"
-                : "pre-deploy scan failed (exit \(exit)) — run `npm run build` and try again, or run `/anglesite:update` if the script is outdated")
-        }
-
-        if report.ok {
-            return .passed(warnings: report.warnings)
-        }
-        return .blocked(failures: report.failures, warnings: report.warnings)
+        PreDeployCheck.parse(output: output, exitCode: exitCode)
     }
 
     // MARK: URL extraction

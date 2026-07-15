@@ -31,6 +31,7 @@ public struct PodmanContainerControl: LocalContainerControl {
     private let live: LivePodmanContainers
     private let astroCommand: String
     private let mcpCommand: String
+    private let logCenter: LogCenter
 
     private static let previewPort = 4321
     private static let mcpPort = 4399
@@ -74,7 +75,8 @@ public struct PodmanContainerControl: LocalContainerControl {
         podmanExecutable: URL = URL(fileURLWithPath: "/usr/bin/podman"),
         supervisor: ProcessSupervisor = .shared,
         astroCommand: String = PodmanContainerControl.defaultAstroCommand,
-        mcpCommand: String = PodmanContainerControl.defaultMCPCommand
+        mcpCommand: String = PodmanContainerControl.defaultMCPCommand,
+        logCenter: LogCenter = .shared
     ) {
         self.image = image
         self.podmanExecutable = podmanExecutable
@@ -82,6 +84,7 @@ public struct PodmanContainerControl: LocalContainerControl {
         self.live = LivePodmanContainers()
         self.astroCommand = astroCommand
         self.mcpCommand = mcpCommand
+        self.logCenter = logCenter
     }
 
     public func start(
@@ -250,6 +253,66 @@ public struct PodmanContainerControl: LocalContainerControl {
         if !result.stdout.isEmpty { onOutput(result.stdout, .stdout) }
         if !result.stderr.isEmpty { onOutput(result.stderr, .stderr) }
         return ContainerExecResult(exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr)
+    }
+
+    /// Like `exec`, but launches `podman exec -i` as a long-running supervised process
+    /// (`ProcessSupervisor.launch(attachStdin: true)`) instead of a one-shot `run`, so the caller
+    /// can keep writing to its stdin — mirrors `StdioTransport`'s exact approach on the host side.
+    /// Output flows through `logCenter` (matching every other `launch`-based process here) and is
+    /// forwarded to `onOutput` by a subscription filtered to this call's `source`, tagged with the
+    /// original `LogCenter.Stream` it arrived on.
+    public func execInteractive(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle {
+        guard let name = await live.containerName(for: siteID) else {
+            throw LocalContainerError.bootFailed("execInteractive: no running container for site \(siteID)")
+        }
+        var arguments = ["exec", "-i", "-w", workingDirectory]
+        for (key, value) in environment.sorted(by: { $0.key < $1.key }) {
+            arguments += ["-e", "\(key)=\(value)"]
+        }
+        arguments.append(name)
+        arguments += argv
+
+        // Unique per call (not just per siteID): two concurrent execInteractive calls for the
+        // same site would otherwise share a `source`, and each call's forwarding loop below
+        // filters only on `line.source == source` — an identical source would cross-contaminate
+        // their `onOutput` callbacks with each other's lines. Mirrors `ContainerizationControl`
+        // .execInteractive's per-call UUID-suffixed exec id on the macOS conformer.
+        let source = "acp-interactive:\(siteID):\(UUID().uuidString.prefix(8))"
+        let subscription = await logCenter.subscribe()
+        let forwardTask = Task { [source] in
+            for await line in subscription.stream {
+                guard line.source == source else { continue }
+                onOutput(line.text, line.stream)
+            }
+        }
+
+        let handle = try await supervisor.launch(
+            source: source,
+            executable: podmanExecutable,
+            arguments: arguments,
+            attachStdin: true,
+            logCenter: logCenter
+        )
+
+        return InteractiveExecHandle(
+            write: { [supervisor] data in try await supervisor.writeStdin(handle, data) },
+            terminate: { [supervisor] in
+                // `.cancel()` finishes the subscription's own continuation — the guaranteed way
+                // to end the `for await` forwarding loop (matches `StdioTransport.close()`);
+                // `forwardTask.cancel()` alone would NOT reliably stop a `for await` over an
+                // `AsyncStream` that's still open.
+                subscription.cancel()
+                forwardTask.cancel()
+                await supervisor.terminate(handle, timeout: 2)
+                _ = await supervisor.waitForExit(handle)
+            }
+        )
     }
 
     // MARK: - Internals

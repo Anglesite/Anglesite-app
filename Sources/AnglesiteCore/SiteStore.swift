@@ -10,7 +10,8 @@ import AnglesiteSiteModel
 /// after a create/open that already called `record`).
 ///
 /// The persisted list is the canonical source between launches: validity and last-seen
-/// timestamps are cached so the UI renders immediately. `load()` restores the list on startup.
+/// timestamps are cached so the UI renders immediately. `load()` restores the list on startup,
+/// dropping entries whose package directories no longer exist.
 public actor SiteStore {
     /// Process-wide shared instance.
     public static let shared = SiteStore()
@@ -133,13 +134,11 @@ public actor SiteStore {
     /// when the UI wants to render quickly. Skips the change emit on a fresh-install no-file
     /// path — there's nothing to propagate.
     ///
-    /// Validity is **recomputed live** here rather than trusted from disk: `isValid` /
-    /// `missingSentinels` are filesystem-derived and go stale between launches (files added or
-    /// removed outside the app, or a change to the sentinel set itself), so a cached verdict can
-    /// be wrong — which once left every scaffolded site greyed-out in the launcher even after the
-    /// sentinel list was corrected, because the launcher reads only the cached value. When the
-    /// fresh check disagrees, the corrected list is persisted back so the next launch and the
-    /// Spotlight change-handler start from the right values.
+    /// Filesystem-derived state is **recomputed live** here rather than trusted from disk. Entries
+    /// whose package directories were deleted outside the app are removed; existing packages have
+    /// `isValid` / `missingSentinels` refreshed because files can change between launches. When the
+    /// loaded list changes, it is persisted back so the launcher, Open Recent, Dock menu, and
+    /// Spotlight all start from the same healed registry.
     public func load() async throws {
         guard fileManager.fileExists(atPath: persistenceURL.path) else {
             sites = []
@@ -147,34 +146,61 @@ public actor SiteStore {
         }
         let data = try Data(contentsOf: persistenceURL)
         var loaded = try Self.decoder.decode([Site].self, from: data)
-        let changed = Self.revalidate(&loaded, fileManager: fileManager)
+        let changed = Self.refreshFilesystemState(&loaded, fileManager: fileManager)
         sites = loaded
         if changed { try? persist() }
         await emitChange()
     }
 
-    /// Recompute each entry's filesystem-derived `isValid` / `missingSentinels`. On MAS the package
-    /// lives behind a security-scoped grant, so resolve and start the per-site bookmark for the
-    /// duration of the check; in package tests there may be no bookmark and the read just works. Returns `true`
-    /// if any entry's verdict changed (so the caller can persist the correction).
-    private static func revalidate(_ sites: inout [Site], fileManager: FileManager) -> Bool {
+    /// Drop entries whose package directory no longer exists, then recompute each survivor's
+    /// `isValid` / `missingSentinels`. On MAS the package lives behind a security-scoped grant, so
+    /// resolve and start the per-site bookmark for the duration of the checks. A bookmark can
+    /// follow a package that moved, so existence is checked at its resolved URL while validation
+    /// continues to use the registry URL until the package is explicitly reopened and recorded.
+    /// If a resolved bookmark cannot start access, retain the entry: an unavailable grant does not
+    /// prove that the user's files were deleted. Returns `true` when the registry changed.
+    private static func refreshFilesystemState(_ sites: inout [Site], fileManager: FileManager) -> Bool {
         var changed = false
         let bookmarker = PlatformSecurityScopedBookmark.make()
-        for index in sites.indices {
+        var refreshed: [Site] = []
+        refreshed.reserveCapacity(sites.count)
+
+        for var site in sites {
             var scoped: URL?
-            if let bookmark = sites[index].bookmarkData,
-               let resolved = try? bookmarker.resolve(bookmark),
-               bookmarker.startAccessing(resolved.url) {
-                scoped = resolved.url
+            var existenceURL = site.packageURL
+            var canDetermineExistence = true
+            if let bookmark = site.bookmarkData {
+                if let resolved = try? bookmarker.resolve(bookmark) {
+                    existenceURL = resolved.url
+                    if bookmarker.startAccessing(resolved.url) {
+                        scoped = resolved.url
+                    } else {
+                        canDetermineExistence = false
+                    }
+                } else {
+                    canDetermineExistence = false
+                }
             }
-            let validation = AnglesitePackage(url: sites[index].packageURL).sourceValidation(fileManager: fileManager)
+
+            var isDirectory: ObjCBool = false
+            let packageExists = fileManager.fileExists(atPath: existenceURL.path, isDirectory: &isDirectory)
+                && isDirectory.boolValue
+            guard !canDetermineExistence || packageExists else {
+                if let scoped { bookmarker.stopAccessing(scoped) }
+                changed = true
+                continue
+            }
+
+            let validation = AnglesitePackage(url: site.packageURL).sourceValidation(fileManager: fileManager)
             if let scoped { bookmarker.stopAccessing(scoped) }
-            if sites[index].isValid != validation.isValid || sites[index].missingSentinels != validation.missing {
-                sites[index].isValid = validation.isValid
-                sites[index].missingSentinels = validation.missing
+            if site.isValid != validation.isValid || site.missingSentinels != validation.missing {
+                site.isValid = validation.isValid
+                site.missingSentinels = validation.missing
                 changed = true
             }
+            refreshed.append(site)
         }
+        sites = refreshed
         return changed
     }
 

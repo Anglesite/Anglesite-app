@@ -46,6 +46,33 @@ public struct ContainerExecResult: Sendable, Equatable {
     }
 }
 
+/// A live handle to an interactively-exec'd guest process — unlike `exec`'s wait-to-completion
+/// result, this returns as soon as the process starts, so the caller can both feed it `stdin`
+/// (e.g. outbound JSON-RPC messages) and keep receiving `onOutput` lines for as long as it runs.
+/// Closure-backed (like `ContainerExecResult` is a plain struct) so no `Containerization`/
+/// `Virtualization` type crosses this seam, and so `FakeLocalContainerControl` can hand back a
+/// fully in-memory handle with no real process behind it.
+public final class InteractiveExecHandle: Sendable {
+    private let writeHandler: @Sendable (Data) async throws -> Void
+    private let terminateHandler: @Sendable () async -> Void
+
+    public init(
+        write: @escaping @Sendable (Data) async throws -> Void,
+        terminate: @escaping @Sendable () async -> Void
+    ) {
+        self.writeHandler = write
+        self.terminateHandler = terminate
+    }
+
+    /// Feeds `data` to the process's stdin.
+    public func write(_ data: Data) async throws { try await writeHandler(data) }
+
+    /// Terminates the process. Safe to call more than once; a terminated process's later
+    /// `onOutput` calls (if any were in flight) still fire per `exec`'s existing `@escaping`
+    /// contract.
+    public func terminate() async { await terminateHandler() }
+}
+
 /// Typed wrapper over "boot a container, hydrate it from a repo, start the guest processes, and
 /// return host-reachable endpoints." `ContainerizationControl` (in AnglesiteContainer) is the
 /// production conformer; `FakeLocalContainerControl` backs the tests. Mirrors `SandboxControlClient`.
@@ -86,4 +113,15 @@ public protocol LocalContainerControl: Sendable {
         workingDirectory: String,
         onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> ContainerExecResult
+
+    /// Like `exec`, but returns as soon as the guest process starts rather than waiting for it to
+    /// exit, and the returned handle can feed the process's stdin — for a long-lived, bidirectional
+    /// child (an ACP agent speaking JSON-RPC over stdio) rather than a one-shot command.
+    func execInteractive(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle
 }

@@ -397,7 +397,9 @@ public struct ContainerizationControl: LocalContainerControl {
             onOutput("[boot] VM started", .stdout)
             return bootedContainer
         } catch {
-            onOutput("[boot] VM boot failed: \(error)", .stderr)
+            let errorDescription = "\(error)"
+            let diagnostic = VmnetFailureRecovery.message(for: errorDescription) ?? errorDescription
+            onOutput("[boot] VM boot failed: \(diagnostic)", .stderr)
             // A timeout leaves create/start running. Its operation releases on a late failure;
             // onLateSuccess stops the late VM and releases through stopBareContainer. Releasing
             // here would let another site reuse the address while that VM is still starting.
@@ -406,7 +408,7 @@ public struct ContainerizationControl: LocalContainerControl {
             }
             try? FileManager.default.removeItem(at: rootfsURL)
             try? FileManager.default.removeItem(at: initfsURL)
-            throw LocalContainerError.bootFailed("\(error)")
+            throw LocalContainerError.bootFailed(diagnostic)
         }
     }
 
@@ -594,6 +596,74 @@ public struct ContainerizationControl: LocalContainerControl {
             exitCode: status.exitCode,
             stdout: stdoutSink.text,
             stderr: stderrSink.text
+        )
+    }
+
+    /// A `ReaderStream` fed by explicit `write(_:)` calls rather than a fixed source — the bridge
+    /// between `InteractiveExecHandle.write(_:)` and the guest process's stdin. `@unchecked Sendable`
+    /// because `AsyncStream.Continuation` is already safe to call concurrently; there is no other
+    /// mutable state here.
+    private final class PipeReaderStream: ReaderStream, @unchecked Sendable {
+        private let backing: AsyncStream<Data>
+        private let continuation: AsyncStream<Data>.Continuation
+
+        init() {
+            (backing, continuation) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
+        }
+
+        func stream() -> AsyncStream<Data> { backing }
+        func write(_ data: Data) { continuation.yield(data) }
+        func finish() { continuation.finish() }
+    }
+
+    /// Like `exec`, but starts the guest process and returns immediately with a live handle instead
+    /// of awaiting completion, and wires `LinuxProcessConfiguration.stdin` so the caller can keep
+    /// feeding the process input (an ACP agent's JSON-RPC stdin) for as long as it runs. A detached
+    /// task drains `proc.wait()` in the background so the process is still reaped (flushing the
+    /// output sinks and calling `proc.delete()`) even though nothing here awaits it synchronously —
+    /// mirrors `runDetached`'s reaping story (container `stop()` also SIGKILLs and deletes every
+    /// vended process, so a caller that never calls `terminate()` still gets cleaned up on teardown).
+    public func execInteractive(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle {
+        guard let container = await live.container(for: siteID) else {
+            throw LocalContainerError.bootFailed("execInteractive: no live container for siteID '\(siteID)'")
+        }
+
+        let stdinStream = PipeReaderStream()
+        let stdoutSink = LineStreamingWriter(stream: .stdout, onLine: onOutput)
+        let stderrSink = LineStreamingWriter(stream: .stderr, onLine: onOutput)
+
+        let label = Self.execLabel(for: argv)
+        let proc = try await container.exec("\(siteID)-interactive-\(label)-\(UUID().uuidString.prefix(8))") { config in
+            config.arguments = argv
+            config.environmentVariables =
+                ["PATH=\(LinuxProcessConfiguration.defaultPath)"]
+                + environment.map { "\($0.key)=\($0.value)" }
+            config.workingDirectory = workingDirectory
+            config.stdin = stdinStream
+            config.stdout = stdoutSink
+            config.stderr = stderrSink
+        }
+        try await proc.start()
+
+        Task {
+            _ = try? await proc.wait()
+            stdoutSink.flush()
+            stderrSink.flush()
+            try? await proc.delete()
+        }
+
+        return InteractiveExecHandle(
+            write: { data in stdinStream.write(data) },
+            terminate: {
+                try? await proc.kill(.term)
+                try? await proc.delete()
+            }
         )
     }
 

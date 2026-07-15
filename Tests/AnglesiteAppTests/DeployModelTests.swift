@@ -19,7 +19,7 @@ private actor GatedDeployExecutor: DeployExecutor {
         case .preflight:
             return DeployStepResult(
                 exitCode: 0,
-                output: #"{"ok":true,"failures":[],"warnings":[]}"#
+                output: #"{"version":1,"ok":true,"failures":[],"warnings":[]}"#
             )
         case .wrangler:
             return DeployStepResult(
