@@ -5,6 +5,10 @@ import Foundation
 /// repo, connect the MCP client to the returned MCP endpoint, settle to `.ready`/`.failed`.
 /// Spawns nothing in-process.
 public actor LocalContainerSiteRuntime: SiteRuntime {
+    /// Shared by `persistEdit`'s two commit-hash validity checks — built once rather than per
+    /// character inside each `allSatisfy` closure.
+    private static let hexDigits = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
+
     private let ref: String
     private let control: any LocalContainerControl
     public let mcpClient: MCPClient
@@ -99,14 +103,14 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     /// Copies one commit produced by the MCP sidecar in `/workspace/site` back into the host's
     /// canonical `Source/` repository without granting the guest write access to that repository.
     ///
-    /// The normal path fast-forwards the host branch. If a native host-side content operation
-    /// committed after this runtime was hydrated, the histories diverge; cherry-picking the one
-    /// overlay commit preserves both changes. A dirty host worktree is refused rather than
-    /// overwritten, and a failed cherry-pick is aborted before returning the error.
+    /// Fast-forward only: `InProcessEditPersistence` requires the exported commit's sole parent to
+    /// equal the host's current HEAD, refusing (rather than merging or cherry-picking) if a native
+    /// host-side content operation committed after this runtime was hydrated. A dirty host
+    /// worktree is refused rather than overwritten.
     public func persistEdit(commit: String?) async throws {
         guard let commit,
               (7...64).contains(commit.count),
-              commit.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "0123456789abcdefABCDEF").contains($0) })
+              commit.unicodeScalars.allSatisfy({ Self.hexDigits.contains($0) })
         else { throw SiteRuntimePersistenceError.missingOrInvalidCommit }
 
         let expectedGeneration = generation
@@ -189,7 +193,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         }
         let fullCommit = String(outputParts[0])
         guard (40...64).contains(fullCommit.count),
-              fullCommit.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "0123456789abcdefABCDEF").contains($0) }),
+              fullCommit.unicodeScalars.allSatisfy({ Self.hexDigits.contains($0) }),
               let bundleData = Data(base64Encoded: String(outputParts[1]), options: .ignoreUnknownCharacters)
         else {
             throw SiteRuntimePersistenceError.syncFailed("container returned an invalid git bundle")
@@ -206,7 +210,12 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
 
         do {
             try await importBundle(bundleURL, fullCommit, siteDirectory)
+            // The host-side import is in-process libgit2, not a subprocess — nothing else would
+            // ever put this write to the canonical repo in the debug pane (CLAUDE.md: "logs are
+            // sacred"), so log the outcome explicitly on both paths.
+            await logCenter.append(source: source, stream: .stdout, text: "persisted \(fullCommit) to Source")
         } catch {
+            await logCenter.append(source: source, stream: .stderr, text: "persist failed: \(error.localizedDescription)")
             throw SiteRuntimePersistenceError.syncFailed(error.localizedDescription)
         }
     }

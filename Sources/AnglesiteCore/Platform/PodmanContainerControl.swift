@@ -95,8 +95,9 @@ public struct PodmanContainerControl: LocalContainerControl {
 
         // 1. Boot a bare, long-lived container (podman's equivalent of Apple Containerization's
         //    "makeBareContainer" step): a no-op main process so `podman exec` has something to
-        //    attach to, the host `Source/` repo bind-mounted for clone + explicit edit persistence,
-        //    and both guest ports
+        //    attach to, the host `Source/` repo bind-mounted read-only (`:ro` below — edit
+        //    persistence hands commits back over exec stdout, not through this mount), and both
+        //    guest ports
         //    published to OS-assigned host ports. `--rm` means `podman stop` alone tears down the
         //    whole thing — no separate `podman rm`.
         //
@@ -138,7 +139,7 @@ public struct PodmanContainerControl: LocalContainerControl {
             throw LocalContainerError.bootFailed("guest /etc/hosts setup failed: \(error)")
         }
 
-        // 3. Clone from the bind-mounted share into a writable /workspace/site, then
+        // 3. Clone from the read-only bind-mounted share into a writable /workspace/site, then
         //    check out ref. Two steps (not `git clone --branch`) because that flag rejects
         //    "HEAD"/bare SHAs, which `git checkout` accepts.
         do {

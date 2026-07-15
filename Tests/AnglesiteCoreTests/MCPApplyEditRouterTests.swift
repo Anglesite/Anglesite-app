@@ -165,6 +165,9 @@ struct MCPApplyEditRouterTests {
         #expect(reply.status == .failed)
         #expect(reply.message?.contains("couldn't be saved to Source") == true)
         #expect(reply.message?.contains("canonical repo is dirty") == true)
+        // Not persisted — a consumer keying off `commit != nil` instead of `status` must not
+        // mistake this for a landed edit.
+        #expect(reply.commit == nil)
         #expect(await observed.replies.isEmpty)
     }
 

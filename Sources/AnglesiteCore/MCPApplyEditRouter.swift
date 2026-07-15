@@ -113,7 +113,9 @@ public struct MCPApplyEditRouter: EditRouter {
                         status: .failed,
                         message: "The edit changed the preview but couldn't be saved to Source: \(error.localizedDescription)",
                         file: reply.file,
-                        commit: reply.commit,
+                        // Not persisted, so nil rather than reply.commit — a consumer keying off
+                        // `commit != nil` instead of `status` must not read this as landed.
+                        commit: nil,
                         result: reply.result,
                         model: reply.model
                     )
