@@ -39,6 +39,33 @@ struct ContainerizationControlTests {
         try? await control.stop(siteID: "e2e")
     }
 
+    @Test("execInteractive echoes what's written to its stdin back out through onOutput")
+    func execInteractiveEchoesStdin() async throws {
+        try #require(enabled, "set ANGLESITE_CONTAINER_E2E=1 on an entitled Apple-Silicon Mac")
+
+        let control = ContainerizationControl()
+        let repo = try makeThrowawayAstroRepo()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        _ = try await control.start(siteID: "e2e-interactive", sourceRepo: repo, ref: "HEAD") { _, _ in }
+        defer { Task { try? await control.stop(siteID: "e2e-interactive") } }
+
+        var receivedLines: [String] = []
+        let handle = try await control.execInteractive(
+            siteID: "e2e-interactive",
+            argv: ["cat"],
+            environment: [:],
+            workingDirectory: "/workspace/site",
+            onOutput: { line, _ in receivedLines.append(line) }
+        )
+        try await handle.write(Data("hello from the host\n".utf8))
+        // `cat` echoes what it reads from stdin; give the guest a moment before asserting.
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(receivedLines.contains("hello from the host"))
+        await handle.terminate()
+
+        try? await control.stop(siteID: "e2e-interactive")
+    }
+
     /// Create a throwaway on-disk git repo containing a minimal Astro site and an initial commit.
     /// Returns the repo directory URL (a `file://` path the driver clones into the guest).
     private func makeThrowawayAstroRepo() throws -> URL {
