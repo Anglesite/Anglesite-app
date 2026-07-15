@@ -54,23 +54,23 @@ actor FakeLocalContainerControl: LocalContainerControl {
     }
 }
 
-actor HostCommandRecorder {
+actor BundleImportRecorder {
     struct Call: Sendable {
-        let executable: URL
-        let arguments: [String]
-        let cwd: URL
+        let bundleURL: URL
+        let commit: String
+        let sourceDirectory: URL
     }
 
     private(set) var calls: [Call] = []
-    let result: ContainerExecResult
+    let error: Error?
 
-    init(result: ContainerExecResult = .init(exitCode: 0, stdout: "", stderr: "")) {
-        self.result = result
+    init(error: Error? = nil) {
+        self.error = error
     }
 
-    func run(executable: URL, arguments: [String], cwd: URL) -> ContainerExecResult {
-        calls.append(.init(executable: executable, arguments: arguments, cwd: cwd))
-        return result
+    func run(bundleURL: URL, commit: String, sourceDirectory: URL) throws {
+        calls.append(.init(bundleURL: bundleURL, commit: commit, sourceDirectory: sourceDirectory))
+        if let error { throw error }
     }
 }
 

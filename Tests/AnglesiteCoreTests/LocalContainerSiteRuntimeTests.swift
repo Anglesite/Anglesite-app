@@ -7,9 +7,7 @@ struct LocalContainerSiteRuntimeTests {
         _ result: Result<LocalContainerSession, LocalContainerError>,
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { _, _ in },
         execResult: ContainerExecResult = .init(exitCode: 0, stdout: "", stderr: ""),
-        runHostCommand: @escaping @Sendable (URL, [String], URL) async throws -> ContainerExecResult = { _, _, _ in
-            .init(exitCode: 0, stdout: "", stderr: "")
-        }
+        importBundle: @escaping @Sendable (URL, String, URL) async throws -> Void = { _, _, _ in }
     ) -> (LocalContainerSiteRuntime, FakeLocalContainerControl) {
         let fake = FakeLocalContainerControl(startResult: result, execResult: execResult)
         let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
@@ -18,7 +16,7 @@ struct LocalContainerSiteRuntimeTests {
             control: fake,
             mcpClient: mcp,
             connect: connect,
-            runHostCommand: runHostCommand)
+            importBundle: importBundle)
         return (rt, fake)
     }
 
@@ -90,13 +88,13 @@ struct LocalContainerSiteRuntimeTests {
     func persistEditRunsCanonicalGitHandoff() async throws {
         let commit = "abc1234567890abcdef1234567890abcdef12345"
         let bundle = Data("test bundle".utf8).base64EncodedString()
-        let host = HostCommandRecorder()
+        let host = BundleImportRecorder()
         let source = URL(fileURLWithPath: "/sites/Foo.anglesite/Source")
         let (runtime, fake) = makeRuntime(
             .success(Self.ok),
             execResult: .init(exitCode: 0, stdout: "\(commit)\n\(bundle)\n", stderr: ""),
-            runHostCommand: { executable, arguments, cwd in
-                await host.run(executable: executable, arguments: arguments, cwd: cwd)
+            importBundle: { bundleURL, importedCommit, sourceDirectory in
+                try await host.run(bundleURL: bundleURL, commit: importedCommit, sourceDirectory: sourceDirectory)
             }
         )
         await runtime.start(siteID: "s1", siteDirectory: source)
@@ -115,13 +113,8 @@ struct LocalContainerSiteRuntimeTests {
 
         let hostCalls = await host.calls
         #expect(hostCalls.count == 1)
-        #expect(hostCalls[0].executable.path == "/bin/sh")
-        #expect(hostCalls[0].arguments[3] == source.path)
-        #expect(hostCalls[0].arguments.last == commit)
-        #expect(hostCalls[0].arguments[1].contains("core.hooksPath=/dev/null"))
-        #expect(hostCalls[0].arguments[1].contains("merge --ff-only FETCH_HEAD"))
-        #expect(hostCalls[0].arguments[1].contains("cherry-pick --abort"))
-        #expect(hostCalls[0].cwd == source)
+        #expect(hostCalls[0].commit == commit)
+        #expect(hostCalls[0].sourceDirectory == source)
     }
 
     @Test("persistEdit refuses a missing commit without touching the container")
@@ -139,9 +132,7 @@ struct LocalContainerSiteRuntimeTests {
     func persistEditSurfacesGitFailure() async {
         let commit = "abc1234567890abcdef1234567890abcdef12345"
         let bundle = Data("test bundle".utf8).base64EncodedString()
-        let host = HostCommandRecorder(
-            result: .init(exitCode: 20, stdout: "", stderr: "canonical Source repository has uncommitted changes")
-        )
+        let host = BundleImportRecorder(error: SiteRuntimePersistenceError.syncFailed("canonical Source repository has uncommitted changes"))
         let fake = FakeLocalContainerControl(
             startResult: .success(Self.ok),
             execResult: .init(exitCode: 0, stdout: "\(commit)\n\(bundle)\n", stderr: ""))
@@ -150,8 +141,8 @@ struct LocalContainerSiteRuntimeTests {
             control: fake,
             mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
             connect: { _, _ in },
-            runHostCommand: { executable, arguments, cwd in
-                await host.run(executable: executable, arguments: arguments, cwd: cwd)
+            importBundle: { bundleURL, importedCommit, sourceDirectory in
+                try await host.run(bundleURL: bundleURL, commit: importedCommit, sourceDirectory: sourceDirectory)
             }
         )
         await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
@@ -174,14 +165,14 @@ struct LocalContainerSiteRuntimeTests {
             result: .success(Self.ok),
             execResult: .init(exitCode: 0, stdout: "\(commit)\n\(bundle)\n", stderr: "")
         )
-        let host = HostCommandRecorder()
+        let host = BundleImportRecorder()
         let runtime = LocalContainerSiteRuntime(
             ref: "HEAD",
             control: fake,
             mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
             connect: { _, _ in },
-            runHostCommand: { executable, arguments, cwd in
-                await host.run(executable: executable, arguments: arguments, cwd: cwd)
+            importBundle: { bundleURL, importedCommit, sourceDirectory in
+                try await host.run(bundleURL: bundleURL, commit: importedCommit, sourceDirectory: sourceDirectory)
             }
         )
         await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/sites/One/Source"))

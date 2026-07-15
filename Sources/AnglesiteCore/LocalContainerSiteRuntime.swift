@@ -14,7 +14,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private let logCenter: LogCenter
     private let connect: @Sendable (MCPClient, URL) async throws -> Void
     private let makeFileWatcher: @Sendable () -> any SiteFileWatching
-    private let runHostCommand: @Sendable (URL, [String], URL) async throws -> ContainerExecResult
+    private let importBundle: @Sendable (URL, String, URL) async throws -> Void
     private let suddenTerminationController: SuddenTerminationController
     private var fileWatcher: (any SiteFileWatching)?
     private var containerTerminationLease: SuddenTerminationController.Lease?
@@ -47,13 +47,12 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         logCenter: LogCenter = .shared,
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) },
         makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { PlatformFileWatcher.make() },
-        runHostCommand: @escaping @Sendable (URL, [String], URL) async throws -> ContainerExecResult = { executable, arguments, cwd in
-            let result = try await ProcessSupervisor.shared.run(
-                executable: executable,
-                arguments: arguments,
-                currentDirectoryURL: cwd
-            )
-            return ContainerExecResult(exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr)
+        importBundle: @escaping @Sendable (URL, String, URL) async throws -> Void = { bundle, commit, source in
+            #if canImport(Darwin)
+            try await InProcessEditPersistence.importBundle(bundle, commit: commit, into: source)
+            #else
+            throw SiteRuntimePersistenceError.syncFailed("in-process git import is unavailable on this platform")
+            #endif
         },
         suddenTerminationController: SuddenTerminationController = .shared
     ) {
@@ -66,7 +65,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         self.logCenter = logCenter
         self.connect = connect
         self.makeFileWatcher = makeFileWatcher
-        self.runHostCommand = runHostCommand
+        self.importBundle = importBundle
         self.suddenTerminationController = suddenTerminationController
     }
 
@@ -131,7 +130,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         set -eu
         runtime=/workspace/site
         commit="$1"
-        ref=refs/anglesite/persist
+        ref=refs/heads/anglesite-persist
         bundle=/tmp/anglesite-persist-$$.bundle
         cleanup() {
           git -C "$runtime" update-ref -d "$ref" >/dev/null 2>&1 || true
@@ -205,45 +204,10 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         }
         defer { try? FileManager.default.removeItem(at: bundleURL) }
 
-        let importScript = #"""
-        set -eu
-        canonical="$1"
-        bundle="$2"
-        commit="$3"
-        git_safe() { git -c core.hooksPath=/dev/null -C "$canonical" "$@"; }
-
-        if test -n "$(git_safe status --porcelain)"; then
-          echo "canonical Source repository has uncommitted changes" >&2
-          exit 20
-        fi
-        git_safe fetch "$bundle" refs/anglesite/persist
-        if test "$(git_safe rev-parse FETCH_HEAD)" != "$commit"; then
-          echo "exported commit did not match the requested edit" >&2
-          exit 22
-        fi
-        if git_safe merge-base --is-ancestor HEAD FETCH_HEAD; then
-          git_safe merge --ff-only FETCH_HEAD
-        elif ! git_safe cherry-pick FETCH_HEAD; then
-          git_safe cherry-pick --abort || true
-          echo "overlay edit conflicts with newer Source changes" >&2
-          exit 21
-        fi
-        """#
-
-        let hostResult: ContainerExecResult
         do {
-            hostResult = try await runHostCommand(
-                URL(fileURLWithPath: "/bin/sh"),
-                ["-c", importScript, "anglesite-persist", siteDirectory.path, bundleURL.path, fullCommit],
-                siteDirectory
-            )
+            try await importBundle(bundleURL, fullCommit, siteDirectory)
         } catch {
             throw SiteRuntimePersistenceError.syncFailed(error.localizedDescription)
-        }
-        guard hostResult.exitCode == 0 else {
-            let detail = hostResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw SiteRuntimePersistenceError.syncFailed(
-                detail.isEmpty ? "git handoff exited \(hostResult.exitCode)" : detail)
         }
     }
 
