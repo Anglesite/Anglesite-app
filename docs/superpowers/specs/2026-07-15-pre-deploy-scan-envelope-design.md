@@ -124,23 +124,14 @@ Re-scoring it to an error is a separate product decision, out of scope here.
 `PreDeployCheck.check` calls it instead of re-declaring its own `RawReport`; its inline struct is
 deleted.
 
-### Legacy fallback
+### No legacy fallback
 
-Existing scaffolded sites keep their already-checked-in `pre-deploy-check.ts` until template
-Dependency Sync updates it — until then, they still emit the bare `Issue[]` with no envelope. The
-shared decoder:
-
-1. Tries decoding `ScanReport` (the new envelope). On success, use it directly.
-2. On failure, tries decoding `[Issue]` where `Issue = { severity, message, file? }` (today's
-   shape). On success, splits by `severity` into `failures`/`warnings`, synthesizes
-   `category: .other` and `detail: nil, remediation: nil` for each, and computes
-   `ok = failures.isEmpty`.
-3. If neither decodes, or `version` is present but not `1`, or stdout is empty/malformed: `.error(...)`
-   with the existing exit-code-aware remediation message. This is unchanged from today's behavior,
-   just reached via an explicit version/shape check instead of "any decode failure."
-
-This is a decode-time compatibility branch, not a second code path to maintain going forward — it
-can be deleted once #745 (existing-site template migration) ships and old sites have upgraded.
+Anglesite is pre-1.0 with no shipped sites to keep decoding for, so the decoder does **not**
+attempt to read the old bare `Issue[]` shape. It decodes `ScanReport` (the new envelope) directly;
+missing/wrong `version`, or stdout that's empty/malformed/doesn't match the envelope, is always
+`.error(...)` with the existing exit-code-aware remediation message. If a stable-release migration
+concern arises later (post-1.0), it gets its own issue at that time — not speculative compat code
+now.
 
 ### UI fallout
 
@@ -152,15 +143,14 @@ optional:
 - The remediation `Text` is wrapped in `if let remediation = f.remediation { Text(remediation)... }`
   and omitted entirely when `nil`.
 - `categoryIcon`/`categoryLabel` switches gain a `.other` case: a generic icon (`exclamationmark.triangle`)
-  and the raw category string as the label, so an unrecognized/legacy category still renders
+  and the raw category string as the label, so an unrecognized category still renders
   something reasonable instead of failing to compile or falling through.
 
 ### Testing
 
 - Unit tests for the new envelope: full success, mixed failures/warnings, unknown category →
-  `.other`, missing/wrong `version`, empty stdout, malformed JSON.
-- Legacy-array fallback test: today's `Issue[]` shape decodes correctly into the same `Outcome`
-  shape (categories as `.other`).
+  `.other`, missing/wrong `version`, empty stdout, malformed JSON. The old bare `Issue[]` shape is
+  one of the malformed-input cases — it no longer decodes, and that's expected.
 - **Producer→consumer fixture test** (the gap this issue exists to close): a Swift test that runs
   the real `Resources/Template/scripts/pre-deploy-check.ts --json` via `npx tsx` against a small
   fixture site directory with a known PII hit and a clean case, feeds the actual captured stdout
@@ -186,5 +176,5 @@ optional:
 - A real deploy's scan result decodes successfully and reflects the site's actual findings, not a
   decode-failure `.error`.
 - An unrecognized category never crashes decoding or breaks a UI switch.
-- Legacy (pre-#742) scaffolded sites keep working via the array fallback until they migrate.
-- Malformed, empty, or unsupported-version output is always an explicit error, never a false pass.
+- Malformed, empty, unsupported-version, or pre-envelope output is always an explicit error, never
+  a false pass.
