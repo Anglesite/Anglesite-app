@@ -26,8 +26,14 @@ struct WorkerCompositionTests {
         #expect(toml.contains("[assets]"))
         #expect(toml.contains("[[d1_databases]]"))
         #expect(toml.contains("binding = \"DB\""))
+        #expect(toml.contains("binding = \"AUTH_DB\""))
+        #expect(toml.contains("migrations_dir = \"worker/migrations\""))
         #expect(toml.contains("[[kv_namespaces]]"))
         #expect(toml.contains("binding = \"SOCIAL_KV\""))
+        #expect(toml.contains("binding = \"ASSETS\""))
+        #expect(toml.contains("run_worker_first = true"))
+        #expect(toml.contains("required = [\"TOKEN_SIGNING_KEY\", \"INDIEAUTH_OWNER_PASSWORD\"]"))
+        #expect(toml.contains("[observability]"))
         #expect(!toml.contains("[[r2_buckets]]"))
     }
 

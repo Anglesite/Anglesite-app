@@ -10,6 +10,7 @@ struct SocialWorkerProvisionCommandTests {
         let recorder = WranglerRecorder([
             ["d1", "create", "my-site-social", "--json"]: .init(stdout: #"{"result":{"uuid":"d1-id"}}"#, stderr: "", exitCode: 0),
             ["kv", "namespace", "create", "my-site-social", "--json"]: .init(stdout: #"{"result":{"id":"kv-id"}}"#, stderr: "", exitCode: 0),
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migrations applied", stderr: "", exitCode: 0),
         ])
         let deployer = DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1))
         let command = SocialWorkerProvisionCommand(tokenSource: { "token" }, runner: recorder.runner, deployer: deployer.deployer)
@@ -27,6 +28,7 @@ struct SocialWorkerProvisionCommandTests {
         #expect(await recorder.arguments == [
             ["d1", "create", "my-site-social", "--json"],
             ["kv", "namespace", "create", "my-site-social", "--json"],
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"],
         ])
         #expect(await recorder.environments.allSatisfy { $0["CLOUDFLARE_API_TOKEN"] == "token" })
         #expect(await deployer.calls == [.init(token: "token", siteID: "site-1", siteDirectory: site)])
@@ -45,6 +47,7 @@ struct SocialWorkerProvisionCommandTests {
             ["d1", "create", "my-site-social", "--json"]: .init(stdout: #"{"uuid":"d1-id"}"#, stderr: "", exitCode: 0),
             ["kv", "namespace", "create", "my-site-social", "--json"]: .init(stdout: #"{"id":"kv-id"}"#, stderr: "", exitCode: 0),
             ["r2", "bucket", "create", "my-site-media"]: .init(stdout: "Created bucket my-site-media", stderr: "", exitCode: 0),
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migrations applied", stderr: "", exitCode: 0),
         ])
         let command = SocialWorkerProvisionCommand(
             tokenSource: { "token" },
@@ -97,7 +100,9 @@ struct SocialWorkerProvisionCommandTests {
         )
         try existing.write(to: site.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
 
-        let recorder = WranglerRecorder([:])
+        let recorder = WranglerRecorder([
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migrations applied", stderr: "", exitCode: 0),
+        ])
         let command = SocialWorkerProvisionCommand(
             tokenSource: { "token" },
             runner: recorder.runner,
@@ -118,7 +123,9 @@ struct SocialWorkerProvisionCommandTests {
         #expect(resources.d1DatabaseID == "d1-existing")
         #expect(resources.kvNamespaceID == "kv-existing")
         #expect(resources.r2BucketName == "media-existing")
-        #expect(await recorder.arguments.isEmpty)
+        #expect(await recorder.arguments == [
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"],
+        ])
     }
 
     @Test("persists partial D1 resources and reports them when KV creation fails")
@@ -153,6 +160,7 @@ struct SocialWorkerProvisionCommandTests {
         let recorder = WranglerRecorder([
             ["d1", "create", "my-site-social", "--json"]: .init(stdout: #"{"uuid":"d1-id"}"#, stderr: "", exitCode: 0),
             ["kv", "namespace", "create", "my-site-social", "--json"]: .init(stdout: #"{"id":"kv-id"}"#, stderr: "", exitCode: 0),
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migrations applied", stderr: "", exitCode: 0),
         ])
         let command = SocialWorkerProvisionCommand(
             tokenSource: { "token" },
@@ -173,6 +181,30 @@ struct SocialWorkerProvisionCommandTests {
         let toml = try String(contentsOf: site.appendingPathComponent("wrangler.toml"), encoding: .utf8)
         #expect(toml.contains("database_id = \"d1-id\""))
         #expect(toml.contains("id = \"kv-id\""))
+    }
+
+    @Test("stops before deploy when the IndieAuth schema migration fails")
+    func migrationFailureStopsDeploy() async throws {
+        let site = try temporaryDirectory()
+        let recorder = WranglerRecorder([
+            ["d1", "create", "my-site-social", "--json"]: .init(stdout: #"{"uuid":"d1-id"}"#, stderr: "", exitCode: 0),
+            ["kv", "namespace", "create", "my-site-social", "--json"]: .init(stdout: #"{"id":"kv-id"}"#, stderr: "", exitCode: 0),
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migration failed", stderr: "", exitCode: 1),
+        ])
+        let deployer = DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1))
+        let command = SocialWorkerProvisionCommand(tokenSource: { "token" }, runner: recorder.runner, deployer: deployer.deployer)
+
+        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site")
+
+        guard case .failed(let reason, let exitCode, let resources) = result else {
+            Issue.record("expected migration failure, got \(result)")
+            return
+        }
+        #expect(reason == "Migration failed")
+        #expect(exitCode == 1)
+        #expect(resources.d1DatabaseID == "d1-id")
+        #expect(resources.kvNamespaceID == "kv-id")
+        #expect(await deployer.calls.isEmpty)
     }
 
     @Test("extracts resource ids from common wrangler JSON shapes")
