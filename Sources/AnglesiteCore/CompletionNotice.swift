@@ -156,8 +156,8 @@ public enum CompletionNoticeBuilder {
     }
 }
 
-/// Maps deploy milestones onto Dock-tile progress (#526). The deploy pipeline has four fixed
-/// milestones (per `DeployCommand`: build → preflight scan → wrangler → finalize), so the Dock
+/// Maps deploy milestones onto Dock-tile progress (#526). The deploy pipeline has fixed
+/// milestones (build/feed generation → preflight scan → wrangler → social delivery), so the Dock
 /// bar can be *determinate per phase* even though each phase's internal progress is unknown —
 /// the fraction is "how far through the pipeline", not a fabricated percentage of wall time.
 /// Unknown phases return `nil` → the Dock overlay renders indeterminate.
@@ -170,6 +170,8 @@ public enum DeployDockProgress {
         case "preflightScan": return 0.45
         case "deploying": return 0.55
         case "finalizing": return 0.90
+        case "webmentions": return 0.94
+        case "syndicating": return 0.97
         default: return nil
         }
     }

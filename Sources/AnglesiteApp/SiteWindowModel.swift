@@ -49,6 +49,10 @@ final class SiteWindowModel {
     private let contentIndexerStore: ContentIndexerStore
     private let integrationOps = IntegrationOperations.live()
     private let contentCreation: ContentCreationWorkflow
+    @ObservationIgnored private var invisiblePublishQueue: InvisiblePublishQueue?
+    @ObservationIgnored private var invisiblePublishWatcher: (any SiteFileWatching)?
+    @ObservationIgnored private var connectivityMonitor: (any ConnectivityMonitoring)?
+    @ObservationIgnored private var invisiblePublishStartTask: Task<Void, Never>?
     @ObservationIgnored
     private var dismissSiteWindow: (() -> Void)?
 
@@ -68,6 +72,7 @@ final class SiteWindowModel {
     /// annotations (Siri AI Phase B / #146 + #148).
     var annotationProvider: PreviewAnnotationProvider?
     var deploy = DeployModel()
+    private(set) var invisiblePublishState: InvisiblePublishQueue.State = .idle
     #if !ANGLESITE_MAS
     var publish = PublishModel()
     #endif
@@ -361,7 +366,14 @@ final class SiteWindowModel {
         preview.startDevServer()
     }
 
+    func previewStateChanged(_ state: SiteRuntimeState) {
+        startup.ingest(state: state)
+        guard preview.canDeploy, let invisiblePublishQueue else { return }
+        Task { await invisiblePublishQueue.retryPending() }
+    }
+
     func handleSiteChanged() {
+        stopInvisiblePublishing()
         siriReadinessModel = nil
         // Persist any unsaved edits before dropping the old site's editor on replay (#188 reuse).
         persistEditorBufferBestEffort()
@@ -375,6 +387,7 @@ final class SiteWindowModel {
     }
 
     func close(suddenTerminationLease: SuddenTerminationController.Lease? = nil) {
+        stopInvisiblePublishing()
         preview.close()
         startup.stop()
         // Note: an in-flight Deploy/Backup/Audit is intentionally NOT cancelled or cleaned up
@@ -1248,6 +1261,7 @@ final class SiteWindowModel {
         // silently discarded by the runtime's fresh scan (#313).
         await styleGuide?.seedFromDisk()
         preview.open(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
+        startInvisiblePublishing(for: resolved)
         // Warm the content graph now rather than waiting for the first create/delete (#660), so
         // `SearchContentTool`'s `isPopulated` check is already reliable by the time the chat
         // assistant is wired up below. Kicked off in the background (not awaited here) so its
@@ -1328,6 +1342,91 @@ final class SiteWindowModel {
         #if !ANGLESITE_MAS
         publish.refreshRemote(source: resolved.sourceDirectory)
         #endif
+    }
+
+    // MARK: - Invisible publishing (#357)
+
+    private func startInvisiblePublishing(for site: SiteStore.Site) {
+        stopInvisiblePublishing()
+
+        let queue = InvisiblePublishQueue(
+            configDirectory: site.configDirectory,
+            publisher: { [weak self] in
+                guard let self else { return .deferred(reason: "the site window closed") }
+                return await self.performInvisiblePublish(siteID: site.id)
+            },
+            onStateChange: { [weak self] state in
+                Task { @MainActor in self?.invisiblePublishState = state }
+            }
+        )
+        invisiblePublishQueue = queue
+
+        let monitor = PlatformConnectivityMonitor.make()
+        connectivityMonitor = monitor
+        invisiblePublishStartTask = Task { [weak self, queue, monitor] in
+            await queue.start(isOnline: false)
+            guard !Task.isCancelled, self?.invisiblePublishQueue === queue else { return }
+            monitor.start { online in
+                Task { await queue.setOnline(online) }
+            }
+        }
+
+        let watcher = PlatformFileWatcher.make()
+        do {
+            try watcher.start(root: site.sourceDirectory) { [queue, root = site.sourceDirectory] batch in
+                guard Self.isPublishRelevant(batch, sourceDirectory: root) else { return }
+                Task { await queue.recordEdit() }
+            }
+            invisiblePublishWatcher = watcher
+        } catch {
+            Task {
+                await LogCenter.shared.append(
+                    source: "publish:\(site.id)", stream: .stderr,
+                    text: "invisible publish: couldn't watch source edits: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    private func stopInvisiblePublishing() {
+        invisiblePublishStartTask?.cancel()
+        invisiblePublishStartTask = nil
+        invisiblePublishWatcher?.stop()
+        invisiblePublishWatcher = nil
+        connectivityMonitor?.stop()
+        connectivityMonitor = nil
+        if let queue = invisiblePublishQueue { Task { await queue.stop() } }
+        invisiblePublishQueue = nil
+        invisiblePublishState = .idle
+    }
+
+    private func performInvisiblePublish(siteID: String) async -> InvisiblePublishQueue.Result {
+        guard let site, site.id == siteID else { return .deferred(reason: "the site is no longer open") }
+        guard !backup.isRunning, !audit.isRunning else {
+            return .deferred(reason: "another site operation is running")
+        }
+        let containerControl = await preview.activeContainerControl()
+        let pageRoutes = await contentGraph.pages(for: site.id).map(\.route)
+        let postRoutes = await contentGraph.posts(for: site.id).map(postRoute(for:))
+        return await deploy.deployAutomatically(
+            siteID: site.id,
+            siteDirectory: site.sourceDirectory,
+            configDirectory: site.configDirectory,
+            currentRoutes: pageRoutes + postRoutes,
+            containerControl: containerControl
+        )
+    }
+
+    nonisolated private static func isPublishRelevant(_ batch: FileChangeBatch, sourceDirectory: URL) -> Bool {
+        if batch.needsFullRescan { return true }
+        let root = sourceDirectory.standardizedFileURL.pathComponents
+        let ignoredTopLevel = Set([".git", ".astro", "dist", "node_modules"])
+        return batch.paths.contains { path in
+            let components = path.standardizedFileURL.pathComponents
+            guard components.starts(with: root) else { return false }
+            guard let firstRelative = components.dropFirst(root.count).first else { return true }
+            return !ignoredTopLevel.contains(firstRelative)
+        }
     }
 
     /// Wire Deploy/Backup/Audit phase transitions to the completion notifier and the Dock-tile
