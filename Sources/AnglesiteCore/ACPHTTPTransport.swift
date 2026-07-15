@@ -39,11 +39,8 @@ public actor ACPHTTPTransport: ACPTransport {
     public func send(_ message: JSONValue) async throws {
         // The id of the outgoing request, if any (absent for notifications). Used below to stop
         // reading the SSE stream as soon as the matching response arrives, rather than waiting for
-        // the connection itself to close — the latter is not guaranteed to happen promptly (some
-        // servers/proxies keep a connection idle-open after finishing a response), and in test
-        // doubles built on a custom `URLProtocol`, `bytes(for:)`'s `AsyncBytes` iterator may never
-        // observe end-of-stream at all even after the response has fully "finished loading" from
-        // the protocol's own point of view — waiting for that would hang indefinitely.
+        // the connection itself to close — a real server/proxy isn't guaranteed to close it
+        // promptly, so relying on that would risk hanging indefinitely.
         let requestID: JSONValue? = {
             if case .object(let obj) = message { return obj["id"] }
             return nil
@@ -83,26 +80,52 @@ public actor ACPHTTPTransport: ACPTransport {
             // complete event as it's parsed, and stop as soon as we see the response matching
             // `requestID` (rather than waiting for the stream/connection to end — see the doc
             // comment on `requestID` above for why that isn't a safe termination condition).
+            //
+            // Deliberately reads raw bytes and splits lines manually rather than using
+            // `asyncBytes.lines`/`AsyncLineSequence`: that wrapper was found, empirically, to not
+            // reliably resume past the first complete line-group when the underlying response was
+            // delivered as a single synchronous chunk (as this codebase's `URLProtocol` test double
+            // does) — it hung indefinitely trying to pull a second event's lines even though all
+            // bytes had already arrived. Raw byte iteration (`for try await byte in asyncBytes`) is
+            // the same primitive the plain `application/json` branch below already uses
+            // successfully, so this sidesteps the `AsyncLineSequence`-specific issue entirely.
             var dataLines: [String] = []
+            var pendingLineBytes = Data()
+
+            func processLine(_ line: String) -> Bool {
+                guard case .complete(let value) = accumulateSSELine(line, into: &dataLines) else { return false }
+                guard let value else { return false }
+                continuation.yield(value)
+                return isMatchingResponse(value, requestID: requestID)
+            }
+
             #if canImport(Darwin)
-            for try await line in asyncBytes.lines {
-                if case .complete(let value) = accumulateSSELine(line, into: &dataLines) {
-                    guard let value else { continue }
-                    continuation.yield(value)
-                    if isMatchingResponse(value, requestID: requestID) { return }
-                }
+            for try await byte in asyncBytes {
+                pendingLineBytes.append(byte)
+                guard byte == 0x0A else { continue }  // '\n'
+                var line = String(decoding: pendingLineBytes.dropLast(), as: UTF8.self)
+                if line.hasSuffix("\r") { line.removeLast() }
+                pendingLineBytes.removeAll(keepingCapacity: true)
+                if processLine(line) { return }
             }
             #else
-            for try await line in runner.lines() {
-                if case .complete(let value) = accumulateSSELine(line, into: &dataLines) {
-                    guard let value else { continue }
-                    continuation.yield(value)
-                    if isMatchingResponse(value, requestID: requestID) { return }
+            for try await chunk in runner.bodyStream {
+                for byte in chunk {
+                    pendingLineBytes.append(byte)
+                    guard byte == 0x0A else { continue }
+                    var line = String(decoding: pendingLineBytes.dropLast(), as: UTF8.self)
+                    if line.hasSuffix("\r") { line.removeLast() }
+                    pendingLineBytes.removeAll(keepingCapacity: true)
+                    if processLine(line) { return }
                 }
             }
             #endif
-            // Stream ended without a trailing blank line (or without ever seeing the matching
-            // response) — flush whatever accumulated so a well-formed final event isn't lost.
+            // The stream ended (without ever seeing the matching response, if `requestID` was
+            // set). Flush a final unterminated line, then whatever `data:` lines accumulated, so a
+            // well-formed final event isn't lost just because the source didn't end on a newline.
+            if !pendingLineBytes.isEmpty {
+                _ = processLine(String(decoding: pendingLineBytes, as: UTF8.self))
+            }
             if !dataLines.isEmpty, let value = decode(dataLines.joined(separator: "\n")) {
                 continuation.yield(value)
             }
