@@ -16,6 +16,7 @@ enum SiteAssistantSessionFactory {
     typealias MCPClientProvider = @Sendable () async -> MCPClient?
     typealias EditRouterProvider = @Sendable (_ siteID: String) async -> (any EditRouter)?
     typealias GraphSnapshotProvider = @Sendable () async -> SiteGraphExplorerSnapshot
+    typealias ContainerControlProvider = @Sendable () async -> (siteID: String, control: any LocalContainerControl)?
     typealias AssistantBuilder = @Sendable (
         _ editBridge: IntentEditBridge,
         _ contentGraph: SiteContentGraph,
@@ -133,6 +134,7 @@ enum SiteAssistantSessionFactory {
         configDirectory: URL,
         packageURL: URL? = nil,
         mcpClient: @escaping MCPClientProvider,
+        containerControlProvider: @escaping ContainerControlProvider,
         contentGraph: SiteContentGraph,
         knowledgeIndex: SiteKnowledgeIndex,
         semanticRanker: SemanticRanker?,
@@ -171,22 +173,27 @@ enum SiteAssistantSessionFactory {
                 }
             }
         }
+        let resolvedAssistant: any ConversationalAssistant = AssistantBackendResolver.resolveActiveACPAssistant(
+            siteID: siteID,
+            sourceDirectory: sourceDirectory,
+            containerControlProvider: containerControlProvider
+        ) ?? dependencies.assistant(
+            editBridge,
+            contentGraph,
+            knowledgeIndex,
+            semanticRanker,
+            integrationService,
+            conventionsEngine,
+            conventionsStore,
+            themeCatalog,
+            designInterviewFactory,
+            graphSnapshotProvider
+        )
         let chat = ChatModel(
             siteID: siteID,
             siteDirectory: sourceDirectory,
             configDirectory: configDirectory,
-            assistant: dependencies.assistant(
-                editBridge,
-                contentGraph,
-                knowledgeIndex,
-                semanticRanker,
-                integrationService,
-                conventionsEngine,
-                conventionsStore,
-                themeCatalog,
-                designInterviewFactory,
-                graphSnapshotProvider
-            ),
+            assistant: resolvedAssistant,
             annotationFeed: dependencies.annotationFeed(sourceDirectory),
             annotationResolver: { [resolveAnnotation = dependencies.resolveAnnotation] id in
                 try await resolveAnnotation(sourceDirectory, id)
