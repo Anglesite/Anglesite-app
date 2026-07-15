@@ -205,8 +205,9 @@ describe("image drop", () => {
     const second = makeImg("/images/second.jpg");
     const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
 
-    dragOn("dragenter", document.body, file);
+    const event = dragOn("dragenter", document.body, file);
 
+    expect(event.defaultPrevented).toBe(true);
     expect(first.classList.contains(IMAGE_DROP_TARGET_CLASS)).toBe(true);
     expect(second.classList.contains(IMAGE_DROP_TARGET_CLASS)).toBe(true);
     expect(document.querySelector(`[${IMAGE_DROP_HINT_ATTRIBUTE}]`)?.textContent).toMatch(/highlighted image/i);
@@ -229,6 +230,21 @@ describe("image drop", () => {
 
     dragOn("dragleave", document.body, file);
 
+    expect(img.classList.contains(IMAGE_DROP_TARGET_CLASS)).toBe(false);
+    expect(document.querySelector(`[${IMAGE_DROP_HINT_ATTRIBUTE}]`)).toBeNull();
+  });
+
+  it("keeps targets visible until nested dragenter and dragleave events balance", () => {
+    const img = makeImg("/images/hero.jpg");
+    const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+    dragOn("dragenter", document.body, file);
+    dragOn("dragenter", img, file);
+
+    dragOn("dragleave", img, file);
+    expect(img.classList.contains(IMAGE_DROP_TARGET_CLASS)).toBe(true);
+    expect(document.querySelector(`[${IMAGE_DROP_HINT_ATTRIBUTE}]`)).not.toBeNull();
+
+    dragOn("dragleave", document.body, file);
     expect(img.classList.contains(IMAGE_DROP_TARGET_CLASS)).toBe(false);
     expect(document.querySelector(`[${IMAGE_DROP_HINT_ATTRIBUTE}]`)).toBeNull();
   });
