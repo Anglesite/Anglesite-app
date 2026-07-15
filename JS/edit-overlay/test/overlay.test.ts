@@ -242,6 +242,19 @@ describe("image drop", () => {
     expect(document.querySelector(".anglesite-toast")?.textContent).toMatch(/highlighted image/i);
   });
 
+  it("explains a non-image file dropped outside a replaceable image without implying one was targeted", () => {
+    makeImg("/images/hero.jpg");
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+
+    dropOn(document.body, file);
+
+    expect(sent.length).toBe(0);
+    const toastText = document.querySelector(".anglesite-toast")?.textContent ?? "";
+    expect(toastText).toMatch(/image file/i);
+    expect(toastText).toMatch(/highlighted image/i);
+    expect(toastText).not.toMatch(/replace this image/i);
+  });
+
   it("rejects a non-image file with guidance and prevents WKWebView navigation", () => {
     const img = makeImg("/images/hero.jpg");
     const file = new File(["notes"], "notes.txt", { type: "text/plain" });

@@ -39,6 +39,8 @@ function installStyles(): void {
   style.textContent = [
     `.${HOVER_CLASS} { outline: 2px solid rgba(0, 122, 255, 0.8); outline-offset: 2px; cursor: text; }`,
     `.${EDITABLE_CLASS} { outline: 2px solid rgba(0, 122, 255, 1); outline-offset: 2px; background: rgba(0, 122, 255, 0.05); }`,
+    // !important here (unlike HOVER_CLASS/EDITABLE_CLASS above): site stylesheets commonly reset
+    // `img { outline: none }`, and the drop-target ring needs to survive that.
     `.${IMAGE_DROP_TARGET_CLASS} { outline: 3px dashed rgba(0, 122, 255, 0.9) !important; outline-offset: 4px !important; filter: brightness(0.9); }`,
     `.${IMAGE_DROP_ACTIVE_CLASS} { outline-style: solid !important; filter: brightness(1.05); cursor: copy; }`,
     `[${IMAGE_DROP_HINT_ATTRIBUTE}] { position: fixed; z-index: 2147483647; left: 50%; top: 16px; transform: translateX(-50%); padding: 8px 12px; border-radius: 9px; background: rgba(28, 28, 30, 0.92); color: white; font: 600 13px/1.25 -apple-system, BlinkMacSystemFont, sans-serif; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25); pointer-events: none; }`,
@@ -168,9 +170,15 @@ function attachImageDrop(awaitReply: (id: string, handler: (r: EditReply) => voi
     showTargets();
   });
   document.addEventListener("dragover", (ev) => {
-    if (!dragIsFile && !isFileDrag(ev.dataTransfer)) return;
-    dragIsFile = true;
-    showTargets();
+    // showTargets() re-scans the whole document, so only pay for it on the dragenter → dragover
+    // transition (normally already done by dragenter; this is just the fallback for the rare case
+    // where dataTransfer didn't read as a file drag until dragover). Every later dragover in the
+    // same drag only needs to move the active-target highlight, not re-highlight everything.
+    if (!dragIsFile) {
+      if (!isFileDrag(ev.dataTransfer)) return;
+      dragIsFile = true;
+      showTargets();
+    }
     const target = imageAtEvent(ev);
     setActiveTarget(target);
     // Prevent WKWebView from navigating to a dropped local file. A target outside an image is
@@ -184,15 +192,20 @@ function attachImageDrop(awaitReply: (id: string, handler: (r: EditReply) => voi
     ev.preventDefault();
     const target = imageAtEvent(ev as DragEvent);
     const hadTargets = imageTargets().length > 0;
+    const isImageFile = file.type.startsWith("image/");
     clearTargets();
-    if (!file.type.startsWith("image/")) {
-      showToast("Choose an image file to replace this image");
+    // Target-existence is checked before file-type so a dropped non-image file never gets the
+    // has-a-target wording ("replace this image") when there wasn't a target to replace.
+    if (!target) {
+      showToast(!hadTargets
+        ? "This page has no images to replace"
+        : isImageFile
+          ? "Drop onto a highlighted image to replace it"
+          : "Drop an image file onto a highlighted image to replace it");
       return;
     }
-    if (!target) {
-      showToast(hadTargets
-        ? "Drop onto a highlighted image to replace it"
-        : "This page has no images to replace");
+    if (!isImageFile) {
+      showToast("Choose an image file to replace this image");
       return;
     }
 
@@ -272,6 +285,9 @@ function attachImageDrop(awaitReply: (id: string, handler: (r: EditReply) => voi
     dragDepth = Math.max(0, dragDepth - 1);
     if (dragDepth === 0) clearTargets();
   });
+  // dragend fires on the drag's source node — for a real Finder→WKWebView drag that's outside
+  // this document, so this rarely fires in production. dragleave's depth counter above is the
+  // real cleanup path; this is a defensive backstop (and what lets tests reset state between runs).
   document.addEventListener("dragend", clearTargets);
 }
 
