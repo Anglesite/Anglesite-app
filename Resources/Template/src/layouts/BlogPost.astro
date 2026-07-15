@@ -8,14 +8,16 @@ import { Schema } from "astro-seo-schema";
 import { blogPostingSchema } from "../lib/schema.ts";
 import { ownerName } from "../lib/profile.ts";
 import BaseLayout from "./BaseLayout.astro";
+import SyndicationLinks from "../components/SyndicationLinks.astro";
 
 interface Props {
   title: string;
   description?: string;
   pubDate?: Date;
+  syndication?: string[];
 }
 
-const { title, description, pubDate } = Astro.props;
+const { title, description, pubDate, syndication } = Astro.props;
 // pubDate is already a Date; pin the locale + UTC so static output is deterministic.
 const iso = pubDate ? pubDate.toISOString() : undefined;
 const human = pubDate
@@ -40,6 +42,7 @@ const jsonLd = blogPostingSchema(
       {iso && <time class="dt-published" datetime={iso}>{human}</time>}
     </a>
     <div class="e-content"><slot /></div>
+    <SyndicationLinks urls={syndication} />
     <!-- anglesite:share -->
     <!-- anglesite:comments -->
   </article>

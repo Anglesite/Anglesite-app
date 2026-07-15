@@ -5,6 +5,7 @@ import type { HentryCollection } from "../lib/collections.ts";
 import { entrySchema, type HentryData } from "../lib/schema.ts";
 import { ownerName } from "../lib/profile.ts";
 import BaseLayout from "./BaseLayout.astro";
+import SyndicationLinks from "../components/SyndicationLinks.astro";
 
 interface Props {
   entry: CollectionEntry<HentryCollection>;
@@ -22,6 +23,7 @@ interface HentryFields {
   bookmarkOf?: string;
   inReplyTo?: string;
   likeOf?: string;
+  syndication?: string[];
 }
 
 const { entry } = Astro.props;
@@ -65,5 +67,6 @@ const jsonLd = entrySchema(entry.collection, entry.data as HentryData, {
         {tags.map((t) => <li><a class="p-category" href={`/tags/${t}`}>{t}</a></li>)}
       </ul>
     )}
+    <SyndicationLinks urls={d.syndication} />
   </article>
 </BaseLayout>

@@ -37,6 +37,7 @@ struct ContentConfigDriftTests {
         const \(collection) = defineCollection({
           loader: glob({ pattern: "**/*.md", base: "./src/content/\(collection)" }),
           schema: z.object({
+            ...socialFields,
         \(schemaLines.joined(separator: "\n"))
           }).strict(),
         });

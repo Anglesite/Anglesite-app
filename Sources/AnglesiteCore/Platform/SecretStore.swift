@@ -34,6 +34,16 @@ public enum SecretAccounts {
     /// token with `gh`, which the sandboxed app can neither spawn nor read.
     public static let gitHubToken = "github-token"
 
+    /// Site-scoped POSSE token slots. Account names include the stable site UUID so credentials
+    /// never leak across two packages configured for different social accounts.
+    public static func mastodonAccessToken(siteID: String) -> String {
+        "posse:\(siteID):mastodon-access-token"
+    }
+
+    public static func blueskyAppPassword(siteID: String) -> String {
+        "posse:\(siteID):bluesky-app-password"
+    }
+
     /// Bearer token for a `.remote` ACP agent connection, keyed by the connection's `id` — there
     /// can be many connections, so this is a function, not a single constant like
     /// `cloudflareToken`/`gitHubToken`.

@@ -70,6 +70,7 @@ final class DeployModel {
 
     private let command: DeployCommand
     private let webmentionCommand: WebmentionSendCommand
+    private let posseCommand: POSSESyndicationCommand
     private let logCenter: LogCenter
     private let keychain: KeychainStore
     private let onboarding: TokenOnboarding
@@ -96,6 +97,7 @@ final class DeployModel {
     init(
         command: DeployCommand = DeployCommand(),
         webmentionCommand: WebmentionSendCommand = WebmentionSendCommand(),
+        posseCommand: POSSESyndicationCommand = POSSESyndicationCommand(),
         logCenter: LogCenter = .shared,
         keychain: KeychainStore = KeychainStore(),
         verifier: TokenVerifying = CloudflareAPITokenVerifier(),
@@ -105,6 +107,7 @@ final class DeployModel {
     ) {
         self.command = command
         self.webmentionCommand = webmentionCommand
+        self.posseCommand = posseCommand
         self.logCenter = logCenter
         self.keychain = keychain
         self.onboarding = TokenOnboarding(verifier: verifier)
@@ -326,6 +329,16 @@ final class DeployModel {
             // the deploy result the user watches. Progress/failures surface only in LogCenter.
             Task.detached { [webmentionCommand] in
                 await webmentionCommand.send(
+                    siteID: siteID,
+                    siteDirectory: siteDirectory,
+                    configDirectory: configDirectory,
+                    siteBase: url
+                )
+            }
+            // POSSE is independently best-effort so a slow social API never delays webmentions or
+            // changes the deploy result. Its own actor serializes overlapping runs per site.
+            Task.detached { [posseCommand] in
+                await posseCommand.syndicate(
                     siteID: siteID,
                     siteDirectory: siteDirectory,
                     configDirectory: configDirectory,
