@@ -148,9 +148,12 @@ substrate-neutral build-command input. The runtime writes that input to temporar
 `Source/`, and the build returns its observed static/generated artifact inventory and findings.
 Raw site settings, credentials, and provider tokens never cross this seam.
 
-This input/output seam is part of the inventory follow-up and must work for every deployment
-runtime. Until it exists, Anglesite can validate the static/generated subset only; it must not
-claim cross-owner collision protection for dynamic or provider-owned paths.
+No current `SiteRuntime` or deploy-orchestrator abstraction provides either provider-owned-path
+reporting or this build input/output transport. [#748](https://github.com/Anglesite/Anglesite-app/issues/748)
+owns those capabilities as a standalone prerequisite; [#744](https://github.com/Anglesite/Anglesite-app/issues/744)
+consumes them for inventory and collision enforcement. Until #748 exists, Anglesite can validate
+the static/generated subset only; it must not claim cross-owner collision protection for dynamic
+or provider-owned paths.
 
 ### Source of truth by owner
 
@@ -164,8 +167,9 @@ claim cross-owner collision protection for dynamic or provider-owned paths.
 Dynamic activation follows the accepted [#700 Workers design](2026-07-13-workers-local-debugging-design.md):
 settings-activated worker IDs live in package `Config/`, component-tied activation is computed,
 and the catalog describes what each Worker exposes. The well-known layer does not create a second
-git-tracked activation system. A follow-up to #708 may add generic HTTP route metadata to the
-existing `WorkerDescriptor`; it must not introduce a parallel well-known-only catalog.
+git-tracked activation system. [#746](https://github.com/Anglesite/Anglesite-app/issues/746) adds
+generic HTTP route metadata to the existing `WorkerDescriptor` after #708/#709; it must not
+introduce a parallel well-known-only catalog.
 
 Credentials, private keys, ACME tokens, and unpublished configuration never become inventory
 content. Runtime bindings and secrets stay in their existing protected stores.
@@ -320,28 +324,42 @@ Current generated files have neither a marker nor an ownership mode, so every un
 
 Existing Dependency Sync updates `package.json` dependencies only; it has no safe mechanism for
 upgrading template scripts. With the current clone-and-run runtime, app-bundled code cannot repair
-a site's checked-in `edge-artifacts.ts`. Existing-site rollout therefore requires a separate
-versioned per-file template migration design with conflict handling. #690 does not silently
-broaden Dependency Sync or claim that an app-bundled generator already works.
+a site's checked-in `edge-artifacts.ts`. Existing-site rollout therefore requires the versioned,
+conflict-safe per-file migration tracked by
+[#745](https://github.com/Anglesite/Anglesite-app/issues/745). #690 does not silently broaden
+Dependency Sync or claim that an app-bundled generator already works.
 
 ## Prerequisites and sequencing
 
-The audit found two independent bugs that must be tracked and fixed separately rather than hidden
-inside this feature:
+The audit found two independent bugs and one missing runtime capability. They are separate
+prerequisites rather than hidden inventory scope:
 
-- define one versioned pre-deploy JSON envelope and update both Swift decoders before emitting new
-  well-known findings; and
-- fix aggregate settings dirty/save accounting before any future well-known settings pane.
+- [#742](https://github.com/Anglesite/Anglesite-app/issues/742) defines one versioned pre-deploy
+  JSON envelope and shared Swift decoding before new well-known findings;
+- [#741](https://github.com/Anglesite/Anglesite-app/issues/741) fixes aggregate Settings
+  dirty/save/revert accounting before any future well-known Settings pane; and
+- [#748](https://github.com/Anglesite/Anglesite-app/issues/748) adds provider-owned-path reporting
+  plus substrate-neutral ephemeral claim-manifest build input/output. That capability does not
+  exist today and must land before full dynamic/provider collision enforcement.
 
 Recommended follow-ups:
 
-1. **`security.txt` repair:** lifecycle, ownership adoption, headers, parser, and build tests.
-2. **Inventory/collisions:** portable descriptor, filesystem inventory, path safety, and pre/post
-   build collision checks.
-3. **Dynamic route metadata:** extend the #700 Worker catalog and Wrangler composition after #708;
-   WebFinger itself stays in #366.
-4. **Product UI:** design only after inventory proves a concrete need; start read-only and avoid a
+1. **[#743 — `security.txt` repair](https://github.com/Anglesite/Anglesite-app/issues/743):**
+   lifecycle, ownership adoption, headers, parser, and build tests.
+2. **[#744 — inventory/collisions](https://github.com/Anglesite/Anglesite-app/issues/744):**
+   portable descriptor, filesystem inventory, path safety, and pre/post-build collision checks;
+   consume #748 rather than implementing runtime transport inside the inventory slice.
+3. **[#745 — existing-site migration](https://github.com/Anglesite/Anglesite-app/issues/745):**
+   versioned per-file upgrades, conflict handling, and explicit legacy ownership adoption.
+4. **[#746 — dynamic route metadata](https://github.com/Anglesite/Anglesite-app/issues/746):**
+   extend the #700 Worker catalog and Wrangler composition after #708/#709; WebFinger itself stays
+   in #366.
+5. **Product UI:** design only after inventory proves a concrete need; start read-only and avoid a
    generic file generator.
+
+The headless critical path is #742 → #743 → #744 → #745, with #748 independently blocking #744.
+#746 waits for #744/#708/#709 and then unblocks #366. #741 is independent of the headless path and
+blocks only a future Settings surface.
 
 No follow-up requires a frontier LLM or a new markdown skill. The work is deterministic
 Swift/TypeScript.
