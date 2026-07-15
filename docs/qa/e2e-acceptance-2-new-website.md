@@ -44,7 +44,7 @@ All three routes present the same wizard sheet on the launcher window:
 Walk the six steps (fixed ~520×460 sheet; footer **Back / Cancel / Continue**):
 
 - **Details** ("Create a website"): "Website name" field; domain radio group **"Buy a domain"** / **"Transfer an existing domain"** / **"Set this up later"**. Selecting "Set this up later" shows the temporary-domain explanation. Continue is disabled until the name is non-empty and the slug untaken; Transfer additionally requires a valid domain.
-  - *Known gap:* the "later" copy promises a `<slug>.pages.dev` address; the actual deploy target is `*.workers.dev` (overview doc, candidate issue). Record the exact copy shown.
+  - *Fixed (#703):* the "later" copy now promises a `<slug>.workers.dev` address, matching the actual deploy target. Record the exact copy shown.
 - **Type** ("What kind of website are you creating?"): one card per site type; **business** is the default.
 - **Look** ("Pick a color scheme"): built-in theme grid plus a **Custom** card (primary/accent colors, "Upload Logo…"). Pick a non-default theme so case 8 can verify it applied.
 - **Content** ("First words"): "Homepage headline", optional short description; "Generate hero image…" appears only when Image Playground is available.

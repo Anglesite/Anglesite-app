@@ -48,7 +48,7 @@ public final class NewSiteWizardModel {
     }
 
     public var cloudflareDevPreview: String {
-        "\(slugPreview).pages.dev"
+        "\(slugPreview).workers.dev"
     }
 
     public var canContinue: Bool {

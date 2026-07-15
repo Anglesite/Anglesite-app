@@ -68,7 +68,7 @@ final class NewSiteWizardModelTests: XCTestCase {
         m.draft.name = "My Cool Site"
         XCTAssertEqual(m.slugPreview, "my-cool-site")
         XCTAssertEqual(m.defaultSaveFileName, "my-cool-site.anglesite")
-        XCTAssertEqual(m.cloudflareDevPreview, "my-cool-site.pages.dev")
+        XCTAssertEqual(m.cloudflareDevPreview, "my-cool-site.workers.dev")
     }
 
     // MARK: Build warnings (#229)

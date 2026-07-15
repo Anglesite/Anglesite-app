@@ -140,7 +140,14 @@ public actor SiteScaffolder {
             }
         }
 
-        do { try appendSiteConfig(draft, logoPublicPath: logoPublicPath, metadataDescription: metadataDescription, siteDir: siteDir) }
+        // Cloudflare Worker config (#701): a per-site-unique name (the same slug the wizard's
+        // uniqueness check ran against) so a fresh site is deployable without hand-editing
+        // wrangler.toml, and two sites never clobber each other's Worker.
+        let projectSlug = SiteSlug.derive(from: draft.name)
+        do { try writeWranglerConfig(siteName: projectSlug, siteDir: siteDir) }
+        catch { emit(.warning(step: "writingContent", message: "Cloudflare Worker config not written: \(humanize(error))")) }
+
+        do { try appendSiteConfig(draft, logoPublicPath: logoPublicPath, metadataDescription: metadataDescription, siteDir: siteDir, cfProjectName: projectSlug) }
         catch { emit(.warning(step: "writingContent", message: "Site metadata not written: \(humanize(error))")) }
 
         // 4b. Optional hero image (Image Playground, #92) — non-blocking. Only when the owner
@@ -172,13 +179,22 @@ public actor SiteScaffolder {
         } catch { emit(.failed(step: "registering", message: humanize(error))) }
     }
 
+    /// Writes a static-only `wrangler.toml` (no social features) so the site is deployable via
+    /// `npx wrangler deploy` with no manual setup. `SocialWorkerProvisionCommand` overwrites this
+    /// with a features-enabled config if the owner opts into social features later.
+    private func writeWranglerConfig(siteName: String, siteDir: URL) throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: siteName, features: [])
+        try toml.write(to: siteDir.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
+    }
+
     /// Append owner answers without clobbering existing lines (e.g. ANGLESITE_VERSION).
     private func appendSiteConfig(_ draft: NewSiteDraft, logoPublicPath: String?,
-                                  metadataDescription: String, siteDir: URL) throws {
+                                  metadataDescription: String, siteDir: URL, cfProjectName: String) throws {
         var values: [(String, String)] = [
             ("SITE_NAME", draft.name),
             ("SITE_TYPE", draft.siteType.rawValue),
             ("DOMAIN_CHOICE", draft.domainChoice.rawValue),
+            ("CF_PROJECT_NAME", cfProjectName),
         ]
         if draft.domainChoice == .transfer && !draft.domain.isEmpty { values.append(("DOMAIN", draft.domain)) }
         if draft.themeID == CustomTheme.id {

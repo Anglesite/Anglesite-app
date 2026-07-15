@@ -194,6 +194,7 @@ public actor DeployCommand {
                 if let configDirectory {
                     try? DeployedRoutesSnapshot.save(currentRoutes, to: configDirectory)
                 }
+                Self.persistSiteURL(url, siteDirectory: siteDirectory)
                 return .succeeded(url: url, duration: duration)
             }
             return .failed(reason: "wrangler exited cleanly but no deployed URL was found in its output", exitCode: 0)
@@ -260,6 +261,27 @@ public actor DeployCommand {
             }
         }
         return nil
+    }
+
+    /// Persists the deployed URL into `.site-config`'s `SITE_URL` (#702) so the *next* build's
+    /// `astro.config.ts` picks up the real host for canonical URLs, feed self-links, and JSON-LD
+    /// instead of the `https://example.com` placeholder. This deploy's own `dist/` was already
+    /// built before the URL was known, so the placeholder still ships on a site's first deploy —
+    /// every deploy after that carries the real host.
+    ///
+    /// Skipped when a custom domain is already configured (`DOMAIN`/`SITE_DOMAIN`): that value
+    /// wins per `WebsiteAnalyticsAsset.bestHost`'s precedence, and overwriting it here would
+    /// silently revert a custom-domain site back to its workers.dev host on every deploy.
+    /// Best-effort — a write failure must never turn a successful deploy into a failed one.
+    static func persistSiteURL(_ url: URL, siteDirectory: URL) {
+        let configURL = siteDirectory.appendingPathComponent(WebsiteAnalyticsAsset.configRelativePath)
+        let config = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+        guard WebsiteAnalyticsAsset.configValue("DOMAIN", in: config) == nil,
+              WebsiteAnalyticsAsset.configValue("SITE_DOMAIN", in: config) == nil
+        else { return }
+        let updated = SiteConfigFile.upsert([("SITE_URL", url.absoluteString)], into: config)
+        guard updated != config else { return }
+        try? updated.write(to: configURL, atomically: true, encoding: .utf8)
     }
 
     // MARK: Host environment curation

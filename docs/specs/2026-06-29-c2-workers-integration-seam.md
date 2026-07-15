@@ -72,7 +72,6 @@ Steps 3–7 are the new work in V-2.1. Steps 1–2 and 8 use existing infrastruc
 - `WorkersConformanceReader` + `WorkersConformanceStatus` (Swift, AnglesiteCore)
 - `WorkerComposition` (Swift, wrangler.toml generator)
 - `worker/worker.ts` stub (template resource)
-- `worker/wrangler.toml.template` (reference)
 - `worker/workers-version.json` (version pin)
 - This decision document
 
@@ -181,7 +180,6 @@ Before offering "Enable Social Features," the app:
 | File | Owner | Purpose |
 |---|---|---|
 | `Resources/Template/worker/worker.ts` | Anglesite app | Per-site Worker entry point (stub, filled by V-2.1) |
-| `Resources/Template/worker/wrangler.toml.template` | Anglesite app | wrangler.toml template (reference) |
 | `Resources/Template/worker/workers-version.json` | Anglesite app | Version pin (read at scaffold/provision time) |
 | `conformance/status.json` (monorepo) | @dwk/workers | Conformance status per package/phase (read by app at build time) |
 | `WorkersConformanceReader` | Anglesite app | Reads conformance/status.json |

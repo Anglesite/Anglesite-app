@@ -283,7 +283,7 @@ final class PlistEditorModel {
                 return
             }
             let config = try WebsiteAnalyticsAsset.loadConfig(siteDirectory: sourceDirectory)
-            let fallbackHost = "\(SiteSlug.derive(from: initialWebsiteTitle)).pages.dev"
+            let fallbackHost = "\(SiteSlug.derive(from: initialWebsiteTitle)).workers.dev"
             let host = WebsiteAnalyticsAsset.bestHost(from: config, fallback: fallbackHost)
             let siteTag = try await analyticsProvider.siteTag(for: host, apiToken: token)
             analyticsSettings.cloudflareToken = siteTag

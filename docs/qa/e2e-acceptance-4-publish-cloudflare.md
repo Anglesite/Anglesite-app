@@ -3,12 +3,12 @@
 **Sequence:** Part 4 of 4 — requires Part 3's exit state (edited site, preview ready).
 **Scope:** first deploy of the site to Cloudflare on the `*.workers.dev` subdomain only — the "Set this up later" domain path. Custom-domain attach, Harden, and Domain wizards are out of scope.
 
-## ⚠️ Known blockers (must land before this part can pass)
+## Landed blockers (code fixes in; this run still owes manual verification)
 
-Two app-side gaps mean a freshly scaffolded site **cannot currently complete this journey without manual intervention** (details in the [overview](e2e-acceptance-overview.md)):
+Two app-side gaps used to mean a freshly scaffolded site couldn't complete this journey without manual intervention. Both now have code fixes on `main` — this Part 4 run still needs to execute and confirm the acceptance matrix below (case 6, 8, 11 in particular) against a real deploy:
 
-1. **#701 — no wrangler config is materialized.** `Source/` ships only `worker/wrangler.toml.template` with `{{SITE_NAME}}` unsubstituted; the app runs bare `npx wrangler deploy`, which aborts without a config. Until fixed, testers must hand-write `Source/wrangler.toml` (copy the template, set a unique `name`) — record that workaround in evidence.
-2. **#702 — `SITE_URL` is never written by the app deploy**, so the built site's canonical URLs/feeds carry `https://example.com` (case 8 documents the expected post-fix behavior).
+1. **#701 — no wrangler config is materialized.** Fixed: `SiteScaffolder` now writes `Source/wrangler.toml` at scaffold time via `WorkerComposition.generateWranglerToml`, with a per-site-unique `name` (the same slug the wizard's uniqueness check runs against) and `CF_PROJECT_NAME` recorded in `.site-config`. The old `worker/wrangler.toml.template` (with its unsubstituted `{{SITE_NAME}}`) has been removed — it's superseded, not rendered.
+2. **#702 — `SITE_URL` is never written by the app deploy.** Partially fixed: `DeployCommand.deploy` now persists `SITE_URL` into `.site-config` after a successful deploy (skipped when a custom `DOMAIN`/`SITE_DOMAIN` is already set). Because `dist/` is built *before* the URL is known, a site's **first** deploy still ships with the `https://example.com` placeholder — every deploy after that carries the real host. Case 8 should be re-run against a second deploy to see the corrected canonical URLs.
 
 ## Purpose
 
@@ -93,7 +93,7 @@ Visit the live URL in a browser:
 
 - Homepage shows the Part 3 edits (headline, image); `/about` and `/blog/` (with the Part 3 post) render; `/rss.xml` serves.
 - No dev-only surfaces: `/keystatic` must not exist in production output.
-- Canonical URLs / feed self-links reference the deployed host — **currently expected to show `https://example.com`** until the `SITE_URL` blocker lands; record actual values.
+- Canonical URLs / feed self-links reference the deployed host — **expected to still show `https://example.com` on the first deploy** (the `SITE_URL` fix persists post-deploy, so `dist/` is built before it's known); re-check after a second deploy, which should carry the real host. Record actual values either way.
 - The health badge reflects the passed scan ("Ready to deploy" green after a recheck).
 
 ### 9. Re-deploy idempotence

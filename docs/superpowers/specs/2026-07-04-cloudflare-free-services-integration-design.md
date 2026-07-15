@@ -11,7 +11,7 @@ Anglesite already integrates deeply with Cloudflare:
 | Already integrated | Where |
 |---|---|
 | Workers deploy (static assets + social worker) | `DeployCommand`, `DeployExecutor`, `WorkerComposition`, `SocialWorkerProvisionCommand` |
-| D1 / KV / R2 provisioning (social worker bindings) | `WorkerComposition`, `worker/wrangler.toml.template` |
+| D1 / KV / R2 provisioning (social worker bindings) | `WorkerComposition` |
 | Web Analytics (beacon injection, GA migration) | `CloudflareWebAnalyticsClient`, `WebsiteAnalyticsAsset` |
 | DNS / DNSSEC / SPF / DMARC / CAA | `HTTPCloudflareClient`, `HardenPlanner`, `SecurityAudit` |
 | SSL mode, Always-HTTPS, HSTS, security headers | `SecurityAudit`, `HardenExecutor` |
