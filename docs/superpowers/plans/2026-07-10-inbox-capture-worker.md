@@ -330,7 +330,6 @@ git commit -m "feat(inbox): add /inbox Worker route for runtime capture (#587)"
 **Files:**
 - Modify: `Sources/AnglesiteCore/WorkerComposition.swift`
 - Modify: `Tests/AnglesiteCoreTests/WorkerCompositionTests.swift`
-- Modify: `Resources/Template/worker/wrangler.toml.template`
 
 **Interfaces:**
 - Consumes: nothing new from Task 1 (independent).
@@ -445,17 +444,7 @@ In `Sources/AnglesiteCore/WorkerComposition.swift`, change the `generateWrangler
 
 (Only the signature and the new `if inboxCaptureEnabled { ... }` block after the R2 block are additions — every other line is unchanged from the current file, reproduced here for context so the diff is unambiguous.)
 
-- [ ] **Step 4: Update the template comment**
-
-In `Resources/Template/worker/wrangler.toml.template`, after the existing commented `[[r2_buckets]]` block at the end of the file, add:
-
-```toml
-#
-# Inbox capture (#587) adds this binding (uncommented by Anglesite when enabled):
-# [[kv_namespaces]]
-# binding = "INBOX_KV"
-# id = ""
-```
+- [ ] **Step 4: (superseded)** — `Resources/Template/worker/wrangler.toml.template` was removed (#701/#713 deploy-URL fix cluster): `wrangler.toml` is now generated entirely by `WorkerComposition.generateWranglerToml` at scaffold/provisioning time, so there's no static template comment to keep in sync. No action needed here.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -465,7 +454,7 @@ Expected: PASS (existing tests + 3 new ones).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/AnglesiteCore/WorkerComposition.swift Tests/AnglesiteCoreTests/WorkerCompositionTests.swift Resources/Template/worker/wrangler.toml.template
+git add Sources/AnglesiteCore/WorkerComposition.swift Tests/AnglesiteCoreTests/WorkerCompositionTests.swift
 git commit -m "feat(inbox): add INBOX_KV wrangler.toml binding (#587)"
 ```
 
