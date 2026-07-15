@@ -2,6 +2,12 @@
 
 This is the **native macOS app** that hosts the Anglesite Codex plugin. The plugin lives in a sibling repo at `../anglesite`. Both repos are under the same `github.com/Anglesite/` parent directory.
 
+## Contribution workflow (mandatory)
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) is the source of truth for contribution workflow. **Read it from the current checkout before planning or making any repository change**, even if you have worked in this repo before; do not rely on this file, a prior session, or a cached summary as a substitute. Apply every requirement relevant to the task, including issue claiming, approval for large changes or new dependencies, generated-file handling, testing, commit format, and pull-request preparation.
+
+Before handing work off, re-check the changed files against `CONTRIBUTING.md`, run the relevant test/build commands it specifies, and report any required check you could not run. When delegating work, explicitly instruct each agent to read `CONTRIBUTING.md` **in its assigned worktree before acting**; the delegating agent remains responsible for verifying compliance.
+
 ## Two-repo coordination
 
 | Repo | Role |
