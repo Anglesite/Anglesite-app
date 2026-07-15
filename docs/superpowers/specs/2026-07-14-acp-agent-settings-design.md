@@ -196,10 +196,18 @@ A new `AssistantBackendResolver` (`AnglesiteCore`) reads
 `FoundationModelAssistant` path or constructs an `ACPAssistant` from the matching
 `ACPAgentStore` entry — kept separate from `ContentAssistantFactory` (which resolves a
 `FoundationModelTier`, a different axis) rather than overloading it with backend selection.
-`SiteAssistantSessionFactory.Dependencies.assistant`
-(`SiteAssistantSessionFactory.swift:58`) is updated so its `base:` argument comes from this
-resolver instead of hardcoding `FoundationModelAssistant` — the one line that makes "switching
-which model is being used" real for the existing chat surface, with no other call site changed.
+
+**Amendment (post-implementation, 2026-07-15):** as built, `SiteAssistantSessionFactory.makeSession`
+resolves `resolveActiveACPAssistant(...) ?? dependencies.assistant(...)` — when an ACP agent is
+active, the resolver's `ACPAssistant` replaces the *entire* assistant, not just the `base:` inside
+`CombinedAugmentedAssistant`. This means an active ACP agent does **not** get the FoundationModels
+RAG/knowledge-index augmentation or emit `.citations` chips — a deliberate divergence from this
+section's original wording, confirmed during the final whole-branch review. Rationale: an ACP
+agent (e.g. one backed by a coding-assistant CLI) typically has its own filesystem/tool access
+inside the container and reads the site's content directly, so injecting FoundationModels-oriented
+RAG context would be redundant or actively confusing context to hand it. If a future ACP agent
+integration needs RAG-style grounding, revisit this at that point rather than retrofitting it
+speculatively now.
 
 ### 4.5 Error handling
 
