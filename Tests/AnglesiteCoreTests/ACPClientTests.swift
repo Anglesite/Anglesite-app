@@ -18,6 +18,7 @@ import Foundation
         /// this test wants to exercise (set per test before calling `sendPrompt`).
         private var updatesToEmitBeforePromptResult: [JSONValue] = []
         private(set) var sentMethods: [String] = []
+        private(set) var sentMessages: [JSONValue] = []
 
         init() {
             var cont: AsyncStream<JSONValue>.Continuation!
@@ -29,11 +30,19 @@ import Foundation
             updatesToEmitBeforePromptResult = updates
         }
 
+        /// Pushes an unsolicited message onto `inbound()`, as if the agent sent it — used to
+        /// simulate a server-initiated request (`session/request_permission`) arriving outside the
+        /// normal request/response flow this fake otherwise drives from `send(_:)`.
+        func injectInbound(_ message: JSONValue) {
+            continuation?.yield(message)
+        }
+
         func open() async throws {}
         nonisolated func inbound() -> AsyncStream<JSONValue> { stream }
         func close() async { continuation?.finish() }
 
         func send(_ message: JSONValue) async throws {
+            sentMessages.append(message)
             guard case .object(let obj) = message, case .string(let method)? = obj["method"] else { return }
             sentMethods.append(method)
             guard case .int(let id)? = obj["id"] else { return }  // notifications get no response
@@ -112,6 +121,41 @@ import Foundation
         #expect(!collected.contains(.turnComplete(nil)))
     }
 
+    // MARK: server-initiated request id types
+
+    @Test func autoDeclinesPermissionRequestsWithStringIds() async throws {
+        let transport = FakeACPAgentTransport()
+        let client = ACPClient(transport: transport)
+        try await client.initialize()
+
+        // Inject an unsolicited server-initiated request with a STRING id (JSON-RPC permits this;
+        // only `.int` was previously matched, so this would have been silently dropped instead of
+        // declined, leaving a conformant agent's request hanging forever).
+        await transport.injectInbound(.object([
+            "jsonrpc": .string("2.0"),
+            "id": .string("perm-1"),
+            "method": .string("session/request_permission"),
+            "params": .object([:]),
+        ]))
+
+        // `newSession` afterward: since the reader task processes `inbound()` strictly in FIFO
+        // order, the injected message above is guaranteed to have already been handled by the
+        // time this resolves — no polling needed.
+        _ = try await client.newSession(cwd: "/workspace/site")
+
+        let sent = await transport.sentMessages
+        let declined = sent.contains { message in
+            guard case .object(let obj) = message,
+                  case .string("perm-1")? = obj["id"],
+                  case .object(let result)? = obj["result"],
+                  case .object(let outcome)? = result["outcome"],
+                  case .string("cancelled")? = outcome["outcome"]
+            else { return false }
+            return true
+        }
+        #expect(declined)
+    }
+
     // MARK: sendRequest timeout (crashed-agent backstop)
 
     /// Mirrors a real crash: answers `initialize`/`session/new` normally, then goes silent on
@@ -166,5 +210,27 @@ import Foundation
             return false
         })
         #expect(!collected.contains(.turnComplete(nil)))
+    }
+
+    // MARK: sendNotification timeout
+
+    /// A transport whose `send` never returns — models `ACPHTTPTransport`'s real hang risk for a
+    /// notification (no request `id` to match a response against, so its SSE read loop would
+    /// otherwise wait for the stream to end, which isn't guaranteed to happen promptly).
+    private actor FakeACPAgentTransportThatHangsOnSend: ACPTransport {
+        func open() async throws {}
+        nonisolated func inbound() -> AsyncStream<JSONValue> { AsyncStream { _ in } }
+        func close() async {}
+        func send(_ message: JSONValue) async throws {
+            try await Task.sleep(nanoseconds: .max)
+        }
+    }
+
+    @Test func cancelSessionDoesNotHangForeverWhenTheTransportNeverReturns() async throws {
+        let client = ACPClient(transport: FakeACPAgentTransportThatHangsOnSend())
+        // `cancelSession` reuses the same test-only override as `sendRequest`'s timeout tests, so
+        // this proves the bound without waiting out the 10s production default.
+        await client.setRequestTimeoutOverrideForTesting(0.05)
+        await client.cancelSession(sessionID: "sess-1")  // must return, not hang forever
     }
 }

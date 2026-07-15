@@ -6,6 +6,7 @@ import Foundation
     private actor FakeACPAgentTransport: ACPTransport {
         private var continuation: AsyncStream<JSONValue>.Continuation?
         private let stream: AsyncStream<JSONValue>
+        private(set) var closeCallCount = 0
 
         init() {
             var cont: AsyncStream<JSONValue>.Continuation!
@@ -15,7 +16,10 @@ import Foundation
 
         func open() async throws {}
         nonisolated func inbound() -> AsyncStream<JSONValue> { stream }
-        func close() async { continuation?.finish() }
+        func close() async {
+            closeCallCount += 1
+            continuation?.finish()
+        }
 
         func send(_ message: JSONValue) async throws {
             guard case .object(let obj) = message, case .string(let method)? = obj["method"],
@@ -62,5 +66,32 @@ import Foundation
             connection: connection, siteID: "site-1", sourceDirectory: URL(fileURLWithPath: "/tmp/site-1"),
             transportFactory: { FakeACPAgentTransport() })
         #expect(assistant.capabilities.providerName == "My Agent")
+    }
+
+    // MARK: deinit tears down the underlying client
+
+    @Test func deinitTearsDownTheUnderlyingClient() async throws {
+        let transport = FakeACPAgentTransport()
+        var assistant: ACPAssistant? = ACPAssistant(
+            connection: ACPAgentConnection(id: UUID(), name: "Test Agent", transport: .remote(url: URL(string: "https://example.com")!)),
+            siteID: "site-1",
+            sourceDirectory: URL(fileURLWithPath: "/tmp/site-1"),
+            transportFactory: { transport }
+        )
+        let context = AssistantContext(siteID: "site-1", siteDirectory: URL(fileURLWithPath: "/tmp/site-1"))
+        // Force the lazy connection so `client` is actually set — otherwise there'd be nothing
+        // for `deinit` to tear down, and this test would pass vacuously.
+        _ = try await assistant?.generate(prompt: "hello", context: context)
+
+        assistant = nil  // drop the last reference — triggers `deinit`
+
+        // `deinit` hands teardown to a detached `Task`, which has no synchronization point this
+        // test can await directly — poll briefly, bounded well within what a real teardown needs.
+        var closed = false
+        for _ in 0..<50 {
+            if await transport.closeCallCount > 0 { closed = true; break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(closed)
     }
 }

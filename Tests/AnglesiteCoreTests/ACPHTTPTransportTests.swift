@@ -6,7 +6,15 @@ import Foundation
 /// (`HTTPTransportTests.swift`) but a separate type/instance so this suite's per-test queue
 /// mutations can never race with that suite's, even though both can run concurrently.
 final class ACPStubURLProtocol: URLProtocol, @unchecked Sendable {
-    struct Response { let status: Int; let headers: [String: String]; let body: Data }
+    struct Response {
+        let status: Int
+        let headers: [String: String]
+        let body: Data
+        /// When set, `body` is delivered across these separate `didLoad` calls (in order) instead
+        /// of as one chunk — simulating true incremental delivery, e.g. a `data:` line split
+        /// across two network reads, rather than the whole response arriving synchronously at once.
+        var chunks: [Data]? = nil
+    }
     nonisolated(unsafe) static var queue: [Response] = []
     nonisolated(unsafe) static var lastAuthHeaders: [String?] = []
 
@@ -19,7 +27,13 @@ final class ACPStubURLProtocol: URLProtocol, @unchecked Sendable {
         let r = Self.queue.isEmpty ? Response(status: 500, headers: [:], body: Data()) : Self.queue.removeFirst()
         let http = HTTPURLResponse(url: request.url!, statusCode: r.status, httpVersion: "HTTP/1.1", headerFields: r.headers)!
         client?.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
-        if !r.body.isEmpty { client?.urlProtocol(self, didLoad: r.body) }
+        if let chunks = r.chunks {
+            for chunk in chunks where !chunk.isEmpty {
+                client?.urlProtocol(self, didLoad: chunk)
+            }
+        } else if !r.body.isEmpty {
+            client?.urlProtocol(self, didLoad: r.body)
+        }
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
@@ -74,6 +88,50 @@ struct ACPHTTPTransportTests {
             status: 200,
             headers: ["Content-Type": "text/event-stream"],
             body: body
+        ))
+        let transport = makeTransport()
+        try await transport.open()
+        var iterator = transport.inbound().makeAsyncIterator()
+        try await transport.send(.object(["jsonrpc": .string("2.0"), "id": .int(1), "method": .string("session/prompt")]))
+
+        let first = await iterator.next()
+        #expect(first == .object([
+            "jsonrpc": .string("2.0"),
+            "method": .string("session/update"),
+            "params": .object(["sessionUpdate": .string("agent_message_chunk")])
+        ]))
+
+        let second = await iterator.next()
+        #expect(second == .object([
+            "jsonrpc": .string("2.0"),
+            "id": .int(1),
+            "result": .object(["stopReason": .string("end_turn")])
+        ]))
+
+        await transport.close()
+    }
+
+    @Test("SSE parsing survives a data: line split across two separate deliveries") func sseSurvivesLineSplitAcrossChunks() async throws {
+        ACPStubURLProtocol.reset()
+        // The core claim behind switching from `.lines` to manual raw-byte parsing (see
+        // ACPHTTPTransport's doc comment) is that it correctly reassembles a line whose bytes
+        // arrive in more than one delivery — unlike the single-`didLoad` tests above, which never
+        // actually exercised a mid-line split. Split the whole SSE body roughly in half, landing
+        // partway through the first `data:` line's JSON payload.
+        let update = #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionUpdate":"agent_message_chunk"}}"#
+        let finalResponse = #"{"jsonrpc":"2.0","id":1,"result":{"stopReason":"end_turn"}}"#
+        let fullBody = "data: \(update)\n\ndata: \(finalResponse)\n\n".data(using: .utf8)!
+        let splitPoint = fullBody.count / 2
+        let chunk1 = Data(fullBody.prefix(splitPoint))
+        let chunk2 = Data(fullBody.suffix(from: splitPoint))
+        #expect(!chunk1.isEmpty)
+        #expect(!chunk2.isEmpty)
+
+        ACPStubURLProtocol.queue.append(.init(
+            status: 200,
+            headers: ["Content-Type": "text/event-stream"],
+            body: fullBody,
+            chunks: [chunk1, chunk2]
         ))
         let transport = makeTransport()
         try await transport.open()

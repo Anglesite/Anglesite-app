@@ -109,7 +109,11 @@ public actor ACPClient {
     }
 
     public func cancelSession(sessionID: String) async {
-        try? await sendNotification(method: "session/cancel", params: .object(["sessionId": .string(sessionID)]))
+        try? await sendNotification(
+            method: "session/cancel",
+            params: .object(["sessionId": .string(sessionID)]),
+            timeout: requestTimeoutOverrideForTesting ?? 10
+        )
     }
 
     public func stop() async {
@@ -130,32 +134,45 @@ public actor ACPClient {
     }
 
     /// Sends a request and awaits its response, bounded by `timeout`. Mirrors
-    /// `MCPClient.sendRequest`'s timeout mechanism exactly: a detached `timeoutTask` fails the
-    /// pending continuation with `.timeout` if no response arrives in time, and is cancelled via
-    /// `defer` once the real response (or an earlier failure) resolves it first. This is what
-    /// bounds a hang if the in-container agent process crashes mid-request without anything else
-    /// noticing (see `ACPError.timeout`).
+    /// `MCPClient.sendRequest`'s timeout mechanism: a detached `timeoutTask` fails the pending
+    /// continuation with `.timeout` if no response arrives in time, and is cancelled via `defer`
+    /// once the real response (or an earlier failure) resolves it first. This is what bounds a
+    /// hang if the in-container agent process crashes mid-request without anything else noticing
+    /// (see `ACPError.timeout`).
+    ///
+    /// Beyond `MCPClient`'s pattern, the `defer` also cancels `sendTask` — the child `Task` that
+    /// performs the actual `transport.send(...)` — not just `timeoutTask`. For `ACPHTTPTransport`,
+    /// `send(_:)` can block for a long time inside its SSE read loop (waiting for the matching
+    /// response); without cancelling `sendTask` too, a timed-out request would abandon that call
+    /// rather than actually tear it down, leaking the network task and its open connection
+    /// indefinitely. `ACPHTTPTransport.send` cooperatively checks `Task.isCancelled` inside its
+    /// read loops so this cancellation actually takes effect, not just marks the task cancelled.
     private func sendRequest(method: String, params: JSONValue?, timeout: TimeInterval) async throws -> JSONValue {
         guard !isStopped else { throw ACPError.stopped }
         let id = nextRequestID
         nextRequestID += 1
         var obj: [String: JSONValue] = ["jsonrpc": .string("2.0"), "id": .int(id), "method": .string(method)]
         if let params { obj["params"] = params }
+        let message = JSONValue.object(obj)
 
         let timeoutTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
             if !Task.isCancelled { await self?.failPending(id: id, error: ACPError.timeout) }
         }
-        defer { timeoutTask.cancel() }
+        var sendTask: Task<Void, Never>?
+        defer {
+            timeoutTask.cancel()
+            sendTask?.cancel()
+        }
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<JSONValue, Error>) in
                 // Registers `pending[id]` synchronously on the actor before `send` is even
                 // scheduled, so a response can never race ahead of registration.
                 pending[id] = cont
-                Task { [weak self] in
+                sendTask = Task { [weak self] in
                     do {
-                        try await self?.transport.send(.object(obj))
+                        try await self?.transport.send(message)
                     } catch {
                         await self?.failPending(id: id, error: error)
                     }
@@ -166,11 +183,34 @@ public actor ACPClient {
         }
     }
 
-    private func sendNotification(method: String, params: JSONValue?) async throws {
+    /// Sends a notification (no response expected) — but the underlying `transport.send(...)` call
+    /// itself can still hang: `ACPHTTPTransport` has no request `id` to match against a notification
+    /// (see its own doc comment), so if the server answers with a `text/event-stream` response, that
+    /// call reads until the stream ends, which isn't guaranteed to happen promptly. Bounded the same
+    /// way as `sendRequest`, via a race between the actual send and a timeout — whichever finishes
+    /// first wins, and the loser is cancelled (relying on the same `Task.isCancelled` cooperation
+    /// `ACPHTTPTransport.send` implements for `sendRequest`'s benefit).
+    private func sendNotification(method: String, params: JSONValue?, timeout: TimeInterval = 10) async throws {
         guard !isStopped else { throw ACPError.stopped }
         var obj: [String: JSONValue] = ["jsonrpc": .string("2.0"), "method": .string(method)]
         if let params { obj["params"] = params }
-        try await transport.send(.object(obj))
+        let message = JSONValue.object(obj)
+        let transport = transport
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { try await transport.send(message) }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
+                throw ACPError.timeout
+            }
+            do {
+                try await group.next()
+                group.cancelAll()
+            } catch {
+                group.cancelAll()
+                throw error
+            }
+        }
     }
 
     private func failPending(id: Int, error: Error) {
@@ -186,12 +226,16 @@ public actor ACPClient {
             guard case .object(let obj) = message else { continue }
 
             if case .string(let method)? = obj["method"] {
-                if case .int(let id)? = obj["id"] {
+                // A server-initiated request has an "id" (any JSON-RPC id type — number or
+                // string; a bare `.int` check here would silently drop a string-id request from a
+                // conformant agent, undermining the auto-decline guarantee below). A notification
+                // has no "id" at all.
+                if let id = obj["id"] {
                     // Server-initiated request. Only `session/request_permission` is expected this
                     // slice; auto-decline since there is no tool-permission UI yet.
                     if method == "session/request_permission" {
                         try? await transport.send(.object([
-                            "jsonrpc": .string("2.0"), "id": .int(id),
+                            "jsonrpc": .string("2.0"), "id": id,
                             "result": .object(["outcome": .object(["outcome": .string("cancelled")])]),
                         ]))
                     }

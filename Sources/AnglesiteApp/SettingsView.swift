@@ -144,6 +144,11 @@ private struct AgentsSettingsView: View {
     private func remove(_ agent: ACPAgentConnection) {
         do {
             try store.remove(id: agent.id)
+            // Best-effort: clears a `.remote` agent's bearer token so removing the connection
+            // doesn't leave it orphaned in the Keychain forever (no-op for `.stdio` agents, which
+            // never write one — `SecretStore.delete` of a missing entry is defined as a no-op).
+            // A Keychain failure here doesn't block the removal itself, which already succeeded.
+            try? KeychainStore().clearACPAgentToken(id: agent.id)
             // Selecting Foundation Models back if the removed agent was active avoids leaving
             // `activeAssistantBackend` pointing at a now-nonexistent agent — `AssistantBackendResolver`
             // would already fall back gracefully, but resetting the picker keeps the UI honest.

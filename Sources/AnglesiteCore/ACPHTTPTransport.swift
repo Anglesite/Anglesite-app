@@ -19,7 +19,15 @@ public actor ACPHTTPTransport: ACPTransport {
     public enum HTTPError: Error, Sendable, Equatable {
         case http(status: Int)
         case badResponse
+        /// A single SSE line (the accumulated `data:` payload since the last event boundary)
+        /// exceeded `maxLineBytes` without a terminating blank line — guards against unbounded
+        /// memory growth from a misbehaving or malicious remote agent that never sends one.
+        case lineTooLong
     }
+
+    /// Upper bound on one accumulated SSE line's byte size (see `HTTPError.lineTooLong`). Generous
+    /// for a real `session/update`/response payload, but not unbounded.
+    private static let maxLineBytes = 1 << 20  // 1 MiB
 
     private let endpoint: URL
     private let bearerToken: SessionToken?
@@ -101,8 +109,14 @@ public actor ACPHTTPTransport: ACPTransport {
 
             #if canImport(Darwin)
             for try await byte in asyncBytes {
+                try Task.checkCancellation()  // see sendRequest's doc comment: lets a timed-out
+                                               // caller's cancellation actually stop this loop,
+                                               // not just abandon it.
                 pendingLineBytes.append(byte)
-                guard byte == 0x0A else { continue }  // '\n'
+                guard byte == 0x0A else {
+                    guard pendingLineBytes.count <= Self.maxLineBytes else { throw HTTPError.lineTooLong }
+                    continue
+                }
                 var line = String(decoding: pendingLineBytes.dropLast(), as: UTF8.self)
                 if line.hasSuffix("\r") { line.removeLast() }
                 pendingLineBytes.removeAll(keepingCapacity: true)
@@ -110,9 +124,13 @@ public actor ACPHTTPTransport: ACPTransport {
             }
             #else
             for try await chunk in runner.bodyStream {
+                try Task.checkCancellation()
                 for byte in chunk {
                     pendingLineBytes.append(byte)
-                    guard byte == 0x0A else { continue }
+                    guard byte == 0x0A else {
+                        guard pendingLineBytes.count <= Self.maxLineBytes else { throw HTTPError.lineTooLong }
+                        continue
+                    }
                     var line = String(decoding: pendingLineBytes.dropLast(), as: UTF8.self)
                     if line.hasSuffix("\r") { line.removeLast() }
                     pendingLineBytes.removeAll(keepingCapacity: true)
@@ -133,9 +151,15 @@ public actor ACPHTTPTransport: ACPTransport {
             // application/json (or other): accumulate the bounded body and decode one message.
             var data = Data()
             #if canImport(Darwin)
-            for try await byte in asyncBytes { data.append(byte) }
+            for try await byte in asyncBytes {
+                try Task.checkCancellation()
+                data.append(byte)
+            }
             #else
-            for try await chunk in runner.bodyStream { data.append(chunk) }
+            for try await chunk in runner.bodyStream {
+                try Task.checkCancellation()
+                data.append(chunk)
+            }
             #endif
             // A notification (no "id") may legitimately get an empty body back — nothing to decode.
             guard !data.isEmpty else { return }

@@ -32,6 +32,22 @@ public actor ACPAssistant: ConversationalAssistant {
     private var client: ACPClient?
     private var sessionID: String?
 
+    // No production call site ever called `client?.stop()` — every ACP-backed chat session leaked
+    // its reader task, and for `.stdio` connections, the long-lived in-container `execInteractive`
+    // guest process, for the life of the app. `cancel()` only cancels the current *turn*
+    // (`session/cancel`, a notification) and deliberately leaves the client connected so a
+    // follow-up message in the same session keeps working — neither it nor `resetSession()` is the
+    // right place to tear the whole client down. Instead, tear down whenever this assistant itself
+    // is deallocated (site window closed, or the active backend switched away from this agent,
+    // both of which drop the last reference to this actor): `client` here is a plain reference to
+    // another actor, so capturing it (not `self`) is safe to do synchronously in `deinit` and hand
+    // to a detached `Task` for its async teardown.
+    deinit {
+        if let client {
+            Task { await client.stop() }
+        }
+    }
+
     public init(
         connection: ACPAgentConnection,
         siteID: String,
