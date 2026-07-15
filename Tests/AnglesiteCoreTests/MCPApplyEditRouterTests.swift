@@ -127,6 +127,47 @@ struct MCPApplyEditRouterTests {
         #expect(captured.first?.commit == "abc1234567890abcdef1234567890abcdef12345")
     }
 
+    @Test("Successful edit is persisted before it is reported as applied")
+    func successfulEditAwaitsPersistence() async {
+        let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","commit":"abc1234567890abcdef1234567890abcdef12345"}"#
+        let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
+            content: [.init(type: "text", text: body)],
+            isError: false
+        )))
+        let persisted = ObservedReplies()
+        let router = MCPApplyEditRouter(
+            toolCaller: { try await recorder.call(name: $0, arguments: $1) },
+            persistEdit: { await persisted.record($0) }
+        )
+
+        let reply = await router.apply(sampleMessage)
+
+        #expect(reply.status == .applied)
+        #expect(await persisted.replies.map(\.commit) == ["abc1234567890abcdef1234567890abcdef12345"])
+    }
+
+    @Test("Persistence failure turns the edit reply into a visible failure")
+    func persistenceFailureIsNotAcknowledgedAsApplied() async {
+        let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/pages/about.astro","commit":"abc1234567890abcdef1234567890abcdef12345"}"#
+        let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
+            content: [.init(type: "text", text: body)],
+            isError: false
+        )))
+        let observed = ObservedReplies()
+        let router = MCPApplyEditRouter(
+            toolCaller: { try await recorder.call(name: $0, arguments: $1) },
+            onEdit: { reply in Task { await observed.record(reply) } },
+            persistEdit: { _ in throw SiteRuntimePersistenceError.syncFailed("canonical repo is dirty") }
+        )
+
+        let reply = await router.apply(sampleMessage)
+
+        #expect(reply.status == .failed)
+        #expect(reply.message?.contains("couldn't be saved to Source") == true)
+        #expect(reply.message?.contains("canonical repo is dirty") == true)
+        #expect(await observed.replies.isEmpty)
+    }
+
     @Test("On edit does not fire when reply has no commit") func onEditDoesNotFireWhenReplyHasNoCommit() async {
         // No JSON in the content — parser gives up; reply has nil commit; observer must NOT fire.
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(

@@ -30,7 +30,7 @@ public struct ContainerizationControl: LocalContainerControl {
     private static let previewPort: UInt32 = 4321
     private static let mcpPort: UInt32 = 4399
 
-    /// Guest mountpoint for the read-only virtio-fs share of the host `Source/` repo (see `start()` step 3).
+    /// Guest mountpoint for the virtio-fs share of the host `Source/` repo (see `start()` step 3).
     private static let repoSharePath = "/run/anglesite-source"
 
     public init(imageLayoutURL: URL? = nil) {
@@ -48,8 +48,10 @@ public struct ContainerizationControl: LocalContainerControl {
         let container = try await makeBareContainer(siteID: siteID, sourceRepo: sourceRepo, onOutput: onOutput)
 
         // 3. Hydrate from the repo: clone the virtio-fs-shared host repo into /workspace/site, then
-        //    check out ref. Cloning from the read-only share (not in place) keeps /workspace writable
-        //    and preserves full git history — native, no network. Two steps because `git clone
+        //    check out ref. Cloning from the share (not in place) keeps /workspace isolated
+        //    and preserves full git history — native, no network. The share is writable only so
+        //    `LocalContainerSiteRuntime.persistEdit` can hand successful commits back after each
+        //    edit. Two steps because `git clone
         //    --branch` rejects "HEAD"/bare SHAs; `git checkout` accepts both.
         // The image ships no /etc/hosts: docker/containerd write one at container create, but
         // Apple Containerization boots the rootfs as-is — without it even `localhost` becomes a
@@ -312,18 +314,18 @@ public struct ContainerizationControl: LocalContainerControl {
                 config.memoryInBytes = 2 * 1024 * 1024 * 1024
                 config.interfaces = [nat]
                 config.dns = DNS(nameservers: ["192.168.64.1"])
-                // Host `Source/` repo shared read-only into the guest via virtio-fs so the guest can
+                // Host `Source/` repo shared into the guest via virtio-fs so the guest can
                 // `git clone` it (the macOS host path is otherwise invisible to the Linux guest).
                 // `Mount.share(source:destination:)` is the host-directory virtio-fs share — confirmed
                 // against `Mount.swift:83` and `ContainerTests.swift:628` (`.share(source: directory.path,
-                // destination: "/mnt")`); `ro` is honoured (`ContainerTests.swift:3309`). NOT
+                // destination: "/mnt")`). The share must be writable for the explicit, awaited
+                // guest-to-host git handoff after apply-edit (#718). NOT
                 // `Mount.sharedMount`, which references a named *pod volume*, not a host path.
                 // Only mounted when a repo is provided — the bare vsock-echo e2e test boots with none.
                 if let sourceRepo {
                     config.mounts.append(.share(
                         source: sourceRepo.path,
-                        destination: Self.repoSharePath,
-                        options: ["ro"]
+                        destination: Self.repoSharePath
                     ))
                 }
             }

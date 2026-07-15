@@ -10,6 +10,24 @@ public enum SiteRuntimeState: Sendable, Equatable {
     case failed(siteID: String, message: String)
 }
 
+/// Failures that prevent a runtime edit from becoming durable in the canonical `Source/` repo.
+public enum SiteRuntimePersistenceError: LocalizedError, Sendable, Equatable {
+    case missingOrInvalidCommit
+    case runtimeNotRunning
+    case syncFailed(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingOrInvalidCommit:
+            "the edit server did not return a valid git commit"
+        case .runtimeNotRunning:
+            "the site runtime is no longer running"
+        case .syncFailed(let message):
+            message
+        }
+    }
+}
+
 /// One runtime = one site's live preview. This is the seam for swapping execution substrates
 /// (see #59 / design doc §4): a container exposes an HTTP/WS URL rather than a pid + pipes, so the
 /// abstraction lives here — at `PreviewSession`'s old level — not at `SupervisorBackend`.

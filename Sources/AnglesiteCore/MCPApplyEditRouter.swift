@@ -13,6 +13,10 @@ import Foundation
 public struct MCPApplyEditRouter: EditRouter {
     public typealias ToolCaller = @Sendable (_ name: String, _ arguments: JSONValue) async throws -> MCPClient.ToolCallResult
     public typealias EditObserver = @Sendable (EditReply) -> Void
+    /// Persists a successful runtime edit into the canonical site repository. Unlike
+    /// ``PostProcessor``, this hook is awaited before the applied reply is returned: acknowledging
+    /// the overlay before `Source/` is durable would recreate #718's close-window data-loss race.
+    public typealias EditPersister = @Sendable (EditReply) async throws -> Void
     /// Async hook fired (fire-and-forget) when an edit is `.applied`, with both the reply and the
     /// originating message. Used by the app to run on-device alt-text generation for image drops
     /// (C.7 / `AltTextGenerator`) without coupling this router to FoundationModels. It runs detached
@@ -26,13 +30,20 @@ public struct MCPApplyEditRouter: EditRouter {
 
     private let toolCaller: ToolCaller
     private let onEdit: EditObserver?
+    private let persistEdit: EditPersister?
     private let postProcess: PostProcessor?
 
     /// Test seam — inject a closure that mimics `MCPClient.callTool` so the router's mapping
     /// logic is verifiable without a live MCP server.
-    public init(toolCaller: @escaping ToolCaller, onEdit: EditObserver? = nil, postProcess: PostProcessor? = nil) {
+    public init(
+        toolCaller: @escaping ToolCaller,
+        onEdit: EditObserver? = nil,
+        persistEdit: EditPersister? = nil,
+        postProcess: PostProcessor? = nil
+    ) {
         self.toolCaller = toolCaller
         self.onEdit = onEdit
+        self.persistEdit = persistEdit
         self.postProcess = postProcess
     }
 
@@ -41,6 +52,7 @@ public struct MCPApplyEditRouter: EditRouter {
     public init(
         mcpClient: @escaping @Sendable () async -> MCPClient?,
         onEdit: EditObserver? = nil,
+        persistEdit: EditPersister? = nil,
         postProcess: PostProcessor? = nil
     ) {
         self.toolCaller = { name, args in
@@ -48,6 +60,7 @@ public struct MCPApplyEditRouter: EditRouter {
             return try await client.callTool(name: name, arguments: args)
         }
         self.onEdit = onEdit
+        self.persistEdit = persistEdit
         self.postProcess = postProcess
     }
 
@@ -91,6 +104,21 @@ public struct MCPApplyEditRouter: EditRouter {
                 result: parsed?.result,
                 model: parsed?.model
             )
+            if let persistEdit {
+                do {
+                    try await persistEdit(reply)
+                } catch {
+                    return EditReply(
+                        id: message.id,
+                        status: .failed,
+                        message: "The edit changed the preview but couldn't be saved to Source: \(error.localizedDescription)",
+                        file: reply.file,
+                        commit: reply.commit,
+                        result: reply.result,
+                        model: reply.model
+                    )
+                }
+            }
             if reply.commit != nil { onEdit?(reply) }
             // Fire-and-forget so the overlay gets its reply immediately; alt-text generation and the
             // follow-up edit land a moment later (see `AltTextGenerator`).

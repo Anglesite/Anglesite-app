@@ -23,6 +23,11 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private var generation = 0
     private var activeSiteID: String?
     private var loadedKnowledgeSiteID: String?
+    /// Serializes guest-to-host git handoffs. Actor isolation alone is insufficient because an
+    /// actor is reentrant while `control.exec` is suspended, and two overlapping overlay edits
+    /// must never race in the canonical working tree.
+    private var persistenceInProgress = false
+    private var persistenceWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// Drains the current container's boot/guest-process output into `logCenter`. Long-lived for
     /// the container's whole run (astro/mcp keep emitting after `start()` returns), so it's stored
@@ -79,6 +84,72 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     public func containerSnapshot() -> (control: any LocalContainerControl, siteID: String)? {
         guard let id = activeSiteID else { return nil }
         return (control: control, siteID: id)
+    }
+
+    /// Copies one commit produced by the MCP sidecar in `/workspace/site` back into the host's
+    /// canonical `Source/` repository, which is mounted at `/run/anglesite-source`.
+    ///
+    /// The normal path fast-forwards the host branch. If a native host-side content operation
+    /// committed after this runtime was hydrated, the histories diverge; cherry-picking the one
+    /// overlay commit preserves both changes. A dirty host worktree is refused rather than
+    /// overwritten, and a failed cherry-pick is aborted before returning the error.
+    public func persistEdit(commit: String?) async throws {
+        guard let commit,
+              (7...64).contains(commit.count),
+              commit.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "0123456789abcdefABCDEF").contains($0) })
+        else { throw SiteRuntimePersistenceError.missingOrInvalidCommit }
+
+        await acquirePersistenceSlot()
+        defer { releasePersistenceSlot() }
+
+        guard let siteID = activeSiteID else {
+            throw SiteRuntimePersistenceError.runtimeNotRunning
+        }
+
+        let script = #"""
+        set -eu
+        canonical=/run/anglesite-source
+        runtime=/workspace/site
+        commit="$1"
+
+        if ! git -C "$canonical" diff --quiet || ! git -C "$canonical" diff --cached --quiet; then
+          echo "canonical Source repository has uncommitted changes" >&2
+          exit 20
+        fi
+
+        git -C "$canonical" fetch "$runtime" "$commit"
+        if git -C "$canonical" merge-base --is-ancestor HEAD FETCH_HEAD; then
+          git -C "$canonical" merge --ff-only FETCH_HEAD
+        else
+          if ! git -C "$canonical" cherry-pick FETCH_HEAD; then
+            git -C "$canonical" cherry-pick --abort || true
+            echo "overlay edit conflicts with newer Source changes" >&2
+            exit 21
+          fi
+        fi
+        """#
+
+        let logCenter = self.logCenter
+        let source = "container:\(siteID):persist"
+        let result: ContainerExecResult
+        do {
+            result = try await control.exec(
+                siteID: siteID,
+                argv: ["sh", "-c", script, "anglesite-persist", commit],
+                environment: [:],
+                workingDirectory: "/workspace/site",
+                onOutput: { line, stream in
+                    Task { await logCenter.append(source: source, stream: stream, text: line) }
+                }
+            )
+        } catch {
+            throw SiteRuntimePersistenceError.syncFailed(error.localizedDescription)
+        }
+        guard result.exitCode == 0 else {
+            let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw SiteRuntimePersistenceError.syncFailed(
+                detail.isEmpty ? "git handoff exited \(result.exitCode)" : detail)
+        }
     }
 
     public func observe() -> AsyncStream<SiteRuntimeState> {
@@ -266,6 +337,22 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private func stopFileWatcher() {
         fileWatcher?.stop()
         fileWatcher = nil
+    }
+
+    private func acquirePersistenceSlot() async {
+        if !persistenceInProgress {
+            persistenceInProgress = true
+            return
+        }
+        await withCheckedContinuation { persistenceWaiters.append($0) }
+    }
+
+    private func releasePersistenceSlot() {
+        if persistenceWaiters.isEmpty {
+            persistenceInProgress = false
+        } else {
+            persistenceWaiters.removeFirst().resume()
+        }
     }
 
     private func applyFileChanges(_ batch: FileChangeBatch, siteID: String, projectRoot: URL, generation gen: Int) async {

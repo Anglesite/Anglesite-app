@@ -81,6 +81,60 @@ struct LocalContainerSiteRuntimeTests {
         #expect(await box.url == Self.ok.mcpURL)
     }
 
+    @Test("persistEdit hands the guest commit back to canonical Source")
+    func persistEditRunsCanonicalGitHandoff() async throws {
+        let commit = "abc1234567890abcdef1234567890abcdef12345"
+        let (runtime, fake) = makeRuntime(.success(Self.ok))
+        await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+
+        try await runtime.persistEdit(commit: commit)
+
+        let calls = await fake.execCalls
+        #expect(calls.count == 1)
+        #expect(calls[0].siteID == "s1")
+        #expect(calls[0].argv.prefix(2) == ["sh", "-c"])
+        #expect(calls[0].argv.last == commit)
+        #expect(calls[0].argv[2].contains("git -C \"$canonical\" fetch \"$runtime\" \"$commit\""))
+        #expect(calls[0].argv[2].contains("merge --ff-only FETCH_HEAD"))
+        #expect(calls[0].argv[2].contains("cherry-pick --abort"))
+        #expect(calls[0].cwd == "/workspace/site")
+    }
+
+    @Test("persistEdit refuses a missing commit without touching the container")
+    func persistEditRequiresCommit() async {
+        let (runtime, fake) = makeRuntime(.success(Self.ok))
+        await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+
+        await #expect(throws: SiteRuntimePersistenceError.missingOrInvalidCommit) {
+            try await runtime.persistEdit(commit: nil)
+        }
+        #expect(await fake.execCalls.isEmpty)
+    }
+
+    @Test("persistEdit surfaces a failed canonical git handoff")
+    func persistEditSurfacesGitFailure() async {
+        let fake = FakeLocalContainerControl(
+            startResult: .success(Self.ok),
+            execResult: .init(exitCode: 20, stdout: "", stderr: "canonical Source repository has uncommitted changes")
+        )
+        let runtime = LocalContainerSiteRuntime(
+            ref: "HEAD",
+            control: fake,
+            mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
+            connect: { _, _ in }
+        )
+        await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+
+        do {
+            try await runtime.persistEdit(commit: "abc1234567890abcdef1234567890abcdef12345")
+            Issue.record("expected persistence to fail")
+        } catch let error as SiteRuntimePersistenceError {
+            #expect(error == .syncFailed("canonical Source repository has uncommitted changes"))
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+    }
+
     @Test("control failure settles to .failed with a friendly message")
     func startFailed() async {
         let (rt, _) = makeRuntime(.failure(.bootFailed("vm refused to boot")))
