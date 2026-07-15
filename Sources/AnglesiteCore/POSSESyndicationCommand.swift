@@ -7,11 +7,18 @@ import FoundationNetworking
 /// each successful API response is ledgered, written into `syndication:` source frontmatter, and
 /// offered to the existing Webmention sender for backfeed after a subsequent deploy makes it live.
 public actor POSSESyndicationCommand {
+    private struct InFlight {
+        let id: UUID
+        let task: Task<Void, Never>
+    }
+
     private let credentials: POSSECredentialResolver.Provider
     private let transport: POSSEHTTPTransport
     private let logCenter: LogCenter
     private let now: @Sendable () -> Date
-    private var inFlight: [String: Task<Void, Never>] = [:]
+    private var inFlight: [String: InFlight] = [:]
+
+    var activeSiteCount: Int { inFlight.count }
 
     public init(
         credentials: @escaping POSSECredentialResolver.Provider = POSSECredentialResolver.provider(),
@@ -26,14 +33,20 @@ public actor POSSESyndicationCommand {
     }
 
     public func syndicate(siteID: String, siteDirectory: URL, configDirectory: URL, siteBase: URL) async {
-        let previous = inFlight[siteID]
+        let previous = inFlight[siteID]?.task
+        let id = UUID()
         let task = Task<Void, Never> { [weak self] in
             _ = await previous?.value
             await self?.perform(siteID: siteID, siteDirectory: siteDirectory,
                                 configDirectory: configDirectory, siteBase: siteBase)
         }
-        inFlight[siteID] = task
+        inFlight[siteID] = InFlight(id: id, task: task)
         await task.value
+        // Actor reentrancy allows a newer run to replace this slot while `task` is awaited.
+        // Remove only our own generation so the newer run remains serialized and tracked.
+        if inFlight[siteID]?.id == id {
+            inFlight[siteID] = nil
+        }
     }
 
     private func perform(siteID: String, siteDirectory: URL, configDirectory: URL, siteBase: URL) async {

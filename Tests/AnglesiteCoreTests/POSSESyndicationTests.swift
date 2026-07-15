@@ -170,6 +170,7 @@ struct POSSESyndicationTests {
         #expect(repaired.contains("https://bsky.app/profile/owner.test/post/record123"))
         #expect(await stub.count(path: "/api/v1/statuses") == 1)
         #expect(await stub.count(path: "/xrpc/com.atproto.repo.createRecord") == 1)
+        #expect(await command.activeSiteCount == 0)
     }
 
     @Test("template accepts POSSE metadata and projects returned URLs as u-syndication")
