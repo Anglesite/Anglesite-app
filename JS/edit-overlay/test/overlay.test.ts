@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
-import { install, HOVER_CLASS, EDITABLE_CLASS } from "../src/overlay.js";
+import {
+  install,
+  HOVER_CLASS,
+  EDITABLE_CLASS,
+  IMAGE_DROP_TARGET_CLASS,
+  IMAGE_DROP_ACTIVE_CLASS,
+  IMAGE_DROP_HINT_ATTRIBUTE,
+} from "../src/overlay.js";
 
 interface WebKit {
   messageHandlers: { anglesite: { postMessage: (body: unknown) => void } };
@@ -40,6 +47,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  document.dispatchEvent(new Event("dragend", { bubbles: true }));
   clearBody();
   sent = [];
   stubWebKit();
@@ -160,11 +168,30 @@ describe("image drop", () => {
 
   /** jsdom 25 doesn't implement DragEvent or DataTransfer, so we use a plain Event
    *  and define dataTransfer directly on the instance. */
-  function dropOn(target: Element, file: File): void {
-    const fakeDataTransfer = { files: [file] };
+  function dropOn(target: Element, file: File): Event {
+    const fakeDataTransfer = {
+      files: [file],
+      items: [{ kind: "file", type: file.type }],
+      types: ["Files"],
+      dropEffect: "none",
+    };
     const drop = new Event("drop", { bubbles: true, cancelable: true });
     Object.defineProperty(drop, "dataTransfer", { value: fakeDataTransfer });
     target.dispatchEvent(drop);
+    return drop;
+  }
+
+  function dragOn(type: "dragenter" | "dragover" | "dragleave", target: Element, file: File): Event {
+    const fakeDataTransfer = {
+      files: [file],
+      items: [{ kind: "file", type: file.type }],
+      types: ["Files"],
+      dropEffect: "none",
+    };
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", { value: fakeDataTransfer });
+    target.dispatchEvent(event);
+    return event;
   }
 
   /** jsdom's FileReader fires its onload callback after two macrotask ticks. */
@@ -172,6 +199,109 @@ describe("image drop", () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
+
+  it("highlights every replaceable image while a Finder file is dragged over the page", () => {
+    const first = makeImg("/images/first.jpg");
+    const second = makeImg("/images/second.jpg");
+    const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+
+    const event = dragOn("dragenter", document.body, file);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(first.classList.contains(IMAGE_DROP_TARGET_CLASS)).toBe(true);
+    expect(second.classList.contains(IMAGE_DROP_TARGET_CLASS)).toBe(true);
+    expect(document.querySelector(`[${IMAGE_DROP_HINT_ATTRIBUTE}]`)?.textContent).toMatch(/highlighted image/i);
+  });
+
+  it("shows which image will receive the drop", () => {
+    const img = makeImg("/images/hero.jpg");
+    const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+
+    const event = dragOn("dragover", img, file);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(img.classList.contains(IMAGE_DROP_ACTIVE_CLASS)).toBe(true);
+  });
+
+  it("clears image targets when the drag leaves the page", () => {
+    const img = makeImg("/images/hero.jpg");
+    const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+    dragOn("dragenter", document.body, file);
+
+    dragOn("dragleave", document.body, file);
+
+    expect(img.classList.contains(IMAGE_DROP_TARGET_CLASS)).toBe(false);
+    expect(document.querySelector(`[${IMAGE_DROP_HINT_ATTRIBUTE}]`)).toBeNull();
+  });
+
+  it("keeps targets visible until nested dragenter and dragleave events balance", () => {
+    const img = makeImg("/images/hero.jpg");
+    const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+    dragOn("dragenter", document.body, file);
+    dragOn("dragenter", img, file);
+
+    dragOn("dragleave", img, file);
+    expect(img.classList.contains(IMAGE_DROP_TARGET_CLASS)).toBe(true);
+    expect(document.querySelector(`[${IMAGE_DROP_HINT_ATTRIBUTE}]`)).not.toBeNull();
+
+    dragOn("dragleave", document.body, file);
+    expect(img.classList.contains(IMAGE_DROP_TARGET_CLASS)).toBe(false);
+    expect(document.querySelector(`[${IMAGE_DROP_HINT_ATTRIBUTE}]`)).toBeNull();
+  });
+
+  it("explains an image drop outside a replaceable image instead of failing silently", () => {
+    makeImg("/images/hero.jpg");
+    const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+
+    dropOn(document.body, file);
+
+    expect(sent.length).toBe(0);
+    expect(document.querySelector(".anglesite-toast")?.textContent).toMatch(/highlighted image/i);
+  });
+
+  it("explains a non-image file dropped outside a replaceable image without implying one was targeted", () => {
+    makeImg("/images/hero.jpg");
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+
+    dropOn(document.body, file);
+
+    expect(sent.length).toBe(0);
+    const toastText = document.querySelector(".anglesite-toast")?.textContent ?? "";
+    expect(toastText).toMatch(/image file/i);
+    expect(toastText).toMatch(/highlighted image/i);
+    expect(toastText).not.toMatch(/replace this image/i);
+  });
+
+  it("rejects a non-image file with guidance and prevents WKWebView navigation", () => {
+    const img = makeImg("/images/hero.jpg");
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+
+    const event = dropOn(img, file);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(sent.length).toBe(0);
+    expect(img.src.endsWith("/images/hero.jpg")).toBe(true);
+    expect(document.querySelector(".anglesite-toast")?.textContent).toMatch(/choose an image file/i);
+  });
+
+  it("still prevents WKWebView navigation and clears the highlight when dataTransfer.files is empty at drop time", () => {
+    // A recognized file drag (dragenter/dragover already saw "Files" in dataTransfer.types) can
+    // still arrive at drop with an empty .files — e.g. a promise-backed/multi-item drag source.
+    const img = makeImg("/images/hero.jpg");
+    const file = new File([new Uint8Array([0xff, 0xd8])], "vacation.jpg", { type: "image/jpeg" });
+    dragOn("dragenter", document.body, file);
+
+    const fakeDataTransfer = { files: [], items: [{ kind: "file", type: "image/jpeg" }], types: ["Files"], dropEffect: "none" };
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "dataTransfer", { value: fakeDataTransfer });
+    document.body.dispatchEvent(drop);
+
+    expect(drop.defaultPrevented).toBe(true);
+    expect(sent.length).toBe(0);
+    expect(img.classList.contains(IMAGE_DROP_TARGET_CLASS)).toBe(false);
+    expect(document.querySelector(`[${IMAGE_DROP_HINT_ATTRIBUTE}]`)).toBeNull();
+    expect(document.querySelector(".anglesite-toast")?.textContent).toMatch(/couldn't read/i);
+  });
 
   it("sets img.src to a blob URL immediately on drop", async () => {
     const img = makeImg("/images/hero.jpg");

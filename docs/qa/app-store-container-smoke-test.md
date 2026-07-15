@@ -81,7 +81,7 @@ The script prints the built app path and the interactive steps. Copy the built a
 | No host Node preview fallback starts |  |  |
 | Preview loads through loopback proxy |  |  |
 | MCP/edit path applies a text edit through the in-container sidecar |  |  |
-| Image drop writes optimized assets under `Source/public/images/` |  |  |
+| Example photo highlights as an image drop target; dropping a Finder image writes optimized assets under `Source/public/images/` |  |  |
 | Build/preflight/deploy path reaches the expected Cloudflare token or wrangler result |  |  |
 | Foundation Models chat is present |  |  |
 | GitHub `gh` settings/auth UI is absent in App Store build |  |  |
