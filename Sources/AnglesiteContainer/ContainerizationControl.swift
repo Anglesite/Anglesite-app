@@ -57,8 +57,13 @@ public struct ContainerizationControl: LocalContainerControl {
         let container = try await makeBareContainer(siteID: siteID, sourceRepo: sourceRepo, onOutput: onOutput)
 
         // 3. Hydrate from the repo: clone the virtio-fs-shared host repo into /workspace/site, then
-        //    check out ref. Cloning from the read-only share (not in place) keeps /workspace writable
-        //    and preserves full git history — native, no network. Two steps because `git clone
+        //    check out ref. Cloning from the read-only share (not in place) keeps /workspace
+        //    writable and preserves full git history — native, no network. The share stays
+        //    read-only for the container's whole life: `LocalContainerSiteRuntime.persistEdit`
+        //    hands a commit back by exporting a git bundle from the guest's own /workspace/site
+        //    clone over `control.exec`'s stdout, then importing it against the host's canonical
+        //    Source/ in-process (`InProcessEditPersistence`) — it never writes through this share.
+        //    Two steps because `git clone
         //    --branch` rejects "HEAD"/bare SHAs; `git checkout` accepts both.
         // The image ships no /etc/hosts: docker/containerd write one at container create, but
         // Apple Containerization boots the rootfs as-is — without it even `localhost` becomes a

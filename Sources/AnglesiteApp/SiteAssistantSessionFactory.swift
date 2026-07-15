@@ -82,7 +82,7 @@ enum SiteAssistantSessionFactory {
                 undoCommand: undoCommand,
                 editRouterProvider: editRouterProvider,
                 assistant: assistant,
-                altTextGenerator: { siteID, sourceDirectory, mcpClient, conventionsEngine in
+                altTextGenerator: { siteID, sourceDirectory, _, conventionsEngine in
                     AltTextGenerator(
                         siteID: siteID,
                         siteDirectory: sourceDirectory,
@@ -101,7 +101,15 @@ enum SiteAssistantSessionFactory {
                             )
                         },
                         apply: { edit in
-                            let reply = await MCPApplyEditRouter(mcpClient: mcpClient).apply(edit)
+                            // Reuse the window's registered router so generated alt-text edits go
+                            // through the same awaited runtime-to-Source persistence hook as the
+                            // originating image edit (#718).
+                            let reply = await EditRouterRegistry.shared.router(for: siteID)?.apply(edit)
+                                ?? EditReply(
+                                    id: edit.id,
+                                    status: .failed,
+                                    message: "no active edit router for \(siteID)"
+                                )
                             if reply.status == .failed {
                                 await LogCenter.shared.append(
                                     source: "alt-text:\(siteID)", stream: .stderr,

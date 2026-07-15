@@ -95,7 +95,9 @@ public struct PodmanContainerControl: LocalContainerControl {
 
         // 1. Boot a bare, long-lived container (podman's equivalent of Apple Containerization's
         //    "makeBareContainer" step): a no-op main process so `podman exec` has something to
-        //    attach to, the host `Source/` repo bind-mounted read-only, and both guest ports
+        //    attach to, the host `Source/` repo bind-mounted read-only (`:ro` below — edit
+        //    persistence hands commits back over exec stdout, not through this mount), and both
+        //    guest ports
         //    published to OS-assigned host ports. `--rm` means `podman stop` alone tears down the
         //    whole thing — no separate `podman rm`.
         //

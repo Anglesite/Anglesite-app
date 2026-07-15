@@ -105,10 +105,13 @@ final class PreviewModel {
 
     init(runtime: any SiteRuntime) {
         self.runtime = runtime
-        self.editRouter = MCPApplyEditRouter(mcpClient: { [weak runtime] in
-            // `runtime` is the actor instance; reading `mcpClient` hops onto the actor.
-            await runtime?.mcpClient
-        })
+        self.editRouter = MCPApplyEditRouter(
+            mcpClient: { [weak runtime] in
+                // `runtime` is the actor instance; reading `mcpClient` hops onto the actor.
+                await runtime?.mcpClient
+            },
+            persistEdit: Self.editPersister(for: runtime)
+        )
         // Mirror runtime state into `state`. `[weak self]` so the model can still be freed; the
         // stream itself outlives a freed model (one PreviewModel per window today, so it's moot).
         Task { @MainActor [weak self] in
@@ -148,11 +151,24 @@ final class PreviewModel {
                 return await self.runtime.mcpClient
             },
             onEdit: onEdit,
+            persistEdit: Self.editPersister(for: runtime),
             postProcess: postProcess
         )
         if let siteID = openSiteID {
             let current = self.editRouter
             Task { await EditRouterRegistry.shared.register(current, for: siteID) }
+        }
+    }
+
+    /// Local container edits happen in a hydrated clone. Their commit must be handed back to the
+    /// host repo before the bridge acknowledges success. Other runtime types retain their own
+    /// persistence semantics, so the hook is intentionally absent for them.
+    private static func editPersister(for runtime: any SiteRuntime) -> MCPApplyEditRouter.EditPersister? {
+        guard let localRuntime = runtime as? LocalContainerSiteRuntime else { return nil }
+        return { [weak localRuntime] reply in
+            guard let localRuntime else { throw SiteRuntimePersistenceError.runtimeNotRunning }
+            guard reply.commit != nil else { return }
+            try await localRuntime.persistEdit(commit: reply.commit)
         }
     }
 

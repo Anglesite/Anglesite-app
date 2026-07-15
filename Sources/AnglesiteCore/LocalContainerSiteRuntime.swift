@@ -5,6 +5,10 @@ import Foundation
 /// repo, connect the MCP client to the returned MCP endpoint, settle to `.ready`/`.failed`.
 /// Spawns nothing in-process.
 public actor LocalContainerSiteRuntime: SiteRuntime {
+    /// Shared by `persistEdit`'s two commit-hash validity checks — built once rather than per
+    /// character inside each `allSatisfy` closure.
+    private static let hexDigits = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
+
     private let ref: String
     private let control: any LocalContainerControl
     public let mcpClient: MCPClient
@@ -14,6 +18,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private let logCenter: LogCenter
     private let connect: @Sendable (MCPClient, URL) async throws -> Void
     private let makeFileWatcher: @Sendable () -> any SiteFileWatching
+    private let importBundle: @Sendable (URL, String, URL) async throws -> Void
     private let suddenTerminationController: SuddenTerminationController
     private var fileWatcher: (any SiteFileWatching)?
     private var containerTerminationLease: SuddenTerminationController.Lease?
@@ -22,7 +27,13 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private var observers: [UUID: AsyncStream<SiteRuntimeState>.Continuation] = [:]
     private var generation = 0
     private var activeSiteID: String?
+    private var activeSiteDirectory: URL?
     private var loadedKnowledgeSiteID: String?
+    /// Serializes guest-to-host git handoffs. Actor isolation alone is insufficient because an
+    /// actor is reentrant while `control.exec` is suspended, and two overlapping overlay edits
+    /// must never race in the canonical working tree.
+    private var persistenceInProgress = false
+    private var persistenceWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// Drains the current container's boot/guest-process output into `logCenter`. Long-lived for
     /// the container's whole run (astro/mcp keep emitting after `start()` returns), so it's stored
@@ -40,6 +51,13 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         logCenter: LogCenter = .shared,
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) },
         makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { PlatformFileWatcher.make() },
+        importBundle: @escaping @Sendable (URL, String, URL) async throws -> Void = { bundle, commit, source in
+            #if canImport(Darwin)
+            try await InProcessEditPersistence.importBundle(bundle, commit: commit, into: source)
+            #else
+            throw SiteRuntimePersistenceError.syncFailed("in-process git import is unavailable on this platform")
+            #endif
+        },
         suddenTerminationController: SuddenTerminationController = .shared
     ) {
         self.ref = ref
@@ -51,6 +69,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         self.logCenter = logCenter
         self.connect = connect
         self.makeFileWatcher = makeFileWatcher
+        self.importBundle = importBundle
         self.suddenTerminationController = suddenTerminationController
     }
 
@@ -79,6 +98,126 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     public func containerSnapshot() -> (control: any LocalContainerControl, siteID: String)? {
         guard let id = activeSiteID else { return nil }
         return (control: control, siteID: id)
+    }
+
+    /// Copies one commit produced by the MCP sidecar in `/workspace/site` back into the host's
+    /// canonical `Source/` repository without granting the guest write access to that repository.
+    ///
+    /// Fast-forward only: `InProcessEditPersistence` requires the exported commit's sole parent to
+    /// equal the host's current HEAD, refusing (rather than merging or cherry-picking) if a native
+    /// host-side content operation committed after this runtime was hydrated. A dirty host
+    /// worktree is refused rather than overwritten.
+    public func persistEdit(commit: String?) async throws {
+        guard let commit,
+              (7...64).contains(commit.count),
+              commit.unicodeScalars.allSatisfy({ Self.hexDigits.contains($0) })
+        else { throw SiteRuntimePersistenceError.missingOrInvalidCommit }
+
+        let expectedGeneration = generation
+        guard let siteID = activeSiteID, let siteDirectory = activeSiteDirectory else {
+            throw SiteRuntimePersistenceError.runtimeNotRunning
+        }
+
+        await acquirePersistenceSlot()
+        defer { releasePersistenceSlot() }
+
+        guard expectedGeneration == generation,
+              activeSiteID == siteID,
+              activeSiteDirectory == siteDirectory
+        else {
+            throw SiteRuntimePersistenceError.runtimeNotRunning
+        }
+
+        // Export exactly the requested commit through stdout as a base64 git bundle. The canonical
+        // repo remains mounted read-only, so no guest process can alter its worktree, refs, or hooks.
+        let exportScript = #"""
+        set -eu
+        runtime=/workspace/site
+        commit="$1"
+        ref=refs/heads/anglesite-persist
+        bundle=/tmp/anglesite-persist-$$.bundle
+        cleanup() {
+          git -C "$runtime" update-ref -d "$ref" >/dev/null 2>&1 || true
+          rm -f "$bundle"
+        }
+        trap cleanup EXIT HUP INT TERM
+
+        full=$(git -C "$runtime" rev-parse "$commit^{commit}")
+        git -C "$runtime" update-ref "$ref" "$full"
+        if parent=$(git -C "$runtime" rev-parse "$full^" 2>/dev/null); then
+          git -C "$runtime" bundle create "$bundle" "$ref" "^$parent"
+        else
+          git -C "$runtime" bundle create "$bundle" "$ref"
+        fi
+        printf '%s\n' "$full"
+        base64 "$bundle"
+        """#
+
+        let logCenter = self.logCenter
+        let source = "container:\(siteID):persist"
+        let result: ContainerExecResult
+        do {
+            result = try await control.exec(
+                siteID: siteID,
+                argv: ["sh", "-c", exportScript, "anglesite-export", commit],
+                environment: [:],
+                workingDirectory: "/workspace/site",
+                onOutput: { line, stream in
+                    // stdout is the base64 bundle transport, not human-readable diagnostic output.
+                    guard stream == .stderr else { return }
+                    Task { await logCenter.append(source: source, stream: stream, text: line) }
+                }
+            )
+        } catch {
+            guard expectedGeneration == generation, activeSiteID == siteID else {
+                throw SiteRuntimePersistenceError.runtimeNotRunning
+            }
+            throw SiteRuntimePersistenceError.syncFailed(error.localizedDescription)
+        }
+        guard result.exitCode == 0 else {
+            let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw SiteRuntimePersistenceError.syncFailed(
+                detail.isEmpty ? "git handoff exited \(result.exitCode)" : detail)
+        }
+
+        guard expectedGeneration == generation,
+              activeSiteID == siteID,
+              activeSiteDirectory == siteDirectory
+        else {
+            throw SiteRuntimePersistenceError.runtimeNotRunning
+        }
+
+        let outputParts = result.stdout.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        guard outputParts.count == 2 else {
+            throw SiteRuntimePersistenceError.syncFailed("container returned an invalid git bundle")
+        }
+        let fullCommit = String(outputParts[0])
+        guard (40...64).contains(fullCommit.count),
+              fullCommit.unicodeScalars.allSatisfy({ Self.hexDigits.contains($0) }),
+              let bundleData = Data(base64Encoded: String(outputParts[1]), options: .ignoreUnknownCharacters)
+        else {
+            throw SiteRuntimePersistenceError.syncFailed("container returned an invalid git bundle")
+        }
+
+        let bundleURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("anglesite-persist-\(UUID().uuidString).bundle")
+        do {
+            try bundleData.write(to: bundleURL, options: .atomic)
+        } catch {
+            throw SiteRuntimePersistenceError.syncFailed(error.localizedDescription)
+        }
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+
+        do {
+            try await importBundle(bundleURL, fullCommit, siteDirectory)
+            // The host-side import is in-process libgit2, not a subprocess — nothing else would
+            // ever put this write to the canonical repo in the debug pane (CLAUDE.md: "logs are
+            // sacred"), so log the outcome explicitly on both paths.
+            await logCenter.append(source: source, stream: .stdout, text: "persisted \(fullCommit) to Source")
+        } catch {
+            await logCenter.append(source: source, stream: .stderr, text: "persist failed: \(error.localizedDescription)")
+            throw SiteRuntimePersistenceError.syncFailed(error.localizedDescription)
+        }
     }
 
     public func observe() -> AsyncStream<SiteRuntimeState> {
@@ -169,6 +308,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             loadedKnowledgeSiteID = siteID
             startFileWatcher(siteID: siteID, projectRoot: siteDirectory, generation: gen)
             activeSiteID = siteID
+            activeSiteDirectory = siteDirectory
             containerTerminationLease = suddenTerminationLease
             setState(.ready(siteID: siteID, url: session.previewURL))
         } catch {
@@ -221,6 +361,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         loadedKnowledgeSiteID = nil
         let containerSiteID = activeSiteID
         activeSiteID = nil
+        activeSiteDirectory = nil
         let containerTerminationLease = self.containerTerminationLease
         self.containerTerminationLease = nil
         let bootLogContinuation = self.bootLogContinuation
@@ -266,6 +407,22 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private func stopFileWatcher() {
         fileWatcher?.stop()
         fileWatcher = nil
+    }
+
+    private func acquirePersistenceSlot() async {
+        if !persistenceInProgress {
+            persistenceInProgress = true
+            return
+        }
+        await withCheckedContinuation { persistenceWaiters.append($0) }
+    }
+
+    private func releasePersistenceSlot() {
+        if persistenceWaiters.isEmpty {
+            persistenceInProgress = false
+        } else {
+            persistenceWaiters.removeFirst().resume()
+        }
     }
 
     private func applyFileChanges(_ batch: FileChangeBatch, siteID: String, projectRoot: URL, generation gen: Int) async {
