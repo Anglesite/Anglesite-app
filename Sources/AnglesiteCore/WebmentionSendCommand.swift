@@ -107,6 +107,16 @@ public actor WebmentionSendCommand {
     }
 
     /// Production transport: a plain `URLSession` request.
+    ///
+    /// **Accepted risk (SSRF surface):** no check against loopback/link-local/private-range hosts
+    /// before either the discovery GET or the send POST. Target URLs come from the site's own
+    /// content (`SocialPublishPlan` parses outbound links from frontmatter and post bodies), so
+    /// anyone who can land a link in that content — a contributor, or in future an imported/
+    /// inbound post — can make the app fetch an internal address (e.g. `127.0.0.1`, a link-local
+    /// metadata endpoint). This is inherent to the webmention protocol (a sender always fetches
+    /// attacker-influenced target URLs) and is treated the same way here as any other outbound
+    /// link the site owner chooses to publish. If an untrusted/anonymous content source ever feeds
+    /// this pipeline without review, revisit with a private-range denylist before that lands.
     public static let defaultTransport: WebmentionEndpointDiscovery.Transport = { request in
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }

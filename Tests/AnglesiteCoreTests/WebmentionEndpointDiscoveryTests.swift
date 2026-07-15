@@ -129,6 +129,28 @@ struct WebmentionEndpointDiscoveryTests {
         #expect(endpoint?.absoluteString == "https://target.example/correct")
     }
 
+    @Test("a non-UTF-8 (Latin-1) page still discovers a real endpoint via the ISO Latin-1 fallback")
+    func nonUTF8PageFallsBackToLatin1() async throws {
+        // 0xE9 is Latin-1 "é" but is not valid as a lone UTF-8 byte (it signals a 3-byte UTF-8
+        // lead byte with no continuation bytes following) — String(data:encoding:.utf8) returns
+        // nil for this whole body, which without a fallback would look identical to "this page
+        // declares no endpoint," even though the ASCII markup after the prose is perfectly valid.
+        var bytes = Array("<p>Caf".utf8)
+        bytes.append(0xE9)
+        bytes.append(contentsOf: Array(
+            "</p><link href=\"https://target.example/wm-latin1\" rel=\"webmention\">".utf8
+        ))
+        let body = Data(bytes)
+        #expect(String(data: body, encoding: .utf8) == nil) // sanity: this body really isn't valid UTF-8
+
+        let nonUTF8Transport: WebmentionEndpointDiscovery.Transport = { _ in
+            let http = HTTPURLResponse(url: self.target, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (body, http)
+        }
+        let endpoint = try await WebmentionEndpointDiscovery.discover(target: target, transport: nonUTF8Transport)
+        #expect(endpoint?.absoluteString == "https://target.example/wm-latin1")
+    }
+
     @Test("no endpoint declared returns nil")
     func noEndpoint() async throws {
         let html = "<html><body>No webmention here. <a href=\"/other\" rel=\"nofollow\">link</a></body></html>"

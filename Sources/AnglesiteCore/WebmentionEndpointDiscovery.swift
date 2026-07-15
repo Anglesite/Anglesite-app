@@ -26,8 +26,19 @@ public enum WebmentionEndpointDiscovery {
            let endpoint = endpoint(fromLinkHeader: linkHeader, relativeTo: finalURL) {
             return endpoint
         }
-        guard let html = String(data: data, encoding: .utf8) else { return nil }
+        guard let html = decodeHTML(data) else { return nil }
         return endpoint(fromHTML: html, relativeTo: finalURL)
+    }
+
+    /// Decodes the response body as text for markup scanning. Tries UTF-8 first (the HTML5-
+    /// mandated default), then falls back to ISO Latin-1 — which never fails, since every byte
+    /// maps to a valid Latin-1 codepoint — so a non-UTF-8 page (Latin-1/Windows-1252, no charset
+    /// declared) is never silently indistinguishable from "this page declares no endpoint." The
+    /// webmention tag/attribute syntax scanned for below is always plain ASCII, which decodes
+    /// identically under UTF-8 and Latin-1, so this fallback still finds real endpoints even when
+    /// it can't correctly render the surrounding prose.
+    private static func decodeHTML(_ data: Data) -> String? {
+        String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
     }
 
     // MARK: Link header
@@ -75,6 +86,14 @@ public enum WebmentionEndpointDiscovery {
 
     /// Matches `<link ...>` and `<a ...>` tags in document order; the first with a `webmention`
     /// rel wins, per the spec ("the first link or a element ... in document order").
+    ///
+    /// Known, accepted limitation: `[^>]*` truncates the tag at the first literal `>`, including
+    /// one embedded inside a quoted attribute value (e.g. `href="/x?a=1>2"`). A correct HTML
+    /// tokenizer would track quote state to know that `>` isn't a tag terminator there. This is a
+    /// conscious won't-fix, not an oversight — a literal, unencoded `>` inside an attribute value
+    /// is invalid per the URL spec (it must be percent-encoded as `%3E`) and vanishingly rare in
+    /// real-world markup; handling it would mean replacing this regex scan with a full tokenizer
+    /// for a case that essentially never occurs.
     private static let tagPattern: NSRegularExpression = {
         do {
             return try NSRegularExpression(pattern: #"<(?:link|a)\b([^>]*)>"#, options: [.caseInsensitive])

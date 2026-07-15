@@ -226,3 +226,9 @@ the PR description, not re-checked by CI.
 - POSSE syndication — V-2.4, separate sub-issue.
 - Any UI surface beyond `LogCenter` — no Settings toggle, no per-site results view. Can follow
   later if the LogCenter-only visibility proves insufficient in practice.
+- Host validation on discovery/send targets (no private-IP/loopback/link-local denylist). Target
+  URLs come from the site's own content (parsed by `SocialPublishPlan`), so a sender inherently
+  fetches attacker-influenced URLs — this is accepted as inherent to the webmention protocol, the
+  same posture as any other outbound link the site owner chooses to publish. Revisit if an
+  untrusted/anonymous content source ever feeds this pipeline without review (see
+  `WebmentionSendCommand.defaultTransport`'s doc comment for the full rationale).
