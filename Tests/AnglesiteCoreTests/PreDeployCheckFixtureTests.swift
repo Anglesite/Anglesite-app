@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 /// Runs the REAL `pre-deploy-check.ts --json` (not a hand-authored JSON string) against a small
@@ -8,6 +9,41 @@ import Foundation
 /// the Swift-expected shape, which is exactly how the envelope mismatch this issue fixes went
 /// uncaught for so long.
 struct PreDeployCheckFixtureTests {
+    /// True when both a Node binary is available and `tsx` is resolvable via `npx` *without*
+    /// hitting the network. `Resources/Template` has no installed `node_modules` in this repo, so
+    /// gating on a local `tsx` install (like the render-smoke suites gate on `node_modules/astro`)
+    /// would make this test skip almost always, defeating its purpose. Instead this checks whether
+    /// `npx` can resolve `tsx` from a global install or its own on-disk cache — the state that lets
+    /// the test run cleanly without a live registry fetch.
+    static var buildable: Bool {
+        guard E2EPrerequisites.locateNode() != nil else { return false }
+        return tsxResolvableOffline
+    }
+
+    /// Runs `npx --offline tsx --version` and reports whether it exits zero.
+    ///
+    /// `--offline` puts npm's cache resolution in `only-if-cached` mode, so a cache hit (global
+    /// install or npx's package cache) succeeds immediately and a cache miss fails immediately with
+    /// `ENOTCACHED` — no registry request either way. This is deliberately `--offline` rather than
+    /// the more commonly suggested `--no-install`: recent npm (tested here against npm 11) no
+    /// longer honors `--no-install` as a hard "don't touch the network" switch — a cache miss with
+    /// `--no-install` still fell through to a live `GET https://registry.npmjs.org/...` in local
+    /// testing, which is exactly the network dependency this gate exists to avoid.
+    private static var tsxResolvableOffline: Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["npx", "--offline", "tsx", "--version"]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    }
+
     private static var templateScriptsDirectory: URL {
         // Tests/AnglesiteCoreTests/PreDeployCheckFixtureTests.swift -> repo root -> Resources/Template/scripts
         URL(fileURLWithPath: #filePath)
@@ -42,7 +78,8 @@ struct PreDeployCheckFixtureTests {
         return (stdout: String(data: data, encoding: .utf8) ?? "", exitCode: process.terminationStatus)
     }
 
-    @Test("Real script output with a PII hit decodes to .blocked with the pii-email category")
+    @Test("Real script output with a PII hit decodes to .blocked with the pii-email category",
+          .enabled(if: PreDeployCheckFixtureTests.buildable))
     func realScriptWithPIIDecodesToBlocked() throws {
         let siteDir = try makeFixtureDist(html: "<html><body><p>Contact us at hello@example.com</p></body></html>")
         defer { try? FileManager.default.removeItem(at: siteDir) }
@@ -62,7 +99,8 @@ struct PreDeployCheckFixtureTests {
         #expect(warnings.contains { $0.category == .missingSecurityArtifact })
     }
 
-    @Test("Real script output with no issues decodes to .passed")
+    @Test("Real script output with no issues decodes to .passed",
+          .enabled(if: PreDeployCheckFixtureTests.buildable))
     func realScriptWithNoIssuesDecodesToPassed() throws {
         let siteDir = try makeFixtureDist(html: "<html><body><p>Nothing sensitive here.</p></body></html>")
         defer { try? FileManager.default.removeItem(at: siteDir) }
