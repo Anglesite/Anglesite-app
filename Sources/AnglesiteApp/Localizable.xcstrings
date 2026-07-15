@@ -201,6 +201,9 @@
     "Add Integration…" : {
 
     },
+    "Add Link…" : {
+
+    },
     "Add one above to get started." : {
 
     },
@@ -214,6 +217,9 @@
 
     },
     "Add Redirect" : {
+
+    },
+    "Add RSS Feed to Directory" : {
 
     },
     "Add rule" : {
@@ -231,16 +237,37 @@
     "AI summary — verify against the log below" : {
 
     },
+    "Align Center" : {
+
+    },
+    "Align Left" : {
+
+    },
+    "Align Objects" : {
+
+    },
+    "Align Right" : {
+
+    },
     "All" : {
 
     },
     "All types" : {
 
     },
+    "Analytics…" : {
+
+    },
     "Anglesite Debug" : {
 
     },
     "Anglesite plugin" : {
+
+    },
+    "Anglesite Website" : {
+
+    },
+    "Animation" : {
 
     },
     "Announce live updates to VoiceOver" : {
@@ -301,10 +328,31 @@
     "Applying…" : {
 
     },
+    "Arrange" : {
+
+    },
+    "Article" : {
+
+    },
     "Ask Assistant" : {
 
     },
     "Ask the assistant…" : {
+
+    },
+    "Assistant" : {
+
+    },
+    "Association" : {
+
+    },
+    "Astro Website…" : {
+
+    },
+    "Attributes" : {
+
+    },
+    "Audio" : {
 
     },
     "Audit" : {
@@ -317,6 +365,9 @@
 
     },
     "Auditing…" : {
+
+    },
+    "Auto-Align Table Cell" : {
 
     },
     "Auto-generate alt text for dropped images" : {
@@ -340,13 +391,28 @@
     "Blocking (%lld)" : {
 
     },
+    "Blockquote" : {
+
+    },
     "Body" : {
+
+    },
+    "Bottom" : {
 
     },
     "Brand terms (exact capitalization)" : {
 
     },
     "Brand Voice" : {
+
+    },
+    "Bring Forward" : {
+
+    },
+    "Bring to Front" : {
+
+    },
+    "Browse All Versions…" : {
 
     },
     "Browse freedesignmd.com" : {
@@ -359,6 +425,9 @@
 
     },
     "Building your website…" : {
+
+    },
+    "Built HTML…" : {
 
     },
     "Built-in themes" : {
@@ -388,10 +457,19 @@
     "Cancel response" : {
 
     },
+    "Canvas" : {
+
+    },
+    "Center" : {
+
+    },
     "Change" : {
 
     },
     "Change ${element} \\u{2014} ${instruction}" : {
+
+    },
+    "Change File Type" : {
 
     },
     "Change Image" : {
@@ -451,7 +529,13 @@
     "Choose…" : {
 
     },
+    "Chrome" : {
+
+    },
     "Cleanup" : {
+
+    },
+    "Cleanup…" : {
 
     },
     "Clear" : {
@@ -478,13 +562,19 @@
     "Cloudflare" : {
 
     },
+    "Code" : {
+
+    },
     "Collection" : {
 
     },
     "Collection Entry" : {
 
     },
-    "Collection…" : {
+    "Collections" : {
+
+    },
+    "Comment" : {
 
     },
     "Commit and push working-tree changes to your current branch" : {
@@ -493,13 +583,16 @@
     "Component" : {
 
     },
-    "Component…" : {
+    "Component Gallery…" : {
 
     },
     "Components" : {
 
     },
     "Computed" : {
+
+    },
+    "Config…" : {
 
     },
     "Connect & deploy" : {
@@ -529,6 +622,9 @@
     "Copy" : {
 
     },
+    "Copy Animation" : {
+
+    },
     "Copy log" : {
 
     },
@@ -542,6 +638,9 @@
 
     },
     "Copy SHA" : {
+
+    },
+    "Copy Style" : {
 
     },
     "Copy URL" : {
@@ -602,7 +701,19 @@
     "Custom Analytics" : {
 
     },
+    "Custom Element…" : {
+
+    },
     "Custom. Choose your own colors and add a logo." : {
+
+    },
+    "Dashboard" : {
+
+    },
+    "Decrease Indent Level" : {
+
+    },
+    "Default Browser" : {
 
     },
     "Delete" : {
@@ -641,6 +752,9 @@
     "Description" : {
 
     },
+    "Deselect All" : {
+
+    },
     "Design Axes" : {
 
     },
@@ -659,6 +773,12 @@
     "Destination path (e.g. /new-page)" : {
 
     },
+    "Details & Summary" : {
+
+    },
+    "Dev Server" : {
+
+    },
     "Dev Server Starting…" : {
 
     },
@@ -671,6 +791,9 @@
     "Diagnostics" : {
 
     },
+    "Dialog" : {
+
+    },
     "Digital downloads" : {
 
     },
@@ -678,6 +801,9 @@
 
     },
     "Dismiss suggestion" : {
+
+    },
+    "Distribute Objects" : {
 
     },
     "Domain" : {
@@ -710,6 +836,12 @@
     "e.g. warm, expert, playful" : {
 
     },
+    "Edit Footer" : {
+
+    },
+    "Edit Header" : {
+
+    },
     "edited" : {
 
     },
@@ -719,6 +851,12 @@
     "Editor" : {
 
     },
+    "Embed" : {
+
+    },
+    "Emphasis" : {
+
+    },
     "Enter the domain to harden" : {
 
     },
@@ -726,6 +864,9 @@
 
     },
     "Enter the domain you already own." : {
+
+    },
+    "Equation…" : {
 
     },
     "Error" : {
@@ -752,13 +893,16 @@
     "Explorer" : {
 
     },
-    "Export Site Source…" : {
-
-    },
     "Export this site's source files to a folder." : {
 
     },
+    "Export To" : {
+
+    },
     "Failed" : {
+
+    },
+    "Figure" : {
 
     },
     "File" : {
@@ -773,13 +917,46 @@
     "Filtering: %@" : {
 
     },
+    "Find" : {
+
+    },
+    "Find & Replace…" : {
+
+    },
     "Find ${contentType} in ${site}" : {
+
+    },
+    "Find Next" : {
+
+    },
+    "Find Previous" : {
+
+    },
+    "Find…" : {
 
     },
     "Finished" : {
 
     },
+    "Firefox" : {
+
+    },
     "First words" : {
+
+    },
+    "Flip Horizontally" : {
+
+    },
+    "Flip Vertically" : {
+
+    },
+    "Font" : {
+
+    },
+    "Form" : {
+
+    },
+    "Format" : {
 
     },
     "Forward" : {
@@ -812,6 +989,9 @@
     "Graph" : {
 
     },
+    "Group" : {
+
+    },
     "Harden" : {
 
     },
@@ -819,6 +999,30 @@
 
     },
     "Hardening…" : {
+
+    },
+    "Has RSS feed" : {
+
+    },
+    "Heading" : {
+
+    },
+    "Heading 1" : {
+
+    },
+    "Heading 2" : {
+
+    },
+    "Heading 3" : {
+
+    },
+    "Heading 4" : {
+
+    },
+    "Heading 5" : {
+
+    },
+    "Heading 6" : {
 
     },
     "Hero image (optional)" : {
@@ -845,7 +1049,16 @@
     "Hide Related Pages" : {
 
     },
+    "Highlight" : {
+
+    },
     "Homepage headline" : {
+
+    },
+    "Horizontal Rule" : {
+
+    },
+    "Horizontally" : {
 
     },
     "How many products?" : {
@@ -855,6 +1068,15 @@
 
     },
     "Ignore" : {
+
+    },
+    "Image" : {
+
+    },
+    "Image Gallery" : {
+
+    },
+    "Image Playground…" : {
 
     },
     "Images" : {
@@ -869,13 +1091,25 @@
     "Import existing site…" : {
 
     },
+    "Import from Phone" : {
+
+    },
     "Import Site…" : {
 
     },
     "Include Git history (.git)" : {
 
     },
+    "Increase Indent Level" : {
+
+    },
+    "Inline Frame" : {
+
+    },
     "Input" : {
+
+    },
+    "Insert" : {
 
     },
     "Inspector" : {
@@ -885,6 +1119,9 @@
 
     },
     "Just a few" : {
+
+    },
+    "Justify" : {
 
     },
     "Keep My Changes" : {
@@ -905,10 +1142,16 @@
     "LAN site runtime" : {
 
     },
+    "Language & Region…" : {
+
+    },
     "Last checked %@" : {
 
     },
     "Learning %@’s conventions…" : {
+
+    },
+    "Left" : {
 
     },
     "Lemon Squeezy" : {
@@ -917,7 +1160,13 @@
     "Likely cause: %@" : {
 
     },
+    "List" : {
+
+    },
     "List DNS records for ${domain}" : {
+
+    },
+    "List Item" : {
 
     },
     "Live" : {
@@ -927,6 +1176,12 @@
 
     },
     "Loading site…" : {
+
+    },
+    "Lock" : {
+
+    },
+    "Logs…" : {
 
     },
     "low confidence" : {
@@ -941,6 +1196,9 @@
     "MCP port" : {
 
     },
+    "Middle" : {
+
+    },
     "Missing Reciprocal Links" : {
 
     },
@@ -948,6 +1206,9 @@
 
     },
     "Mode" : {
+
+    },
+    "Move To…" : {
 
     },
     "My Website" : {
@@ -962,28 +1223,52 @@
     "Naming" : {
 
     },
-    "New" : {
+    "Navigation" : {
 
     },
     "New attribute name" : {
 
     },
+    "New Blog…" : {
+
+    },
     "New Collection" : {
+
+    },
+    "New Collection…" : {
 
     },
     "New Component" : {
 
     },
+    "New Component…" : {
+
+    },
+    "New Inventory…" : {
+
+    },
     "New Page" : {
 
     },
+    "New Page…" : {
+
+    },
+    "New Podcast…" : {
+
+    },
     "New Post" : {
+
+    },
+    "New Post…" : {
 
     },
     "New selector, e.g. .card-footer" : {
 
     },
     "New Site" : {
+
+    },
+    "New Site…" : {
 
     },
     "No Anglesite sites found" : {
@@ -1085,9 +1370,6 @@
     "Open in browser" : {
 
     },
-    "Open in Browser" : {
-
-    },
     "Open Recent" : {
 
     },
@@ -1121,13 +1403,25 @@
     "optional" : {
 
     },
+    "Ordered" : {
+
+    },
     "Overview of the whole graph — click to jump to a node" : {
+
+    },
+    "Package" : {
 
     },
     "Page" : {
 
     },
-    "Page…" : {
+    "Paragraph" : {
+
+    },
+    "Paste Animation" : {
+
+    },
+    "Paste Style" : {
 
     },
     "Paste the HTML code from another analytics provider here, such as Google Analytics, Plausible, Fathom, or a conversion tag." : {
@@ -1160,10 +1454,10 @@
     "Post" : {
 
     },
-    "Post…" : {
+    "Posts a notification when a Deploy, Backup, or Audit finishes while Anglesite is in the background — success or failure. Clicking the notification brings the site's window to the front. Delivery starts quietly; promote or silence Anglesite in System Settings › Notifications." : {
 
     },
-    "Posts a notification when a Deploy, Backup, or Audit finishes while Anglesite is in the background — success or failure. Clicking the notification brings the site's window to the front. Delivery starts quietly; promote or silence Anglesite in System Settings › Notifications." : {
+    "Preformatted Text" : {
 
     },
     "Preview" : {
@@ -1173,6 +1467,9 @@
 
     },
     "Preview and apply Cloudflare security hardening for this site" : {
+
+    },
+    "Preview in" : {
 
     },
     "Preview port" : {
@@ -1187,13 +1484,22 @@
     "Priority" : {
 
     },
+    "Privacy & Analytics…" : {
+
+    },
     "Project Style Guide" : {
 
     },
     "property" : {
 
     },
+    "Provide Anglesite Feedback…" : {
+
+    },
     "Provider" : {
+
+    },
+    "Publish…" : {
 
     },
     "Published URL (paste after posting)" : {
@@ -1205,10 +1511,16 @@
     "Recheck" : {
 
     },
-    "Recheck Deploy Readiness" : {
+    "Recheck Readiness" : {
+
+    },
+    "Record Audio…" : {
 
     },
     "Record Published URLs" : {
+
+    },
+    "Reduce File Size…" : {
 
     },
     "Refresh" : {
@@ -1253,6 +1565,15 @@
     "Remove from Anglesite…" : {
 
     },
+    "Remove Highlights and Comments" : {
+
+    },
+    "Remove Link" : {
+
+    },
+    "Remove RSS Feed" : {
+
+    },
     "Rename" : {
 
     },
@@ -1295,7 +1616,7 @@
     "Resolving zone and reading current state…" : {
 
     },
-    "Restart Dev Server" : {
+    "Restart" : {
 
     },
     "Result" : {
@@ -1317,7 +1638,13 @@
     "Reveal in Finder" : {
 
     },
+    "Reverse Text Direction" : {
+
+    },
     "Revert" : {
+
+    },
+    "Revert To" : {
 
     },
     "Revert to Saved" : {
@@ -1338,6 +1665,9 @@
     "Reviewing your site's copy, page by page…" : {
 
     },
+    "Right" : {
+
+    },
     "Route" : {
 
     },
@@ -1356,10 +1686,16 @@
     "Runtime host" : {
 
     },
+    "Safari" : {
+
+    },
     "Save" : {
 
     },
     "Save as Annotation" : {
+
+    },
+    "Save As…" : {
 
     },
     "Save the imported site package." : {
@@ -1398,6 +1734,9 @@
     "Scanning…" : {
 
     },
+    "Script" : {
+
+    },
     "Search" : {
 
     },
@@ -1407,7 +1746,13 @@
     "Search graph" : {
 
     },
+    "Search Site…" : {
+
+    },
     "Searching freedesignmd.com…" : {
+
+    },
+    "Section" : {
 
     },
     "See and edit this site's learned writing, image, and naming conventions" : {
@@ -1417,6 +1762,9 @@
 
     },
     "Select an element in the canvas" : {
+
+    },
+    "Select Parent" : {
 
     },
     "Selected" : {
@@ -1434,10 +1782,19 @@
     "Send (⏎)" : {
 
     },
+    "Send Backward" : {
+
+    },
+    "Send to Back" : {
+
+    },
     "SEO" : {
 
     },
     "Server" : {
+
+    },
+    "Set Password…" : {
 
     },
     "Set this up later" : {
@@ -1467,6 +1824,9 @@
     "Share the deployed site's URL" : {
 
     },
+    "Share…" : {
+
+    },
     "Short description (optional)" : {
 
     },
@@ -1488,10 +1848,16 @@
     "Show Logs" : {
 
     },
+    "Show Next Inspector Tab" : {
+
+    },
     "Show or hide %@" : {
 
     },
     "Show or hide the page inspector" : {
+
+    },
+    "Show Previous Inspector Tab" : {
 
     },
     "Show related pages" : {
@@ -1509,6 +1875,9 @@
     "Signed in as %@" : {
 
     },
+    "Single File" : {
+
+    },
     "Siri AI" : {
 
     },
@@ -1519,9 +1888,6 @@
 
     },
     "Siri AI Readiness…" : {
-
-    },
-    "Site" : {
 
     },
     "Site Graph" : {
@@ -1578,6 +1944,9 @@
     "Standard output" : {
 
     },
+    "Start" : {
+
+    },
     "Start a design interview for ${site}" : {
 
     },
@@ -1587,7 +1956,7 @@
     "Status of ${site}" : {
 
     },
-    "Stop Dev Server" : {
+    "Stop" : {
 
     },
     "Stored in the macOS Keychain under `io.dwk.anglesite`. The token is passed to `wrangler deploy` as `CLOUDFLARE_API_TOKEN` and never written to logs. An exported `CLOUDFLARE_API_TOKEN` in the shell that launched Anglesite takes precedence over this entry." : {
@@ -1596,10 +1965,22 @@
     "Stream" : {
 
     },
+    "Strikethrough" : {
+
+    },
+    "Strong" : {
+
+    },
+    "Style" : {
+
+    },
     "Style Guide" : {
 
     },
     "Styles" : {
+
+    },
+    "Styles…" : {
 
     },
     "Suggested fix: %@" : {
@@ -1617,6 +1998,9 @@
     "Syndication recorded" : {
 
     },
+    "Table" : {
+
+    },
     "Tag" : {
 
     },
@@ -1624,6 +2008,9 @@
 
     },
     "Temporary (302)" : {
+
+    },
+    "Text" : {
 
     },
     "The build produced no output." : {
@@ -1692,6 +2079,9 @@
     "Token verified" : {
 
     },
+    "Top" : {
+
+    },
     "Transfer an existing domain" : {
 
     },
@@ -1710,6 +2100,9 @@
     "Unavailable — newer edits have been made since" : {
 
     },
+    "Underline" : {
+
+    },
     "Undo" : {
 
     },
@@ -1720,6 +2113,15 @@
 
     },
     "Undone" : {
+
+    },
+    "Ungroup" : {
+
+    },
+    "Unlock" : {
+
+    },
+    "Unordered" : {
 
     },
     "Unprocessed (show fallbacks)" : {
@@ -1743,7 +2145,10 @@
     "URL" : {
 
     },
-    "Use a temporary Cloudflare Pages domain later, such as %@." : {
+    "Use a temporary Cloudflare Workers domain later, such as %@." : {
+
+    },
+    "Use Selection for Find" : {
 
     },
     "Used to push backups and publish sites to GitHub over HTTPS (the sandboxed app can't run `git` or `gh`, so it pushes in-process with this token). Create a fine-grained token with Contents read/write access at github.com/settings/tokens. Stored in the macOS Keychain under `io.dwk.anglesite` and never written to logs." : {
@@ -1761,6 +2166,12 @@
     "value" : {
 
     },
+    "Vertically" : {
+
+    },
+    "Video" : {
+
+    },
     "View" : {
 
     },
@@ -1776,10 +2187,19 @@
     "Warnings (%lld)" : {
 
     },
+    "Web Video…" : {
+
+    },
+    "Website" : {
+
+    },
     "Website details changed on disk" : {
 
     },
     "Website name" : {
+
+    },
+    "Website Settings…" : {
 
     },
     "Weeks: %lld" : {
@@ -1795,6 +2215,9 @@
 
     },
     "What this website is about, in a sentence" : {
+
+    },
+    "What's New in Anglesite" : {
 
     },
     "When you create a page or post, Anglesite uses Apple's on-device model to suggest a short SEO description. Runs locally; requires Apple Intelligence to be enabled. Falls back to a title-derived description when off or unavailable." : {

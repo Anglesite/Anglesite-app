@@ -30,6 +30,7 @@ Key things to know:
 
 - **macOS 27+ and Xcode 27+ (Swift 6.4)** are required for the app itself. The `.xcodeproj` is gitignored and generated from [`project.yml`](project.yml) with [XcodeGen](https://github.com/yonaskolb/XcodeGen) — never edit or commit the project file; edit `project.yml`.
 - **Open `Anglesite.xcodeproj`, not `xed .`** — the latter opens `Package.swift`, which has no runnable target.
+- **Commit String Catalog updates.** App builds automatically extract SwiftUI and `String(localized:)` literals into `Sources/AnglesiteApp/Localizable.xcstrings` because `SWIFT_EMIT_LOC_STRINGS` is enabled. If you add, remove, or rename user-visible text, build the app target, review the generated `.xcstrings` diff, and include it in the same commit. Do not blindly restore the catalog when it appears after a build. If extraction looks incomplete or unexpectedly large, run a clean build (`xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug clean build`) and review the stabilized result before committing it.
 - **Linux contributors welcome.** The portable SwiftPM targets build and test on Linux (Swift 6.3+, no Xcode or Node needed) — see [Developing on Linux](README.md#developing-on-linux). The cross-platform port ([#571](https://github.com/Anglesite/Anglesite-app/issues/571)) is an active track.
 - **Plugin sibling checkout (optional).** Some end-to-end tests expect the plugin repo checked out next to this one (`../anglesite`); they skip cleanly when it's absent.
 
