@@ -54,6 +54,76 @@ actor FakeLocalContainerControl: LocalContainerControl {
     }
 }
 
+actor HostCommandRecorder {
+    struct Call: Sendable {
+        let executable: URL
+        let arguments: [String]
+        let cwd: URL
+    }
+
+    private(set) var calls: [Call] = []
+    let result: ContainerExecResult
+
+    init(result: ContainerExecResult = .init(exitCode: 0, stdout: "", stderr: "")) {
+        self.result = result
+    }
+
+    func run(executable: URL, arguments: [String], cwd: URL) -> ContainerExecResult {
+        calls.append(.init(executable: executable, arguments: arguments, cwd: cwd))
+        return result
+    }
+}
+
+actor PersistenceGatedFakeLocalContainerControl: LocalContainerControl {
+    private let result: Result<LocalContainerSession, LocalContainerError>
+    private let execResult: ContainerExecResult
+    private var parkedContinuation: CheckedContinuation<Void, Never>?
+    private var gateContinuation: CheckedContinuation<Void, Never>?
+    private var execParked = false
+
+    init(result: Result<LocalContainerSession, LocalContainerError>, execResult: ContainerExecResult) {
+        self.result = result
+        self.execResult = execResult
+    }
+
+    func waitUntilExecParked() async {
+        if execParked { return }
+        await withCheckedContinuation { parkedContinuation = $0 }
+    }
+
+    func releaseExec() {
+        gateContinuation?.resume()
+        gateContinuation = nil
+    }
+
+    func start(
+        siteID: String,
+        sourceRepo: URL,
+        ref: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> LocalContainerSession {
+        try result.get()
+    }
+
+    func stop(siteID: String) async throws {}
+
+    func exec(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> ContainerExecResult {
+        execParked = true
+        parkedContinuation?.resume()
+        parkedContinuation = nil
+        await withCheckedContinuation { continuation in
+            gateContinuation = continuation
+        }
+        return execResult
+    }
+}
+
 /// A `LocalContainerControl` whose `start` suspends until `release()` is called — for
 /// deterministically interleaving a concurrent `stop()`/second `start()` while the first
 /// `start()` is parked. Mirrors `GatedFakeSandboxControlClient`.

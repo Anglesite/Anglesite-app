@@ -314,18 +314,18 @@ public struct ContainerizationControl: LocalContainerControl {
                 config.memoryInBytes = 2 * 1024 * 1024 * 1024
                 config.interfaces = [nat]
                 config.dns = DNS(nameservers: ["192.168.64.1"])
-                // Host `Source/` repo shared into the guest via virtio-fs so the guest can
+                // Host `Source/` repo shared read-only into the guest via virtio-fs so the guest can
                 // `git clone` it (the macOS host path is otherwise invisible to the Linux guest).
                 // `Mount.share(source:destination:)` is the host-directory virtio-fs share — confirmed
                 // against `Mount.swift:83` and `ContainerTests.swift:628` (`.share(source: directory.path,
-                // destination: "/mnt")`). The share must be writable for the explicit, awaited
-                // guest-to-host git handoff after apply-edit (#718). NOT
+                // destination: "/mnt")`); `ro` is honoured (`ContainerTests.swift:3309`). NOT
                 // `Mount.sharedMount`, which references a named *pod volume*, not a host path.
                 // Only mounted when a repo is provided — the bare vsock-echo e2e test boots with none.
                 if let sourceRepo {
                     config.mounts.append(.share(
                         source: sourceRepo.path,
-                        destination: Self.repoSharePath
+                        destination: Self.repoSharePath,
+                        options: ["ro"]
                     ))
                 }
             }

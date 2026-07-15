@@ -167,6 +167,7 @@ final class PreviewModel {
         guard let localRuntime = runtime as? LocalContainerSiteRuntime else { return nil }
         return { [weak localRuntime] reply in
             guard let localRuntime else { throw SiteRuntimePersistenceError.runtimeNotRunning }
+            guard reply.commit != nil else { return }
             try await localRuntime.persistEdit(commit: reply.commit)
         }
     }

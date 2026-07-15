@@ -5,15 +5,20 @@ import Foundation
 struct LocalContainerSiteRuntimeTests {
     private func makeRuntime(
         _ result: Result<LocalContainerSession, LocalContainerError>,
-        connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { _, _ in }
+        connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { _, _ in },
+        execResult: ContainerExecResult = .init(exitCode: 0, stdout: "", stderr: ""),
+        runHostCommand: @escaping @Sendable (URL, [String], URL) async throws -> ContainerExecResult = { _, _, _ in
+            .init(exitCode: 0, stdout: "", stderr: "")
+        }
     ) -> (LocalContainerSiteRuntime, FakeLocalContainerControl) {
-        let fake = FakeLocalContainerControl(startResult: result)
+        let fake = FakeLocalContainerControl(startResult: result, execResult: execResult)
         let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
         let rt = LocalContainerSiteRuntime(
             ref: "HEAD",
             control: fake,
             mcpClient: mcp,
-            connect: connect)
+            connect: connect,
+            runHostCommand: runHostCommand)
         return (rt, fake)
     }
 
@@ -84,8 +89,17 @@ struct LocalContainerSiteRuntimeTests {
     @Test("persistEdit hands the guest commit back to canonical Source")
     func persistEditRunsCanonicalGitHandoff() async throws {
         let commit = "abc1234567890abcdef1234567890abcdef12345"
-        let (runtime, fake) = makeRuntime(.success(Self.ok))
-        await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+        let bundle = Data("test bundle".utf8).base64EncodedString()
+        let host = HostCommandRecorder()
+        let source = URL(fileURLWithPath: "/sites/Foo.anglesite/Source")
+        let (runtime, fake) = makeRuntime(
+            .success(Self.ok),
+            execResult: .init(exitCode: 0, stdout: "\(commit)\n\(bundle)\n", stderr: ""),
+            runHostCommand: { executable, arguments, cwd in
+                await host.run(executable: executable, arguments: arguments, cwd: cwd)
+            }
+        )
+        await runtime.start(siteID: "s1", siteDirectory: source)
 
         try await runtime.persistEdit(commit: commit)
 
@@ -94,10 +108,20 @@ struct LocalContainerSiteRuntimeTests {
         #expect(calls[0].siteID == "s1")
         #expect(calls[0].argv.prefix(2) == ["sh", "-c"])
         #expect(calls[0].argv.last == commit)
-        #expect(calls[0].argv[2].contains("git -C \"$canonical\" fetch \"$runtime\" \"$commit\""))
-        #expect(calls[0].argv[2].contains("merge --ff-only FETCH_HEAD"))
-        #expect(calls[0].argv[2].contains("cherry-pick --abort"))
+        #expect(calls[0].argv[2].contains("bundle create"))
+        #expect(calls[0].argv[2].contains("base64 \"$bundle\""))
+        #expect(!calls[0].argv[2].contains("/run/anglesite-source"))
         #expect(calls[0].cwd == "/workspace/site")
+
+        let hostCalls = await host.calls
+        #expect(hostCalls.count == 1)
+        #expect(hostCalls[0].executable.path == "/bin/sh")
+        #expect(hostCalls[0].arguments[3] == source.path)
+        #expect(hostCalls[0].arguments.last == commit)
+        #expect(hostCalls[0].arguments[1].contains("core.hooksPath=/dev/null"))
+        #expect(hostCalls[0].arguments[1].contains("merge --ff-only FETCH_HEAD"))
+        #expect(hostCalls[0].arguments[1].contains("cherry-pick --abort"))
+        #expect(hostCalls[0].cwd == source)
     }
 
     @Test("persistEdit refuses a missing commit without touching the container")
@@ -113,26 +137,65 @@ struct LocalContainerSiteRuntimeTests {
 
     @Test("persistEdit surfaces a failed canonical git handoff")
     func persistEditSurfacesGitFailure() async {
+        let commit = "abc1234567890abcdef1234567890abcdef12345"
+        let bundle = Data("test bundle".utf8).base64EncodedString()
+        let host = HostCommandRecorder(
+            result: .init(exitCode: 20, stdout: "", stderr: "canonical Source repository has uncommitted changes")
+        )
         let fake = FakeLocalContainerControl(
             startResult: .success(Self.ok),
-            execResult: .init(exitCode: 20, stdout: "", stderr: "canonical Source repository has uncommitted changes")
-        )
+            execResult: .init(exitCode: 0, stdout: "\(commit)\n\(bundle)\n", stderr: ""))
         let runtime = LocalContainerSiteRuntime(
             ref: "HEAD",
             control: fake,
             mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
-            connect: { _, _ in }
+            connect: { _, _ in },
+            runHostCommand: { executable, arguments, cwd in
+                await host.run(executable: executable, arguments: arguments, cwd: cwd)
+            }
         )
         await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
 
         do {
-            try await runtime.persistEdit(commit: "abc1234567890abcdef1234567890abcdef12345")
+            try await runtime.persistEdit(commit: commit)
             Issue.record("expected persistence to fail")
         } catch let error as SiteRuntimePersistenceError {
             #expect(error == .syncFailed("canonical Source repository has uncommitted changes"))
         } catch {
             Issue.record("unexpected error: \(error)")
         }
+    }
+
+    @Test("persistEdit abandons an export superseded by a site switch")
+    func persistEditRejectsSupersededGeneration() async {
+        let commit = "abc1234567890abcdef1234567890abcdef12345"
+        let bundle = Data("test bundle".utf8).base64EncodedString()
+        let fake = PersistenceGatedFakeLocalContainerControl(
+            result: .success(Self.ok),
+            execResult: .init(exitCode: 0, stdout: "\(commit)\n\(bundle)\n", stderr: "")
+        )
+        let host = HostCommandRecorder()
+        let runtime = LocalContainerSiteRuntime(
+            ref: "HEAD",
+            control: fake,
+            mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
+            connect: { _, _ in },
+            runHostCommand: { executable, arguments, cwd in
+                await host.run(executable: executable, arguments: arguments, cwd: cwd)
+            }
+        )
+        await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/sites/One/Source"))
+
+        let persistence = Task { try await runtime.persistEdit(commit: commit) }
+        await fake.waitUntilExecParked()
+        await runtime.stop()
+        await runtime.start(siteID: "s2", siteDirectory: URL(fileURLWithPath: "/sites/Two/Source"))
+        await fake.releaseExec()
+
+        await #expect(throws: SiteRuntimePersistenceError.runtimeNotRunning) {
+            try await persistence.value
+        }
+        #expect(await host.calls.isEmpty)
     }
 
     @Test("control failure settles to .failed with a friendly message")

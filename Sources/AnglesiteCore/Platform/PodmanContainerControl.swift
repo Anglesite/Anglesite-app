@@ -114,7 +114,7 @@ public struct PodmanContainerControl: LocalContainerControl {
                 podmanExecutable: podmanExecutable,
                 arguments: [
                     "run", "-d", "--rm", "--name", name,
-                    "-v", "\(sourceRepo.path):\(Self.repoSharePath):rw",
+                    "-v", "\(sourceRepo.path):\(Self.repoSharePath):ro",
                     "-p", "127.0.0.1::\(Self.previewPort)",
                     "-p", "127.0.0.1::\(Self.mcpPort)",
                     image, "sleep", "infinity",

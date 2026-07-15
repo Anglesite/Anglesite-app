@@ -14,6 +14,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private let logCenter: LogCenter
     private let connect: @Sendable (MCPClient, URL) async throws -> Void
     private let makeFileWatcher: @Sendable () -> any SiteFileWatching
+    private let runHostCommand: @Sendable (URL, [String], URL) async throws -> ContainerExecResult
     private let suddenTerminationController: SuddenTerminationController
     private var fileWatcher: (any SiteFileWatching)?
     private var containerTerminationLease: SuddenTerminationController.Lease?
@@ -22,6 +23,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private var observers: [UUID: AsyncStream<SiteRuntimeState>.Continuation] = [:]
     private var generation = 0
     private var activeSiteID: String?
+    private var activeSiteDirectory: URL?
     private var loadedKnowledgeSiteID: String?
     /// Serializes guest-to-host git handoffs. Actor isolation alone is insufficient because an
     /// actor is reentrant while `control.exec` is suspended, and two overlapping overlay edits
@@ -45,6 +47,14 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         logCenter: LogCenter = .shared,
         connect: @escaping @Sendable (MCPClient, URL) async throws -> Void = { c, u in try await c.connect(httpEndpoint: u) },
         makeFileWatcher: @escaping @Sendable () -> any SiteFileWatching = { PlatformFileWatcher.make() },
+        runHostCommand: @escaping @Sendable (URL, [String], URL) async throws -> ContainerExecResult = { executable, arguments, cwd in
+            let result = try await ProcessSupervisor.shared.run(
+                executable: executable,
+                arguments: arguments,
+                currentDirectoryURL: cwd
+            )
+            return ContainerExecResult(exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr)
+        },
         suddenTerminationController: SuddenTerminationController = .shared
     ) {
         self.ref = ref
@@ -56,6 +66,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         self.logCenter = logCenter
         self.connect = connect
         self.makeFileWatcher = makeFileWatcher
+        self.runHostCommand = runHostCommand
         self.suddenTerminationController = suddenTerminationController
     }
 
@@ -87,7 +98,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     }
 
     /// Copies one commit produced by the MCP sidecar in `/workspace/site` back into the host's
-    /// canonical `Source/` repository, which is mounted at `/run/anglesite-source`.
+    /// canonical `Source/` repository without granting the guest write access to that repository.
     ///
     /// The normal path fast-forwards the host branch. If a native host-side content operation
     /// committed after this runtime was hydrated, the histories diverge; cherry-picking the one
@@ -99,34 +110,44 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
               commit.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "0123456789abcdefABCDEF").contains($0) })
         else { throw SiteRuntimePersistenceError.missingOrInvalidCommit }
 
-        await acquirePersistenceSlot()
-        defer { releasePersistenceSlot() }
-
-        guard let siteID = activeSiteID else {
+        let expectedGeneration = generation
+        guard let siteID = activeSiteID, let siteDirectory = activeSiteDirectory else {
             throw SiteRuntimePersistenceError.runtimeNotRunning
         }
 
-        let script = #"""
+        await acquirePersistenceSlot()
+        defer { releasePersistenceSlot() }
+
+        guard expectedGeneration == generation,
+              activeSiteID == siteID,
+              activeSiteDirectory == siteDirectory
+        else {
+            throw SiteRuntimePersistenceError.runtimeNotRunning
+        }
+
+        // Export exactly the requested commit through stdout as a base64 git bundle. The canonical
+        // repo remains mounted read-only, so no guest process can alter its worktree, refs, or hooks.
+        let exportScript = #"""
         set -eu
-        canonical=/run/anglesite-source
         runtime=/workspace/site
         commit="$1"
+        ref=refs/anglesite/persist
+        bundle=/tmp/anglesite-persist-$$.bundle
+        cleanup() {
+          git -C "$runtime" update-ref -d "$ref" >/dev/null 2>&1 || true
+          rm -f "$bundle"
+        }
+        trap cleanup EXIT HUP INT TERM
 
-        if ! git -C "$canonical" diff --quiet || ! git -C "$canonical" diff --cached --quiet; then
-          echo "canonical Source repository has uncommitted changes" >&2
-          exit 20
-        fi
-
-        git -C "$canonical" fetch "$runtime" "$commit"
-        if git -C "$canonical" merge-base --is-ancestor HEAD FETCH_HEAD; then
-          git -C "$canonical" merge --ff-only FETCH_HEAD
+        full=$(git -C "$runtime" rev-parse "$commit^{commit}")
+        git -C "$runtime" update-ref "$ref" "$full"
+        if parent=$(git -C "$runtime" rev-parse "$full^" 2>/dev/null); then
+          git -C "$runtime" bundle create "$bundle" "$ref" "^$parent"
         else
-          if ! git -C "$canonical" cherry-pick FETCH_HEAD; then
-            git -C "$canonical" cherry-pick --abort || true
-            echo "overlay edit conflicts with newer Source changes" >&2
-            exit 21
-          fi
+          git -C "$runtime" bundle create "$bundle" "$ref"
         fi
+        printf '%s\n' "$full"
+        base64 "$bundle"
         """#
 
         let logCenter = self.logCenter
@@ -135,20 +156,94 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         do {
             result = try await control.exec(
                 siteID: siteID,
-                argv: ["sh", "-c", script, "anglesite-persist", commit],
+                argv: ["sh", "-c", exportScript, "anglesite-export", commit],
                 environment: [:],
                 workingDirectory: "/workspace/site",
                 onOutput: { line, stream in
+                    // stdout is the base64 bundle transport, not human-readable diagnostic output.
+                    guard stream == .stderr else { return }
                     Task { await logCenter.append(source: source, stream: stream, text: line) }
                 }
             )
         } catch {
+            guard expectedGeneration == generation, activeSiteID == siteID else {
+                throw SiteRuntimePersistenceError.runtimeNotRunning
+            }
             throw SiteRuntimePersistenceError.syncFailed(error.localizedDescription)
         }
         guard result.exitCode == 0 else {
             let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             throw SiteRuntimePersistenceError.syncFailed(
                 detail.isEmpty ? "git handoff exited \(result.exitCode)" : detail)
+        }
+
+        guard expectedGeneration == generation,
+              activeSiteID == siteID,
+              activeSiteDirectory == siteDirectory
+        else {
+            throw SiteRuntimePersistenceError.runtimeNotRunning
+        }
+
+        let outputParts = result.stdout.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        guard outputParts.count == 2 else {
+            throw SiteRuntimePersistenceError.syncFailed("container returned an invalid git bundle")
+        }
+        let fullCommit = String(outputParts[0])
+        guard (40...64).contains(fullCommit.count),
+              fullCommit.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "0123456789abcdefABCDEF").contains($0) }),
+              let bundleData = Data(base64Encoded: String(outputParts[1]), options: .ignoreUnknownCharacters)
+        else {
+            throw SiteRuntimePersistenceError.syncFailed("container returned an invalid git bundle")
+        }
+
+        let bundleURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("anglesite-persist-\(UUID().uuidString).bundle")
+        do {
+            try bundleData.write(to: bundleURL, options: .atomic)
+        } catch {
+            throw SiteRuntimePersistenceError.syncFailed(error.localizedDescription)
+        }
+        defer { try? FileManager.default.removeItem(at: bundleURL) }
+
+        let importScript = #"""
+        set -eu
+        canonical="$1"
+        bundle="$2"
+        commit="$3"
+        git_safe() { git -c core.hooksPath=/dev/null -C "$canonical" "$@"; }
+
+        if test -n "$(git_safe status --porcelain)"; then
+          echo "canonical Source repository has uncommitted changes" >&2
+          exit 20
+        fi
+        git_safe fetch "$bundle" refs/anglesite/persist
+        if test "$(git_safe rev-parse FETCH_HEAD)" != "$commit"; then
+          echo "exported commit did not match the requested edit" >&2
+          exit 22
+        fi
+        if git_safe merge-base --is-ancestor HEAD FETCH_HEAD; then
+          git_safe merge --ff-only FETCH_HEAD
+        elif ! git_safe cherry-pick FETCH_HEAD; then
+          git_safe cherry-pick --abort || true
+          echo "overlay edit conflicts with newer Source changes" >&2
+          exit 21
+        fi
+        """#
+
+        let hostResult: ContainerExecResult
+        do {
+            hostResult = try await runHostCommand(
+                URL(fileURLWithPath: "/bin/sh"),
+                ["-c", importScript, "anglesite-persist", siteDirectory.path, bundleURL.path, fullCommit],
+                siteDirectory
+            )
+        } catch {
+            throw SiteRuntimePersistenceError.syncFailed(error.localizedDescription)
+        }
+        guard hostResult.exitCode == 0 else {
+            let detail = hostResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw SiteRuntimePersistenceError.syncFailed(
+                detail.isEmpty ? "git handoff exited \(hostResult.exitCode)" : detail)
         }
     }
 
@@ -240,6 +335,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             loadedKnowledgeSiteID = siteID
             startFileWatcher(siteID: siteID, projectRoot: siteDirectory, generation: gen)
             activeSiteID = siteID
+            activeSiteDirectory = siteDirectory
             containerTerminationLease = suddenTerminationLease
             setState(.ready(siteID: siteID, url: session.previewURL))
         } catch {
@@ -292,6 +388,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         loadedKnowledgeSiteID = nil
         let containerSiteID = activeSiteID
         activeSiteID = nil
+        activeSiteDirectory = nil
         let containerTerminationLease = self.containerTerminationLease
         self.containerTerminationLease = nil
         let bootLogContinuation = self.bootLogContinuation
