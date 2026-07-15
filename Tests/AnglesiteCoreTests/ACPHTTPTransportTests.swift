@@ -61,4 +61,39 @@ struct ACPHTTPTransportTests {
         }
         await transport.close()
     }
+
+    @Test("SSE response yields every event, not just the first") func sseYieldsEveryEvent() async throws {
+        ACPStubURLProtocol.reset()
+        // One `session/prompt` POST's SSE stream carries a `session/update` push notification
+        // (no "id") followed by the final JSON-RPC response (has "id") to that same request.
+        // Both must reach `inbound()` — dropping any but the first is the bug this fixes.
+        let update = #"{"jsonrpc":"2.0","method":"session/update","params":{"sessionUpdate":"agent_message_chunk"}}"#
+        let finalResponse = #"{"jsonrpc":"2.0","id":1,"result":{"stopReason":"end_turn"}}"#
+        let body = "data: \(update)\n\ndata: \(finalResponse)\n\n".data(using: .utf8)!
+        ACPStubURLProtocol.queue.append(.init(
+            status: 200,
+            headers: ["Content-Type": "text/event-stream"],
+            body: body
+        ))
+        let transport = makeTransport()
+        try await transport.open()
+        var iterator = transport.inbound().makeAsyncIterator()
+        try await transport.send(.object(["jsonrpc": .string("2.0"), "id": .int(1), "method": .string("session/prompt")]))
+
+        let first = await iterator.next()
+        #expect(first == .object([
+            "jsonrpc": .string("2.0"),
+            "method": .string("session/update"),
+            "params": .object(["sessionUpdate": .string("agent_message_chunk")])
+        ]))
+
+        let second = await iterator.next()
+        #expect(second == .object([
+            "jsonrpc": .string("2.0"),
+            "id": .int(1),
+            "result": .object(["stopReason": .string("end_turn")])
+        ]))
+
+        await transport.close()
+    }
 }
