@@ -112,13 +112,33 @@ public enum WebmentionEndpointDiscovery {
     }
 
     /// Extracts `name="value"` / `name='value'` / `name=value` from an HTML tag's attribute
-    /// string or an HTTP Link-header parameter string. `\b` before `name` prevents matching
-    /// inside a longer attribute name (e.g. `data-rel=` must not match a lookup for `rel`).
+    /// string or an HTTP Link-header parameter string. The lookahead-free anchor
+    /// `(?:^|[\s;<])` before `name` requires the name to start at the beginning of the source,
+    /// or be preceded by whitespace, a `;` (Link-header parameter separator), or `<` — so a
+    /// lookup for `rel` does not match inside a longer attribute name like `data-rel=`. (A
+    /// plain `\b` word-boundary anchor does *not* achieve this: `-` is a non-word character, so
+    /// `\brel\b` still matches the `rel` inside `data-rel=`.)
+    private static let relRegex = attributeRegex(for: "rel")
+    private static let hrefRegex = attributeRegex(for: "href")
+
+    private static func attributeRegex(for name: String) -> NSRegularExpression {
+        do {
+            return try NSRegularExpression(
+                pattern: "(?:^|[\\s;<])\(name)\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\s\"'>]+))",
+                options: [.caseInsensitive]
+            )
+        } catch {
+            fatalError("Invalid webmention discovery attribute regex for \(name): \(error)")
+        }
+    }
+
     private static func attributeValue(_ name: String, in source: String) -> String? {
-        guard let regex = try? NSRegularExpression(
-            pattern: "\\b\(name)\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\s\"'>]+))",
-            options: [.caseInsensitive]
-        ) else { return nil }
+        let regex: NSRegularExpression
+        switch name {
+        case "rel": regex = relRegex
+        case "href": regex = hrefRegex
+        default: regex = attributeRegex(for: name)
+        }
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
         guard let match = regex.firstMatch(in: source, range: range) else { return nil }
         for groupIndex in [2, 3, 4] {

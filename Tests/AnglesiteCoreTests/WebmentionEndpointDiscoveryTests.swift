@@ -106,6 +106,29 @@ struct WebmentionEndpointDiscoveryTests {
         #expect(endpoint?.absoluteString == "https://target.example/webmention")
     }
 
+    @Test("Link header endpoint resolved relative to the redirected response URL")
+    func linkHeaderRelativeAfterRedirect() async throws {
+        let redirected = URL(string: "https://target.example/moved/post")!
+        let endpoint = try await WebmentionEndpointDiscovery.discover(
+            target: target,
+            transport: transport(
+                headers: ["Link": "<../webmention>; rel=\"webmention\""],
+                responseURL: redirected
+            )
+        )
+        #expect(endpoint?.absoluteString == "https://target.example/webmention")
+    }
+
+    @Test("HTML: a data-rel decoy attribute does not shadow a later real rel=webmention element")
+    func htmlDataRelDecoyDoesNotMatch() async throws {
+        let html = """
+        <a data-rel="webmention" href="/decoy">wrong</a>
+        <a href="/correct" rel="webmention">right</a>
+        """
+        let endpoint = try await WebmentionEndpointDiscovery.discover(target: target, transport: transport(html: html))
+        #expect(endpoint?.absoluteString == "https://target.example/correct")
+    }
+
     @Test("no endpoint declared returns nil")
     func noEndpoint() async throws {
         let html = "<html><body>No webmention here. <a href=\"/other\" rel=\"nofollow\">link</a></body></html>"
