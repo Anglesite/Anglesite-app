@@ -1,0 +1,16 @@
+---
+interface Props { urls?: string[] }
+const urls = Array.isArray(Astro.props.urls) ? Astro.props.urls : [];
+function label(url: string): string {
+  try { return new URL(url).hostname; } catch { return url; }
+}
+---
+
+{urls.length > 0 && (
+  <p class="syndication-links">
+    Also published on:{" "}
+    {urls.map((url, index) => (
+      <><a class="u-syndication" rel="syndication" href={url}>{label(url)}</a>{index < urls.length - 1 ? ", " : ""}</>
+    ))}
+  </p>
+)}

@@ -33,6 +33,16 @@ public enum SecretAccounts {
     /// REST API (#654). The app owns this credential: the old `gh auth login` flow left the
     /// token with `gh`, which the sandboxed app can neither spawn nor read.
     public static let gitHubToken = "github-token"
+
+    /// Site-scoped POSSE token slots. Account names include the stable site UUID so credentials
+    /// never leak across two packages configured for different social accounts.
+    public static func mastodonAccessToken(siteID: String) -> String {
+        "posse:\(siteID):mastodon-access-token"
+    }
+
+    public static func blueskyAppPassword(siteID: String) -> String {
+        "posse:\(siteID):bluesky-app-password"
+    }
 }
 
 public extension SecretStore {

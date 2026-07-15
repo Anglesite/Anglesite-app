@@ -3,6 +3,7 @@ import type { CollectionEntry } from "astro:content";
 import { Schema } from "astro-seo-schema";
 import { entrySchema } from "../lib/schema.ts";
 import BaseLayout from "./BaseLayout.astro";
+import SyndicationLinks from "../components/SyndicationLinks.astro";
 
 interface Props {
   entry: CollectionEntry<"events">;
@@ -32,5 +33,6 @@ const endHuman = endDate?.toLocaleString("en-US");
     {endISO && <time class="dt-end" datetime={endISO}>{endHuman}</time>}
     {d.location && <p class="p-location">{d.location}</p>}
     <div class="e-content"><slot /></div>
+    <SyndicationLinks urls={d.syndication} />
   </article>
 </BaseLayout>

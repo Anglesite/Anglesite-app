@@ -183,7 +183,10 @@ public enum SocialPublishPlan {
     }
 
     private static func isFutureDated(_ frontmatter: [String: FrontmatterValue], after referenceDate: Date) -> Bool {
-        guard let publishDate = parseDate(string(frontmatter["publishDate"]) ?? string(frontmatter["date"])) else {
+        guard let publishDate = parseDate(
+            string(frontmatter["publishDate"]) ?? string(frontmatter["pubDate"])
+                ?? string(frontmatter["date"]) ?? string(frontmatter["start"])
+        ) else {
             return false
         }
         return publishDate > referenceDate

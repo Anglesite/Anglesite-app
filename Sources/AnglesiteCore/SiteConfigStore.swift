@@ -22,10 +22,30 @@ public struct SiteSettings: Sendable, Codable, Equatable {
     /// `inboxCaptureAccountID`.
     public var inboxCaptureKVNamespaceID: String?
 
-    public init(displayName: String? = nil, inboxCaptureAccountID: String? = nil, inboxCaptureKVNamespaceID: String? = nil) {
+    /// Mastodon server origin used for POSSE, for example `https://mastodon.social`.
+    /// The access token is stored separately in the platform secret store.
+    public var mastodonBaseURL: String?
+
+    /// Bluesky handle or DID used to create a session for POSSE. The app password is secret-store only.
+    public var blueskyIdentifier: String?
+
+    /// Bluesky PDS origin. `nil` uses the public `https://bsky.social` service.
+    public var blueskyPDSURL: String?
+
+    public init(
+        displayName: String? = nil,
+        inboxCaptureAccountID: String? = nil,
+        inboxCaptureKVNamespaceID: String? = nil,
+        mastodonBaseURL: String? = nil,
+        blueskyIdentifier: String? = nil,
+        blueskyPDSURL: String? = nil
+    ) {
         self.displayName = displayName
         self.inboxCaptureAccountID = inboxCaptureAccountID
         self.inboxCaptureKVNamespaceID = inboxCaptureKVNamespaceID
+        self.mastodonBaseURL = mastodonBaseURL
+        self.blueskyIdentifier = blueskyIdentifier
+        self.blueskyPDSURL = blueskyPDSURL
     }
 }
 
