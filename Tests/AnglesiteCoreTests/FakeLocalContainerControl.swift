@@ -154,6 +154,19 @@ actor PersistenceGatedFakeLocalContainerControl: LocalContainerControl {
         }
         return execResult
     }
+
+    // Not exercised by any test — this fake exists to test `exec`'s persistence-gating race,
+    // not `execInteractive`. Trivial no-op handle, matching the other not-exercised conformances
+    // in this file (`StopGatedFakeLocalContainerControl`, `GatedFakeLocalContainerControl`).
+    func execInteractive(
+        siteID: String,
+        argv: [String],
+        environment: [String: String],
+        workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle {
+        InteractiveExecHandle(write: { _ in }, terminate: {})
+    }
 }
 
 /// A `LocalContainerControl` whose `start` suspends until `release()` is called — for
