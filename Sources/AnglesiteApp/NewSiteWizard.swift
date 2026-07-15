@@ -97,7 +97,7 @@ struct NewSiteWizard: View {
             Text("Enter the domain you already own.")
                 .font(.caption).foregroundStyle(.secondary)
         case .later:
-            Text("Use a temporary Cloudflare Pages domain later, such as \(model.cloudflareDevPreview).")
+            Text("Use a temporary Cloudflare Workers domain later, such as \(model.cloudflareDevPreview).")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

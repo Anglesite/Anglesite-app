@@ -70,9 +70,42 @@ final class SiteScaffolderTests: XCTestCase {
         let cfg = try String(contentsOf: pkgURL.appendingPathComponent("Source/.site-config"), encoding: .utf8)
         XCTAssertFalse(cfg.contains("ANGLESITE_VERSION=1.0.0"))
         XCTAssertTrue(cfg.contains("SITE_NAME=Acme Co"))
+        XCTAssertTrue(cfg.contains("CF_PROJECT_NAME=acme-co"))
         // Theme + homepage applied in Source/:
         let css = try String(contentsOf: pkgURL.appendingPathComponent("Source/src/styles/global.css"), encoding: .utf8)
         XCTAssertTrue(css.contains("--color-primary: #1e3a5f;"))
+    }
+
+    func testHappyPathWritesADeployableWranglerConfig() async throws {
+        let root = tmpDir()
+        let scaffolder = makeScaffolder(root: root)
+        for await _ in scaffolder.scaffold(makeDraft()) {}
+
+        let pkgURL = root.appendingPathComponent("acme-co.anglesite")
+        let toml = try String(contentsOf: pkgURL.appendingPathComponent("Source/wrangler.toml"), encoding: .utf8)
+        XCTAssertTrue(toml.contains(#"name = "acme-co""#))
+        XCTAssertTrue(toml.contains(#"directory = "dist""#))
+        // Static-only: no social-feature bindings and no Worker entrypoint.
+        XCTAssertFalse(toml.contains("main ="))
+        XCTAssertFalse(toml.contains("d1_databases"))
+    }
+
+    /// Two sites with different names must never share a Worker name (#701 case 11):
+    /// the slug is derived the same way the wizard's `slugTaken` uniqueness check runs against.
+    func testTwoSitesGetDistinctWorkerNames() async throws {
+        let root = tmpDir()
+        let scaffolder = makeScaffolder(root: root)
+        var second = makeDraft()
+        second.name = "Beta Co"
+        for await _ in scaffolder.scaffold(makeDraft()) {}
+        for await _ in scaffolder.scaffold(second) {}
+
+        let firstCfg = try String(
+            contentsOf: root.appendingPathComponent("acme-co.anglesite/Source/.site-config"), encoding: .utf8)
+        let secondCfg = try String(
+            contentsOf: root.appendingPathComponent("beta-co.anglesite/Source/.site-config"), encoding: .utf8)
+        XCTAssertTrue(firstCfg.contains("CF_PROJECT_NAME=acme-co"))
+        XCTAssertTrue(secondCfg.contains("CF_PROJECT_NAME=beta-co"))
     }
 
     func testSiteConfigValuesAreSanitizedAndBlurbBackfillsTagline() async throws {

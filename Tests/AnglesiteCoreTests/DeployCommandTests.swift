@@ -542,6 +542,65 @@ struct DeployCommandTests {
         #expect(!warnings.contains { $0.category == .orphanedRoute })
     }
 
+    // MARK: SITE_URL persistence (#702)
+
+    private func privateSiteDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DeployCommandTests-site-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test("a successful deploy writes SITE_URL into .site-config")
+    func successfulDeployWritesSiteURL() async {
+        let siteDir = privateSiteDir()
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "building…")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published s (1.0 sec)\n  https://s.example.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
+
+        let config = try? String(contentsOf: siteDir.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(config?.contains("SITE_URL=https://s.example.workers.dev") == true)
+    }
+
+    @Test("a custom DOMAIN already in .site-config is not overwritten by the workers.dev URL")
+    func customDomainWinsOverWorkersDevURL() async {
+        let siteDir = privateSiteDir()
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        try? "DOMAIN=example.com\n".write(
+            to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "building…")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published s (1.0 sec)\n  https://s.example.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
+
+        let config = try? String(contentsOf: siteDir.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(config?.contains("DOMAIN=example.com") == true)
+        #expect(config?.contains("SITE_URL=") == false)
+    }
+
+    @Test("persistSiteURL upserts without clobbering unrelated keys")
+    func persistSiteURLUpsertsInPlace() {
+        let siteDir = privateSiteDir()
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        try? "SITE_NAME=Acme\nSITE_URL=https://old.example.workers.dev\n".write(
+            to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        DeployCommand.persistSiteURL(URL(string: "https://new.example.workers.dev")!, siteDirectory: siteDir)
+
+        let config = try! String(contentsOf: siteDir.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(config.contains("SITE_NAME=Acme"))
+        #expect(config.contains("SITE_URL=https://new.example.workers.dev"))
+        #expect(!config.contains("old.example.workers.dev"))
+    }
+
     /// Minimal thread-safe box for recording values appended from `@Sendable` closures.
     private final class Locked<T>: @unchecked Sendable {
         private let lock = NSLock(); private var value: T
