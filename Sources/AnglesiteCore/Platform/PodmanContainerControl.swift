@@ -278,7 +278,12 @@ public struct PodmanContainerControl: LocalContainerControl {
         arguments.append(name)
         arguments += argv
 
-        let source = "acp-interactive:\(siteID)"
+        // Unique per call (not just per siteID): two concurrent execInteractive calls for the
+        // same site would otherwise share a `source`, and each call's forwarding loop below
+        // filters only on `line.source == source` — an identical source would cross-contaminate
+        // their `onOutput` callbacks with each other's lines. Mirrors `ContainerizationControl`
+        // .execInteractive's per-call UUID-suffixed exec id on the macOS conformer.
+        let source = "acp-interactive:\(siteID):\(UUID().uuidString.prefix(8))"
         let subscription = await logCenter.subscribe()
         let forwardTask = Task { [source] in
             for await line in subscription.stream {
