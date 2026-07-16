@@ -87,6 +87,14 @@ public enum IntegrationPlanner {
                     return .failure(.missingTemplateAsset(path: from.path))
                 }
                 steps.append(.createFile(relativePath: dest, contents: contents))
+            case .copyTemplatedFile(let from, let to, let when):
+                guard isVisible(when, answers: effective, providerID: providerID) else { continue }
+                let dest = to.resolve(tokens)
+                let src = templateDirectory.appendingPathComponent(from.path)
+                guard let contents = try? String(contentsOf: src, encoding: .utf8) else {
+                    return .failure(.missingTemplateAsset(path: from.path))
+                }
+                steps.append(.createFile(relativePath: dest, contents: Template(contents).resolve(tokens)))
             case .writeConfig(let entries, let when):
                 guard isVisible(when, answers: effective, providerID: providerID) else { continue }
                 steps.append(.upsertConfig(entries.map { ConfigKV(key: $0.key, value: $0.value.resolve(tokens)) }))
@@ -137,7 +145,7 @@ public enum IntegrationPlanner {
     private static func operationReferences(_ token: String, _ op: Operation) -> Bool {
         let needle = "{{\(token)}}"
         switch op {
-        case .copyFile(_, let to, _): return to.raw.contains(needle)
+        case .copyFile(_, let to, _), .copyTemplatedFile(_, let to, _): return to.raw.contains(needle)
         case .writeConfig(let entries, _): return entries.contains { $0.value.raw.contains(needle) }
         case .injectAtAnchor(let file, _, let snippet, _, _): return file.raw.contains(needle) || snippet.raw.contains(needle)
         case .appendLine(let file, let line, _): return file.raw.contains(needle) || line.raw.contains(needle)

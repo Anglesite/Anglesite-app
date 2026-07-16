@@ -3,7 +3,7 @@ public enum IntegrationID: String, Sendable, CaseIterable {
     case tracking, share, podcast
     case indieweb, menu
     case buyButton, lemonSqueezy, paddle, snipcart, shopifyBuyButton
-    case inbox, membership
+    case inbox, membership, carbonTxt
 }
 
 public struct Template: Sendable, Equatable, ExpressibleByStringLiteral {
@@ -12,6 +12,17 @@ public struct Template: Sendable, Equatable, ExpressibleByStringLiteral {
     public init(stringLiteral raw: String) { self.raw = raw }
     public func resolve(_ tokens: [String: String]) -> String {
         var out = raw
+        // A staged text asset can conditionally include a complete optional line or TOML entry
+        // without needing a bespoke operation. Sections are deliberately non-nesting.
+        while let opening = out.range(of: "{{#"),
+              let keyEnd = out[opening.upperBound...].range(of: "}}") {
+            let key = String(out[opening.upperBound..<keyEnd.lowerBound])
+            let closingMarker = "{{/\(key)}}"
+            guard let closing = out[keyEnd.upperBound...].range(of: closingMarker) else { break }
+            let content = String(out[keyEnd.upperBound..<closing.lowerBound])
+            out.replaceSubrange(opening.lowerBound..<closing.upperBound,
+                                with: tokens[key]?.isEmpty == false ? content : "")
+        }
         for (key, value) in tokens {
             out = out.replacingOccurrences(of: "{{\(key)}}", with: value)
         }
@@ -76,6 +87,9 @@ public struct TemplateRef: Sendable, Equatable { public let path: String
 
 public enum Operation: Sendable, Equatable {
     case copyFile(from: TemplateRef, to: Template, when: Condition)
+    /// Copies a staged text asset after resolving its `Template` tokens. This opt-in operation
+    /// keeps ordinary staged assets byte-for-byte intact.
+    case copyTemplatedFile(from: TemplateRef, to: Template, when: Condition)
     case writeConfig([ConfigEntry], when: Condition)
     /// `fromFieldHost` names a `.url`-kind field whose value's host (e.g. a per-site
     /// Cloudflare Worker subdomain) is extracted at plan time and added alongside

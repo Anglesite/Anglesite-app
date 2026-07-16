@@ -18,4 +18,10 @@ import Testing
         let t = Template("{{x}}{{x}}")
         #expect(t.resolve(["x": "ab"]) == "abab")
     }
+
+    @Test func resolvesOptionalSections() {
+        let t = Template("start {{#optional}}value={{optional}}{{/optional}} end")
+        #expect(t.resolve([:]) == "start  end")
+        #expect(t.resolve(["optional": "yes"]) == "start value=yes end")
+    }
 }

@@ -188,6 +188,69 @@ import Foundation
         #expect(rFail == .failure(.missingRequiredField(key: "username")))
     }
 
+    @Test func carbonTxtRendersOptionalDisclosureAndStaticAsset() throws {
+        let template = makeTemplate()
+        let asset = template.appendingPathComponent("integrations/public/carbon.txt")
+        try FileManager.default.createDirectory(at: asset.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "version = \"0.5\"\n{{#disclosureURL}}url = \"{{disclosureURL}}\"\n{{/disclosureURL}}provider = \"{{hostingProvider}}\"\n"
+            .write(to: asset, atomically: true, encoding: .utf8)
+
+        let descriptor = IntegrationCatalog.descriptor(for: .carbonTxt)
+        let withoutDisclosure = try IntegrationPlanner.plan(
+            descriptor: descriptor,
+            answers: ["provenanceURL": "https://www.cloudflare.com/sustainability/"],
+            sourceDirectory: makeSource(), templateDirectory: template
+        ).get()
+        guard case .createFile(let path, let contents) = withoutDisclosure.steps.first else {
+            Issue.record("expected carbon.txt create step")
+            return
+        }
+        #expect(path == "public/carbon.txt")
+        #expect(contents == "version = \"0.5\"\nprovider = \"Cloudflare\"\n")
+
+        let withDisclosure = try IntegrationPlanner.plan(
+            descriptor: descriptor,
+            answers: [
+                "provenanceURL": "https://www.cloudflare.com/sustainability/",
+                "disclosureURL": "https://example.com/sustainability",
+            ],
+            sourceDirectory: makeSource(), templateDirectory: template
+        ).get()
+        guard case .createFile(_, let contents) = withDisclosure.steps.first else {
+            Issue.record("expected carbon.txt create step")
+            return
+        }
+        #expect(contents.contains("url = \"https://example.com/sustainability\""))
+    }
+
+    @Test func ordinaryCopyFileLeavesTemplateMarkersUntouched() throws {
+        let template = makeTemplate()
+        let asset = template.appendingPathComponent("integrations/public/literal.txt")
+        try FileManager.default.createDirectory(at: asset.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "literal {{siteName}} and {{#optional}}markers{{/optional}}"
+            .write(to: asset, atomically: true, encoding: .utf8)
+        let descriptor = IntegrationDescriptor(
+            id: .carbonTxt,
+            displayName: "Test",
+            summary: "",
+            providers: [],
+            fields: [],
+            operations: [.copyFile(from: TemplateRef("integrations/public/literal.txt"),
+                                   to: "public/literal.txt", when: .always)]
+        )
+
+        let plan = try IntegrationPlanner.plan(
+            descriptor: descriptor,
+            answers: [:],
+            sourceDirectory: makeSource(), templateDirectory: template
+        ).get()
+        guard case .createFile(_, let contents) = plan.steps.first else {
+            Issue.record("expected literal create step")
+            return
+        }
+        #expect(contents == "literal {{siteName}} and {{#optional}}markers{{/optional}}")
+    }
+
     @Test func giscusEmitsNoBrandColorWarning() throws {
         let r = try IntegrationPlanner.plan(descriptor: IntegrationCatalog.descriptor(for: .giscus),
             answers: ["repo": "o/r", "repoId": "R", "category": "General", "categoryId": "C", "mapping": "pathname"],
