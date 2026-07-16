@@ -32,7 +32,9 @@ struct WorkerCompositionTests {
         #expect(toml.contains("binding = \"SOCIAL_KV\""))
         #expect(toml.contains("binding = \"ASSETS\""))
         #expect(toml.contains("run_worker_first = true"))
-        #expect(toml.contains("required = [\"TOKEN_SIGNING_KEY\", \"INDIEAUTH_OWNER_PASSWORD\"]"))
+        #expect(toml.contains("# Secrets required for IndieAuth (set with `wrangler secret put <NAME>`):"))
+        #expect(toml.contains("# TOKEN_SIGNING_KEY, INDIEAUTH_OWNER_PASSWORD"))
+        #expect(!toml.contains("[secrets]"))
         #expect(toml.contains("[observability]"))
         #expect(!toml.contains("[[r2_buckets]]"))
     }

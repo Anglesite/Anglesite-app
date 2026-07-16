@@ -78,11 +78,24 @@ function decodeBase64url(value: string): Uint8Array<ArrayBuffer> | null {
   }
 }
 
-async function hmacKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
+/**
+ * Derives a purpose-specific HMAC key from `secret` via HKDF, so that `TOKEN_SIGNING_KEY` — the
+ * one secret provisioned for both consent-token signing and owner-password comparison — yields
+ * independent subkeys per purpose. A weakness or misuse in one purpose's key can't cross over
+ * into the other's.
+ */
+async function deriveKey(secret: string, purpose: string): Promise<CryptoKey> {
+  const baseKey = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
+    "HKDF",
+    false,
+    ["deriveKey"],
+  );
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: new TextEncoder().encode(purpose) },
+    baseKey,
+    { name: "HMAC", hash: "SHA-256", length: 256 },
     false,
     ["sign", "verify"],
   );
@@ -121,7 +134,7 @@ export async function createConsentToken(
   now = Math.floor(Date.now() / 1000),
 ): Promise<string> {
   const payload = new TextEncoder().encode(JSON.stringify(grantFor(request, now + CONSENT_TTL_SECONDS)));
-  const signature = await crypto.subtle.sign("HMAC", await hmacKey(signingKey), payload);
+  const signature = await crypto.subtle.sign("HMAC", await deriveKey(signingKey, "consent-token"), payload);
   return `${base64url(payload)}.${base64url(new Uint8Array(signature))}`;
 }
 
@@ -137,7 +150,7 @@ export async function verifyConsentToken(
   const payload = decodeBase64url(payloadPart);
   const signature = decodeBase64url(signaturePart);
   if (!payload || !signature) return false;
-  if (!(await crypto.subtle.verify("HMAC", await hmacKey(signingKey), signature, payload))) return false;
+  if (!(await crypto.subtle.verify("HMAC", await deriveKey(signingKey, "consent-token"), signature, payload))) return false;
 
   let decoded: unknown;
   try {
@@ -151,7 +164,7 @@ export async function verifyConsentToken(
 }
 
 async function secretsMatch(provided: string, expected: string, comparisonSecret: string): Promise<boolean> {
-  const key = await hmacKey(comparisonSecret);
+  const key = await deriveKey(comparisonSecret, "owner-password-compare");
   const encoder = new TextEncoder();
   const expectedMAC = await crypto.subtle.sign("HMAC", key, encoder.encode(expected));
   // Keep both passwords as message data under one server-controlled key and delegate the MAC
@@ -237,7 +250,11 @@ async function consentRateLimitKey(request: Request): Promise<string> {
 }
 
 async function isConsentRateLimited(request: Request, env: WorkerEnv): Promise<boolean> {
-  if (!env.SOCIAL_KV) return false;
+  if (!env.SOCIAL_KV) {
+    // Fail closed: an unbound KV must never silently disable the limiter.
+    console.warn(JSON.stringify({ event: "indieauth.consent_rate_limit_unavailable" }));
+    return true;
+  }
   const key = await consentRateLimitKey(request);
   const raw = await env.SOCIAL_KV.get(key);
   const count = raw ? Number.parseInt(raw, 10) : 0;
@@ -248,7 +265,7 @@ async function isConsentRateLimited(request: Request, env: WorkerEnv): Promise<b
 
 export async function handleIndieAuthConsent(request: Request, env: WorkerEnv): Promise<Response> {
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405, headers: { allow: "POST" } });
-  if (!env.INDIEAUTH_OWNER_PASSWORD || !env.TOKEN_SIGNING_KEY) {
+  if (!env.INDIEAUTH_OWNER_PASSWORD || !env.TOKEN_SIGNING_KEY || !env.SOCIAL_KV) {
     return new Response("IndieAuth secrets are not configured", { status: 503 });
   }
   if (await isConsentRateLimited(request, env)) return new Response("Too Many Requests", { status: 429 });
@@ -291,7 +308,11 @@ function indieAuthHandler(request: Request, env: WorkerEnv) {
     baseUrl,
     scopesSupported: ["create", "update", "delete", "media"],
     resourceIndicatorPolicy(resource) {
-      return new URL(resource).origin === baseUrl;
+      try {
+        return new URL(resource).origin === baseUrl;
+      } catch {
+        return false;
+      }
     },
     async approveAuthorization(authorization) {
       const consent = new URL(request.url).searchParams.get("consent");

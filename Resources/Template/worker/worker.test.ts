@@ -1,8 +1,17 @@
 import { env } from "cloudflare:workers";
 import { createExecutionContext } from "cloudflare:test";
-import { createIndieAuthStore } from "@dwk/indieauth";
+import { createIndieAuthStore, type AuthorizationRequest } from "@dwk/indieauth";
 import { beforeEach, expect, test } from "vitest";
-import { validateInboxFields, isRateLimited, handleInbox, type InboxKV, type WorkerEnv } from "./worker";
+import {
+  validateInboxFields,
+  isRateLimited,
+  handleInbox,
+  handleIndieAuthConsent,
+  createConsentToken,
+  verifyConsentToken,
+  type InboxKV,
+  type WorkerEnv,
+} from "./worker";
 import worker from "./worker";
 
 const testEnv = env as unknown as WorkerEnv;
@@ -247,4 +256,104 @@ test("IndieAuth consent rejects the wrong owner password", async () => {
     body,
   }));
   expect(response.status).toBe(401);
+});
+
+function sampleAuthorizationRequest(overrides: Partial<AuthorizationRequest> = {}): AuthorizationRequest {
+  return {
+    clientId: "https://client.example/app",
+    redirectUri: "https://client.example/callback",
+    state: "state-355",
+    codeChallenge: "challenge",
+    codeChallengeMethod: "S256",
+    scope: "create",
+    scopes: ["create"],
+    ...overrides,
+  };
+}
+
+test("verifyConsentToken: accepts a token replayed against the exact request it was issued for", async () => {
+  const request = sampleAuthorizationRequest();
+  const token = await createConsentToken(request, "test-signing-key");
+  expect(await verifyConsentToken(token, request, "test-signing-key")).toBe(true);
+});
+
+test("verifyConsentToken: rejects a token replayed against a different client_id", async () => {
+  const granted = sampleAuthorizationRequest();
+  const token = await createConsentToken(granted, "test-signing-key");
+  const tampered = sampleAuthorizationRequest({ clientId: "https://attacker.example/app" });
+  expect(await verifyConsentToken(token, tampered, "test-signing-key")).toBe(false);
+});
+
+test("verifyConsentToken: rejects a token replayed against a different redirect_uri", async () => {
+  const granted = sampleAuthorizationRequest();
+  const token = await createConsentToken(granted, "test-signing-key");
+  const tampered = sampleAuthorizationRequest({ redirectUri: "https://attacker.example/callback" });
+  expect(await verifyConsentToken(token, tampered, "test-signing-key")).toBe(false);
+});
+
+test("verifyConsentToken: rejects a token replayed with an escalated scope", async () => {
+  const granted = sampleAuthorizationRequest();
+  const token = await createConsentToken(granted, "test-signing-key");
+  const tampered = sampleAuthorizationRequest({ scope: "create update delete", scopes: ["create", "update", "delete"] });
+  expect(await verifyConsentToken(token, tampered, "test-signing-key")).toBe(false);
+});
+
+test("verifyConsentToken: rejects a token signed with a different key", async () => {
+  const request = sampleAuthorizationRequest();
+  const token = await createConsentToken(request, "test-signing-key");
+  expect(await verifyConsentToken(token, request, "a-different-signing-key")).toBe(false);
+});
+
+test("verifyConsentToken: rejects an expired token", async () => {
+  const request = sampleAuthorizationRequest();
+  const issuedAt = 1_000;
+  const token = await createConsentToken(request, "test-signing-key", issuedAt);
+  expect(await verifyConsentToken(token, request, "test-signing-key", issuedAt + 301)).toBe(false);
+});
+
+test("handleIndieAuthConsent: 503s when a required secret isn't configured", async () => {
+  const { TOKEN_SIGNING_KEY: _unusedSigningKey, ...envWithoutSigningKey } = testEnv;
+  const request = new Request("https://owner.example/indieauth/consent", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "192.0.2.40" },
+    body: new URLSearchParams({ password: "correct horse battery staple" }),
+  });
+  const response = await handleIndieAuthConsent(request, envWithoutSigningKey as unknown as WorkerEnv);
+  expect(response.status).toBe(503);
+});
+
+test("handleIndieAuthConsent: 503s when the rate-limit KV isn't bound (fails closed, not open)", async () => {
+  const { SOCIAL_KV: _unusedSocialKV, ...envWithoutKV } = testEnv;
+  const request = new Request("https://owner.example/indieauth/consent", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "192.0.2.42" },
+    body: new URLSearchParams({ password: "correct horse battery staple" }),
+  });
+  const response = await handleIndieAuthConsent(request, envWithoutKV as unknown as WorkerEnv);
+  expect(response.status).toBe(503);
+});
+
+test("handleIndieAuthConsent: 400s on a malformed (oversized) form body", async () => {
+  const request = new Request("https://owner.example/indieauth/consent", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "192.0.2.41" },
+    body: `password=${"x".repeat(20_000)}`,
+  });
+  const response = await handleIndieAuthConsent(request, testEnv);
+  expect(response.status).toBe(400);
+});
+
+test("handleIndieAuthConsent: 429s once the per-IP login attempt limit is exceeded", async () => {
+  const makeRequest = () =>
+    new Request("https://owner.example/indieauth/consent", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "192.0.2.43" },
+      body: new URLSearchParams({ password: "incorrect" }),
+    });
+  for (let i = 0; i < 5; i++) {
+    const response = await handleIndieAuthConsent(makeRequest(), testEnv);
+    expect(response.status).toBe(401);
+  }
+  const limited = await handleIndieAuthConsent(makeRequest(), testEnv);
+  expect(limited.status).toBe(429);
 });

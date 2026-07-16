@@ -168,8 +168,12 @@ public enum WorkerComposition {
 
         if features.contains(.indieauth) {
             lines.append("")
-            lines.append("[secrets]")
-            lines.append("required = [\"TOKEN_SIGNING_KEY\", \"INDIEAUTH_OWNER_PASSWORD\"]")
+            // Wrangler has no schema for declaring required secrets in wrangler.toml — secrets are
+            // set with `wrangler secret put <NAME>` and are never read back out of this file. Emit
+            // this as a comment (not a `[secrets]` table) so it can't be mistaken for a config key
+            // wrangler validates or fail on.
+            lines.append("# Secrets required for IndieAuth (set with `wrangler secret put <NAME>`):")
+            lines.append("# TOKEN_SIGNING_KEY, INDIEAUTH_OWNER_PASSWORD")
         }
 
         if hasSocialFeatures || inboxCaptureEnabled {
