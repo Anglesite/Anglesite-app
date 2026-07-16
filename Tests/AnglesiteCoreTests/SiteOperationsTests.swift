@@ -148,6 +148,7 @@ struct SiteOperationsTests {
         #expect(await recorder.arguments == [
             ["d1", "create", "blue-bottle-cafe-social", "--json"],
             ["kv", "namespace", "create", "blue-bottle-cafe-social", "--json"],
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"],
         ])
         #expect(await recorder.deployCalls == [
             .init(token: "token", siteID: "s1", siteDirectory: package.appendingPathComponent("Source", isDirectory: true))

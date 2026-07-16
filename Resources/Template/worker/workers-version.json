@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Pinned @dwk/workers version range for this template. Read by Anglesite during scaffold and social-feature enablement. Updated when a new @dwk/workers release ships.",
-  "version": "0.0.0",
-  "range": "^0.0.0",
-  "note": "@dwk/workers is pre-release (0.0.0). Social features (V-2+) are gated on conformance; this pin tracks the monorepo version the template was tested against.",
+  "version": "0.1.0-beta.3",
+  "range": "0.1.0-beta.3",
+  "note": "IndieAuth is pinned to the exact published beta verified by the template Worker integration suite; later social packages remain gated on their conformance status.",
   "packages": {
-    "@dwk/indieauth": "^0.0.0",
+    "@dwk/indieauth": "0.1.0-beta.3",
     "@dwk/webmention": "^0.0.0",
     "@dwk/micropub": "^0.0.0",
     "@dwk/websub": "^0.0.0",

@@ -94,7 +94,8 @@ public enum WorkerComposition {
         }
         var lines: [String] = []
         lines.append("name = \"\(siteName)\"")
-        lines.append("compatibility_date = \"2025-01-01\"")
+        lines.append("compatibility_date = \"2026-07-15\"")
+        lines.append("compatibility_flags = [\"nodejs_compat\"]")
 
         let hasSocialFeatures = !features.isEmpty
         if hasSocialFeatures || inboxCaptureEnabled {
@@ -103,12 +104,32 @@ public enum WorkerComposition {
         lines.append("")
         lines.append("[assets]")
         lines.append("directory = \"dist\"")
+        if hasSocialFeatures || inboxCaptureEnabled {
+            lines.append("binding = \"ASSETS\"")
+            lines.append("run_worker_first = true")
+        }
 
         if features.contains(where: { $0.needsD1 }) {
             lines.append("")
             lines.append("[[d1_databases]]")
             lines.append("binding = \"DB\"")
             lines.append("database_name = \"\(siteName)-social\"")
+            if let id = resources.d1DatabaseID, !id.isEmpty {
+                lines.append("database_id = \"\(id)\"")
+            } else {
+                lines.append("database_id = \"\"  # filled by provisioning")
+            }
+        }
+
+        // @dwk/indieauth's binding name is part of its public composition contract. Keep the
+        // generic DB binding above for the other @dwk packages, while binding the same per-site
+        // D1 database under AUTH_DB for authorization codes and issued-token state.
+        if features.contains(.indieauth) {
+            lines.append("")
+            lines.append("[[d1_databases]]")
+            lines.append("binding = \"AUTH_DB\"")
+            lines.append("database_name = \"\(siteName)-social\"")
+            lines.append("migrations_dir = \"worker/migrations\"")
             if let id = resources.d1DatabaseID, !id.isEmpty {
                 lines.append("database_id = \"\(id)\"")
             } else {
@@ -143,6 +164,23 @@ public enum WorkerComposition {
             } else {
                 lines.append("id = \"\"  # filled by provisioning")
             }
+        }
+
+        if features.contains(.indieauth) {
+            lines.append("")
+            // Wrangler has no schema for declaring required secrets in wrangler.toml — secrets are
+            // set with `wrangler secret put <NAME>` and are never read back out of this file. Emit
+            // this as a comment (not a `[secrets]` table) so it can't be mistaken for a config key
+            // wrangler validates or fail on.
+            lines.append("# Secrets required for IndieAuth (set with `wrangler secret put <NAME>`):")
+            lines.append("# TOKEN_SIGNING_KEY, INDIEAUTH_OWNER_PASSWORD")
+        }
+
+        if hasSocialFeatures || inboxCaptureEnabled {
+            lines.append("")
+            lines.append("[observability]")
+            lines.append("enabled = true")
+            lines.append("head_sampling_rate = 1")
         }
 
         lines.append("")

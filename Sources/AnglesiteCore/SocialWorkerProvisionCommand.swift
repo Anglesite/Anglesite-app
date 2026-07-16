@@ -152,6 +152,22 @@ public actor SocialWorkerProvisionCommand {
             return failure
         }
 
+        // @dwk/indieauth deliberately keeps schema deployment outside its request handler. Apply
+        // the committed D1 migrations after wrangler.toml contains the concrete database id and
+        // before publishing code that can receive authorization requests.
+        if features.contains(.indieauth) {
+            let result = await runWrangler(
+                siteDirectory: siteDirectory,
+                arguments: ["d1", "migrations", "apply", "AUTH_DB", "--remote"],
+                environment: environment,
+                source: source,
+                resources: resources
+            )
+            if case .failure(let failure) = result {
+                return failure
+            }
+        }
+
         switch await deployer(token, siteID, siteDirectory) {
         case .succeeded(let url, _):
             return .succeeded(url: url, resources: resources, duration: Date().timeIntervalSince(started))

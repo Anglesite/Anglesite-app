@@ -53,7 +53,7 @@ import EsiRemove from "../components/esi/EsiRemove.astro";
     const distFiles = await readdir(join(fixtureDir, "dist"), { recursive: true, withFileTypes: true });
     for (const entry of distFiles) {
       if (!entry.isFile()) continue;
-      const filePath = join(entry.parentPath ?? entry.path, entry.name);
+      const filePath = join(entry.parentPath, entry.name);
       const contents = await readFile(filePath, "utf8").catch(() => "");
       assert.ok(
         !contents.includes("resolveEsiFragments"),

@@ -63,9 +63,11 @@ struct SiteIdentityRenderSmokeTests {
             try await build()
             let biz = try indexHTML()
             #expect(biz.contains("h-card"))
+            #expect(biz.contains("rel=\"indieauth-metadata\""))
             #expect(biz.contains("p-name"))
             #expect(biz.contains("p-tel"))
             #expect(biz.contains("p-street-address"))
+            #expect(biz.contains("rel=\"me\""))
 
             // 3. Personal profile → h-card without business-only address mf2.
             try writeProfile("""

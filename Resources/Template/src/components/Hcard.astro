@@ -27,7 +27,7 @@ const hours: string[] = Array.isArray(profile?.hours) ? profile.hours : [];
           {profile.postalCode && <span class="p-postal-code">{profile.postalCode}</span>}
         </p>
       )}
-      {profile.url && <a class="u-url" href={profile.url}>{profile.url}</a>}
+      {profile.url && <a class="u-url" rel="me" href={profile.url}>{profile.url}</a>}
       {hours.length > 0 && (
         <ul class="hours">{hours.map((h) => <li>{h}</li>)}</ul>
       )}
