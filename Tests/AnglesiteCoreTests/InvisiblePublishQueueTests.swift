@@ -38,16 +38,22 @@ private actor GatedPublishProbe {
     }
 }
 
-@Suite("Invisible publish queue")
+// Serialized: each test drives real debounce timers, and running them
+// concurrently with each other amplifies scheduler starvation under
+// `swift test --parallel` on loaded CI runners (#762).
+@Suite("Invisible publish queue", .serialized)
 struct InvisiblePublishQueueTests {
     @Test("idle edits debounce into one publish")
     func debouncesEdits() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let probe = PublishProbe()
+        // The debounce window must be comfortably wider than the sleeps
+        // between edits, or a stalled scheduler can let the timer fire
+        // mid-sequence and split the edits into two publishes (#762).
         let queue = InvisiblePublishQueue(
             configDirectory: directory,
-            debounce: .milliseconds(30),
+            debounce: .milliseconds(250),
             publisher: { await probe.publish() }
         )
 
@@ -159,8 +165,12 @@ struct InvisiblePublishQueueTests {
         return url
     }
 
+    /// Polls `condition` until it holds or `timeout` elapses. The deadline is
+    /// deliberately generous: it only bounds how long a genuine failure hangs,
+    /// while a passing test returns as soon as the condition is met — a tight
+    /// deadline just makes the suite flaky under parallel CI load (#762).
     private func waitUntil(
-        timeout: Duration = .seconds(2),
+        timeout: Duration = .seconds(30),
         condition: @escaping @Sendable () async -> Bool
     ) async throws {
         let clock = ContinuousClock()
