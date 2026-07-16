@@ -37,12 +37,32 @@ rsync -a \
     --exclude='.wrangler/' \
     "$TEMPLATE_SRC/" "$FIXTURE_DIR/"
 
-NPM=npm
-echo "==> using PATH npm"
-
 cd "$FIXTURE_DIR"
-echo "==> $NPM install --no-audit --no-fund --prefer-offline"
-"$NPM" install --no-audit --no-fund --prefer-offline
+echo "==> npm install --no-audit --no-fund --prefer-offline"
+npm install --no-audit --no-fund --prefer-offline
+
+# The app refuses to preview a repo-less site (git is the source of truth, #72), and
+# File ▸ Import doesn't bootstrap a repo either (#720) — so without a commit here the
+# runbook flow (create-smoke-fixture.sh → Import → preview) dead-ends. The template's
+# .gitignore (#719) keeps node_modules/ and build outputs out of the commit. Fixture-local
+# `-c` identity values keep this working on machines with no global git identity.
+if [[ ! -d .git ]]; then
+    echo "==> git init"
+    git init -q
+fi
+git add -A
+if ! git diff --cached --quiet; then
+    if git rev-parse -q --verify HEAD >/dev/null; then
+        COMMIT_MSG="Refresh fixture from template"
+    else
+        COMMIT_MSG="Initial fixture"
+    fi
+    echo "==> git commit: $COMMIT_MSG"
+    git -c user.name="Anglesite Smoke Fixture" \
+        -c user.email="smoke-fixture@anglesite.invalid" \
+        -c commit.gpgsign=false \
+        commit -q -m "$COMMIT_MSG"
+fi
 
 # ----- Real-signed sandbox validation -----
 # A real Apple Development identity is required — the App Sandbox entitlements are NOT
@@ -55,15 +75,39 @@ if ! security find-identity -v -p codesigning | grep -q "Apple Development"; the
     exit 1
 fi
 
-# Derive the 10-char Team ID from the first USABLE signing identity. `find-identity -v`
-# lists only certs that have a private key on this machine — unlike `find-certificate`,
-# which also returns stale/foreign certs (e.g. a revoked org cert) with no key, picking
-# the wrong team and failing the build. Override with DEVELOPMENT_TEAM=... for multi-team.
-DEV_TEAM="${DEVELOPMENT_TEAM:-$(security find-identity -v -p codesigning \
-    | grep "Apple Development" | head -1 \
-    | grep -oE '\([A-Z0-9]{10}\)' | tr -d '()')}"
-if [[ -z "$DEV_TEAM" ]]; then
-    echo "error: couldn't derive the Apple Development Team ID; set DEVELOPMENT_TEAM=..." >&2
+# Derive the 10-char Team ID from the first USABLE signing identity's certificate OU.
+# The "(XXXXXXXXXX)" parenthetical in the identity's common name is NOT the Team ID for
+# Apple Development certs — it's a certificate/machine ID (e.g. KH7H8Y25RT on a machine
+# whose real Personal-Team OU is UX3L9R8RSL), and passing it as DEVELOPMENT_TEAM fails
+# the build with 'No Account for Team'. `find-identity -v` picks the identity (it lists
+# only certs that have a private key on this machine — unlike `find-certificate`, which
+# also returns stale/foreign certs with no key); the OU of that identity's certificate
+# is the Team ID. The cert is re-fetched by the SHA-1 fingerprint `find-identity`
+# printed — never re-looked-up by name, which could match a stale/renewed cert with the
+# identical common name. Override with DEVELOPMENT_TEAM=... for multi-team setups.
+IDENTITY_CN=""
+if [[ -z "${DEVELOPMENT_TEAM:-}" ]]; then
+    IDENTITY_LINE=$(security find-identity -v -p codesigning \
+        | grep "Apple Development" | head -1)
+    IDENTITY_SHA1=$(echo "$IDENTITY_LINE" | awk '{print $2}')
+    IDENTITY_CN=$(echo "$IDENTITY_LINE" | sed -E 's/^[^"]*"([^"]+)".*$/\1/')
+    DEV_TEAM=$(security find-certificate -a -c "$IDENTITY_CN" -Z -p 2>/dev/null \
+        | awk -v want="$IDENTITY_SHA1" '
+            /^SHA-1 hash:/ { keep = ($3 == want) }
+            /-----BEGIN CERTIFICATE-----/ { inpem = 1 }
+            inpem && keep { print }
+            /-----END CERTIFICATE-----/ { inpem = 0 }' \
+        | openssl x509 -noout -subject -nameopt multiline 2>/dev/null \
+        | awk '$1 == "organizationalUnitName" { print $3; exit }')
+else
+    DEV_TEAM="$DEVELOPMENT_TEAM"
+fi
+if [[ ! "$DEV_TEAM" =~ ^[A-Z0-9]{10}$ ]]; then
+    echo "error: couldn't derive a valid 10-char Team ID${IDENTITY_CN:+ from identity \"$IDENTITY_CN\"} (got '${DEV_TEAM:-}')." >&2
+    echo "       Set DEVELOPMENT_TEAM=<team-id> and re-run. Find your Team ID with:" >&2
+    echo "         security find-certificate -c \"Apple Development\" -p \\" >&2
+    echo "           | openssl x509 -noout -subject      # the OU field is the Team ID" >&2
+    echo "       or at https://developer.apple.com/account → Membership details." >&2
     exit 1
 fi
 
