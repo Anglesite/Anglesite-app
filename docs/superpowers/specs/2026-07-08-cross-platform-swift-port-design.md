@@ -79,6 +79,18 @@ Notes:
 
 ## 6. UI + preview per platform
 
+### Platform UX quality bar
+
+The shared core provides capability and business behavior; it does **not** prescribe a lowest-common-denominator interface. Each shell must implement the platform's interaction model and pass the applicable release checklist:
+
+| Target | Required standard | Shell implication |
+|---|---|---|
+| macOS | [`mac-assed-app-spec.md`](../../mac-assed-app-spec.md) | Preserve standard menu, keyboard, document/window, Finder, VoiceOver, and AppKit/SwiftUI behavior. |
+| Windows | [`windows-assed-app-spec.md`](../../windows-assed-app-spec.md) | Use Windows command, taskbar, File Explorer, accessibility, DPI/multi-monitor, and package-manager behavior. |
+| Linux | [`linux-assed-app-spec.md`](../../linux-assed-app-spec.md) | Target Ubuntu GNOME intentionally while maintaining freedesktop.org interoperability, Wayland, portals, XDG paths, Orca access, and package-confinement correctness. |
+
+A platform shell may adapt navigation, commands, windowing, file access, settings, notifications, and system integration to its platform. Shared models should expose capabilities and intent, not force a macOS-specific or generic-web presentation. Any deliberate departure from an applicable standard must be recorded in the feature design and shown to be clearer, accessible, reversible, and task-appropriate.
+
 ### Linux — GTK4/libadwaita via Adwaita for Swift
 
 - [Adwaita for Swift](https://git.aparoksha.dev/aparoksha/adwaita-swift) (aparoksha, actively maintained as of March 2026) provides a SwiftUI-like declarative API over GTK4/libadwaita — the closest idiomatic target for translating view structure. `@Observable` core models are consumed through its state system.
