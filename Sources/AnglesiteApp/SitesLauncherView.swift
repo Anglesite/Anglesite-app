@@ -61,6 +61,7 @@ struct SitesLauncherView: View {
             }
         }
         .task { await onFirstAppear() }
+        .task { await observeChanges() }
         .onChange(of: router.newSiteRequested) { _, requested in
             guard requested else { return }
             router.clearNewSiteRequest()
@@ -145,12 +146,20 @@ struct SitesLauncherView: View {
                 .padding(.vertical, 2)
             }
             .buttonStyle(.plain)
-            .disabled(!site.isValid)
-            .accessibilityValue(site.isValid ? "Valid" : "Missing required files")
-            .help(site.isValid
-                  ? "Open \(site.name) in its own window"
-                  : "Site is missing required files: \(site.missingSentinels.joined(separator: ", "))")
+            // A dead bookmark (needsReauthorization) still lets the row respond to a click — it
+            // routes to the same "Locate…" recovery as the context-menu action — rather than
+            // going fully dead with no way to fix it in place (#776).
+            .disabled(!site.isValid && !site.needsReauthorization)
+            .accessibilityValue(site.isValid
+                                 ? "Valid"
+                                 : (site.needsReauthorization ? "Needs re-authorization" : "Missing required files"))
+            .help(helpText(for: site))
             .contextMenu {
+                if site.needsReauthorization {
+                    Button("Locate…", systemImage: "questionmark.folder") {
+                        Task { await reauthorize(site) }
+                    }
+                }
                 Button("Rename…", systemImage: "pencil") {
                     promptRename(site)
                 }
@@ -262,9 +271,40 @@ struct SitesLauncherView: View {
 
     // MARK: - Actions
 
+    /// The row tooltip: names the actual problem rather than a generic disabled state. A dead
+    /// bookmark (needsReauthorization) is not the same failure as missing project files, and
+    /// reporting it as such sends owners chasing a fix that doesn't exist (#776).
+    private func helpText(for site: SiteStore.Site) -> String {
+        if site.isValid {
+            return "Open \(site.name) in its own window"
+        }
+        if site.needsReauthorization {
+            return "Anglesite lost access to this site, likely after a restart. Click to relocate it and restore access."
+        }
+        return "Site is missing required files: \(site.missingSentinels.joined(separator: ", "))"
+    }
+
     private func open(site: SiteStore.Site) {
+        guard site.isValid else {
+            Task { await reauthorize(site) }
+            return
+        }
         openWindow(value: site.id)
         dismissWindow()
+    }
+
+    /// Re-grant access to `site` (#776) via `SiteActions.reauthorize` — an `NSOpenPanel` anchored
+    /// at its last-known path, confirmed to be the same package by marker UUID. A successful heal
+    /// reaches this view through `observeChanges()`'s `SiteStore.changeStream()` subscription, so
+    /// there's no need to patch `sites` here directly; go ahead and open the now-healed site.
+    private func reauthorize(_ site: SiteStore.Site) async {
+        do {
+            guard let healed = try await SiteActions.reauthorize(site) else { return }
+            openWindow(value: healed.id)
+            dismissWindow()
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 
     /// Raise the remove-confirmation dialog for `site`. `siteToRemoveName` is captured here so the
@@ -452,6 +492,17 @@ struct SitesLauncherView: View {
             loadError = nil
         } catch {
             loadError = "\(error)"
+        }
+    }
+
+    /// Mirrors `RecentSitesModel`'s subscription: keeps the launcher's list live across any
+    /// registry mutation from elsewhere in the app — Open Site…, the Dock menu, drag-drop, or a
+    /// "Locate…" reauthorization — not just this view's own `refreshSites()` calls. Before this,
+    /// a site opened successfully via ⌘O in the same session still showed ⚠ here until the next
+    /// manual reload (#776).
+    private func observeChanges() async {
+        for await updated in SiteStore.shared.changeStream() {
+            sites = updated
         }
     }
 }
