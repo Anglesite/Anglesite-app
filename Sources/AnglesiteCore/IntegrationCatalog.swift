@@ -30,7 +30,7 @@ public extension IntegrationDescriptor {
         }
         for (i, op) in operations.enumerated() {
             switch op {
-            case .copyFile(_, _, let w), .writeConfig(_, let w), .injectAtAnchor(_, _, _, let w, _), .appendLine(_, _, let w):
+            case .copyFile(_, _, let w), .copyTemplatedFile(_, _, let w), .writeConfig(_, let w), .injectAtAnchor(_, _, _, let w, _), .appendLine(_, _, let w):
                 check(w, "operation \(i)")
             case .addCSPDomains(let fromProvider, _, let fromFieldHost, let w):
                 check(w, "operation \(i)")
@@ -52,7 +52,7 @@ public enum IntegrationCatalog {
         tracking, share, podcast,
         indieweb, menu,
         buyButton, lemonSqueezy, paddle, snipcart, shopifyBuyButton,
-        inbox, membership,
+        inbox, membership, carbonTxt,
     ]
 
     public static func descriptor(for id: IntegrationID) -> IntegrationDescriptor {
@@ -684,5 +684,29 @@ public enum IntegrationCatalog {
             .writeConfig([
                 ConfigEntry(key: "MEMBERSHIP_DIRECTORY_TITLE", value: "{{directoryTitle}}"),
             ], when: .always),
+        ])
+
+    // MARK: carbon.txt
+    static let carbonTxt = IntegrationDescriptor(
+        id: .carbonTxt,
+        displayName: "carbon.txt",
+        summary: "Publish a machine-readable sustainability disclosure at /carbon.txt.",
+        providers: [],
+        fields: [
+            Field(key: "hostingProvider", label: "Hosting provider", kind: .text,
+                  defaultValue: "Cloudflare",
+                  help: "The provider responsible for hosting this site."),
+            Field(key: "hostingProviderDomain", label: "Hosting provider domain", kind: .text,
+                  defaultValue: "cloudflare.com",
+                  help: "The provider’s public domain, without https:// or a path."),
+            Field(key: "provenanceURL", label: "Hosting sustainability source", kind: .url,
+                  help: "A link to the provider’s sustainability report, certification, or Green Web Check result."),
+            Field(key: "disclosureURL", label: "Organisation disclosure URL", kind: .url,
+                  isOptional: true,
+                  help: "Optional link to your organisation’s own sustainability disclosure."),
+        ],
+        operations: [
+            .copyTemplatedFile(from: TemplateRef("integrations/public/carbon.txt"),
+                               to: "public/carbon.txt", when: .always),
         ])
 }

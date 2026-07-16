@@ -1,0 +1,13 @@
+version = "0.5"
+
+# Hosting provider: {{hostingProvider}}
+[org]
+disclosures = [
+  { doc_type = "web-page", url = "{{provenanceURL}}", title = "{{hostingProvider}} sustainability source" },
+{{#disclosureURL}}  { doc_type = "web-page", url = "{{disclosureURL}}", title = "Organisation sustainability disclosure" },
+{{/disclosureURL}}]
+
+[upstream]
+services = [
+  { domain = "{{hostingProviderDomain}}", service_type = "shared-hosting" },
+]

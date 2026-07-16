@@ -9,7 +9,7 @@ import Testing
             .tracking, .share, .podcast,
             .indieweb, .menu,
             .buyButton, .lemonSqueezy, .paddle, .snipcart, .shopifyBuyButton,
-            .inbox, .membership,
+            .inbox, .membership, .carbonTxt,
         ]))
     }
 
@@ -285,6 +285,20 @@ import Testing
     @Test func membershipWritesDirectoryTitle() {
         let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .membership))
         #expect(keys.contains("MEMBERSHIP_DIRECTORY_TITLE"))
+    }
+
+    @Test func carbonTxtScaffoldsAStaticPublicFileWithoutCSP() {
+        let carbon = IntegrationCatalog.descriptor(for: .carbonTxt)
+        #expect(carbon.providers.isEmpty)
+        #expect(carbon.operations.contains {
+            if case .copyTemplatedFile(let from, let to, let when) = $0 {
+                return from.path == "integrations/public/carbon.txt"
+                    && to.raw == "public/carbon.txt"
+                    && when == .always
+            }
+            return false
+        })
+        #expect(!carbon.operations.contains { if case .addCSPDomains = $0 { return true }; return false })
     }
 
     @Test func redirectsHasNoProvidersAndAppendsToRedirectsFile() {
