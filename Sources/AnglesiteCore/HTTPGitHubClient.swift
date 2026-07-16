@@ -21,12 +21,8 @@ public enum GitHubRepoAPIError: Error, Equatable, Sendable {
 /// sandbox-safe Publish-to-GitHub path: `gh repo create` shells out and MAS users generally
 /// won't have `gh` installed at all.
 ///
-/// **Not yet wired into `RepoBootstrap`/`RepoProvider`.** `createRepo` only creates the remote
-/// repository — it does not (and today cannot) wire `origin` in the local repo or push to it.
-/// SwiftGit2 has no `addRemote`/`push` at the pinned revision (both land together in #659, shared
-/// with #653); wiring this client into a `RepoProvider` before then would let `RepoBootstrap`
-/// silently create an empty orphan GitHub repo with no way to push content into it. Wire it up
-/// once #659 merges.
+/// `createRepo` only creates the remote repository — wiring `origin` and pushing into it is
+/// `HTTPRepoProvider`'s job, using SwiftGit2's `addRemote`/`push` (#659).
 public struct HTTPGitHubClient: Sendable {
     private static let base = "https://api.github.com"
     private let transport: GitHubAPITokenVerifier.Transport
