@@ -680,10 +680,21 @@ struct ComponentEditorView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                // `.id(codeZone)` forces SwiftUI to tear down and recreate this
+                // NSViewRepresentable (fresh Coordinator, fresh STTextView, fresh NeonPlugin) on
+                // every tab switch, rather than reusing the same underlying view/coordinator
+                // across zones. Without it, `makeCoordinator`/`makeNSView` run exactly once for
+                // the lifetime of this view's position in the tree: the coordinator's captured
+                // `text` binding and the plugin's `language` would both stay pinned to whichever
+                // zone was active at first mount, so typing after switching tabs would silently
+                // write into the wrong zone's draft and highlight with the wrong grammar (PR
+                // #774 review). Recreating the view on zone change does mean losing cursor/scroll
+                // position when switching tabs — an acceptable tradeoff over misrouted edits.
                 ComponentCodeEditorView(
                     text: codeDraftBinding(codeZone),
                     language: codeZone.language
                 )
+                .id(codeZone)
                 .frame(height: 160)
                 .border(.separator)
                 HStack {
