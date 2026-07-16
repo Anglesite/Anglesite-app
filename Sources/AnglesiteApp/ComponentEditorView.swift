@@ -4,6 +4,7 @@ import AnglesiteCore
 import AnglesiteBridge
 import STTextView
 import STPluginNeon
+import TreeSitterResource
 
 /// Component Editor: outline + harness canvas + inspector (with interactive Styles panel and structure edits).
 struct ComponentEditorView: View {
@@ -1076,7 +1077,7 @@ private struct ComponentCodeEditorView: NSViewRepresentable {
 
         func textViewDidChangeText(_ notification: Notification) {
             guard !isProgrammaticUpdate, let textView = notification.object as? STTextView else { return }
-            text.wrappedValue = textView.text
+            text.wrappedValue = textView.text ?? ""
         }
     }
 
