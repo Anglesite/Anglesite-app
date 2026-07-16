@@ -317,8 +317,14 @@ packageDependencies.append(
 packageDependencies.append(
     .package(url: "https://github.com/krzyzanowskim/STTextView", from: "2.3.10")
 )
+// Pinned to a commit, not `from:` — STTextView-Plugin-Neon's own manifest depends on Neon by
+// `revision:` (Neon has no tagged SPM releases), and SwiftPM refuses to resolve a stable-version
+// (`from:`) requirement on a package that itself depends on an unstable-version package. Pinning
+// by revision here (rather than tracking `branch: "main"`) matches the SwiftGit2 policy above:
+// deliberate bumps only, no silently picking up unreviewed future commits. This is tag 0.8.1's
+// commit.
 packageDependencies.append(
-    .package(url: "https://github.com/krzyzanowskim/STTextView-Plugin-Neon", from: "0.8.1")
+    .package(url: "https://github.com/krzyzanowskim/STTextView-Plugin-Neon", revision: "5a30db4ce7908a5414e7b499e2379bdc49991cd1")
 )
 #endif
 
