@@ -58,6 +58,78 @@ struct LocalContainerSiteRuntimeTests {
         #expect(controller.activeLeaseCount == 0)
     }
 
+    /// Thread-safe begin/release counter for `ActivityAssertion.Lease` — mirrors
+    /// `SuddenTerminationController`'s injectability but with independent per-call leases (no
+    /// shared ref-count to assert on), so the test asserts the counts balance instead.
+    private final class ActivityAssertionCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private(set) var beginCount = 0
+        private(set) var releaseCount = 0
+
+        func beginActivity(_ reason: String) -> ActivityAssertion.Lease {
+            lock.lock(); beginCount += 1; lock.unlock()
+            return ActivityAssertion.Lease(onRelease: { [weak self] in
+                guard let self else { return }
+                self.lock.lock(); self.releaseCount += 1; self.lock.unlock()
+            })
+        }
+    }
+
+    @Test("a successful boot begins and releases exactly one activity assertion")
+    func successfulBootBalancesActivityAssertion() async {
+        let counter = ActivityAssertionCounter()
+        let fake = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let runtime = LocalContainerSiteRuntime(
+            ref: "HEAD",
+            control: fake,
+            mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
+            connect: { _, _ in },
+            beginActivity: counter.beginActivity
+        )
+
+        await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+        #expect(counter.beginCount == 1)
+        #expect(counter.releaseCount == 1)
+    }
+
+    @Test("a failed boot does not leak its activity assertion")
+    func failedBootDoesNotLeakActivityAssertion() async {
+        let counter = ActivityAssertionCounter()
+        let fake = FakeLocalContainerControl(startResult: .failure(.bootFailed("no boot")))
+        let runtime = LocalContainerSiteRuntime(
+            ref: "HEAD",
+            control: fake,
+            mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
+            connect: { _, _ in },
+            beginActivity: counter.beginActivity
+        )
+
+        await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+        #expect(counter.beginCount == 1)
+        #expect(counter.releaseCount == 1)
+    }
+
+    @Test("stop() after a successful boot does not double-release the (already-released) activity assertion")
+    func stopAfterBootDoesNotDoubleReleaseActivityAssertion() async {
+        // The activity assertion is scoped to the boot window only — it's released as soon as
+        // .ready is reached, unlike suddenTerminationLease, which lives on as
+        // containerTerminationLease until stop(). This just confirms stop() doesn't touch it again.
+        let counter = ActivityAssertionCounter()
+        let fake = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let runtime = LocalContainerSiteRuntime(
+            ref: "HEAD",
+            control: fake,
+            mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
+            connect: { _, _ in },
+            beginActivity: counter.beginActivity
+        )
+
+        await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+        await runtime.stop()
+        #expect(counter.beginCount == 1)
+        #expect(counter.releaseCount == 1)
+    }
+
     @Test("start settles to .ready with the preview URL")
     func startReady() async {
         let (rt, _) = makeRuntime(.success(Self.ok))
