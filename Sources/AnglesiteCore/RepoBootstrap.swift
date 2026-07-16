@@ -7,11 +7,12 @@ import SwiftGit2
 /// delegates the create-remote-and-push step to a `RepoProvider`. See #68 / the design doc.
 ///
 /// The git `origin` is the source of truth for published state — `remote(of:)` reads it; nothing
-/// is persisted app-side. On Darwin, the preflight (`remote(of:)`, `ensureCommittable`) runs
-/// in-process via SwiftGit2 — `/usr/bin/git` cannot execute at all under App Sandbox (#640/#654).
-/// `RepoCommandRunner` remains the seam for the remaining subprocess calls (off-Darwin preflight,
-/// and `GHRepoProvider`'s `gh`/`git remote get-url` calls, which are a separate, still-blocked
-/// half of #654 pending SwiftGit2 `addRemote`/`push` support, #659).
+/// is persisted app-side. On Darwin, the preflight (`remote(of:)`, `ensureCommittable`) *and* the
+/// create-remote-and-push step run in-process — `/usr/bin/git` cannot execute at all under App
+/// Sandbox (#640/#654), and MAS users generally won't have `gh` installed either. `.live()` picks
+/// `HTTPRepoProvider` (REST API + SwiftGit2 `addRemote`/`push`, #654) on Darwin and `GHRepoProvider`
+/// (subprocess `gh`/`git`) elsewhere, where there's no sandbox to route around.
+/// `RepoCommandRunner` remains the seam `GHRepoProvider` and the off-Darwin preflight fallback use.
 public actor RepoBootstrap {
     public enum Step: Sendable, Equatable { case checkingRemote, initializing, committing, creatingRepo, pushing }
 
@@ -244,8 +245,10 @@ public actor RepoBootstrap {
         }
     }
 
-    /// Production wiring: `git`/`gh` run through `ProcessSupervisor.shared.run`. The one-shot `run`
-    /// path captures rather than streams, so the runner forwards captured stdout/stderr to
+    /// Production wiring. On Darwin, repo creation + push run in-process via `HTTPRepoProvider`
+    /// (#654) — `runner` still exists for the off-Darwin `RepoProvider`/preflight fallback, so it's
+    /// always built. Off-Darwin, `git`/`gh` run through `ProcessSupervisor.shared.run`; the one-shot
+    /// `run` path captures rather than streams, so the runner forwards captured stdout/stderr to
     /// `LogCenter` itself — per CLAUDE.md "logs are sacred", every spawned subprocess must reach
     /// the debug pane.
     public static func live(supervisor: ProcessSupervisor = .shared, logCenter: LogCenter = .shared) -> RepoBootstrap {
@@ -256,6 +259,10 @@ public actor RepoBootstrap {
             if !result.stderr.isEmpty { await logCenter.append(source: source, stream: .stderr, text: result.stderr) }
             return result
         }
+        #if canImport(Darwin)
+        return RepoBootstrap(provider: HTTPRepoProvider(), run: runner)
+        #else
         return RepoBootstrap(provider: GHRepoProvider(run: runner), run: runner)
+        #endif
     }
 }
