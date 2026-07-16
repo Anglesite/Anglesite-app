@@ -82,13 +82,21 @@ fi
 # the build with 'No Account for Team'. `find-identity -v` picks the identity (it lists
 # only certs that have a private key on this machine — unlike `find-certificate`, which
 # also returns stale/foreign certs with no key); the OU of that identity's certificate
-# is the Team ID. Override with DEVELOPMENT_TEAM=... for multi-team setups.
+# is the Team ID. The cert is re-fetched by the SHA-1 fingerprint `find-identity`
+# printed — never re-looked-up by name, which could match a stale/renewed cert with the
+# identical common name. Override with DEVELOPMENT_TEAM=... for multi-team setups.
 IDENTITY_CN=""
 if [[ -z "${DEVELOPMENT_TEAM:-}" ]]; then
-    IDENTITY_CN=$(security find-identity -v -p codesigning \
-        | grep "Apple Development" | head -1 \
-        | sed -E 's/^[^"]*"([^"]+)".*$/\1/')
-    DEV_TEAM=$(security find-certificate -c "$IDENTITY_CN" -p 2>/dev/null \
+    IDENTITY_LINE=$(security find-identity -v -p codesigning \
+        | grep "Apple Development" | head -1)
+    IDENTITY_SHA1=$(echo "$IDENTITY_LINE" | awk '{print $2}')
+    IDENTITY_CN=$(echo "$IDENTITY_LINE" | sed -E 's/^[^"]*"([^"]+)".*$/\1/')
+    DEV_TEAM=$(security find-certificate -a -c "$IDENTITY_CN" -Z -p 2>/dev/null \
+        | awk -v want="$IDENTITY_SHA1" '
+            /^SHA-1 hash:/ { keep = ($3 == want) }
+            /-----BEGIN CERTIFICATE-----/ { inpem = 1 }
+            inpem && keep { print }
+            /-----END CERTIFICATE-----/ { inpem = 0 }' \
         | openssl x509 -noout -subject -nameopt multiline 2>/dev/null \
         | awk '$1 == "organizationalUnitName" { print $3; exit }')
 else
