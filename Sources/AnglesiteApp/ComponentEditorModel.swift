@@ -280,10 +280,59 @@ final class ComponentEditorModel {
         )
     }
 
+    // MARK: - Props & code writes
+
+    /// Codegen/replace the `Props` interface + `Astro.props` destructure from a structured props
+    /// array (the Props form). An empty array removes both. `applyComponentStyleEdit`'s
+    /// piggybacked-model path adopts the fresh model but doesn't otherwise know to touch
+    /// `knobValues` (it's op-agnostic), so this op resyncs the knobs bar itself on success:
+    /// existing knob values survive for props that still exist (by name), renamed/removed props
+    /// drop out, and newly added props get their type-based default. Returns whether the write
+    /// applied.
+    @discardableResult
+    func setPropsInterface(props: [ComponentModel.Prop]) async -> Bool {
+        let applied = await applyComponentStyleEdit(
+            ComponentCodeEditBuilder.setPropsInterface(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                props: props
+            )
+        )
+        if applied { syncKnobValues() }
+        return applied
+    }
+
+    /// Rebuilds `knobValues` against the current `model`'s props, keyed by name — see
+    /// `setPropsInterface`'s doc comment for why this is needed after that op specifically.
+    private func syncKnobValues() {
+        let props = model?.frontmatter?.props ?? []
+        var next: [String: String] = [:]
+        for prop in props {
+            next[prop.name] = knobValues[prop.name] ?? KnobDefaults.value(for: prop)
+        }
+        knobValues = next
+    }
+
+    /// Replace a whole script zone (`"frontmatter"` or `"client"`) wholesale — a code-pane save.
+    /// Returns whether the write actually applied.
+    @discardableResult
+    func setScriptZone(zone: String, source: String) async -> Bool {
+        await applyComponentStyleEdit(
+            ComponentCodeEditBuilder.setScriptZone(
+                id: UUID().uuidString,
+                path: relativePath,
+                baseVersion: model?.version ?? "",
+                zone: zone,
+                source: source
+            )
+        )
+    }
+
     /// Routes a built `EditMessage` to `context.editRouter` and reconciles the result. Shared by
-    /// both the style writes above and the structure writes above (`insertNode`/`moveNode`/
-    /// `removeNode`/`setAttr`) — the name is a slice-2 holdover, but the reconciliation logic is
-    /// op-agnostic:
+    /// the style writes, the structure writes (`insertNode`/`moveNode`/`removeNode`/`setAttr`),
+    /// and the props/code writes above (`setPropsInterface`/`setScriptZone`) — the name is a
+    /// slice-2 holdover, but the reconciliation logic is op-agnostic:
     /// - `.applied` with a piggybacked `reply.model` adopts it directly (no second fetch).
     /// - `.applied` without one falls back to `load()`.
     /// - `.failed` with reason `"stale"` (the plugin's machine-readable refusal code — see

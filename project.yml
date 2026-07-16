@@ -11,6 +11,17 @@ options:
 packages:
   Anglesite:
     path: .
+  # Component Editor slice 4 (spec §7): STTextView code panes with tree-sitter syntax
+  # highlighting — see the matching dependencies in Package.swift for the full rationale.
+  STTextView:
+    url: https://github.com/krzyzanowskim/STTextView
+    from: 2.3.10
+  # Pinned to a commit (tag 0.8.1), not `from:` — see the matching Package.swift comment: its
+  # own manifest depends on Neon by `revision:`, and SwiftPM refuses a stable-version
+  # requirement on a package that itself depends on an unstable-version one.
+  STTextViewPluginNeon:
+    url: https://github.com/krzyzanowskim/STTextView-Plugin-Neon
+    revision: 5a30db4ce7908a5414e7b499e2379bdc49991cd1
 
 targets:
   Anglesite:
@@ -82,6 +93,10 @@ targets:
         product: AnglesiteIntents
       - package: Anglesite
         product: AnglesiteContainer
+      - package: STTextView
+        product: STTextView
+      - package: STTextViewPluginNeon
+        product: STTextView-Plugin-Neon
       - target: AnglesiteQuickLookPreview
         embed: true
       - target: AnglesiteQuickLookThumbnail

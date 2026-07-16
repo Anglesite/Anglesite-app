@@ -55,6 +55,14 @@ public struct EditMessage: Sendable, Equatable {
         /// `"set-attr"` — Component Editor: set or remove (nil value) an attribute/prop at
         /// the use-site. Carries a `component` payload.
         public static let setAttr = "set-attr"
+        /// `"set-props-interface"` — Component Editor: codegen/replace the frontmatter's
+        /// `Props` interface + `Astro.props` destructure from a structured props array.
+        /// Carries a `component` payload.
+        public static let setPropsInterface = "set-props-interface"
+        /// `"set-script-zone"` — Component Editor: replace a whole script zone
+        /// (`frontmatter` or `client`) wholesale — a code-pane save. Carries a `component`
+        /// payload.
+        public static let setScriptZone = "set-script-zone"
     }
 
     /// Overlay-generated correlation ID so the JS side can match replies to the original message.

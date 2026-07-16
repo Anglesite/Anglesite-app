@@ -2,6 +2,8 @@ import SwiftUI
 import WebKit
 import AnglesiteCore
 import AnglesiteBridge
+import STTextView
+import STPluginNeon
 
 /// Component Editor: outline + harness canvas + inspector (with interactive Styles panel and structure edits).
 struct ComponentEditorView: View {
@@ -37,8 +39,65 @@ struct ComponentEditorView: View {
     /// Name/value text for the inline "Add attribute" form in the Selection panel.
     @State private var newAttrName: String = ""
     @State private var newAttrValue: String = ""
+    /// Editable draft of the component's Props interface (Props form), seeded from
+    /// `model.model?.frontmatter?.props` whenever a fresh model loads and reconciled back via
+    /// an explicit "Save Props" action — the op replaces the whole interface atomically, so
+    /// per-field auto-commit (like the Styles panel's declaration rows) doesn't fit here.
+    @State private var propsDraft: [PropDraft] = []
+    /// Which code pane is showing — "Props & Data" (frontmatter TS) or "Behavior" (client
+    /// script). Design spec §4.3.
+    @State private var codeZone: CodeZone = .frontmatter
+    /// Editable drafts for the two code panes, keyed by zone — dirty-tracked like
+    /// `FileEditorModel` (spec §5) and saved explicitly via `setScriptZone`, not on blur.
+    @State private var codeDrafts: [CodeZone: String] = [.frontmatter: "", .client: ""]
 
     enum Mode: String, CaseIterable { case design = "Design", source = "Source" }
+
+    /// The two code panes' zones (design spec §4.3): frontmatter TS ("Props & Data") and the
+    /// client `<script>` ("Behavior"). Maps 1:1 to `EditMessage.Op.setScriptZone`'s wire values.
+    private enum CodeZone: String, CaseIterable, Hashable {
+        case frontmatter, client
+
+        var label: String {
+            switch self {
+            case .frontmatter: "Props & Data"
+            case .client: "Behavior"
+            }
+        }
+
+        var language: TreeSitterLanguage {
+            switch self {
+            case .frontmatter: .typescript
+            case .client: .javascript
+            }
+        }
+    }
+
+    /// One row in the Props form. `id` is a stable SwiftUI identity for `ForEach`/drafting —
+    /// excluded from `==` (see the custom `Equatable` below) so draft-vs-model dirty checks
+    /// compare content only, not incidental per-row identity.
+    private struct PropDraft: Identifiable, Equatable {
+        let id = UUID()
+        var name: String
+        var type: String
+        var optional: Bool
+        var defaultValue: String
+
+        init(name: String, type: String, optional: Bool, defaultValue: String) {
+            self.name = name
+            self.type = type
+            self.optional = optional
+            self.defaultValue = defaultValue
+        }
+
+        init(_ prop: ComponentModel.Prop) {
+            self.init(name: prop.name, type: prop.type, optional: prop.optional, defaultValue: prop.defaultValue ?? "")
+        }
+
+        static func == (lhs: PropDraft, rhs: PropDraft) -> Bool {
+            lhs.name == rhs.name && lhs.type == rhs.type && lhs.optional == rhs.optional && lhs.defaultValue == rhs.defaultValue
+        }
+    }
 
     init(file: FileRef, context: ComponentEditorContext, fileEditor: FileEditorModel) {
         self.file = file
@@ -88,6 +147,16 @@ struct ComponentEditorView: View {
             // compiler diagnostic in a banner, rather than a dead-end full-pane error — fixing
             // the syntax error in source is the only way out, so land the user where they can.
             if newValue == .unparseable { mode = .source }
+        }
+        .onChange(of: model?.model?.version) { _, _ in
+            // A fresh model version means a fresh Props form / code pane baseline — re-seed
+            // both drafts. Any in-progress, unsaved edits are intentionally discarded here (the
+            // same tradeoff a stale-write "Reload" already makes elsewhere in this editor).
+            propsDraft = (model?.model?.frontmatter?.props ?? []).map(PropDraft.init)
+            codeDrafts = [
+                .frontmatter: model?.model?.frontmatter?.source ?? "",
+                .client: model?.model?.clientScript?.source ?? "",
+            ]
         }
     }
 
@@ -347,13 +416,37 @@ struct ComponentEditorView: View {
             HStack {
                 ForEach(props, id: \.name) { prop in
                     LabeledContent(prop.name) {
-                        TextField(prop.type, text: knobBinding(model, name: prop.name))
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 120)
+                        knobControl(model, prop: prop)
                     }
                 }
             }
             .padding(8)
+        }
+    }
+
+    /// Type-aware harness knob control (design spec §4.2): a `boolean` prop gets a `Toggle`,
+    /// a `number` prop gets a `Stepper` alongside its text field, and everything else keeps the
+    /// plain text field slice 1 shipped. `model.knobValues` stays `[String: String]` regardless
+    /// (that's `HarnessURL.build`'s contract) — these controls just read/write it through a
+    /// typed `Binding`.
+    @ViewBuilder
+    private func knobControl(_ model: ComponentEditorModel, prop: ComponentModel.Prop) -> some View {
+        switch prop.type {
+        case "boolean":
+            Toggle("", isOn: booleanKnobBinding(model, name: prop.name))
+                .labelsHidden()
+        case "number":
+            HStack(spacing: 2) {
+                TextField(prop.type, text: knobBinding(model, name: prop.name))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 70)
+                Stepper("", value: numberKnobBinding(model, name: prop.name))
+                    .labelsHidden()
+            }
+        default:
+            TextField(prop.type, text: knobBinding(model, name: prop.name))
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 120)
         }
     }
 
@@ -362,6 +455,26 @@ struct ComponentEditorView: View {
             get: { model.knobValues[name] ?? "" },
             set: { model.knobValues[name] = $0 }
         )
+    }
+
+    private func booleanKnobBinding(_ model: ComponentEditorModel, name: String) -> Binding<Bool> {
+        Binding(
+            get: { (model.knobValues[name] ?? "false") == "true" },
+            set: { model.knobValues[name] = $0 ? "true" : "false" }
+        )
+    }
+
+    private func numberKnobBinding(_ model: ComponentEditorModel, name: String) -> Binding<Double> {
+        Binding(
+            get: { Double(model.knobValues[name] ?? "") ?? 0 },
+            set: { model.knobValues[name] = formatKnobNumber($0) }
+        )
+    }
+
+    /// Drops a redundant trailing ".0" for whole numbers so an integer-typed prop's knob (e.g.
+    /// `count`) round-trips as "2", not "2.0".
+    private func formatKnobNumber(_ value: Double) -> String {
+        value.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(value)) : String(value)
     }
 
     private func inspector(_ model: ComponentEditorModel) -> some View {
@@ -404,6 +517,8 @@ struct ComponentEditorView: View {
                         }
                     }
                 }
+                propsForm(model)
+                codePane(model)
                 if model.conflict {
                     conflictBanner(model)
                 }
@@ -483,6 +598,145 @@ struct ComponentEditorView: View {
             }
             .padding(10)
         }
+    }
+
+    /// Structured Props form (design spec §4.3): the component's `Props` interface as
+    /// name/type/optional/default rows, independent of outline selection — props belong to the
+    /// component as a whole, not to any one template node. Edits accumulate in `propsDraft` and
+    /// commit together via "Save Props" (a `set-props-interface` op replaces the whole
+    /// interface atomically, so there's no single field to auto-commit on blur/submit the way
+    /// the Styles panel's declaration rows do).
+    private func propsForm(_ model: ComponentEditorModel) -> some View {
+        GroupBox("Props") {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach($propsDraft) { $prop in
+                    HStack(spacing: 4) {
+                        TextField("name", text: $prop.name)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(width: 80)
+                        TextField("type", text: $prop.type)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(width: 70)
+                        Toggle("optional", isOn: $prop.optional)
+                            .labelsHidden()
+                            .help("Optional")
+                        TextField("default", text: $prop.defaultValue)
+                            .font(.system(.caption, design: .monospaced))
+                        Button(role: .destructive) {
+                            propsDraft.removeAll { $0.id == prop.id }
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                HStack {
+                    Button("Add Prop") {
+                        propsDraft.append(PropDraft(name: "", type: "string", optional: false, defaultValue: ""))
+                    }
+                    .font(.caption2)
+                    .buttonStyle(.plain)
+                    Spacer()
+                    Button("Save Props") {
+                        Task { await savePropsDraft(model) }
+                    }
+                    .disabled(!propsDraftDirty(model))
+                }
+            }
+        }
+    }
+
+    /// True when `propsDraft` differs from the current model's props — gates "Save Props" so it
+    /// only enables once there's something to save (and disables again once the piggybacked
+    /// model from a successful save re-seeds the draft via the `.onChange(of: model?.model?.version)`
+    /// handler in `body`).
+    private func propsDraftDirty(_ model: ComponentEditorModel) -> Bool {
+        propsDraft != (model.model?.frontmatter?.props ?? []).map(PropDraft.init)
+    }
+
+    /// Commits `propsDraft` via `setPropsInterface`, dropping any row with a blank name or type
+    /// (an in-progress "Add Prop" row the user hasn't filled in yet) rather than sending it as a
+    /// malformed prop the plugin would refuse outright.
+    private func savePropsDraft(_ model: ComponentEditorModel) async {
+        let props = propsDraft.compactMap { draft -> ComponentModel.Prop? in
+            let name = draft.name.trimmingCharacters(in: .whitespaces)
+            let type = draft.type.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, !type.isEmpty else { return nil }
+            let defaultValue = draft.defaultValue.trimmingCharacters(in: .whitespaces)
+            return ComponentModel.Prop(name: name, type: type, optional: draft.optional, defaultValue: defaultValue.isEmpty ? nil : defaultValue)
+        }
+        await model.setPropsInterface(props: props)
+    }
+
+    /// The two STTextView code panes (design spec §4.3/§7): "Props & Data" (frontmatter TS) and
+    /// "Behavior" (client script), tree-sitter highlighted, switched with a segmented picker.
+    /// Dirty-tracked like `FileEditorModel` — explicit save via the button below, not on blur
+    /// (see that button's doc comment for why it doesn't also bind ⌘S).
+    private func codePane(_ model: ComponentEditorModel) -> some View {
+        GroupBox("Code") {
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Zone", selection: $codeZone) {
+                    ForEach(CodeZone.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                // `.id(codeZone)` forces SwiftUI to tear down and recreate this
+                // NSViewRepresentable (fresh Coordinator, fresh STTextView, fresh NeonPlugin) on
+                // every tab switch, rather than reusing the same underlying view/coordinator
+                // across zones. Without it, `makeCoordinator`/`makeNSView` run exactly once for
+                // the lifetime of this view's position in the tree: the coordinator's captured
+                // `text` binding and the plugin's `language` would both stay pinned to whichever
+                // zone was active at first mount, so typing after switching tabs would silently
+                // write into the wrong zone's draft and highlight with the wrong grammar (PR
+                // #774 review). Recreating the view on zone change does mean losing cursor/scroll
+                // position when switching tabs — an acceptable tradeoff over misrouted edits.
+                ComponentCodeEditorView(
+                    text: codeDraftBinding(codeZone),
+                    language: codeZone.language
+                )
+                .id(codeZone)
+                .frame(height: 160)
+                .border(.separator)
+                HStack {
+                    if codeDraftDirty(model, zone: codeZone) {
+                        Text("Unsaved changes").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Save") {
+                        Task { await saveCodeDraft(model, zone: codeZone) }
+                    }
+                    // No local ⌘S: `SaveCommands`/#509 centralized File ▸ Save specifically to
+                    // avoid double-registering the shortcut when multiple editing surfaces are
+                    // on screen at once. This pane isn't wired into `SiteWindowModel.activeEditor`
+                    // (a closed `.text`/`.plist` enum) yet — a reasonable follow-up once the
+                    // Component Editor's props/code drafts need to participate in File ▸ Save /
+                    // Revert to Saved the way the main-pane editor and inspector already do.
+                    .disabled(!codeDraftDirty(model, zone: codeZone))
+                }
+            }
+        }
+    }
+
+    private func codeDraftBinding(_ zone: CodeZone) -> Binding<String> {
+        Binding(
+            get: { codeDrafts[zone] ?? "" },
+            set: { codeDrafts[zone] = $0 }
+        )
+    }
+
+    private func currentZoneSource(_ model: ComponentEditorModel, zone: CodeZone) -> String {
+        switch zone {
+        case .frontmatter: model.model?.frontmatter?.source ?? ""
+        case .client: model.model?.clientScript?.source ?? ""
+        }
+    }
+
+    private func codeDraftDirty(_ model: ComponentEditorModel, zone: CodeZone) -> Bool {
+        (codeDrafts[zone] ?? "") != currentZoneSource(model, zone: zone)
+    }
+
+    private func saveCodeDraft(_ model: ComponentEditorModel, zone: CodeZone) async {
+        await model.setScriptZone(zone: zone.rawValue, source: codeDrafts[zone] ?? "")
     }
 
     /// "This component changed outside Anglesite" banner — the edit that triggered a stale-write
@@ -793,5 +1047,53 @@ private struct ComponentCanvasView: NSViewRepresentable {
             coordinator.pendingReload = nil
             webView.load(URLRequest(url: targetURL))
         }
+    }
+}
+
+/// STTextView-backed code pane for a component script zone, tree-sitter highlighted via
+/// STTextView-Plugin-Neon's `NeonPlugin`. Wraps the AppKit view directly
+/// (`STTextView.scrollableTextView()`), matching `ComponentCanvasView` above's own
+/// NSViewRepresentable-over-AppKit pattern rather than STTextView's SwiftUI wrapper.
+private struct ComponentCodeEditorView: NSViewRepresentable {
+    @Binding var text: String
+    let language: TreeSitterLanguage
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, STTextViewDelegate {
+        let text: Binding<String>
+        /// Set while `updateNSView` is pushing the SwiftUI-side value into the text view, so
+        /// the resulting `textViewDidChangeText` notification doesn't bounce right back into
+        /// `text` (a no-op, but one that would otherwise re-trigger `updateNSView` every frame).
+        var isProgrammaticUpdate = false
+
+        init(text: Binding<String>) {
+            self.text = text
+        }
+
+        func textViewDidChangeText(_ notification: Notification) {
+            guard !isProgrammaticUpdate, let textView = notification.object as? STTextView else { return }
+            text.wrappedValue = textView.text
+        }
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = STTextView.scrollableTextView()
+        guard let textView = scrollView.documentView as? STTextView else { return scrollView }
+        textView.text = text
+        textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        textView.delegate = context.coordinator
+        textView.addPlugin(NeonPlugin(theme: .default, language: language))
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? STTextView, textView.text != text else { return }
+        context.coordinator.isProgrammaticUpdate = true
+        textView.text = text
+        context.coordinator.isProgrammaticUpdate = false
     }
 }
