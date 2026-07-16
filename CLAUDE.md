@@ -83,6 +83,18 @@ Resources/
 - **The app cannot bypass plugin security hooks** — `pre-deploy-check.sh` runs before every deploy, and the app surfaces failures rather than allowing override.
 - **Git is the source of truth** (#72) — the app must never become the only way to edit a site. A site's canonical, externally-editable copy is its `Source/` **git repo**, clonable anywhere. A site is an `.anglesite` **package** (#242): Finder treats it as opaque (double-click opens it in Anglesite), but `cd`, `git`, VS Code, and the Codex CLI all still descend into `Foo.anglesite/Source/` and keep working, and that repo can be cloned and edited outside the app entirely. App-owned per-site state lives beside it in `Foo.anglesite/Config/`, outside the repo (never in git). The app's own local working copy is not canonical: it lives **inside the site runtime/container** (#66/#69), hydrated from the repo when a site opens and pushed back to it — so any clone of the repo, not the app's working tree, is the unit everything else derives from. See [`docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md`](docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md) §8 (the #72 reconciliation) and the [containerization notes](docs/specs/2026-06-09-containerization-mas-subspike-notes.md).
 
+## Platform UX standards
+
+Every user-facing design and implementation must follow the standard for its target platform. Treat the applicable release acceptance checklist as part of feature definition and QA—not as optional polish—and do not flatten platform behavior into a lowest-common-denominator cross-platform UI.
+
+- **macOS:** [`docs/mac-assed-app-spec.md`](docs/mac-assed-app-spec.md). Current app work must preserve Mac conventions, including menus, keyboard commands, windows, files, Undo/Redo, VoiceOver, and system integration.
+- **iOS and iPadOS:** [`docs/ios-ipados-assed-app-spec.md`](docs/ios-ipados-assed-app-spec.md). Mobile work must distinguish the focused iPhone experience from iPad's adaptive multitasking, keyboard, pointer, Apple Pencil, and drag-and-drop context.
+- **Android:** [`docs/android-assed-app-spec.md`](docs/android-assed-app-spec.md). Android work must distinguish touch-first phone use from adaptive tablet, foldable, keyboard, pointer, and windowed contexts while preserving Android Back, intents, lifecycle, and accessibility behavior.
+- **Windows:** [`docs/windows-assed-app-spec.md`](docs/windows-assed-app-spec.md). Future Windows work must use Windows-native commands, shell integration, accessibility, DPI/multi-monitor behavior, and packaging.
+- **Linux (Ubuntu GNOME baseline):** [`docs/linux-assed-app-spec.md`](docs/linux-assed-app-spec.md). Future Linux work must follow Ubuntu GNOME patterns while respecting freedesktop.org interoperability, Wayland, portals, XDG data locations, accessibility, and the shipped package format.
+
+When shared-core constraints conflict with a platform convention, keep the shared behavior deterministic and introduce a thin platform-shell adaptation rather than weakening the native experience on every platform. Document any intentional convention departure in the feature design and verify that it is clearer, accessible, reversible, and justified for the task.
+
 ## Worktrees (default for feature/agent work)
 
 Do feature work — and **all** dispatched-agent work — in a git worktree, never directly on the main checkout. Multiple agents run in parallel here, so the main tree must stay clean. Worktrees live under `.claude/worktrees/<name>/`.
