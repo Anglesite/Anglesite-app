@@ -17,6 +17,16 @@
 #   container-kernel/vmlinux      (kernel binary — vendor-container-kernel.sh)
 #   container-initfs/index.json   (vminit OCI layout — vendor-container-kernel.sh)
 #
+# Beyond presence, the kernel/initfs (not the locally-built image — #616 scope) are also
+# digest-checked against scripts/container-artifact-versions.lock.json: a present-but-wrong
+# artifact (stale cache, corrupted download, tampered override) is exactly the failure presence
+# checks alone can't catch. An entry with no pin recorded yet (lock value "null") is never
+# treated as an error here — only a lock/artifact *mismatch* is, at the same Debug-warn/
+# Release-error severity as a missing file below. This also settles #616's open question on env
+# overrides in Release: they stay allowed, but a Release build now digest-checks the *overridden*
+# path too, same severity as the default path — a stale/wrong override fails Release exactly like
+# a stale/wrong vendored artifact would.
+#
 # Policy: Debug builds WARN (Xcode issue-navigator warnings, build continues) —
 # a fresh worktree must stay buildable for work that never boots a container.
 # Release builds FAIL — an archive without boot artifacts ships an app whose
@@ -31,6 +41,34 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 RESOURCES="$REPO_ROOT/Resources"
+source "$SCRIPT_DIR/lib/artifact-lock.sh"
+
+# Appends to `missing` iff the lock has a real pin for $1 that disagrees with $2 (the digest/hash
+# just computed from the on-disk artifact). Silent no-op when unpinned ("null") — see comment
+# above. $3 is the human-readable label used in the failure message.
+check_digest() {
+    local jq_path="$1" actual="$2" label="$3"
+    local expected
+    expected="$(lock_get "$jq_path")"
+    [[ "$expected" == "null" || -z "$expected" ]] && return 0
+    if [[ "$actual" != "$expected" ]]; then
+        missing+=("$label digest mismatch — expected $expected (pinned in scripts/container-artifact-versions.lock.json), got $actual. Re-vendor, or if this bump is intentional, re-run scripts/vendor-container-kernel.sh --update-lock.")
+    fi
+}
+
+# The saved OCI layout's index.json may be reformatted/repackaged relative to what the registry
+# served (see the matching comment in vendor-container-kernel.sh), so this doesn't hash the file —
+# it confirms the pinned manifest digest (a unique-enough hex string) is referenced somewhere
+# inside it, which is robust to exactly how `container image save` chose to shape the layout.
+check_vminit_layout() {
+    local index_json="$1" label="$2"
+    local expected
+    expected="$(lock_get '.vminit.arm64_manifest_digest')"
+    [[ "$expected" == "null" || -z "$expected" ]] && return 0
+    if ! grep -q "${expected#sha256:}" "$index_json" 2>/dev/null; then
+        missing+=("$label does not reference the pinned vminit manifest digest $expected (scripts/container-artifact-versions.lock.json). Re-vendor, or if this bump is intentional, re-run scripts/vendor-container-kernel.sh --update-lock.")
+    fi
+}
 
 # Per-artifact runtime overrides (BundledImage honors these at runtime, so a dev
 # running against external artifacts shouldn't be nagged about unvendored dirs).
@@ -51,17 +89,25 @@ fi
 if [[ -n "${ANGLESITE_CONTAINER_KERNEL:-}" ]]; then
     if [[ ! -f "$ANGLESITE_CONTAINER_KERNEL" ]]; then
         missing+=("ANGLESITE_CONTAINER_KERNEL=$ANGLESITE_CONTAINER_KERNEL does not exist — fix or unset the override")
+    else
+        check_digest '.kata.vmlinux_sha256' "$(sha256_of "$ANGLESITE_CONTAINER_KERNEL")" "ANGLESITE_CONTAINER_KERNEL vmlinux"
     fi
 elif [[ ! -f "$RESOURCES/container-kernel/vmlinux" ]]; then
     missing+=("Resources/container-kernel is unvendored (no vmlinux) — run scripts/vendor-container-kernel.sh")
+else
+    check_digest '.kata.vmlinux_sha256' "$(sha256_of "$RESOURCES/container-kernel/vmlinux")" "Resources/container-kernel/vmlinux"
 fi
 
 if [[ -n "${ANGLESITE_CONTAINER_INITFS:-}" ]]; then
     if [[ ! -f "$ANGLESITE_CONTAINER_INITFS/index.json" ]]; then
         missing+=("ANGLESITE_CONTAINER_INITFS=$ANGLESITE_CONTAINER_INITFS has no index.json — fix or unset the override")
+    else
+        check_vminit_layout "$ANGLESITE_CONTAINER_INITFS/index.json" "ANGLESITE_CONTAINER_INITFS layout"
     fi
 elif [[ ! -f "$RESOURCES/container-initfs/index.json" ]]; then
     missing+=("Resources/container-initfs is unvendored (no index.json) — run scripts/vendor-container-kernel.sh")
+else
+    check_vminit_layout "$RESOURCES/container-initfs/index.json" "Resources/container-initfs layout"
 fi
 
 if [[ ${#missing[@]} -eq 0 ]]; then

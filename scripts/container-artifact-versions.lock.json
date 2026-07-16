@@ -1,0 +1,19 @@
+{
+  "_comment": "Pinned container boot-artifact versions/digests for #616 (distribution-grade provisioning). Read/written by scripts/vendor-container-kernel.sh --update-lock and verified by scripts/check-container-resources.sh. Committed (not gitignored) — this is metadata, not a vendored binary.",
+  "kata": {
+    "version": "3.17.0",
+    "asset": "kata-static-3.17.0-arm64.tar.xz",
+    "url": "https://github.com/kata-containers/kata-containers/releases/download/3.17.0/kata-static-3.17.0-arm64.tar.xz",
+    "tarball_sha256": null,
+    "vmlinux_sha256": null,
+    "pinned_at": null,
+    "_todo": "Unpinned — github.com release downloads are unreachable from this session's network egress policy. Run 'scripts/vendor-container-kernel.sh --update-lock' from a session that can reach github.com to populate tarball_sha256/vmlinux_sha256/pinned_at."
+  },
+  "vminit": {
+    "image": "ghcr.io/apple/containerization/vminit",
+    "tag": "0.34.0",
+    "index_digest": "sha256:42904e78cad3e398a4dc8fa4484ccfd51152af21c43eedb923616f360b4d9015",
+    "arm64_manifest_digest": "sha256:976264a8b126bb4cb16bdbcf60d8f9c1b20a18ed6b232be8c75236a3a2be721f",
+    "pinned_at": "2026-07-16"
+  }
+}
