@@ -157,6 +157,56 @@ enum SiteActions {
         }
     }
 
+    /// Surfaced by `reauthorize(_:)` when the folder picked in the "Locate…" panel isn't the same
+    /// package as the site being repaired — guards against silently rebinding a recents entry to
+    /// an unrelated package that happens to share a name (#776).
+    struct ReauthorizationMismatchError: LocalizedError {
+        var errorDescription: String? {
+            String(localized: "That's a different site — choose the original package folder instead.")
+        }
+    }
+
+    /// True when `picked`'s marker UUID matches `expectedID`.
+    static func markerMatches(_ picked: AnglesitePackage, expectedID: String) -> Bool {
+        (try? picked.readMarker())?.siteID.uuidString == expectedID
+    }
+
+    /// Re-grant access to `site` after its security-scoped bookmark stopped resolving (#776 — a
+    /// reboot, or a preceding runtime failure, can invalidate the sandbox extension even though
+    /// the package on disk is untouched). Prompts an `NSOpenPanel` anchored at the site's
+    /// last-known location, confirms the chosen folder is the SAME package by marker UUID (not
+    /// just path), then re-registers it through the shared `registerPackage` path — which
+    /// re-validates against the just-granted access and mints a fresh bookmark, healing both
+    /// `isValid` and `needsReauthorization` for every observer of `SiteStore.changeStream()`.
+    ///
+    /// - Returns: the healed site, or `nil` if the panel was cancelled.
+    /// - Throws: `ImportError` wrapping `ReauthorizationMismatchError` on a mismatched pick, or any
+    ///   error from re-registration.
+    static func reauthorize(_ site: SiteStore.Site) async throws -> SiteStore.Site? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.anglesiteSite]
+        panel.treatsFilePackagesAsDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = site.packageURL.deletingLastPathComponent()
+        panel.prompt = String(localized: "Grant Access")
+        panel.message = String(
+            localized: "Anglesite lost access to “\(site.name)”, likely after a restart. Locate it again to restore access."
+        )
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+
+        let package = AnglesitePackage(url: url)
+        guard markerMatches(package, expectedID: site.id) else {
+            throw ImportError(folderName: url.lastPathComponent, underlying: ReauthorizationMismatchError())
+        }
+        do {
+            return try await registerPackage(package)
+        } catch {
+            throw ImportError(folderName: url.lastPathComponent, underlying: error)
+        }
+    }
+
     /// Run the package picker, register the chosen `.anglesite` package with `SiteStore`, and
     /// (on MAS) mint + persist a security-scoped bookmark so the grant survives relaunch.
     ///

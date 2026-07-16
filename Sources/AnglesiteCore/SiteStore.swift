@@ -31,6 +31,13 @@ public actor SiteStore {
         /// Security-scoped bookmark for `packageURL`. One grant covers the whole package, so
         /// Source/ and Config/ are both reachable under it.
         public var bookmarkData: Data?
+        /// True when a persisted bookmark exists but could not be resolved or started during the
+        /// last `refreshFilesystemState()` pass (#776 — e.g. a reboot invalidated the sandbox
+        /// extension). This is distinct from a confirmed-invalid package (missing sentinels):
+        /// access simply couldn't be verified, so `missingSentinels` is not trustworthy either.
+        /// Lets the UI offer a re-grant affordance ("Locate…") instead of misreporting the
+        /// package as missing files, and instead of silently going dead with no explanation.
+        public var needsReauthorization: Bool
 
         /// The Astro project tree — every subprocess (scaffold, dev server, build, deploy,
         /// pre-deploy check) runs with this as its working directory.
@@ -45,7 +52,8 @@ public actor SiteStore {
             isValid: Bool,
             missingSentinels: [String],
             lastSeen: Date = Date(),
-            bookmarkData: Data? = nil
+            bookmarkData: Data? = nil,
+            needsReauthorization: Bool = false
         ) {
             self.id = id
             self.name = name
@@ -54,6 +62,26 @@ public actor SiteStore {
             self.missingSentinels = missingSentinels
             self.lastSeen = lastSeen
             self.bookmarkData = bookmarkData
+            self.needsReauthorization = needsReauthorization
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case id, name, packageURL, isValid, missingSentinels, lastSeen, bookmarkData, needsReauthorization
+        }
+
+        /// Custom decoding so `recents.json` written before #776 (no `needsReauthorization` key)
+        /// still loads — a missing key defaults to `false` rather than failing `load()` entirely
+        /// (which would blank the launcher for every existing user on upgrade).
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            name = try container.decode(String.self, forKey: .name)
+            packageURL = try container.decode(URL.self, forKey: .packageURL)
+            isValid = try container.decode(Bool.self, forKey: .isValid)
+            missingSentinels = try container.decode([String].self, forKey: .missingSentinels)
+            lastSeen = try container.decode(Date.self, forKey: .lastSeen)
+            bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+            needsReauthorization = try container.decodeIfPresent(Bool.self, forKey: .needsReauthorization) ?? false
         }
 
         /// Build a `Site` from a package on disk: id = marker UUID, name = resolved display name
@@ -169,6 +197,9 @@ public actor SiteStore {
             var scoped: URL?
             var existenceURL = site.packageURL
             var canDetermineExistence = true
+            // True only when a bookmark exists but resolving it or starting access on it failed —
+            // i.e. we hold a grant that stopped working, not "there was never a grant" (#776).
+            var needsReauthorization = false
             if let bookmark = site.bookmarkData {
                 if let resolved = try? bookmarker.resolve(bookmark) {
                     existenceURL = resolved.url
@@ -176,9 +207,11 @@ public actor SiteStore {
                         scoped = resolved.url
                     } else {
                         canDetermineExistence = false
+                        needsReauthorization = true
                     }
                 } else {
                     canDetermineExistence = false
+                    needsReauthorization = true
                 }
             }
 
@@ -191,11 +224,19 @@ public actor SiteStore {
                 continue
             }
 
+            // When access can't be verified, don't trust a validation run against the unscoped
+            // path — under sandboxing it will read as "every sentinel missing" even though the
+            // package is untouched, which is exactly the misleading state #776 reported.
             let validation = AnglesitePackage(url: site.packageURL).sourceValidation(fileManager: fileManager)
             if let scoped { bookmarker.stopAccessing(scoped) }
-            if site.isValid != validation.isValid || site.missingSentinels != validation.missing {
-                site.isValid = validation.isValid
-                site.missingSentinels = validation.missing
+            let isValid = needsReauthorization ? false : validation.isValid
+            let missing = needsReauthorization ? [] : validation.missing
+            if site.isValid != isValid
+                || site.missingSentinels != missing
+                || site.needsReauthorization != needsReauthorization {
+                site.isValid = isValid
+                site.missingSentinels = missing
+                site.needsReauthorization = needsReauthorization
                 changed = true
             }
             refreshed.append(site)
@@ -214,7 +255,8 @@ public actor SiteStore {
         if let existing = sites.first(where: { $0.id == site.id }) {
             // Carry the bookmark forward ONLY when the package is still at the same path. If it
             // moved, the old bookmark embeds the old location and would grant the wrong path on
-            // MAS — drop it so SiteWindow.acquireGrant re-prompts a grant at the new location.
+            // MAS — drop it so the next open (which just proved access via a picker/Finder/drag)
+            // mints a fresh one at the new location instead of keeping a stale grant around.
             if existing.packageURL == site.packageURL {
                 site.bookmarkData = existing.bookmarkData ?? site.bookmarkData
             }

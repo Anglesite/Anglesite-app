@@ -109,6 +109,71 @@ final class SiteStoreTests {
         #expect(await reader.find(id: site.id) != nil)
     }
 
+    /// The #776 scenario: the package is fully intact on disk — only its persisted bookmark can
+    /// no longer be resolved (e.g. a reboot invalidated the sandbox extension). `load()` must not
+    /// report this as "missing required files" (misleading — the files are all there) and must
+    /// flag it as needing re-authorization so the UI can offer a "Locate…" recovery instead of
+    /// going dead with no explanation.
+    @Test("load flags an intact package with an unresolvable bookmark as needing reauthorization")
+    func loadFlagsIntactPackageNeedingReauthorization() async throws {
+        let pkg = try makeValidPackage(named: "lost-grant")
+        let writer = SiteStore(persistenceURL: persistenceURL)
+        let site = try await writer.record(pkg)
+        #expect(site.isValid)
+        try await writer.setBookmark(Data("not-a-bookmark".utf8), for: site.id)
+        // The package itself is untouched — only the bookmark is bad.
+
+        let reader = SiteStore(persistenceURL: persistenceURL)
+        try await reader.load()
+        let loaded = try #require(await reader.find(id: site.id))
+        #expect(loaded.needsReauthorization)
+        #expect(!loaded.isValid, "access can't be verified, so the site can't be opened until reauthorized")
+        #expect(loaded.missingSentinels.isEmpty, "must not misreport a lost grant as missing project files")
+    }
+
+    /// `record()` rebuilds the entry via `Site.make`, which recomputes validity directly (no
+    /// bookmark involved) — so it clears a stale `needsReauthorization` in memory immediately.
+    /// This is what makes `SiteActions.reauthorize`/`registerPackage` (record + a fresh
+    /// `setBookmark`, in `SiteActions.swift`) heal the visible state right away; the paired
+    /// `setBookmark` call — not tested here, it lives outside AnglesiteCore — is still what makes
+    /// the fix survive a relaunch, since `record()` alone carries the stale bookmark forward
+    /// unchanged (see `recordCarriesBookmarkForward`).
+    @Test("record clears a prior needsReauthorization flag")
+    func recordClearsNeedsReauthorization() async throws {
+        let pkg = try makeValidPackage(named: "healed")
+        let store = SiteStore(persistenceURL: persistenceURL)
+        let site = try await store.record(pkg)
+        try await store.setBookmark(Data("not-a-bookmark".utf8), for: site.id)
+        try await store.load()
+        #expect(try #require(await store.find(id: site.id)).needsReauthorization)
+
+        _ = try await store.record(pkg)
+        let healed = try #require(await store.find(id: site.id))
+        #expect(!healed.needsReauthorization)
+        #expect(healed.isValid)
+    }
+
+    /// `recents.json` written before #776 has no `needsReauthorization` key. Decoding must default
+    /// it to `false` rather than fail `load()` outright, which would blank the launcher for every
+    /// existing user on upgrade.
+    @Test("Site decodes pre-#776 JSON lacking needsReauthorization as false")
+    func siteDecodesLegacyJSONWithoutReauthorizationKey() throws {
+        let json = """
+        {
+            "id": "legacy-id",
+            "name": "legacy",
+            "packageURL": "file:///tmp/legacy.anglesite/",
+            "isValid": true,
+            "missingSentinels": [],
+            "lastSeen": "2026-01-01T00:00:00Z"
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let site = try decoder.decode(SiteStore.Site.self, from: Data(json.utf8))
+        #expect(!site.needsReauthorization)
+    }
+
     /// Regression: validity is cached in `recents.json` but recomputed on `load()`. A registry
     /// written by an older build (or before a sentinel-list fix) can hold a stale `isValid:false`
     /// for a package that is actually valid on disk — that left every site greyed-out in the
