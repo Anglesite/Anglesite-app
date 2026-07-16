@@ -223,7 +223,13 @@ if includeContainer {
 packageTargets.append(
     .target(
         name: "AnglesiteAppCore",
-        dependencies: ["AnglesiteCore", "AnglesiteBridge", "AnglesiteIntents"],
+        dependencies: [
+            "AnglesiteCore", "AnglesiteBridge", "AnglesiteIntents",
+            .product(name: "STTextView", package: "STTextView"),
+            // Module name is `STPluginNeon` (the target); the product name the dependency
+            // resolver matches on is the package's own product name below.
+            .product(name: "STTextView-Plugin-Neon", package: "STTextView-Plugin-Neon"),
+        ],
         path: "Sources/AnglesiteApp",
         exclude: ["AnglesiteApp.swift", "LiveSiteRuntimeFactory.swift"],
         // #541: ChatView.swift imports FoundationModels, so without this its object code embeds a
@@ -296,6 +302,23 @@ var packageDependencies: [Package.Dependency] = []
 // deliberately.
 packageDependencies.append(
     .package(url: "https://github.com/Anglesite/SwiftGit2.git", revision: "65a16e39b09c16770a684ca29f3d5b242b9d0313")
+)
+
+// Component Editor slice 4 (spec §7, §4.3): STTextView-backed code panes ("Props & Data",
+// "Behavior") with tree-sitter syntax highlighting.
+//   - STTextView is the TextKit 2 code-editing view itself (AppKit here — AnglesiteAppCore is
+//     already Darwin/macOS-only).
+//   - STTextView-Plugin-Neon wires Neon + SwiftTreeSitter highlighting into an STTextView via
+//     its `NeonPlugin(theme:language:)`, bundling its own vendored tree-sitter grammars/queries
+//     (TreeSitterResource, including CSS/JavaScript/TypeScript) — so these two packages cover
+//     the whole highlighting stack the spec calls for, with no separate grammar packages
+//     to add.
+// Both AppKit-only, so gated the same as SwiftGit2 above.
+packageDependencies.append(
+    .package(url: "https://github.com/krzyzanowskim/STTextView", from: "2.3.10")
+)
+packageDependencies.append(
+    .package(url: "https://github.com/krzyzanowskim/STTextView-Plugin-Neon", from: "0.8.1")
 )
 #endif
 
