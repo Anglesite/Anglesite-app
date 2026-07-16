@@ -83,6 +83,72 @@ import Foundation
         }
     }
 
+    @Test func carbonTxtRendersFromShippedTemplate() throws {
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CarbonTxtTemplateAssetsTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let descriptor = IntegrationCatalog.descriptor(for: .carbonTxt)
+        let cases: [([String: String], String)] = [
+            (
+                ["provenanceURL": "https://www.cloudflare.com/sustainability/"],
+                """
+                version = "0.5"
+
+                # Hosting provider: Cloudflare
+                [org]
+                disclosures = [
+                  { doc_type = "web-page", url = "https://www.cloudflare.com/sustainability/", title = "Cloudflare sustainability source" },
+                ]
+
+                [upstream]
+                services = [
+                  { domain = "cloudflare.com", service_type = "shared-hosting" },
+                ]
+                """
+            ),
+            (
+                [
+                    "provenanceURL": "https://www.cloudflare.com/sustainability/",
+                    "disclosureURL": "https://example.com/sustainability",
+                ],
+                """
+                version = "0.5"
+
+                # Hosting provider: Cloudflare
+                [org]
+                disclosures = [
+                  { doc_type = "web-page", url = "https://www.cloudflare.com/sustainability/", title = "Cloudflare sustainability source" },
+                  { doc_type = "web-page", url = "https://example.com/sustainability", title = "Organisation sustainability disclosure" },
+                ]
+
+                [upstream]
+                services = [
+                  { domain = "cloudflare.com", service_type = "shared-hosting" },
+                ]
+                """
+            ),
+        ]
+
+        for (answers, expected) in cases {
+            let plan = try IntegrationPlanner.plan(
+                descriptor: descriptor,
+                answers: answers,
+                sourceDirectory: source,
+                templateDirectory: templateRoot()
+            ).get()
+            guard case .createFile(let path, let contents) = plan.steps.first else {
+                Issue.record("expected carbon.txt create step")
+                return
+            }
+            #expect(path == "public/carbon.txt")
+            // Exact complete TOML output catches syntax, delimiter, and optional-section drift in
+            // the shipped asset rather than only exercising a miniature fixture.
+            #expect(contents == expected + "\n")
+        }
+    }
+
     @Test func layoutsHaveImportAndBodyAnchors() throws {
         let root = templateRoot()
         let base = try String(contentsOf: root.appendingPathComponent("src/layouts/BaseLayout.astro"), encoding: .utf8)
