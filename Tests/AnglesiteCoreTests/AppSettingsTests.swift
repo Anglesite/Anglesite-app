@@ -18,25 +18,6 @@ final class AppSettingsTests {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
-    @Test("Plugin path override defaults to nil") func pluginPathOverrideDefaultsToNil() {
-        let settings = AppSettings(defaults: defaults)
-        #expect(settings.pluginPathOverride == nil)
-    }
-
-    @Test("Plugin path override round trip") func pluginPathOverrideRoundTrip() {
-        let settings = AppSettings(defaults: defaults)
-        let url = URL(fileURLWithPath: "/tmp/anglesite-plugin", isDirectory: true)
-        settings.pluginPathOverride = url
-        #expect(settings.pluginPathOverride?.path == url.path)
-    }
-
-    @Test("Clearing plugin path override") func clearingPluginPathOverride() {
-        let settings = AppSettings(defaults: defaults)
-        settings.pluginPathOverride = URL(fileURLWithPath: "/tmp/x", isDirectory: true)
-        settings.pluginPathOverride = nil
-        #expect(settings.pluginPathOverride == nil)
-    }
-
     @Test("Sites root falls back to home Sites") func sitesRootFallsBackToHomeSites() {
         let settings = AppSettings(defaults: defaults)
         let expected = FileManager.default.homeDirectoryForCurrentUser

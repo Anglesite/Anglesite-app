@@ -23,10 +23,6 @@ targets:
       - path: Resources/Template
         type: folder
         buildPhase: resources
-      - path: Resources/plugin
-        type: folder
-        buildPhase: resources
-        optional: true
       - path: Resources/edit-overlay
         type: folder
         buildPhase: resources
@@ -37,12 +33,9 @@ targets:
         optional: true
     preBuildScripts:
       # Guard first so a Release build with unvendored container resources fails
-      # before the (slow) plugin copy/npm install phases run. Debug only warns.
+      # before the remaining (slower) build phases run. Debug only warns.
       - name: Check container resources
         script: "\"${PROJECT_DIR}/scripts/check-container-resources.sh\""
-        basedOnDependencyAnalysis: false
-      - name: Bundle Anglesite plugin
-        script: "\"${PROJECT_DIR}/scripts/copy-plugin.sh\""
         basedOnDependencyAnalysis: false
       - name: Build edit overlay
         script: "\"${PROJECT_DIR}/scripts/build-overlay.sh\""

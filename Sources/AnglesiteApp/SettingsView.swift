@@ -283,7 +283,6 @@ private struct ACPAgentEditorSheet: View {
 
 /// Development overrides, credentials, and diagnostics — the sharp tools (#529).
 private struct AdvancedSettingsView: View {
-    @AppStorage(AppSettings.Key.pluginPathOverride) private var pluginPathOverride: String = ""
     @AppStorage(AppSettings.Key.sitesRootOverride) private var sitesRootOverride: String = ""
     @AppStorage(AppSettings.Key.debugPaneEnabled) private var debugPaneEnabled: Bool = false
     @AppStorage(AppSettings.Key.lanRuntimeHost) private var lanRuntimeHost: String = ""
@@ -303,18 +302,6 @@ private struct AdvancedSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Anglesite plugin") {
-                FolderPickerRow(
-                    label: "Plugin path override",
-                    placeholder: "(use bundled plugin)",
-                    path: $pluginPathOverride,
-                    promptTitle: "Choose Anglesite plugin directory"
-                )
-                Text("Point at a checkout of the plugin (e.g. `../anglesite`) to iterate without rebuilding the app.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
             Section("Sites root") {
                 FolderPickerRow(
                     label: "Sites root override",

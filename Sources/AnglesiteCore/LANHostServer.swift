@@ -48,7 +48,7 @@ public enum LANHostServer {
 
     /// Resolves the sibling `anglesite` plugin repo's `server/` directory — the MCP HTTP sidecar
     /// entry point (`server/index.mjs`) staged into the container image at build time by
-    /// `scripts/vendor-container-image.sh`. Resolution order mirrors `scripts/copy-plugin.sh`:
+    /// `scripts/vendor-container-image.sh`. Resolution order:
     /// explicit path > `ANGLESITE_PLUGIN_SRC` env > `../anglesite` sibling default.
     public static func resolvePluginServerPath(
         explicit: String?,

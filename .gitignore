@@ -44,7 +44,8 @@ fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
 
-# Bundled plugin/resources populated at build time, not committed.
+# Bundled resources populated at build time, not committed.
+# (Resources/plugin stays listed only to keep stale pre-#466 build output out of git.)
 Resources/plugin
 Resources/edit-overlay/
 node_modules/

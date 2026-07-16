@@ -16,7 +16,7 @@ stage_dev_image_context() {
     local root
     root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-    # Mirror scripts/copy-plugin.sh's resolution: honor $ANGLESITE_PLUGIN_SRC, default to
+    # Honor $ANGLESITE_PLUGIN_SRC, default to
     # ../anglesite (sibling under the same parent dir as this repo — wrong from inside a
     # worktree, so set ANGLESITE_PLUGIN_SRC there).
     local default_plugin_src="$(cd "$root/.." && pwd)/anglesite"

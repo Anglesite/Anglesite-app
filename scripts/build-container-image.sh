@@ -21,7 +21,7 @@
 #   PLATFORM             build arch   (default: linux/arm64). Set linux/amd64 for the
 #                        Cloudflare substrate (CF Containers are amd64-only), or a
 #                        comma list "linux/amd64,linux/arm64" for a multi-arch manifest.
-#   ANGLESITE_PLUGIN_SRC plugin checkout (default: ../anglesite sibling, like copy-plugin.sh)
+#   ANGLESITE_PLUGIN_SRC plugin checkout (default: ../anglesite sibling, like stage-dev-image-context.sh)
 #
 # Distribution (decision Q-D): the Cloudflare/shared image is pushed to a registry
 # BY DIGEST. Cloudflare Containers run amd64 (remote); the substrate layers its
@@ -58,7 +58,7 @@ fi
 NODE_VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
 [[ -n "$NODE_VERSION" ]] || { echo "$VERSION_FILE is empty" >&2; exit 1; }
 
-# Resolve the plugin source the same way copy-plugin.sh does.
+# Resolve the plugin source the same way scripts/lib/stage-dev-image-context.sh does.
 DEFAULT_SRC=$(cd "$REPO_ROOT/.." && pwd)/anglesite
 SRC="${ANGLESITE_PLUGIN_SRC:-$DEFAULT_SRC}"
 [[ -d "$SRC" ]] || { echo "plugin source not found at $SRC (set ANGLESITE_PLUGIN_SRC)" >&2; exit 1; }
