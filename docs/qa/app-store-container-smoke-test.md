@@ -109,3 +109,61 @@ Also save the app debug pane logs for these sources when present:
 ## Acceptance
 
 #81 can close when the matrix passes on a real-signed App Store-target build, or when every failure has a follow-up issue with captured logs and a clear owner.
+
+## Re-run scope (2026-07-16)
+
+The 2026-07-13/14 run (see #81 comments) executed the full matrix above on a
+real-signed build and found one blocking failure plus six other bugs, all now
+fixed and merged:
+
+| Issue | Problem | Fixed by |
+|---|---|---|
+| #718 | Edit-overlay writes never reached host `Source/` — lost on next boot | #737 |
+| #715 | Guest lost all outbound network when another vmnet consumer ran | #736 |
+| #719 | Template `.gitignore` missed `node_modules`, etc. | #733 |
+| #720 | Import didn't git-bootstrap plain (non-package) sites | #727 |
+| #721 | Post-crash boot retry failed once (stale rootfs) | #729 |
+| #722 | `create-smoke-fixture.sh` team-ID derivation + missing git init | #767 |
+| #713 | `vendor-container-image.sh` broken since #698 | #730 |
+
+None of this has been re-verified against a fresh build yet, and the
+image-drop row was already inconclusive before these fixes landed. #81 stays
+open until a re-run confirms the fixes hold and image-drop gets a human check.
+This is a **focused re-run**, not a full matrix from scratch:
+
+1. **Case 8 — MCP edit persistence (regression-critical).** Apply a text edit
+   through the overlay, confirm the write lands in host `Source/`
+   immediately (not just in-container), then close/reopen the window (or
+   restart the app) and confirm the edit survived. This is the row #737 must
+   fix; it's the reason #81 is still open.
+2. **Image drop (still inconclusive).** Needs a literal human hand — drag a
+   Finder image onto an `<img>` in the preview, confirm optimized assets land
+   under `Source/public/images/`. No scripted/synthetic drag session
+   substitutes for this (same tooling limit hit during the #491 run).
+3. **Full wrangler round-trip.** #715 fixed the vmnet conflict that gated
+   this in the first run — with it fixed, push a real `wrangler deploy`
+   (needs a Cloudflare token in Keychain) instead of stopping at "reaches the
+   expected token prompt."
+4. **Spot-check, not full re-verification, of the other fixed rows:**
+   - `create-smoke-fixture.sh` team-ID derivation (#722) — confirm the script
+     picks the right identity/team with no manual correction.
+   - Import → git-bootstrap (#720) — confirm a plain site import auto-inits
+     without the earlier manual `git init` workaround.
+   - `.gitignore` (#719) — confirm a freshly scaffolded site doesn't commit
+     `node_modules`.
+   - Boot retry after crash (#721) — low priority; only worth reproducing if
+     a crash happens organically during the run.
+   - `vendor-container-image.sh` (#713) — already proven working (it built
+     the 07-13 image); just confirm the image still provisions cleanly since
+     #730 landed.
+5. **Everything that fully passed the first time** (sandbox/entitlement,
+   runtime selection, chat presence, `gh` absence, teardown, log
+   cleanliness) needs no re-execution — nothing on those paths changed since
+   07-14.
+
+### Execution blocker
+
+This scoping pass was written from a session with no Xcode/macOS access, so
+it cannot execute the matrix itself. The re-run needs the same preconditions
+as the original: an Apple Silicon Mac, a real signing identity, and
+hands-on GUI time — the image-drop case specifically cannot be automated.
