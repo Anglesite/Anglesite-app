@@ -1,26 +1,26 @@
 # Anglesite-app — Development Context
 
-This is the **native macOS app** that hosts the Anglesite Codex plugin. The plugin lives in a sibling repo at `../anglesite`. Both repos are under the same `github.com/Anglesite/` parent directory.
+This is the **native macOS app**. The sibling repo at `../anglesite` supplies the **MCP sidecar** (`server/`), which is staged into the container image at build time. Both repos are under the same `github.com/Anglesite/` parent directory.
 
 ## Two-repo coordination
 
 | Repo | Role |
 |---|---|
-| `Anglesite/anglesite` | Codex plugin: skills, hooks, MCP server, docs |
+| `Anglesite/anglesite` | MCP sidecar server (`server/`) — the app's edit/content backend inside the container |
 | `Anglesite/Anglesite-app` *(this repo)* | macOS app: SwiftUI shell, website template, WKWebView preview, edit overlay |
 
-The **website template** (Astro project skeleton, themes, scaffold script, pre-deploy check) lives in this repo at `Resources/Template/`. It is a committed, first-class app resource — not copied from the plugin at build time. `TemplateRuntime` resolves it from the app bundle (with a Settings override for development).
+The **website template** (Astro project skeleton, themes, scaffold script, pre-deploy check) lives in this repo at `Resources/Template/`. It is a committed, first-class app resource. `TemplateRuntime` resolves it from the app bundle (with a Settings override for development).
 
-Cross-cutting work (e.g. extending the MCP server with `apply-edit` messages) lands as paired PRs:
+The sidecar repo's Claude-plugin machinery (markdown skills, `hooks.json`, `.claude-plugin/` manifest) is retired on the app side (#466): the app no longer bundles or loads any of it — `scripts/copy-plugin.sh`, `Resources/plugin/`, and `PluginRuntime` are gone. What the app consumes from the sibling repo is only `server/` (+ its npm manifests), staged into the container image by `scripts/lib/stage-dev-image-context.sh`. Until the sidecar's converted repo drops the `.claude-plugin/plugin.json` marker, the staging scripts still use that file as an identity check — that check moves with the paired plugin-repo conversion PR.
 
-1. Plugin PR adds the server-side support and ships in a tagged plugin release.
-2. App PR consumes it and bumps the bundled-plugin pointer.
+Cross-cutting work (e.g. extending the MCP server with new messages) still lands as paired PRs:
 
-Paired PRs are only needed for MCP schema changes and skill additions — template changes are app-only.
+1. Sidecar PR adds the server-side support and ships in a tagged release.
+2. App PR consumes it (and re-vendors the container image).
 
-When in doubt, the plugin is the source of truth for skills, hooks, and the MCP message schema. The app is a *host* — it does not own those. The app *does* own the template.
+Paired PRs are only needed for MCP schema changes — template changes are app-only. The sidecar repo is the source of truth for the MCP message schema; the app owns the template and everything else.
 
-> **Direction note:** the Claude Code / plugin-skill dependency is being retired under epic #459 (see "Plan" below). New feature journeys should land as deterministic Swift/TypeScript or Apple Intelligence paths, not new `claude --print` / markdown-skill paths.
+> **Direction note:** the Claude Code dependency is retired app-side (epic #459, slice 7 #466). New feature journeys land as deterministic Swift/TypeScript or Apple Intelligence paths — there is no `claude --print` / markdown-skill path to extend.
 
 ## Stack
 
@@ -28,7 +28,7 @@ When in doubt, the plugin is the source of truth for skills, hooks, and the MCP 
 - **Plain SwiftUI + actors** for v0. No TCA, no third-party state libraries.
 - **WKWebView** — live preview of the Astro dev server.
 - **No host-side Node runtime** — retired (#70). Dev-server, build, and deploy commands run inside a container runtime (local Apple Containerization or the remote Cloudflare sandbox) instead of a bundled host Node.
-- **MCP** — talks to the plugin's server over stdio (local subprocess) or HTTP/Streamable transport (for container-backed runtimes). `MCPClient` abstracts the transport behind an `MCPTransport` seam; `SiteRuntime` (protocol) abstracts the execution substrate so `PreviewModel` doesn't know whether a site runs in-process or in a container.
+- **MCP** — talks to the sidecar server (the sibling repo's `server/`) over stdio (local subprocess) or HTTP/Streamable transport (for container-backed runtimes). `MCPClient` abstracts the transport behind an `MCPTransport` seam; `SiteRuntime` (protocol) abstracts the execution substrate so `PreviewModel` doesn't know whether a site runs in-process or in a container.
 
 ## Site identity — the `.anglesite` package
 
@@ -37,7 +37,7 @@ A site is a self-contained `.anglesite` **package** (#242) — a directory with 
 
 - `Info.plist` — marker: format version + **stable site UUID** + display name + created date. Identity is the UUID (path-independent), so moving/renaming a package keeps its identity.
 - `Source/` — the Astro project, a git repo. The externally-editable, clonable unit; `cd`/git/VS Code/CLI descend into it.
-- `Config/` — app-owned per-site state (`settings.plist` via `SiteConfigStore`, `chat-history.jsonl`, caches). **Never** in git. `.site-config` stays in `Source/` (template/plugin-owned).
+- `Config/` — app-owned per-site state (`settings.plist` via `SiteConfigStore`, `chat-history.jsonl`, caches). **Never** in git. `.site-config` stays in `Source/` (template-owned).
 
 `AnglesitePackage` (AnglesiteSiteModel, re-exported by AnglesiteCore) is the single source of truth for this layout. The app opens packages explicitly — Finder double-click / `onOpenURL`, **File ▸ Open Site…** (an `NSOpenPanel` filtering on the `io.dwk.anglesite.site` UTI via `UTType.anglesiteSite`), **Open Recent** — and discovers them via a **recents registry** (`SiteStore`, `recents.json`), not by scanning a folder. `SiteStore.Site` carries `packageURL` + computed `sourceDirectory`/`configDirectory` (there is no `path`).
 
@@ -66,8 +66,6 @@ JS/
 └── edit-overlay/        TypeScript edit overlay compiled and bundled into app resources
 Resources/
 ├── Template/            Website template (themes, scaffold script, Astro source, pre-deploy check) — committed
-├── plugin/              (gitignored) Plugin MCP server + skills, populated by scripts/copy-plugin.sh
-│                        (template excluded — lives in Resources/Template/ instead)
 ├── container-image/     (gitignored) Vendored arm64 OCI image, populated by scripts/vendor-container-image.sh
 ├── container-kernel/    (gitignored) Vendored Linux kernel binary, populated by scripts/vendor-container-kernel.sh
 ├── container-initfs/    (gitignored) Vendored vminit initfs OCI layout, populated by scripts/vendor-container-kernel.sh
@@ -80,7 +78,7 @@ Resources/
 - **No frameworks beyond Apple's** unless explicitly approved.
 - **Process spawning is centralized** in `AnglesiteCore/ProcessSupervisor` — never call `Process()` from a view.
 - **Logs are sacred** — every spawned subprocess streams stdout+stderr into the debug pane. Do not silently `>/dev/null`.
-- **The app cannot bypass plugin security hooks** — `pre-deploy-check.sh` runs before every deploy, and the app surfaces failures rather than allowing override.
+- **The app cannot bypass the pre-deploy security gate** — the template's `scripts/pre-deploy-check.ts` runs directly before every deploy (`PreDeployCheck`), and the app surfaces failures rather than allowing override. This is the native replacement for the old plugin `PreToolUse` hook (roadmap §7) — a non-LLM gate can't be prompt-injected or talked out of running.
 - **Git is the source of truth** (#72) — the app must never become the only way to edit a site. A site's canonical, externally-editable copy is its `Source/` **git repo**, clonable anywhere. A site is an `.anglesite` **package** (#242): Finder treats it as opaque (double-click opens it in Anglesite), but `cd`, `git`, VS Code, and the Codex CLI all still descend into `Foo.anglesite/Source/` and keep working, and that repo can be cloned and edited outside the app entirely. App-owned per-site state lives beside it in `Foo.anglesite/Config/`, outside the repo (never in git). The app's own local working copy is not canonical: it lives **inside the site runtime/container** (#66/#69), hydrated from the repo when a site opens and pushed back to it — so any clone of the repo, not the app's working tree, is the unit everything else derives from. See [`docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md`](docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md) §8 (the #72 reconciliation) and the [containerization notes](docs/specs/2026-06-09-containerization-mas-subspike-notes.md).
 
 ## Platform UX standards
@@ -100,7 +98,7 @@ When shared-core constraints conflict with a platform convention, keep the share
 Do feature work — and **all** dispatched-agent work — in a git worktree, never directly on the main checkout. Multiple agents run in parallel here, so the main tree must stay clean. Worktrees live under `.claude/worktrees/<name>/`.
 
 - **Run `xcodegen generate` first** — `Anglesite.xcodeproj` is gitignored and regenerated from `project.yml`, so a fresh worktree has no project file until you generate it.
-- **Set `ANGLESITE_PLUGIN_SRC`** — its default (`../anglesite`) resolves wrong from inside a worktree; point it at the real plugin checkout (`…/github.com/Anglesite/anglesite`) so `copy-plugin.sh` finds the plugin.
+- **Set `ANGLESITE_PLUGIN_SRC`** — its default (`../anglesite`) resolves wrong from inside a worktree; point it at the real sidecar checkout (`…/github.com/Anglesite/anglesite`) so the container-image scripts (`vendor-container-image.sh` / `build-podman-image.sh` / `build-container-image.sh`) can stage the MCP sidecar.
 - **Dispatched subagents must `cd` to the worktree** — give them a hard `cd <worktree>` guard before any git op, or they run against the main checkout.
 
 ## Build
@@ -117,7 +115,7 @@ open Anglesite.xcodeproj
 xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug build
 ```
 
-Tests: `swift test --package-path .` runs the SwiftPM test targets (`AnglesiteSiteModelTests`, `AnglesiteCoreTests`, `AnglesiteBridgeTests`, and, on Swift 6.4+/Xcode 27, `AnglesiteIntentsTests`). `AnglesiteContainerLocalTests` is opt-in with `ANGLESITE_CONTAINER_TESTS=1`; its end-to-end cases also require `ANGLESITE_CONTAINER_E2E=1`. Most suites are Swift Testing (#74), with the remaining XCTest holdouts in `AnglesiteCoreTests` and `AnglesiteBridgeTests`. The MCP / apply-edit e2e tests (`AppliesEditEndToEndTests`, `MCPClientHTTPEndToEndTests`) need the sibling plugin checkout + node; they're gated with Swift Testing's `.enabled(if:)` trait, so they skip cleanly when the plugin is absent — set `ANGLESITE_PLUGIN_PATH` to the plugin checkout to make them run. If `swift build`/`swift test` seems to hang with no output, a stale SwiftPM process is likely holding the `.build` lock — check `pgrep -fl swift-test` and kill the orphan rather than assuming a bad test.
+Tests: `swift test --package-path .` runs the SwiftPM test targets (`AnglesiteSiteModelTests`, `AnglesiteCoreTests`, `AnglesiteBridgeTests`, and, on Swift 6.4+/Xcode 27, `AnglesiteIntentsTests`). `AnglesiteContainerLocalTests` is opt-in with `ANGLESITE_CONTAINER_TESTS=1`; its end-to-end cases also require `ANGLESITE_CONTAINER_E2E=1`. Most suites are Swift Testing (#74), with the remaining XCTest holdouts in `AnglesiteCoreTests` and `AnglesiteBridgeTests`. The MCP / apply-edit e2e tests (`AppliesEditEndToEndTests`, `MCPClientHTTPEndToEndTests`) need the sibling sidecar checkout + node; they're gated with Swift Testing's `.enabled(if:)` trait, so they skip cleanly when the checkout is absent — set `ANGLESITE_PLUGIN_PATH` to the sidecar checkout to make them run. If `swift build`/`swift test` seems to hang with no output, a stale SwiftPM process is likely holding the `.build` lock — check `pgrep -fl swift-test` and kill the orphan rather than assuming a bad test.
 
 Note: `swift test` runs on CI's older runners even though `Package.swift` declares `.macOS("27.0")` — a SwiftPM CLI test binary tolerates a high deployment target as long as it doesn't call macOS-27-only symbols at runtime. **Hosted** app tests (`xcodebuild test` with `Anglesite.app` as the test host) do *not* work there: launching a macOS-27 `.app` is blocked on an older-macOS runner by LaunchServices. (The Swift lanes run on macos-26 — bumped from macos-15, whose Swift 6.2.x OS concurrency runtime carried a task-allocator bug that crashed whole `swift test` runs with "freed pointer was not the last allocation", see PR #644/#646.) So app-target logic that needs CI coverage (e.g. `DeployModel`'s token orchestration) is kept thin and pushed into a testable `AnglesiteCore` type (`TokenOnboarding`) rather than tested through a hosted app target.
 
@@ -133,13 +131,13 @@ Within Phase 10, the **Apple Help Book** has shipped and the app is now a single
 
 **macOS 27 / Siri AI:** the platform wave has shipped and the Siri AI phases A–D (#132–135) are all closed (system-wide MCP, Spotlight App-Intents indexing, View Annotations, App Intents Testing, Foundation Models chat, SwiftUI 27 toolbars, the Xcode 27 migration audit). Follow-on intelligence work now lives under the Claude Code removal epic below.
 
-**Claude Code removal epic (#459):** the active migration driving current feature work — retire the `claude --print` subprocess, `ClaudeAgent`, and the markdown skills, replacing them with deterministic Swift/TypeScript plus Apple Intelligence (on-device Foundation Models, escalating to Private Cloud Compute). **LLM policy (revised 2026-07-08):** platform-native on-device AI is the default; external LLMs are supported **only as an explicit Settings opt-in** (user-configured endpoint + key, which also covers self-hosted servers like Ollama — supports less capable machines), and features that require a frontier-class model are **clearly labeled** BBEdit-style, never a silent degraded cloud call. See [`docs/superpowers/specs/2026-07-08-cross-platform-swift-port-design.md`](docs/superpowers/specs/2026-07-08-cross-platform-swift-port-design.md) §8. Spec: [`docs/superpowers/specs/2026-06-20-claude-code-removal-roadmap-design.md`](docs/superpowers/specs/2026-06-20-claude-code-removal-roadmap-design.md). Work lands as vertical slices (each ends "tool before brain": deterministic tool → FM Tool + App Intent + GUI → delete that journey's `claude --print` path). Slices 1–6 (#460–465) have all landed — Slice 3 closed 2026-07-09 with the Keystatic-backed integration catalog (its runtime inbox-capture follow-up is #587, blocked on `@dwk/workers`); Slice 6 (2026-07-10) shipped content help on FM (copy-edit / social-media / repurpose over the shared content-help kernel: `BrandVoiceGuidance` + interview, `SiteContentChunker`, `ContentAssistantFactory` tier seam — spec `docs/superpowers/specs/2026-07-10-slice6-content-help-fm-design.md`); only slice 7 (#466) remains, and it is now unblocked. Slice 7 deletes `ClaudeAgent` and converts the plugin repo — so don't extend the Claude-plugin path for new features without checking this epic first.
+**Claude Code removal epic (#459):** the active migration driving current feature work — retire the `claude --print` subprocess, `ClaudeAgent`, and the markdown skills, replacing them with deterministic Swift/TypeScript plus Apple Intelligence (on-device Foundation Models, escalating to Private Cloud Compute). **LLM policy (revised 2026-07-08):** platform-native on-device AI is the default; external LLMs are supported **only as an explicit Settings opt-in** (user-configured endpoint + key, which also covers self-hosted servers like Ollama — supports less capable machines), and features that require a frontier-class model are **clearly labeled** BBEdit-style, never a silent degraded cloud call. See [`docs/superpowers/specs/2026-07-08-cross-platform-swift-port-design.md`](docs/superpowers/specs/2026-07-08-cross-platform-swift-port-design.md) §8. Spec: [`docs/superpowers/specs/2026-06-20-claude-code-removal-roadmap-design.md`](docs/superpowers/specs/2026-06-20-claude-code-removal-roadmap-design.md). Work lands as vertical slices (each ends "tool before brain": deterministic tool → FM Tool + App Intent + GUI → delete that journey's `claude --print` path). Slices 1–6 (#460–465) have all landed — Slice 3 closed 2026-07-09 with the Keystatic-backed integration catalog (its runtime inbox-capture follow-up is #587, blocked on `@dwk/workers`); Slice 6 (2026-07-10) shipped content help on FM (copy-edit / social-media / repurpose over the shared content-help kernel: `BrandVoiceGuidance` + interview, `SiteContentChunker`, `ContentAssistantFactory` tier seam — spec `docs/superpowers/specs/2026-07-10-slice6-content-help-fm-design.md`); Slice 7's app side (#466) landed 2026-07-16: the Claude-plugin bundling (`copy-plugin.sh`, `Resources/plugin/`, `PluginRuntime`, the Settings plugin-path override) is deleted, and the Bucket 6 journeys are simplified to deterministic cores (`ExperimentStats` for A/B analysis, `EmailSetupPlanner` for provider recommendation + DNS pre-fill; `creative-canvas` retired outright). The remaining piece of the epic is cross-repo: the sibling repo's conversion to a plain MCP sidecar (delete skill markdown + `hooks.json` + `.claude-plugin/` manifest) lands as the paired plugin-repo PR. There is no Claude-plugin path left to extend in this repo.
 
 **`.anglesite` package model (#242):** shipped — a site is a `.anglesite` package (see "Site identity" above). Design + phase plans: [`docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md`](docs/superpowers/specs/2026-06-19-anglesite-package-model-design.md) and `docs/superpowers/plans/2026-06-19-anglesite-package-model-p{1..5}-*.md`. It dovetails with the container epics: the git-bootstrap (#68, shipped) and the container runtimes — #69 (shipped) and the deferred remote runtime (#66) — operate on the package's `Source/` repo, and `Config/` never enters a container. The `SiteConfigStore.displayName` override consumer (#266) has since shipped.
 
 **Other active tracks (status 2026-07-10):**
 
-- **Component Editor epic (#496):** Swift-native WYSIWYG for Astro components (spec: `docs/superpowers/specs/2026-07-05-component-editor-design.md`). Slice 1 (read-only editor, plugin v1.3.0), slice 2 (Styles panel write ops, plugin v1.4.0), and slice 3 (structure ops + palette, plugin v1.5.0) have landed; next is props/zone code editors (#494). Each slice ships a paired plugin release + `MIN_PLUGIN_VERSION` bump.
+- **Component Editor epic (#496):** Swift-native WYSIWYG for Astro components (spec: `docs/superpowers/specs/2026-07-05-component-editor-design.md`). Slice 1 (read-only editor, plugin v1.3.0), slice 2 (Styles panel write ops, plugin v1.4.0), and slice 3 (structure ops + palette, plugin v1.5.0) have landed; next is props/zone code editors (#494). Each slice ships a paired sidecar release (the old `MIN_PLUGIN_VERSION` build guard left with `copy-plugin.sh` in #466 — the container image vendors whatever sidecar the checkout provides).
 - **Personal Publishing OS pivot (#334):** V-1 (typed content objects + feeds, #335) shipped, including the content-type registry, mf2/JSON-LD projection, and per-type editors. V-2–V-5 (Webmention/POSSE, inbound interactions, ActivityPub + reader, communities) are **gated on a conformant `@dwk/workers` release**. Runtime inbox capture (#587) shipped independently of that gate — it doesn't depend on any `@dwk/*` package (Webmention/Micropub's shapes don't fit a public anonymous submission endpoint) — landing a bespoke `/inbox` Worker route + `INBOX_KV` staging + app-side git commit-back (`InboxSubmissionSync`). No Settings UI provisions it yet; `SiteSettings.inboxCaptureAccountID`/`inboxCaptureKVNamespaceID` are the storage slots a future wizard fills in.
 - **Menu bar / toolbar completeness (#518):** swept 2026-07-08/09 — Save/menus/customizable toolbar, macOS conventions (proxy icon, Dock menu, ShareLink, launcher drops, Settings tabs), preview navigation, dev-server controls, navigator content commands, Print, notifications, ⌘Z, String Catalog scaffolding all landed. Remaining: Edit ▸ Find + Format menu (#517), toolbar search (#520), manual GUI verification of the navigator commands (#586).
 - **Cross-platform Swift port (#571):** Anglesite v2 on Windows & Linux (spec: `docs/superpowers/specs/2026-07-08-cross-platform-swift-port-design.md`). Phased P1–P5 (#566–570), Linux first; P1 (Linux CI leg + portability seams) is the entry point. This epic is where the revised LLM policy's `ExternalLLMBackend` lands (P5).
