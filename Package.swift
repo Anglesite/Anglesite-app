@@ -314,8 +314,13 @@ packageDependencies.append(
 //     the whole highlighting stack the spec calls for, with no separate grammar packages
 //     to add.
 // Both AppKit-only, so gated the same as SwiftGit2 above.
+// Pinned to a commit, not `from:` — `Package.resolved` is gitignored (no committed lockfile), so
+// every fresh checkout resolves independently, and a floating `from:` here let a fresh resolve of
+// 2.3.10 silently ship an API change (`text` became `String?`) that broke #774 (see #781, #783).
+// Matches the SwiftGit2/STTextView-Plugin-Neon policy below: deliberate bumps only. This is tag
+// 2.3.10's commit.
 packageDependencies.append(
-    .package(url: "https://github.com/krzyzanowskim/STTextView", from: "2.3.10")
+    .package(url: "https://github.com/krzyzanowskim/STTextView", revision: "8569251785daf1f0310eaa9235d1254264f0d249")
 )
 // Pinned to a commit, not `from:` — STTextView-Plugin-Neon's own manifest depends on Neon by
 // `revision:` (Neon has no tagged SPM releases), and SwiftPM refuses to resolve a stable-version
