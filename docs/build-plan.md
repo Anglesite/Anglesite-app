@@ -34,10 +34,10 @@ This was the original riskiest piece and is now historical: host-side embedded N
 
 ## Phase 2 — Plugin + site project plumbing
 
-1. ✅ Bundle a known-good copy of the Anglesite plugin in `Resources/plugin/` (copied from `../anglesite` at build time via the `Bundle Anglesite plugin` pre-build script in `project.yml`). Stamp the copy with the source commit for diagnostics.
+1. ✅ Bundle a known-good copy of the Anglesite plugin in `Resources/plugin/` (copied from `../anglesite` at build time via the `Bundle Anglesite plugin` pre-build script in `project.yml`). Stamp the copy with the source commit for diagnostics. *(Retired by #466: the app no longer bundles or loads the Claude plugin; the MCP sidecar is staged into the container image from the sibling checkout instead.)*
 2. ✅ `SiteStore` (Swift actor): manages `~/Sites/<name>/` directories. Discovers existing projects (look for `anglesite.config.json`), persists the list in `~/Library/Application Support/Anglesite/sites.json`. *(Superseded by #242: `SiteStore` is now a recents registry of `.anglesite` packages — `record`/`touch`, `recents.json` — not a `~/Sites` scan. See CLAUDE.md "Site identity — the `.anglesite` package".)*
 3. ✅ `ProjectValidator`: confirms a directory is an Anglesite project (`anglesite.config.json`, `astro.config.ts`, `keystatic.config.ts`). Returns which sentinels are missing so the UI can show partial-scaffold remediation.
-4. ✅ **Settings → Advanced → Plugin path** override (per §7) wired up early — lets the plugin author point the app at `../anglesite` while iterating. `Sites root` override added alongside for development/testing.
+4. ✅ **Settings → Advanced → Plugin path** override (per §7) wired up early — lets the plugin author point the app at `../anglesite` while iterating. `Sites root` override added alongside for development/testing. *(Plugin-path override retired by #466 with the bundled plugin; the Sites root override remains.)*
 
 ## Phase 3 — Subprocess supervisor
 
@@ -165,7 +165,7 @@ These issues target macOS 27 APIs available with Xcode 27 / Swift 6.4 (all lande
 
 `gh issue list` remains the source of truth; this is the snapshot of open tracks beyond Phase 10 release work.
 
-- **Claude Code removal (#459)** — Slices 1–4 (#460–463) landed; Slices 5–7 (#464–466) queued: theme/design on PCC, content help on FM/PCC, then the cleanup slice that deletes `ClaudeAgent` and converts the plugin repo. Runtime inbox capture (#587) split out of Slice 3, blocked on `@dwk/workers`.
+- **Claude Code removal (#459)** — Slices 1–6 (#460–465) landed; Slice 7's app side (#466) landed 2026-07-16 (Claude-plugin bundling deleted, Bucket 6 simplified to deterministic cores: `ExperimentStats`, `EmailSetupPlanner`; `creative-canvas` retired). Remaining: the paired plugin-repo conversion to a plain MCP sidecar. Runtime inbox capture (#587) split out of Slice 3, blocked on `@dwk/workers`.
 - **Component Editor (#496)** — slice 1 (read-only editor, plugin v1.3.0), slice 2 (Styles panel, plugin v1.4.0), and slice 3 (structure ops + palette, plugin v1.5.0) landed; next: props/zone code editors (#494), extract-to-component (#495). Fast-follows: #489, #490.
 - **Personal Publishing OS pivot (#334)** — V-1 typed content + feeds (#335) shipped. V-2 outbound social (#336: #354–357), V-3 inbound (#337: #358–362), V-4 federation + reader (#338: #363–366), V-5 communities (#339: #367–371) are all gated on a stable, conformant `@dwk/workers` release.
 - **Cross-platform Swift port (#571)** — Windows/Linux v2 in five phases (#566–570), Linux first; P5 carries `ExternalLLMBackend` + Phi Silica under the revised LLM policy.

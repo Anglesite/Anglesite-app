@@ -2,7 +2,7 @@ import Foundation
 
 /// User-configurable app settings, backed by `UserDefaults`.
 ///
-/// Defined here in AnglesiteCore so non-UI code (e.g. `PluginRuntime`) can read settings without
+/// Defined here in AnglesiteCore so non-UI code (e.g. `TemplateRuntime`) can read settings without
 /// pulling in SwiftUI. The Settings UI in AnglesiteApp uses SwiftUI's `@AppStorage` against the
 /// same keys, so changes are reactive without `AppSettings` needing to be `@Observable`.
 public final class AppSettings: @unchecked Sendable {
@@ -12,7 +12,6 @@ public final class AppSettings: @unchecked Sendable {
 
     /// UserDefaults keys. Public so the SwiftUI side can use them with `@AppStorage`.
     public enum Key {
-        public static let pluginPathOverride   = "anglesite.pluginPathOverride"
         public static let templatePathOverride = "anglesite.templatePathOverride"
         public static let sitesRootOverride    = "anglesite.sitesRootOverride"
         public static let lanRuntimeHost        = "anglesite.lanRuntimeHost"
@@ -46,22 +45,6 @@ public final class AppSettings: @unchecked Sendable {
 
     public init(defaults: UserDefaults) {
         self.defaults = defaults
-    }
-
-    /// Optional override for the bundled Anglesite plugin path. Lets plugin authors point a
-    /// running app at `../anglesite` while iterating without rebuilding.
-    public var pluginPathOverride: URL? {
-        get {
-            guard let path = defaults.string(forKey: Key.pluginPathOverride), !path.isEmpty else { return nil }
-            return URL(fileURLWithPath: path, isDirectory: true)
-        }
-        set {
-            if let url = newValue {
-                defaults.set(url.path, forKey: Key.pluginPathOverride)
-            } else {
-                defaults.removeObject(forKey: Key.pluginPathOverride)
-            }
-        }
     }
 
     /// Optional override for the bundled website template path. Lets template authors iterate

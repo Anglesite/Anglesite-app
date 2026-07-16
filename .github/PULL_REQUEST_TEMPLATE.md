@@ -5,9 +5,9 @@
 ## Paired PR check
 
 - [ ] This change is **self-contained** to `Anglesite-app`.
-- [ ] This change **needs a paired PR** in [`Anglesite/anglesite`](https://github.com/Anglesite/anglesite) (plugin / MCP server / template / hooks). Link it here: <!-- e.g. Anglesite/anglesite#123 -->
+- [ ] This change **needs a paired PR** in [`Anglesite/anglesite`](https://github.com/Anglesite/anglesite) (MCP sidecar server). Link it here: <!-- e.g. Anglesite/anglesite#123 -->
 
-> Cross-cutting work (extending MCP messages, changing the plugin's hook contract, adjusting the site template the app scaffolds, etc.) lands as paired PRs. The plugin PR ships first in a tagged release; the app PR consumes it and bumps `Resources/plugin/`'s source-of-truth pointer. See `CLAUDE.md` ▸ "Two-repo coordination".
+> Cross-cutting work (extending MCP messages) lands as paired PRs. The sidecar PR ships first in a tagged release; the app PR consumes it and re-vendors the container image. Template changes are app-only (`Resources/Template/`). See `CLAUDE.md` ▸ "Two-repo coordination".
 
 ## Test plan
 

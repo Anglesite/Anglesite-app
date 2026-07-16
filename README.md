@@ -1,12 +1,12 @@
 # Anglesite (Mac app)
 
-A native macOS app that wraps the [Anglesite Claude plugin](https://github.com/Anglesite/anglesite) and gives non-technical site owners a click-to-edit experience for their website.
+A native macOS app that gives non-technical site owners a click-to-edit experience for their website.
 
-The app does not replace the plugin — it embeds it. Scaffolding, edits, deploys, and skills all flow through the same skills, hooks, and MCP server that Claude Code uses today; this app is a custom **host** for that machinery with native UI on top.
+Scaffolding, deploys, and design flows are deterministic Swift; generative features run on Apple Intelligence (on-device Foundation Models). Edits and content operations go through the [Anglesite MCP sidecar](https://github.com/Anglesite/anglesite) (`server/` in the sibling repo), which runs inside the app's container runtime. The former Claude Code dependency — the `claude --print` subprocess and the markdown-skill machinery — is fully retired (epic #459).
 
 ## Status
 
-**Pre-release.** The v0 → v1 core is built (Phases 0–9): plugin/site plumbing, supervised subprocesses, the WKWebView live preview with click-to-edit overlay routed through the plugin's MCP server, deploy via `wrangler` (with the plugin's mandatory pre-deploy scan), Keychain/`gh` credentials, the per-site chat panel, multi-window, the deploy-readiness health badge, image-drop optimization, and per-edit undo.
+**Pre-release.** The v0 → v1 core is built (Phases 0–9): site plumbing, supervised subprocesses, the WKWebView live preview with click-to-edit overlay routed through the MCP sidecar, deploy via `wrangler` (with the mandatory pre-deploy scan), Keychain/`gh` credentials, the per-site chat panel, multi-window, the deploy-readiness health badge, image-drop optimization, and per-edit undo.
 
 In progress (Phase 10, v2 polish):
 - **Mac App Store build.** `Anglesite` is the single sandboxed app target (`io.dwk.anglesite`). The old direct-download target has been retired. The host-side embedded Node runtime has been retired (#70); local Apple Containerization is the macOS runtime direction.
@@ -24,7 +24,7 @@ See [`docs/build-plan.md`](docs/build-plan.md) for the full phased status.
 ## Documentation
 
 - [Build plan](docs/build-plan.md) — phased implementation roadmap
-- [High-level design](../anglesite/docs/dev/mac-app-design.md) — companion design doc in the plugin repo
+- [High-level design](../anglesite/docs/dev/mac-app-design.md) — companion design doc in the sidecar repo
 
 ## Requirements
 
@@ -40,7 +40,7 @@ On either platform, `scripts/setup-dev-env.sh` checks the prerequisites below, f
 ## Building
 
 ```sh
-# Clone alongside the plugin repo
+# Clone alongside the sidecar repo
 git clone https://github.com/Anglesite/Anglesite-app.git
 cd Anglesite-app
 
@@ -102,9 +102,9 @@ Notes:
 - **Working on the port itself:** `ANGLESITE_PORT_WIP=1 swift build --target AnglesiteCore` opts the not-yet-portable core into the manifest so in-flight seam work can be compile-checked locally. Apple-only targets (`AnglesiteBridge`, `AnglesiteIntents`, `AnglesiteContainer`, …) never build off-Darwin.
 - **Containers:** `podman` is not needed for the purity phase; it becomes relevant with the Linux MVP's `PodmanSiteRuntime`.
 
-## Relationship to the plugin repo
+## Relationship to the sidecar repo
 
-This repo expects to live next to `Anglesite/anglesite` on disk (both checked out under the same parent directory). At build time the Xcode project copies the plugin into `Resources/plugin/`. For local plugin development, point **Settings → Advanced → Plugin path** at your working copy of the plugin.
+This repo expects to live next to `Anglesite/anglesite` on disk (both checked out under the same parent directory) — or set `ANGLESITE_PLUGIN_SRC` to point elsewhere. The sibling repo supplies the **MCP sidecar** (`server/`), which the container-image scripts (`scripts/vendor-container-image.sh`, `scripts/build-podman-image.sh`) stage into the dev-server image; the MCP end-to-end tests also spawn it directly from the checkout (`ANGLESITE_PLUGIN_PATH`). Nothing from the sibling repo is bundled into the app itself anymore (#466).
 
 ## License
 
