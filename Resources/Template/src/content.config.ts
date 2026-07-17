@@ -33,6 +33,7 @@ const notes = defineCollection({
     ...socialFields,
     publishDate: z.coerce.date(),
     tags: z.array(z.string()).optional(),
+    draft: z.boolean().default(false),
   }).strict(),
 });
 
@@ -45,6 +46,7 @@ const articles = defineCollection({
     publishDate: z.coerce.date(),
     updated: z.coerce.date().optional(),
     tags: z.array(z.string()).optional(),
+    draft: z.boolean().default(false),
   }).strict(),
 });
 
@@ -56,6 +58,7 @@ const photos = defineCollection({
     caption: z.string().optional(),
     publishDate: z.coerce.date(),
     tags: z.array(z.string()).optional(),
+    draft: z.boolean().default(false),
   }).strict(),
 });
 
@@ -67,6 +70,7 @@ const albums = defineCollection({
     images: z.array(z.string()),
     publishDate: z.coerce.date(),
     tags: z.array(z.string()).optional(),
+    draft: z.boolean().default(false),
   }).strict(),
 });
 
@@ -78,6 +82,7 @@ const bookmarks = defineCollection({
     title: z.string().optional(),
     publishDate: z.coerce.date(),
     tags: z.array(z.string()).optional(),
+    draft: z.boolean().default(false),
   }).strict(),
 });
 
@@ -87,6 +92,7 @@ const replies = defineCollection({
     ...socialFields,
     inReplyTo: z.string().url(),
     publishDate: z.coerce.date(),
+    draft: z.boolean().default(false),
   }).strict(),
 });
 
@@ -96,6 +102,7 @@ const likes = defineCollection({
     ...socialFields,
     likeOf: z.string().url(),
     publishDate: z.coerce.date(),
+    draft: z.boolean().default(false),
   }).strict(),
 });
 
