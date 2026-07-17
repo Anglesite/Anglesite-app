@@ -226,6 +226,17 @@ struct SiteOperationsTests {
         #expect(!dialog.lowercased().contains("override"))
     }
 
+    @Test("social worker provisioning worker-name-conflict dialog names the taken Worker")
+    func socialWorkerProvisionWorkerNameConflictDialog() {
+        let result = SocialWorkerProvisionCommand.Result.workerNameConflict(
+            name: "taken-name", resources: .init(d1DatabaseID: "d1")
+        )
+        let dialog = SiteOperations.dialog(forSocialWorkerProvision: result)
+        #expect(dialog.contains("taken-name"))
+        #expect(dialog.lowercased().contains("rename"))
+        #expect(dialog.contains("Provisioned resources: D1."))
+    }
+
     @Test("social worker provisioning failure dialog includes partial resources")
     func socialWorkerProvisionFailureDialog() {
         let result = SocialWorkerProvisionCommand.Result.failed(

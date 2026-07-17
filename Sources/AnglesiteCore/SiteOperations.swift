@@ -140,6 +140,8 @@ public struct SiteOperations: Sendable {
             let count = failures.count
             let noun = count == 1 ? "issue" : "issues"
             return "Social Worker provisioning blocked by the pre-deploy security scan (\(count) \(noun)).\(resourceSuffix(resources))"
+        case .workerNameConflict(let name, let resources):
+            return "Social Worker provisioning blocked: the Worker name \"\(name)\" is already in use on your Cloudflare account. Rename the site's Worker in Anglesite and try again.\(resourceSuffix(resources))"
         case .failed(let reason, _, let resources):
             return "Social Worker provisioning failed: \(reason).\(resourceSuffix(resources))"
         }

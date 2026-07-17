@@ -13,6 +13,10 @@ public actor SocialWorkerProvisionCommand {
     public enum Result: Sendable, Equatable {
         case succeeded(url: URL, resources: WorkerComposition.ProvisionedResources, duration: TimeInterval)
         case blocked(failures: [PreDeployCheck.ScanFailure], warnings: [PreDeployCheck.ScanWarning], resources: WorkerComposition.ProvisionedResources)
+        /// The candidate Worker name is already in use on the connected Cloudflare account and
+        /// this site has never deployed before — mirrors `DeployCommand.Result.workerNameConflict`
+        /// rather than collapsing it, so callers can drive the same rename-and-retry UX (#740).
+        case workerNameConflict(name: String, resources: WorkerComposition.ProvisionedResources)
         case failed(reason: String, exitCode: Int32?, resources: WorkerComposition.ProvisionedResources)
     }
 
@@ -174,9 +178,7 @@ public actor SocialWorkerProvisionCommand {
         case .blocked(let failures, let warnings):
             return .blocked(failures: failures, warnings: warnings, resources: resources)
         case .workerNameConflict(let name):
-            return .failed(
-                reason: "Worker name \"\(name)\" is already in use on your Cloudflare account — rename it in Anglesite and try again.",
-                exitCode: nil, resources: resources)
+            return .workerNameConflict(name: name, resources: resources)
         case .failed(let reason, let exitCode):
             return .failed(reason: reason, exitCode: exitCode, resources: resources)
         }
