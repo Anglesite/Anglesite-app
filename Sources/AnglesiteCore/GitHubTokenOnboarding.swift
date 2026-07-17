@@ -50,7 +50,7 @@ public struct GitHubTokenOnboarding {
             do {
                 try persist(trimmed)
             } catch {
-                return .stay(message: "Couldn't save to Keychain: \(error)")
+                return .stay(message: "Couldn’t save to Keychain: \(error)")
             }
             // Let the user see which account they connected, then re-check cancellation before
             // retrying the publish behind their back.
