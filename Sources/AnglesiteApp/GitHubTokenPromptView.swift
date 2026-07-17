@@ -50,7 +50,7 @@ struct GitHubTokenPromptView: View {
                     }
                 }
                 step(2) {
-                    Text("Create a fine-grained token with **Contents: Read and write** access, then copy it and paste it below.")
+                    Text("Select **All repositories**, then grant **Contents: Read and write** and **Administration: Read and write** (Administration is what lets a new repo be created) — then copy the token and paste it below.")
                 }
             }
             .font(.callout)
