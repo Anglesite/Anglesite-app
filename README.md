@@ -51,9 +51,10 @@ scripts/setup-dev-env.sh
 # Generate the Xcode project
 xcodegen generate
 
-# (Recommended) Enable git hooks that auto-regenerate the .xcodeproj after
-# `git pull` / branch switches / rebases — keeps Xcode in sync with project.yml
-# and Sources/ without manual `xcodegen generate` calls.
+# (Recommended) Enable git hooks: auto-regenerate the .xcodeproj after
+# `git pull` / branch switches / rebases (keeps Xcode in sync with project.yml
+# and Sources/ without manual `xcodegen generate` calls), and auto-restore the
+# trailing newline Xcode's String Catalog build phase strips from *.xcstrings.
 git config core.hooksPath scripts/git-hooks
 
 # (Optional one-time verification) Confirm project.yml hasn't drifted from the
