@@ -338,6 +338,47 @@ public struct NativeContentOperations: ContentOperationsService {
         return .created(filePath: relPath, identifier: slug)
     }
 
+    /// Duplicate an existing `.astro` component: read its contents verbatim (no retitle —
+    /// unlike pages/posts, a component has no title to rewrite), derive a "Copy"-suffixed
+    /// PascalCase name colliding-safely with `NameCopy`/`NameCopy2`… (mirrors `createComponent`'s
+    /// PascalCase convention), write, commit. Preserves the source's subdirectory (e.g.
+    /// `src/components/esi/EsiInclude.astro` duplicates to `src/components/esi/EsiIncludeCopy.astro`)
+    /// since component grouping directories are meaningful (design spec §4.1's palette groups by
+    /// `SiteFileTree`'s components group).
+    public func duplicateComponent(siteID: String, relativePath: String) async -> ContentCreateResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        let sourceAbs = root.appendingPathComponent(relativePath)
+        guard fileManager.fileExists(atPath: sourceAbs.path) else {
+            return .failed(reason: "No component exists at \(relativePath)")
+        }
+        let contents: String
+        do { contents = try FileDocumentIO.load(sourceAbs, fileManager: fileManager).contents }
+        catch { return .failed(reason: "\(error)") }
+
+        let relDir = (relativePath as NSString).deletingLastPathComponent
+        let baseName = ((relativePath as NSString).lastPathComponent as NSString).deletingPathExtension
+        func candidatePath(_ name: String) -> String {
+            relDir.isEmpty ? "\(name).astro" : "\(relDir)/\(name).astro"
+        }
+        var attempt = 1
+        var candidateName = "\(baseName)Copy"
+        var relPath = candidatePath(candidateName)
+        while attempt < 1000, fileManager.fileExists(atPath: root.appendingPathComponent(relPath).path) {
+            attempt += 1
+            candidateName = "\(baseName)Copy\(attempt)"
+            relPath = candidatePath(candidateName)
+        }
+        guard !fileManager.fileExists(atPath: root.appendingPathComponent(relPath).path) else {
+            return .failed(reason: "Couldn't find an available name for the duplicate after 1000 attempts")
+        }
+
+        do { try write(contents, to: root.appendingPathComponent(relPath)) }
+        catch { return .failed(reason: "\(error)") }
+
+        _ = await gitCommit(root, relPath, "anglesite: duplicate component \(candidateName)")
+        return .created(filePath: relPath, identifier: candidateName)
+    }
+
     /// Scaffold a minimal blank `.astro` component into `src/components/`. Derives a PascalCase
     /// file name from `name` (Astro convention) via the same `ContentScaffold.slugify` used for
     /// pages/posts, then title-cases each hyphenated segment.
