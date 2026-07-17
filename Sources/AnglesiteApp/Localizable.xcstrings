@@ -4,41 +4,6 @@
     "" : {
 
     },
-    ":" : {
-
-    },
-    "“%@”\n\nbecomes\n\n“%@”" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "“%1$@”\n\nbecomes\n\n“%2$@”"
-          }
-        }
-      }
-    },
-    "“%@” → “%@”" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "“%1$@” → “%2$@”"
-          }
-        }
-      }
-    },
-    "@media %@" : {
-
-    },
-    "/" : {
-
-    },
-    "/new-path" : {
-
-    },
-    "/old-path" : {
-
-    },
     "%@ %@" : {
       "localizations" : {
         "en" : {
@@ -59,6 +24,15 @@
         }
       }
     },
+    "%@ changed on disk" : {
+
+    },
+    "%@ has been changed since this edit. Undoing will overwrite those changes." : {
+
+    },
+    "%@ tool" : {
+
+    },
     "%@ → %@" : {
       "localizations" : {
         "en" : {
@@ -68,15 +42,6 @@
           }
         }
       }
-    },
-    "%@ changed on disk" : {
-
-    },
-    "%@ has been changed since this edit. Undoing will overwrite those changes." : {
-
-    },
-    "%@ tool" : {
-
     },
     "%@, %@" : {
       "localizations" : {
@@ -117,6 +82,16 @@
     "%lld incoming references" : {
 
     },
+    "%lld of %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld"
+          }
+        }
+      }
+    },
     "%lld refs" : {
 
     },
@@ -126,10 +101,25 @@
     "%lld%%" : {
 
     },
+    "/" : {
+
+    },
+    "/new-path" : {
+
+    },
+    "/old-path" : {
+
+    },
     "301" : {
 
     },
     "302" : {
+
+    },
+    ":" : {
+
+    },
+    "@media %@" : {
 
     },
     "A custom token named “Anglesite” should be pre-filled with all permissions Anglesite uses. If it isn’t, add at least the “Edit Cloudflare Workers” template’s permissions so deploying works — Anglesite will ask again when a feature needs more access. Click **Continue to summary**." : {
@@ -142,6 +132,18 @@
 
     },
     "A service or one-off" : {
+
+    },
+    "ACP Agents" : {
+
+    },
+    "AI explanation" : {
+
+    },
+    "AI summary — verify against the log below" : {
+
+    },
+    "API token" : {
 
     },
     "About Anglesite" : {
@@ -159,37 +161,19 @@
     "Accessibility" : {
 
     },
+    "Active Model" : {
+
+    },
     "Actual Size" : {
 
     },
     "Add" : {
 
     },
-    "Add a ${type} record to ${domain}" : {
-
-    },
-    "Add a link back to **%@**" : {
-
-    },
-    "Add a Store" : {
-
-    },
-    "Add a store to ${site}" : {
+    "Add Agent…" : {
 
     },
     "Add Bluesky verification" : {
-
-    },
-    "Add booking to ${site}" : {
-
-    },
-    "Add comments to ${site}" : {
-
-    },
-    "Add declaration" : {
-
-    },
-    "Add donations to ${site}" : {
 
     },
     "Add Google verification" : {
@@ -204,6 +188,42 @@
     "Add Link…" : {
 
     },
+    "Add Prop" : {
+
+    },
+    "Add RSS Feed to Directory" : {
+
+    },
+    "Add Redirect" : {
+
+    },
+    "Add Site" : {
+
+    },
+    "Add a ${type} record to ${domain}" : {
+
+    },
+    "Add a Store" : {
+
+    },
+    "Add a link back to **%@**" : {
+
+    },
+    "Add a store to ${site}" : {
+
+    },
+    "Add booking to ${site}" : {
+
+    },
+    "Add comments to ${site}" : {
+
+    },
+    "Add declaration" : {
+
+    },
+    "Add donations to ${site}" : {
+
+    },
     "Add one above to get started." : {
 
     },
@@ -216,25 +236,13 @@
     "Add record" : {
 
     },
-    "Add Redirect" : {
-
-    },
-    "Add RSS Feed to Directory" : {
-
-    },
     "Add rule" : {
-
-    },
-    "Add Site" : {
 
     },
     "Advanced" : {
 
     },
-    "AI explanation" : {
-
-    },
-    "AI summary — verify against the log below" : {
+    "Agents" : {
 
     },
     "Align Center" : {
@@ -261,10 +269,10 @@
     "Anglesite Debug" : {
 
     },
-    "Anglesite plugin" : {
+    "Anglesite Website" : {
 
     },
-    "Anglesite Website" : {
+    "Anglesite lost access to “%@”, likely after a restart. Locate it again to restore access." : {
 
     },
     "Animation" : {
@@ -282,7 +290,7 @@
     "Answer a couple of questions and we'll pick the right commerce integration." : {
 
     },
-    "API token" : {
+    "Apple Intelligence (On-Device)" : {
 
     },
     "Apple Intelligence Required" : {
@@ -297,6 +305,9 @@
     "Apply" : {
 
     },
+    "Apply ${themeID} theme to ${site}" : {
+
+    },
     "Apply %lld change%@" : {
       "localizations" : {
         "en" : {
@@ -307,25 +318,25 @@
         }
       }
     },
-    "Apply ${themeID} theme to ${site}" : {
+    "Apply This Design" : {
 
     },
     "Apply a Theme" : {
 
     },
-    "Apply This Design" : {
-
-    },
     "Apply this rewrite?" : {
-
-    },
-    "Apply…" : {
 
     },
     "Applying hardening changes…" : {
 
     },
     "Applying…" : {
+
+    },
+    "Apply…" : {
+
+    },
+    "Arguments (space-separated)" : {
 
     },
     "Arrange" : {
@@ -388,6 +399,9 @@
     "Backup" : {
 
     },
+    "Base styles" : {
+
+    },
     "Blocking (%lld)" : {
 
     },
@@ -400,10 +414,10 @@
     "Bottom" : {
 
     },
-    "Brand terms (exact capitalization)" : {
+    "Brand Voice" : {
 
     },
-    "Brand Voice" : {
+    "Brand terms (exact capitalization)" : {
 
     },
     "Bring Forward" : {
@@ -439,10 +453,10 @@
     "By default, Anglesite saves new and imported site packages under `~/Sites/`. Override this for development or testing." : {
 
     },
-    "Can't open %@" : {
+    "Can't Open Component" : {
 
     },
-    "Can't Open Component" : {
+    "Can't open %@" : {
 
     },
     "Can't open website details" : {
@@ -499,15 +513,6 @@
     "Choose %@" : {
 
     },
-    "Choose a provider" : {
-
-    },
-    "Choose an Anglesite site package." : {
-
-    },
-    "Choose an existing Anglesite site folder to import." : {
-
-    },
     "Choose Image" : {
 
     },
@@ -517,13 +522,22 @@
     "Choose Undo now to bring it back, or OK to keep it deleted." : {
 
     },
+    "Choose a provider" : {
+
+    },
+    "Choose an Anglesite site package." : {
+
+    },
+    "Choose an existing Anglesite site folder to import." : {
+
+    },
     "Choose where to save the local .anglesite file." : {
 
     },
-    "Choose your own colors and add a logo." : {
+    "Choose your Sites folder so Anglesite can create the new site there." : {
 
     },
-    "Choose your Sites folder so Anglesite can create the new site there." : {
+    "Choose your own colors and add a logo." : {
 
     },
     "Choose…" : {
@@ -574,6 +588,9 @@
     "Collections" : {
 
     },
+    "Command" : {
+
+    },
     "Comment" : {
 
     },
@@ -590,6 +607,9 @@
 
     },
     "Computed" : {
+
+    },
+    "Condition, e.g. (min-width: 768px)" : {
 
     },
     "Config…" : {
@@ -625,12 +645,6 @@
     "Copy Animation" : {
 
     },
-    "Copy log" : {
-
-    },
-    "Copy markdown link to clipboard" : {
-
-    },
     "Copy Review" : {
 
     },
@@ -644,6 +658,12 @@
 
     },
     "Copy URL" : {
+
+    },
+    "Copy log" : {
+
+    },
+    "Copy markdown link to clipboard" : {
 
     },
     "Couldn't add “%@”: %@" : {
@@ -708,6 +728,9 @@
 
     },
     "Dashboard" : {
+
+    },
+    "Debug builds always show the Debug Pane (View → Show Debug Pane, ⌥⌘D) regardless of this setting." : {
 
     },
     "Decrease Indent Level" : {
@@ -824,16 +847,10 @@
     "Duplicate" : {
 
     },
-    "e.g. artisanal, world-class" : {
+    "Duplicate & Modify" : {
 
     },
-    "e.g. busy parents in Oakland" : {
-
-    },
-    "e.g. SourdoughLab" : {
-
-    },
-    "e.g. warm, expert, playful" : {
+    "ESI Fragments" : {
 
     },
     "Edit Footer" : {
@@ -842,13 +859,13 @@
     "Edit Header" : {
 
     },
-    "edited" : {
-
-    },
     "Editing" : {
 
     },
     "Editor" : {
+
+    },
+    "Edit…" : {
 
     },
     "Embed" : {
@@ -872,12 +889,6 @@
     "Error" : {
 
     },
-    "ESI Fragments" : {
-
-    },
-    "example.com" : {
-
-    },
     "Explain" : {
 
     },
@@ -893,10 +904,10 @@
     "Explorer" : {
 
     },
-    "Export this site's source files to a folder." : {
+    "Export To" : {
 
     },
-    "Export To" : {
+    "Export this site's source files to a folder." : {
 
     },
     "Failed" : {
@@ -920,10 +931,10 @@
     "Find" : {
 
     },
-    "Find & Replace…" : {
+    "Find ${contentType} in ${site}" : {
 
     },
-    "Find ${contentType} in ${site}" : {
+    "Find & Replace…" : {
 
     },
     "Find Next" : {
@@ -971,10 +982,10 @@
     "General" : {
 
     },
-    "Generate hero image…" : {
+    "Generate Plan" : {
 
     },
-    "Generate Plan" : {
+    "Generate hero image…" : {
 
     },
     "Generates recommended platforms, bios, content pillars, and a weekly calendar — saved into your site repo, never posted for you." : {
@@ -995,10 +1006,10 @@
     "Harden" : {
 
     },
-    "Harden…" : {
+    "Hardening…" : {
 
     },
-    "Hardening…" : {
+    "Harden…" : {
 
     },
     "Has RSS feed" : {
@@ -1037,16 +1048,16 @@
     "Hide Chat" : {
 
     },
-    "Hide chat panel" : {
-
-    },
     "Hide Inspector" : {
 
     },
-    "Hide related pages" : {
+    "Hide Related Pages" : {
 
     },
-    "Hide Related Pages" : {
+    "Hide chat panel" : {
+
+    },
+    "Hide related pages" : {
 
     },
     "Highlight" : {
@@ -1088,13 +1099,13 @@
     "Impact analysis" : {
 
     },
+    "Import Site…" : {
+
+    },
     "Import existing site…" : {
 
     },
     "Import from Phone" : {
-
-    },
-    "Import Site…" : {
 
     },
     "Include Git history (.git)" : {
@@ -1130,10 +1141,10 @@
     "Kind" : {
 
     },
-    "LAN runtime host" : {
+    "LAN runtime MCP port" : {
 
     },
-    "LAN runtime MCP port" : {
+    "LAN runtime host" : {
 
     },
     "LAN runtime preview port" : {
@@ -1178,19 +1189,16 @@
     "Loading site…" : {
 
     },
+    "Locate…" : {
+
+    },
     "Lock" : {
 
     },
     "Logs…" : {
 
     },
-    "low confidence" : {
-
-    },
     "Lower numbers are preferred mail servers, e.g. 10." : {
-
-    },
-    "mac-studio.local" : {
 
     },
     "MCP port" : {
@@ -1206,6 +1214,9 @@
 
     },
     "Mode" : {
+
+    },
+    "Model" : {
 
     },
     "Move To…" : {
@@ -1226,7 +1237,7 @@
     "Navigation" : {
 
     },
-    "New attribute name" : {
+    "Needs re-authorization" : {
 
     },
     "New Blog…" : {
@@ -1262,22 +1273,37 @@
     "New Post…" : {
 
     },
-    "New selector, e.g. .card-footer" : {
-
-    },
     "New Site" : {
 
     },
     "New Site…" : {
 
     },
+    "New attribute name" : {
+
+    },
+    "New selector, e.g. .card-footer" : {
+
+    },
     "No Anglesite sites found" : {
 
     },
-    "No changes needed." : {
+    "No Collection Types" : {
 
     },
-    "No Collection Types" : {
+    "No DNS records found." : {
+
+    },
+    "No Recent Sites" : {
+
+    },
+    "No Suggestions" : {
+
+    },
+    "No agents configured." : {
+
+    },
+    "No changes needed." : {
 
     },
     "No component usage learned yet." : {
@@ -1292,28 +1318,22 @@
     "No copy issues found across %lld pages — nice work." : {
 
     },
-    "No DNS records found." : {
-
-    },
     "No issues found in the most recent scan." : {
 
     },
     "No issues found." : {
 
     },
-    "No matching graph nodes" : {
+    "No matches" : {
 
     },
-    "No Recent Sites" : {
+    "No matching graph nodes" : {
 
     },
     "No redirects yet. Add one below." : {
 
     },
     "No scoped styles" : {
-
-    },
-    "No Suggestions" : {
 
     },
     "No unused files found" : {
@@ -1325,10 +1345,10 @@
     "None" : {
 
     },
-    "Not reviewed" : {
+    "Not Set" : {
 
     },
-    "Not Set" : {
+    "Not reviewed" : {
 
     },
     "Notifications" : {
@@ -1337,19 +1357,16 @@
     "Notify when site operations finish" : {
 
     },
-    "Off" : {
+    "OK" : {
 
     },
-    "OK" : {
+    "Off" : {
 
     },
     "On" : {
 
     },
     "Open" : {
-
-    },
-    "Open %@ in its own window" : {
 
     },
     "Open ${target}" : {
@@ -1367,13 +1384,16 @@
     "Open File" : {
 
     },
-    "Open in browser" : {
-
-    },
     "Open Recent" : {
 
     },
     "Open Site…" : {
+
+    },
+    "Open Website Anyway" : {
+
+    },
+    "Open in browser" : {
 
     },
     "Open the chat panel for a deeper AI audit of this site" : {
@@ -1383,9 +1403,6 @@
 
     },
     "Open the preview first to start the runtime before deploying" : {
-
-    },
-    "Open Website Anyway" : {
 
     },
     "Opens %@" : {
@@ -1400,7 +1417,7 @@
     "Opens the log of the failed dev server launch." : {
 
     },
-    "optional" : {
+    "Optional" : {
 
     },
     "Ordered" : {
@@ -1427,9 +1444,6 @@
     "Paste the HTML code from another analytics provider here, such as Google Analytics, Plausible, Fathom, or a conversion tag." : {
 
     },
-    "paste token" : {
-
-    },
     "Pause" : {
 
     },
@@ -1443,9 +1457,6 @@
 
     },
     "Plan social media for ${site}" : {
-
-    },
-    "Point at a checkout of the plugin (e.g. `../anglesite`) to iterate without rebuilding the app." : {
 
     },
     "Polar" : {
@@ -1490,7 +1501,7 @@
     "Project Style Guide" : {
 
     },
-    "property" : {
+    "Props" : {
 
     },
     "Provide Anglesite Feedback…" : {
@@ -1499,10 +1510,10 @@
     "Provider" : {
 
     },
-    "Publish…" : {
+    "Published URL (paste after posting)" : {
 
     },
-    "Published URL (paste after posting)" : {
+    "Publish…" : {
 
     },
     "Re-check" : {
@@ -1538,10 +1549,10 @@
     "Reload DNS records for this domain" : {
 
     },
-    "Reload from Disk" : {
+    "Reload Preview" : {
 
     },
-    "Reload Preview" : {
+    "Reload from Disk" : {
 
     },
     "Reload site list" : {
@@ -1556,15 +1567,6 @@
     "Remove" : {
 
     },
-    "Remove “%@” from Anglesite?" : {
-
-    },
-    "Remove from Anglesite" : {
-
-    },
-    "Remove from Anglesite…" : {
-
-    },
     "Remove Highlights and Comments" : {
 
     },
@@ -1574,13 +1576,22 @@
     "Remove RSS Feed" : {
 
     },
+    "Remove from Anglesite" : {
+
+    },
+    "Remove from Anglesite…" : {
+
+    },
+    "Remove “%@” from Anglesite?" : {
+
+    },
     "Rename" : {
 
     },
-    "Rename failed" : {
+    "Rename Site" : {
 
     },
-    "Rename Site" : {
+    "Rename failed" : {
 
     },
     "Rename…" : {
@@ -1589,13 +1600,19 @@
     "Replace" : {
 
     },
-    "Repurpose “%@”" : {
+    "Replace All" : {
+
+    },
+    "Replace With" : {
 
     },
     "Repurpose ${slug} from ${site}" : {
 
     },
     "Repurpose Post…" : {
+
+    },
+    "Repurpose “%@”" : {
 
     },
     "Rescan" : {
@@ -1656,10 +1673,10 @@
     "Review Copy" : {
 
     },
-    "Review copy on ${site}" : {
+    "Review Copy…" : {
 
     },
-    "Review Copy…" : {
+    "Review copy on ${site}" : {
 
     },
     "Reviewing your site's copy, page by page…" : {
@@ -1680,10 +1697,10 @@
     "Running" : {
 
     },
-    "running…" : {
+    "Runtime host" : {
 
     },
-    "Runtime host" : {
+    "SEO" : {
 
     },
     "Safari" : {
@@ -1692,16 +1709,10 @@
     "Save" : {
 
     },
-    "Save as Annotation" : {
-
-    },
     "Save As…" : {
 
     },
-    "Save the imported site package." : {
-
-    },
-    "Save to docs/social-calendar.md" : {
+    "Save Props" : {
 
     },
     "Save Voice" : {
@@ -1710,16 +1721,25 @@
     "Save Website…" : {
 
     },
-    "Save your website" : {
-
-    },
     "Save Your Website" : {
 
     },
-    "Save…" : {
+    "Save as Annotation" : {
+
+    },
+    "Save the imported site package." : {
+
+    },
+    "Save to docs/social-calendar.md" : {
+
+    },
+    "Save your website" : {
 
     },
     "Saved" : {
+
+    },
+    "Save…" : {
 
     },
     "Scan" : {
@@ -1743,10 +1763,10 @@
     "Search ${site} for ${query}" : {
 
     },
-    "Search graph" : {
+    "Search Site…" : {
 
     },
-    "Search Site…" : {
+    "Search graph" : {
 
     },
     "Searching freedesignmd.com…" : {
@@ -1758,22 +1778,19 @@
     "See and edit this site's learned writing, image, and naming conventions" : {
 
     },
+    "Select Parent" : {
+
+    },
     "Select a node" : {
 
     },
     "Select an element in the canvas" : {
 
     },
-    "Select Parent" : {
-
-    },
     "Selected" : {
 
     },
     "Selection" : {
-
-    },
-    "selector" : {
 
     },
     "Send" : {
@@ -1788,25 +1805,22 @@
     "Send to Back" : {
 
     },
-    "SEO" : {
-
-    },
     "Server" : {
 
     },
     "Set Password…" : {
 
     },
-    "Set this up later" : {
-
-    },
     "Set Up" : {
 
     },
-    "Set up a third-party integration for this site" : {
+    "Set Up Brand Voice…" : {
 
     },
-    "Set Up Brand Voice…" : {
+    "Set this up later" : {
+
+    },
+    "Set up a third-party integration for this site" : {
 
     },
     "Sets a display name just for Anglesite. Leave blank to use the site's built-in name." : {
@@ -1833,9 +1847,6 @@
     "Show Chat" : {
 
     },
-    "Show chat panel" : {
-
-    },
     "Show Debug Pane" : {
 
     },
@@ -1851,22 +1862,25 @@
     "Show Next Inspector Tab" : {
 
     },
-    "Show or hide %@" : {
-
-    },
-    "Show or hide the page inspector" : {
-
-    },
     "Show Previous Inspector Tab" : {
-
-    },
-    "Show related pages" : {
 
     },
     "Show Related Pages" : {
 
     },
     "Show Web Inspector" : {
+
+    },
+    "Show chat panel" : {
+
+    },
+    "Show or hide %@" : {
+
+    },
+    "Show or hide the page inspector" : {
+
+    },
+    "Show related pages" : {
 
     },
     "Shows the most recent pre-deploy scan results" : {
@@ -1884,10 +1898,10 @@
     "Siri AI Readiness" : {
 
     },
-    "Siri AI readiness for “%@”." : {
+    "Siri AI Readiness…" : {
 
     },
-    "Siri AI Readiness…" : {
+    "Siri AI readiness for “%@”." : {
 
     },
     "Site Graph" : {
@@ -1897,9 +1911,6 @@
 
     },
     "Site is missing required files" : {
-
-    },
-    "Site is missing required files: %@" : {
 
     },
     "Site name" : {
@@ -1947,10 +1958,10 @@
     "Start" : {
 
     },
-    "Start a design interview for ${site}" : {
+    "Start Dev Server" : {
 
     },
-    "Start Dev Server" : {
+    "Start a design interview for ${site}" : {
 
     },
     "Status of ${site}" : {
@@ -1983,10 +1994,10 @@
     "Styles…" : {
 
     },
-    "Suggested fix: %@" : {
+    "Suggested Links" : {
 
     },
-    "Suggested Links" : {
+    "Suggested fix: %@" : {
 
     },
     "Summarizing…" : {
@@ -1996,6 +2007,9 @@
 
     },
     "Syndication recorded" : {
+
+    },
+    "TTL" : {
 
     },
     "Table" : {
@@ -2011,6 +2025,9 @@
 
     },
     "Text" : {
+
+    },
+    "That's a different site — choose the original package folder instead." : {
 
     },
     "The build produced no output." : {
@@ -2085,16 +2102,19 @@
     "Transfer an existing domain" : {
 
     },
-    "Try again" : {
+    "Transport" : {
 
     },
     "Try Again" : {
 
     },
-    "TTL" : {
+    "Try again" : {
 
     },
     "Type" : {
+
+    },
+    "URL" : {
 
     },
     "Unavailable — newer edits have been made since" : {
@@ -2142,13 +2162,10 @@
     "Upload Logo…" : {
 
     },
-    "URL" : {
+    "Use Selection for Find" : {
 
     },
     "Use a temporary Cloudflare Workers domain later, such as %@." : {
-
-    },
-    "Use Selection for Find" : {
 
     },
     "Used to push backups and publish sites to GitHub over HTTPS (the sandboxed app can't run `git` or `gh`, so it pushes in-process with this token). Create a fine-grained token with Contents read/write access at github.com/settings/tokens. Stored in the macOS Keychain under `io.dwk.anglesite` and never written to logs." : {
@@ -2161,9 +2178,6 @@
 
     },
     "Valid" : {
-
-    },
-    "value" : {
 
     },
     "Vertically" : {
@@ -2193,13 +2207,13 @@
     "Website" : {
 
     },
+    "Website Settings…" : {
+
+    },
     "Website details changed on disk" : {
 
     },
     "Website name" : {
-
-    },
-    "Website Settings…" : {
 
     },
     "Weeks: %lld" : {
@@ -2247,11 +2261,91 @@
     "Your website was created, but something above needs attention before it can preview. You can open it anyway and fix it from the website window." : {
 
     },
+    "Zone" : {
+
+    },
     "Zoom In" : {
 
     },
     "Zoom Out" : {
 
+    },
+    "claude-code-acp" : {
+
+    },
+    "default" : {
+
+    },
+    "e.g. SourdoughLab" : {
+
+    },
+    "e.g. artisanal, world-class" : {
+
+    },
+    "e.g. busy parents in Oakland" : {
+
+    },
+    "e.g. warm, expert, playful" : {
+
+    },
+    "edited" : {
+
+    },
+    "example.com" : {
+
+    },
+    "https://agent.example.com/acp" : {
+
+    },
+    "low confidence" : {
+
+    },
+    "mac-studio.local" : {
+
+    },
+    "name" : {
+
+    },
+    "optional" : {
+
+    },
+    "paste token" : {
+
+    },
+    "property" : {
+
+    },
+    "running…" : {
+
+    },
+    "selector" : {
+
+    },
+    "type" : {
+
+    },
+    "value" : {
+
+    },
+    "“%@”\n\nbecomes\n\n“%@”" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "“%1$@”\n\nbecomes\n\n“%2$@”"
+          }
+        }
+      }
+    },
+    "“%@” → “%@”" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "“%1$@” → “%2$@”"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

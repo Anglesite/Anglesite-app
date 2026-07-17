@@ -15,6 +15,8 @@ import AnglesiteCore
 final class FileEditorModel {
     let file: FileRef
     var text: String = ""
+    /// Command/find seam for the markdown editor surface; unused for other editor kinds.
+    let markdownController = MarkdownEditorController()
     private var fileSession = EditableFileSession()
     var savedText: String { fileSession.savedContents }
     var lastModified: Date? { fileSession.lastModified }

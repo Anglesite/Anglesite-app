@@ -14,6 +14,8 @@ import AnglesiteCore
 final class TypedEntryEditorModel: InspectorEditorModel {
     let file: FileRef
     let descriptor: ContentTypeDescriptor
+    /// Command/find seam for the body field's markdown editor.
+    let markdownController = MarkdownEditorController()
     private let sourceDirectory: URL
     private let gitCommit: NativeContentOperations.GitCommit
 

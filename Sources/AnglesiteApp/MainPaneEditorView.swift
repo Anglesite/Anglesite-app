@@ -32,10 +32,16 @@ struct MainPaneEditorView: View {
                     ProgressView().controlSize(.small)
                 } else {
                     switch EditorKind.resolve(for: model.file) {
-                    case .text, .plist, .markdown:
+                    case .text, .plist:
                         TextEditor(text: $model.text)
                             .font(.system(.body, design: .monospaced))
                             .scrollContentBackground(.hidden)
+                    case .markdown:
+                        MarkdownTextView(
+                            text: $model.text,
+                            controller: model.markdownController,
+                            documentId: model.file.id
+                        )
                     case .component:
                         if let componentContext {
                             ComponentEditorView(file: model.file, context: componentContext, fileEditor: model)
