@@ -18,6 +18,13 @@ public struct EditReply: Sendable, Equatable, Encodable {
     /// Op-scoped metadata. For `replace-image-src` carries `{ src, srcset? }`. `nil` for ops
     /// that don't surface overlay-side metadata.
     public let result: ImageResult?
+    /// `extract-component`-scoped metadata — the new component's project-relative path, the
+    /// original component's Props the plugin hoisted into it, and any non-fatal warnings (e.g. a
+    /// scoped style rule that couldn't be migrated). Present on the `.applied` reply for that op;
+    /// `nil` for every other op. Kept as a narrowly-typed additive field alongside `result`/`model`
+    /// rather than widening `result` into an enum, matching this type's one-field-per-op-family
+    /// convention.
+    public let extractResult: ExtractComponentResult?
     /// Preview-only: the source fragment before/after the would-be change (`.preview` status).
     public let before: String?
     public let after: String?
@@ -44,6 +51,24 @@ public struct EditReply: Sendable, Equatable, Encodable {
         }
     }
 
+    /// Structured result of the `extract-component` op — mirrors the plugin's
+    /// `result: { componentPath, hoistedProps, warnings }` shape.
+    public struct ExtractComponentResult: Sendable, Equatable, Encodable {
+        /// Project-relative path of the newly-created component (e.g. `src/components/Hero.astro`).
+        public let componentPath: String
+        /// Names of the original component's declared Props the extracted subtree bare-referenced,
+        /// which the plugin hoisted into the new component's own `Props` interface.
+        public let hoistedProps: [String]
+        /// Non-fatal advisories (e.g. a complex scoped style rule left behind). Empty when clean.
+        public let warnings: [String]
+
+        public init(componentPath: String, hoistedProps: [String], warnings: [String]) {
+            self.componentPath = componentPath
+            self.hoistedProps = hoistedProps
+            self.warnings = warnings
+        }
+    }
+
     public enum Status: String, Sendable, Equatable, Encodable {
         case applied, failed, ambiguous, preview
     }
@@ -59,7 +84,8 @@ public struct EditReply: Sendable, Equatable, Encodable {
         after: String? = nil,
         op: String? = nil,
         model: ComponentModel? = nil,
-        reason: String? = nil
+        reason: String? = nil,
+        extractResult: ExtractComponentResult? = nil
     ) {
         self.id = id
         self.status = status
@@ -72,6 +98,7 @@ public struct EditReply: Sendable, Equatable, Encodable {
         self.op = op
         self.model = model
         self.reason = reason
+        self.extractResult = extractResult
     }
 }
 

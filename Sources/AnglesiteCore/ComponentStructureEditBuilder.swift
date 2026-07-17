@@ -92,6 +92,33 @@ public enum ComponentStructureEditBuilder {
         )
     }
 
+    /// Carve the subtree rooted at `nodeId` out into a brand-new `.astro` component at
+    /// `newComponentPath` (a project-relative path under `src/components/` with a capitalized
+    /// basename), replacing the extracted markup with a self-closing instance + import. The
+    /// plugin applies this as one atomic two-file edit. Adds `newComponentPath` to the standard
+    /// `{ path, baseVersion, nodeId }` structure-op payload.
+    public static func extractComponent(
+        id: String,
+        path: String,
+        baseVersion: String,
+        nodeId: String,
+        newComponentPath: String
+    ) -> EditMessage {
+        EditMessage(
+            id: id,
+            path: path,
+            selector: nil,
+            op: EditMessage.Op.extractComponent,
+            component: .object([
+                "path": .string(path),
+                "baseVersion": .string(baseVersion),
+                "nodeId": .string(nodeId),
+                "newComponentPath": .string(newComponentPath),
+            ]),
+            value: nil
+        )
+    }
+
     /// `value: nil` removes the attribute (encodes as an explicit JSON `null`, distinct from
     /// omitting the field — the plugin schema treats `value === null` as "remove").
     public static func setAttr(

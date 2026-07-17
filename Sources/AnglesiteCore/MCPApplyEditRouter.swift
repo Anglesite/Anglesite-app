@@ -102,7 +102,8 @@ public struct MCPApplyEditRouter: EditRouter {
                 file: parsed?.file,
                 commit: parsed?.commit,
                 result: parsed?.result,
-                model: parsed?.model
+                model: parsed?.model,
+                extractResult: parsed?.extractResult
             )
             if let persistEdit {
                 do {
@@ -117,7 +118,8 @@ public struct MCPApplyEditRouter: EditRouter {
                         // `commit != nil` instead of `status` must not read this as landed.
                         commit: nil,
                         result: reply.result,
-                        model: reply.model
+                        model: reply.model,
+                        extractResult: reply.extractResult
                     )
                 }
             }
@@ -165,11 +167,20 @@ public struct MCPApplyEditRouter: EditRouter {
         else { return nil }
         let file = json["file"] as? String
         let commit = json["commit"] as? String
+        // The `result` key is op-shaped: `replace-image-src` puts `{ src, srcset? }` there,
+        // `extract-component` puts `{ componentPath, hoistedProps, warnings }`. Discriminate on
+        // which keys are present rather than assuming one shape.
         var image: EditReply.ImageResult?
-        if let resultDict = json["result"] as? [String: Any],
-           let src = resultDict["src"] as? String {
-            let srcset = resultDict["srcset"] as? String
-            image = EditReply.ImageResult(src: src, srcset: srcset)
+        var extract: EditReply.ExtractComponentResult?
+        if let resultDict = json["result"] as? [String: Any] {
+            if let src = resultDict["src"] as? String {
+                let srcset = resultDict["srcset"] as? String
+                image = EditReply.ImageResult(src: src, srcset: srcset)
+            } else if let componentPath = resultDict["componentPath"] as? String {
+                let hoisted = (resultDict["hoistedProps"] as? [Any])?.compactMap { $0 as? String } ?? []
+                let warnings = (resultDict["warnings"] as? [Any])?.compactMap { $0 as? String } ?? []
+                extract = EditReply.ExtractComponentResult(componentPath: componentPath, hoistedProps: hoisted, warnings: warnings)
+            }
         }
         var model: ComponentModel?
         if let modelDict = json["model"],
@@ -179,14 +190,15 @@ public struct MCPApplyEditRouter: EditRouter {
         // Present on `anglesite:edit-failed` bodies (e.g. "stale", "no-match", "invalid-input") —
         // the machine-readable counterpart to the free-form `detail` prose folded into `message`.
         let reason = json["reason"] as? String
-        if file == nil && commit == nil && image == nil && model == nil && reason == nil { return nil }
-        return Parsed(file: file, commit: commit, result: image, model: model, reason: reason)
+        if file == nil && commit == nil && image == nil && extract == nil && model == nil && reason == nil { return nil }
+        return Parsed(file: file, commit: commit, result: image, extractResult: extract, model: model, reason: reason)
     }
 
     struct Parsed: Equatable {
         let file: String?
         let commit: String?
         let result: EditReply.ImageResult?
+        let extractResult: EditReply.ExtractComponentResult?
         let model: ComponentModel?
         let reason: String?
     }

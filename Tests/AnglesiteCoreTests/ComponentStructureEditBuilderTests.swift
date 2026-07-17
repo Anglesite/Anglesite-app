@@ -71,4 +71,21 @@ import Testing
         guard case .object(let obj)? = message.component else { Issue.record("expected object component payload"); return }
         #expect(obj["value"] == .null)
     }
+
+    @Test("extractComponent carries nodeId and newComponentPath")
+    func extractComponentShape() {
+        let message = ComponentStructureEditBuilder.extractComponent(
+            id: "id-7",
+            path: "src/components/Card.astro",
+            baseVersion: "sha256:abc",
+            nodeId: "n3",
+            newComponentPath: "src/components/Hero.astro"
+        )
+        #expect(message.op == EditMessage.Op.extractComponent)
+        guard case .object(let obj)? = message.component else { Issue.record("expected object component payload"); return }
+        #expect(obj["path"] == .string("src/components/Card.astro"))
+        #expect(obj["baseVersion"] == .string("sha256:abc"))
+        #expect(obj["nodeId"] == .string("n3"))
+        #expect(obj["newComponentPath"] == .string("src/components/Hero.astro"))
+    }
 }
