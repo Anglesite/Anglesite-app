@@ -128,6 +128,7 @@ final class MockCloudflareReader: CloudflareReading, @unchecked Sendable {
         return state
     }
     func listDNSRecords(zoneID: String, apiToken: String) async throws -> [DNSRecord] { [] }
+    func workerScriptNames(apiToken: String) async throws -> [String] { [] }
 }
 
 final class MockCloudflareWriter: CloudflareWriting, @unchecked Sendable {

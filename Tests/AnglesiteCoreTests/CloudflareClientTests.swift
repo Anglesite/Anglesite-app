@@ -110,6 +110,62 @@ func unauthorizedMaps() async {
     }
 }
 
+@Test("workerScriptNames returns every script id across the account's first page")
+func workerScriptNamesReturnsIds() async throws {
+    let accountsJSON = #"{"success":true,"errors":[],"messages":[],"result":[{"id":"acct123"}]}"#
+    let scriptsJSON = """
+    {"success":true,"errors":[],"messages":[],"result":[{"id":"my-site"},{"id":"other-site"}],
+     "result_info":{"page":1,"total_pages":1}}
+    """
+    let client = HTTPCloudflareClient(transport: fakeTransport([
+        "/accounts?per_page=1": (200, accountsJSON),
+        "/workers/scripts?per_page=100": (200, scriptsJSON),
+    ]))
+    let names = try await client.workerScriptNames(apiToken: "t")
+    #expect(names == ["my-site", "other-site"])
+}
+
+@Test("workerScriptNames pages through more than 100 scripts")
+func workerScriptNamesPaginates() async throws {
+    let accountsJSON = #"{"success":true,"errors":[],"messages":[],"result":[{"id":"acct123"}]}"#
+    let page1 = """
+    {"success":true,"errors":[],"messages":[],"result":[{"id":"page1-site"}],
+     "result_info":{"page":1,"total_pages":2}}
+    """
+    let page2 = """
+    {"success":true,"errors":[],"messages":[],"result":[{"id":"page2-site"}],
+     "result_info":{"page":2,"total_pages":2}}
+    """
+    let client = HTTPCloudflareClient(transport: { request in
+        let url = request.url!.absoluteString
+        let (status, body): (Int, String)
+        if url.contains("/accounts?per_page=1") {
+            (status, body) = (200, accountsJSON)
+        } else if url.contains("page=2") {
+            (status, body) = (200, page2)
+        } else if url.contains("/workers/scripts?per_page=100") {
+            (status, body) = (200, page1)
+        } else {
+            (status, body) = (404, "{\"success\":false}")
+        }
+        let resp = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+        return (Data(body.utf8), resp)
+    })
+    let names = try await client.workerScriptNames(apiToken: "t")
+    #expect(names == ["page1-site", "page2-site"])
+}
+
+@Test("workerScriptNames throws when the token has no visible account")
+func workerScriptNamesNoAccount() async {
+    let emptyAccountsJSON = #"{"success":true,"errors":[],"messages":[],"result":[]}"#
+    let client = HTTPCloudflareClient(transport: fakeTransport([
+        "/accounts?per_page=1": (200, emptyAccountsJSON),
+    ]))
+    await #expect(throws: CloudflareError.self) {
+        try await client.workerScriptNames(apiToken: "t")
+    }
+}
+
 @Test("zoneState assembles DNSSEC, settings, DNS records, bot mode, and WAF rules")
 func zoneStateAssembles() async throws {
     let env = { (r: String) in "{\"success\":true,\"errors\":[],\"messages\":[],\"result\":\(r)}" }

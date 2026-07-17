@@ -56,6 +56,8 @@ private struct CFFullDNSRecord: Decodable, Sendable {
     let ttl: Int
     let proxied: Bool?
 }
+private struct CFAccount: Decodable, Sendable { let id: String }
+private struct CFWorkerScript: Decodable, Sendable { let id: String }
 
 /// Body for DELETE requests, which Cloudflare's API doesn't require but tolerates.
 private struct CFEmptyBody: Encodable, Sendable {}
@@ -265,6 +267,16 @@ public struct HTTPCloudflareClient: CloudflareReading {
             DNSRecord(id: $0.id, type: $0.type, name: $0.name, content: $0.content,
                       ttl: $0.ttl, proxied: $0.proxied ?? false)
         }
+    }
+
+    public func workerScriptNames(apiToken: String) async throws -> [String] {
+        let accounts = try await get("/accounts?per_page=1", apiToken: apiToken, as: [CFAccount].self)
+        guard let accountID = accounts.first?.id else {
+            throw CloudflareError.api(message: "no Cloudflare account visible to this token")
+        }
+        let scripts = try await paginated(
+            "/accounts/\(accountID)/workers/scripts?per_page=100", apiToken: apiToken, as: CFWorkerScript.self)
+        return scripts.map(\.id)
     }
 
     // MARK: - Write helpers
