@@ -8,7 +8,8 @@ struct VmnetFailureRecoveryTests {
         let message = VmnetFailureRecovery.message(for: error)
 
         #expect(message?.contains("VMNET_MEM_FAILURE (1002)") == true)
-        #expect(message?.contains("Quit other VM/container apps and retry") == true)
+        #expect(message?.contains("Restart Networking") == true)
+        #expect(message?.contains("quit other VM/container apps and retry") == true)
         #expect(message?.contains("restart your Mac") == true)
     }
 
@@ -18,5 +19,13 @@ struct VmnetFailureRecoveryTests {
         #expect(VmnetFailureRecovery.message(for: "vmnet returned 1001") == nil)
         #expect(VmnetFailureRecovery.message(for: "vmnet_return_t(rawValue: 11002)") == nil)
         #expect(VmnetFailureRecovery.message(for: "vmnet_return_t(rawValue: 10021)") == nil)
+    }
+
+    @Test("isRecoverable matches only the failures message(for:) itself names")
+    func isRecoverableTracksMessage() {
+        let recognized = VmnetFailureRecovery.message(
+            for: "unsupported: failed to create vmnet network with status vmnet_return_t(rawValue: 1002)")!
+        #expect(VmnetFailureRecovery.isRecoverable(failureMessage: recognized))
+        #expect(!VmnetFailureRecovery.isRecoverable(failureMessage: "guest process launch failed: timed out"))
     }
 }

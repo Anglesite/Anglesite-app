@@ -43,6 +43,63 @@ struct SharedVmnetNetworkTests {
         #expect(recorder.releaseCalls == ["missing-gateway"])
         #expect(recorder.activeSiteIDs.isEmpty)
     }
+
+    @Test("reset discards the cached network so the next allocate rebuilds it (#812)")
+    func resetForcesRebuild() async throws {
+        // Each factory call gets its own recorder — mirrors real `VmnetNetwork.init` building a
+        // fresh, empty `Allocator` per instance, not one shared across every network this process
+        // ever creates.
+        let factory = RecordingFactory()
+        let allocator = SharedVmnetNetwork {
+            FakeNetwork(recorder: factory.makeRecorder())
+        }
+
+        _ = try await allocator.allocate(siteID: "before-reset")
+        #expect(factory.callCount == 1)
+
+        await allocator.reset()
+
+        // A fresh network's allocator has no memory of the pre-reset siteID, so the same id can be
+        // allocated again without the "already exists" error `FakeNetworkRecorder.allocate` throws
+        // for a live duplicate against the SAME network instance.
+        _ = try await allocator.allocate(siteID: "before-reset")
+        #expect(factory.callCount == 2)
+        #expect(factory.recorderCount == 2)
+    }
+
+    @Test("reset before any allocation is a harmless no-op")
+    func resetWithoutPriorAllocation() async throws {
+        let factory = RecordingFactory()
+        let allocator = SharedVmnetNetwork {
+            FakeNetwork(recorder: factory.makeRecorder())
+        }
+
+        await allocator.reset()
+        _ = try await allocator.allocate(siteID: "first-ever")
+        #expect(factory.callCount == 1)
+    }
+}
+
+/// Hands out a fresh `FakeNetworkRecorder` per factory call while tracking how many were made —
+/// mirrors `FakeNetworkRecorder`'s own locking style below. A plain captured `var` won't compile
+/// here: `SharedVmnetNetwork.NetworkFactory` is `@Sendable`, so the factory closure can't mutate a
+/// non-isolated local.
+private final class RecordingFactory: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+    private var recorders: [FakeNetworkRecorder] = []
+
+    var callCount: Int { lock.withLock { calls } }
+    var recorderCount: Int { lock.withLock { recorders.count } }
+
+    func makeRecorder() -> FakeNetworkRecorder {
+        lock.withLock {
+            calls += 1
+            let recorder = FakeNetworkRecorder()
+            recorders.append(recorder)
+            return recorder
+        }
+    }
 }
 
 private struct FakeNetwork: Network {

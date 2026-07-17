@@ -786,6 +786,13 @@ struct SiteWindow: View {
                     Text(message)
                         .font(.callout).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).frame(maxWidth: 420)
+                    // Only for the vmnet failures `VmnetFailureRecovery` recognizes — plain Retry
+                    // alone would keep reusing the same wedged network object (#812).
+                    if VmnetFailureRecovery.isRecoverable(failureMessage: message) {
+                        Button("Restart Networking & Retry") {
+                            model.restartNetworkingAndRetry()
+                        }
+                    }
                     Button("Retry") {
                         model.retryPreview()
                     }

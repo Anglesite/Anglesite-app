@@ -103,6 +103,14 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         return (control: control, siteID: id)
     }
 
+    /// `PreviewModel.resetNetworking()`'s target (#812): unlike `containerSnapshot()`, `control` is
+    /// available from construction regardless of `activeSiteID` — a boot failure never sets it, but
+    /// the failure pane's "Restart Networking" button needs to reach this control precisely when
+    /// the most recent boot failed.
+    public func resetNetworking() async {
+        await control.resetNetworking()
+    }
+
     /// Copies one commit produced by the MCP sidecar in `/workspace/site` back into the host's
     /// canonical `Source/` repository without granting the guest write access to that repository.
     ///
