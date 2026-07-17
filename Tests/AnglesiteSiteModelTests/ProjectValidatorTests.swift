@@ -44,13 +44,13 @@ final class ProjectValidatorTests {
     }
 
     /// Regression for the Sites launcher showing every scaffolded site grayed-out with a warning
-    /// triangle: the validator required `anglesite.config.json` / `astro.config.ts`, filenames the
-    /// template never produced. The canonical scaffold (`scaffold.sh` + `Resources/Template/`)
-    /// writes `.site-config` and `astro.config.mjs`, so that exact pair must validate as a real
-    /// Anglesite site.
-    @Test("Canonical template layout (.site-config + astro.config.mjs) is valid") func canonicalTemplateLayoutIsValid() throws {
+    /// triangle: the validator required `anglesite.config.json` / `astro.config.mjs`, filenames the
+    /// template doesn't produce (it moved to `astro.config.ts` in #380). The canonical scaffold
+    /// (`scaffold.sh` + `Resources/Template/`) writes `.site-config` and `astro.config.ts`, so that
+    /// exact pair must validate as a real Anglesite site (#786).
+    @Test("Canonical template layout (.site-config + astro.config.ts) is valid") func canonicalTemplateLayoutIsValid() throws {
         try Data().write(to: tempDir.appendingPathComponent(".site-config"))
-        try Data().write(to: tempDir.appendingPathComponent("astro.config.mjs"))
+        try Data().write(to: tempDir.appendingPathComponent("astro.config.ts"))
         let result = ProjectValidator.validate(tempDir)
         #expect(result.isValid, "a site scaffolded from the template must be valid")
         #expect(result.missingRequired == [])
@@ -59,7 +59,7 @@ final class ProjectValidatorTests {
     @Test("Not valid when a required sentinel is missing") func notValidWhenARequiredSentinelIsMissing() throws {
         // Only one of the two required sentinels — still not a valid Anglesite project because
         // `.site-config` (the Anglesite-managed marker) is missing.
-        try Data().write(to: tempDir.appendingPathComponent("astro.config.mjs"))
+        try Data().write(to: tempDir.appendingPathComponent("astro.config.ts"))
         let result = ProjectValidator.validate(tempDir)
         #expect(!result.isValid)
         #expect(result.missingRequired == [".site-config"])

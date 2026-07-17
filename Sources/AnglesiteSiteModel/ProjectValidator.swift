@@ -4,13 +4,14 @@ import Foundation
 ///
 /// The sentinel filenames must match what the scaffolder actually writes (see
 /// `Resources/Template/` + `scaffold.sh`): the canonical markers are `.site-config` and
-/// `astro.config.mjs`. (They are *not* `anglesite.config.json` / `astro.config.ts`, which the
-/// template has never produced — using those flagged every freshly scaffolded site as invalid.)
+/// `astro.config.ts` (the template moved off `astro.config.mjs` in #380 — using the old `.mjs`
+/// name here flagged every freshly scaffolded site as invalid). They are *not*
+/// `anglesite.config.json`, which the template has never produced.
 ///
 /// Two tiers of sentinels:
 ///   - **Required** (`requiredSentinels`) — must be present for the directory to count as an
 ///     Anglesite project at all: `.site-config` (identifies the project as Anglesite-managed and
-///     is read by `scripts/config.ts`'s `readConfig`) and `astro.config.mjs` (it's an Astro site).
+///     is read by `scripts/config.ts`'s `readConfig`) and `astro.config.ts` (it's an Astro site).
 ///   - **Recommended** (`recommendedSentinels`) — optional integration markers that aren't
 ///     load-bearing for the core preview + edit pipeline. A site missing only recommended
 ///     sentinels is still valid; the UI can surface them as optional rather than blockers.
@@ -23,7 +24,7 @@ import Foundation
 public enum ProjectValidator {
     public static let requiredSentinels: [String] = [
         ".site-config",
-        "astro.config.mjs"
+        "astro.config.ts"
     ]
     public static let recommendedSentinels: [String] = []
     /// Union of required + recommended — the full set a caller can check without caring about the
