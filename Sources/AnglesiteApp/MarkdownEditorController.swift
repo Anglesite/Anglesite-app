@@ -86,16 +86,28 @@ final class MarkdownEditorController {
 
     private func observeFindResults() {
         if let resultsObserver { NotificationCenter.default.removeObserver(resultsObserver) }
-        // queue: nil → delivered synchronously on the posting thread. The engine posts results
-        // from its own main-queue bus handler, so assumeIsolated holds.
+        // queue: nil → delivered synchronously on the posting thread, which the engine's own
+        // bus handler guarantees is main — callers (the find bar, `findNext`/`findPrevious`'s
+        // wrap math) depend on `matchCount`/`currentMatchIndex` already reflecting the latest
+        // query by the time `post(name:)` returns, so this can't unconditionally defer via
+        // `Task { @MainActor in }` (tried during #808 review — broke exactly that synchronous
+        // contract). Instead: verify the guarantee at runtime rather than assuming it.
+        // `Thread.isMainThread` true → `MainActor.assumeIsolated` is now a confirmed-safe
+        // same-thread hop, not a trusted one. False (the guarantee broken) → fail safely with a
+        // one-runloop-turn-late update via `Task` instead of trapping.
         resultsObserver = NotificationCenter.default.addObserver(
             forName: busNames.findResults, object: nil, queue: nil
         ) { [weak self] note in
             let count = note.userInfo?["count"] as? Int ?? 0
-            MainActor.assumeIsolated {
-                guard let self else { return }
+            guard let self else { return }
+            @MainActor func apply() {
                 self.matchCount = count
                 if self.currentMatchIndex >= count { self.currentMatchIndex = max(0, count - 1) }
+            }
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { apply() }
+            } else {
+                Task { @MainActor in apply() }
             }
         }
     }
@@ -189,7 +201,11 @@ final class MarkdownEditorController {
 @MainActor @Observable
 final class MarkdownEditorFocusRegistry {
     static let shared = MarkdownEditorFocusRegistry()
-    private(set) var active: MarkdownEditorController?
+    // `weak` (#808 review): a window closed via a path that skips the normal
+    // dismantleNSView/resign handshake (e.g. an abrupt teardown) must not pin the last-focused
+    // controller — and its live NotificationCenter observer — alive indefinitely. A dangling
+    // strong reference here would simply auto-nil instead of leaking.
+    private(set) weak var active: MarkdownEditorController?
 
     func activate(_ controller: MarkdownEditorController) {
         if active !== controller { active = controller }

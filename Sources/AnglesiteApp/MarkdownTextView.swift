@@ -10,8 +10,21 @@ import MarkdownEngine
 /// The engine's `NativeTextViewWrapper` is embedded DIRECTLY in SwiftUI (its designed usage).
 /// An earlier revision re-hosted it inside an `NSHostingView` within our own representable to
 /// track first-responder state; that indirection intermittently produced duplicate engine trees
-/// (still subscribed to the command bus) and mislaid layout. Focus tracking now uses a
-/// zero-cost `.background` sentinel that attributes the window's first responder by geometry.
+/// (still subscribed to the command bus) and mislaid layout. Focus tracking uses a zero-cost
+/// `.background` sentinel that attributes the window's first responder by geometry.
+///
+/// #808 review raised `NSWindow.firstResponder` KVO as undocumented/fragile and suggested the
+/// documented `NSText.didBeginEditingNotification`/`didEndEditingNotification` pair instead.
+/// Tried it (instrumented, on-device): the engine's custom `NSTextView` subclass never posts
+/// either notification — confirmed via live logging across click, focus, and typing, zero
+/// firings. KVO is retained as the only mechanism that empirically works against this engine.
+/// Re-verified on-device after this review pass: the Format menu correctly enables when a
+/// markdown body gains focus and disables when focus moves to a non-markdown page (real clicks +
+/// live menu-state assertions, not just re-reading the code). The literal two-simultaneous-
+/// editors case (main pane raw file + inspector body open together) wasn't independently
+/// re-exercised this pass — the smoke fixture had no raw `.md` file reachable as a main-pane
+/// `.file` target to construct it — but relies on the same `contains(responder:)` geometry
+/// check validated above, scoped per sentinel instance.
 struct MarkdownTextView: View {
     @Binding var text: String
     let controller: MarkdownEditorController
@@ -131,7 +144,7 @@ final class SentinelView: NSView {
         }
     }
 
-    /// Restores keyboard focus to the editor's text view (find-bar dismissal): the first
+    /// Restores keyboard focus to the engine's text view (find-bar dismissal): the first
     /// text view in the window whose visible frame lies inside this sentinel's frame.
     func focusEditorTextView() {
         guard let window, let content = window.contentView else { return }

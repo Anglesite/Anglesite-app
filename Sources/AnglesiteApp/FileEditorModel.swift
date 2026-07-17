@@ -15,7 +15,12 @@ import AnglesiteCore
 final class FileEditorModel {
     let file: FileRef
     var text: String = ""
-    /// Command/find seam for the markdown editor surface; unused for other editor kinds.
+    /// Command/find seam for the markdown editor surface; unused for `.text`/`.plist`/
+    /// `.component` files. `lazy var` was considered (#808 review) to skip that allocation, but
+    /// `@Observable` rewrites stored properties into tracked computed ones, which `lazy` can't
+    /// attach to — and the actual per-instance cost (a UUID, ten `Notification.Name` string
+    /// constants, one `NotificationCenter` observer) is small enough not to warrant fighting the
+    /// macro for it.
     let markdownController = MarkdownEditorController()
     private var fileSession = EditableFileSession()
     var savedText: String { fileSession.savedContents }
