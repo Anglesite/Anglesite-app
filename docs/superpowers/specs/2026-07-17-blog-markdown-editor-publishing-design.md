@@ -14,10 +14,11 @@ Two coupled pieces:
    bold, task checkboxes toggleable) — not a raw monospaced buffer, and not a WYSIWYG
    that rewrites the file.
 2. **A publish flow for posts that works on desktop and mobile**, where mobile is
-   assumed to have **no container access at all** — no Apple Containerization, no Node,
-   no subprocesses, and *not* the remote Cloudflare Sandbox either (that is a container
-   too, just someone else's; it stays an orthogonal opt-in, per the
-   2026-06-23 remote-sandbox design).
+   assumed to have **no container access on the device** — no Apple Containerization,
+   no Node, no subprocesses; the phone only makes HTTPS calls — and where **Cloudflare
+   is the only required third-party dependency** (owner decision, 2026-07-17). The user
+   already needs a Cloudflare account to host the site; publishing must not
+   additionally require GitHub or any other git host.
 
 ## Current state this builds on
 
@@ -127,7 +128,14 @@ On every platform: **publish = commits on `Source/` + a deterministic pipeline t
 in a deploy, with the pre-deploy security gate running somewhere the client cannot
 skip, and build logs surfaced** (logs are sacred). No LLM in the loop anywhere.
 
-### C.2 One seam, two strategies
+### C.2 One seam, two strategies — Cloudflare-only by requirement
+
+GitHub cannot be load-bearing anywhere in the required path. That rules out Cloudflare
+Workers Builds as the container-less pipeline — Workers Builds only connects to
+GitHub/GitLab repos, so a design built on it silently reintroduces a git-host account
+as a prerequisite. Instead, the container-less path runs entirely against services in
+the **user's own Cloudflare account** (§C.4). GitHub stays what it already is via
+RepoBootstrap (#68): an optional mirror/collaboration surface, never a requirement.
 
 A `PublishPipeline` protocol in AnglesiteCore with two implementations:
 
@@ -135,16 +143,20 @@ A `PublishPipeline` protocol in AnglesiteCore with two implementations:
   `DeployCommand` runs build → pre-deploy scan (#742 envelope, `.blocked` is final) →
   `wrangler deploy` inside the container runtime. Fast local iteration, no push
   required.
-- **`GitPushPublishPipeline`** — the container-less path: commit → pull
-  (fast-forward/rebase) → push to `origin` → **Cloudflare Workers Builds** (git-connected,
-  user's account, user's billing — same BYO posture as everything else) builds and
-  deploys → the app polls the Workers Builds deployment via the Cloudflare API and
-  streams the build log into the debug pane.
+- **`CloudPublishPipeline`** — the container-less path: commit → pull
+  (fast-forward/rebase) → push to the site's **Anglesite-provisioned git origin in the
+  user's Cloudflare account** (§C.4) → the origin's publish service builds, gates, and
+  deploys in an ephemeral Cloudflare Sandbox → the app polls the control Worker for
+  status and streams the build log into the debug pane.
 
-Mobile only has the second. Desktop gets both — push-to-deploy is also the natural fit
+Mobile only has the second. Desktop gets both — push-to-publish is also the natural fit
 for the Linux/Windows ports (#571) and for users who never provision the container
 runtime. `DeployModel` picks the strategy the way it picks `ContainerDeployExecutor`
 today.
+
+**Optional Workers Builds variant:** when a site *does* have a GitHub remote (the user
+ran Publish to GitHub), Workers Builds can drive the same `build:ci` entry point (§C.3)
+off pushes to that remote. Nice-to-have, not v1-required, and never the default.
 
 ### C.3 Moving the gate server-side (template change, app-only)
 
@@ -155,30 +167,71 @@ The template's CI story gets a `build:ci` script:
 "build:ci": "npm run build && npx tsx scripts/pre-deploy-check.ts --json --strict"
 ```
 
-Workers Builds is configured with build command `npm run build:ci` and deploy command
-`npx wrangler deploy`. The scan runs **after** the build (it inspects `dist/`, matching
-`DeployCommand`'s ordering) and a blocker exits non-zero, so **the deploy step never
-runs**. This is strictly stronger than today's posture: the gate becomes unbypassable
-from *any* client — the app, a laptop with `git push`, or a compromised device — rather
-than being enforced by app code. The desktop container path keeps its local preflight
-too (better UX: blocked before pushing anything). The scan's `--json` envelope (#742)
-is emitted into the build log; on failure the app extracts it when present and renders
-the existing `Phase.blocked` UI, falling back to a raw log excerpt for ordinary build
-errors.
+`build:ci` is the single server-side entry point: the publish service (§C.4) runs it,
+and so does the optional Workers Builds variant when a GitHub remote exists. The scan
+runs **after** the build (it inspects `dist/`, matching `DeployCommand`'s ordering) and
+a blocker exits non-zero, so **the deploy step never runs**. This is strictly stronger
+than today's posture: the gate becomes unbypassable from *any* client — the app, a
+laptop with `git push`, or a compromised device — rather than being enforced by app
+code. The desktop container path keeps its local preflight too (better UX: blocked
+before pushing anything). The scan's `--json` envelope (#742) is emitted into the build
+log; on failure the app extracts it when present and renders the existing
+`Phase.blocked` UI, falling back to a raw log excerpt for ordinary build errors.
 
-### C.4 Mobile flow end-to-end (no containers anywhere)
+### C.4 The git origin + publish service (user's Cloudflare account)
 
-**Prerequisite:** the site has an `origin` remote — i.e. `RepoBootstrap` (#68,
-"Publish to GitHub") has run. Mobile onboarding surfaces this as the entry requirement;
-a site that exists only on one Mac's disk is not reachable from a phone *by design*
-(git is the sync layer; there is no bespoke Anglesite sync protocol).
+The piece that removes GitHub from the requirements: a small, Anglesite-maintained
+**site-services Worker** the user deploys into their own account **once**, via the
+Deploy-to-Cloudflare button — the same provisioning shape (and plausibly the same
+template repo) as the 2026-06-23 remote-sandbox design. It provides, per site:
 
-1. **Onboarding (once):** sign into the git host (GitHub OAuth device/web flow → token
-   in Keychain, mirroring `HTTPGitHubClient`), pick the site repo, **shallow clone**
-   `Source/` into the app's container directory via SwiftGit2 (libgit2 is already the
-   Darwin git path; no subprocess involved). Connect Cloudflare with the existing
-   verify-then-persist `TokenOnboarding` pattern; enable Workers Builds for the repo
-   (§C.6).
+- **A durable git origin.** Bare repos live in **R2**; a per-site Durable Object owns
+  each one. Serving uses *real git*, not a pack-protocol reimplementation in Workers
+  JS: the control Worker wakes an ephemeral Sandbox that restores the bare repo from
+  R2 and serves **git smart HTTP** (`git http-backend`) behind the token-checking auth
+  proxy; after a push, the repo syncs back to R2 *before* the push is reported
+  successful. Because it speaks standard smart HTTP with a token, any git client can
+  clone and push it — #72's "clonable anywhere" invariant holds with zero GitHub
+  involvement.
+- **The publish pipeline.** A push to the origin (or an explicit publish RPC) makes
+  the service check out the pushed ref in the sandbox, run `npm run build:ci` (§C.3 —
+  build, then the pre-deploy gate), and on success `wrangler deploy` in-sandbox with
+  the account's token. The control Worker exposes status + build logs for the app to
+  poll and stream (logs are sacred, on every platform).
+
+Boundaries and posture:
+
+- This sandbox is **ephemeral compute in the user's Cloudflare account, not a
+  container on the device** — the phone still only makes HTTPS calls, so the
+  no-containers-on-mobile constraint holds. It is distinct from the remote *preview*
+  sandbox (#66), which stays an opt-in live dev-server session; the publish sandbox
+  runs for seconds-to-minutes per publish, then sleeps. Disk loss on sleep is
+  immaterial — R2 is the durable home and the sandbox is always reconstructable from
+  it (the same cold-hydrate posture #66 already accepted).
+- **Single-writer safety:** the per-site DO serializes pushes; the R2 sync completes
+  before receive-pack's response is released, so a crash mid-push means the client
+  re-pushes — the R2 copy is never a torn state.
+- **Billing honesty:** Cloudflare Sandboxes/Containers require the Workers paid plan.
+  That is a real cost floor for container-less publishing, but it is a *Cloudflare*
+  cost on the account the user already bills for hosting — consistent with the BYO
+  "user bills, zero Anglesite-operated infra" posture. Surfaced plainly in onboarding,
+  never a silent failure.
+
+### C.5 Mobile flow end-to-end (no containers on the device, Cloudflare only)
+
+**Prerequisite:** the site has its Cloudflare origin (§C.4) — set up from any device
+that has the site, typically the Mac, which pushes `Source/` to the origin when
+cloud publishing is enabled. A site that exists only on one Mac's disk is not
+reachable from a phone *by design* (git is the sync layer; there is no bespoke
+Anglesite sync protocol — the origin just lives in the user's Cloudflare account
+instead of on a git host).
+
+1. **Onboarding (once):** connect Cloudflare with the existing verify-then-persist
+   `TokenOnboarding` pattern; provision the site-services Worker via the
+   Deploy-to-Cloudflare button (§C.7); pick the site and **shallow clone** `Source/`
+   from its origin into the app's container directory via SwiftGit2 (libgit2 is
+   already the Darwin git path; no subprocess involved). No GitHub sign-in exists in
+   this flow.
 2. **Edit:** the same navigator-lite → `TypedEntryEditorView` (ported off
    `NSOpenPanel`/`NSWorkspace` onto `fileImporter`/`PhotosPicker`) with
    `MarkdownTextView` bodies. `FrontmatterDocument` round-trip, per-edit commits —
@@ -189,12 +242,16 @@ a site that exists only on one Mac's disk is not reachable from a phone *by desi
    implementation that diverges from Astro's, shown in site-unlike CSS. Honest
    labeling over simulation. True preview = the deployed site post-publish (drafts
    never deploy), or the remote sandbox for users who separately opt into it.
-4. **Publish:** flip draft (§B.3) → `pull --rebase` → push over HTTPS → Workers Builds
-   builds, gates, deploys → app polls deployment status, streams the log, and on
+4. **Publish:** flip draft (§B.3) → `pull --rebase` → push to the origin → the publish
+   service builds, gates, deploys (§C.4) → app polls status, streams the log, and on
    success runs the Webmention/POSSE post-deploy steps app-side (pure Swift + HTTP,
    fully portable — same code desktop runs today).
 
-### C.5 Desktop flow
+Creating a *new* site from the phone is feasible under this design (the template is an
+app resource; scaffold + `git init` + push to a fresh origin need no Node — `npm ci`
+happens server-side in `build:ci`), but it is a follow-on, not part of this slice.
+
+### C.6 Desktop flow
 
 Unchanged core, plus the publish verbs: a post's editor and the navigator get
 **Publish/Unpublish** (menu + toolbar, proper Mac conventions per the mac-assed spec);
@@ -202,15 +259,23 @@ publish commits then triggers whichever `PublishPipeline` the site is configured
 The container path's dev-server preview keeps showing drafts (dev mode renders
 `draft: true` entries with a "Draft" badge — dev-only, filtered from builds).
 
-### C.6 Workers Builds provisioning
+### C.7 Provisioning (one-time, Cloudflare only)
 
-Connecting a Cloudflare account to the git host is a one-time dashboard OAuth step that
-cannot be done headlessly; the app deep-links the user through it, then creates/updates
-the build configuration (build command, deploy command, root directory) via the API and
-verifies with a status poll. Exact API coverage for build-config creation is an open
-item to verify during implementation (same manual-verify posture as #207's token
-onboarding). Fallback if the API gap is real: the app shows copy-paste build settings
-and verifies by observing the first deployment.
+Two steps, both against Cloudflare and nothing else:
+
+1. **API token** — the existing verify-then-persist `TokenOnboarding` flow
+   (Keychain-stored, verified before use), with scopes extended to cover the
+   site-services Worker's needs (Workers scripts, DO, R2).
+2. **Site-services Worker** — deployed into the user's account via the
+   Deploy-to-Cloudflare button against the Anglesite template repo (browser OAuth to
+   *Cloudflare*, hosted build — the exact mechanism the remote-sandbox design already
+   locked, because a phone can't run wrangler or build images). The app then verifies
+   with a status RPC and registers the site's origin URL.
+
+Per-site enablement afterward is a single control-Worker call (create the DO + R2
+prefix + origin URL). If the user later runs Publish to GitHub (#68), that adds a
+mirror remote and unlocks the optional Workers Builds variant; nothing in the required
+path changes.
 
 ## Data flow
 
@@ -223,11 +288,13 @@ and verifies by observing the first deployment.
                                         └─► wrangler deploy → URL         │
                                         └─► push origin (background)      │
                     └──────────────────────────────────────────────────────┘
-                    ┌── iOS / container-less ─────────────────────────────┐
+                    ┌── iOS / container-less (Cloudflare only) ───────────┐
  edit local clone (MarkdownTextView)                                      │
    → save → commit (SwiftGit2, offline-safe)                              │
-   → Publish: draft:false + commit → pull --rebase → push origin          │
-       └─► Workers Builds (user's CF acct): npm run build:ci              │
+   → Publish: draft:false + commit → pull --rebase                        │
+   → push → git origin (user's CF acct: DO + R2 bare repo,                │
+       │     smart HTTP via git http-backend in ephemeral sandbox)        │
+       └─► publish service (same sandbox): npm run build:ci               │
              build → pre-deploy-check --strict ✗→ deploy never runs       │
              └─► wrangler deploy → app polls status + streams log         │
                   └─► app-side Webmention/POSSE on success                │
@@ -239,10 +306,13 @@ and verifies by observing the first deployment.
 - **Non-fast-forward push** → automatic `pull --rebase`; on conflict, a per-file
   keep-mine/keep-theirs sheet scoped to content files (the same conflict posture as
   `FileEditorModel`'s external-change flow). Never silent merge, never force-push.
-- **CI build failure** → distinguish gate-blocked (scan envelope found in the log →
-  existing blocked-deploy UI with categories/remediation) from plain build errors (log
-  excerpt + link to full log). A failed CI deploy leaves the previous deploy live —
-  static hosting's natural atomicity.
+- **Pipeline build failure** → distinguish gate-blocked (scan envelope found in the log
+  → existing blocked-deploy UI with categories/remediation) from plain build errors
+  (log excerpt + link to full log). A failed pipeline run leaves the previous deploy
+  live — static hosting's natural atomicity.
+- **Cold starts** → pushing/publishing may wake the sandbox; the publish UI shows
+  determinate-ish states (waking → pushing → building → checking → deploying), the
+  same progress posture as #66's `.starting`.
 - **Draft leakage backstop** → optional pre-deploy-check addition: fail if any
   `draft: true` source entry has a corresponding page in `dist/` (cheap route check;
   belt-and-suspenders on top of route/feed filtering).
@@ -251,9 +321,11 @@ and verifies by observing the first deployment.
   registry constrain typed fields to valid shapes.
 - **Offline** → editing and committing fully work; Publish is disabled with an explicit
   "waiting for network" state, never queued silently.
-- **Missing prerequisites** → no `origin` → route to Publish-to-GitHub onboarding
-  (desktop) or "open this site on your Mac first" guidance (iOS); missing/invalid CF or
-  git token → the existing verify-then-persist reconnect flows.
+- **Missing prerequisites** → no Cloudflare origin → route to site-services
+  provisioning (§C.7) on desktop, or "enable cloud publishing on your Mac first"
+  guidance on iOS; missing/invalid token → the existing verify-then-persist reconnect
+  flows; Workers plan lacks container support → explicit upgrade guidance, never a
+  silent retry loop.
 - **Concurrent editing** (Mac + phone) → git handles it; per-edit commits keep changes
   small and rebases clean. The phone pulls on foreground/site-open, the Mac's checkout
   hydrates as today.
@@ -269,15 +341,20 @@ and verifies by observing the first deployment.
 - **Draft model:** template fixture tests — `draft: true` entry emits no `dist/` page,
   no index/feed entry, for each post-family collection; `swift test` template-coupled
   suites updated (`.strict()` schema additions).
-- **`GitPushPublishPipeline` (unit):** faked git + faked Workers Builds client — happy
-  path, non-FF → rebase, conflict surfaced, CI blocked-envelope parsed, CI plain
-  failure, offline. Same style as `RemoteSandboxSiteRuntime`'s faked control client.
+- **`CloudPublishPipeline` (unit):** faked git + faked site-services control client —
+  happy path, non-FF → rebase, conflict surfaced, blocked-envelope parsed, plain build
+  failure, offline, cold-start states. Same style as `RemoteSandboxSiteRuntime`'s
+  faked `SandboxControlClient`.
+- **Site-services Worker (its own repo's suite):** origin round-trip — clone/push
+  against the served smart HTTP with a stock git client; push → R2 sync ordering;
+  DO-serialized concurrent pushes; publish RPC drives `build:ci` and reports the
+  envelope.
 - **`build:ci` producer test:** fresh scaffold, seeded PII blocker → `npm run build:ci`
   exits non-zero *after* building; clean scaffold exits zero (extends the #742
   producer→consumer fixture lane).
-- **One opt-in live e2e** (gated like the container/e2e suites): push a draft-flip
-  commit to a real repo wired to Workers Builds, poll to deployed, assert the post URL
-  is live.
+- **One opt-in live e2e** (gated like the container/e2e suites, real Cloudflare
+  account): provision, push a draft-flip commit to the origin, poll to deployed,
+  assert the post URL is live and a re-clone of the origin matches the local repo.
 
 ## Phasing
 
@@ -286,12 +363,14 @@ and verifies by observing the first deployment.
 2. **Slice 2 — draft/publish model:** template schema + filtering, registry `draft`,
    drafts-by-default, desktop Publish/Unpublish verbs over the existing container
    pipeline.
-3. **Slice 3 — push-to-deploy on desktop:** `PublishPipeline` seam, `build:ci` gate,
-   Workers Builds client + onboarding, log streaming. Proves the container-less
-   pipeline where debugging is easy.
+3. **Slice 3 — Cloudflare publish services + desktop push-to-publish:** the
+   site-services Worker (git origin + publish pipeline, its own template repo),
+   `PublishPipeline` seam, `build:ci` gate, provisioning + log streaming in the Mac
+   app. Proves the whole container-less pipeline where debugging is easy — the phone
+   adds no new moving parts server-side.
 4. **Slice 4 — mobile:** iOS shell grows the local-checkout mode (clone/pull/push via
-   SwiftGit2), ported typed/markdown editors, mobile publish UX. Depends on #71 scope
-   decisions.
+   SwiftGit2 against the Cloudflare origin), ported typed/markdown editors, mobile
+   publish UX. Depends on #71 scope decisions.
 
 Each slice is deterministic Swift/TypeScript end-to-end (no LLM path), per the #459
 direction.
@@ -303,15 +382,19 @@ direction.
 - Media/photo posting pipeline from mobile (image import + asset commits) — the seam
   exists (`image` fields, git), but the capture/compression UX is its own design.
 - Micropub as the mobile posting protocol — deliberately *not* chosen here (server-side
-  Micropub is V-3, gated on `@dwk/workers`; this design needs no server component
-  beyond CI). Revisit posting-via-Micropub when V-3 lands.
+  Micropub is V-3, gated on `@dwk/workers`; this design's only server component is the
+  site-services Worker, which is git + build, not a posting API). Revisit
+  posting-via-Micropub when V-3 lands.
+- The Workers Builds variant for GitHub-mirrored repos (§C.2) — optional follow-on.
 - Tables/LaTeX/wiki-link editor affordances; inline image thumbnails (fast-follow).
 - Merging the template `blog` collection with typed `articles` (open question below).
 
 ## Open questions (owner input wanted)
 
-1. **Workers Builds API surface** — can the build config be created purely via API
-   once the GitHub↔Cloudflare connection exists? (Determines how hands-off §C.6 is.)
+1. **Site-services template home** — its own repo, or folded into the #66
+   remote-sandbox Deploy-to-Cloudflare template so one provisioning pass yields one
+   "Anglesite Cloud" Worker offering both preview sessions and origin/publish? (One
+   template is friendlier; one repo per concern is simpler to version.)
 2. **`blog` vs `articles`** — keep both (blog = simple starter, articles = typed
    h-entry) or migrate the starter to `articles` and retire `blog`?
 3. **iOS product shape** — does the container-less local-checkout mode *replace* the
@@ -321,3 +404,7 @@ direction.
 4. **swift-markdown-engine adoption** — if the in-house styler's macOS feel lags the
    reference, is a scoped adoption of SwiftMarkdownEngine behind the `MarkdownTextView`
    seam (macOS only, new-dep approval) acceptable as a stopgap?
+5. **Workers paid-plan floor** — is requiring the paid plan for container-less
+   publishing acceptable for v1, or does that justify prioritizing the Workers Builds
+   variant (free tier, but GitHub-gated) as a cost fallback for users who *choose* a
+   GitHub mirror?
