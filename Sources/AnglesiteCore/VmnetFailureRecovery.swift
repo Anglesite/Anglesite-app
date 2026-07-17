@@ -7,7 +7,7 @@ import Foundation
 /// cannot reliably repair system-wide vmnet state (#753) — quitting other apps or rebooting may
 /// still be needed. But the failure can also be *this process's own* cached vmnet network stuck in
 /// a bad state, which the "Restart Networking" action the failure pane offers when `isRecoverable`
-/// is true (`ContainerizationControl.resetSharedNetworking()`, #812) can fix without either.
+/// is true (`ContainerizationControl.resetNetworking()`, #812) can fix without either.
 public enum VmnetFailureRecovery {
     /// Substring both `message(for:)` and `isRecoverable(failureMessage:)` key off of, kept in one
     /// place so the two can't drift out of sync.
@@ -25,7 +25,7 @@ public enum VmnetFailureRecovery {
     }
 
     /// True when `failureMessage` (as surfaced by `SiteRuntimeState.failed`) names a vmnet failure
-    /// that `ContainerizationControl.resetSharedNetworking()` can plausibly self-heal. Gates the
+    /// that `ContainerizationControl.resetNetworking()` can plausibly self-heal. Gates the
     /// failure pane's "Restart Networking" button — shown only for the failures `message(for:)`
     /// itself recognizes, not every boot failure.
     public static func isRecoverable(failureMessage: String) -> Bool {
