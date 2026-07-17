@@ -239,6 +239,9 @@
     "Add rule" : {
 
     },
+    "Adds robots.txt rules refusing known AI-training crawlers (GPTBot, ClaudeBot, and others). This reduces your site's visibility to AI assistants and AI-generated search summaries — it does not affect traditional search engines." : {
+
+    },
     "Advanced" : {
 
     },
@@ -263,6 +266,9 @@
     "All types" : {
 
     },
+    "Allow" : {
+
+    },
     "Analytics…" : {
 
     },
@@ -273,6 +279,9 @@
 
     },
     "Anglesite lost access to “%@”, likely after a restart. Locate it again to restore access." : {
+
+    },
+    "Anglesite plugin" : {
 
     },
     "Animation" : {
@@ -400,6 +409,9 @@
 
     },
     "Base styles" : {
+
+    },
+    "Block AI Training Crawlers" : {
 
     },
     "Blocking (%lld)" : {
@@ -576,6 +588,9 @@
     "Cloudflare" : {
 
     },
+    "Cloudflare's Content Signals Policy states a usage preference per purpose in robots.txt. It's a signal that well-behaved crawlers honor, not an enforced block." : {
+
+    },
     "Code" : {
 
     },
@@ -586,6 +601,9 @@
 
     },
     "Collections" : {
+
+    },
+    "Collection…" : {
 
     },
     "Command" : {
@@ -603,7 +621,13 @@
     "Component Gallery…" : {
 
     },
+    "Component names must start with an uppercase letter." : {
+
+    },
     "Components" : {
+
+    },
+    "Component…" : {
 
     },
     "Computed" : {
@@ -628,6 +652,9 @@
 
     },
     "Content" : {
+
+    },
+    "Content Signals" : {
 
     },
     "Content type filter" : {
@@ -820,6 +847,9 @@
     "Digital downloads" : {
 
     },
+    "Disallow" : {
+
+    },
     "Dismiss" : {
 
     },
@@ -904,10 +934,25 @@
     "Explorer" : {
 
     },
+    "Export Site Source…" : {
+
+    },
     "Export To" : {
 
     },
     "Export this site's source files to a folder." : {
+
+    },
+    "Extract" : {
+
+    },
+    "Extract into Component" : {
+
+    },
+    "Extract into Component…" : {
+
+    },
+    "Extracting…" : {
 
     },
     "Failed" : {
@@ -1037,6 +1082,9 @@
 
     },
     "Heading 6" : {
+
+    },
+    "Hero" : {
 
     },
     "Hero image (optional)" : {
@@ -1243,6 +1291,9 @@
     "Needs re-authorization" : {
 
     },
+    "New" : {
+
+    },
     "New Blog…" : {
 
     },
@@ -1375,6 +1426,9 @@
     "Open ${target}" : {
 
     },
+    "Open %@ in its own window" : {
+
+    },
     "Open Cloudflare API tokens" : {
 
     },
@@ -1394,6 +1448,9 @@
 
     },
     "Open Website Anyway" : {
+
+    },
+    "Open in Browser" : {
 
     },
     "Open in browser" : {
@@ -1435,6 +1492,9 @@
     "Page" : {
 
     },
+    "Page…" : {
+
+    },
     "Paragraph" : {
 
     },
@@ -1462,6 +1522,9 @@
     "Plan social media for ${site}" : {
 
     },
+    "Point at a checkout of the plugin (e.g. `../anglesite`) to iterate without rebuilding the app." : {
+
+    },
     "Polar" : {
 
     },
@@ -1469,6 +1532,9 @@
 
     },
     "Posts a notification when a Deploy, Backup, or Audit finishes while Anglesite is in the background — success or failure. Clicking the notification brings the site's window to the front. Delivery starts quietly; promote or silence Anglesite in System Settings › Notifications." : {
+
+    },
+    "Post…" : {
 
     },
     "Preformatted Text" : {
@@ -1523,6 +1589,9 @@
 
     },
     "Recheck" : {
+
+    },
+    "Recheck Deploy Readiness" : {
 
     },
     "Recheck Readiness" : {
@@ -1591,6 +1660,9 @@
     "Rename" : {
 
     },
+    "Rename & retry" : {
+
+    },
     "Rename Site" : {
 
     },
@@ -1637,6 +1709,9 @@
 
     },
     "Restart" : {
+
+    },
+    "Restart Dev Server" : {
 
     },
     "Restart Networking & Retry" : {
@@ -1910,6 +1985,9 @@
     "Siri AI readiness for “%@”." : {
 
     },
+    "Site" : {
+
+    },
     "Site Graph" : {
 
     },
@@ -1917,6 +1995,9 @@
 
     },
     "Site is missing required files" : {
+
+    },
+    "Site is missing required files: %@" : {
 
     },
     "Site name" : {
@@ -1974,6 +2055,9 @@
 
     },
     "Stop" : {
+
+    },
+    "Stop Dev Server" : {
 
     },
     "Stored in the macOS Keychain under `io.dwk.anglesite`. The token is passed to `wrangler deploy` as `CLOUDFLARE_API_TOKEN` and never written to logs. An exported `CLOUDFLARE_API_TOKEN` in the shell that launched Anglesite takes precedence over this entry." : {
@@ -2159,6 +2243,9 @@
     "Unsaved changes in the editor and inspector will be discarded." : {
 
     },
+    "Unspecified" : {
+
+    },
     "Unused Assets" : {
 
     },
@@ -2169,6 +2256,9 @@
 
     },
     "Use Selection for Find" : {
+
+    },
+    "Use a temporary Cloudflare Pages domain later, such as %@." : {
 
     },
     "Use a temporary Cloudflare Workers domain later, such as %@." : {
@@ -2258,6 +2348,12 @@
     "Words or phrases to avoid" : {
 
     },
+    "Worker name" : {
+
+    },
+    "Worker name already in use" : {
+
+    },
     "Writing" : {
 
     },
@@ -2342,6 +2438,9 @@
           }
         }
       }
+    },
+    "“%@” already exists on your connected Cloudflare account. Choose a different name to deploy this site under." : {
+
     },
     "“%@” → “%@”" : {
       "localizations" : {
