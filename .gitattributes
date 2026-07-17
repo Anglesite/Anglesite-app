@@ -1,0 +1,33 @@
+# Default: normalize line endings to LF in the repo, let git detect text vs binary.
+* text=auto eol=lf
+
+# Xcode's String Catalog extraction (SWIFT_EMIT_LOC_STRINGS, project.yml) regenerates
+# these on every build. Keeping them explicitly LF-normalized text makes a stripped
+# trailing newline show up as "\ No newline at end of file" in `git diff` instead of
+# silently disappearing — see the fix commits 6b16b6ca / bdd306ae.
+*.xcstrings text eol=lf
+
+# Swift / project sources
+*.swift text eol=lf
+*.plist text eol=lf
+project.yml text eol=lf
+
+# Web overlay sources
+*.ts text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+
+# Docs / scripts
+*.md text eol=lf
+*.sh text eol=lf
+
+# Binary vendored/build assets — never diff, never normalize
+*.png binary
+*.icns binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
+Resources/container-image/** -text -diff
+Resources/container-kernel/** -text -diff
+Resources/container-initfs/** -text -diff
