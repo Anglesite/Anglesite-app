@@ -197,7 +197,10 @@ public actor DeployCommand {
                 Self.persistSiteURL(url, siteDirectory: siteDirectory)
                 return .succeeded(url: url, duration: duration)
             }
-            return .failed(reason: "wrangler exited cleanly but no deployed URL was found in its output", exitCode: 0)
+            return .failed(
+                reason: "wrangler exited successfully (code 0), but no deployed URL could be found in its output — the deploy likely succeeded; check the deploy log for the URL",
+                exitCode: 0
+            )
         }
         return .failed(reason: "wrangler exited with code \(code)", exitCode: code)
     }
@@ -213,29 +216,56 @@ public actor DeployCommand {
 
     // MARK: URL extraction
 
-    /// Scans for the wrangler "Published" anchor and the first URL after it. The line shape is
+    /// Extracts the deployed URL from wrangler's captured stdout. Two signals are tried, in
+    /// order, because wrangler's exact wording has already drifted across major versions (older
+    /// wrangler printed a `Published <name> (1.23 sec)` status line; current wrangler instead
+    /// prints separate `Uploaded <name> (…)` / `Deployed <name> triggers (…)` lines) and `wrangler
+    /// deploy` (unlike `wrangler pages deploy`) has no `--json` output mode to depend on instead:
     ///
-    ///     Published <name> (1.23 sec)
-    ///       https://<name>.<acct>.workers.dev
-    ///
-    /// Anchoring on `Published` (start-of-line, case-sensitive) prevents help-text URLs from
-    /// being mistaken for the deploy result. We accept the URL on the same line or any
-    /// subsequent line — wrangler has shipped multiple layouts of this block over the years.
+    /// 1. The first `https://*.workers.dev` URL anywhere in the output. A workers.dev subdomain is
+    ///    a distinctive, version-independent signature of a genuine deploy result — it never
+    ///    appears in wrangler's help/informational text (which points at developers.cloudflare.com
+    ///    / dash.cloudflare.com) — so this is checked first, regardless of which status-line
+    ///    wording the installed wrangler prints.
+    /// 2. For custom-domain deploys (no workers.dev URL present): anchor on a recognized
+    ///    start-of-line status prefix and take the first URL on/after that line. Multiple prefixes
+    ///    are recognized to tolerate wrangler renaming this line across versions.
     public static func extractDeployedURL(from output: String) -> URL? {
+        if let url = firstURL(in: output, requiringHostSuffix: ".workers.dev") {
+            return url
+        }
+        let anchors = ["Published", "Deployed", "Uploaded"]
         let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
-        guard let publishedIdx = lines.firstIndex(where: { $0.hasPrefix("Published") || $0.hasPrefix("Published ") }) else {
+        guard let anchorIdx = lines.firstIndex(where: { line in anchors.contains(where: line.hasPrefix) }) else {
             return nil
         }
-        // Search the Published line itself, then subsequent lines, for the first URL.
-        for line in lines[publishedIdx...] {
-            if let urlRange = line.range(of: #"https?://[^\s]+"#, options: [.regularExpression]) {
-                // Strip trailing punctuation a terminal might tack on (commas, periods, closing parens).
-                var raw = String(line[urlRange])
-                while let last = raw.last, ",.)]}>".contains(last) {
-                    raw.removeLast()
-                }
-                return URL(string: raw)
+        // Search the anchor line itself, then subsequent lines, for the first URL.
+        for line in lines[anchorIdx...] {
+            if let url = firstURL(in: String(line)) {
+                return url
             }
+        }
+        return nil
+    }
+
+    /// The first `http(s)` URL in `text` — optionally required to have a host ending in
+    /// `hostSuffix` — with trailing punctuation a terminal might tack on (commas, periods, closing
+    /// parens) stripped. Scans the whole string (not line-by-line), so callers doing a
+    /// version-independent signature scan can pass multi-line output directly.
+    private static func firstURL(in text: String, requiringHostSuffix hostSuffix: String? = nil) -> URL? {
+        guard let regex = try? NSRegularExpression(pattern: #"https?://\S+"#) else { return nil }
+        let fullRange = NSRange(text.startIndex..., in: text)
+        for match in regex.matches(in: text, range: fullRange) {
+            guard let range = Range(match.range, in: text) else { continue }
+            var raw = String(text[range])
+            while let last = raw.last, ",.)]}>".contains(last) {
+                raw.removeLast()
+            }
+            guard let url = URL(string: raw) else { continue }
+            if let hostSuffix {
+                guard let host = url.host, host.hasSuffix(hostSuffix) else { continue }
+            }
+            return url
         }
         return nil
     }
