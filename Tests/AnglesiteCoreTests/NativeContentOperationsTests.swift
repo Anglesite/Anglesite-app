@@ -302,6 +302,28 @@ struct NativeContentOperationsTests {
         #expect(status.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
+    @Test("hasCommit finds an exact commit-message match in a real repo, and doesn't substring-match a shorter message")
+    func realGitHasCommit() async throws {
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        for args in [["init"], ["config", "user.email", "t@t.io"], ["config", "user.name", "t"]] {
+            _ = try await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: repo)
+        }
+        // Commit message is a superstring of the shorter message we'll also search for below —
+        // this is the exact false-positive risk the review flagged: `git log --grep` substring-
+        // matches by default, so a naive implementation would incorrectly report the shorter
+        // message as found too.
+        try "note".write(to: repo.appendingPathComponent("my-note-extra.md"), atomically: true, encoding: .utf8)
+        _ = await NativeContentOperations.processGitCommit(repo, "my-note-extra.md", "anglesite: publish note my-note-extra")
+
+        let found = await NativeContentOperations.hasCommit(repo, "anglesite: publish note my-note-extra")
+        #expect(found == true)
+
+        let notFound = await NativeContentOperations.hasCommit(repo, "anglesite: publish note my-note")
+        #expect(notFound == false)
+    }
+
     @Test("processGitDelete refuses a staged-but-never-committed file (no HEAD copy to roll back to)")
     func refusesUncommittedFile() async throws {
         let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
@@ -430,6 +452,14 @@ struct NativeContentOperationsTests {
         let result = await ops.publish(siteID: "s1", relativePath: "src/content/blog/hello.md", collection: "blog")
         guard case let .failed(reason) = result else { Issue.record("expected .failed"); return }
         #expect(reason.contains("blog"))
+    }
+
+    @Test("publish reports .failed for a registered collection with no draft field, instead of silently no-opping")
+    func publishDraftlessCollection() async {
+        let (ops, _, _) = makePublishOps()
+        let result = await ops.publish(siteID: "s1", relativePath: "src/content/events/party.md", collection: "events")
+        guard case let .failed(reason) = result else { Issue.record("expected .failed"); return }
+        #expect(reason.contains("events"))
     }
 }
 

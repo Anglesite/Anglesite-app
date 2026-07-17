@@ -279,6 +279,9 @@ public struct NativeContentOperations: ContentOperationsService {
         guard let descriptor = registry.descriptor(forCollection: collection) else {
             return .failed(reason: "\(collection) is not a registered content type")
         }
+        guard descriptor.fields.contains(where: { $0.name == "draft" }) else {
+            return .failed(reason: "\(collection) entries don't support draft/publish")
+        }
         let abs = root.appendingPathComponent(relativePath)
         guard let raw = try? String(contentsOf: abs, encoding: .utf8) else {
             return .failed(reason: "Couldn't read \(relativePath)")
@@ -313,6 +316,9 @@ public struct NativeContentOperations: ContentOperationsService {
         guard let root = await siteDirectory(siteID) else { return .siteNotFound }
         guard let descriptor = registry.descriptor(forCollection: collection) else {
             return .failed(reason: "\(collection) is not a registered content type")
+        }
+        guard descriptor.fields.contains(where: { $0.name == "draft" }) else {
+            return .failed(reason: "\(collection) entries don't support draft/publish")
         }
         let abs = root.appendingPathComponent(relativePath)
         guard let raw = try? String(contentsOf: abs, encoding: .utf8) else {
