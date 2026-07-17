@@ -225,6 +225,11 @@ public actor SocialWorkerProvisionCommand {
         resources: WorkerComposition.ProvisionedResources
     ) -> Result? {
         do {
+            // Called without `inboxCaptureEnabled`/`inboxKVNamespaceID` — #587's inbox-capture
+            // provisioning doesn't route through here yet. If/when it starts writing an
+            // `INBOX_KV` binding via those params elsewhere, this call site needs the same
+            // params or it will silently strip that binding on the next worker-composition
+            // deploy.
             let toml = try WorkerComposition.generateWranglerToml(
                 siteName: siteName,
                 features: features,
@@ -313,5 +318,24 @@ public actor SocialWorkerProvisionCommand {
 
     public static let defaultDeployer: Deployer = { token, siteID, siteDirectory in
         await DeployCommand(tokenSource: { token }).deploy(siteID: siteID, siteDirectory: siteDirectory)
+    }
+}
+
+extension SocialWorkerProvisionCommand.Result {
+    /// Maps this result onto `DeployCommand.Result`'s shape, dropping the `resources` payload
+    /// (no caller surfaces it through this seam) — the shared mapping both `DeployModel.runDeploy`
+    /// and `SiteOperations.deployWithWorkerComposition` need after routing every deploy through
+    /// `SocialWorkerProvisionCommand.provision`.
+    public var asDeployCommandResult: DeployCommand.Result {
+        switch self {
+        case .succeeded(let url, _, let duration):
+            return .succeeded(url: url, duration: duration)
+        case .blocked(let failures, let warnings, _):
+            return .blocked(failures: failures, warnings: warnings)
+        case .workerNameConflict(let name, _):
+            return .workerNameConflict(name: name)
+        case .failed(let reason, let exitCode, _):
+            return .failed(reason: reason, exitCode: exitCode)
+        }
     }
 }

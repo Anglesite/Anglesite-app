@@ -106,7 +106,8 @@ final class DeployModel {
         siteDirectory: URL,
         configDirectory: URL,
         currentRoutes: [String],
-        containerControl: (siteID: String, control: any LocalContainerControl)?
+        containerControl: (siteID: String, control: any LocalContainerControl)?,
+        siteName: String?
     )?
 
     private enum Presentation: Equatable {
@@ -171,7 +172,7 @@ final class DeployModel {
     ) {
         guard !isRunning else { return }
         if !hasUsableToken() {
-            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl)
+            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl, siteName)
             tokenVerification = .idle
             tokenPromptPresented = true
             return
@@ -266,7 +267,7 @@ final class DeployModel {
             deploy(
                 siteID: pending.siteID, siteDirectory: pending.siteDirectory,
                 configDirectory: pending.configDirectory, currentRoutes: pending.currentRoutes,
-                containerControl: pending.containerControl)
+                containerControl: pending.containerControl, siteName: pending.siteName)
         case .stay(let message):
             tokenVerification = .failed(message: message)
         case .abort:
@@ -317,7 +318,7 @@ final class DeployModel {
         deploy(
             siteID: pending.siteID, siteDirectory: pending.siteDirectory,
             configDirectory: pending.configDirectory, currentRoutes: pending.currentRoutes,
-            containerControl: pending.containerControl)
+            containerControl: pending.containerControl, siteName: pending.siteName)
     }
 
     func cancelWorkerNameConflictPrompt() {
@@ -490,17 +491,7 @@ final class DeployModel {
             try? await configStore.save(updated)
         }
 
-        let result: DeployCommand.Result
-        switch provisionResult {
-        case .succeeded(let url, _, let duration):
-            result = .succeeded(url: url, duration: duration)
-        case .blocked(let failures, let warnings, _):
-            result = .blocked(failures: failures, warnings: warnings)
-        case .workerNameConflict(let name, _):
-            result = .workerNameConflict(name: name)
-        case .failed(let reason, let exitCode, _):
-            result = .failed(reason: reason, exitCode: exitCode)
-        }
+        let result = provisionResult.asDeployCommandResult
 
         subscription.cancel()
         _ = await logTask.value
@@ -553,7 +544,7 @@ final class DeployModel {
             workerNameConflictPresented = false
             blockedPresented = presentation == .foreground
         case .workerNameConflict(let name):
-            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl)
+            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl, siteName)
             transition(siteID: siteID, to: .workerNameConflict(name: name))
             drawerPresented = false
             workerNameConflictError = nil

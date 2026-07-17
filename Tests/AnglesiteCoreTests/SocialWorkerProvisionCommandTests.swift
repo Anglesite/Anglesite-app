@@ -299,6 +299,42 @@ struct SocialWorkerProvisionCommandTests {
         ])
     }
 
+    @Test("asDeployCommandResult maps succeeded, dropping the resources payload")
+    func asDeployCommandResultMapsSucceeded() {
+        let url = URL(string: "https://my-site.example.workers.dev")!
+        let result = SocialWorkerProvisionCommand.Result.succeeded(
+            url: url, resources: .init(d1DatabaseID: "d1-id"), duration: 3
+        )
+        #expect(result.asDeployCommandResult == .succeeded(url: url, duration: 3))
+    }
+
+    @Test("asDeployCommandResult maps blocked, dropping the resources payload")
+    func asDeployCommandResultMapsBlocked() {
+        let failure = PreDeployCheck.ScanFailure(
+            category: .exposedToken, message: "API key committed", file: "src/index.md", remediation: "Remove it"
+        )
+        let result = SocialWorkerProvisionCommand.Result.blocked(
+            failures: [failure], warnings: [], resources: .init(kvNamespaceID: "kv-id")
+        )
+        #expect(result.asDeployCommandResult == .blocked(failures: [failure], warnings: []))
+    }
+
+    @Test("asDeployCommandResult maps workerNameConflict, dropping the resources payload")
+    func asDeployCommandResultMapsWorkerNameConflict() {
+        let result = SocialWorkerProvisionCommand.Result.workerNameConflict(
+            name: "taken-name", resources: .init(r2BucketName: "media")
+        )
+        #expect(result.asDeployCommandResult == .workerNameConflict(name: "taken-name"))
+    }
+
+    @Test("asDeployCommandResult maps failed, dropping the resources payload")
+    func asDeployCommandResultMapsFailed() {
+        let result = SocialWorkerProvisionCommand.Result.failed(
+            reason: "KV failed", exitCode: 1, resources: .init(d1DatabaseID: "d1-id")
+        )
+        #expect(result.asDeployCommandResult == .failed(reason: "KV failed", exitCode: 1))
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("SocialWorkerProvisionCommandTests-\(UUID().uuidString)", isDirectory: true)

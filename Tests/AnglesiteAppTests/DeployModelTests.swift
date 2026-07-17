@@ -272,8 +272,8 @@ struct DeployModelTests {
         }
     }
 
-    @Test("a site with a settings-activated worker persists lastDeployedWorkerIDs after a successful deploy")
-    func activatingAWorkerPersistsLastDeployedWorkerIDs() async throws {
+    @Test("a settings-activated worker without a container fails at provisioning rather than skipping composition")
+    func activatingAWorkerWithoutContainerFailsAtProvisioning() async throws {
         let executor = GatedDeployExecutor()
         await executor.resumeBuild()
         let command = DeployCommand(tokenSource: { "test-token" }, executor: executor)

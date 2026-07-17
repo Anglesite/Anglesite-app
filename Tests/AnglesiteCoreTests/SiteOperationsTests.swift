@@ -283,6 +283,40 @@ struct SiteOperationsTests {
         #expect(saved.lastDeployedWorkerIDs == ["indieauth"])
     }
 
+    @Test("headless deploy resolves the Worker name from CF_PROJECT_NAME before deriving from the site's display name")
+    func headlessDeployUsesConfiguredProjectNameOverDerivedSlug() async throws {
+        let package = try temporaryPackage()
+        defer { try? FileManager.default.removeItem(at: package) }
+        let site = makeSite(name: "Blue Bottle Cafe", packageURL: package)
+        let configStore = SiteConfigStore(configDirectory: site.configDirectory)
+        try await configStore.save(SiteSettings(activeWorkerIDs: ["indieauth"]))
+
+        // Simulate a #740 worker-name-conflict rename: `.site-config` already records a Worker
+        // name that differs from what `SiteSlug.derive(from: site.name)` would produce. A naive
+        // re-derivation would silently revert the rename on every subsequent deploy.
+        let siteConfigContents = SiteConfigFile.upsert([("CF_PROJECT_NAME", "renamed-worker")], into: "")
+        try siteConfigContents.write(
+            to: site.sourceDirectory.appendingPathComponent(WebsiteAnalyticsAsset.configRelativePath),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let recorder = SocialWorkerRecorder()
+        let ops = SiteOperations(factory: SocialWorkerFactory(recorder: recorder), store: throwawayStore())
+
+        let result = await ops.deploy(site: site)
+
+        guard case .succeeded = result else {
+            Issue.record("expected success, got \(result)")
+            return
+        }
+        #expect(await recorder.arguments == [
+            ["d1", "create", "renamed-worker-social", "--json"],
+            ["kv", "namespace", "create", "renamed-worker-social", "--json"],
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"],
+        ])
+    }
+
     @Test("headless deploy with no activated workers still deploys through the plain static path")
     func headlessDeployWithNoActiveWorkers() async throws {
         let package = try temporaryPackage()

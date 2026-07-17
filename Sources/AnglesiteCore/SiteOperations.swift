@@ -75,12 +75,20 @@ public struct SiteOperations: Sendable {
         let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: [], graph: nil)
         let features = WorkerActivation.mapToFeatures(effectiveActiveIDs)
 
+        // Prefer the site's already-established Worker name (`.site-config`'s `CF_PROJECT_NAME`,
+        // set at the first successful deploy or by a worker-name-conflict rename, #740) over
+        // re-deriving one from the site's display name — mirrors `DeployModel.runDeploy`'s
+        // resolution so the headless path can't silently revert a rename on every deploy.
+        let existingConfig = (try? WebsiteAnalyticsAsset.loadConfig(siteDirectory: siteDirectory)) ?? ""
+        let workerSiteName = SiteConfigFile.value(forKey: "CF_PROJECT_NAME", in: existingConfig)
+            ?? SiteSlug.derive(from: site.name)
+
         onProgress?(.deployBuilding)
         onProgress?(.deployDeploying)
         let provisionResult = await factory.socialWorkerProvision().provision(
             siteID: site.id,
             siteDirectory: siteDirectory,
-            siteName: SiteSlug.derive(from: site.name),
+            siteName: workerSiteName,
             features: features,
             knownResources: settings.provisionedWorkerResources ?? .init()
         )
@@ -93,16 +101,7 @@ public struct SiteOperations: Sendable {
             try? await configStore.save(updated)
         }
 
-        switch provisionResult {
-        case .succeeded(let url, _, let duration):
-            return .succeeded(url: url, duration: duration)
-        case .blocked(let failures, let warnings, _):
-            return .blocked(failures: failures, warnings: warnings)
-        case .workerNameConflict(let name, _):
-            return .workerNameConflict(name: name)
-        case .failed(let reason, let exitCode, _):
-            return .failed(reason: reason, exitCode: exitCode)
-        }
+        return provisionResult.asDeployCommandResult
     }
 
     public func backup(site: SiteStore.Site, onProgress: ProgressHandler? = nil) async -> BackupCommand.Result {
