@@ -102,7 +102,7 @@ final class PlistEditorModel {
             lastModified = loaded.modificationDate
             loadError = nil
             hasWebsiteIcons = WebsiteIconInstaller.hasInstalledIcons(in: sourceDirectory)
-            let analytics = try Self.loadAnalyticsSettings(sourceDirectory: sourceDirectory)
+            let (analytics, config) = try Self.loadAnalyticsSettings(sourceDirectory: sourceDirectory)
             analyticsSettings = analytics
             savedAnalyticsSettings = analytics
             analyticsError = nil
@@ -118,15 +118,13 @@ final class PlistEditorModel {
                 redirectsError = "Couldn't load existing redirects.json — it may be corrupted or hand-edited with invalid entries. Fix it externally or your next save will discard it. (\(error.localizedDescription))"
                 redirectsLoadFailed = true
             }
-            do {
-                let config = try WebsiteAnalyticsAsset.loadConfig(siteDirectory: sourceDirectory)
-                let policy = CrawlerPolicyAsset.parseSettings(from: config)
-                crawlerPolicySettings = policy
-                savedCrawlerPolicySettings = policy
-                crawlerPolicyError = nil
-            } catch {
-                crawlerPolicyError = "Couldn't load crawler policy settings: \(error.localizedDescription)"
-            }
+            // Reuses the `.site-config` contents `loadAnalyticsSettings` already read — a load
+            // failure there already aborts this whole `load()` via the outer `catch` below, so
+            // there's no separate failure mode here to handle.
+            let policy = CrawlerPolicyAsset.parseSettings(from: config)
+            crawlerPolicySettings = policy
+            savedCrawlerPolicySettings = policy
+            crawlerPolicyError = nil
         } catch {
             loadError = error.localizedDescription
         }
@@ -331,14 +329,19 @@ final class PlistEditorModel {
         }
     }
 
-    private static func loadAnalyticsSettings(sourceDirectory: URL) throws -> WebsiteAnalyticsAsset.Settings {
+    /// Also returns the raw `.site-config` contents alongside the parsed analytics settings, so
+    /// `load()` can reuse them for `CrawlerPolicyAsset.parseSettings` instead of reading the file
+    /// from disk a second time.
+    private static func loadAnalyticsSettings(
+        sourceDirectory: URL
+    ) throws -> (settings: WebsiteAnalyticsAsset.Settings, config: String) {
         let layoutURL = sourceDirectory.appendingPathComponent(WebsiteAnalyticsAsset.layoutRelativePath)
         let config = try WebsiteAnalyticsAsset.loadConfig(siteDirectory: sourceDirectory)
         guard FileManager.default.fileExists(atPath: layoutURL.path) else {
-            return WebsiteAnalyticsAsset.parseMigratingLegacySettings(layoutSource: "", config: config)
+            return (WebsiteAnalyticsAsset.parseMigratingLegacySettings(layoutSource: "", config: config), config)
         }
         let source = try String(contentsOf: layoutURL, encoding: .utf8)
-        return WebsiteAnalyticsAsset.parseMigratingLegacySettings(layoutSource: source, config: config)
+        return (WebsiteAnalyticsAsset.parseMigratingLegacySettings(layoutSource: source, config: config), config)
     }
 
     private func cloudflareToken() async throws -> String? {
