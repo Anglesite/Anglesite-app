@@ -195,6 +195,7 @@ public actor DeployCommand {
                     try? DeployedRoutesSnapshot.save(currentRoutes, to: configDirectory)
                 }
                 Self.persistSiteURL(url, siteDirectory: siteDirectory)
+                Self.persistWorkerDeployed(siteDirectory: siteDirectory)
                 return .succeeded(url: url, duration: duration)
             }
             return .failed(reason: "wrangler exited cleanly but no deployed URL was found in its output", exitCode: 0)
@@ -258,6 +259,19 @@ public actor DeployCommand {
         else { return }
         let updated = SiteConfigFile.upsert([("SITE_URL", url.absoluteString)], into: config)
         guard updated != config else { return }
+        try? updated.write(to: configURL, atomically: true, encoding: .utf8)
+    }
+
+    /// Marks this site as having successfully deployed at least once, via `.site-config`'s
+    /// `CF_WORKER_DEPLOYED` — the signal `checkWorkerNameConflict` uses to skip the collision
+    /// check on every deploy after the first (#740). Written unconditionally, unlike
+    /// `persistSiteURL` (which skips when a custom domain is already configured) — deploy
+    /// history isn't confounded by domain choice. Best-effort, matching `persistSiteURL`.
+    static func persistWorkerDeployed(siteDirectory: URL) {
+        let configURL = siteDirectory.appendingPathComponent(WebsiteAnalyticsAsset.configRelativePath)
+        let config = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+        guard SiteConfigFile.value(forKey: "CF_WORKER_DEPLOYED", in: config) == nil else { return }
+        let updated = SiteConfigFile.upsert([("CF_WORKER_DEPLOYED", "true")], into: config)
         try? updated.write(to: configURL, atomically: true, encoding: .utf8)
     }
 
