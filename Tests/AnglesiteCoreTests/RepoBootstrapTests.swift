@@ -71,6 +71,13 @@ import Foundation
         try await run(["init"])
         try await run(["config", "user.email", "t@t.io"])
         try await run(["config", "user.name", "t"])
+        // Isolate from the developer's ambient global excludesFile (e.g. `~/.gitignore`
+        // containing `.env`, common on real dev machines) the same way user.email/user.name
+        // are pinned above — otherwise a repo-local `.env` that also matches the *global*
+        // ignore rules is classified "ignored" rather than "untracked" by both real git and
+        // libgit2, so it never reaches `git status`/`repo.status(...)` and the dotenv-secret
+        // guard under test never sees it.
+        try await run(["config", "core.excludesFile", "/dev/null"])
         if let remoteURL { try await run(["remote", "add", "origin", remoteURL]) }
         if commit {
             try "seed".write(to: dir.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
