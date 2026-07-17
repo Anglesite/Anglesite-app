@@ -67,6 +67,83 @@ struct SiteNavigatorModelTests {
         #expect(model.canDelete("nonexistent") == false)
         #expect(model.canDuplicate("nonexistent") == false)
     }
+
+    /// #674: the bare Delete key on the navigator list should act on whatever
+    /// `deletableSelection()` returns — nil disables it, non-nil is the item to delete.
+    @Test("deletableSelection returns the selected content row")
+    func deletableSelectionReturnsSelectedContentRow() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: "site-1",
+            pages: [SiteContentGraph.Page(
+                id: "site-1:page:/about", siteID: "site-1", route: "/about",
+                filePath: "src/pages/about.astro", title: "About", lastModified: Date())],
+            posts: [], images: []
+        )
+        let model = SiteNavigatorModel(graph: graph)
+        model.start(siteID: "site-1", siteRoot: root, sourceDirectory: root, websiteTitle: "Test")
+        while model.nodes.isEmpty { await Task.yield() }
+        let id = try #require(flatten(model.nodes).first { $0.title == "About" }?.id)
+
+        model.selection = id
+
+        #expect(model.deletableSelection()?.id == id)
+    }
+
+    @Test("deletableSelection is nil with no selection")
+    func deletableSelectionNilWithNoSelection() {
+        let model = SiteNavigatorModel(graph: SiteContentGraph())
+        #expect(model.deletableSelection() == nil)
+    }
+
+    @Test("deletableSelection is nil while inline-renaming the selection")
+    func deletableSelectionNilWhileEditing() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: "site-1",
+            pages: [SiteContentGraph.Page(
+                id: "site-1:page:/about", siteID: "site-1", route: "/about",
+                filePath: "src/pages/about.astro", title: "About", lastModified: Date())],
+            posts: [], images: []
+        )
+        let model = SiteNavigatorModel(graph: graph)
+        model.start(siteID: "site-1", siteRoot: root, sourceDirectory: root, websiteTitle: "Test")
+        while model.nodes.isEmpty { await Task.yield() }
+        let id = try #require(flatten(model.nodes).first { $0.title == "About" }?.id)
+        model.selection = id
+
+        model.beginEditing(id)
+
+        #expect(model.deletableSelection() == nil)
+    }
+
+    @Test("deletableSelection is nil for the non-deletable website-settings row")
+    func deletableSelectionNilForWebsiteSettingsRow() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let graph = SiteContentGraph()
+        await graph.load(
+            siteID: "site-1",
+            pages: [SiteContentGraph.Page(
+                id: "site-1:page:/about", siteID: "site-1", route: "/about",
+                filePath: "src/pages/about.astro", title: "About", lastModified: Date())],
+            posts: [], images: []
+        )
+        let model = SiteNavigatorModel(graph: graph)
+        model.start(siteID: "site-1", siteRoot: root, sourceDirectory: root, websiteTitle: "Test")
+        while model.nodes.isEmpty { await Task.yield() }
+        let id = try #require(model.nodes.first { $0.kind == .website }?.id)
+        model.selection = id
+
+        #expect(model.deletableSelection() == nil)
+    }
 }
 
 /// `saveRedirect` writes through `RedirectsStore` to `Source/redirects.json` (#530) — the
