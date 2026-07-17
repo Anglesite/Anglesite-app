@@ -345,4 +345,41 @@ final class PlistEditorModel {
         merged.append(contentsOf: entries)
         return merged
     }
+
+    // MARK: - Aggregate dirty/save seam (#741)
+
+    /// One independently dirty/saveable settings-pane facet hosted by this plist editor — one
+    /// each for Website (`entries`), Analytics, and Redirects. `SiteWindowModel`'s aggregate
+    /// dirty/save accounting (`hasUnsavedEdits`, `editCommandInFlight`, `saveAllEdits()`) folds
+    /// over `dirtyFacets` instead of checking each pane by name, so a future settings pane (e.g. a
+    /// `.well-known` tab) is registered here and needs no edits anywhere else — including
+    /// `SiteWindowModel`'s save/close switch statements.
+    struct DirtyFacet {
+        let isDirty: Bool
+        let isSaving: Bool
+        let save: () async -> Void
+    }
+
+    private var dirtyFacets: [DirtyFacet] {
+        [
+            DirtyFacet(isDirty: isDirty, isSaving: isSaving) { await self.save() },
+            DirtyFacet(isDirty: isAnalyticsDirty, isSaving: isSavingAnalytics) { await self.saveAnalytics() },
+            DirtyFacet(isDirty: isRedirectsDirty, isSaving: isSavingRedirects) { await self.saveRedirects() },
+        ]
+    }
+
+    /// True if any settings-pane facet has unsaved edits.
+    var hasAnyUnsavedEdits: Bool { dirtyFacets.contains { $0.isDirty } }
+
+    /// True while any settings-pane facet's own save is in flight.
+    var isAnySaving: Bool { dirtyFacets.contains { $0.isSaving } }
+
+    /// Saves every currently-dirty settings-pane facet. Each facet's own `save()` keeps its
+    /// existing validation and error reporting (e.g. a validation failure just leaves that facet
+    /// dirty with its own error string set) — one facet failing to save does not block the others.
+    func saveAllDirty() async {
+        for facet in dirtyFacets where facet.isDirty {
+            await facet.save()
+        }
+    }
 }
