@@ -363,6 +363,18 @@ struct DeployCommandTests {
         #expect(url == URL(string: "https://example.com"))
     }
 
+    @Test("extractDeployedURL prefers the anchored workers.dev URL over an incidental one mentioned earlier")
+    func extractDeployedURLIgnoresIncidentalWorkersDevBeforeAnchor() {
+        // A workers.dev URL mentioned before the anchor line (e.g. an "you already have a
+        // subdomain" notice) must not outrank the actual deploy result after the anchor.
+        let url = DeployCommand.extractDeployedURL(from: """
+            Note: your account already has a workers.dev subdomain: https://myaccount.workers.dev
+            Deployed angle-app triggers (0.45 sec)
+              https://angle-app.example.workers.dev
+            """)
+        #expect(url?.host == "angle-app.example.workers.dev")
+    }
+
     // MARK: Scan report parsing helper
 
     @Test("parseScanReport maps ok/blocked/error correctly")

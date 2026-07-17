@@ -216,36 +216,32 @@ public actor DeployCommand {
 
     // MARK: URL extraction
 
-    /// Extracts the deployed URL from wrangler's captured stdout. Two signals are tried, in
-    /// order, because wrangler's exact wording has already drifted across major versions (older
-    /// wrangler printed a `Published <name> (1.23 sec)` status line; current wrangler instead
-    /// prints separate `Uploaded <name> (…)` / `Deployed <name> triggers (…)` lines) and `wrangler
-    /// deploy` (unlike `wrangler pages deploy`) has no `--json` output mode to depend on instead:
+    /// Extracts the deployed URL from wrangler's captured stdout. Wrangler's exact wording has
+    /// already drifted across major versions (older wrangler printed a `Published <name> (1.23
+    /// sec)` status line; current wrangler instead prints separate `Uploaded <name> (…)` /
+    /// `Deployed <name> triggers (…)` lines), and `wrangler deploy` (unlike `wrangler pages
+    /// deploy`) has no `--json` output mode to depend on instead, so multiple status-line prefixes
+    /// are recognized as the anchor:
     ///
-    /// 1. The first `https://*.workers.dev` URL anywhere in the output. A workers.dev subdomain is
-    ///    a distinctive, version-independent signature of a genuine deploy result — it never
-    ///    appears in wrangler's help/informational text (which points at developers.cloudflare.com
-    ///    / dash.cloudflare.com) — so this is checked first, regardless of which status-line
-    ///    wording the installed wrangler prints.
-    /// 2. For custom-domain deploys (no workers.dev URL present): anchor on a recognized
-    ///    start-of-line status prefix and take the first URL on/after that line. Multiple prefixes
-    ///    are recognized to tolerate wrangler renaming this line across versions.
+    /// 1. Anchor on a recognized start-of-line status prefix (`Published`/`Deployed`/`Uploaded`)
+    ///    and search only the anchor line and lines after it — never anything before it — for a
+    ///    URL. A `*.workers.dev` URL there is preferred (the common case); any URL is accepted as a
+    ///    fallback for custom-domain deploys, which have no workers.dev host in their output.
+    ///    Scoping to at/after the anchor (rather than the whole output) matters because this
+    ///    result gets persisted as the site's live URL: an incidental workers.dev mention earlier
+    ///    in the log (e.g. a subdomain-already-exists notice) must not outrank the real result.
+    /// 2. If no anchor line is recognized at all (a future wrangler layout this doesn't know
+    ///    about), fall back to a whole-output scan for a `*.workers.dev` URL — still a
+    ///    distinctive, version-independent signature of a genuine deploy result, just without
+    ///    anchor confirmation.
     public static func extractDeployedURL(from output: String) -> URL? {
-        if let url = firstURL(in: output, requiringHostSuffix: ".workers.dev") {
-            return url
-        }
         let anchors = ["Published", "Deployed", "Uploaded"]
         let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
-        guard let anchorIdx = lines.firstIndex(where: { line in anchors.contains(where: line.hasPrefix) }) else {
-            return nil
+        if let anchorIdx = lines.firstIndex(where: { line in anchors.contains(where: line.hasPrefix) }) {
+            let tail = lines[anchorIdx...].joined(separator: "\n")
+            return firstURL(in: tail, requiringHostSuffix: ".workers.dev") ?? firstURL(in: tail)
         }
-        // Search the anchor line itself, then subsequent lines, for the first URL.
-        for line in lines[anchorIdx...] {
-            if let url = firstURL(in: String(line)) {
-                return url
-            }
-        }
-        return nil
+        return firstURL(in: output, requiringHostSuffix: ".workers.dev")
     }
 
     /// The first `http(s)` URL in `text` — optionally required to have a host ending in
