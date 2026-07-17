@@ -18,10 +18,6 @@ public enum WorkerCatalogFetchError: Error, Sendable, Equatable {
 /// Network or parse failures degrade to the last successfully cached copy, then to an empty
 /// catalog — the Workers Settings tab and deploy composition must never block or crash on a
 /// catalog fetch failure (design doc §3).
-///
-/// - Important: `catalogURL` has no in-app default. As of this writing `@dwk/workers` has not
-///   yet published `catalog.json` — callers must supply the real manifest URL once the monorepo
-///   publishes one.
 public actor WorkerCatalogFetcher {
     #if canImport(OSLog)
     private static let logger = Logger(subsystem: "io.dwk.anglesite", category: "WorkerCatalogFetcher")
@@ -95,6 +91,13 @@ public actor WorkerCatalogFetcher {
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: [.atomic])
     }
+
+    /// The published `@dwk/workers` monorepo catalog manifest — verified live 2026-07-17
+    /// (davidwkeith/workers#255, merged in davidwkeith/workers#258). Callers still supply
+    /// `catalogURL` explicitly at `init`; this is the value production call sites should pass.
+    public static let productionCatalogURL = URL(
+        string: "https://raw.githubusercontent.com/davidwkeith/workers/main/catalog.json"
+    )!
 
     /// `~/Library/Application Support/Anglesite/worker-catalog-cache.json` — mirrors
     /// `SiteStore`'s `defaultPersistenceURL` convention (`SiteStore.swift:323-333`).

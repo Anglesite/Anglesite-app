@@ -173,4 +173,12 @@ private final class WorkerCatalogStubURLProtocol: URLProtocol, @unchecked Sendab
         let workers = await fetcher.catalog()
         #expect(workers.isEmpty)
     }
+
+    @Test("productionCatalogURL points at the published davidwkeith/workers catalog.json")
+    func productionCatalogURLIsThePublishedManifest() {
+        #expect(
+            WorkerCatalogFetcher.productionCatalogURL
+                == URL(string: "https://raw.githubusercontent.com/davidwkeith/workers/main/catalog.json")!
+        )
+    }
 }
