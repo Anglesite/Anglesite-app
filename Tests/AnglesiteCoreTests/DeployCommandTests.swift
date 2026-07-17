@@ -370,6 +370,103 @@ struct DeployCommandTests {
         #expect(SiteConfigFile.value(forKey: "CF_WORKER_DEPLOYED", in: config) == "true", "but CF_WORKER_DEPLOYED must still be written")
     }
 
+    /// Writes `.site-config` with the given `CF_PROJECT_NAME` and, if `deployedBefore`, a
+    /// `CF_WORKER_DEPLOYED=true` marker — the two inputs `checkWorkerNameConflict` reads.
+    private func makeSiteDirectory(projectName: String?, deployedBefore: Bool) -> URL {
+        let dir = makeSiteDirectory()
+        var lines: [String] = []
+        if let projectName { lines.append("CF_PROJECT_NAME=\(projectName)") }
+        if deployedBefore { lines.append("CF_WORKER_DEPLOYED=true") }
+        if !lines.isEmpty {
+            try? (lines.joined(separator: "\n") + "\n")
+                .write(to: dir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+        }
+        return dir
+    }
+
+    @Test("First deploy with a name that already exists remotely returns .workerNameConflict before any step runs")
+    func firstDeployNameTakenReturnsConflict() async {
+        let siteDir = makeSiteDirectory(projectName: "taken-name", deployedBefore: false)
+        let exec = FakeExecutor().onRun(.build, { Issue.record("build must not run on a worker-name conflict") })
+        let cmd = DeployCommand(
+            tokenSource: { "tok" },
+            workerScriptNamesSource: { _ in ["taken-name", "other-site"] },
+            executor: exec
+        )
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .workerNameConflict(let name) = result else {
+            Issue.record("expected .workerNameConflict, got \(result)"); return
+        }
+        #expect(name == "taken-name")
+        #expect(!exec.ran(.build))
+    }
+
+    @Test("First deploy with a name that's free proceeds to build")
+    func firstDeployNameFreeProceeds() async {
+        let siteDir = makeSiteDirectory(projectName: "my-new-site", deployedBefore: false)
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(
+            tokenSource: { "tok" },
+            workerScriptNamesSource: { _ in ["some-other-site"] },
+            executor: exec
+        )
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
+        #expect(exec.ran(.build))
+    }
+
+    @Test("No CF_PROJECT_NAME in .site-config skips the check entirely (fail open)")
+    func noProjectNameSkipsCheck() async {
+        let siteDir = makeSiteDirectory(projectName: nil, deployedBefore: false)
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(
+            tokenSource: { "tok" },
+            workerScriptNamesSource: { _ in Issue.record("must not be called when CF_PROJECT_NAME is absent"); return [] },
+            executor: exec
+        )
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
+    }
+
+    @Test("CF_WORKER_DEPLOYED already set skips the check regardless of remote state (no regression on redeploys)")
+    func alreadyDeployedSkipsCheck() async {
+        let siteDir = makeSiteDirectory(projectName: "my-site", deployedBefore: true)
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(
+            tokenSource: { "tok" },
+            // Even though the name is "taken" by this same call, a redeploy must not be blocked.
+            workerScriptNamesSource: { _ in ["my-site"] },
+            executor: exec
+        )
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
+    }
+
+    @Test("A thrown error from workerScriptNamesSource fails open and proceeds to build")
+    func availabilityCheckErrorFailsOpen() async {
+        let siteDir = makeSiteDirectory(projectName: "my-new-site", deployedBefore: false)
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(
+            tokenSource: { "tok" },
+            workerScriptNamesSource: { _ in throw CloudflareError.http(status: 500) },
+            executor: exec
+        )
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded (fail open), got \(result)"); return }
+    }
+
     // MARK: Scan report parsing helper
 
     @Test("parseScanReport maps ok/blocked/error correctly")

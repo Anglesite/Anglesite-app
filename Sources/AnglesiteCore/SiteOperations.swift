@@ -102,6 +102,8 @@ public struct SiteOperations: Sendable {
             let count = failures.count
             let noun = count == 1 ? "issue" : "issues"
             return "Deploy blocked by the pre-deploy security scan (\(count) \(noun)). Resolve these in Anglesite first."
+        case .workerNameConflict(let name):
+            return "Deploy blocked: the Worker name \"\(name)\" is already in use on your Cloudflare account. Rename the site's Worker in Anglesite and try again."
         case .failed(let reason, _):
             return "Deploy failed: \(reason)"
         }
