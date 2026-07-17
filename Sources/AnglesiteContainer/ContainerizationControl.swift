@@ -390,7 +390,13 @@ public struct ContainerizationControl: LocalContainerControl {
                     return container
                 } catch {
                     // This also covers a failure that arrives after the timeout already won.
-                    await network.release(siteID: siteID)
+                    // `stopBareContainer` (not a bare `network.release`) mirrors `onLateSuccess`
+                    // above: `container.stop()` is a no-op via `try?` when `create()`/`.start()`
+                    // never reached `.created`/`.started` state (#785), but it DOES matter when
+                    // `.start()` fails after `.create()` already succeeded — that path leaves the
+                    // VM in `.created` state, and only an explicit `stop()` releases it instead of
+                    // leaking it until the app quits.
+                    await stopBareContainer(container, siteID: siteID)
                     throw error
                 }
             }
