@@ -62,6 +62,11 @@ recorded as an addendum to this spec. The leading direction going into the spike
 **STTextView + an in-house, UI-framework-free styling core**, but that is a
 hypothesis to test against what exists, not a decision.
 
+> **Survey outcome (#796):** see the **Addendum** at the end of this document. The
+> spike **refuted** the STTextView hypothesis for this feature and recommends
+> adopting **swift-markdown-engine on macOS**, with the iOS approach deferred to
+> slice 4.
+
 Survey candidates (initial sweep, 2026-07-17 — the spike evaluates hands-on):
 
 | Package | Platforms | What it provides | Initial read |
@@ -522,3 +527,52 @@ All questions raised by this spec have been resolved by the owner (2026-07-17):
   on-device on Android — is a **v2.0 feature**, out of scope for this design.
 - **Editor substrate** — decided by the mandatory A.1 package-survey spike; its
   outcome lands as an addendum to this spec.
+
+---
+
+## Addendum — A.1 package-survey outcome (#796)
+
+**Date:** 2026-07-17 · **Method:** source-level evaluation of pinned clones of every
+§A.1 candidate plus a fresh ecosystem sweep, against the §A.1 acceptance criteria.
+Run in a Linux environment, so two criteria could not be exercised and are **not
+guessed**: typing-latency feel on target hardware and a Writing Tools smoke test.
+Both are the first Xcode task of #797 (checklist below).
+
+### Verdict matrix
+
+| Candidate | Verdict | Decisive evidence |
+|---|---|---|
+| **swift-markdown-engine** (Apache-2.0, macOS 14+, TextKit 2) | **Adopt on macOS** | The only candidate meeting the macOS criteria outright: real `NSTextView` subclass (Writing Tools actively integrated, `writingToolsBehavior = .complete`; find, spelling, dictation free); attribute-only styling — markers shrink to 0.1 pt, *never* removed from storage; undoable click-to-toggle GFM checkboxes through the standard `shouldChangeText`/undo channel; incremental O(edit) parse + paragraph-scoped restyle, profiled by upstream against ~139k-char documents; **zero-dependency core** (code-block/LaTeX products opt-in); clean extension/theme/service seams; 226 commits in 3 months, backed by a shipping app. Its `Parser/` layer is pure Foundation — reusable on Linux and as a future shared core. |
+| **STTextView** (+ Neon) | **Rejected for this feature** (stays for Component Editor code panes) | **GPLv3 with a paid commercial alternative** — a hard gate for MAS + iOS distribution (⚠️ this also warrants a license-posture check on the *existing* code-pane usage, tracked separately). It is a custom `NSView`/`UIView`, not NSTextView/UITextView: **zero Writing Tools integration on either platform**, no iOS find UI, and the `clickedOnLink` hook a checkbox toggle needs is declared but never dispatched on UIKit. The cross-platform attribute API itself is solid (Neon proves the viewport-incremental pattern on both platforms) — the substrate loses on license and system-text-services, not on styling mechanics. |
+| **SwiftDown** (MIT) | Reference implementation only | Exactly the right *shape* (attribute-only `NSTextStorage` over real NSTextView/UITextView, per-node fonts/sizes, dual-platform) but dormant since 2024-02, full-document cmark reparse per debounced change, whole-buffer binding resets, no checkboxes, no marker dimming, no paragraph styles, and it drags in Down/cmark frozen at CommonMark 0.29. |
+| **Runestone** (MIT) | Reference implementation only | The best incremental engine surveyed (tree-sitter `InputEdit`, per-line async highlight, per-capture fonts/sizes — its capture taxonomy maps cleanly onto "dim markers, size headings"). Disqualified as substrate: iOS-only, custom Core Text stack (not UITextView — system behaviors not free), normalizes line endings on edit, tree-sitter runtime + grammar deps, upstream in maintenance mode. |
+| **Marklight** (MIT) | Reference only | Dead since 2018-11; TextKit 1; no SPM; no GFM. Usefully proves the `MarklightFont`/`MarklightColor` typealias trick for one styling core across AppKit/UIKit. |
+| **TextMarkupKit** (Apache-2.0; new find, not in the original table) | Reference only | Actively-cited architecture for exactly this problem — incremental packrat parsing + `PieceTable` + `AttributesArray` for format-as-you-type markup — but 40 commits, dormant 2022→2024 with a single "compile on macOS" fix 2026-07, and its text view is `#if canImport(UIKit)` only. |
+| Long tail (Notepad ’20, MarkdownTextView ’16, SwiftUIMarkdownEditor ’21, CDMarkdownKit, MarkupEditor, swift-markdown-ui/Textual) | Not candidates | Dead, or the wrong model: CDMarkdownKit and swift-markdown-ui are one-way renderers (the latter now in maintenance mode); MarkupEditor is actively maintained but is a WKWebView/ProseMirror HTML WYSIWYG — not a source-faithful Markdown buffer. |
+
+### Decision
+
+1. **macOS (slice 1, #797): adopt swift-markdown-engine.** One new Apache-2.0
+   dependency with zero transitive deps in the core product — the approval this
+   policy requires is this addendum's review. Pinned **by revision** (the
+   SwiftGit2/STTextView policy — deliberate bumps only; it is pre-1.0 and its API
+   moves). Wrapped behind our own `MarkdownTextView` SwiftUI seam so the substrate
+   stays swappable and call sites never import it directly.
+2. **Required configuration/patch at adoption:** disable smart quotes (upstream
+   hard-enables `isAutomaticQuoteSubstitutionEnabled`; a one-line change — prefer
+   upstreaming a config toggle, else carry the patch in our pin) and run
+   plain-Markdown (the wiki-link display transform is identity for content without
+   `[[…]]`; we don't emit that syntax).
+3. **`AnglesiteMarkdown` (§A.3) is not built now** — swift-markdown-engine
+   supersedes the in-house styler on macOS. §A.3's `MarkdownTextView` wrapper and
+   `EditorKind.markdown` routing stand unchanged.
+4. **iOS (slice 4, post-V-3 gate): decision deferred, options narrowed.** When the
+   Micropub client needs its compose surface: either (a) fork/upstream a UIKit view
+   layer reusing swift-markdown-engine's Foundation-only parser and
+   typealias-shallow styler (the survey sized this as rebuilding its ~30-file
+   TextView/Renderer layer), or (b) an in-house `UITextView`/TextKit 2 styler using
+   the reference patterns above. **Explicitly not STTextView** for this feature.
+5. **Remaining on-device verification (first Xcode task of #797):** typing-latency
+   feel on a ~100 KB post; Writing Tools smoke (rewrite + proofread round-trip
+   keeps Markdown intact); checkbox hit-target size; confirm smart-quote handling
+   behaves after the §2 change.
