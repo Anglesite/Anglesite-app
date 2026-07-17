@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Fires before `git commit`. Xcode's SWIFT_EMIT_LOC_STRINGS build phase regenerates
+# *.xcstrings catalogs on every build and drops the trailing newline — this has
+# needed a manual "restore trailing newline" follow-up commit twice already
+# (bdd306ae, 6b16b6ca). Auto-fix and re-stage any staged .xcstrings file that's
+# missing its final newline so that never has to happen again.
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+# Staged .xcstrings files (added/copied/modified — skip deleted).
+mapfile -t files < <(git diff --cached --name-only --diff-filter=ACM -- '*.xcstrings')
+
+for f in "${files[@]}"; do
+  [[ -s "$f" ]] || continue
+  # `tail -c1` prints the file's last byte; command substitution strips a trailing
+  # newline from *that* output. So a non-empty result means the last byte wasn't \n.
+  if [[ -n "$(tail -c 1 "$f")" ]]; then
+    printf '\n' >>"$f"
+    git add "$f"
+    echo "[git-hook] Restored trailing newline in $f" >&2
+  fi
+done
