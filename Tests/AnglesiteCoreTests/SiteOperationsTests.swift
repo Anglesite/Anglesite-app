@@ -130,6 +130,13 @@ struct SiteOperationsTests {
         #expect(dialog == "Deploy failed: network down")
     }
 
+    @Test("deploy worker-name-conflict dialog names the taken Worker and asks for a rename")
+    func deployWorkerNameConflictDialog() {
+        let dialog = SiteOperations.dialog(forDeploy: .workerNameConflict(name: "taken-name"))
+        #expect(dialog.contains("taken-name"))
+        #expect(dialog.lowercased().contains("rename"))
+    }
+
     @Test("social worker provisioning runs through SiteOperations and slugifies the worker name")
     func socialWorkerProvisionOperation() async throws {
         let package = try temporaryPackage()

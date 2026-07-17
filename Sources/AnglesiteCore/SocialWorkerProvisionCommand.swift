@@ -173,6 +173,10 @@ public actor SocialWorkerProvisionCommand {
             return .succeeded(url: url, resources: resources, duration: Date().timeIntervalSince(started))
         case .blocked(let failures, let warnings):
             return .blocked(failures: failures, warnings: warnings, resources: resources)
+        case .workerNameConflict(let name):
+            return .failed(
+                reason: "Worker name \"\(name)\" is already in use on your Cloudflare account — rename it in Anglesite and try again.",
+                exitCode: nil, resources: resources)
         case .failed(let reason, let exitCode):
             return .failed(reason: reason, exitCode: exitCode, resources: resources)
         }

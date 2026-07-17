@@ -45,6 +45,9 @@ public protocol CloudflareReading: Sendable {
     /// Full DNS record listing for a zone — distinct from `zoneState`'s narrow security-relevant
     /// subset (CAA/MX/SPF/DMARC only). Used by the Domain DNS management feature.
     func listDNSRecords(zoneID: String, apiToken: String) async throws -> [DNSRecord]
+    /// Every Worker script name (the `id` field) visible to the token's first account. Used to
+    /// detect a Worker-name collision before a site's first deploy (#740).
+    func workerScriptNames(apiToken: String) async throws -> [String]
 }
 
 /// Injectable HTTP boundary — identical shape to `CloudflareAPITokenVerifier.Transport`.

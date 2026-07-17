@@ -17,6 +17,7 @@ final class DeployModel {
         case succeeded(url: URL, duration: TimeInterval)
         case failed(reason: String, exitCode: Int32?)
         case blocked(failures: [PreDeployCheck.ScanFailure], warnings: [PreDeployCheck.ScanWarning])
+        case workerNameConflict(name: String)
     }
 
     private(set) var phase: Phase = .idle
@@ -39,6 +40,13 @@ final class DeployModel {
     /// flow. Set when `deploy(...)` is invoked without a token in either the env or the
     /// Keychain; cleared when the user saves a token (which then retries the deploy) or cancels.
     var tokenPromptPresented: Bool = false
+    /// Bound to a `.sheet` in `SiteWindow` for the `.workerNameConflict` outcome — the Worker
+    /// name is already taken on the connected Cloudflare account and this is the site's first
+    /// deploy. Reuses `pendingDeploy` (below) to park and retry, same as the token-prompt flow.
+    var workerNameConflictPresented: Bool = false
+    /// Set when a rename attempt itself fails (invalid name, or no parked deploy). Cleared on
+    /// every fresh presentation and on a successful rename-and-retry.
+    private(set) var workerNameConflictError: String?
 
     /// Progress of verifying a pasted token, consumed by `CloudflareTokenPromptView`'s status line
     /// and button-enabled logic. A token is only written to the Keychain once verification reaches
@@ -83,9 +91,10 @@ final class DeployModel {
     private var inFlight: Task<Void, Never>?
     private let suddenTerminationController: SuddenTerminationController
     private let tokenAvailabilityOverride: (() -> Bool)?
-    /// Site to retry once the user pastes a token. `nil` outside the prompt flow.
-    /// Carries the container control (if any) so the parked-then-retried deploy
-    /// uses the same executor as the original dispatch.
+    /// Site to retry once the user takes the action a parked deploy is waiting on — either
+    /// pasting a Cloudflare token (`verifyAndSaveToken`) or renaming a taken Worker name
+    /// (`renameWorkerAndRetry`). `nil` outside both prompt flows. Carries the container control
+    /// (if any) so the parked-then-retried deploy uses the same executor as the original dispatch.
     private var pendingDeploy: (
         siteID: String,
         siteDirectory: URL,
@@ -202,6 +211,8 @@ final class DeployModel {
             return .succeeded(url: url)
         case .blocked(let failures, _):
             return .blocked(failureCount: failures.count)
+        case .workerNameConflict(let name):
+            return .failed(reason: "Worker name \"\(name)\" is already in use on your Cloudflare account — rename it in the app and deploy again.")
         case .failed(let reason, _):
             return .failed(reason: reason)
         }
@@ -254,6 +265,51 @@ final class DeployModel {
         pendingDeploy = nil
         tokenPromptPresented = false
         tokenVerification = .idle
+    }
+
+    /// Called by the worker-name-conflict sheet's "Rename & retry" button. Applies the rename to
+    /// `wrangler.toml`/`.site-config` via `WorkerNameRename.apply`, then retries the parked
+    /// deploy — which re-runs the collision check against the new name and loops back to this
+    /// same sheet if it's also taken.
+    func renameWorkerAndRetry(_ newName: String) async {
+        guard let pending = pendingDeploy else {
+            workerNameConflictError = "No deploy is waiting — close this and click Deploy again."
+            return
+        }
+        do {
+            try WorkerNameRename.apply(newName: newName, siteDirectory: pending.siteDirectory)
+        } catch let error as WorkerNameRename.RenameError {
+            switch error {
+            case .invalidName:
+                workerNameConflictError = "Worker names can only contain letters, numbers, hyphens, and underscores."
+            case .wranglerConfigMissing:
+                workerNameConflictError = "Couldn't find this site's wrangler.toml — try deploying again."
+            case .nameLineNotFound:
+                workerNameConflictError = "This site's wrangler.toml is missing its Worker name — try deploying again."
+            }
+            return
+        } catch {
+            workerNameConflictError = "Couldn't rename the Worker: \(error)"
+            return
+        }
+        pendingDeploy = nil
+        workerNameConflictError = nil
+        // Deliberately NOT clearing `workerNameConflictPresented` here — the sheet stays open
+        // (showing its current content) while the retried deploy runs. `runDeploy`'s `.succeeded`/
+        // `.failed`/`.blocked` cases dismiss it once the outcome is known; its `.workerNameConflict`
+        // case leaves it presented with the new taken name. Clearing it eagerly here, before the
+        // retry even starts, would dismiss-then-re-present the sheet on a loop-back (the new name
+        // is also taken) — a visible flash instead of the taken-name text updating in place.
+        deploy(
+            siteID: pending.siteID, siteDirectory: pending.siteDirectory,
+            configDirectory: pending.configDirectory, currentRoutes: pending.currentRoutes,
+            containerControl: pending.containerControl)
+    }
+
+    func cancelWorkerNameConflictPrompt() {
+        pendingDeploy = nil
+        workerNameConflictPresented = false
+        workerNameConflictError = nil
     }
 
     func dismissDrawer() {
@@ -385,8 +441,10 @@ final class DeployModel {
                 siteBase: url
             )
             currentMilestone = nil
+            workerNameConflictPresented = false
             transition(siteID: siteID, to: .succeeded(url: url, duration: duration))
         case .failed(let reason, let exit):
+            workerNameConflictPresented = false
             transition(siteID: siteID, to: .failed(reason: reason, exitCode: exit))
             guard presentation == .foreground else { return result }
             let capturedLog = logText   // snapshot before the suspension; a later deploy clears logLines
@@ -407,7 +465,14 @@ final class DeployModel {
             // For the blocked outcome the modal sheet carries the actionable info; the
             // streaming-log drawer would just be noise.
             drawerPresented = false
+            workerNameConflictPresented = false
             blockedPresented = presentation == .foreground
+        case .workerNameConflict(let name):
+            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl)
+            transition(siteID: siteID, to: .workerNameConflict(name: name))
+            drawerPresented = false
+            workerNameConflictError = nil
+            workerNameConflictPresented = presentation == .foreground
         }
         return result
     }

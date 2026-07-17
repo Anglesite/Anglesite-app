@@ -328,6 +328,145 @@ struct DeployCommandTests {
         #expect(url.host == "angle-app.example.workers.dev")
     }
 
+    // MARK: Worker-name collision (#740)
+
+    /// A fresh, empty subdirectory under the system temp dir — distinct from the shared `tmpDir`
+    /// (which is the temp root itself, used elsewhere only as a `cd`-able path) because these
+    /// tests write real `.site-config` contents that must not leak between test runs.
+    private func makeSiteDirectory() -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test("A successful deploy writes CF_WORKER_DEPLOYED=true to .site-config")
+    func successfulDeployMarksWorkerDeployed() async {
+        let siteDir = makeSiteDirectory()
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
+        let config = (try? String(contentsOf: siteDir.appendingPathComponent(".site-config"), encoding: .utf8)) ?? ""
+        #expect(SiteConfigFile.value(forKey: "CF_WORKER_DEPLOYED", in: config) == "true")
+    }
+
+    @Test("CF_WORKER_DEPLOYED is written even for a .transfer-domain site (where SITE_URL is not)")
+    func workerDeployedMarkerNotConfoundedByCustomDomain() async {
+        let siteDir = makeSiteDirectory()
+        let configURL = siteDir.appendingPathComponent(".site-config")
+        try? "DOMAIN=example.com\n".write(to: configURL, atomically: true, encoding: .utf8)
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
+        let config = try! String(contentsOf: configURL, encoding: .utf8)
+        #expect(SiteConfigFile.value(forKey: "SITE_URL", in: config) == nil, "SITE_URL is skipped when DOMAIN is set")
+        #expect(SiteConfigFile.value(forKey: "CF_WORKER_DEPLOYED", in: config) == "true", "but CF_WORKER_DEPLOYED must still be written")
+    }
+
+    /// Writes `.site-config` with the given `CF_PROJECT_NAME` and, if `deployedBefore`, a
+    /// `CF_WORKER_DEPLOYED=true` marker — the two inputs `checkWorkerNameConflict` reads.
+    private func makeSiteDirectory(projectName: String?, deployedBefore: Bool) -> URL {
+        let dir = makeSiteDirectory()
+        var lines: [String] = []
+        if let projectName { lines.append("CF_PROJECT_NAME=\(projectName)") }
+        if deployedBefore { lines.append("CF_WORKER_DEPLOYED=true") }
+        if !lines.isEmpty {
+            try? (lines.joined(separator: "\n") + "\n")
+                .write(to: dir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+        }
+        return dir
+    }
+
+    @Test("First deploy with a name that already exists remotely returns .workerNameConflict before any step runs")
+    func firstDeployNameTakenReturnsConflict() async {
+        let siteDir = makeSiteDirectory(projectName: "taken-name", deployedBefore: false)
+        let exec = FakeExecutor().onRun(.build, { Issue.record("build must not run on a worker-name conflict") })
+        let cmd = DeployCommand(
+            tokenSource: { "tok" },
+            workerScriptNamesSource: { _ in ["taken-name", "other-site"] },
+            executor: exec
+        )
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .workerNameConflict(let name) = result else {
+            Issue.record("expected .workerNameConflict, got \(result)"); return
+        }
+        #expect(name == "taken-name")
+        #expect(!exec.ran(.build))
+    }
+
+    @Test("First deploy with a name that's free proceeds to build")
+    func firstDeployNameFreeProceeds() async {
+        let siteDir = makeSiteDirectory(projectName: "my-new-site", deployedBefore: false)
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(
+            tokenSource: { "tok" },
+            workerScriptNamesSource: { _ in ["some-other-site"] },
+            executor: exec
+        )
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
+        #expect(exec.ran(.build))
+    }
+
+    @Test("No CF_PROJECT_NAME in .site-config skips the check entirely (fail open)")
+    func noProjectNameSkipsCheck() async {
+        let siteDir = makeSiteDirectory(projectName: nil, deployedBefore: false)
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(
+            tokenSource: { "tok" },
+            workerScriptNamesSource: { _ in Issue.record("must not be called when CF_PROJECT_NAME is absent"); return [] },
+            executor: exec
+        )
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
+    }
+
+    @Test("CF_WORKER_DEPLOYED already set skips the check regardless of remote state (no regression on redeploys)")
+    func alreadyDeployedSkipsCheck() async {
+        let siteDir = makeSiteDirectory(projectName: "my-site", deployedBefore: true)
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(
+            tokenSource: { "tok" },
+            // Even though the name is "taken" by this same call, a redeploy must not be blocked.
+            workerScriptNamesSource: { _ in ["my-site"] },
+            executor: exec
+        )
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded, got \(result)"); return }
+    }
+
+    @Test("A thrown error from workerScriptNamesSource fails open and proceeds to build")
+    func availabilityCheckErrorFailsOpen() async {
+        let siteDir = makeSiteDirectory(projectName: "my-new-site", deployedBefore: false)
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(
+            tokenSource: { "tok" },
+            workerScriptNamesSource: { _ in throw CloudflareError.http(status: 500) },
+            executor: exec
+        )
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDir)
+        guard case .succeeded = result else { Issue.record("expected .succeeded (fail open), got \(result)"); return }
+    }
+
     @Test("Finds the URL when wrangler uses current Uploaded/Deployed wording instead of Published")
     func findsURLWithUploadedDeployedWording() async {
         // Current wrangler (4.x) no longer prints a "Published" line — it prints separate

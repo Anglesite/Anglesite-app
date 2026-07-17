@@ -183,6 +183,25 @@ struct SocialWorkerProvisionCommandTests {
         #expect(toml.contains("id = \"kv-id\""))
     }
 
+    @Test("a worker-name conflict from the deployer maps to a failed provisioning result")
+    func workerNameConflictMapsToFailed() async throws {
+        let site = try temporaryDirectory()
+        let recorder = WranglerRecorder([
+            ["d1", "create", "my-site-social", "--json"]: .init(stdout: #"{"result":{"uuid":"d1-id"}}"#, stderr: "", exitCode: 0),
+            ["kv", "namespace", "create", "my-site-social", "--json"]: .init(stdout: #"{"result":{"id":"kv-id"}}"#, stderr: "", exitCode: 0),
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migrations applied", stderr: "", exitCode: 0),
+        ])
+        let deployer = DeployRecorder(result: .workerNameConflict(name: "taken-name"))
+        let command = SocialWorkerProvisionCommand(tokenSource: { "token" }, runner: recorder.runner, deployer: deployer.deployer)
+
+        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site")
+
+        guard case .failed(let reason, _, _) = result else {
+            Issue.record("expected .failed, got \(result)"); return
+        }
+        #expect(reason.contains("taken-name"))
+    }
+
     @Test("stops before deploy when the IndieAuth schema migration fails")
     func migrationFailureStopsDeploy() async throws {
         let site = try temporaryDirectory()

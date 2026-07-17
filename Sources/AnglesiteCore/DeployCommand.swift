@@ -30,6 +30,12 @@ public actor DeployCommand {
         /// The pre-deploy security scan refused the deploy. Carries the structured
         /// failures (and any warnings) so the UI can render a sheet with no override.
         case blocked(failures: [PreDeployCheck.ScanFailure], warnings: [PreDeployCheck.ScanWarning])
+        /// The candidate Worker name (`.site-config`'s `CF_PROJECT_NAME`) already exists on the
+        /// connected Cloudflare account, and this site has never deployed before
+        /// (`CF_WORKER_DEPLOYED` is not yet set in `.site-config`) — refusing to silently let
+        /// `wrangler deploy` take over an unrelated (or stale) Worker. Carries the taken name for
+        /// the UI's rename prompt (#740).
+        case workerNameConflict(name: String)
         /// `exitCode` is `nil` for pre-spawn refusals (no token, no wrangler) and for spawn
         /// failures; otherwise it's the failing subprocess's exit code (including `0` for the
         /// "wrangler exited cleanly but we couldn't find a URL" case).
@@ -57,14 +63,22 @@ public actor DeployCommand {
     /// cases where deploy() returns .failed afterwards.
     public typealias PreflightObserver = @Sendable (PreDeployCheck.Outcome) -> Void
 
+    /// Returns the account's existing Worker script names for the given token. Production
+    /// callers use `DeployCommand.defaultWorkerScriptNames` (`HTTPCloudflareClient`); tests
+    /// inject a fake list or a throwing closure.
+    public typealias WorkerScriptNamesSource = @Sendable (_ apiToken: String) async throws -> [String]
+
     public nonisolated let tokenSource: TokenSource
+    private let workerScriptNamesSource: WorkerScriptNamesSource
     private let executor: any DeployExecutor
 
     public init(
         tokenSource: @escaping TokenSource = DeployCommand.keychainTokenSource,
+        workerScriptNamesSource: @escaping WorkerScriptNamesSource = DeployCommand.defaultWorkerScriptNames,
         executor: any DeployExecutor = HostDeployExecutor()
     ) {
         self.tokenSource = tokenSource
+        self.workerScriptNamesSource = workerScriptNamesSource
         self.executor = executor
     }
 
@@ -95,6 +109,12 @@ public actor DeployCommand {
         }
         guard let token, !token.isEmpty else {
             return .failed(reason: "no CLOUDFLARE_API_TOKEN — add it in Settings → Advanced → Credentials, or set the env var", exitCode: nil)
+        }
+
+        if let conflict = await Self.checkWorkerNameConflict(
+            siteDirectory: siteDirectory, apiToken: token, workerScriptNamesSource: workerScriptNamesSource
+        ) {
+            return conflict
         }
 
         // Curated environment for the non-secret steps: a safe subset of the host process env,
@@ -195,6 +215,7 @@ public actor DeployCommand {
                     try? DeployedRoutesSnapshot.save(currentRoutes, to: configDirectory)
                 }
                 Self.persistSiteURL(url, siteDirectory: siteDirectory)
+                Self.persistWorkerDeployed(siteDirectory: siteDirectory)
                 return .succeeded(url: url, duration: duration)
             }
             return .failed(
@@ -287,6 +308,39 @@ public actor DeployCommand {
         try? updated.write(to: configURL, atomically: true, encoding: .utf8)
     }
 
+    /// Marks this site as having successfully deployed at least once, via `.site-config`'s
+    /// `CF_WORKER_DEPLOYED` — the signal `checkWorkerNameConflict` uses to skip the collision
+    /// check on every deploy after the first (#740). Written unconditionally, unlike
+    /// `persistSiteURL` (which skips when a custom domain is already configured) — deploy
+    /// history isn't confounded by domain choice. Best-effort, matching `persistSiteURL`.
+    static func persistWorkerDeployed(siteDirectory: URL) {
+        let configURL = siteDirectory.appendingPathComponent(WebsiteAnalyticsAsset.configRelativePath)
+        let config = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+        guard SiteConfigFile.value(forKey: "CF_WORKER_DEPLOYED", in: config) == nil else { return }
+        let updated = SiteConfigFile.upsert([("CF_WORKER_DEPLOYED", "true")], into: config)
+        try? updated.write(to: configURL, atomically: true, encoding: .utf8)
+    }
+
+    /// Checks whether `.site-config`'s `CF_PROJECT_NAME` collides with an existing Worker on the
+    /// connected Cloudflare account, but only on a site's first deploy (`CF_WORKER_DEPLOYED` not
+    /// yet set). Returns `.workerNameConflict` on a confirmed collision, or `nil` when the check
+    /// doesn't apply (redeploy, no candidate name) or can't be confirmed — a Cloudflare API
+    /// failure here must never block a deploy that would otherwise succeed (fail open).
+    static func checkWorkerNameConflict(
+        siteDirectory: URL,
+        apiToken: String,
+        workerScriptNamesSource: WorkerScriptNamesSource
+    ) async -> Result? {
+        let configURL = siteDirectory.appendingPathComponent(WebsiteAnalyticsAsset.configRelativePath)
+        let config = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+        guard SiteConfigFile.value(forKey: "CF_WORKER_DEPLOYED", in: config) == nil,
+              let candidateName = SiteConfigFile.value(forKey: "CF_PROJECT_NAME", in: config)
+        else { return nil }
+        guard let names = try? await workerScriptNamesSource(apiToken) else { return nil }
+        guard names.contains(candidateName) else { return nil }
+        return .workerNameConflict(name: candidateName)
+    }
+
     // MARK: Host environment curation
 
     /// Keys that a host-path build or preflight step legitimately needs. The allowlist is
@@ -355,6 +409,12 @@ public actor DeployCommand {
             return env
         }
         return try PlatformSecretStore.make().readCloudflareToken()
+    }
+
+    /// Default `WorkerScriptNamesSource` for production: the account's Worker script names via
+    /// `HTTPCloudflareClient`.
+    public static let defaultWorkerScriptNames: WorkerScriptNamesSource = { apiToken in
+        try await HTTPCloudflareClient().workerScriptNames(apiToken: apiToken)
     }
 
     /// Default `PreflightChecker`: host-side preflight was retired with embedded Node. Container

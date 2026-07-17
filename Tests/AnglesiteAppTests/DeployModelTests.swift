@@ -79,4 +79,164 @@ struct DeployModelTests {
             return
         }
     }
+
+    @Test("A worker-name conflict parks the deploy and presents the conflict sheet")
+    func workerNameConflictParksAndPresents() async {
+        let executor = GatedDeployExecutor()
+        // Never reached — the conflict short-circuits before the build step — but present so a
+        // regression that skips the gate doesn't hang the test on the gated continuation.
+        await executor.resumeBuild()
+        let command = DeployCommand(
+            tokenSource: { "test-token" },
+            workerScriptNamesSource: { _ in ["my-site"] },
+            executor: executor
+        )
+        let model = DeployModel(command: command, logCenter: LogCenter(), tokenAvailabilityOverride: { true })
+        let siteDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try! FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        try! "CF_PROJECT_NAME=my-site\n".write(to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        model.deploy(siteID: "s", siteDirectory: siteDir, configDirectory: siteDir, currentRoutes: [])
+        while model.isRunning { await Task.yield() }
+
+        guard case .workerNameConflict(let name) = model.phase else {
+            Issue.record("expected .workerNameConflict, got \(model.phase)"); return
+        }
+        #expect(name == "my-site")
+        #expect(model.workerNameConflictPresented)
+    }
+
+    @Test("Renaming and retrying rewrites wrangler.toml/.site-config and re-deploys under the new name")
+    func renameAndRetrySucceedsUnderNewName() async {
+        let executor = GatedDeployExecutor()
+        // Never reached — the conflict short-circuits before the build step — but present so a
+        // regression that skips the gate doesn't hang the test on the gated continuation.
+        await executor.resumeBuild()
+        let command = DeployCommand(
+            tokenSource: { "test-token" },
+            // "my-site" is taken; "my-site-2" (what the sheet will submit) is free.
+            workerScriptNamesSource: { _ in ["my-site"] },
+            executor: executor
+        )
+        let model = DeployModel(command: command, logCenter: LogCenter(), tokenAvailabilityOverride: { true })
+        let siteDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try! FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        try! #"name = "my-site""#.write(to: siteDir.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
+        try! "CF_PROJECT_NAME=my-site\n".write(to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        model.deploy(siteID: "s", siteDirectory: siteDir, configDirectory: siteDir, currentRoutes: [])
+        while model.isRunning { await Task.yield() }
+        guard case .workerNameConflict = model.phase else {
+            Issue.record("expected .workerNameConflict before renaming, got \(model.phase)"); return
+        }
+
+        // Unlike the initial deploy above, the retried deploy's new name is free, so it proceeds
+        // into the real pipeline and parks on a fresh build continuation — wait for it, then
+        // resume it, mirroring `suddenTerminationLeaseBracketsDeploy`'s synchronization.
+        await model.renameWorkerAndRetry("my-site-2")
+        await executor.waitUntilBuildIsParked()
+        await executor.resumeBuild()
+        while model.isRunning { await Task.yield() }
+
+        guard case .succeeded = model.phase else {
+            Issue.record("expected .succeeded after rename-and-retry, got \(model.phase)"); return
+        }
+        #expect(!model.workerNameConflictPresented)
+        let toml = try! String(contentsOf: siteDir.appendingPathComponent("wrangler.toml"), encoding: .utf8)
+        #expect(toml.contains(#"name = "my-site-2""#))
+    }
+
+    @Test("Renaming to a name that's also taken loops back to the conflict sheet under the new name")
+    func renameToAlsoTakenNameLoopsBackToConflict() async {
+        let executor = GatedDeployExecutor()
+        // Never reached — both the initial and retried collision checks short-circuit before the
+        // build step — but present so a regression that skips the gate doesn't hang the test on
+        // the gated continuation.
+        await executor.resumeBuild()
+        let command = DeployCommand(
+            tokenSource: { "test-token" },
+            // Both "my-site" (the original name) and "my-site-2" (the rename target) are taken.
+            workerScriptNamesSource: { _ in ["my-site", "my-site-2"] },
+            executor: executor
+        )
+        let model = DeployModel(command: command, logCenter: LogCenter(), tokenAvailabilityOverride: { true })
+        let siteDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try! FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        try! #"name = "my-site""#.write(to: siteDir.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
+        try! "CF_PROJECT_NAME=my-site\n".write(to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        model.deploy(siteID: "s", siteDirectory: siteDir, configDirectory: siteDir, currentRoutes: [])
+        while model.isRunning { await Task.yield() }
+        guard case .workerNameConflict(let firstName) = model.phase else {
+            Issue.record("expected .workerNameConflict before renaming, got \(model.phase)"); return
+        }
+        #expect(firstName == "my-site")
+
+        // "my-site-2" is also taken, so the retried deploy's collision check fires again — it's a
+        // pre-spawn check that short-circuits before `.build`, so no build-continuation
+        // synchronization is needed for this retry (unlike `renameAndRetrySucceedsUnderNewName`,
+        // where the retry's name is free and genuinely reaches the build step).
+        await model.renameWorkerAndRetry("my-site-2")
+        while model.isRunning { await Task.yield() }
+
+        guard case .workerNameConflict(let secondName) = model.phase else {
+            Issue.record("expected .workerNameConflict again after renaming to a taken name, got \(model.phase)"); return
+        }
+        #expect(secondName == "my-site-2")
+        #expect(model.workerNameConflictPresented)
+    }
+
+    @Test("An invalid rename target surfaces a plain-language error instead of the raw error enum")
+    func renameWithInvalidNameSurfacesPlainLanguageError() async {
+        let executor = GatedDeployExecutor()
+        await executor.resumeBuild()
+        let command = DeployCommand(
+            tokenSource: { "test-token" },
+            workerScriptNamesSource: { _ in ["my-site"] },
+            executor: executor
+        )
+        let model = DeployModel(command: command, logCenter: LogCenter(), tokenAvailabilityOverride: { true })
+        let siteDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try! FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        try! #"name = "my-site""#.write(to: siteDir.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
+        try! "CF_PROJECT_NAME=my-site\n".write(to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        model.deploy(siteID: "s", siteDirectory: siteDir, configDirectory: siteDir, currentRoutes: [])
+        while model.isRunning { await Task.yield() }
+        guard case .workerNameConflict = model.phase else {
+            Issue.record("expected .workerNameConflict before renaming, got \(model.phase)"); return
+        }
+
+        await model.renameWorkerAndRetry("bad name!")
+
+        #expect(!model.isRunning)
+        #expect(model.workerNameConflictPresented)
+        #expect(model.workerNameConflictError == "Worker names can only contain letters, numbers, hyphens, and underscores.")
+    }
+
+    @Test("Cancelling the conflict prompt clears the parked deploy and dismisses the sheet")
+    func cancelClearsPendingDeploy() async {
+        let executor = GatedDeployExecutor()
+        await executor.resumeBuild()
+        let command = DeployCommand(
+            tokenSource: { "test-token" },
+            workerScriptNamesSource: { _ in ["my-site"] },
+            executor: executor
+        )
+        let model = DeployModel(command: command, logCenter: LogCenter(), tokenAvailabilityOverride: { true })
+        let siteDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try! FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        try! "CF_PROJECT_NAME=my-site\n".write(to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        model.deploy(siteID: "s", siteDirectory: siteDir, configDirectory: siteDir, currentRoutes: [])
+        while model.isRunning { await Task.yield() }
+
+        model.cancelWorkerNameConflictPrompt()
+
+        #expect(!model.workerNameConflictPresented)
+        // A subsequent rename attempt with nothing parked must fail gracefully, not crash.
+        await model.renameWorkerAndRetry("anything")
+        #expect(!model.isRunning)
+        #expect(model.workerNameConflictError == "No deploy is waiting — close this and click Deploy again.")
+    }
 }

@@ -129,6 +129,7 @@ final class FakeReader: CloudflareReading, @unchecked Sendable {
         if let listError { throw listError }
         return records
     }
+    func workerScriptNames(apiToken: String) async throws -> [String] { [] }
 }
 
 final class FakeWriter: CloudflareWriting, @unchecked Sendable {
