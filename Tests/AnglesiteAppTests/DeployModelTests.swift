@@ -79,4 +79,30 @@ struct DeployModelTests {
             return
         }
     }
+
+    @Test("A worker-name conflict parks the deploy and presents the conflict sheet")
+    func workerNameConflictParksAndPresents() async {
+        let executor = GatedDeployExecutor()
+        // Never reached — the conflict short-circuits before the build step — but present so a
+        // regression that skips the gate doesn't hang the test on the gated continuation.
+        await executor.resumeBuild()
+        let command = DeployCommand(
+            tokenSource: { "test-token" },
+            workerScriptNamesSource: { _ in ["my-site"] },
+            executor: executor
+        )
+        let model = DeployModel(command: command, logCenter: LogCenter(), tokenAvailabilityOverride: { true })
+        let siteDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try! FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        try! "CF_PROJECT_NAME=my-site\n".write(to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        model.deploy(siteID: "s", siteDirectory: siteDir, configDirectory: siteDir, currentRoutes: [])
+        while model.isRunning { await Task.yield() }
+
+        guard case .workerNameConflict(let name) = model.phase else {
+            Issue.record("expected .workerNameConflict, got \(model.phase)"); return
+        }
+        #expect(name == "my-site")
+        #expect(model.workerNameConflictPresented)
+    }
 }

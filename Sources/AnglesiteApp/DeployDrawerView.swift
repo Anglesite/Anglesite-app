@@ -9,9 +9,9 @@ import AnglesiteCore
 ///   - `.succeeded` → deployed URL with Copy / Open buttons + log
 ///   - `.failed`   → reason banner + log + Copy-log
 ///
-/// The `.blocked` phase is rendered by `BlockedDeploySheetView` (modal), not here — by the time
-/// this drawer is on screen, the deploy has either reached wrangler or failed in a way the user
-/// might want to read about.
+/// The `.blocked` and `.workerNameConflict` phases are each rendered by their own modal sheet,
+/// not here — by the time this drawer is on screen, the deploy has either reached wrangler or
+/// failed in a way the user might want to read about.
 struct DeployDrawerView: View {
     @Bindable var model: DeployModel
     let siteName: String
@@ -82,7 +82,7 @@ struct DeployDrawerView: View {
             Image(systemName: "exclamationmark.octagon.fill")
                 .foregroundStyle(.red).font(.title3)
                 .accessibilityHidden(true)
-        case .idle, .blocked:
+        case .idle, .blocked, .workerNameConflict:
             Image(systemName: "shippingbox").font(.title3)
                 .accessibilityHidden(true)
         }
@@ -93,7 +93,7 @@ struct DeployDrawerView: View {
         case .running: return "Deploying \(siteName)…"
         case .succeeded(let url, _): return url.absoluteString
         case .failed: return "Deploy failed"
-        case .idle, .blocked: return siteName
+        case .idle, .blocked, .workerNameConflict: return siteName
         }
     }
 
@@ -212,14 +212,15 @@ struct DeployDrawerView: View {
     }
 
     /// Collapses the app-target `DeployModel.Phase` onto the announceable substrate the decider
-    /// understands. `idle` and `blocked` are both pre-output states → `.inactive`.
+    /// understands. `idle`, `blocked`, and `workerNameConflict` are all pre-output states →
+    /// `.inactive`.
     private func activity(for phase: DeployModel.Phase) -> LiveRegionAnnouncer.DeployActivity {
         switch phase {
         case .running: return .running(site: siteName)
         case .succeeded(let url, _): return .succeeded(url: url.absoluteString)
         case .failed(let reason, let exit):
             return .failed(reason: exit.map { "\(reason) (exit \($0))" } ?? reason)
-        case .idle, .blocked: return .inactive
+        case .idle, .blocked, .workerNameConflict: return .inactive
         }
     }
 

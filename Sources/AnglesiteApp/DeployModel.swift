@@ -17,6 +17,7 @@ final class DeployModel {
         case succeeded(url: URL, duration: TimeInterval)
         case failed(reason: String, exitCode: Int32?)
         case blocked(failures: [PreDeployCheck.ScanFailure], warnings: [PreDeployCheck.ScanWarning])
+        case workerNameConflict(name: String)
     }
 
     private(set) var phase: Phase = .idle
@@ -39,6 +40,13 @@ final class DeployModel {
     /// flow. Set when `deploy(...)` is invoked without a token in either the env or the
     /// Keychain; cleared when the user saves a token (which then retries the deploy) or cancels.
     var tokenPromptPresented: Bool = false
+    /// Bound to a `.sheet` in `SiteWindow` for the `.workerNameConflict` outcome — the Worker
+    /// name is already taken on the connected Cloudflare account and this is the site's first
+    /// deploy. Reuses `pendingDeploy` (below) to park and retry, same as the token-prompt flow.
+    var workerNameConflictPresented: Bool = false
+    /// Set when a rename attempt itself fails (invalid name, or no parked deploy). Cleared on
+    /// every fresh presentation and on a successful rename-and-retry.
+    private(set) var workerNameConflictError: String?
 
     /// Progress of verifying a pasted token, consumed by `CloudflareTokenPromptView`'s status line
     /// and button-enabled logic. A token is only written to the Keychain once verification reaches
@@ -83,9 +91,10 @@ final class DeployModel {
     private var inFlight: Task<Void, Never>?
     private let suddenTerminationController: SuddenTerminationController
     private let tokenAvailabilityOverride: (() -> Bool)?
-    /// Site to retry once the user pastes a token. `nil` outside the prompt flow.
-    /// Carries the container control (if any) so the parked-then-retried deploy
-    /// uses the same executor as the original dispatch.
+    /// Site to retry once the user takes the action a parked deploy is waiting on — either
+    /// pasting a Cloudflare token (`verifyAndSaveToken`) or renaming a taken Worker name
+    /// (`renameWorkerAndRetry`). `nil` outside both prompt flows. Carries the container control
+    /// (if any) so the parked-then-retried deploy uses the same executor as the original dispatch.
     private var pendingDeploy: (
         siteID: String,
         siteDirectory: URL,
@@ -202,6 +211,8 @@ final class DeployModel {
             return .succeeded(url: url)
         case .blocked(let failures, _):
             return .blocked(failureCount: failures.count)
+        case .workerNameConflict(let name):
+            return .failed(reason: "Worker name \"\(name)\" is already in use on your Cloudflare account — rename it in the app and deploy again.")
         case .failed(let reason, _):
             return .failed(reason: reason)
         }
@@ -408,6 +419,12 @@ final class DeployModel {
             // streaming-log drawer would just be noise.
             drawerPresented = false
             blockedPresented = presentation == .foreground
+        case .workerNameConflict(let name):
+            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl)
+            transition(siteID: siteID, to: .workerNameConflict(name: name))
+            drawerPresented = false
+            workerNameConflictError = nil
+            workerNameConflictPresented = presentation == .foreground
         }
         return result
     }
