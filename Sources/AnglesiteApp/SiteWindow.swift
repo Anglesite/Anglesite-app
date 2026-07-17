@@ -409,7 +409,6 @@ struct SiteWindow: View {
             }
             .defaultCustomization(.hidden)
 
-            #if !ANGLESITE_MAS
             // One stable item whose label/action reflects publish state — two swapping items
             // would break saved customizations.
             ToolbarItem(id: SiteToolbarItemID.github.rawValue, placement: .primaryAction) {
@@ -431,7 +430,6 @@ struct SiteWindow: View {
                 }
             }
             .defaultCustomization(.hidden)
-            #endif
 
             // — Default trailing cluster —
 
@@ -528,21 +526,14 @@ struct SiteWindow: View {
         .sheet(isPresented: $bindableModel.domain.sheetPresented) {
             DomainSheetView(model: model.domain)
         }
-        #if !ANGLESITE_MAS
         .sheet(isPresented: $bindableModel.publish.sheetPresented) {
             PublishSheet(model: model.publish, siteName: site.name)
         }
-        .sheet(isPresented: $bindableModel.publish.authSheetPresented) {
-            GitHubAuthSheetView { result in
-                switch result {
-                case .authenticated:
-                    model.publish.authCompleted(source: site.sourceDirectory, repoName: site.name)
-                case .failed, .cancelled:
-                    model.publish.authSheetPresented = false
-                }
+        .sheet(isPresented: $bindableModel.publish.tokenPromptPresented) {
+            GitHubTokenPromptView(model: model.publish) {
+                model.publish.cancelTokenPrompt()
             }
         }
-        #endif
         .sheet(item: $bindableModel.siriReadinessModel) { readinessModel in
             NavigationStack {
                 ScrollView {
