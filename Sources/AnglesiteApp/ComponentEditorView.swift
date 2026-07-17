@@ -349,6 +349,13 @@ struct ComponentEditorView: View {
                     .frame(width: 84, height: 44)
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                     .draggable(OutlineDragPayload.insert(PaletteDragPayload(label: item.label, kind: item.kind)))
+                    .contextMenu {
+                        if case .component(_, let componentPath) = item.kind {
+                            Button("Duplicate & Modify") {
+                                Task { await model.duplicateComponent(path: componentPath) }
+                            }
+                        }
+                    }
                 }
             }
             .padding(8)
