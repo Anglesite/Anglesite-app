@@ -293,8 +293,13 @@ final class DeployModel {
             return
         }
         pendingDeploy = nil
-        workerNameConflictPresented = false
         workerNameConflictError = nil
+        // Deliberately NOT clearing `workerNameConflictPresented` here — the sheet stays open
+        // (showing its current content) while the retried deploy runs. `runDeploy`'s `.succeeded`/
+        // `.failed`/`.blocked` cases dismiss it once the outcome is known; its `.workerNameConflict`
+        // case leaves it presented with the new taken name. Clearing it eagerly here, before the
+        // retry even starts, would dismiss-then-re-present the sheet on a loop-back (the new name
+        // is also taken) — a visible flash instead of the taken-name text updating in place.
         deploy(
             siteID: pending.siteID, siteDirectory: pending.siteDirectory,
             configDirectory: pending.configDirectory, currentRoutes: pending.currentRoutes,
@@ -436,8 +441,10 @@ final class DeployModel {
                 siteBase: url
             )
             currentMilestone = nil
+            workerNameConflictPresented = false
             transition(siteID: siteID, to: .succeeded(url: url, duration: duration))
         case .failed(let reason, let exit):
+            workerNameConflictPresented = false
             transition(siteID: siteID, to: .failed(reason: reason, exitCode: exit))
             guard presentation == .foreground else { return result }
             let capturedLog = logText   // snapshot before the suspension; a later deploy clears logLines
@@ -458,6 +465,7 @@ final class DeployModel {
             // For the blocked outcome the modal sheet carries the actionable info; the
             // streaming-log drawer would just be noise.
             drawerPresented = false
+            workerNameConflictPresented = false
             blockedPresented = presentation == .foreground
         case .workerNameConflict(let name):
             pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl)

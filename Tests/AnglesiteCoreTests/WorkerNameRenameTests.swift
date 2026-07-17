@@ -68,4 +68,23 @@ struct WorkerNameRenameTests {
             try WorkerNameRename.apply(newName: "new-name", siteDirectory: dir)
         }
     }
+
+    @Test("Throws .nameLineNotFound when wrangler.toml exists but has no name line (e.g. hand-edited)")
+    func nameLineNotFound() throws {
+        let toml = """
+        compatibility_date = "2026-07-15"
+        compatibility_flags = ["nodejs_compat"]
+
+        [assets]
+        directory = "dist"
+        """
+        let dir = makeSiteDirectory(wranglerToml: toml, siteConfig: "CF_PROJECT_NAME=old-name\n")
+
+        #expect(throws: WorkerNameRename.RenameError.nameLineNotFound) {
+            try WorkerNameRename.apply(newName: "new-name", siteDirectory: dir)
+        }
+
+        let config = try String(contentsOf: dir.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(SiteConfigFile.value(forKey: "CF_PROJECT_NAME", in: config) == "old-name", ".site-config must be untouched when the name line can't be found")
+    }
 }
