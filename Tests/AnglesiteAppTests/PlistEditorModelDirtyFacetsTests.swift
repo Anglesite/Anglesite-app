@@ -104,6 +104,31 @@ struct PlistEditorModelDirtyFacetsTests {
         #expect(model.isDirty == false, "the Website facet should still have saved despite Redirects failing validation")
     }
 
+    @Test("hasAnyUnsavedEdits reflects crawler-policy dirty state alone — the #693 facet added after this seam existed")
+    func hasAnyUnsavedEditsReflectsCrawlerPolicyAlone() async throws {
+        let model = try makeModel()
+        await model.load()
+        model.crawlerPolicySettings.blockAI = true
+        #expect(model.isDirty == false)
+        #expect(model.isRedirectsDirty == false)
+        #expect(model.isAnalyticsDirty == false)
+        #expect(model.hasAnyUnsavedEdits == true)
+    }
+
+    @Test("saveAllDirty saves a dirty crawler policy into .site-config")
+    func saveAllDirtySavesCrawlerPolicy() async throws {
+        let model = try makeModel()
+        await model.load()
+        model.crawlerPolicySettings.blockAI = true
+        model.crawlerPolicySettings.search = .no
+
+        await model.saveAllDirty()
+
+        #expect(model.isCrawlerPolicyDirty == false)
+        let config = try String(contentsOf: model.sourceDirectory.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(CrawlerPolicyAsset.parseSettings(from: config) == model.crawlerPolicySettings)
+    }
+
     @Test("isAnySaving is true while saveRedirects is in flight")
     func isAnySavingReflectsRedirectsInFlight() async throws {
         let model = try makeModel()

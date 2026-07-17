@@ -37,10 +37,15 @@ final class PlistEditorModel {
     private(set) var isSavingRedirects = false
     private(set) var redirectsLoadFailed = false
     var conflictDiskContents: String?
+    var crawlerPolicySettings = CrawlerPolicyAsset.Settings()
+    private(set) var savedCrawlerPolicySettings = CrawlerPolicyAsset.Settings()
+    private(set) var crawlerPolicyError: String?
+    private(set) var isSavingCrawlerPolicy = false
 
     var isDirty: Bool { entries != savedEntries && loadError == nil && !isLoading }
     var isAnalyticsDirty: Bool { analyticsSettings != savedAnalyticsSettings && loadError == nil && !isLoading }
     var isRedirectsDirty: Bool { redirectEntries != savedRedirectEntries && loadError == nil && !isLoading }
+    var isCrawlerPolicyDirty: Bool { crawlerPolicySettings != savedCrawlerPolicySettings && loadError == nil && !isLoading }
     var cloudflareAnalyticsEnabled: Bool { !analyticsSettings.cloudflareToken.isEmpty }
     var customAnalyticsValidationMessage: String? {
         WebsiteAnalyticsAsset.customHeadTagValidationMessage(analyticsSettings.customHeadTag)
@@ -113,6 +118,15 @@ final class PlistEditorModel {
                 redirectsError = "Couldn't load existing redirects.json — it may be corrupted or hand-edited with invalid entries. Fix it externally or your next save will discard it. (\(error.localizedDescription))"
                 redirectsLoadFailed = true
             }
+            do {
+                let config = try WebsiteAnalyticsAsset.loadConfig(siteDirectory: sourceDirectory)
+                let policy = CrawlerPolicyAsset.parseSettings(from: config)
+                crawlerPolicySettings = policy
+                savedCrawlerPolicySettings = policy
+                crawlerPolicyError = nil
+            } catch {
+                crawlerPolicyError = "Couldn't load crawler policy settings: \(error.localizedDescription)"
+            }
         } catch {
             loadError = error.localizedDescription
         }
@@ -161,7 +175,10 @@ final class PlistEditorModel {
             guard await saveAnalytics() else { return false }
         }
         if isRedirectsDirty {
-            return await saveRedirects()
+            guard await saveRedirects() else { return false }
+        }
+        if isCrawlerPolicyDirty {
+            return await saveCrawlerPolicy()
         }
         return true
     }
@@ -266,6 +283,27 @@ final class PlistEditorModel {
         }
     }
 
+    @discardableResult
+    func saveCrawlerPolicy() async -> Bool {
+        guard isCrawlerPolicyDirty else { return true }
+        guard !isSavingCrawlerPolicy else { return false }
+        isSavingCrawlerPolicy = true
+        crawlerPolicyError = nil
+        defer { isSavingCrawlerPolicy = false }
+        let sourceDirectory = sourceDirectory
+        let settings = crawlerPolicySettings
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try CrawlerPolicyAsset.install(settings, siteDirectory: sourceDirectory)
+            }.value
+            savedCrawlerPolicySettings = settings
+            return true
+        } catch {
+            crawlerPolicyError = "Couldn't save crawler policy: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     func setCloudflareAnalyticsEnabled(_ enabled: Bool) async {
         if !enabled {
             analyticsSettings.cloudflareToken = ""
@@ -365,6 +403,7 @@ final class PlistEditorModel {
             DirtyFacet(isDirty: isDirty, isSaving: isSaving) { await self.save() },
             DirtyFacet(isDirty: isAnalyticsDirty, isSaving: isSavingAnalytics) { await self.saveAnalytics() },
             DirtyFacet(isDirty: isRedirectsDirty, isSaving: isSavingRedirects) { await self.saveRedirects() },
+            DirtyFacet(isDirty: isCrawlerPolicyDirty, isSaving: isSavingCrawlerPolicy) { await self.saveCrawlerPolicy() },
         ]
     }
 
