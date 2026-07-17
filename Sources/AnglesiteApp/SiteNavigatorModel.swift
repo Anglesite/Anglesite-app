@@ -115,6 +115,14 @@ final class SiteNavigatorModel {
     /// pages too — so it checks `postIDs` rather than the page-or-post `isContentRow`.
     func canRepurpose(_ id: String) -> Bool { postIDs.contains(id) }
 
+    /// The item the bare Delete key (`.onDeleteCommand`, #674) should act on right now, or nil
+    /// when there's no selection, the selection isn't deletable, or inline-rename is in progress
+    /// (Delete should edit the text field, not delete the row, while `editingItemID` is set).
+    func deletableSelection() -> NavigatorItem? {
+        guard editingItemID == nil, let id = selection, canDelete(id) else { return nil }
+        return item(for: id)
+    }
+
     func beginEditing(_ id: String) {
         guard canRename(id) else { return }
         let current = nodesByID[id]?.title ?? ""

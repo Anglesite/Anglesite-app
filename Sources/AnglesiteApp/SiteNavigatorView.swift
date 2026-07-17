@@ -17,6 +17,14 @@ struct SiteNavigatorView: View {
             }
         }
         .listStyle(.sidebar)
+        // Bare Delete key deletes the selection, matching Xcode/Mail/Notes sidebar convention
+        // (#674). `deletableSelection()` is nil during inline-rename, so Delete edits the text
+        // field there instead — same guard the Return-to-rename affordance above uses.
+        .onDeleteCommand {
+            if let item = model.deletableSelection() {
+                onDeleteRequested(item)
+            }
+        }
         .overlay {
             if model.nodes.isEmpty {
                 ContentUnavailableView("No content yet", systemImage: "sidebar.left")
