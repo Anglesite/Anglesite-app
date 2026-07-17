@@ -987,6 +987,19 @@ final class SiteWindowModel {
         return result
     }
 
+    /// Duplicates the component at `relativePath` (design spec §6.3: "duplicate-and-modify" —
+    /// surfaced on the Component Editor's own palette, since project components aren't tracked
+    /// in `SiteContentGraph` or shown in the page-only Navigator). Same force-refresh reasoning
+    /// as `createComponent`.
+    func duplicateComponent(relativePath: String) async -> ContentCreateResult {
+        guard let site else { return .siteNotFound }
+        let result = await contentCreation.duplicateComponent(siteID: site.id, relativePath: relativePath)
+        if case .created = result {
+            await navigator?.refreshNow()
+        }
+        return result
+    }
+
     /// Resolves `deleteConfirmation` to its page/post record, deletes via
     /// `contentCreation.deleteContent`, and clears the confirmation. Mirrors
     /// `deleteCleanupCandidate`'s ordering: editor/inspector state open on the file being deleted

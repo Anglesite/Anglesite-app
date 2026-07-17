@@ -629,6 +629,95 @@ struct NativeContentOperationsComponentTests {
     }
 }
 
+@Suite("NativeContentOperations.duplicateComponent")
+struct NativeContentOperationsDuplicateComponentTests {
+    private func makeRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("native-content-ops-dup-component-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test("duplicateComponent writes a Copy-suffixed file with identical contents")
+    func duplicatesComponent() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/components/Card.astro"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let original = "---\ninterface Props { title: string }\n---\n<div>{Astro.props.title}</div>\n"
+        try original.write(to: abs, atomically: true, encoding: .utf8)
+
+        let ops = NativeContentOperations(siteDirectory: { _ in root }, gitCommit: { _, _, _ in "deadbeef" })
+
+        let result = await ops.duplicateComponent(siteID: "site-1", relativePath: relPath)
+
+        guard case .created(let filePath, let identifier) = result else {
+            Issue.record("expected .created, got \(result)"); return
+        }
+        #expect(filePath == "src/components/CardCopy.astro")
+        #expect(identifier == "CardCopy")
+        let copied = try String(contentsOf: root.appendingPathComponent(filePath), encoding: .utf8)
+        #expect(copied == original)
+    }
+
+    @Test("duplicateComponent bumps the suffix on collision")
+    func duplicatesComponentWithCollision() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/components/Card.astro"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "original".write(to: abs, atomically: true, encoding: .utf8)
+        try "existing copy".write(to: root.appendingPathComponent("src/components/CardCopy.astro"), atomically: true, encoding: .utf8)
+
+        let ops = NativeContentOperations(siteDirectory: { _ in root }, gitCommit: { _, _, _ in "deadbeef" })
+
+        let result = await ops.duplicateComponent(siteID: "site-1", relativePath: relPath)
+
+        guard case .created(let filePath, let identifier) = result else {
+            Issue.record("expected .created, got \(result)"); return
+        }
+        #expect(filePath == "src/components/CardCopy2.astro")
+        #expect(identifier == "CardCopy2")
+    }
+
+    @Test("duplicateComponent preserves a nested subdirectory")
+    func duplicatesNestedComponent() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let relPath = "src/components/esi/EsiInclude.astro"
+        let abs = root.appendingPathComponent(relPath)
+        try FileManager.default.createDirectory(at: abs.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "original".write(to: abs, atomically: true, encoding: .utf8)
+
+        let ops = NativeContentOperations(siteDirectory: { _ in root }, gitCommit: { _, _, _ in "deadbeef" })
+
+        let result = await ops.duplicateComponent(siteID: "site-1", relativePath: relPath)
+
+        guard case .created(let filePath, _) = result else { Issue.record("expected .created, got \(result)"); return }
+        #expect(filePath == "src/components/esi/EsiIncludeCopy.astro")
+    }
+
+    @Test("duplicateComponent fails when the source file does not exist")
+    func duplicateMissingComponentFails() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ops = NativeContentOperations(siteDirectory: { _ in root })
+
+        let result = await ops.duplicateComponent(siteID: "site-1", relativePath: "src/components/Missing.astro")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
+
+    @Test("unknown site returns .siteNotFound")
+    func duplicateComponentSiteNotFound() async {
+        let ops = NativeContentOperations(siteDirectory: { _ in nil }, gitCommit: { _, _, _ in nil })
+        let result = await ops.duplicateComponent(siteID: "missing", relativePath: "src/components/Card.astro")
+        #expect(result == .siteNotFound)
+    }
+}
+
 private struct StubPageCopyGenerator: PageCopyGenerating {
     let suggestion: PageCopySuggestion?
     func suggestDescription(title: String, siteID: String, siteDirectory: URL) async -> PageCopySuggestion? {

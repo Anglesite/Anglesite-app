@@ -147,6 +147,13 @@ extension SiteWindowModelTests {
         #expect(result == .siteNotFound)
     }
 
+    @Test("duplicateComponent no-ops safely when there is no open site")
+    func duplicateComponentNoSiteReturnsSiteNotFound() async {
+        let model = makeModel()
+        let result = await model.duplicateComponent(relativePath: "src/components/Card.astro")
+        #expect(result == .siteNotFound)
+    }
+
     @Test("confirmDelete clears deleteConfirmation and no-ops when there is no open site")
     func confirmDeleteNoSiteIsNoOp() async {
         let model = makeModel()
