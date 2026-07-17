@@ -500,6 +500,13 @@ struct SiteWindow: View {
                 model.deploy.cancelTokenPrompt()
             }
         }
+        .sheet(isPresented: $bindableModel.deploy.workerNameConflictPresented) {
+            if case .workerNameConflict(let name) = model.deploy.phase {
+                WorkerNameConflictSheetView(model: model.deploy, takenName: name) {
+                    model.deploy.cancelWorkerNameConflictPrompt()
+                }
+            }
+        }
         .sheet(isPresented: $bindableModel.audit.sheetPresented) {
             AuditSheetView(
                 model: model.audit,
