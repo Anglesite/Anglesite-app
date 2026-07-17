@@ -71,7 +71,7 @@ final class SiteWindowModel {
     /// reports into it and AppKit's `appEntityUIElementProvider` can hit-test against its
     /// annotations (Siri AI Phase B / #146 + #148).
     var annotationProvider: PreviewAnnotationProvider?
-    var deploy = DeployModel()
+    var deploy: DeployModel
     private(set) var invisiblePublishState: InvisiblePublishQueue.State = .idle
     #if !ANGLESITE_MAS
     var publish = PublishModel()
@@ -184,6 +184,10 @@ final class SiteWindowModel {
         contentIndexerStore: ContentIndexerStore
     ) {
         self.contentGraph = contentGraph
+        self.deploy = DeployModel(
+            contentGraph: contentGraph,
+            workerCatalog: { await WorkerCatalogFetcher(catalogURL: WorkerCatalogFetcher.productionCatalogURL).catalog() }
+        )
         self.knowledgeIndex = knowledgeIndex
         self.semanticRanker = semanticRanker
         self.conventionsEngine = conventionsEngine
@@ -479,7 +483,7 @@ final class SiteWindowModel {
             deploy.deploy(
                 siteID: site.id, siteDirectory: site.sourceDirectory,
                 configDirectory: site.configDirectory, currentRoutes: currentRoutes,
-                containerControl: containerControl)
+                containerControl: containerControl, siteName: site.name)
         }
     }
 
@@ -1423,7 +1427,8 @@ final class SiteWindowModel {
             siteDirectory: site.sourceDirectory,
             configDirectory: site.configDirectory,
             currentRoutes: pageRoutes + postRoutes,
-            containerControl: containerControl
+            containerControl: containerControl,
+            siteName: site.name
         )
     }
 

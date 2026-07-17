@@ -83,6 +83,12 @@ final class DeployModel {
     private let keychain: KeychainStore
     private let onboarding: TokenOnboarding
     private let summarizer: any DeployFailureSummarizing
+    private let contentGraph: SiteContentGraph
+    /// Returns the current `@dwk/workers` catalog. Defaults to `{ [] }` (no network, no active
+    /// settings-activated workers ever computed) so existing tests that don't inject one keep
+    /// deploying exactly as before — production wiring (`SiteWindowModel`) passes a real
+    /// `WorkerCatalogFetcher(catalogURL: WorkerCatalogFetcher.productionCatalogURL).catalog`.
+    private let workerCatalog: @Sendable () async -> [WorkerDescriptor]
     /// Bumped at the start of every `runDeploy`. The async failure-summarization captures the
     /// value at dispatch and only writes its result back if it still matches — so a summary from
     /// a superseded deploy can't stomp the current deploy's state, even though
@@ -117,7 +123,9 @@ final class DeployModel {
         verifier: TokenVerifying = CloudflareAPITokenVerifier(),
         summarizer: any DeployFailureSummarizing = DeploySummarizerFactory.makeDefault(),
         suddenTerminationController: SuddenTerminationController = .shared,
-        tokenAvailabilityOverride: (() -> Bool)? = nil
+        tokenAvailabilityOverride: (() -> Bool)? = nil,
+        contentGraph: SiteContentGraph = SiteContentGraph(),
+        workerCatalog: @escaping @Sendable () async -> [WorkerDescriptor] = { [] }
     ) {
         self.command = command
         self.webmentionCommand = webmentionCommand
@@ -128,6 +136,8 @@ final class DeployModel {
         self.summarizer = summarizer
         self.suddenTerminationController = suddenTerminationController
         self.tokenAvailabilityOverride = tokenAvailabilityOverride
+        self.contentGraph = contentGraph
+        self.workerCatalog = workerCatalog
     }
 
     var isRunning: Bool {
@@ -156,7 +166,8 @@ final class DeployModel {
         siteDirectory: URL,
         configDirectory: URL,
         currentRoutes: [String],
-        containerControl: (siteID: String, control: any LocalContainerControl)? = nil
+        containerControl: (siteID: String, control: any LocalContainerControl)? = nil,
+        siteName: String? = nil
     ) {
         guard !isRunning else { return }
         if !hasUsableToken() {
@@ -176,7 +187,8 @@ final class DeployModel {
                 configDirectory: configDirectory, currentRoutes: currentRoutes,
                 containerControl: containerControl,
                 suddenTerminationLease: suddenTerminationLease,
-                presentation: .foreground)
+                presentation: .foreground,
+                siteName: siteName)
         }
     }
 
@@ -189,7 +201,8 @@ final class DeployModel {
         siteDirectory: URL,
         configDirectory: URL,
         currentRoutes: [String],
-        containerControl: (siteID: String, control: any LocalContainerControl)?
+        containerControl: (siteID: String, control: any LocalContainerControl)?,
+        siteName: String? = nil
     ) async -> InvisiblePublishQueue.Result {
         guard !isRunning else { return .deferred(reason: "another site operation is running") }
         guard hasUsableToken() else { return .deferred(reason: "Cloudflare credentials are not configured") }
@@ -204,7 +217,8 @@ final class DeployModel {
             currentRoutes: currentRoutes,
             containerControl: containerControl,
             suddenTerminationLease: lease,
-            presentation: .background
+            presentation: .background,
+            siteName: siteName
         )
         switch result {
         case .succeeded(let url, _):
@@ -351,7 +365,8 @@ final class DeployModel {
         currentRoutes: [String],
         containerControl: (siteID: String, control: any LocalContainerControl)? = nil,
         suddenTerminationLease: SuddenTerminationController.Lease,
-        presentation: Presentation
+        presentation: Presentation,
+        siteName: String? = nil
     ) async -> DeployCommand.Result {
         defer { suddenTerminationLease.release() }
         transition(siteID: siteID, to: .running(siteID: siteID, since: Date()))
@@ -382,6 +397,7 @@ final class DeployModel {
         // injected `command` so the test-injection path (a fully pre-built
         // `DeployCommand`) continues to work unmodified.
         let activeCommand: DeployCommand
+        let containerRunner: SocialWorkerProvisionCommand.CommandRunner?
         if let cc = containerControl {
             activeCommand = DeployCommand(
                 tokenSource: command.tokenSource,
@@ -391,31 +407,100 @@ final class DeployModel {
                     logCenter: logCenter
                 )
             )
+            containerRunner = ContainerCommandRunner(control: cc.control, siteID: cc.siteID, logCenter: logCenter).runner
         } else {
             activeCommand = command
+            containerRunner = nil
         }
 
-        let result = await activeCommand.deploy(
-            siteID: siteID,
-            siteDirectory: siteDirectory,
-            configDirectory: configDirectory,
-            currentRoutes: currentRoutes,
-            onPreflight: { [weak self] outcome in
-                // The callback fires inside DeployCommand's actor isolation; hop to
-                // MainActor before touching our @Observable state or the consumer's
-                // closure (which likely mutates SwiftUI state too).
-                Task { @MainActor in
-                    self?.onScanComplete?(outcome)
-                }
-            },
-            onProgress: { [weak self] progress in
-                // last-write-wins: each milestone fully replaces the label, so out-of-order delivery across these hops is benign
-                Task { @MainActor in
-                    self?.currentMilestone = progress.label
-                    self?.onMilestone?(siteID, progress)
-                }
+        // Effective active worker set (#709 design §4-5): component-tied workers via
+        // ImpactAnalysis (only when this site's content graph has actually been scanned — a
+        // headless/never-opened site contributes nothing there, matching ImpactAnalysis's own
+        // "never invents, may under-report" bias) unioned with settings-activated workers.
+        let configStore = SiteConfigStore(configDirectory: configDirectory)
+        let settings = (try? await configStore.load()) ?? SiteSettings()
+        let catalog = await workerCatalog()
+        let snapshot: SiteGraphExplorerSnapshot?
+        if await contentGraph.isPopulated(siteID: siteID) {
+            snapshot = SiteGraphExplorer.build(
+                projectRoot: siteDirectory,
+                siteID: siteID,
+                pages: await contentGraph.pages(for: siteID),
+                posts: await contentGraph.posts(for: siteID),
+                images: await contentGraph.images(for: siteID)
+            )
+        } else {
+            snapshot = nil
+        }
+        let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: catalog, graph: snapshot)
+        let removedIDs = WorkerActivation.removedIDs(previous: Set(settings.lastDeployedWorkerIDs ?? []), next: effectiveActiveIDs)
+        if !removedIDs.isEmpty {
+            await logCenter.append(
+                source: "deploy:\(siteID)",
+                stream: .stdout,
+                text: "Deactivating workers: \(removedIDs.sorted().joined(separator: ", "))"
+            )
+        }
+        let features = WorkerActivation.mapToFeatures(effectiveActiveIDs)
+
+        let socialCommand = SocialWorkerProvisionCommand(
+            tokenSource: { [weak self] in try await self?.command.tokenSource() },
+            runner: containerRunner ?? SocialWorkerProvisionCommand.defaultRunner,
+            deployer: { [weak self] _, deploySiteID, deploySiteDirectory in
+                await activeCommand.deploy(
+                    siteID: deploySiteID,
+                    siteDirectory: deploySiteDirectory,
+                    configDirectory: configDirectory,
+                    currentRoutes: currentRoutes,
+                    onPreflight: { [weak self] outcome in
+                        Task { @MainActor in self?.onScanComplete?(outcome) }
+                    },
+                    onProgress: { [weak self] progress in
+                        Task { @MainActor in
+                            self?.currentMilestone = progress.label
+                            self?.onMilestone?(siteID, progress)
+                        }
+                    }
+                )
             }
         )
+
+        // Prefer the site's already-established Worker name (`.site-config`'s `CF_PROJECT_NAME`,
+        // set at the first successful deploy or by a worker-name-conflict rename, #740) over
+        // re-deriving one from the site's display name. Otherwise every deploy after a
+        // rename-and-retry would silently regenerate `wrangler.toml` under the original
+        // (still-taken) name basis via `persistConfig`, defeating the rename. Falls back to the
+        // derived slug only when no candidate name has been recorded yet — a genuinely first-ever
+        // deploy.
+        let existingConfig = (try? WebsiteAnalyticsAsset.loadConfig(siteDirectory: siteDirectory)) ?? ""
+        let workerSiteName = SiteConfigFile.value(forKey: "CF_PROJECT_NAME", in: existingConfig)
+            ?? SiteSlug.derive(from: siteName ?? siteID)
+        let provisionResult = await socialCommand.provision(
+            siteID: siteID,
+            siteDirectory: siteDirectory,
+            siteName: workerSiteName,
+            features: features,
+            knownResources: settings.provisionedWorkerResources ?? .init()
+        )
+
+        if case .succeeded(_, let resources, _) = provisionResult {
+            var updated = settings
+            updated.lastDeployedWorkerIDs = Array(effectiveActiveIDs).sorted()
+            updated.provisionedWorkerResources = resources
+            try? await configStore.save(updated)
+        }
+
+        let result: DeployCommand.Result
+        switch provisionResult {
+        case .succeeded(let url, _, let duration):
+            result = .succeeded(url: url, duration: duration)
+        case .blocked(let failures, let warnings, _):
+            result = .blocked(failures: failures, warnings: warnings)
+        case .workerNameConflict(let name, _):
+            result = .workerNameConflict(name: name)
+        case .failed(let reason, let exitCode, _):
+            result = .failed(reason: reason, exitCode: exitCode)
+        }
 
         subscription.cancel()
         _ = await logTask.value

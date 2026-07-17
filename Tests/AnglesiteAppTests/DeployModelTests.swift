@@ -239,4 +239,81 @@ struct DeployModelTests {
         #expect(!model.isRunning)
         #expect(model.workerNameConflictError == "No deploy is waiting — close this and click Deploy again.")
     }
+
+    @Test("a site with no active workers still deploys through the plain static path")
+    func staticSiteDeploysUnaffected() async throws {
+        let executor = GatedDeployExecutor()
+        let command = DeployCommand(tokenSource: { "test-token" }, executor: executor)
+        let contentGraph = SiteContentGraph()
+        let model = DeployModel(
+            command: command,
+            logCenter: LogCenter(),
+            suddenTerminationController: SuddenTerminationController(disable: {}, enable: {}),
+            tokenAvailabilityOverride: { true },
+            contentGraph: contentGraph,
+            workerCatalog: { [] }
+        )
+        let dir = try temporaryDirectory()
+
+        // Unlike the worker-name-conflict tests, this deploy has no active workers and no
+        // pre-existing name collision, so it genuinely reaches the real `.build` step (no
+        // short-circuit) — wait for the executor to park there, then resume it, mirroring
+        // `suddenTerminationLeaseBracketsDeploy`. Resuming before the build step is reached
+        // (as the conflict tests do defensively) would resume nothing and hang this deploy
+        // forever.
+        model.deploy(siteID: "test-site", siteDirectory: dir, configDirectory: dir, currentRoutes: [])
+        await executor.waitUntilBuildIsParked()
+        await executor.resumeBuild()
+        while model.isRunning { await Task.yield() }
+
+        guard case .succeeded = model.phase else {
+            Issue.record("Expected deploy to succeed, got \(model.phase)")
+            return
+        }
+    }
+
+    @Test("a site with a settings-activated worker persists lastDeployedWorkerIDs after a successful deploy")
+    func activatingAWorkerPersistsLastDeployedWorkerIDs() async throws {
+        let executor = GatedDeployExecutor()
+        await executor.resumeBuild()
+        let command = DeployCommand(tokenSource: { "test-token" }, executor: executor)
+        let contentGraph = SiteContentGraph()
+        let catalog = [
+            WorkerDescriptor(
+                id: "indieauth", displayName: "IndieAuth", description: "d", group: "identity",
+                binding: .settingsActivated, resources: .init(needsD1: true, needsKV: false, needsR2: false)
+            )
+        ]
+        let model = DeployModel(
+            command: command,
+            logCenter: LogCenter(),
+            suddenTerminationController: SuddenTerminationController(disable: {}, enable: {}),
+            tokenAvailabilityOverride: { true },
+            contentGraph: contentGraph,
+            workerCatalog: { catalog }
+        )
+        let dir = try temporaryDirectory()
+        let configDir = dir.appendingPathComponent("Config", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let configStore = SiteConfigStore(configDirectory: configDir)
+        try await configStore.save(SiteSettings(activeWorkerIDs: ["indieauth"]))
+
+        model.deploy(siteID: "test-site", siteDirectory: dir, configDirectory: configDir, currentRoutes: [])
+        while model.isRunning { await Task.yield() }
+
+        // provision() has no working runner outside a container (Task 5's ContainerCommandRunner
+        // requires a real LocalContainerControl) — without containerControl this deploy is
+        // expected to fail at the D1-provisioning step, NOT silently skip worker composition.
+        guard case .failed = model.phase else {
+            Issue.record("Expected a provisioning failure without a container, got \(model.phase)")
+            return
+        }
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DeployModelTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
 }
