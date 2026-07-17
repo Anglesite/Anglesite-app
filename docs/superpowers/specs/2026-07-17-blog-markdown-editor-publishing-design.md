@@ -4,10 +4,12 @@
 **Status:** Proposed; owner decisions locked 2026-07-17 during review: (1) mobile
 posting is Micropub, gated on V-3 `@dwk/workers` conformance; (2) bakes are
 **Worker-triggered**; (3) **Cloudflare is canonical for typed content** ("headless
-CMS" model) — this deliberately **re-scopes #72 and reverses C.3's canonicality for
-authored content** (git stays canonical for code/theme; content portability becomes a
-guaranteed continuous export-to-git). Cross-cutting (#340-class); flagged here so the
-reversal is explicit, not absorbed.
+CMS" model) — this deliberately **re-scopes #72 and reverses C.3's canonicality**,
+for authored content and (4, unified) for received interactions too (git stays
+canonical for code/theme; content portability becomes a guaranteed continuous
+export-to-git); (5) the V-3 Worker API includes a **bulk content read endpoint** for
+builds; (6) **export is desktop-only** — mobile has no export path. Cross-cutting
+(#340-class); flagged here so the reversals are explicit, not absorbed.
 **Related:** #517 (Find + Format menu, blocked on editor work) · #288 (template blog system) · #346 (typed form editors) · #68 (repo bootstrap / Publish to GitHub) · #640/#654 (in-process git) · #742 (pre-deploy scan envelope) · #71/#66 (iOS thin client + remote sandbox) · #571 (cross-platform port) · epic #496 (Component Editor, STTextView precedent) · **#334 pivot: V-2 IndieAuth (#355), V-2.1 per-site Worker (#353), V-3 Micropub, V-3.4 snapshot-to-git (#362)** · C.2 workers seam + C.3 canonicality decision docs (2026-06-29)
 
 ## Goal
@@ -235,21 +237,31 @@ Cloudflare-canonical model, a post's life is:
 3. **Export to git (portability guarantee):** C.3's snapshot machinery, demoted from
    canon to **continuous export**: authored posts serialize to full-fidelity
    Markdown + YAML frontmatter (registry schema; `post-status` ⇄ Part B's `draft`)
-   with R2 media alongside. The desktop app syncs exports down into `Source/`
-   (one-way, the #587 `InboxSubmissionSync` shape) and **File ▸ Export** always
-   yields a complete site — code *and* content — so the site outlives Cloudflare.
-   Exports are read-side artifacts: editing an exported file does not write back to
-   the CMS (the API is the write path; the app warns if it detects divergence).
+   with R2 media alongside. **Received interactions unify under the same model**
+   (owner decision, 2026-07-17): D1-canonical, exported to
+   `Source/data/interactions/` in C.3's JSON shape — one canonicality rule for
+   everything the Worker stores, superseding C.3's git-canonical ruling for them.
+   The desktop app syncs exports down into `Source/` (one-way, the #587
+   `InboxSubmissionSync` shape) and **File ▸ Export** always yields a complete
+   site — code *and* content — so the site outlives Cloudflare. **Export is
+   desktop-only** (owner decision, 2026-07-17): mobile is a posting client, not an
+   archival one — there is no mobile export path; content remains in the user's own
+   Cloudflare account and is exportable from any desktop install. Exports are
+   read-side artifacts: editing an exported file does not write back to the CMS
+   (the API is the write path; the app warns if it detects divergence).
 
 **How the builder gets the site without git or GitHub:** the build container needs
 code + content. Content comes from D1 through an **Astro content-layer loader** in
-the template that reads the Worker's content API (drafts filtered server-side; the
-existing zod schemas validate loader output exactly as they validate `glob()` files
-today — un-provisioned sites keep the `glob()` loader and today's behavior). Code
-comes from the **deployed-source bundle**: every desktop deploy uploads the built
-site's `Source/` snapshot to R2 as a one-way artifact. No two-way git mirror, no
-sync protocol — code changes only ever arrive via desktop deploys, content changes
-only ever arrive via the API, so the two lanes never conflict.
+the template that reads the Worker's **bulk content read endpoint** — a decided V-3
+API requirement (owner, 2026-07-17): paginated, draft-filtered server-side, with a
+change cursor for incremental builds (Micropub `q=source` stays the per-post read;
+the bulk endpoint is the build-time read). The existing zod schemas validate loader
+output exactly as they validate `glob()` files today — un-provisioned sites keep the
+`glob()` loader and today's behavior. Code comes from the **deployed-source
+bundle**: every desktop deploy uploads the built site's `Source/` snapshot to R2 as
+a one-way artifact. No two-way git mirror, no sync protocol — code changes only
+ever arrive via desktop deploys, content changes only ever arrive via the API, so
+the two lanes never conflict.
 
 The phone therefore never touches git — **no local clone, no SwiftGit2, no push
 credentials** — and neither does the builder.
@@ -472,24 +484,16 @@ direction.
 
 ## Open questions (owner input wanted)
 
-1. **Bulk content read API for builds** — Micropub's `q=source` is a per-post read;
-   the content-layer loader wants a bulk, paginated content endpoint on the Worker
-   (with draft filtering and a change cursor for incremental builds). Shape belongs
-   to the workers repo; flagged so it lands in V-3's API surface.
-2. **Received interactions** — C.3 made *received* interactions git-canonical via
-   snapshot. With authored content now Cloudflare-canonical, should V-3.4 unify both
-   under the export model for consistency, or is received-interaction canonicality
-   worth keeping distinct? (Not re-decided here.)
-3. **Export transport for mobile-only users** — the desktop app syncs exports into
-   `Source/`; a user who never opens a Mac needs an equivalent guarantee. Is an
-   on-demand complete-site export from the Worker (R2-staged archive the iOS app can
-   save/share) sufficient?
-4. **`blog` vs `articles`** — keep both (blog = simple starter, articles = typed
+Resolved during review (2026-07-17), recorded in §C.4: the bulk content read
+endpoint is a V-3 API requirement; received interactions unify under the
+D1-canonical + export model; export is desktop-only (no mobile export path).
+
+1. **`blog` vs `articles`** — keep both (blog = simple starter, articles = typed
    h-entry) or migrate the starter to `articles` and retire `blog`? (In CMS mode the
    distinction also decides which collections the content import migrates.)
-5. **iOS product shape** — is the Micropub client the *whole* default iOS experience
+2. **iOS product shape** — is the Micropub client the *whole* default iOS experience
    (with the remote-sandbox thin client as the "power preview" opt-in), or do they
    ship together? This spec assumes the former.
-6. **swift-markdown-engine adoption** — if the in-house styler's macOS feel lags the
+3. **swift-markdown-engine adoption** — if the in-house styler's macOS feel lags the
    reference, is a scoped adoption of SwiftMarkdownEngine behind the `MarkdownTextView`
    seam (macOS only, new-dep approval) acceptable as a stopgap?
