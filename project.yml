@@ -22,6 +22,12 @@ packages:
   STTextViewPluginNeon:
     url: https://github.com/krzyzanowskim/STTextView-Plugin-Neon
     revision: 5a30db4ce7908a5414e7b499e2379bdc49991cd1
+  # Markdown editor substrate (#797): Anglesite's patched fork of
+  # nodes-app/swift-markdown-engine, pinned by revision — see the matching
+  # Package.swift comment for the full rationale.
+  MarkdownEngine:
+    url: https://github.com/Anglesite/swift-markdown-engine
+    revision: ff54708bb07ccc7df1f43d367c0a2fd9ab791466
 
 targets:
   Anglesite:
@@ -97,6 +103,8 @@ targets:
         product: STTextView
       - package: STTextViewPluginNeon
         product: STTextView-Plugin-Neon
+      - package: MarkdownEngine
+        product: MarkdownEngine
       - target: AnglesiteQuickLookPreview
         embed: true
       - target: AnglesiteQuickLookThumbnail

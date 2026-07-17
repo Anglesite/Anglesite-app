@@ -229,6 +229,7 @@ packageTargets.append(
             // Module name is `STPluginNeon` (the target); the product name the dependency
             // resolver matches on is the package's own product name below.
             .product(name: "STTextView-Plugin-Neon", package: "STTextView-Plugin-Neon"),
+            .product(name: "MarkdownEngine", package: "swift-markdown-engine"),
         ],
         path: "Sources/AnglesiteApp",
         exclude: ["AnglesiteApp.swift", "LiveSiteRuntimeFactory.swift"],
@@ -330,6 +331,17 @@ packageDependencies.append(
 // commit.
 packageDependencies.append(
     .package(url: "https://github.com/krzyzanowskim/STTextView-Plugin-Neon", revision: "5a30db4ce7908a5414e7b499e2379bdc49991cd1")
+)
+// Markdown editor substrate (#797; survey #796 — see the spec addendum in
+// docs/superpowers/specs/2026-07-17-blog-markdown-editor-publishing-design.md). Anglesite's
+// fork of nodes-app/swift-markdown-engine v0.10.0 plus one patch making automatic quote
+// substitution configurable (SpellCheckingPolicy.automaticQuoteSubstitution) — smart quotes
+// corrupt Markdown sources. Only the zero-dependency core `MarkdownEngine` product is linked
+// (no MarkdownEngineCodeBlocks/MarkdownEngineLatex — LaTeX and highlighted fences are out of
+// scope for v1, §A.2). Pinned by revision, matching the SwiftGit2/STTextView policy above:
+// deliberate bumps only (upstream is pre-1.0 and its API moves).
+packageDependencies.append(
+    .package(url: "https://github.com/Anglesite/swift-markdown-engine", revision: "ff54708bb07ccc7df1f43d367c0a2fd9ab791466")
 )
 #endif
 
