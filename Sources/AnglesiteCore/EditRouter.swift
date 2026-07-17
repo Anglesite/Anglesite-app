@@ -18,6 +18,13 @@ public struct EditReply: Sendable, Equatable, Encodable {
     /// Op-scoped metadata. For `replace-image-src` carries `{ src, srcset? }`. `nil` for ops
     /// that don't surface overlay-side metadata.
     public let result: ImageResult?
+    /// `extract-component`-scoped metadata — the project-relative path of the brand-new component
+    /// file the op created (e.g. `src/components/Hero.astro`). A plain top-level string on the
+    /// plugin's `edit-applied` body (sibling to `file`/`commit`, NOT nested under `result`).
+    /// Present on the `.applied` reply for that op; `nil` for every other op. Kept as a simple
+    /// additive optional alongside `commit`/`model`, matching this type's one-field-per-op-family
+    /// convention.
+    public let newFile: String?
     /// Preview-only: the source fragment before/after the would-be change (`.preview` status).
     public let before: String?
     public let after: String?
@@ -59,7 +66,8 @@ public struct EditReply: Sendable, Equatable, Encodable {
         after: String? = nil,
         op: String? = nil,
         model: ComponentModel? = nil,
-        reason: String? = nil
+        reason: String? = nil,
+        newFile: String? = nil
     ) {
         self.id = id
         self.status = status
@@ -72,6 +80,7 @@ public struct EditReply: Sendable, Equatable, Encodable {
         self.op = op
         self.model = model
         self.reason = reason
+        self.newFile = newFile
     }
 }
 

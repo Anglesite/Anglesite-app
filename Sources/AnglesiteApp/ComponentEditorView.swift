@@ -60,6 +60,15 @@ struct ComponentEditorView: View {
     /// Editable drafts for the two code panes, keyed by zone — dirty-tracked like
     /// `FileEditorModel` (spec §5) and saved explicitly via `setScriptZone`, not on blur.
     @State private var codeDrafts: [CodeZone: String] = [.frontmatter: "", .client: ""]
+    /// Outline node the "Extract into Component…" sheet is targeting, captured at menu-tap time.
+    /// Non-nil presents `ExtractComponentSheet` (design §6.3).
+    @State private var extractTarget: ExtractTarget?
+
+    /// Identifiable wrapper for an outline node id, so `.sheet(item:)` can drive the extract
+    /// sheet off which row was right-clicked.
+    private struct ExtractTarget: Identifiable {
+        let id: String
+    }
 
     enum Mode: String, CaseIterable { case design = "Design", source = "Source" }
 
@@ -168,6 +177,19 @@ struct ComponentEditorView: View {
                 .client: model?.model?.clientScript?.source ?? "",
             ]
         }
+        .sheet(item: $extractTarget) { target in
+            ExtractComponentSheet { name in
+                guard let model else { return "The component editor isn't ready yet." }
+                // Pass the bare name straight through — the plugin derives the full
+                // `src/components/<name>.astro` path itself from `newName`.
+                let applied = await model.extractComponent(nodeId: target.id, newName: name)
+                // On success the sheet dismisses (nil). On failure, surface the plugin's refusal
+                // (invalid-input / already-exists / dynamic-expression / a transient error) captured
+                // in `writeError`; a stale refusal leaves `writeError` nil, so fall back to a generic
+                // message (the conflict banner explains the reload separately).
+                return applied ? nil : (model.writeError ?? "The component couldn't be extracted.")
+            }
+        }
     }
 
     @ViewBuilder private var sourcePane: some View {
@@ -272,6 +294,13 @@ struct ComponentEditorView: View {
         .onTapGesture(count: 2) {
             guard row.isSealed else { return }
             openSealedComponent(model, row: row)
+        }
+        .contextMenu {
+            if model.canExtractComponent(row) {
+                Button("Extract into Component…") {
+                    extractTarget = ExtractTarget(id: row.node.id)
+                }
+            }
         }
     }
 

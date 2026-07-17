@@ -394,4 +394,56 @@ final class ComponentEditorModel {
             return false
         }
     }
+
+    // MARK: - Extract into component
+
+    /// Extract the subtree rooted at `nodeId` into a brand-new `.astro` component. `newName` is a
+    /// bare PascalCase identifier — the plugin derives the full `src/components/<newName>.astro`
+    /// path itself. The plugin applies this as one atomic two-file edit; the reconciliation here
+    /// mirrors the other structure writes (`applyComponentStyleEdit`) — adopt a piggybacked fresh
+    /// `model` for the original file or reload; a `stale` refusal flips `conflict` and reloads.
+    /// Because this op creates a brand-new component file, the piggybacked-model fast path also
+    /// rescans `projectComponents` so the palette immediately reflects the new component (the
+    /// `load()` fallback already does this). The `newName` client-side validation lives in
+    /// `ExtractComponentSheet`; the plugin's own `invalid-input`/`already-exists`/`dynamic-expression`
+    /// refusals still surface here via `writeError` (they flow through the generic failure branch,
+    /// like every other op's non-`stale` refusal). Returns whether the extraction applied.
+    @discardableResult
+    func extractComponent(nodeId: String, newName: String) async -> Bool {
+        guard let editRouter = context.editRouter else { return false }
+        let message = ComponentStructureEditBuilder.extractComponent(
+            id: UUID().uuidString,
+            path: relativePath,
+            baseVersion: model?.version ?? "",
+            nodeId: nodeId,
+            newName: newName
+        )
+        let reply = await editRouter.apply(message)
+        switch reply.status {
+        case .applied:
+            conflict = false
+            writeError = nil
+            if let freshModel = reply.model {
+                model = freshModel
+                projectComponents = SiteFileTree.scan(siteRoot: context.sourceRoot)[.components] ?? []
+            } else {
+                await load()
+            }
+            return true
+        case .failed where reply.reason == "stale":
+            conflict = true
+            await load()
+            return false
+        default:
+            writeError = reply.message ?? "The component couldn't be extracted."
+            return false
+        }
+    }
+
+    /// Whether the outline `row` can be extracted into its own component. Delegates to
+    /// `ComponentOutline.isExtractable(_:)` (Core), which hosts the actual gating logic so it's
+    /// unit-testable on CI (app-target Swift tests don't run there).
+    func canExtractComponent(_ row: ComponentOutline.Row) -> Bool {
+        ComponentOutline.isExtractable(row.node)
+    }
 }

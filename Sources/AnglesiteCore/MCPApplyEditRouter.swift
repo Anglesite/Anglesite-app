@@ -102,7 +102,8 @@ public struct MCPApplyEditRouter: EditRouter {
                 file: parsed?.file,
                 commit: parsed?.commit,
                 result: parsed?.result,
-                model: parsed?.model
+                model: parsed?.model,
+                newFile: parsed?.newFile
             )
             if let persistEdit {
                 do {
@@ -117,7 +118,8 @@ public struct MCPApplyEditRouter: EditRouter {
                         // `commit != nil` instead of `status` must not read this as landed.
                         commit: nil,
                         result: reply.result,
-                        model: reply.model
+                        model: reply.model,
+                        newFile: reply.newFile
                     )
                 }
             }
@@ -165,12 +167,16 @@ public struct MCPApplyEditRouter: EditRouter {
         else { return nil }
         let file = json["file"] as? String
         let commit = json["commit"] as? String
+        // The `result` key carries `replace-image-src`'s `{ src, srcset? }`.
         var image: EditReply.ImageResult?
-        if let resultDict = json["result"] as? [String: Any],
-           let src = resultDict["src"] as? String {
+        if let resultDict = json["result"] as? [String: Any], let src = resultDict["src"] as? String {
             let srcset = resultDict["srcset"] as? String
             image = EditReply.ImageResult(src: src, srcset: srcset)
         }
+        // `extract-component` reports the brand-new file it created as a plain top-level string
+        // (`newFile`), a sibling of `file`/`commit` — NOT nested under `result` (that op has no
+        // `result` object at all).
+        let newFile = json["newFile"] as? String
         var model: ComponentModel?
         if let modelDict = json["model"],
            let modelData = try? JSONSerialization.data(withJSONObject: modelDict) {
@@ -179,14 +185,15 @@ public struct MCPApplyEditRouter: EditRouter {
         // Present on `anglesite:edit-failed` bodies (e.g. "stale", "no-match", "invalid-input") —
         // the machine-readable counterpart to the free-form `detail` prose folded into `message`.
         let reason = json["reason"] as? String
-        if file == nil && commit == nil && image == nil && model == nil && reason == nil { return nil }
-        return Parsed(file: file, commit: commit, result: image, model: model, reason: reason)
+        if file == nil && commit == nil && image == nil && newFile == nil && model == nil && reason == nil { return nil }
+        return Parsed(file: file, commit: commit, result: image, newFile: newFile, model: model, reason: reason)
     }
 
     struct Parsed: Equatable {
         let file: String?
         let commit: String?
         let result: EditReply.ImageResult?
+        let newFile: String?
         let model: ComponentModel?
         let reason: String?
     }
