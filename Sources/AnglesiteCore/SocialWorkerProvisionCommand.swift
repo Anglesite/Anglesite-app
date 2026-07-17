@@ -51,7 +51,13 @@ public actor SocialWorkerProvisionCommand {
         siteID: String,
         siteDirectory: URL,
         siteName: String,
-        features: [WorkerComposition.Feature] = WorkerComposition.Feature.v2
+        features: [WorkerComposition.Feature] = WorkerComposition.Feature.v2,
+        /// Resources already known from `SiteSettings.provisionedWorkerResources` (#709), checked
+        /// before falling back to `readPersistedResources`'s wrangler.toml scrape. Durable across
+        /// a worker being deactivated (which drops its binding block from the file) and later
+        /// reactivated — the default (`.init()`, all-nil) makes this call fall through to the
+        /// existing file-scrape-only behavior unchanged.
+        knownResources: WorkerComposition.ProvisionedResources = .init()
     ) async -> Result {
         let token: String?
         do {
@@ -76,7 +82,7 @@ public actor SocialWorkerProvisionCommand {
         let source = "worker-provision:\(siteID)"
         let started = Date()
 
-        var resources = Self.readPersistedResources(from: siteDirectory)
+        var resources = knownResources == .init() ? Self.readPersistedResources(from: siteDirectory) : knownResources
 
         if features.contains(where: { $0.needsD1 }) {
             if resources.d1DatabaseID == nil {

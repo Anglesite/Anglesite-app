@@ -258,6 +258,47 @@ struct SocialWorkerProvisionCommandTests {
         #expect(resources.r2BucketName == "media-bucket")
     }
 
+    @Test("knownResources is reused instead of re-scraping wrangler.toml, so a deactivated-then-reactivated worker doesn't recreate its Cloudflare resource")
+    func reusesKnownResourcesOverFileScrape() async throws {
+        let site = try temporaryDirectory()
+        // wrangler.toml on disk reflects the CURRENT (deactivated) feature set — no R2 block, so
+        // a file-scrape alone would find no bucket name and try to recreate it.
+        let currentToml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site",
+            features: [.indieauth],
+            resources: .init(d1DatabaseID: "d1-id", kvNamespaceID: "kv-id", r2BucketName: nil)
+        )
+        try currentToml.write(to: site.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
+
+        // knownResources (as persisted in SiteSettings before deactivation) still remembers the bucket.
+        let known = WorkerComposition.ProvisionedResources(
+            d1DatabaseID: "d1-id", kvNamespaceID: "kv-id", r2BucketName: "my-site-media"
+        )
+        let recorder = WranglerRecorder([
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migrations applied", stderr: "", exitCode: 0),
+        ])
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "token" },
+            runner: recorder.runner,
+            deployer: DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1)).deployer
+        )
+
+        // Reactivating micropub (needs R2) should reuse the known bucket, not call `r2 bucket create` again.
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site",
+            features: [.indieauth, .micropub], knownResources: known
+        )
+
+        guard case .succeeded(_, let resources, _) = result else {
+            Issue.record("expected success, got \(result)")
+            return
+        }
+        #expect(resources.r2BucketName == "my-site-media")
+        #expect(await recorder.arguments == [
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"],
+        ])
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("SocialWorkerProvisionCommandTests-\(UUID().uuidString)", isDirectory: true)
