@@ -424,18 +424,10 @@ final class ComponentEditorModel {
         }
     }
 
-    /// Whether the outline `row` can be extracted into its own component. Restricted to
-    /// `.element` and `.component` kinds: the outline root is a `.fragment` (nothing to extract),
-    /// and `.slot`/`.expression`/`.text` nodes have no meaningful standalone extraction. The
-    /// plugin op also permits a bare `<slot />`, but that isn't a useful first-pass UI affordance,
-    /// so the trigger is narrowed to elements and component instances. (A sealed component
-    /// instance's own slot-fill children never surface as outline rows — see
-    /// `ComponentOutline.rows` — so there are no "rows inside a sealed instance" to guard against;
-    /// the instance row itself stays extractable.)
+    /// Whether the outline `row` can be extracted into its own component. Delegates to
+    /// `ComponentOutline.isExtractable(_:)` (Core), which hosts the actual gating logic so it's
+    /// unit-testable on CI (app-target Swift tests don't run there).
     func canExtractComponent(_ row: ComponentOutline.Row) -> Bool {
-        switch row.node.kind {
-        case .element, .component: return true
-        case .fragment, .slot, .expression, .text: return false
-        }
+        ComponentOutline.isExtractable(row.node)
     }
 }

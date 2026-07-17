@@ -35,6 +35,22 @@ struct ComponentOutlineTests {
         #expect(rows.first?.isSealed == false)
     }
 
+    @Test(
+        "isExtractable is true only for .element and .component node kinds",
+        arguments: [
+            (ComponentModel.Node.Kind.fragment, false),
+            (ComponentModel.Node.Kind.element, true),
+            (ComponentModel.Node.Kind.component, true),
+            (ComponentModel.Node.Kind.expression, false),
+            (ComponentModel.Node.Kind.slot, false),
+            (ComponentModel.Node.Kind.text, false),
+        ]
+    )
+    func isExtractable(kind: ComponentModel.Node.Kind, expected: Bool) {
+        let node = ComponentModel.Node(id: "n0", kind: kind, tag: nil, attrs: [], span: .init(start: nil, end: nil), loc: nil, text: nil, children: [])
+        #expect(ComponentOutline.isExtractable(node) == expected)
+    }
+
     @Test("Loc lookup finds an exact line+column match") func locLookupExact() throws {
         let root = try model().template
         #expect(ComponentOutline.node(atLine: 7, column: 1, in: root)?.id == "n1")
