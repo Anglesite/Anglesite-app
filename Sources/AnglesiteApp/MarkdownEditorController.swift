@@ -50,10 +50,23 @@ final class MarkdownEditorController {
         }
     }
 
-    let busNames: BusNames
+    /// Notification names of the engine instance this controller currently commands. SwiftUI may
+    /// transiently instantiate more than one engine tree for the same editor (observed in the
+    /// #797 GUI smoke: two `makeNSView` calls for one Body field, with the orphan staying alive
+    /// and subscribed); scoping names per engine INSTANCE and adopting the focused instance's
+    /// names makes such orphans harmless — they listen on names nobody posts to.
+    private(set) var busNames: BusNames
     /// Installed by `MarkdownTextView`; returns keyboard focus to the engine text view
     /// (used when the find bar dismisses).
     var focusEditor: (() -> Void)?
+
+    /// Called by the hosting view when its engine instance gains keyboard focus (and once at
+    /// creation, so a sole instance is commandable before first focus).
+    func adoptBusNames(_ names: BusNames) {
+        guard names.applyBold != busNames.applyBold else { return }
+        busNames = names
+        observeFindResults()
+    }
 
     // MARK: Find state (rendered by MarkdownFindBar; highlights drawn by the engine)
 
@@ -68,6 +81,11 @@ final class MarkdownEditorController {
 
     init() {
         busNames = BusNames(id: UUID())
+        observeFindResults()
+    }
+
+    private func observeFindResults() {
+        if let resultsObserver { NotificationCenter.default.removeObserver(resultsObserver) }
         // queue: nil → delivered synchronously on the posting thread. The engine posts results
         // from its own main-queue bus handler, so assumeIsolated holds.
         resultsObserver = NotificationCenter.default.addObserver(
