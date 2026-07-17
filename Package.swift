@@ -341,7 +341,7 @@ packageDependencies.append(
 // scope for v1, §A.2). Pinned by revision, matching the SwiftGit2/STTextView policy above:
 // deliberate bumps only (upstream is pre-1.0 and its API moves).
 packageDependencies.append(
-    .package(url: "https://github.com/Anglesite/swift-markdown-engine", revision: "ff54708bb07ccc7df1f43d367c0a2fd9ab791466")
+    .package(url: "https://github.com/Anglesite/swift-markdown-engine", revision: "badbaa4b9816daf3baa82de625c2551c4e0b4d81")
 )
 #endif
 

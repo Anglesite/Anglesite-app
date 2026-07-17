@@ -27,7 +27,7 @@ packages:
   # Package.swift comment for the full rationale.
   MarkdownEngine:
     url: https://github.com/Anglesite/swift-markdown-engine
-    revision: ff54708bb07ccc7df1f43d367c0a2fd9ab791466
+    revision: badbaa4b9816daf3baa82de625c2551c4e0b4d81
 
 targets:
   Anglesite:

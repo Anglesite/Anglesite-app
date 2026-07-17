@@ -85,6 +85,11 @@ private struct EngineHost: NSViewRepresentable {
         )
         return MarkdownEditorConfiguration(
             services: MarkdownEditorServices(bus: bus),
+            // Auto-close pairs OFF: typing `[` must insert exactly `[` — auto-paired `]`s corrupt
+            // hand-typed task/link syntax (`- [ ]`, `[text](url)`) and even defeat the engine's
+            // empty-item list termination (the stray `]` makes the item non-empty). List
+            // continuation itself stays on (`helpersEnabled`) — it produces valid Markdown.
+            lists: ListStyle(autoClosePairsEnabled: false),
             // Fork-added toggle (Anglesite/swift-markdown-engine): Markdown sources need straight
             // quotes — smart quotes would corrupt frontmatter and code samples (addendum §2).
             spellChecking: SpellCheckingPolicy(automaticQuoteSubstitution: false),
