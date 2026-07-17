@@ -54,16 +54,35 @@ to "git receives a guaranteed continuous export."
 
 ## Part A — the Markdown editor
 
-### A.1 Substrate decision
+### A.1 Substrate decision — survey first (owner requirement, 2026-07-17)
 
-**Chosen: STTextView + an in-house, UI-framework-free styling core.**
+Building a Markdown editor is complicated enough that **a package survey is a
+mandatory spike before any in-house code** — the first task of slice 1, its outcome
+recorded as an addendum to this spec. The leading direction going into the spike is
+**STTextView + an in-house, UI-framework-free styling core**, but that is a
+hypothesis to test against what exists, not a decision.
 
-| Option | Verdict |
-|---|---|
-| **SwiftMarkdownEngine** (the referenced library) | Rejected as a dependency: AppKit-only, so it cannot cover iOS at all; it would be a *second* text-view substrate living beside the already-shipped STTextView; and it's a new third-party dep (policy: Apple frameworks only unless approved). It stays the **behavioral reference** — feature set and feel are what we're matching. |
-| **STTextView** (already approved) | Chosen. TextKit 2, feature-complete AppKit *and* UIKit implementations (`STTextViewAppKit` / `STTextViewUIKit` over `STTextViewCommon`), plugin seam already proven in this app by the Component Editor code panes. One substrate for code panes and prose. |
-| **SwiftUI `TextEditor` + `AttributedString`** (macOS 26+/iOS 26+) | Fallback, recorded. Zero-dep and cross-platform, but programmatic whole-document restyling on every keystroke fights the binding model (cursor/selection stability), and there is no plugin/interaction seam for checkbox taps or link handling. Revisit if STTextView's UIKit leg disappoints in practice. |
-| **tree-sitter-markdown via the existing Neon plugin** | Insufficient alone: token *coloring* only — no per-block fonts/sizes (headings), paragraph styles (list indents, blockquotes), or interactive checkboxes. |
+Survey candidates (initial sweep, 2026-07-17 — the spike evaluates hands-on):
+
+| Package | Platforms | What it provides | Initial read |
+|---|---|---|---|
+| [SwiftMarkdownEngine](https://github.com/nodes-app/swift-markdown-engine) (nodes-app) | macOS / AppKit, TextKit 2 | The full reference behavior: live typographic styling, task checkboxes, wiki-links, code blocks, LaTeX; zero-dep core; Apache-2.0 | Closest to the target feel; AppKit-only, so iOS needs a second answer; new dep needs approval |
+| [STTextView](https://github.com/krzyzanowskim/STTextView) (+ Neon plugin) | macOS **and** iOS, TextKit 2 | Text-view substrate + tree-sitter coloring; **already approved & shipping** in the Component Editor | Substrate only — the Markdown *styling* layer would be ours |
+| [Runestone](https://github.com/simonbs/Runestone) (simonbs) | iOS / UIKit | Performant editor, tree-sitter incremental highlighting (markdown grammar exists), line numbers | Syntax *coloring*, not typographic live styling; iOS-only |
+| [SwiftDown](https://github.com/qeude/SwiftDown) (qeude) | iOS + macOS, SwiftUI | Themable Markdown editor with in-editor live preview | Both platforms — verify maintenance, fidelity, TextKit generation |
+| [Marklight](https://github.com/macteo/Marklight) | iOS, `NSTextStorage` subclass | Markdown syntax highlighter for `UITextView` | Older TextKit-1 era; pattern reference more than a dependency |
+| [MarkupEditor](https://swiftpackageindex.com/stevengharris/MarkupEditor) | iOS + macOS | WYSIWYG editing via WKWebView/contenteditable | Wrong model — HTML-rewriting WYSIWYG, not source-faithful Markdown |
+| [swift-markdown-ui](https://github.com/gonzalezreal/swift-markdown-ui) / Textual | iOS + macOS, SwiftUI | Markdown **rendering** only | Not an editor; possible preview-side reference |
+| apple/swift-markdown | all | cmark-gfm **parsing** only | Candidate parser under whichever styling layer wins |
+| SwiftUI `TextEditor` + `AttributedString` (macOS 26+/iOS 26+) | both | Zero-dep native text editing | Programmatic whole-document restyling fights the binding model; no interaction seam for checkbox taps |
+
+**Spike acceptance criteria** — each serious candidate is exercised against: AppKit
+*and* UIKit coverage (or a clean per-platform seam); attribute-only styling of raw
+source (never rewrites the buffer; byte-fidelity after an edit-free session);
+interactive task checkboxes; Writing Tools + Find integration; typing latency on a
+~100 KB document; license, maintenance cadence, and fit with the
+Apple-frameworks-only dependency policy (any new dep needs issue approval first);
+and whether core logic stays separable for the Linux/Windows port (#571).
 
 ### A.2 Styling model (the swift-markdown-engine contract)
 
@@ -84,7 +103,7 @@ to "git receives a guaranteed continuous export."
   small; a full-document restyle is the correctness backstop and is acceptable up to
   tens of KB.
 
-### A.3 Components
+### A.3 Components (leading direction — final shape follows the A.1 spike)
 
 1. **`AnglesiteMarkdown`** *(new SwiftPM target, UI-framework-free)* — the tokenizer +
    styler: `MarkdownScanner` (source → block/inline nodes with source ranges) and
@@ -130,9 +149,10 @@ the typed post-family types have nothing.
    `anglesite: publish <type> <slug>` via the existing `processGitCommit` path.
    "Unpublish" is the inverse and is allowed — static rebuild makes it cheap.
 
-Whether the legacy template `blog` collection and the typed `articles` collection should
-merge is deliberately **not** decided here (open question); the editor and publish flow
-work identically against both since both are Markdown + frontmatter collections.
+**Decided (owner, 2026-07-17): both collections stay.** `blog` remains the simple
+starter (title/pubDate/description/draft), `articles` the typed h-entry collection;
+the editor and publish flow work identically against both since both are Markdown +
+frontmatter collections, and CMS-mode provisioning's content import migrates both.
 
 Mode note: everything above is the literal mechanism for **un-provisioned (all-git)
 sites**. In CMS mode (§C.4), the same registry `draft` field and publish semantics
@@ -437,8 +457,11 @@ git host.
 
 ## Phasing
 
-1. **Slice 1 — editor on macOS:** `AnglesiteMarkdown` + `MarkdownTextView` +
-   `.markdown` routing; Format menu + Find (#517). No behavior change to saving.
+1. **Slice 1 — editor on macOS:** starts with the **A.1 package-survey spike**
+   (mandatory; outcome recorded as a spec addendum), then the chosen substrate wired
+   as `MarkdownTextView` + `.markdown` routing (+ `AnglesiteMarkdown` if the survey
+   confirms the in-house styler); Format menu + Find (#517). No behavior change to
+   saving.
 2. **Slice 2 — draft/publish model:** template schema + filtering, registry `draft`,
    drafts-by-default, desktop Publish/Unpublish verbs over the existing container
    pipeline.
@@ -464,6 +487,10 @@ direction.
 
 - WYSIWYG rich-text editing that rewrites Markdown; the Component Editor (#496) owns
   visual editing of components.
+- **Full site editing on mobile** (code/theme/pages, not just posts) — a **v2.0
+  feature** (owner, 2026-07-17): via a remote container on iOS (#66/#71) and
+  on-device on Android (the Android platform shell of #571, which can host a local
+  toolchain). This design ships mobile as a posting client only.
 - Media/photo posting *UX* from mobile — the transport is settled (Micropub media
   endpoint → R2, exported alongside content), but capture/compression/alt-text UX is
   its own design.
@@ -482,18 +509,16 @@ direction.
 - Tables/LaTeX/wiki-link editor affordances; inline image thumbnails (fast-follow).
 - Merging the template `blog` collection with typed `articles` (open question below).
 
-## Open questions (owner input wanted)
+## Resolved questions (decision log)
 
-Resolved during review (2026-07-17), recorded in §C.4: the bulk content read
-endpoint is a V-3 API requirement; received interactions unify under the
-D1-canonical + export model; export is desktop-only (no mobile export path).
+All questions raised by this spec have been resolved by the owner (2026-07-17):
 
-1. **`blog` vs `articles`** — keep both (blog = simple starter, articles = typed
-   h-entry) or migrate the starter to `articles` and retire `blog`? (In CMS mode the
-   distinction also decides which collections the content import migrates.)
-2. **iOS product shape** — is the Micropub client the *whole* default iOS experience
-   (with the remote-sandbox thin client as the "power preview" opt-in), or do they
-   ship together? This spec assumes the former.
-3. **swift-markdown-engine adoption** — if the in-house styler's macOS feel lags the
-   reference, is a scoped adoption of SwiftMarkdownEngine behind the `MarkdownTextView`
-   seam (macOS only, new-dep approval) acceptable as a stopgap?
+- **Bulk content read endpoint** — V-3 API requirement (§C.4).
+- **Received interactions** — unified under the D1-canonical + export model (§C.4).
+- **Export** — desktop-only; no mobile export path (§C.4).
+- **`blog` vs `articles`** — both stay (Part B).
+- **iOS product shape** — the Micropub client *is* the default iOS experience.
+  Full site editing on mobile — via a remote container on iOS (#66/#71) or
+  on-device on Android — is a **v2.0 feature**, out of scope for this design.
+- **Editor substrate** — decided by the mandatory A.1 package-survey spike; its
+  outcome lands as an addendum to this spec.
