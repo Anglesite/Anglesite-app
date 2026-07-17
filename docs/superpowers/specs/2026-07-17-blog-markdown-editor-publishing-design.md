@@ -581,7 +581,27 @@ Both are the first Xcode task of #797 (checklist below).
    > `Anglesite/swift-markdown-engine` fork (upstream v0.10.0 `665f7c46` + the §2
    > smart-quote config patch, `SpellCheckingPolicy.automaticQuoteSubstitution`),
    > pinned by revision; the engine's 250-test upstream suite passes with the patch.
-   > The four on-device *feel* checks above remain a **manual GUI smoke** (agent
-   > session had no screen access): a ~100 KB fixture post with every v1 construct
-   > is staged at `~/Sites/issue491-smoke.anglesite/Source/src/content/blog/`
-   > `markdown-editor-stress-test.md` for it.
+   > A ~100 KB fixture post with every v1 construct is staged at
+   > `~/Sites/issue491-smoke.anglesite/Source/src/content/blog/`
+   > `markdown-editor-stress-test.md`.
+   >
+   > **Manual GUI smoke results (2026-07-17):** the smoke run surfaced and fixed
+   > two real defects before landing (both in PR #808's history): (1) the engine's
+   > bracket auto-close paired `[` → `[]` with no type-through, corrupting hand-typed
+   > task/link syntax — fixed by disabling `autoClosePairsEnabled` and patching the
+   > fork to gate the Obsidian `[[` completion behind the same flag; (2) the first
+   > `MarkdownTextView` design re-hosted the engine's view inside our own
+   > `NSHostingView` to track focus, which intermittently produced a duplicate,
+   > still-bus-subscribed engine tree — fixed by embedding the engine's view
+   > directly in SwiftUI (its designed usage) with a lightweight sentinel view for
+   > focus tracking instead. Of the four on-device checks: **typing latency**
+   > (100 KB paste + burst typing, no perceptible lag), **checkbox hit-target**
+   > (click toggles `[ ]`⇄`[x]` as the documented 1-char undoable edit, confirmed
+   > with real `CGEvent` clicks after computer-use's screenshot-pixel coordinates
+   > proved unreliable against this Mac's Retina scale), and **smart-quote
+   > handling** (`"quotes"` and `'apostrophes'` survive typing/pasting unmodified)
+   > all **passed**. **Writing Tools round-trip** was **not exercised** — skipped
+   > by owner direction rather than pursued further; requires Apple Intelligence
+   > enabled and is not a correctness gate (the engine wires
+   > `writingToolsBehavior = .complete` on a real `NSTextView`, so this is a
+   > system-integration smoke, not app logic).
