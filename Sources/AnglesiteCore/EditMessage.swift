@@ -55,6 +55,12 @@ public struct EditMessage: Sendable, Equatable {
         /// `"set-attr"` — Component Editor: set or remove (nil value) an attribute/prop at
         /// the use-site. Carries a `component` payload.
         public static let setAttr = "set-attr"
+        /// `"extract-component"` — Component Editor: carve an outline subtree out into a brand-new
+        /// `.astro` component under `src/components/`, replacing the extracted markup with a
+        /// self-closing instance + import (one atomic two-file edit). Carries a `component` payload
+        /// with an added `newName` (a bare PascalCase identifier; the server derives the full
+        /// `src/components/<newName>.astro` path itself).
+        public static let extractComponent = "extract-component"
         /// `"set-props-interface"` — Component Editor: codegen/replace the frontmatter's
         /// `Props` interface + `Astro.props` destructure from a structured props array.
         /// Carries a `component` payload.

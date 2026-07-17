@@ -467,6 +467,53 @@ struct DeployCommandTests {
         guard case .succeeded = result else { Issue.record("expected .succeeded (fail open), got \(result)"); return }
     }
 
+    @Test("Finds the URL when wrangler uses current Uploaded/Deployed wording instead of Published")
+    func findsURLWithUploadedDeployedWording() async {
+        // Current wrangler (4.x) no longer prints a "Published" line — it prints separate
+        // "Uploaded"/"Deployed" status lines. The workers.dev URL itself is the version-independent
+        // signal `extractDeployedURL` should key off.
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: """
+                Total Upload: 12.34 KiB / gzip: 5.67 KiB
+                Uploaded angle-app (1.23 sec)
+                Deployed angle-app triggers (0.45 sec)
+                  https://angle-app.example.workers.dev
+                Current Version ID: abc-123
+                """)
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "mysite", siteDirectory: tmpDir)
+        guard case .succeeded(let url, _) = result else {
+            Issue.record("expected .succeeded, got \(result)"); return
+        }
+        #expect(url.host == "angle-app.example.workers.dev")
+    }
+
+    @Test("extractDeployedURL finds a workers.dev URL with no recognized anchor line at all")
+    func extractDeployedURLFindsWorkersDevWithoutAnchor() {
+        let url = DeployCommand.extractDeployedURL(from: "some future wrangler wording\n  https://angle-app.example.workers.dev\ndone")
+        #expect(url?.host == "angle-app.example.workers.dev")
+    }
+
+    @Test("extractDeployedURL falls back to the Deployed/Uploaded anchor for a custom-domain deploy with no workers.dev URL")
+    func extractDeployedURLCustomDomainAnchorFallback() {
+        let url = DeployCommand.extractDeployedURL(from: "Deployed angle-app triggers (0.45 sec)\n  https://example.com")
+        #expect(url == URL(string: "https://example.com"))
+    }
+
+    @Test("extractDeployedURL prefers the anchored workers.dev URL over an incidental one mentioned earlier")
+    func extractDeployedURLIgnoresIncidentalWorkersDevBeforeAnchor() {
+        // A workers.dev URL mentioned before the anchor line (e.g. an "you already have a
+        // subdomain" notice) must not outrank the actual deploy result after the anchor.
+        let url = DeployCommand.extractDeployedURL(from: """
+            Note: your account already has a workers.dev subdomain: https://myaccount.workers.dev
+            Deployed angle-app triggers (0.45 sec)
+              https://angle-app.example.workers.dev
+            """)
+        #expect(url?.host == "angle-app.example.workers.dev")
+    }
+
     // MARK: Scan report parsing helper
 
     @Test("parseScanReport maps ok/blocked/error correctly")

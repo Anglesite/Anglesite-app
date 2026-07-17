@@ -45,6 +45,21 @@ public enum ComponentOutline {
         return rows
     }
 
+    /// Whether `node` can be extracted into its own component. Restricted to
+    /// `.element` and `.component` kinds: the outline root is a `.fragment` (nothing to extract),
+    /// and `.slot`/`.expression`/`.text` nodes have no meaningful standalone extraction. The
+    /// plugin op also permits a bare `<slot />`, but that isn't a useful first-pass UI affordance,
+    /// so the trigger is narrowed to elements and component instances. (A sealed component
+    /// instance's own slot-fill children never surface as outline rows — see `rows(from:)` above
+    /// — so there are no "rows inside a sealed instance" to guard against; the instance row
+    /// itself stays extractable.)
+    public static func isExtractable(_ node: ComponentModel.Node) -> Bool {
+        switch node.kind {
+        case .element, .component: return true
+        case .fragment, .slot, .expression, .text: return false
+        }
+    }
+
     /// Source-loc match — the canvas reports the loc Astro's dev server
     /// stamps on the rendered element via `data-astro-source-loc`, which is
     /// the END of the element's opening tag (verified against

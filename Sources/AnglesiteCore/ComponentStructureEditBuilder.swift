@@ -92,6 +92,34 @@ public enum ComponentStructureEditBuilder {
         )
     }
 
+    /// Carve the subtree rooted at `nodeId` out into a brand-new `.astro` component, replacing the
+    /// extracted markup with a self-closing instance + import. The plugin applies this as one
+    /// atomic two-file edit. `newName` is a bare PascalCase identifier (no path, no `.astro`
+    /// suffix) — the server derives the full path itself as `src/components/<newName>.astro` and
+    /// validates the name against a strict PascalCase-identifier regex. Adds `newName` to the
+    /// standard `{ path, baseVersion, nodeId }` structure-op payload.
+    public static func extractComponent(
+        id: String,
+        path: String,
+        baseVersion: String,
+        nodeId: String,
+        newName: String
+    ) -> EditMessage {
+        EditMessage(
+            id: id,
+            path: path,
+            selector: nil,
+            op: EditMessage.Op.extractComponent,
+            component: .object([
+                "path": .string(path),
+                "baseVersion": .string(baseVersion),
+                "nodeId": .string(nodeId),
+                "newName": .string(newName),
+            ]),
+            value: nil
+        )
+    }
+
     /// `value: nil` removes the attribute (encodes as an explicit JSON `null`, distinct from
     /// omitting the field — the plugin schema treats `value === null` as "remove").
     public static func setAttr(

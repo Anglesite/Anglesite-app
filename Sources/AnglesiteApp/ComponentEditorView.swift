@@ -16,6 +16,9 @@ struct ComponentEditorView: View {
     /// Design (three-pane) vs Source (existing text editor) — the escape hatch.
     @State private var mode: Mode = .design
     @State private var webView: WKWebView?
+    /// Canvas viewport-width preset (design spec §3/§4.2) — "Fill" (the default) matches the
+    /// pre-slice-5 behavior of the harness filling the available pane width.
+    @State private var viewportPreset: ComponentViewportPreset = .fill
 
     /// In-progress edits to a rule's selector, keyed by `spanKey(rule.span)`,
     /// pending commit (on focus loss) to `ComponentEditorModel.setRuleSelector`.
@@ -34,6 +37,12 @@ struct ComponentEditorView: View {
     @State private var colorCommitTasks: [String: Task<Void, Never>] = [:]
     /// Selector text for the inline "Add rule" form at the bottom of the Styles panel.
     @State private var newRuleSelector: String = ""
+    /// `@media` condition text for the inline "Add rule" form; blank means no wrapping media
+    /// query (same as passing `nil` to `addStyleRule`).
+    @State private var newRuleMedia: String = ""
+    /// Media keys (via `mediaGroupKey`) the user has manually collapsed — a `DisclosureGroup`
+    /// per media section defaults to expanded, matching the old flat list's always-visible rules.
+    @State private var collapsedMediaKeys: Set<String> = []
     /// In-progress edits to an attribute value, keyed by `"<nodeID>:<attrName>"`, pending
     /// commit (on submit) to `ComponentEditorModel.setAttr`.
     @State private var attrValueDrafts: [String: String] = [:]
@@ -51,6 +60,15 @@ struct ComponentEditorView: View {
     /// Editable drafts for the two code panes, keyed by zone — dirty-tracked like
     /// `FileEditorModel` (spec §5) and saved explicitly via `setScriptZone`, not on blur.
     @State private var codeDrafts: [CodeZone: String] = [.frontmatter: "", .client: ""]
+    /// Outline node the "Extract into Component…" sheet is targeting, captured at menu-tap time.
+    /// Non-nil presents `ExtractComponentSheet` (design §6.3).
+    @State private var extractTarget: ExtractTarget?
+
+    /// Identifiable wrapper for an outline node id, so `.sheet(item:)` can drive the extract
+    /// sheet off which row was right-clicked.
+    private struct ExtractTarget: Identifiable {
+        let id: String
+    }
 
     enum Mode: String, CaseIterable { case design = "Design", source = "Source" }
 
@@ -159,6 +177,19 @@ struct ComponentEditorView: View {
                 .client: model?.model?.clientScript?.source ?? "",
             ]
         }
+        .sheet(item: $extractTarget) { target in
+            ExtractComponentSheet { name in
+                guard let model else { return "The component editor isn't ready yet." }
+                // Pass the bare name straight through — the plugin derives the full
+                // `src/components/<name>.astro` path itself from `newName`.
+                let applied = await model.extractComponent(nodeId: target.id, newName: name)
+                // On success the sheet dismisses (nil). On failure, surface the plugin's refusal
+                // (invalid-input / already-exists / dynamic-expression / a transient error) captured
+                // in `writeError`; a stale refusal leaves `writeError` nil, so fall back to a generic
+                // message (the conflict banner explains the reload separately).
+                return applied ? nil : (model.writeError ?? "The component couldn't be extracted.")
+            }
+        }
     }
 
     @ViewBuilder private var sourcePane: some View {
@@ -264,6 +295,13 @@ struct ComponentEditorView: View {
             guard row.isSealed else { return }
             openSealedComponent(model, row: row)
         }
+        .contextMenu {
+            if model.canExtractComponent(row) {
+                Button("Extract into Component…") {
+                    extractTarget = ExtractTarget(id: row.node.id)
+                }
+            }
+        }
     }
 
     /// Top third of the row = insert before (same parent as the target); bottom third =
@@ -340,38 +378,91 @@ struct ComponentEditorView: View {
                     .frame(width: 84, height: 44)
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                     .draggable(OutlineDragPayload.insert(PaletteDragPayload(label: item.label, kind: item.kind)))
+                    .contextMenu {
+                        if case .component(_, let componentPath) = item.kind {
+                            Button("Duplicate & Modify") {
+                                Task { await model.duplicateComponent(path: componentPath) }
+                            }
+                        }
+                    }
                 }
             }
             .padding(8)
         }
     }
 
+    /// Device-width preset row above the canvas (design spec §3: "A viewport-width control
+    /// (device presets + free resize)…"). "Free resize" isn't implemented in this pass — the
+    /// four fixed presets are the "polish" scope issue #495 asks for; a drag handle can follow
+    /// as its own increment if needed.
+    private var viewportToolbar: some View {
+        HStack(spacing: 2) {
+            ForEach(ComponentViewportPreset.allCases) { preset in
+                Button {
+                    viewportPreset = preset
+                } label: {
+                    Image(systemName: preset.systemImage)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(viewportPreset == preset ? Color.accentColor : Color.secondary)
+                .help(preset.label)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
+
     @ViewBuilder private func canvas(_ model: ComponentEditorModel) -> some View {
         VStack(spacing: 0) {
+            viewportToolbar
+            Divider()
             if let props = model.model?.frontmatter?.props, !props.isEmpty {
                 knobsBar(model, props: props)
                 Divider()
             }
-            // Gated directly on `context.baseURL` (not just `model.harnessURL`)
-            // so the live canvas replaces this placeholder the moment the dev
-            // server becomes ready, in lockstep with the `loadKey`-driven
-            // reload above.
-            if context.baseURL != nil, let url = model.harnessURL {
-                ComponentCanvasView(
-                    url: url,
-                    editRouter: context.editRouter,
-                    onSelection: { model.canvasSelected($0) },
-                    onComputedStyles: { model.computedStyles = $0.styles },
-                    onWebView: { webView = $0 }
-                )
-                .dropDestination(for: OutlineDragPayload.self) { items, location in
-                    guard let item = items.first, case .insert(let payload) = item, let webView else { return false }
-                    Task { await performCanvasDrop(model, payload: payload, location: location, webView: webView) }
-                    return true
+            canvasWebView(model)
+        }
+    }
+
+    /// The harness `WKWebView` itself (drop-destination wiring unchanged from before slice 5a),
+    /// width-constrained to `viewportPreset.width` when a fixed preset is active. `.fill`
+    /// (`width == nil`) renders identically to the pre-slice-5 behavior — no frame constraint,
+    /// canvas fills the available pane width.
+    @ViewBuilder private func canvasWebView(_ model: ComponentEditorModel) -> some View {
+        // Gated directly on `context.baseURL` (not just `model.harnessURL`)
+        // so the live canvas replaces this placeholder the moment the dev
+        // server becomes ready, in lockstep with the `loadKey`-driven
+        // reload above.
+        if context.baseURL != nil, let url = model.harnessURL {
+            let content = ComponentCanvasView(
+                url: url,
+                editRouter: context.editRouter,
+                onSelection: { model.canvasSelected($0) },
+                onComputedStyles: { model.computedStyles = $0.styles },
+                onWebView: { webView = $0 }
+            )
+            .dropDestination(for: OutlineDragPayload.self) { items, location in
+                guard let item = items.first, case .insert(let payload) = item, let webView else { return false }
+                Task { await performCanvasDrop(model, payload: payload, location: location, webView: webView) }
+                return true
+            }
+            if let width = viewportPreset.width {
+                // Sizes to the split pane's own available height (via GeometryReader) rather
+                // than a fixed magic number — a hardcoded height either clipped the canvas on a
+                // pane shorter than it, or left dead space below it on a taller one (PR #795
+                // review). Horizontal scroll still covers the width-overflow case (preset wider
+                // than the pane), which is the whole point of a fixed-width preset.
+                GeometryReader { geometry in
+                    ScrollView(.horizontal) {
+                        content.frame(width: width, height: geometry.size.height)
+                    }
                 }
             } else {
-                ContentUnavailableView("Dev Server Starting…", systemImage: "hourglass")
+                content
             }
+        } else {
+            ContentUnavailableView("Dev Server Starting…", systemImage: "hourglass")
         }
     }
 
@@ -410,6 +501,66 @@ struct ComponentEditorView: View {
         let line: Int
         let column: Int
         let zone: String
+    }
+
+    /// Stable dictionary/Set key for a media group — `""` for the unscoped "Base styles" group,
+    /// the media condition string otherwise. Mirrors `ComponentStyleGrouping.groups`' own
+    /// `key.isEmpty ? nil : key` convention so the two stay in sync.
+    private func mediaGroupKey(_ media: String?) -> String { media ?? "" }
+
+    /// Expand/collapse binding for one media group's `DisclosureGroup`, backed by
+    /// `collapsedMediaKeys` — defaults to expanded (absent from the set) so the panel reads the
+    /// same as the old always-expanded flat list until the user explicitly collapses a section.
+    private func mediaExpandedBinding(for media: String?) -> Binding<Bool> {
+        let key = mediaGroupKey(media)
+        return Binding(
+            get: { !collapsedMediaKeys.contains(key) },
+            set: { expanded in
+                if expanded {
+                    collapsedMediaKeys.remove(key)
+                } else {
+                    collapsedMediaKeys.insert(key)
+                }
+            }
+        )
+    }
+
+    /// One rule's editable selector + declaration rows — extracted from the old flat Styles
+    /// rendering so the grouped-by-media rendering above can reuse it per group.
+    @ViewBuilder
+    private func ruleRow(_ model: ComponentEditorModel, ruleIndex: Int, rule: ComponentModel.StyleRule) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TextField("selector", text: selectorBinding(for: rule))
+                .font(.system(.caption, design: .monospaced))
+                .textFieldStyle(.plain)
+                .bold()
+                .onSubmit { commitSelector(model, rule: rule) }
+            ForEach(rule.declarations, id: \.property) { decl in
+                HStack(spacing: 4) {
+                    TextField("property", text: propertyBinding(for: decl))
+                        .font(.system(.caption, design: .monospaced))
+                        .textFieldStyle(.plain)
+                        .frame(width: 110)
+                        .onSubmit { commitDeclaration(model, ruleIndex: ruleIndex, rule: rule, decl: decl) }
+                    Text(":")
+                    declarationValueField(model, ruleIndex: ruleIndex, rule: rule, decl: decl)
+                    Button(role: .destructive) {
+                        removeDeclaration(model, rule: rule, decl: decl)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Button("Add declaration") {
+                let newProperty = "new-property-\(UUID().uuidString.prefix(8))"
+                Task { await model.setStyleProperty(ruleSpan: spanArray(rule.span), property: newProperty, value: "") }
+            }
+            .font(.caption2)
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
     }
 
     private func knobsBar(_ model: ComponentEditorModel, props: [ComponentModel.Prop]) -> some View {
@@ -528,43 +679,20 @@ struct ComponentEditorView: View {
                 }
                 GroupBox("Styles") {
                     if let styles = model.model?.styles, !styles.isEmpty {
-                        ForEach(Array(styles.enumerated()), id: \.offset) { ruleIndex, rule in
-                            VStack(alignment: .leading, spacing: 4) {
-                                if let media = rule.media {
-                                    Text("@media \(media)").font(.caption2).foregroundStyle(.secondary)
-                                }
-                                TextField("selector", text: selectorBinding(for: rule))
-                                    .font(.system(.caption, design: .monospaced))
-                                    .textFieldStyle(.plain)
-                                    .bold()
-                                    .onSubmit { commitSelector(model, rule: rule) }
-                                ForEach(rule.declarations, id: \.property) { decl in
-                                    HStack(spacing: 4) {
-                                        TextField("property", text: propertyBinding(for: decl))
-                                            .font(.system(.caption, design: .monospaced))
-                                            .textFieldStyle(.plain)
-                                            .frame(width: 110)
-                                            .onSubmit { commitDeclaration(model, ruleIndex: ruleIndex, rule: rule, decl: decl) }
-                                        Text(":")
-                                        declarationValueField(model, ruleIndex: ruleIndex, rule: rule, decl: decl)
-                                        Button(role: .destructive) {
-                                            removeDeclaration(model, rule: rule, decl: decl)
-                                        } label: {
-                                            Image(systemName: "minus.circle")
-                                        }
-                                        .buttonStyle(.plain)
+                        let groups = ComponentStyleGrouping.groups(from: styles)
+                        ForEach(Array(groups.enumerated()), id: \.offset) { groupIndex, group in
+                            DisclosureGroup(isExpanded: mediaExpandedBinding(for: group.media)) {
+                                ForEach(Array(group.rules.enumerated()), id: \.element.index) { position, indexed in
+                                    ruleRow(model, ruleIndex: indexed.index, rule: indexed.rule)
+                                    if position < group.rules.count - 1 {
+                                        Divider()
                                     }
                                 }
-                                Button("Add declaration") {
-                                    let newProperty = "new-property-\(UUID().uuidString.prefix(8))"
-                                    Task { await model.setStyleProperty(ruleSpan: spanArray(rule.span), property: newProperty, value: "") }
-                                }
-                                .font(.caption2)
-                                .buttonStyle(.plain)
+                            } label: {
+                                Text(group.media.map { "@media \($0)" } ?? "Base styles")
+                                    .font(.caption).bold()
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 4)
-                            if ruleIndex < styles.count - 1 {
+                            if groupIndex < groups.count - 1 {
                                 Divider()
                             }
                         }
@@ -572,15 +700,21 @@ struct ComponentEditorView: View {
                         Text("No scoped styles").foregroundStyle(.secondary)
                     }
                     Divider()
-                    HStack {
-                        TextField("New selector, e.g. .card-footer", text: $newRuleSelector)
-                            .font(.system(.caption, design: .monospaced))
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            TextField("New selector, e.g. .card-footer", text: $newRuleSelector)
+                                .font(.system(.caption, design: .monospaced))
+                            TextField("Condition, e.g. (min-width: 768px)", text: $newRuleMedia)
+                                .font(.system(.caption, design: .monospaced))
+                        }
                         Button("Add rule") {
                             let selector = newRuleSelector.trimmingCharacters(in: .whitespaces)
                             guard !selector.isEmpty else { return }
+                            let media = ComponentStyleGrouping.normalizeMediaCondition(newRuleMedia)
                             Task {
-                                await model.addStyleRule(selector: selector, media: nil, declarations: [])
+                                await model.addStyleRule(selector: selector, media: media.isEmpty ? nil : media, declarations: [])
                                 newRuleSelector = ""
+                                newRuleMedia = ""
                             }
                         }
                         .disabled(newRuleSelector.trimmingCharacters(in: .whitespaces).isEmpty)

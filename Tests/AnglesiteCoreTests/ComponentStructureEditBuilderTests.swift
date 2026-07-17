@@ -71,4 +71,24 @@ import Testing
         guard case .object(let obj)? = message.component else { Issue.record("expected object component payload"); return }
         #expect(obj["value"] == .null)
     }
+
+    @Test("extractComponent carries nodeId and a bare newName")
+    func extractComponentShape() {
+        let message = ComponentStructureEditBuilder.extractComponent(
+            id: "id-7",
+            path: "src/components/Card.astro",
+            baseVersion: "sha256:abc",
+            nodeId: "n3",
+            newName: "Hero"
+        )
+        #expect(message.op == EditMessage.Op.extractComponent)
+        guard case .object(let obj)? = message.component else { Issue.record("expected object component payload"); return }
+        #expect(obj["path"] == .string("src/components/Card.astro"))
+        #expect(obj["baseVersion"] == .string("sha256:abc"))
+        #expect(obj["nodeId"] == .string("n3"))
+        // Bare PascalCase identifier — no path prefix, no `.astro` suffix (the server derives the
+        // full path), and no leftover `newComponentPath` key.
+        #expect(obj["newName"] == .string("Hero"))
+        #expect(obj["newComponentPath"] == nil)
+    }
 }

@@ -20,6 +20,10 @@ struct ComponentEditorContext {
     /// component instance to edit its own definition" (spec §4.1). `nil` in
     /// tests/previews that don't need navigation.
     var onOpenFile: ((FileRef) -> Void)? = nil
+    /// Duplicates a project-relative `.astro` component path, returning the new file's path/name
+    /// on success (design spec §6.3: "duplicate-and-modify"). `nil` in tests/previews that don't
+    /// need it — `ComponentEditorModel.duplicateComponent(path:)` no-ops when this is `nil`.
+    var duplicateComponent: ((String) async -> ContentCreateResult)? = nil
 }
 
 @MainActor
@@ -69,7 +73,11 @@ final class ComponentEditorModel {
     }
 
     /// Path of this component relative to the site's Source/ root.
-    var relativePath: String {
+    var relativePath: String { relativePath(for: file) }
+
+    /// Project-relative path of `file` under `context.sourceRoot` — the general form of
+    /// `relativePath` above (which is always `relativePath(for: self.file)`).
+    private func relativePath(for file: FileRef) -> String {
         let root = context.sourceRoot.path(percentEncoded: false)
         let full = file.url.path(percentEncoded: false)
         guard full.hasPrefix(root) else { return file.name }
@@ -140,6 +148,24 @@ final class ComponentEditorModel {
     func openReferencedComponent(tag: String?) {
         guard let tag, let match = projectComponents.first(where: { $0.name == "\(tag).astro" }) else { return }
         context.onOpenFile?(match)
+    }
+
+    /// Duplicates `path` (a project-relative `.astro` path, e.g. from a palette item's
+    /// `componentPath`) via `context.duplicateComponent` and, on success, refreshes
+    /// `projectComponents` and opens the new file through `context.onOpenFile` — "duplicate-and-
+    /// modify" (design spec §6.3). No-op (returns `nil`) if duplication isn't wired
+    /// (`context.duplicateComponent == nil`, true in tests/previews without write capability).
+    @discardableResult
+    func duplicateComponent(path: String) async -> ContentCreateResult? {
+        guard let duplicateComponent = context.duplicateComponent else { return nil }
+        let result = await duplicateComponent(path)
+        if case .created(let filePath, _) = result {
+            projectComponents = SiteFileTree.scan(siteRoot: context.sourceRoot)[.components] ?? []
+            if let match = projectComponents.first(where: { relativePath(for: $0) == filePath }) {
+                context.onOpenFile?(match)
+            }
+        }
+        return result
     }
 
     // MARK: - Style writes
@@ -367,5 +393,57 @@ final class ComponentEditorModel {
             writeError = reply.message ?? "The edit couldn't be applied."
             return false
         }
+    }
+
+    // MARK: - Extract into component
+
+    /// Extract the subtree rooted at `nodeId` into a brand-new `.astro` component. `newName` is a
+    /// bare PascalCase identifier — the plugin derives the full `src/components/<newName>.astro`
+    /// path itself. The plugin applies this as one atomic two-file edit; the reconciliation here
+    /// mirrors the other structure writes (`applyComponentStyleEdit`) — adopt a piggybacked fresh
+    /// `model` for the original file or reload; a `stale` refusal flips `conflict` and reloads.
+    /// Because this op creates a brand-new component file, the piggybacked-model fast path also
+    /// rescans `projectComponents` so the palette immediately reflects the new component (the
+    /// `load()` fallback already does this). The `newName` client-side validation lives in
+    /// `ExtractComponentSheet`; the plugin's own `invalid-input`/`already-exists`/`dynamic-expression`
+    /// refusals still surface here via `writeError` (they flow through the generic failure branch,
+    /// like every other op's non-`stale` refusal). Returns whether the extraction applied.
+    @discardableResult
+    func extractComponent(nodeId: String, newName: String) async -> Bool {
+        guard let editRouter = context.editRouter else { return false }
+        let message = ComponentStructureEditBuilder.extractComponent(
+            id: UUID().uuidString,
+            path: relativePath,
+            baseVersion: model?.version ?? "",
+            nodeId: nodeId,
+            newName: newName
+        )
+        let reply = await editRouter.apply(message)
+        switch reply.status {
+        case .applied:
+            conflict = false
+            writeError = nil
+            if let freshModel = reply.model {
+                model = freshModel
+                projectComponents = SiteFileTree.scan(siteRoot: context.sourceRoot)[.components] ?? []
+            } else {
+                await load()
+            }
+            return true
+        case .failed where reply.reason == "stale":
+            conflict = true
+            await load()
+            return false
+        default:
+            writeError = reply.message ?? "The component couldn't be extracted."
+            return false
+        }
+    }
+
+    /// Whether the outline `row` can be extracted into its own component. Delegates to
+    /// `ComponentOutline.isExtractable(_:)` (Core), which hosts the actual gating logic so it's
+    /// unit-testable on CI (app-target Swift tests don't run there).
+    func canExtractComponent(_ row: ComponentOutline.Row) -> Bool {
+        ComponentOutline.isExtractable(row.node)
     }
 }

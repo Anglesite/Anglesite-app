@@ -548,13 +548,13 @@ final class SiteWindowModel {
     }
 
     /// True when the main-pane editor or the inspector holds unsaved edits — drives File ▸ Save /
-    /// Revert to Saved enablement (#509). The `.plist` editor has two independent dirty flags:
-    /// plist entries (`isDirty`) and analytics settings (`isAnalyticsDirty`) — both count, matching
-    /// `PlistEditorModel.flushBeforeLeaving()` (PR #532 review).
+    /// Revert to Saved enablement (#509). The `.plist` editor hosts several independent settings-pane
+    /// dirty flags (Website, Analytics, Redirects, …); `PlistEditorModel.hasAnyUnsavedEdits` (#741)
+    /// aggregates all of them, matching `PlistEditorModel.flushBeforeLeaving()` (PR #532 review).
     var hasUnsavedEdits: Bool {
         let editorDirty = switch activeEditor {
         case .text(let model): model.isDirty
-        case .plist(let model): model.isDirty || model.isAnalyticsDirty
+        case .plist(let model): model.hasAnyUnsavedEdits
         case nil: false
         }
         return editorDirty || (inspectorContext?.model.isDirty ?? false)
@@ -567,7 +567,7 @@ final class SiteWindowModel {
         if menuEditCommandRunning { return true }
         switch activeEditor {
         case .text(let model): if model.isSaving { return true }
-        case .plist(let model): if model.isSaving || model.isSavingAnalytics { return true }
+        case .plist(let model): if model.isAnySaving { return true }
         case nil: break
         }
         return inspectorContext?.model.isSaving ?? false
@@ -579,7 +579,7 @@ final class SiteWindowModel {
 
     /// File ▸ Save. Writes every dirty editing surface: a page's content (main-pane editor) and its
     /// metadata (inspector) are one document to the user, so Save covers both. Each model's `save()`
-    /// no-ops when clean; the plist editor's analytics settings save separately (`saveAnalytics()`).
+    /// no-ops when clean; the plist editor's settings-pane facets save via `saveAllDirty()` (#741).
     func saveAllEdits() async {
         guard !menuEditCommandRunning else { return }
         menuEditCommandRunning = true
@@ -588,8 +588,7 @@ final class SiteWindowModel {
         case .text(let model):
             await model.save()
         case .plist(let model):
-            await model.save()
-            if model.isAnalyticsDirty { await model.saveAnalytics() }
+            await model.saveAllDirty()
         case nil: break
         }
         if let model = inspectorContext?.model { await model.save() }
@@ -604,15 +603,14 @@ final class SiteWindowModel {
 
     /// Discard unsaved edits by re-reading each dirty surface from disk. Uses `load()` — not
     /// `reloadFromDisk()`, which is conflict-flow-specific and no-ops without a pending conflict.
-    /// `load()` also re-reads the plist editor's analytics settings, so the `isAnalyticsDirty`
-    /// surface reverts too.
+    /// `load()` re-reads every settings-pane facet, so `hasAnyUnsavedEdits` (#741) fully reverts.
     func confirmRevertToSaved() async {
         guard !menuEditCommandRunning else { return }
         menuEditCommandRunning = true
         defer { menuEditCommandRunning = false }
         switch activeEditor {
         case .text(let model) where model.isDirty: await model.load()
-        case .plist(let model) where model.isDirty || model.isAnalyticsDirty: await model.load()
+        case .plist(let model) where model.hasAnyUnsavedEdits: await model.load()
         default: break
         }
         if let model = inspectorContext?.model, model.isDirty { await model.load() }
@@ -641,6 +639,9 @@ final class SiteWindowModel {
     /// Best-effort off-main save of the open editor's buffer when the editor is torn down (window
     /// close or site replay), where no conflict dialog can be shown. Consistent with the
     /// auto-save-on-leave model; last-writer-wins on the rare teardown-time external conflict.
+    /// The `.plist` editor flushes every dirty settings-pane facet via `saveAllDirty()` (#741) — a
+    /// prior version only ever persisted the Website entries here, silently dropping unsaved
+    /// Analytics/Redirects edits on window close.
     @discardableResult
     private func persistEditorBufferBestEffort() -> Task<Void, Never>? {
         switch activeEditor {
@@ -649,12 +650,8 @@ final class SiteWindowModel {
             let contents = model.text
             return Task.detached(priority: .userInitiated) { _ = try? FileDocumentIO.save(contents, to: url) }
         case .plist(let model):
-            if model.isDirty, model.validationMessage == nil {
-                let url = model.file.url
-                let entries = model.entriesForSaving()
-                return Task.detached(priority: .userInitiated) { _ = try? PlistDocumentIO.save(entries, to: url) }
-            }
-            return nil
+            guard model.hasAnyUnsavedEdits else { return nil }
+            return Task { await model.saveAllDirty() }
         case .text, nil:
             return nil
         }
@@ -984,6 +981,19 @@ final class SiteWindowModel {
     func createComponent(name: String) async -> ContentCreateResult {
         guard let site else { return .siteNotFound }
         let result = await contentCreation.createComponent(siteID: site.id, name: name)
+        if case .created = result {
+            await navigator?.refreshNow()
+        }
+        return result
+    }
+
+    /// Duplicates the component at `relativePath` (design spec §6.3: "duplicate-and-modify" —
+    /// surfaced on the Component Editor's own palette, since project components aren't tracked
+    /// in `SiteContentGraph` or shown in the page-only Navigator). Same force-refresh reasoning
+    /// as `createComponent`.
+    func duplicateComponent(relativePath: String) async -> ContentCreateResult {
+        guard let site else { return .siteNotFound }
+        let result = await contentCreation.duplicateComponent(siteID: site.id, relativePath: relativePath)
         if case .created = result {
             await navigator?.refreshNow()
         }

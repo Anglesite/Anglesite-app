@@ -37,10 +37,15 @@ final class PlistEditorModel {
     private(set) var isSavingRedirects = false
     private(set) var redirectsLoadFailed = false
     var conflictDiskContents: String?
+    var crawlerPolicySettings = CrawlerPolicyAsset.Settings()
+    private(set) var savedCrawlerPolicySettings = CrawlerPolicyAsset.Settings()
+    private(set) var crawlerPolicyError: String?
+    private(set) var isSavingCrawlerPolicy = false
 
     var isDirty: Bool { entries != savedEntries && loadError == nil && !isLoading }
     var isAnalyticsDirty: Bool { analyticsSettings != savedAnalyticsSettings && loadError == nil && !isLoading }
     var isRedirectsDirty: Bool { redirectEntries != savedRedirectEntries && loadError == nil && !isLoading }
+    var isCrawlerPolicyDirty: Bool { crawlerPolicySettings != savedCrawlerPolicySettings && loadError == nil && !isLoading }
     var cloudflareAnalyticsEnabled: Bool { !analyticsSettings.cloudflareToken.isEmpty }
     var customAnalyticsValidationMessage: String? {
         WebsiteAnalyticsAsset.customHeadTagValidationMessage(analyticsSettings.customHeadTag)
@@ -97,7 +102,7 @@ final class PlistEditorModel {
             lastModified = loaded.modificationDate
             loadError = nil
             hasWebsiteIcons = WebsiteIconInstaller.hasInstalledIcons(in: sourceDirectory)
-            let analytics = try Self.loadAnalyticsSettings(sourceDirectory: sourceDirectory)
+            let (analytics, config) = try Self.loadAnalyticsSettings(sourceDirectory: sourceDirectory)
             analyticsSettings = analytics
             savedAnalyticsSettings = analytics
             analyticsError = nil
@@ -113,6 +118,13 @@ final class PlistEditorModel {
                 redirectsError = "Couldn't load existing redirects.json — it may be corrupted or hand-edited with invalid entries. Fix it externally or your next save will discard it. (\(error.localizedDescription))"
                 redirectsLoadFailed = true
             }
+            // Reuses the `.site-config` contents `loadAnalyticsSettings` already read — a load
+            // failure there already aborts this whole `load()` via the outer `catch` below, so
+            // there's no separate failure mode here to handle.
+            let policy = CrawlerPolicyAsset.parseSettings(from: config)
+            crawlerPolicySettings = policy
+            savedCrawlerPolicySettings = policy
+            crawlerPolicyError = nil
         } catch {
             loadError = error.localizedDescription
         }
@@ -161,7 +173,10 @@ final class PlistEditorModel {
             guard await saveAnalytics() else { return false }
         }
         if isRedirectsDirty {
-            return await saveRedirects()
+            guard await saveRedirects() else { return false }
+        }
+        if isCrawlerPolicyDirty {
+            return await saveCrawlerPolicy()
         }
         return true
     }
@@ -266,6 +281,27 @@ final class PlistEditorModel {
         }
     }
 
+    @discardableResult
+    func saveCrawlerPolicy() async -> Bool {
+        guard isCrawlerPolicyDirty else { return true }
+        guard !isSavingCrawlerPolicy else { return false }
+        isSavingCrawlerPolicy = true
+        crawlerPolicyError = nil
+        defer { isSavingCrawlerPolicy = false }
+        let sourceDirectory = sourceDirectory
+        let settings = crawlerPolicySettings
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try CrawlerPolicyAsset.install(settings, siteDirectory: sourceDirectory)
+            }.value
+            savedCrawlerPolicySettings = settings
+            return true
+        } catch {
+            crawlerPolicyError = "Couldn't save crawler policy: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     func setCloudflareAnalyticsEnabled(_ enabled: Bool) async {
         if !enabled {
             analyticsSettings.cloudflareToken = ""
@@ -293,14 +329,19 @@ final class PlistEditorModel {
         }
     }
 
-    private static func loadAnalyticsSettings(sourceDirectory: URL) throws -> WebsiteAnalyticsAsset.Settings {
+    /// Also returns the raw `.site-config` contents alongside the parsed analytics settings, so
+    /// `load()` can reuse them for `CrawlerPolicyAsset.parseSettings` instead of reading the file
+    /// from disk a second time.
+    private static func loadAnalyticsSettings(
+        sourceDirectory: URL
+    ) throws -> (settings: WebsiteAnalyticsAsset.Settings, config: String) {
         let layoutURL = sourceDirectory.appendingPathComponent(WebsiteAnalyticsAsset.layoutRelativePath)
         let config = try WebsiteAnalyticsAsset.loadConfig(siteDirectory: sourceDirectory)
         guard FileManager.default.fileExists(atPath: layoutURL.path) else {
-            return WebsiteAnalyticsAsset.parseMigratingLegacySettings(layoutSource: "", config: config)
+            return (WebsiteAnalyticsAsset.parseMigratingLegacySettings(layoutSource: "", config: config), config)
         }
         let source = try String(contentsOf: layoutURL, encoding: .utf8)
-        return WebsiteAnalyticsAsset.parseMigratingLegacySettings(layoutSource: source, config: config)
+        return (WebsiteAnalyticsAsset.parseMigratingLegacySettings(layoutSource: source, config: config), config)
     }
 
     private func cloudflareToken() async throws -> String? {
@@ -344,5 +385,43 @@ final class PlistEditorModel {
         var merged = allEntries.filter { !Self.isWebsiteTitleEntry($0) }
         merged.append(contentsOf: entries)
         return merged
+    }
+
+    // MARK: - Aggregate dirty/save seam (#741)
+
+    /// One independently dirty/saveable settings-pane facet hosted by this plist editor — one
+    /// each for Website (`entries`), Analytics, and Redirects. `SiteWindowModel`'s aggregate
+    /// dirty/save accounting (`hasUnsavedEdits`, `editCommandInFlight`, `saveAllEdits()`) folds
+    /// over `dirtyFacets` instead of checking each pane by name, so a future settings pane (e.g. a
+    /// `.well-known` tab) is registered here and needs no edits anywhere else — including
+    /// `SiteWindowModel`'s save/close switch statements.
+    private struct DirtyFacet {
+        let isDirty: Bool
+        let isSaving: Bool
+        let save: () async -> Void
+    }
+
+    private var dirtyFacets: [DirtyFacet] {
+        [
+            DirtyFacet(isDirty: isDirty, isSaving: isSaving) { await self.save() },
+            DirtyFacet(isDirty: isAnalyticsDirty, isSaving: isSavingAnalytics) { await self.saveAnalytics() },
+            DirtyFacet(isDirty: isRedirectsDirty, isSaving: isSavingRedirects) { await self.saveRedirects() },
+            DirtyFacet(isDirty: isCrawlerPolicyDirty, isSaving: isSavingCrawlerPolicy) { await self.saveCrawlerPolicy() },
+        ]
+    }
+
+    /// True if any settings-pane facet has unsaved edits.
+    var hasAnyUnsavedEdits: Bool { dirtyFacets.contains { $0.isDirty } }
+
+    /// True while any settings-pane facet's own save is in flight.
+    var isAnySaving: Bool { dirtyFacets.contains { $0.isSaving } }
+
+    /// Saves every currently-dirty settings-pane facet. Each facet's own `save()` keeps its
+    /// existing validation and error reporting (e.g. a validation failure just leaves that facet
+    /// dirty with its own error string set) — one facet failing to save does not block the others.
+    func saveAllDirty() async {
+        for facet in dirtyFacets where facet.isDirty {
+            await facet.save()
+        }
     }
 }
