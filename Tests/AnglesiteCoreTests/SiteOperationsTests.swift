@@ -261,6 +261,62 @@ struct SiteOperationsTests {
         let dialog = SiteOperations.dialog(forAudit: .failed(reason: "config missing", exitCode: 1, logTail: []))
         #expect(dialog == "Audit failed: config missing")
     }
+
+    @Test("headless deploy with a settings-activated worker routes through provision and persists lastDeployedWorkerIDs")
+    func headlessDeployWithActiveWorkerPersistsState() async throws {
+        let package = try temporaryPackage()
+        defer { try? FileManager.default.removeItem(at: package) }
+        let site = makeSite(name: "Blue Bottle Cafe", packageURL: package)
+        let configStore = SiteConfigStore(configDirectory: site.configDirectory)
+        try await configStore.save(SiteSettings(activeWorkerIDs: ["indieauth"]))
+
+        let recorder = SocialWorkerRecorder()
+        let ops = SiteOperations(factory: SocialWorkerFactory(recorder: recorder), store: throwawayStore())
+
+        let result = await ops.deploy(site: site)
+
+        guard case .succeeded = result else {
+            Issue.record("expected success, got \(result)")
+            return
+        }
+        let saved = try await configStore.load()
+        #expect(saved.lastDeployedWorkerIDs == ["indieauth"])
+    }
+
+    @Test("headless deploy with no activated workers still deploys through the plain static path")
+    func headlessDeployWithNoActiveWorkers() async throws {
+        let package = try temporaryPackage()
+        defer { try? FileManager.default.removeItem(at: package) }
+        let site = makeSite(name: "Blue Bottle Cafe", packageURL: package)
+        let recorder = SocialWorkerRecorder()
+        let ops = SiteOperations(factory: SocialWorkerFactory(recorder: recorder), store: throwawayStore())
+
+        let result = await ops.deploy(site: site)
+
+        guard case .succeeded = result else {
+            Issue.record("expected success, got \(result)")
+            return
+        }
+        #expect(await recorder.arguments.isEmpty)
+    }
+
+    @Test("headless deploy still reports coarse progress milestones through onProgress")
+    func headlessDeployReportsProgress() async throws {
+        let package = try temporaryPackage()
+        defer { try? FileManager.default.removeItem(at: package) }
+        let site = makeSite(name: "Blue Bottle Cafe", packageURL: package)
+        let ops = SiteOperations(factory: SocialWorkerFactory(recorder: SocialWorkerRecorder()), store: throwawayStore())
+        let seen = HeadlessDeployProgressRecorder()
+
+        _ = await ops.deploy(site: site, onProgress: { progress in Task { await seen.record(progress) } })
+        // onProgress fires synchronously inside deployWithWorkerComposition, but the recorder hop
+        // above is async — give it a beat to land before asserting.
+        while await seen.progresses.count < 2 { await Task.yield() }
+
+        let progresses = await seen.progresses
+        #expect(progresses.contains(.deployBuilding))
+        #expect(progresses.contains(.deployDeploying))
+    }
 }
 
 private actor SocialWorkerRecorder {
@@ -296,6 +352,13 @@ private struct DeployCall: Sendable, Equatable {
 
 private struct TestAccessError: LocalizedError, Sendable {
     var errorDescription: String? { "could not resolve site access" }
+}
+
+// Named distinctly from `DeployCommandProgressTests.ProgressRecorder` (an internal,
+// non-private, lock-based type in the same test target) to avoid a same-module name clash.
+private actor HeadlessDeployProgressRecorder {
+    private(set) var progresses: [OperationProgress] = []
+    func record(_ progress: OperationProgress) { progresses.append(progress) }
 }
 
 private struct SocialWorkerFactory: CommandFactory {

@@ -43,12 +43,65 @@ public struct SiteOperations: Sendable {
     public func deploy(site: SiteStore.Site, onProgress: ProgressHandler? = nil) async -> DeployCommand.Result {
         do {
             return try await SiteAccess.withScopedAccess(to: site, in: store) { url in
-                await factory.deploy().deploy(siteID: site.id, siteDirectory: url, onProgress: onProgress)
+                await self.deployWithWorkerComposition(site: site, siteDirectory: url, onProgress: onProgress)
             }
         } catch let SiteAccess.AccessError.noGrant(message) {
             return .failed(reason: message, exitCode: nil)
         } catch {
             return .failed(reason: error.localizedDescription, exitCode: nil)
+        }
+    }
+
+    /// Headless-deploy counterpart to `DeployModel.runDeploy`'s worker-composition wiring
+    /// (#709 design §5/§8): computes the effective active worker set — settings-activated only,
+    /// since this path (App Intents/Shortcuts) has no populated `SiteContentGraph` to derive
+    /// component-tied activation from — and routes through `SocialWorkerProvisionCommand.provision`
+    /// the same way the main Deploy button does, persisting the result on success.
+    ///
+    /// `onProgress` fidelity note: `SocialWorkerProvisionCommand.provision` has no milestone hook
+    /// of its own (unlike `DeployCommand.deploy`, it's never been wired for one — it had no live
+    /// caller before #709), so this emits the same coarse `OperationProgress.deployBuilding` /
+    /// `.deployDeploying` milestones `DeployCommand.deploy` would have emitted around the
+    /// build/deploy boundary, rather than `DeployCommand`'s finer per-step ones (preflight,
+    /// finalizing). `SiteIntents.swift:59` is this path's one real consumer (Siri/Shortcuts
+    /// progress) — dropping progress reporting to nothing would regress it; this keeps it coarser
+    /// but non-silent without adding an `onProgress` parameter to `SocialWorkerProvisionCommand`
+    /// itself, which would ripple into Tasks 3/4's signature and every other call site.
+    private func deployWithWorkerComposition(
+        site: SiteStore.Site, siteDirectory: URL, onProgress: ProgressHandler?
+    ) async -> DeployCommand.Result {
+        let configStore = SiteConfigStore(configDirectory: site.configDirectory)
+        let settings = (try? await configStore.load()) ?? SiteSettings()
+        let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: [], graph: nil)
+        let features = WorkerActivation.mapToFeatures(effectiveActiveIDs)
+
+        onProgress?(.deployBuilding)
+        onProgress?(.deployDeploying)
+        let provisionResult = await factory.socialWorkerProvision().provision(
+            siteID: site.id,
+            siteDirectory: siteDirectory,
+            siteName: SiteSlug.derive(from: site.name),
+            features: features,
+            knownResources: settings.provisionedWorkerResources ?? .init()
+        )
+        onProgress?(.deployFinalizing)
+
+        if case .succeeded(_, let resources, _) = provisionResult {
+            var updated = settings
+            updated.lastDeployedWorkerIDs = Array(effectiveActiveIDs).sorted()
+            updated.provisionedWorkerResources = resources
+            try? await configStore.save(updated)
+        }
+
+        switch provisionResult {
+        case .succeeded(let url, _, let duration):
+            return .succeeded(url: url, duration: duration)
+        case .blocked(let failures, let warnings, _):
+            return .blocked(failures: failures, warnings: warnings)
+        case .workerNameConflict(let name, _):
+            return .workerNameConflict(name: name)
+        case .failed(let reason, let exitCode, _):
+            return .failed(reason: reason, exitCode: exitCode)
         }
     }
 
