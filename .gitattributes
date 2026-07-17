@@ -28,6 +28,3 @@ project.yml text eol=lf
 *.zip binary
 *.tar binary
 *.gz binary
-Resources/container-image/** -text -diff
-Resources/container-kernel/** -text -diff
-Resources/container-initfs/** -text -diff
