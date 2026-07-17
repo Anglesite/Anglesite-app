@@ -61,7 +61,7 @@ public enum WorkerComposition {
         charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
     )
 
-    public struct ProvisionedResources: Sendable, Equatable {
+    public struct ProvisionedResources: Sendable, Equatable, Codable {
         public var d1DatabaseID: String?
         public var kvNamespaceID: String?
         public var r2BucketName: String?

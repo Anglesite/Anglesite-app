@@ -32,13 +32,33 @@ public struct SiteSettings: Sendable, Codable, Equatable {
     /// Bluesky PDS origin. `nil` uses the public `https://bsky.social` service.
     public var blueskyPDSURL: String?
 
+    /// `@dwk/workers` catalog ids the user has manually toggled on. Component-tied workers are
+    /// never stored here — their active state is always recomputed live from Site Graph
+    /// Explorer / `ImpactAnalysis` (`WorkerActivation`, #709), so it can't drift from site
+    /// content.
+    public var activeWorkerIDs: [String]?
+
+    /// The full effective active worker-id set (component-tied + settings-activated) as of the
+    /// last successful deploy — the diff baseline `WorkerActivation.removedIDs` reports removals
+    /// against (#709).
+    public var lastDeployedWorkerIDs: [String]?
+
+    /// Already-provisioned Cloudflare D1/KV/R2 resource ids for this site's composed Worker,
+    /// durable across a worker being deactivated and later reactivated — deactivating a worker
+    /// drops its binding block from `wrangler.toml`, so this is the source of truth instead of
+    /// re-scraping the file (#709).
+    public var provisionedWorkerResources: WorkerComposition.ProvisionedResources?
+
     public init(
         displayName: String? = nil,
         inboxCaptureAccountID: String? = nil,
         inboxCaptureKVNamespaceID: String? = nil,
         mastodonBaseURL: String? = nil,
         blueskyIdentifier: String? = nil,
-        blueskyPDSURL: String? = nil
+        blueskyPDSURL: String? = nil,
+        activeWorkerIDs: [String]? = nil,
+        lastDeployedWorkerIDs: [String]? = nil,
+        provisionedWorkerResources: WorkerComposition.ProvisionedResources? = nil
     ) {
         self.displayName = displayName
         self.inboxCaptureAccountID = inboxCaptureAccountID
@@ -46,6 +66,9 @@ public struct SiteSettings: Sendable, Codable, Equatable {
         self.mastodonBaseURL = mastodonBaseURL
         self.blueskyIdentifier = blueskyIdentifier
         self.blueskyPDSURL = blueskyPDSURL
+        self.activeWorkerIDs = activeWorkerIDs
+        self.lastDeployedWorkerIDs = lastDeployedWorkerIDs
+        self.provisionedWorkerResources = provisionedWorkerResources
     }
 }
 
