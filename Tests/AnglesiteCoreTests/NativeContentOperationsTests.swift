@@ -323,6 +323,114 @@ struct NativeContentOperationsTests {
         #expect(sha == nil)
         #expect(FileManager.default.fileExists(atPath: filePath.path))
     }
+
+    private func makePublishOps(
+        publishedBefore: Bool = false,
+        now: Date = Date(timeIntervalSince1970: 1_750_000_000)
+    ) -> (ops: NativeContentOperations, root: URL, calls: Spy) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("native-content-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let spy = Spy()
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { proj, rel, msg in await spy.record(proj, rel, msg); return "deadbeef" },
+            gitHasCommit: { _, _ in publishedBefore },
+            now: { now }
+        )
+        return (ops, root, spy)
+    }
+
+    @Test("publish sets draft: false and re-stamps publishDate on a first publish")
+    func publishFirstTime() async throws {
+        let (ops, root, spy) = makePublishOps(publishedBefore: false)
+        let dir = root.appendingPathComponent("src/content/notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("my-note.md")
+        try """
+        ---
+        publishDate: 2020-01-01T00:00:00.000Z
+        tags: []
+        draft: true
+        ---
+
+        Hello.
+        """.write(to: file, atomically: true, encoding: .utf8)
+
+        let result = await ops.publish(siteID: "s1", relativePath: "src/content/notes/my-note.md", collection: "notes")
+        #expect(result == .created(filePath: "src/content/notes/my-note.md", identifier: "my-note"))
+
+        let written = try String(contentsOf: file, encoding: .utf8)
+        #expect(written.contains("draft: false"))
+        #expect(written.contains("publishDate: 2025-06-15T15:06:40.000Z")) // re-stamped to `now`
+        #expect(!written.contains("2020-01-01"))
+
+        let calls = await spy.calls
+        #expect(calls.count == 1)
+        #expect(calls.first?.2 == "anglesite: publish note my-note")
+    }
+
+    @Test("publish keeps the original publishDate on a republish")
+    func publishRepublish() async throws {
+        let (ops, root, spy) = makePublishOps(publishedBefore: true)
+        let dir = root.appendingPathComponent("src/content/notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("my-note.md")
+        try """
+        ---
+        publishDate: 2020-01-01T00:00:00.000Z
+        tags: []
+        draft: true
+        ---
+
+        Hello.
+        """.write(to: file, atomically: true, encoding: .utf8)
+
+        let result = await ops.publish(siteID: "s1", relativePath: "src/content/notes/my-note.md", collection: "notes")
+        #expect(result == .created(filePath: "src/content/notes/my-note.md", identifier: "my-note"))
+
+        let written = try String(contentsOf: file, encoding: .utf8)
+        #expect(written.contains("draft: false"))
+        #expect(written.contains("publishDate: 2020-01-01T00:00:00.000Z")) // untouched
+
+        let calls = await spy.calls
+        #expect(calls.first?.2 == "anglesite: publish note my-note")
+    }
+
+    @Test("unpublish sets draft: true and leaves publishDate untouched")
+    func unpublish() async throws {
+        let (ops, root, spy) = makePublishOps()
+        let dir = root.appendingPathComponent("src/content/notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("my-note.md")
+        try """
+        ---
+        publishDate: 2025-06-15T15:06:40.000Z
+        tags: []
+        draft: false
+        ---
+
+        Hello.
+        """.write(to: file, atomically: true, encoding: .utf8)
+
+        let result = await ops.unpublish(siteID: "s1", relativePath: "src/content/notes/my-note.md", collection: "notes")
+        #expect(result == .created(filePath: "src/content/notes/my-note.md", identifier: "my-note"))
+
+        let written = try String(contentsOf: file, encoding: .utf8)
+        #expect(written.contains("draft: true"))
+        #expect(written.contains("publishDate: 2025-06-15T15:06:40.000Z"))
+
+        let calls = await spy.calls
+        #expect(calls.first?.2 == "anglesite: unpublish note my-note")
+    }
+
+    @Test("publish reports .failed for an unregistered collection")
+    func publishUnknownCollection() async {
+        let (ops, _, _) = makePublishOps()
+        let result = await ops.publish(siteID: "s1", relativePath: "src/content/blog/hello.md", collection: "blog")
+        guard case let .failed(reason) = result else { Issue.record("expected .failed"); return }
+        #expect(reason.contains("blog"))
+    }
 }
 
 @Suite("NativeContentOperations.deleteContent")
