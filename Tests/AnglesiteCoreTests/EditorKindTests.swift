@@ -22,4 +22,22 @@ struct EditorKindTests {
             #expect(EditorKind.resolve(for: ref) == .text)
         }
     }
+
+    @Test("markdown files route to the markdown editor in every group")
+    func markdownFilesUseMarkdownEditor() {
+        for ext in ["md", "mdx", "markdown", "MD"] {
+            for group in FileGroup.allCases {
+                let ref = FileRef(url: URL(fileURLWithPath: "/tmp/post.\(ext)"), group: group, name: "post.\(ext)")
+                #expect(EditorKind.resolve(for: ref) == .markdown)
+            }
+        }
+    }
+
+    @Test("markdown-adjacent extensions stay text")
+    func markdownLookalikesStayText() {
+        for name in ["notes.mdoc", "readme.txt", "md"] {
+            let ref = FileRef(url: URL(fileURLWithPath: "/tmp/\(name)"), group: .pages, name: name)
+            #expect(EditorKind.resolve(for: ref) == .text)
+        }
+    }
 }

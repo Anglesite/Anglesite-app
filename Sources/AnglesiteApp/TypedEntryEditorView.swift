@@ -15,9 +15,15 @@ struct TypedEntryForm: View {
             }
             if let body = bodyField {
                 Section("Body") {
-                    TextEditor(text: model.textBinding(body.name))
-                        .font(.system(.body, design: .monospaced))
-                        .frame(minHeight: 160)
+                    MarkdownTextView(
+                        text: model.textBinding(body.name),
+                        controller: model.markdownController,
+                        // Distinct from the main-pane editor of the same file (different text
+                        // scope — body-only vs whole file), so their undo stacks never mix.
+                        documentId: model.file.id + "#body",
+                        fitsContent: true
+                    )
+                    .frame(minHeight: 160)
                 }
             }
         }

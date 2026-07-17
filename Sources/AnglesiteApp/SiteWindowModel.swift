@@ -791,7 +791,7 @@ final class SiteWindowModel {
             guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
             inspectorContext = nil
             switch EditorKind.resolve(for: file) {
-            case .text, .component:
+            case .text, .component, .markdown:
                 // `.component` also builds a plain `FileEditorModel`: `MainPaneEditorView` re-resolves
                 // `EditorKind` itself and renders `ComponentEditorView` (backed by the same
                 // `FileEditorModel` for its Source-mode escape hatch) when a `componentContext` is
