@@ -312,6 +312,83 @@ struct NewPostSheet: View {
     }
 }
 
+/// Name prompt for "Extract into Component…" (design §6.3). Mirrors `NewComponentSheet`'s
+/// Form/toolbar shape, but prompts for a component name (combined into a
+/// `src/components/<Name>.astro` path by the caller) and validates client-side that the name
+/// starts with an uppercase letter — a UX guard, not a substitute for the plugin's own
+/// `invalid-input`/`exists` refusals, which surface via `errorMessage`.
+struct ExtractComponentSheet: View {
+    /// Called with the client-side-validated name. Returns an error message to show in-sheet, or
+    /// `nil` on success (which dismisses).
+    let onExtract: (_ name: String) async -> String?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var isExtracting = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("New Component") {
+                    TextField("Name", text: $name, prompt: Text("Hero"))
+                }
+                if !trimmedName.isEmpty && !nameIsValid {
+                    Text("Component names must start with an uppercase letter.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                }
+            }
+            .formStyle(.grouped)
+            .frame(minWidth: 380, minHeight: 180)
+            .navigationTitle("Extract into Component")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(isExtracting)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isExtracting ? "Extracting…" : "Extract") {
+                        extract()
+                    }
+                    .disabled(isExtracting || !nameIsValid)
+                }
+            }
+        }
+    }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Non-empty and starts with an uppercase letter — mirrors the plugin's capitalized-basename
+    /// requirement for `newComponentPath`.
+    private var nameIsValid: Bool {
+        trimmedName.first?.isUppercase == true
+    }
+
+    private func extract() {
+        isExtracting = true
+        errorMessage = nil
+        Task {
+            let error = await onExtract(trimmedName)
+            await MainActor.run {
+                isExtracting = false
+                if let error {
+                    errorMessage = error
+                } else {
+                    dismiss()
+                }
+            }
+        }
+    }
+}
+
 struct NewComponentSheet: View {
     let onCreate: (String) async -> ContentCreateResult
 

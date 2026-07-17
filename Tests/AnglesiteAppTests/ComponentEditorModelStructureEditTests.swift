@@ -66,4 +66,60 @@ struct ComponentEditorModelStructureEditTests {
         #expect(!applied)
         #expect(model.conflict)
     }
+
+    @Test("extractComponent sends the built EditMessage and surfaces warnings")
+    func extractComponentAppliesWithWarnings() async {
+        let router = RecordingRouter(reply: EditReply(
+            id: "x",
+            status: .applied,
+            message: nil,
+            extractResult: EditReply.ExtractComponentResult(
+                componentPath: "src/components/Hero.astro",
+                hoistedProps: ["title"],
+                warnings: ["Could not migrate a complex style rule."]
+            )
+        ))
+        let model = makeModel(router: router)
+        let applied = await model.extractComponent(nodeId: "n3", newComponentPath: "src/components/Hero.astro")
+        #expect(applied)
+        #expect(router.lastMessage?.op == EditMessage.Op.extractComponent)
+        #expect(model.extractWarnings == ["Could not migrate a complex style rule."])
+    }
+
+    @Test("extractComponent with no warnings leaves the banner state nil")
+    func extractComponentAppliesWithoutWarnings() async {
+        let router = RecordingRouter(reply: EditReply(
+            id: "x",
+            status: .applied,
+            message: nil,
+            extractResult: EditReply.ExtractComponentResult(
+                componentPath: "src/components/Hero.astro",
+                hoistedProps: [],
+                warnings: []
+            )
+        ))
+        let model = makeModel(router: router)
+        let applied = await model.extractComponent(nodeId: "n3", newComponentPath: "src/components/Hero.astro")
+        #expect(applied)
+        #expect(model.extractWarnings == nil)
+    }
+
+    @Test("extractComponent surfaces a plugin refusal via writeError")
+    func extractComponentRefusalSurfacesWriteError() async {
+        let router = RecordingRouter(reply: EditReply(id: "x", status: .failed, message: "That component already exists.", reason: "exists"))
+        let model = makeModel(router: router)
+        let applied = await model.extractComponent(nodeId: "n3", newComponentPath: "src/components/Hero.astro")
+        #expect(!applied)
+        #expect(model.writeError == "That component already exists.")
+        #expect(!model.conflict)
+    }
+
+    @Test("extractComponent stale refusal flips conflict")
+    func extractComponentStaleFlipsConflict() async {
+        let router = RecordingRouter(reply: EditReply(id: "x", status: .failed, message: "stale", reason: "stale"))
+        let model = makeModel(router: router)
+        let applied = await model.extractComponent(nodeId: "n3", newComponentPath: "src/components/Hero.astro")
+        #expect(!applied)
+        #expect(model.conflict)
+    }
 }
