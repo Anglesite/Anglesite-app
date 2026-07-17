@@ -39,4 +39,17 @@ public enum ComponentStyleGrouping {
             Group(media: key.isEmpty ? nil : key, rules: byKey[key] ?? [])
         }
     }
+
+    /// Strips a redundant leading "@media" a user may have typed into the Styles panel's "Add
+    /// rule" form condition field (case-insensitive, tolerates surrounding whitespace) — the
+    /// field only asks for the condition itself (e.g. `"(min-width: 768px)"`), but typing the
+    /// literal `"@media (min-width: 768px)"` is a natural mistake given the field sits right
+    /// next to text that says "@media". Without this, the rendered section header
+    /// (`"@media \(condition)"`) would double up as `"@media @media (min-width: 768px)"`
+    /// (PR #795 review).
+    public static func normalizeMediaCondition(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard trimmed.lowercased().hasPrefix("@media") else { return trimmed }
+        return String(trimmed.dropFirst("@media".count)).trimmingCharacters(in: .whitespaces)
+    }
 }

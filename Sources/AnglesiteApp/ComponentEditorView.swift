@@ -419,8 +419,15 @@ struct ComponentEditorView: View {
                 return true
             }
             if let width = viewportPreset.width {
-                ScrollView(.horizontal) {
-                    content.frame(width: width, height: 800)
+                // Sizes to the split pane's own available height (via GeometryReader) rather
+                // than a fixed magic number — a hardcoded height either clipped the canvas on a
+                // pane shorter than it, or left dead space below it on a taller one (PR #795
+                // review). Horizontal scroll still covers the width-overflow case (preset wider
+                // than the pane), which is the whole point of a fixed-width preset.
+                GeometryReader { geometry in
+                    ScrollView(.horizontal) {
+                        content.frame(width: width, height: geometry.size.height)
+                    }
                 }
             } else {
                 content
@@ -668,13 +675,13 @@ struct ComponentEditorView: View {
                         HStack {
                             TextField("New selector, e.g. .card-footer", text: $newRuleSelector)
                                 .font(.system(.caption, design: .monospaced))
-                            TextField("@media (optional)", text: $newRuleMedia)
+                            TextField("Condition, e.g. (min-width: 768px)", text: $newRuleMedia)
                                 .font(.system(.caption, design: .monospaced))
                         }
                         Button("Add rule") {
                             let selector = newRuleSelector.trimmingCharacters(in: .whitespaces)
                             guard !selector.isEmpty else { return }
-                            let media = newRuleMedia.trimmingCharacters(in: .whitespaces)
+                            let media = ComponentStyleGrouping.normalizeMediaCondition(newRuleMedia)
                             Task {
                                 await model.addStyleRule(selector: selector, media: media.isEmpty ? nil : media, declarations: [])
                                 newRuleSelector = ""

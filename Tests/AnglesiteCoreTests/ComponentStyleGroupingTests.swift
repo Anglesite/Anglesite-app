@@ -46,4 +46,28 @@ struct ComponentStyleGroupingTests {
     func emptyStylesProduceNoGroups() {
         #expect(ComponentStyleGrouping.groups(from: []).isEmpty)
     }
+
+    @Test("normalizeMediaCondition passes a bare condition through unchanged")
+    func normalizeMediaConditionPassesBareConditionThrough() {
+        #expect(ComponentStyleGrouping.normalizeMediaCondition("(min-width: 768px)") == "(min-width: 768px)")
+    }
+
+    @Test("normalizeMediaCondition strips a redundant leading @media, case-insensitively")
+    func normalizeMediaConditionStripsLeadingAtMedia() {
+        #expect(ComponentStyleGrouping.normalizeMediaCondition("@media (min-width: 768px)") == "(min-width: 768px)")
+        #expect(ComponentStyleGrouping.normalizeMediaCondition("@Media (min-width: 768px)") == "(min-width: 768px)")
+        #expect(ComponentStyleGrouping.normalizeMediaCondition("@MEDIA(min-width: 768px)") == "(min-width: 768px)")
+    }
+
+    @Test("normalizeMediaCondition trims surrounding whitespace")
+    func normalizeMediaConditionTrimsWhitespace() {
+        #expect(ComponentStyleGrouping.normalizeMediaCondition("  (min-width: 768px)  ") == "(min-width: 768px)")
+        #expect(ComponentStyleGrouping.normalizeMediaCondition("  @media   (min-width: 768px)  ") == "(min-width: 768px)")
+    }
+
+    @Test("normalizeMediaCondition on just \"@media\" alone yields an empty string")
+    func normalizeMediaConditionBareAtMediaYieldsEmpty() {
+        #expect(ComponentStyleGrouping.normalizeMediaCondition("@media").isEmpty)
+        #expect(ComponentStyleGrouping.normalizeMediaCondition("  @media  ").isEmpty)
+    }
 }
