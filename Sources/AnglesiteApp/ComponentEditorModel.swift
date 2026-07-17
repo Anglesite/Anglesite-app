@@ -20,6 +20,10 @@ struct ComponentEditorContext {
     /// component instance to edit its own definition" (spec §4.1). `nil` in
     /// tests/previews that don't need navigation.
     var onOpenFile: ((FileRef) -> Void)? = nil
+    /// Duplicates a project-relative `.astro` component path, returning the new file's path/name
+    /// on success (design spec §6.3: "duplicate-and-modify"). `nil` in tests/previews that don't
+    /// need it — `ComponentEditorModel.duplicateComponent(path:)` no-ops when this is `nil`.
+    var duplicateComponent: ((String) async -> ContentCreateResult)? = nil
 }
 
 @MainActor
@@ -69,7 +73,11 @@ final class ComponentEditorModel {
     }
 
     /// Path of this component relative to the site's Source/ root.
-    var relativePath: String {
+    var relativePath: String { relativePath(for: file) }
+
+    /// Project-relative path of `file` under `context.sourceRoot` — the general form of
+    /// `relativePath` above (which is always `relativePath(for: self.file)`).
+    private func relativePath(for file: FileRef) -> String {
         let root = context.sourceRoot.path(percentEncoded: false)
         let full = file.url.path(percentEncoded: false)
         guard full.hasPrefix(root) else { return file.name }
@@ -140,6 +148,24 @@ final class ComponentEditorModel {
     func openReferencedComponent(tag: String?) {
         guard let tag, let match = projectComponents.first(where: { $0.name == "\(tag).astro" }) else { return }
         context.onOpenFile?(match)
+    }
+
+    /// Duplicates `path` (a project-relative `.astro` path, e.g. from a palette item's
+    /// `componentPath`) via `context.duplicateComponent` and, on success, refreshes
+    /// `projectComponents` and opens the new file through `context.onOpenFile` — "duplicate-and-
+    /// modify" (design spec §6.3). No-op (returns `nil`) if duplication isn't wired
+    /// (`context.duplicateComponent == nil`, true in tests/previews without write capability).
+    @discardableResult
+    func duplicateComponent(path: String) async -> ContentCreateResult? {
+        guard let duplicateComponent = context.duplicateComponent else { return nil }
+        let result = await duplicateComponent(path)
+        if case .created(let filePath, _) = result {
+            projectComponents = SiteFileTree.scan(siteRoot: context.sourceRoot)[.components] ?? []
+            if let match = projectComponents.first(where: { relativePath(for: $0) == filePath }) {
+                context.onOpenFile?(match)
+            }
+        }
+        return result
     }
 
     // MARK: - Style writes

@@ -718,7 +718,8 @@ struct SiteWindow: View {
                         // would silently diverge from that once the Styles panel starts sending
                         // real edits.
                         editRouter: model.preview.editRouter,
-                        onOpenFile: { file in model.openFile(file) }
+                        onOpenFile: { file in model.openFile(file) },
+                        duplicateComponent: { relativePath in await model.duplicateComponent(relativePath: relativePath) }
                     )
                 )
             } else if case .plist(let plistEditorModel) = model.activeEditor {

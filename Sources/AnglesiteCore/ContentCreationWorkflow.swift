@@ -27,6 +27,7 @@ public struct ContentCreationWorkflow: ContentOperationsService {
     public typealias PageDuplicator = @Sendable (_ siteID: String, _ relativePath: String, _ title: String) async -> ContentCreateResult
     public typealias PostDuplicator = @Sendable (_ siteID: String, _ relativePath: String, _ collection: String, _ title: String) async -> ContentCreateResult
     public typealias ComponentCreator = @Sendable (_ siteID: String, _ name: String) async -> ContentCreateResult
+    public typealias ComponentDuplicator = @Sendable (_ siteID: String, _ relativePath: String) async -> ContentCreateResult
 
     private let operations: any ContentOperationsService
     private let contentGraph: SiteContentGraph?
@@ -39,6 +40,7 @@ public struct ContentCreationWorkflow: ContentOperationsService {
     private let pageDuplicator: PageDuplicator?
     private let postDuplicator: PostDuplicator?
     private let componentCreator: ComponentCreator?
+    private let componentDuplicator: ComponentDuplicator?
 
     public init(
         operations: any ContentOperationsService,
@@ -51,7 +53,8 @@ public struct ContentCreationWorkflow: ContentOperationsService {
         contentRestorer: ContentRestorer? = nil,
         pageDuplicator: PageDuplicator? = nil,
         postDuplicator: PostDuplicator? = nil,
-        componentCreator: ComponentCreator? = nil
+        componentCreator: ComponentCreator? = nil,
+        componentDuplicator: ComponentDuplicator? = nil
     ) {
         self.operations = operations
         self.contentGraph = contentGraph
@@ -64,6 +67,7 @@ public struct ContentCreationWorkflow: ContentOperationsService {
         self.pageDuplicator = pageDuplicator
         self.postDuplicator = postDuplicator
         self.componentCreator = componentCreator
+        self.componentDuplicator = componentDuplicator
     }
 
     public static func native(
@@ -113,6 +117,9 @@ public struct ContentCreationWorkflow: ContentOperationsService {
             },
             componentCreator: { siteID, name in
                 await native.createComponent(siteID: siteID, name: name)
+            },
+            componentDuplicator: { siteID, relativePath in
+                await native.duplicateComponent(siteID: siteID, relativePath: relativePath)
             }
         )
     }
@@ -281,5 +288,12 @@ public struct ContentCreationWorkflow: ContentOperationsService {
     public func createComponent(siteID: String, name: String) async -> ContentCreateResult {
         guard let componentCreator else { return .failed(reason: "Component creation is not configured for this workflow") }
         return await componentCreator(siteID, name)
+    }
+
+    /// Mirrors `createComponent`'s no-graph-refresh precedent (components aren't part of
+    /// `SiteContentGraph`) — the app-layer caller refreshes the Navigator itself.
+    public func duplicateComponent(siteID: String, relativePath: String) async -> ContentCreateResult {
+        guard let componentDuplicator else { return .failed(reason: "Duplicate is not configured for this workflow") }
+        return await componentDuplicator(siteID, relativePath)
     }
 }

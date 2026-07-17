@@ -311,6 +311,45 @@ struct ContentCreationWorkflowTests {
         #expect(result == .created(filePath: "src/components/Widget.astro", identifier: "Widget"))
     }
 
+    @Test("duplicateComponent does not require content graph access and returns the operation's result")
+    func duplicateComponentPassesThrough() async throws {
+        let root = try makeSite()
+        let operations = FakeCreateOperations { _, _, _ in
+            .failed(reason: "unexpected")
+        } createPost: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        } createTyped: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        }
+        let workflow = ContentCreationWorkflow(
+            operations: operations,
+            contentGraph: nil,
+            siteDirectory: { _ in root },
+            componentDuplicator: { _, relativePath in .created(filePath: "src/components/WidgetCopy.astro", identifier: "WidgetCopy") }
+        )
+
+        let result = await workflow.duplicateComponent(siteID: Self.siteID, relativePath: "src/components/Widget.astro")
+
+        #expect(result == .created(filePath: "src/components/WidgetCopy.astro", identifier: "WidgetCopy"))
+    }
+
+    @Test("duplicateComponent reports failed when the workflow has no componentDuplicator configured")
+    func duplicateComponentUnconfigured() async throws {
+        let root = try makeSite()
+        let operations = FakeCreateOperations { _, _, _ in
+            .failed(reason: "unexpected")
+        } createPost: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        } createTyped: { _, _, _, _ in
+            .failed(reason: "unexpected")
+        }
+        let workflow = ContentCreationWorkflow(operations: operations, contentGraph: nil, siteDirectory: { _ in root })
+
+        let result = await workflow.duplicateComponent(siteID: Self.siteID, relativePath: "src/components/Widget.astro")
+
+        guard case .failed = result else { Issue.record("expected .failed, got \(result)"); return }
+    }
+
     @Test("deleteContent reports failed when the workflow has no contentDeleter configured")
     func deleteContentUnconfigured() async throws {
         let root = try makeSite()
