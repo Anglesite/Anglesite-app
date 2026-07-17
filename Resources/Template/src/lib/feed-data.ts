@@ -5,9 +5,11 @@ const PER_COLLECTION_LIMIT = 50;
 const COMBINED_LIMIT = 50;
 
 /// Map a collection's entries to feed items *without* sorting — callers that immediately re-sort
-/// (the combined feed) skip the wasted per-collection sort.
+/// (the combined feed) skip the wasted per-collection sort. Drafts are always excluded (#798): a
+/// feed is syndication data consumed by external readers, not a live dev preview, so unlike the
+/// page routes above this filter is unconditional — dev or prod, a draft never appears in a feed.
 async function mapCollection(collection: string, site: string): Promise<FeedItem[]> {
-  const entries = await getCollection(collection as any);
+  const entries = await getCollection(collection as any, (entry: any) => !entry.data.draft);
   return entries.map((e: any) =>
     toFeedItem(collection, { id: e.id, collection, data: e.data, body: e.body }, site),
   );

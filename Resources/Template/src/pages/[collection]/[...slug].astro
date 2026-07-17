@@ -9,7 +9,14 @@ export async function getStaticPaths() {
   const paths = [];
   for (const collection of ENTRY_COLLECTIONS) {
     const entries = await getCollection(collection);
-    for (const entry of entries) {
+    // Business types (events/reviews/announcements) have no `draft` key — `.draft` is
+    // `undefined` there, and `!undefined` is `true`, so they pass through unfiltered exactly as
+    // before. Only the post-family types this issue adds `draft` to are actually gated, and only
+    // in a production build; `astro dev` shows drafts (with a badge inside Hentry) for preview.
+    const visible = entries.filter((entry) =>
+      import.meta.env.PROD ? !(entry.data as any).draft : true,
+    );
+    for (const entry of visible) {
       paths.push({ params: { collection, slug: entry.id }, props: { entry } });
     }
   }
