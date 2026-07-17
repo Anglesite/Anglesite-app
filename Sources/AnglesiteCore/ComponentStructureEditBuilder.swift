@@ -92,17 +92,18 @@ public enum ComponentStructureEditBuilder {
         )
     }
 
-    /// Carve the subtree rooted at `nodeId` out into a brand-new `.astro` component at
-    /// `newComponentPath` (a project-relative path under `src/components/` with a capitalized
-    /// basename), replacing the extracted markup with a self-closing instance + import. The
-    /// plugin applies this as one atomic two-file edit. Adds `newComponentPath` to the standard
-    /// `{ path, baseVersion, nodeId }` structure-op payload.
+    /// Carve the subtree rooted at `nodeId` out into a brand-new `.astro` component, replacing the
+    /// extracted markup with a self-closing instance + import. The plugin applies this as one
+    /// atomic two-file edit. `newName` is a bare PascalCase identifier (no path, no `.astro`
+    /// suffix) — the server derives the full path itself as `src/components/<newName>.astro` and
+    /// validates the name against a strict PascalCase-identifier regex. Adds `newName` to the
+    /// standard `{ path, baseVersion, nodeId }` structure-op payload.
     public static func extractComponent(
         id: String,
         path: String,
         baseVersion: String,
         nodeId: String,
-        newComponentPath: String
+        newName: String
     ) -> EditMessage {
         EditMessage(
             id: id,
@@ -113,7 +114,7 @@ public enum ComponentStructureEditBuilder {
                 "path": .string(path),
                 "baseVersion": .string(baseVersion),
                 "nodeId": .string(nodeId),
-                "newComponentPath": .string(newComponentPath),
+                "newName": .string(newName),
             ]),
             value: nil
         )

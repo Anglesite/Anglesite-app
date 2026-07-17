@@ -96,8 +96,10 @@ struct MCPApplyEditRouterTests {
         #expect(reply.result?.srcset == "/images/hero-480w.webp 480w")
     }
 
-    @Test("Successful reply with extract result exposes componentPath, hoistedProps, warnings") func successfulReplyWithExtractResultExposesExtractResult() async {
-        let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/components/Card.astro","range":{"start":40,"end":120},"commit":"abc1234567890abcdef1234567890abcdef12345","result":{"componentPath":"src/components/Hero.astro","hoistedProps":["title","subtitle"],"warnings":["Left a complex style rule behind."]}}"#
+    @Test("Successful reply with a top-level newFile exposes newFile, no result object") func successfulReplyWithNewFileExposesNewFile() async {
+        // `extract-component` reports the created file as a plain top-level `newFile` string
+        // (sibling to `file`/`commit`), with NO `result` object at all.
+        let body = #"{"type":"anglesite:edit-applied","id":"e-1","file":"src/components/Card.astro","range":{"start":40,"end":120},"commit":"abc1234567890abcdef1234567890abcdef12345","newFile":"src/components/Hero.astro"}"#
         let recorder = ToolCallRecorder(result: .success(MCPClient.ToolCallResult(
             content: [.init(type: "text", text: body)],
             isError: false
@@ -105,10 +107,9 @@ struct MCPApplyEditRouterTests {
         let router = MCPApplyEditRouter(toolCaller: { try await recorder.call(name: $0, arguments: $1) })
         let reply = await router.apply(sampleMessage)
         #expect(reply.status == .applied)
+        #expect(reply.file == "src/components/Card.astro")
+        #expect(reply.newFile == "src/components/Hero.astro")
         #expect(reply.result == nil)
-        #expect(reply.extractResult?.componentPath == "src/components/Hero.astro")
-        #expect(reply.extractResult?.hoistedProps == ["title", "subtitle"])
-        #expect(reply.extractResult?.warnings == ["Left a complex style rule behind."])
     }
 
     @Test("Malformed reply text falls back to message string") func malformedReplyTextFallsBackToMessageString() async {

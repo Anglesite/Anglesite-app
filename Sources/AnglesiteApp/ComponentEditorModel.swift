@@ -60,11 +60,6 @@ final class ComponentEditorModel {
     /// `writeError` instead drives a small dismissible banner scoped to the Styles panel; `model`
     /// and `loadError` are left untouched so the editor pane stays live.
     var writeError: String?
-    /// Non-fatal advisories from the last `extract-component` op (e.g. a scoped style rule the
-    /// plugin couldn't migrate) — drives the dismissible warnings banner. Set only when the
-    /// extraction applied with a non-empty `warnings` list; `nil` otherwise, and cleared on the
-    /// next successful `load()` or applied edit.
-    var extractWarnings: [String]?
     /// Sibling project components for the palette — scanned once per `load()`, not per render.
     private(set) var projectComponents: [FileRef] = []
 
@@ -109,7 +104,6 @@ final class ComponentEditorModel {
             model = fetched
             loadError = nil
             loadErrorReason = nil
-            extractWarnings = nil
             knobValues = Dictionary(
                 uniqueKeysWithValues: (fetched.frontmatter?.props ?? []).map {
                     ($0.name, KnobDefaults.value(for: $0))
@@ -359,9 +353,6 @@ final class ComponentEditorModel {
         case .applied:
             conflict = false
             writeError = nil
-            // A successful unrelated edit clears any lingering extract warnings (a fresh model
-            // adoption below doesn't run `load()`, which is the other place they'd clear).
-            extractWarnings = nil
             if let freshModel = reply.model {
                 model = freshModel
             } else {
@@ -380,24 +371,26 @@ final class ComponentEditorModel {
 
     // MARK: - Extract into component
 
-    /// Extract the subtree rooted at `nodeId` into a brand-new `.astro` component at
-    /// `newComponentPath`, replacing the extracted markup with a self-closing instance + import.
-    /// The plugin applies this as one atomic two-file edit; the reconciliation here mirrors the
-    /// other structure writes (`applyComponentStyleEdit`) — adopt a piggybacked fresh `model` for
-    /// the original file or reload; a `stale` refusal flips `conflict` and reloads — and
-    /// additionally surfaces the op's non-fatal `warnings` via `extractWarnings` for the banner.
-    /// The `newComponentPath` client-side validation lives in `ExtractComponentSheet`; the
-    /// plugin's own `invalid-input`/`exists` refusals still surface here via `writeError`.
-    /// Returns whether the extraction applied.
+    /// Extract the subtree rooted at `nodeId` into a brand-new `.astro` component. `newName` is a
+    /// bare PascalCase identifier — the plugin derives the full `src/components/<newName>.astro`
+    /// path itself. The plugin applies this as one atomic two-file edit; the reconciliation here
+    /// mirrors the other structure writes (`applyComponentStyleEdit`) — adopt a piggybacked fresh
+    /// `model` for the original file or reload; a `stale` refusal flips `conflict` and reloads.
+    /// Because this op creates a brand-new component file, the piggybacked-model fast path also
+    /// rescans `projectComponents` so the palette immediately reflects the new component (the
+    /// `load()` fallback already does this). The `newName` client-side validation lives in
+    /// `ExtractComponentSheet`; the plugin's own `invalid-input`/`already-exists`/`dynamic-expression`
+    /// refusals still surface here via `writeError` (they flow through the generic failure branch,
+    /// like every other op's non-`stale` refusal). Returns whether the extraction applied.
     @discardableResult
-    func extractComponent(nodeId: String, newComponentPath: String) async -> Bool {
+    func extractComponent(nodeId: String, newName: String) async -> Bool {
         guard let editRouter = context.editRouter else { return false }
         let message = ComponentStructureEditBuilder.extractComponent(
             id: UUID().uuidString,
             path: relativePath,
             baseVersion: model?.version ?? "",
             nodeId: nodeId,
-            newComponentPath: newComponentPath
+            newName: newName
         )
         let reply = await editRouter.apply(message)
         switch reply.status {
@@ -406,13 +399,10 @@ final class ComponentEditorModel {
             writeError = nil
             if let freshModel = reply.model {
                 model = freshModel
+                projectComponents = SiteFileTree.scan(siteRoot: context.sourceRoot)[.components] ?? []
             } else {
                 await load()
             }
-            // Set last: `load()` above clears `extractWarnings`, so surfacing the op's warnings
-            // must happen after the model reconciliation, not before.
-            let warnings = reply.extractResult?.warnings ?? []
-            extractWarnings = warnings.isEmpty ? nil : warnings
             return true
         case .failed where reply.reason == "stale":
             conflict = true

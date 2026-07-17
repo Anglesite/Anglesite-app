@@ -171,12 +171,13 @@ struct ComponentEditorView: View {
         .sheet(item: $extractTarget) { target in
             ExtractComponentSheet { name in
                 guard let model else { return "The component editor isn't ready yet." }
-                let newComponentPath = "src/components/\(name).astro"
-                let applied = await model.extractComponent(nodeId: target.id, newComponentPath: newComponentPath)
+                // Pass the bare name straight through — the plugin derives the full
+                // `src/components/<name>.astro` path itself from `newName`.
+                let applied = await model.extractComponent(nodeId: target.id, newName: name)
                 // On success the sheet dismisses (nil). On failure, surface the plugin's refusal
-                // (invalid-input / exists / a transient error) captured in `writeError`; a stale
-                // refusal leaves `writeError` nil, so fall back to a generic message (the conflict
-                // banner explains the reload separately).
+                // (invalid-input / already-exists / dynamic-expression / a transient error) captured
+                // in `writeError`; a stale refusal leaves `writeError` nil, so fall back to a generic
+                // message (the conflict banner explains the reload separately).
                 return applied ? nil : (model.writeError ?? "The component couldn't be extracted.")
             }
         }
@@ -554,9 +555,6 @@ struct ComponentEditorView: View {
                 if let writeError = model.writeError {
                     writeErrorBanner(model, message: writeError)
                 }
-                if let warnings = model.extractWarnings, !warnings.isEmpty {
-                    extractWarningsBanner(model, warnings: warnings)
-                }
                 GroupBox("Styles") {
                     if let styles = model.model?.styles, !styles.isEmpty {
                         ForEach(Array(styles.enumerated()), id: \.offset) { ruleIndex, rule in
@@ -811,32 +809,6 @@ struct ComponentEditorView: View {
         }
         .padding(8)
         .background(.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-    }
-
-    /// Non-fatal advisories from the last `extract-component` op (e.g. a scoped style rule left
-    /// behind) — a dismissible banner, visually distinct from the red error/conflict banners via a
-    /// yellow tint and an `exclamationmark.circle` symbol. The extraction still applied; this just
-    /// tells the user what the plugin couldn't carry over. Dismissing clears `model.extractWarnings`.
-    private func extractWarningsBanner(_ model: ComponentEditorModel, warnings: [String]) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.circle").foregroundStyle(.yellow)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Component extracted with warnings:").font(.caption).bold()
-                ForEach(warnings, id: \.self) { warning in
-                    Text("• \(warning)").font(.caption)
-                }
-            }
-            Spacer()
-            Button {
-                model.extractWarnings = nil
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-        }
-        .padding(8)
-        .background(.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func highlightInCanvas(nodeID: String?) {

@@ -313,10 +313,10 @@ struct NewPostSheet: View {
 }
 
 /// Name prompt for "Extract into Component…" (design §6.3). Mirrors `NewComponentSheet`'s
-/// Form/toolbar shape, but prompts for a component name (combined into a
-/// `src/components/<Name>.astro` path by the caller) and validates client-side that the name
-/// starts with an uppercase letter — a UX guard, not a substitute for the plugin's own
-/// `invalid-input`/`exists` refusals, which surface via `errorMessage`.
+/// Form/toolbar shape, but prompts for a bare component name passed straight through as the op's
+/// `newName` (the plugin derives the full `src/components/<Name>.astro` path itself). Validates
+/// client-side that the name starts with an uppercase letter — a UX guard, not a substitute for
+/// the plugin's own `invalid-input`/`already-exists` refusals, which surface via `errorMessage`.
 struct ExtractComponentSheet: View {
     /// Called with the client-side-validated name. Returns an error message to show in-sheet, or
     /// `nil` on success (which dismisses).
@@ -366,8 +366,8 @@ struct ExtractComponentSheet: View {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Non-empty and starts with an uppercase letter — mirrors the plugin's capitalized-basename
-    /// requirement for `newComponentPath`.
+    /// Non-empty and starts with an uppercase letter — mirrors the plugin's PascalCase-identifier
+    /// requirement for `newName`.
     private var nameIsValid: Bool {
         trimmedName.first?.isUppercase == true
     }

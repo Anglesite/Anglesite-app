@@ -67,50 +67,43 @@ struct ComponentEditorModelStructureEditTests {
         #expect(model.conflict)
     }
 
-    @Test("extractComponent sends the built EditMessage and surfaces warnings")
-    func extractComponentAppliesWithWarnings() async {
+    @Test("extractComponent sends the built EditMessage carrying a bare newName and applies success")
+    func extractComponentApplies() async {
         let router = RecordingRouter(reply: EditReply(
             id: "x",
             status: .applied,
             message: nil,
-            extractResult: EditReply.ExtractComponentResult(
-                componentPath: "src/components/Hero.astro",
-                hoistedProps: ["title"],
-                warnings: ["Could not migrate a complex style rule."]
-            )
+            newFile: "src/components/Hero.astro"
         ))
         let model = makeModel(router: router)
-        let applied = await model.extractComponent(nodeId: "n3", newComponentPath: "src/components/Hero.astro")
+        let applied = await model.extractComponent(nodeId: "n3", newName: "Hero")
         #expect(applied)
         #expect(router.lastMessage?.op == EditMessage.Op.extractComponent)
-        #expect(model.extractWarnings == ["Could not migrate a complex style rule."])
+        // The op carries the bare name straight through as `newName` — no client-side path building.
+        guard case .object(let obj)? = router.lastMessage?.component else { Issue.record("expected object component payload"); return }
+        #expect(obj["newName"] == .string("Hero"))
+        #expect(obj["nodeId"] == .string("n3"))
     }
 
-    @Test("extractComponent with no warnings leaves the banner state nil")
-    func extractComponentAppliesWithoutWarnings() async {
-        let router = RecordingRouter(reply: EditReply(
-            id: "x",
-            status: .applied,
-            message: nil,
-            extractResult: EditReply.ExtractComponentResult(
-                componentPath: "src/components/Hero.astro",
-                hoistedProps: [],
-                warnings: []
-            )
-        ))
-        let model = makeModel(router: router)
-        let applied = await model.extractComponent(nodeId: "n3", newComponentPath: "src/components/Hero.astro")
-        #expect(applied)
-        #expect(model.extractWarnings == nil)
-    }
-
-    @Test("extractComponent surfaces a plugin refusal via writeError")
+    @Test("extractComponent surfaces a plugin already-exists refusal via writeError")
     func extractComponentRefusalSurfacesWriteError() async {
-        let router = RecordingRouter(reply: EditReply(id: "x", status: .failed, message: "That component already exists.", reason: "exists"))
+        let router = RecordingRouter(reply: EditReply(id: "x", status: .failed, message: "That component already exists.", reason: "already-exists"))
         let model = makeModel(router: router)
-        let applied = await model.extractComponent(nodeId: "n3", newComponentPath: "src/components/Hero.astro")
+        let applied = await model.extractComponent(nodeId: "n3", newName: "Hero")
         #expect(!applied)
         #expect(model.writeError == "That component already exists.")
+        #expect(!model.conflict)
+    }
+
+    @Test("extractComponent surfaces a dynamic-expression refusal via writeError")
+    func extractComponentDynamicExpressionSurfacesWriteError() async {
+        // `dynamic-expression` is a routine, non-`stale` refusal, so it flows through the generic
+        // failure branch into `writeError` exactly like `already-exists` — no special-casing.
+        let router = RecordingRouter(reply: EditReply(id: "x", status: .failed, message: "Can't extract a subtree with dynamic content.", reason: "dynamic-expression"))
+        let model = makeModel(router: router)
+        let applied = await model.extractComponent(nodeId: "n3", newName: "Hero")
+        #expect(!applied)
+        #expect(model.writeError == "Can't extract a subtree with dynamic content.")
         #expect(!model.conflict)
     }
 
@@ -118,7 +111,7 @@ struct ComponentEditorModelStructureEditTests {
     func extractComponentStaleFlipsConflict() async {
         let router = RecordingRouter(reply: EditReply(id: "x", status: .failed, message: "stale", reason: "stale"))
         let model = makeModel(router: router)
-        let applied = await model.extractComponent(nodeId: "n3", newComponentPath: "src/components/Hero.astro")
+        let applied = await model.extractComponent(nodeId: "n3", newName: "Hero")
         #expect(!applied)
         #expect(model.conflict)
     }
