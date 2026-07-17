@@ -105,4 +105,62 @@ struct DeployModelTests {
         #expect(name == "my-site")
         #expect(model.workerNameConflictPresented)
     }
+
+    @Test("Renaming and retrying rewrites wrangler.toml/.site-config and re-deploys under the new name")
+    func renameAndRetrySucceedsUnderNewName() async {
+        let executor = GatedDeployExecutor()
+        await executor.resumeBuild()
+        let command = DeployCommand(
+            tokenSource: { "test-token" },
+            // "my-site" is taken; "my-site-2" (what the sheet will submit) is free.
+            workerScriptNamesSource: { _ in ["my-site"] },
+            executor: executor
+        )
+        let model = DeployModel(command: command, logCenter: LogCenter(), tokenAvailabilityOverride: { true })
+        let siteDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try! FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        try! #"name = "my-site""#.write(to: siteDir.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
+        try! "CF_PROJECT_NAME=my-site\n".write(to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        model.deploy(siteID: "s", siteDirectory: siteDir, configDirectory: siteDir, currentRoutes: [])
+        while model.isRunning { await Task.yield() }
+        guard case .workerNameConflict = model.phase else {
+            Issue.record("expected .workerNameConflict before renaming, got \(model.phase)"); return
+        }
+
+        await model.renameWorkerAndRetry("my-site-2")
+        while model.isRunning { await Task.yield() }
+
+        guard case .succeeded = model.phase else {
+            Issue.record("expected .succeeded after rename-and-retry, got \(model.phase)"); return
+        }
+        #expect(!model.workerNameConflictPresented)
+        let toml = try! String(contentsOf: siteDir.appendingPathComponent("wrangler.toml"), encoding: .utf8)
+        #expect(toml.contains(#"name = "my-site-2""#))
+    }
+
+    @Test("Cancelling the conflict prompt clears the parked deploy and dismisses the sheet")
+    func cancelClearsPendingDeploy() async {
+        let executor = GatedDeployExecutor()
+        await executor.resumeBuild()
+        let command = DeployCommand(
+            tokenSource: { "test-token" },
+            workerScriptNamesSource: { _ in ["my-site"] },
+            executor: executor
+        )
+        let model = DeployModel(command: command, logCenter: LogCenter(), tokenAvailabilityOverride: { true })
+        let siteDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try! FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        try! "CF_PROJECT_NAME=my-site\n".write(to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        model.deploy(siteID: "s", siteDirectory: siteDir, configDirectory: siteDir, currentRoutes: [])
+        while model.isRunning { await Task.yield() }
+
+        model.cancelWorkerNameConflictPrompt()
+
+        #expect(!model.workerNameConflictPresented)
+        // A subsequent rename attempt with nothing parked must fail gracefully, not crash.
+        await model.renameWorkerAndRetry("anything")
+        #expect(!model.isRunning)
+    }
 }

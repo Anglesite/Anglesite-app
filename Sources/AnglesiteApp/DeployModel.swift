@@ -267,6 +267,36 @@ final class DeployModel {
         tokenVerification = .idle
     }
 
+    /// Called by the worker-name-conflict sheet's "Rename & retry" button. Applies the rename to
+    /// `wrangler.toml`/`.site-config` via `WorkerNameRename.apply`, then retries the parked
+    /// deploy — which re-runs the collision check against the new name and loops back to this
+    /// same sheet if it's also taken.
+    func renameWorkerAndRetry(_ newName: String) async {
+        guard let pending = pendingDeploy else {
+            workerNameConflictError = "No deploy is waiting — close this and click Deploy again."
+            return
+        }
+        do {
+            try WorkerNameRename.apply(newName: newName, siteDirectory: pending.siteDirectory)
+        } catch {
+            workerNameConflictError = "Couldn't rename the Worker: \(error)"
+            return
+        }
+        pendingDeploy = nil
+        workerNameConflictPresented = false
+        workerNameConflictError = nil
+        deploy(
+            siteID: pending.siteID, siteDirectory: pending.siteDirectory,
+            configDirectory: pending.configDirectory, currentRoutes: pending.currentRoutes,
+            containerControl: pending.containerControl)
+    }
+
+    func cancelWorkerNameConflictPrompt() {
+        pendingDeploy = nil
+        workerNameConflictPresented = false
+        workerNameConflictError = nil
+    }
+
     func dismissDrawer() {
         drawerPresented = false
     }
