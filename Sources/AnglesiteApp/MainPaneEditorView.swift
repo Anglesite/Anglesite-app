@@ -32,7 +32,7 @@ struct MainPaneEditorView: View {
                     ProgressView().controlSize(.small)
                 } else {
                     switch EditorKind.resolve(for: model.file) {
-                    case .text, .plist:
+                    case .text, .plist, .markdown:
                         TextEditor(text: $model.text)
                             .font(.system(.body, design: .monospaced))
                             .scrollContentBackground(.hidden)

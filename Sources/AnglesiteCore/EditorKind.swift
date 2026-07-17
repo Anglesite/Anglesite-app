@@ -5,6 +5,7 @@ public enum EditorKind: Sendable, Equatable {
     case text
     case plist
     case component
+    case markdown
 
     /// Resolves the editor for a file. A single decision point so the routing rule lives in one
     /// tested place; kept on the enum to keep the public API surface tidy.
@@ -14,6 +15,9 @@ public enum EditorKind: Sendable, Equatable {
         }
         if file.group == .components, file.url.pathExtension.lowercased() == "astro" {
             return .component
+        }
+        if ["md", "mdx", "markdown"].contains(file.url.pathExtension.lowercased()) {
+            return .markdown
         }
         return .text
     }
