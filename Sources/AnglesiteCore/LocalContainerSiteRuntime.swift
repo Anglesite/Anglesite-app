@@ -20,6 +20,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private let makeFileWatcher: @Sendable () -> any SiteFileWatching
     private let importBundle: @Sendable (URL, String, URL) async throws -> Void
     private let suddenTerminationController: SuddenTerminationController
+    private let beginActivity: @Sendable (String) -> ActivityAssertion.Lease
     private var fileWatcher: (any SiteFileWatching)?
     private var containerTerminationLease: SuddenTerminationController.Lease?
 
@@ -58,7 +59,8 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             throw SiteRuntimePersistenceError.syncFailed("in-process git import is unavailable on this platform")
             #endif
         },
-        suddenTerminationController: SuddenTerminationController = .shared
+        suddenTerminationController: SuddenTerminationController = .shared,
+        beginActivity: @escaping @Sendable (String) -> ActivityAssertion.Lease = ActivityAssertion.begin
     ) {
         self.ref = ref
         self.control = control
@@ -71,6 +73,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         self.makeFileWatcher = makeFileWatcher
         self.importBundle = importBundle
         self.suddenTerminationController = suddenTerminationController
+        self.beginActivity = beginActivity
     }
 
     public var state: SiteRuntimeState { current }
@@ -246,6 +249,11 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         }
         setState(.starting(siteID: siteID))
         let suddenTerminationLease = suddenTerminationController.acquire()
+        // Scoped to the boot window only (unlike suddenTerminationLease, which outlives it as
+        // containerTerminationLease) — released on every exit path below, including success:
+        // once .ready/.failed is reached there's no more provisioning work an occluded app could
+        // silently stall on. #773.
+        let activityLease = beginActivity("Starting local preview for \(siteID)")
 
         // Wire the container's boot/guest-process output (repo clone, npm install + astro dev, the
         // MCP sidecar, the vsock bridge) into LogCenter under a per-site source tag, live, the same
@@ -274,6 +282,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         func abandonSupersededAttempt() async {
             try? await control.stop(siteID: siteID)
             suddenTerminationLease.release()
+            activityLease.release()
             continuation.finish()
             await drainTask.value
         }
@@ -310,6 +319,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             activeSiteID = siteID
             activeSiteDirectory = siteDirectory
             containerTerminationLease = suddenTerminationLease
+            activityLease.release()
             setState(.ready(siteID: siteID, url: session.previewURL))
         } catch {
             // Finish this attempt's own (locally-captured) boot log stream immediately rather than
@@ -325,6 +335,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
                 try? await control.stop(siteID: siteID)
             }
             suddenTerminationLease.release()
+            activityLease.release()
             guard gen == generation else { return }
             bootLogContinuation = nil
             bootLogDrainTask = nil
