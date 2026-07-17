@@ -576,3 +576,12 @@ Both are the first Xcode task of #797 (checklist below).
    feel on a ~100 KB post; Writing Tools smoke (rewrite + proofread round-trip
    keeps Markdown intact); checkbox hit-target size; confirm smart-quote handling
    behaves after the §2 change.
+
+   > **#797 implementation status (2026-07-17):** the engine is adopted via the
+   > `Anglesite/swift-markdown-engine` fork (upstream v0.10.0 `665f7c46` + the §2
+   > smart-quote config patch, `SpellCheckingPolicy.automaticQuoteSubstitution`),
+   > pinned by revision; the engine's 250-test upstream suite passes with the patch.
+   > The four on-device *feel* checks above remain a **manual GUI smoke** (agent
+   > session had no screen access): a ~100 KB fixture post with every v1 construct
+   > is staged at `~/Sites/issue491-smoke.anglesite/Source/src/content/blog/`
+   > `markdown-editor-stress-test.md` for it.
