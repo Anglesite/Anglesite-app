@@ -366,6 +366,17 @@ final class SiteWindowModel {
         preview.startDevServer()
     }
 
+    /// The `.failed`-state pane's "Restart Networking" button (#812), shown only when
+    /// `VmnetFailureRecovery.isRecoverable` recognizes the failure. Drops this process's cached
+    /// vmnet network (`PreviewModel.resetNetworking()`) before retrying, so the retry that follows
+    /// doesn't just fail against the same wedged network object.
+    func restartNetworkingAndRetry() {
+        Task {
+            await preview.resetNetworking()
+            retryPreview()
+        }
+    }
+
     func previewStateChanged(_ state: SiteRuntimeState) {
         startup.ingest(state: state)
         guard preview.canDeploy, let invisiblePublishQueue else { return }

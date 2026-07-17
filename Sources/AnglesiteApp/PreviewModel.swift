@@ -468,6 +468,17 @@ final class PreviewModel {
         return (siteID: snapshot.siteID, control: snapshot.control)
     }
 
+    /// The failure pane's "Restart Networking" action (#812) — unlike `activeContainerControl()`,
+    /// works from a `.failed` state (no live container to snapshot) since
+    /// `LocalContainerSiteRuntime.resetNetworking()` reaches its `control` unconditionally. No-ops
+    /// for other runtime types; the button that calls this is only shown when
+    /// `VmnetFailureRecovery.isRecoverable` recognized the failure, which only the local-container
+    /// path can produce.
+    func resetNetworking() async {
+        guard let containerRuntime = runtime as? LocalContainerSiteRuntime else { return }
+        await containerRuntime.resetNetworking()
+    }
+
     /// True when the preview runtime is ready — used to gate the Deploy button so a user
     /// deploying before the container (or dev server) is up sees a coherent error rather than
     /// a silent `ContainerDeployExecutor` "container isn't running" failure.

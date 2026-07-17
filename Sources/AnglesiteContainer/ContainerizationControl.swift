@@ -190,6 +190,16 @@ public struct ContainerizationControl: LocalContainerControl {
         await network.release(siteID: siteID)
     }
 
+    /// `LocalContainerControl.resetNetworking()` conformance (#812): drops this process's cached
+    /// vmnet network so the next boot attempt builds a fresh one, without disturbing any
+    /// currently-running site's container (see `SharedVmnetNetwork.reset()`) and without an app
+    /// relaunch or macOS reboot. Every `ContainerizationControl` value resolves to the same
+    /// `SharedVmnetNetwork.shared` actor, so this is reachable from any instance regardless of
+    /// which site (if any) it booted.
+    public func resetNetworking() async {
+        await network.reset()
+    }
+
     /// Phases 0–2 of `start()`: resolve bundled artifacts, unpack rootfs/initfs, boot the VM.
     /// `sourceRepo: nil` boots a bare container (no virtio-fs share) — used by the vsock e2e test.
     /// Does NOT register the container in `live` — the caller owns its lifecycle (either `start()`'s

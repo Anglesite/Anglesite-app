@@ -56,4 +56,26 @@ actor SharedVmnetNetwork {
         try? network.releaseInterface(siteID)
         self.network = network
     }
+
+    /// Discards the cached network so the next `allocate` builds a fresh one via `makeNetwork`,
+    /// instead of reusing whatever this process has been holding since its first boot (#812).
+    ///
+    /// Safe for any currently-running site: `VmnetNetwork.Interface` (Containerization's
+    /// `Network.createInterface` return value, already handed to that site's booted VM as
+    /// `config.interfaces`) carries its own retained copy of the underlying `vmnet_network_ref` —
+    /// `vmnet_network_create` returns it `CF_RETURNS_RETAINED`, so Swift ARC/CF-bridges it like any
+    /// other CF object. Dropping the copy cached here only stops *this* actor from reusing it for
+    /// future allocations; a VM that already attached its own copy keeps running unaffected, and
+    /// the OS-level network only actually tears down once every such holder — including one held by
+    /// this call — releases theirs.
+    ///
+    /// This is a self-heal for state that's stuck *in this process* (e.g. an exhausted allocator, or
+    /// a network object left in a bad state by a partial boot failure). It does NOT reach into vmnet
+    /// state owned by another process: a stranded lease left by a crashed prior launch or another
+    /// app (#753) is invisible to and unrecoverable by this call — the App Sandbox precludes
+    /// inspecting or killing another process's Virtualization XPC VM, matching
+    /// `VmnetFailureRecovery`'s existing constraint.
+    func reset() {
+        network = nil
+    }
 }
