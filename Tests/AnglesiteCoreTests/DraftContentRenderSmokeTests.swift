@@ -76,7 +76,7 @@ struct DraftContentRenderSmokeTests {
 
             let combinedFeed = try String(
                 contentsOf: dist.appendingPathComponent("feed.json"), encoding: .utf8)
-            for fixture in Self.draftFixtures where fixture.collection != "blog" {
+            for fixture in Self.draftFixtures {
                 #expect(!combinedFeed.contains(fixture.slug), "\(fixture.slug) leaked into the combined feed")
             }
         }
