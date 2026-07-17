@@ -278,6 +278,16 @@ final class DeployModel {
         }
         do {
             try WorkerNameRename.apply(newName: newName, siteDirectory: pending.siteDirectory)
+        } catch let error as WorkerNameRename.RenameError {
+            switch error {
+            case .invalidName:
+                workerNameConflictError = "Worker names can only contain letters, numbers, hyphens, and underscores."
+            case .wranglerConfigMissing:
+                workerNameConflictError = "Couldn't find this site's wrangler.toml — try deploying again."
+            case .nameLineNotFound:
+                workerNameConflictError = "This site's wrangler.toml is missing its Worker name — try deploying again."
+            }
+            return
         } catch {
             workerNameConflictError = "Couldn't rename the Worker: \(error)"
             return
