@@ -354,7 +354,7 @@ final class PlistEditorModel {
     /// over `dirtyFacets` instead of checking each pane by name, so a future settings pane (e.g. a
     /// `.well-known` tab) is registered here and needs no edits anywhere else — including
     /// `SiteWindowModel`'s save/close switch statements.
-    struct DirtyFacet {
+    private struct DirtyFacet {
         let isDirty: Bool
         let isSaving: Bool
         let save: () async -> Void
