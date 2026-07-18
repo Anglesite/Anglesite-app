@@ -31,6 +31,10 @@ final class SiteNavigatorModel {
     /// page rows without an extra actor hop — both are `.route` targets and `isContentRow` alone
     /// can't tell them apart (Task 16, #465).
     private var postIDs: Set<String> = []
+    /// Full post records from the last `refresh()`, so `canPublish`/`canUnpublish` (#798) can read
+    /// a row's collection and current draft state without an extra actor hop.
+    private var postsByID: [String: SiteContentGraph.Post] = [:]
+    private let contentTypeRegistry = ContentTypeRegistry()
 
     private let graph: SiteContentGraph
     private var observeTask: Task<Void, Never>?
@@ -114,6 +118,24 @@ final class SiteNavigatorModel {
     /// Repurpose (#465, Task 16) is post-only — unlike Rename/Delete/Duplicate, which apply to
     /// pages too — so it checks `postIDs` rather than the page-or-post `isContentRow`.
     func canRepurpose(_ id: String) -> Bool { postIDs.contains(id) }
+
+    /// Publish/Unpublish (#798) apply only to registry-backed typed post-family entries — `blog`
+    /// posts have no `ContentTypeDescriptor` (they predate the registry, per `content.config.ts`'s
+    /// hand-authored `blog` block) and keep their existing verb-less draft workflow.
+    private func publishableDescriptor(_ id: String) -> ContentTypeDescriptor? {
+        guard let post = postsByID[id] else { return nil }
+        return contentTypeRegistry.descriptor(forCollection: post.collection)
+    }
+
+    func canPublish(_ id: String) -> Bool {
+        guard let post = postsByID[id], publishableDescriptor(id) != nil else { return false }
+        return post.draft
+    }
+
+    func canUnpublish(_ id: String) -> Bool {
+        guard let post = postsByID[id], publishableDescriptor(id) != nil else { return false }
+        return !post.draft
+    }
 
     /// The item the bare Delete key (`.onDeleteCommand`, #674) should act on right now, or nil
     /// when there's no selection, the selection isn't deletable, or inline-rename is in progress
@@ -206,9 +228,10 @@ final class SiteNavigatorModel {
             SiteFileTree.feedCollections(siteRoot: siteRoot)
         }.value
         if Task.isCancelled { return }
-        // Assigned together with `nodes` below so `canRepurpose` never gates against a post
-        // set that's out of sync with what's actually shown in the sidebar.
+        // Assigned together with `nodes` below so `canRepurpose`/`canPublish`/`canUnpublish` never
+        // gate against a post set that's out of sync with what's actually shown in the sidebar.
         postIDs = Set(posts.map(\.id))
+        postsByID = Dictionary(uniqueKeysWithValues: posts.map { ($0.id, $0) })
         let tree = buildSiteURLTree(
             websiteTitle: websiteTitle, pages: pages, posts: posts, feedCollections: feeds)
         nodes = tree

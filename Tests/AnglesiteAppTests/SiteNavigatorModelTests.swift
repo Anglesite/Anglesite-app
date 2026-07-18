@@ -193,3 +193,49 @@ struct SiteNavigatorModelRedirectsTests {
         #expect(model.redirectSaveError != nil)
     }
 }
+
+@Suite("SiteNavigatorModel publish/unpublish gating (#798)")
+@MainActor
+struct SiteNavigatorModelPublishGatingTests {
+    @Test("canPublish/canUnpublish are mutually exclusive for a typed post, false for pages and blog posts")
+    func publishGating() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let graph = SiteContentGraph()
+        // No `generation:` — nil (the default) applies unconditionally, matching every other
+        // test-caller of `load` in this codebase; a non-nil value is guarded against a
+        // `beginScan` token this test never claims and would silently discard the load.
+        await graph.load(
+            siteID: "site-1",
+            pages: [],
+            posts: [
+                SiteContentGraph.Post(
+                    id: "site-1:post:draft-note", siteID: "site-1", collection: "notes", slug: "draft-note",
+                    title: "Draft note", draft: true, publishDate: nil, tags: [],
+                    filePath: "src/content/notes/draft-note.md", lastModified: Date()),
+                SiteContentGraph.Post(
+                    id: "site-1:post:live-note", siteID: "site-1", collection: "notes", slug: "live-note",
+                    title: "Live note", draft: false, publishDate: Date(), tags: [],
+                    filePath: "src/content/notes/live-note.md", lastModified: Date()),
+                SiteContentGraph.Post(
+                    id: "site-1:post:blog-post", siteID: "site-1", collection: "blog", slug: "blog-post",
+                    title: "Blog post", draft: true, publishDate: nil, tags: [],
+                    filePath: "src/content/blog/blog-post.md", lastModified: Date()),
+            ],
+            images: []
+        )
+
+        let model = SiteNavigatorModel(graph: graph)
+        model.start(siteID: "site-1", siteRoot: root, sourceDirectory: root, websiteTitle: "Test")
+        while model.nodes.isEmpty { await Task.yield() }
+
+        #expect(model.canPublish("site-1:post:draft-note") == true)
+        #expect(model.canUnpublish("site-1:post:draft-note") == false)
+        #expect(model.canPublish("site-1:post:live-note") == false)
+        #expect(model.canUnpublish("site-1:post:live-note") == true)
+        #expect(model.canPublish("site-1:post:blog-post") == false)
+        #expect(model.canUnpublish("site-1:post:blog-post") == false)
+        model.stop()
+    }
+}
