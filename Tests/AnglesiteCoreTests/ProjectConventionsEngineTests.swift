@@ -1,23 +1,14 @@
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 @Suite("ProjectConventionsEngine")
 struct ProjectConventionsEngineTests {
-    private func makeSite(_ files: [String: String]) -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("conventions-engine-\(UUID().uuidString)", isDirectory: true)
-        for (rel, contents) in files {
-            let url = root.appendingPathComponent(rel)
-            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try! Data(contents.utf8).write(to: url)
-        }
-        return root
-    }
 
     @Test("rebuild scans matching files and skips build artifacts")
     func rebuildScansFiles() async {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "conventions-engine", [
             "src/pages/about.astro": "# About Us\n",
             "node_modules/pkg/index.js": "<ShouldNotCount />",
         ])
@@ -31,7 +22,7 @@ struct ProjectConventionsEngineTests {
 
     @Test("upsertFile incorporates a single changed file without a full rescan")
     func upsertFileIncorporatesChange() async {
-        let root = makeSite(["src/pages/about.astro": "# About Us\n"])
+        let root = try! writeSiteTree(prefix: "conventions-engine", ["src/pages/about.astro": "# About Us\n"])
         let engine = ProjectConventionsEngine()
         await engine.rebuild(siteID: "site-1", projectRoot: root)
 
@@ -45,7 +36,7 @@ struct ProjectConventionsEngineTests {
 
     @Test("removeFile drops a file's contribution")
     func removeFileDropsContribution() async {
-        let root = makeSite(["src/pages/about.astro": "# About Us\n"])
+        let root = try! writeSiteTree(prefix: "conventions-engine", ["src/pages/about.astro": "# About Us\n"])
         let engine = ProjectConventionsEngine()
         await engine.rebuild(siteID: "site-1", projectRoot: root)
 
@@ -57,7 +48,7 @@ struct ProjectConventionsEngineTests {
 
     @Test("rebuild preserves a user override across re-learning")
     func rebuildPreservesOverride() async {
-        let root = makeSite(["src/pages/about.astro": "# About Us\n"])
+        let root = try! writeSiteTree(prefix: "conventions-engine", ["src/pages/about.astro": "# About Us\n"])
         let engine = ProjectConventionsEngine()
         await engine.rebuild(siteID: "site-1", projectRoot: root)
         await engine.applyOverride(siteID: "site-1", value: .altTextAverageLength(99))
@@ -72,7 +63,7 @@ struct ProjectConventionsEngineTests {
 
     @Test("clearOverride reverts a field to inferred")
     func clearOverrideReverts() async {
-        let root = makeSite(["src/pages/about.astro": "# About Us\n"])
+        let root = try! writeSiteTree(prefix: "conventions-engine", ["src/pages/about.astro": "# About Us\n"])
         let engine = ProjectConventionsEngine()
         await engine.rebuild(siteID: "site-1", projectRoot: root)
         await engine.applyOverride(siteID: "site-1", value: .altTextAverageLength(99))
@@ -86,7 +77,7 @@ struct ProjectConventionsEngineTests {
     @Test("clearOverride followed by a rebuild recomputes the field fresh, not left at the stale overridden value")
     func clearOverrideThenRebuildRecomputesFresh() async {
         // "short" is 5 characters — the true learned average once the override is gone.
-        let root = makeSite(["src/pages/about.astro": "![short](x.png)\n"])
+        let root = try! writeSiteTree(prefix: "conventions-engine", ["src/pages/about.astro": "![short](x.png)\n"])
         let engine = ProjectConventionsEngine()
         await engine.rebuild(siteID: "site-1", projectRoot: root)
         let learned = await engine.conventions(siteID: "site-1")
@@ -107,7 +98,7 @@ struct ProjectConventionsEngineTests {
 
     @Test("seed sets a starting value that a subsequent rebuild's merge respects")
     func seedIsRespectedByRebuild() async {
-        let root = makeSite(["src/pages/about.astro": "# About Us\n"])
+        let root = try! writeSiteTree(prefix: "conventions-engine", ["src/pages/about.astro": "# About Us\n"])
         let engine = ProjectConventionsEngine()
         var seeded = ProjectConventions.empty
         seeded.apply(.altTextAverageLength(7))
@@ -121,7 +112,7 @@ struct ProjectConventionsEngineTests {
 
     @Test("frontmatter collections come from content.config.ts, not the extractor")
     func frontmatterComesFromSchemaReader() async {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "conventions-engine", [
             "src/content.config.ts": """
             import { defineCollection } from "astro:content";
             import { z } from "astro/zod";
@@ -138,7 +129,7 @@ struct ProjectConventionsEngineTests {
 
     @Test("rebuild(forceEnrichment: true) calls the enricher and fills tone/brand fields")
     func forcedEnrichmentFillsFields() async {
-        let root = makeSite(["src/pages/about.astro": "# About Us\n"])
+        let root = try! writeSiteTree(prefix: "conventions-engine", ["src/pages/about.astro": "# About Us\n"])
         let engine = ProjectConventionsEngine(
             enrich: { _, _ in (toneDescriptors: ["concise", "friendly"], brandTerms: ["Anglesite"]) },
             now: { Date(timeIntervalSince1970: 0) }
@@ -153,7 +144,7 @@ struct ProjectConventionsEngineTests {
 
     @Test("a second rebuild within the throttle window does not call the enricher again")
     func throttleSkipsSecondCall() async {
-        let root = makeSite(["src/pages/about.astro": "# About Us\n"])
+        let root = try! writeSiteTree(prefix: "conventions-engine", ["src/pages/about.astro": "# About Us\n"])
         let callCount = CallCounter()
         var currentTime = Date(timeIntervalSince1970: 0)
         let engine = ProjectConventionsEngine(
@@ -173,7 +164,7 @@ struct ProjectConventionsEngineTests {
 
     @Test("an overridden tone/brand field survives enrichment")
     func enrichmentPreservesOverride() async {
-        let root = makeSite(["src/pages/about.astro": "# About Us\n"])
+        let root = try! writeSiteTree(prefix: "conventions-engine", ["src/pages/about.astro": "# About Us\n"])
         let engine = ProjectConventionsEngine(
             enrich: { _, _ in (toneDescriptors: ["concise"], brandTerms: ["fresh-from-model"]) },
             now: { Date(timeIntervalSince1970: 0) }

@@ -1,6 +1,7 @@
 #if canImport(Darwin)
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 /// `InProcessGit` executes `BackupCommand`'s exact git vocabulary via SwiftGit2 (in-process
@@ -16,13 +17,6 @@ import Foundation
 @Suite("InProcessGit", .serialized) struct InProcessGitTests {
 
     // MARK: - Fixtures (subprocess git — tests are unsandboxed)
-
-    private func makeTempDir(_ label: String) throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("inprocessgit-\(label)-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
 
     @discardableResult
     private func git(_ arguments: [String], in dir: URL) async throws -> String {
@@ -42,7 +36,7 @@ import Foundation
 
     /// Repo on branch `draft` with local identity configured and one commit of `hello.txt`.
     private func makeRepo() async throws -> URL {
-        let dir = try makeTempDir("work")
+        let dir = try makeTempDir(prefix: "inprocessgit-work")
         try await git(["init", "-b", "draft"], in: dir)
         try await git(["config", "user.name", "Test"], in: dir)
         try await git(["config", "user.email", "test@example.com"], in: dir)
@@ -54,7 +48,7 @@ import Foundation
 
     /// Bare repo registered as `origin` of `repo`, with the current `draft` already pushed.
     private func addPushedOrigin(to repo: URL) async throws -> URL {
-        let remote = try makeTempDir("origin")
+        let remote = try makeTempDir(prefix: "inprocessgit-origin")
         try await git(["init", "--bare"], in: remote)
         try await git(["remote", "add", "origin", remote.absoluteString], in: repo)
         try await git(["push", "origin", "draft"], in: repo)
@@ -69,7 +63,7 @@ import Foundation
         let inRepo = await InProcessGit.run(siteDirectory: repo, arguments: ["rev-parse", "--is-inside-work-tree"])
         #expect(inRepo.exitCode == 0)
 
-        let plain = try makeTempDir("plain")
+        let plain = try makeTempDir(prefix: "inprocessgit-plain")
         let outside = await InProcessGit.run(siteDirectory: plain, arguments: ["rev-parse", "--is-inside-work-tree"])
         #expect(outside.exitCode != 0)
     }
@@ -226,7 +220,7 @@ import Foundation
         let remote = try await addPushedOrigin(to: repo)
 
         // Move the remote ahead behind our back, so our next push can't fast-forward.
-        let other = try makeTempDir("other")
+        let other = try makeTempDir(prefix: "inprocessgit-other")
         try await git(["clone", remote.absoluteString, "checkout"], in: other)
         let otherRepo = other.appendingPathComponent("checkout")
         try await git(["config", "user.name", "Other"], in: otherRepo)

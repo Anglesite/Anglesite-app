@@ -1,14 +1,9 @@
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 struct SiteFileTreeTests {
-    private func makeTempDir() throws -> URL {
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("anglesite-filetree-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
 
     private func write(_ relative: String, under root: URL) throws {
         let url = root.appendingPathComponent(relative)
@@ -18,7 +13,7 @@ struct SiteFileTreeTests {
 
     @Test("plain (non-package) site resolves layout to the site root, no config")
     func plainLayout() throws {
-        let root = try makeTempDir(); defer { try? FileManager.default.removeItem(at: root) }
+        let root = try makeTempDir(prefix: "anglesite-filetree"); defer { try? FileManager.default.removeItem(at: root) }
         let layout = SiteFileTree.layout(for: root)
         #expect(layout.sourceDir == root)
         #expect(layout.configDir == nil)
@@ -27,7 +22,7 @@ struct SiteFileTreeTests {
 
     @Test("package site resolves layout to Source/ and Config/")
     func packageLayout() throws {
-        let parent = try makeTempDir(); defer { try? FileManager.default.removeItem(at: parent) }
+        let parent = try makeTempDir(prefix: "anglesite-filetree"); defer { try? FileManager.default.removeItem(at: parent) }
         let pkgURL = parent.appendingPathComponent("Acme.anglesite", isDirectory: true)
         let pkg = AnglesitePackage(url: pkgURL)
         try FileManager.default.createDirectory(at: pkg.sourceURL, withIntermediateDirectories: true)
@@ -42,7 +37,7 @@ struct SiteFileTreeTests {
 
     @Test("scan groups components, styles, and metadata; excludes plumbing")
     func scanGroups() throws {
-        let root = try makeTempDir(); defer { try? FileManager.default.removeItem(at: root) }
+        let root = try makeTempDir(prefix: "anglesite-filetree"); defer { try? FileManager.default.removeItem(at: root) }
         try write("src/layouts/BaseLayout.astro", under: root)
         try write("src/components/Card.astro", under: root)
         try write("src/styles/global.css", under: root)
@@ -63,7 +58,7 @@ struct SiteFileTreeTests {
 
     @Test("empty groups are absent from the result")
     func emptyGroupsAbsent() throws {
-        let root = try makeTempDir(); defer { try? FileManager.default.removeItem(at: root) }
+        let root = try makeTempDir(prefix: "anglesite-filetree"); defer { try? FileManager.default.removeItem(at: root) }
         try write("src/styles/only.css", under: root)
         let groups = SiteFileTree.scan(siteRoot: root)
         #expect(groups[.styles]?.count == 1)
@@ -72,7 +67,7 @@ struct SiteFileTreeTests {
 
     @Test("feedCollections finds collections with an rss.xml.ts route and ignores everything else")
     func feedCollections() throws {
-        let root = try makeTempDir(); defer { try? FileManager.default.removeItem(at: root) }
+        let root = try makeTempDir(prefix: "anglesite-filetree"); defer { try? FileManager.default.removeItem(at: root) }
         // notes has a feed; photos has a directory but no rss route; the root rss.xml.ts is site-wide.
         try write("src/pages/notes/rss.xml.ts", under: root)
         try FileManager.default.createDirectory(at: root.appendingPathComponent("src/pages/photos"),

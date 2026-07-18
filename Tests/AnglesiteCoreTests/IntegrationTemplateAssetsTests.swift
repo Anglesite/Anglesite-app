@@ -1,39 +1,20 @@
 // Tests/AnglesiteCoreTests/IntegrationTemplateAssetsTests.swift
 // Hermetic test — no app bundle or TemplateRuntime needed.
-// Resolves the template by walking up from #filePath:
-//   .../Tests/AnglesiteCoreTests/IntegrationTemplateAssetsTests.swift
-//   → deletingLastPathComponent x3 → repo root
-//   → appending "Resources/Template"
+// Resolves the template via AnglesiteTestSupport.templateRoot() (a #filePath
+// walk-up to the repo root; see that helper for the PR #283 classic-URL-API note).
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 @Suite struct IntegrationTemplateAssetsTests {
 
-    private func templateRoot() -> URL {
-        // NOTE: use the classic URL APIs (fileURLWithPath / appendingPathComponent / .path), NOT the
-        // newer URL(filePath:) / appending(path:) / path(percentEncoded:). The latter are vended by
-        // the swift-foundation overlay (libswift_DarwinFoundation3.dylib), which the macOS-26 CI
-        // runners don't ship — a test bundle that links it can't load there. See PR #283 CI notes.
-        let here = URL(fileURLWithPath: #filePath)
-        // here      = .../Tests/AnglesiteCoreTests/IntegrationTemplateAssetsTests.swift
-        // parent[0] = .../Tests/AnglesiteCoreTests/
-        // parent[1] = .../Tests/
-        // parent[2] = repo root
-        let repoRoot = here
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        #expect(FileManager.default.fileExists(atPath: repoRoot.appendingPathComponent("Package.swift").path), "repo-root detection drifted")
-        return repoRoot.appendingPathComponent("Resources/Template")
+    @Test func configHelperExists() throws {
+        #expect(FileManager.default.fileExists(atPath: try templateRoot().appendingPathComponent("scripts/config.ts").path))
     }
 
-    @Test func configHelperExists() {
-        #expect(FileManager.default.fileExists(atPath: templateRoot().appendingPathComponent("scripts/config.ts").path))
-    }
-
-    @Test func onDemandAssetsAreStagedNotInSrc() {
-        let root = templateRoot()
+    @Test func onDemandAssetsAreStagedNotInSrc() throws {
+        let root = try templateRoot()
         // staged (copied on-demand):
         for p in ["integrations/components/BookingWidget.astro", "integrations/components/DonationButton.astro",
                   "integrations/components/Comments.astro", "integrations/components/ContactForm.astro",
@@ -136,7 +117,7 @@ import Foundation
                 descriptor: descriptor,
                 answers: answers,
                 sourceDirectory: source,
-                templateDirectory: templateRoot()
+                templateDirectory: try templateRoot()
             ).get()
             guard case .createFile(let path, let contents) = plan.steps.first else {
                 Issue.record("expected carbon.txt create step")
@@ -150,7 +131,7 @@ import Foundation
     }
 
     @Test func layoutsHaveImportAndBodyAnchors() throws {
-        let root = templateRoot()
+        let root = try templateRoot()
         let base = try String(contentsOf: root.appendingPathComponent("src/layouts/BaseLayout.astro"), encoding: .utf8)
         #expect(base.contains("// anglesite:imports"))
         #expect(base.contains("<!-- anglesite:nav -->"))
@@ -163,14 +144,14 @@ import Foundation
     }
 
     @Test func homepageHasImportAndHeroAnchors() throws {
-        let root = templateRoot()
+        let root = try templateRoot()
         let index = try String(contentsOf: root.appendingPathComponent("src/pages/index.astro"), encoding: .utf8)
         #expect(index.contains("// anglesite:imports"))
         #expect(index.contains("<!-- anglesite:hero-cta -->"))
     }
 
     @Test func onDemandPagesUseReadConfigNotImportMetaEnv() throws {
-        let root = templateRoot()
+        let root = try templateRoot()
         for p in ["integrations/pages/book.astro", "integrations/pages/donate.astro", "integrations/pages/contact.astro",
                   "integrations/pages/subscribe.astro", "integrations/pages/offline.astro",
                   "integrations/pages/manifest.webmanifest.ts"] {
@@ -181,7 +162,7 @@ import Foundation
     }
 
     @Test func scaffoldExcludesIntegrationsDir() throws {
-        let s = try String(contentsOf: templateRoot().appendingPathComponent("scripts/scaffold.sh"), encoding: .utf8)
+        let s = try String(contentsOf: try templateRoot().appendingPathComponent("scripts/scaffold.sh"), encoding: .utf8)
         #expect(s.contains("--exclude='integrations/'"))
     }
 
@@ -212,7 +193,7 @@ import Foundation
     }
 
     @Test func scaffoldDoesNotExcludeConfigTs() throws {
-        let s = try String(contentsOf: templateRoot().appendingPathComponent("scripts/scaffold.sh"), encoding: .utf8)
+        let s = try String(contentsOf: try templateRoot().appendingPathComponent("scripts/scaffold.sh"), encoding: .utf8)
         // config.ts must ship to scaffolded sites — ensure it's not excluded.
         #expect(!s.contains("config.ts"), "scaffold.sh must not exclude config.ts")
         // The only excludes should be the known set.
@@ -224,7 +205,7 @@ import Foundation
     }
 
     @Test func astroConfigRegistersRedirectsIntegration() throws {
-        let configURL = templateRoot().appendingPathComponent("astro.config.ts")
+        let configURL = try templateRoot().appendingPathComponent("astro.config.ts")
         let source = try String(contentsOf: configURL, encoding: .utf8)
         #expect(source.contains("import redirects from \"./scripts/redirects.ts\""))
         #expect(source.contains("redirects()"))
@@ -234,7 +215,7 @@ import Foundation
     /// keys that its descriptor writes via .writeConfig operations.
     /// This catches mismatches like DONATIONS_LABEL (page) vs DONATIONS_BUTTON_TEXT (descriptor).
     @Test func pageEnvKeysAreWrittenByDescriptors() throws {
-        let root = templateRoot()
+        let root = try templateRoot()
 
         // Booking: integrations/pages/book.astro
         let bookURL = root.appendingPathComponent("integrations/pages/book.astro")

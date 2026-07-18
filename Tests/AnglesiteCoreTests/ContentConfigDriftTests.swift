@@ -1,14 +1,14 @@
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 @Suite("content.config.ts drift guard")
 struct ContentConfigDriftTests {
 
-    /// Repo-root-relative path to the committed template config. `swift test` runs with CWD = package root.
+    /// The committed template config in this checkout.
     static var configFile: URL {
-        URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-            .appendingPathComponent("Resources/Template/src/content.config.ts")
+        get throws { try templateRoot().appendingPathComponent("src/content.config.ts") }
     }
 
     /// Canonical Zod expression for a field kind, or nil for the markdown body (excluded from frontmatter).

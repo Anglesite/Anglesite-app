@@ -1,25 +1,15 @@
 // Tests/AnglesiteCoreTests/BlogTemplateAssetsTests.swift
 // Hermetic test — no app bundle or TemplateRuntime needed. Resolves the template
-// by walking up from #filePath (Tests/AnglesiteCoreTests/ -> Tests/ -> repo root).
-// Classic URL APIs only (see IntegrationTemplateAssetsTests / PR #283 CI notes).
+// via AnglesiteTestSupport.templateRoot() (a #filePath walk-up to the repo root).
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 @Suite struct BlogTemplateAssetsTests {
 
-    private func templateRoot() -> URL {
-        let here = URL(fileURLWithPath: #filePath)
-        let repoRoot = here
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        #expect(FileManager.default.fileExists(atPath: repoRoot.appendingPathComponent("Package.swift").path), "repo-root detection drifted")
-        return repoRoot.appendingPathComponent("Resources/Template")
-    }
-
     @Test func contentConfigDefinesBlogCollection() throws {
-        let root = templateRoot()
+        let root = try templateRoot()
         let cfg = root.appendingPathComponent("src/content.config.ts")
         #expect(FileManager.default.fileExists(atPath: cfg.path), "missing src/content.config.ts")
         let s = try String(contentsOf: cfg, encoding: .utf8)
@@ -35,7 +25,7 @@ import Foundation
     }
 
     @Test func starterPostExistsWithRequiredFrontmatter() throws {
-        let root = templateRoot()
+        let root = try templateRoot()
         let post = root.appendingPathComponent("src/content/blog/welcome-to-your-blog.md")
         #expect(FileManager.default.fileExists(atPath: post.path), "missing starter post")
         let s = try String(contentsOf: post, encoding: .utf8)
@@ -45,7 +35,7 @@ import Foundation
     }
 
     @Test func postRouteRendersThroughBlogPostLayout() throws {
-        let root = templateRoot()
+        let root = try templateRoot()
         let route = root.appendingPathComponent("src/pages/blog/[...slug].astro")
         #expect(FileManager.default.fileExists(atPath: route.path), "missing post route")
         let s = try String(contentsOf: route, encoding: .utf8)
@@ -63,7 +53,7 @@ import Foundation
     }
 
     @Test func blogPostLayoutRendersTitleAndDate() throws {
-        let root = templateRoot()
+        let root = try templateRoot()
         let s = try String(contentsOf: root.appendingPathComponent("src/layouts/BlogPost.astro"), encoding: .utf8)
         // visible heading + publication date in the article body. The heading carries the
         // microformats2 `p-name` (V-1.7 / #349) — the post title is the h-entry's name.
@@ -77,7 +67,7 @@ import Foundation
     }
 
     @Test func blogIndexListsCollection() throws {
-        let root = templateRoot()
+        let root = try templateRoot()
         let index = root.appendingPathComponent("src/pages/blog/index.astro")
         #expect(FileManager.default.fileExists(atPath: index.path), "missing blog index")
         let s = try String(contentsOf: index, encoding: .utf8)
@@ -91,7 +81,7 @@ import Foundation
     }
 
     @Test func homepageLinksToBlog() throws {
-        let root = templateRoot()
+        let root = try templateRoot()
         let s = try String(contentsOf: root.appendingPathComponent("src/pages/index.astro"), encoding: .utf8)
         #expect(s.contains("href=\"/blog/\""), "homepage should link to /blog/")
     }
@@ -100,7 +90,7 @@ import Foundation
         // MarkerInjector matches the FIRST occurrence of the anchor. If the anchor text
         // also appears in BlogPost.astro's frontmatter doc-comment, giscus injects into
         // the frontmatter and never renders. Guard the real layout against that regression.
-        let root = templateRoot()
+        let root = try templateRoot()
         let src = try String(contentsOf: root.appendingPathComponent("src/layouts/BlogPost.astro"), encoding: .utf8)
         let out = try MarkerInjector.inject(
             snippet: "<Comments />", withID: "comments",

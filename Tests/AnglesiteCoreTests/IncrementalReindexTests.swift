@@ -1,21 +1,10 @@
 import Foundation
 import Testing
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 @Suite("IncrementalReindex")
 struct IncrementalReindexTests {
-    /// Create a temp site `Source/` dir; `files` maps relative path → contents.
-    private func makeSite(_ files: [String: String] = [:]) -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("reindex-\(UUID().uuidString)", isDirectory: true)
-        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        for (rel, contents) in files {
-            let url = root.appendingPathComponent(rel)
-            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try! Data(contents.utf8).write(to: url)
-        }
-        return root
-    }
 
     private let exists: @Sendable (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
 
@@ -36,7 +25,7 @@ struct IncrementalReindexTests {
 
     @Test("apply upserts a newly created file into the index")
     func applyUpsertsNewFile() async {
-        let root = makeSite(["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
+        let root = try! writeSiteTree(prefix: "reindex", ["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
         let index = SiteKnowledgeIndex()
         await index.rebuild(siteID: "s", projectRoot: root)
         #expect(await index.documents(siteID: "s").contains { $0.path == "src/pages/about.astro" } == false)
@@ -51,7 +40,7 @@ struct IncrementalReindexTests {
 
     @Test("apply removes a deleted file from the index")
     func applyRemovesDeletedFile() async {
-        let root = makeSite(["src/pages/gone.astro": "---\ntitle: Gone\n---\nbody"])
+        let root = try! writeSiteTree(prefix: "reindex", ["src/pages/gone.astro": "---\ntitle: Gone\n---\nbody"])
         let index = SiteKnowledgeIndex()
         await index.rebuild(siteID: "s", projectRoot: root)
         #expect(await index.documents(siteID: "s").contains { $0.path == "src/pages/gone.astro" })
@@ -65,7 +54,7 @@ struct IncrementalReindexTests {
 
     @Test("apply ignores skipped-directory paths")
     func applyIgnoresSkippedDirs() async {
-        let root = makeSite(["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
+        let root = try! writeSiteTree(prefix: "reindex", ["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
         let index = SiteKnowledgeIndex()
         await index.rebuild(siteID: "s", projectRoot: root)
         let before = await index.documents(siteID: "s").count
@@ -81,7 +70,7 @@ struct IncrementalReindexTests {
 
     @Test("apply with needsFullRescan rebuilds and picks up files absent from the batch")
     func applyFullRescan() async {
-        let root = makeSite(["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
+        let root = try! writeSiteTree(prefix: "reindex", ["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
         let index = SiteKnowledgeIndex()
         await index.rebuild(siteID: "s", projectRoot: root)
 
@@ -125,7 +114,7 @@ struct IncrementalReindexTests {
 
     @Test("apply embeds a newly created file into the ranker")
     func applyUpsertsRankerForNewFile() async {
-        let root = makeSite(["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
+        let root = try! writeSiteTree(prefix: "reindex", ["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
         let (index, ranker) = await seededIndexAndRanker(root)
         #expect(await ranker.vectorCount(siteID: "s") == 1)
 
@@ -139,7 +128,7 @@ struct IncrementalReindexTests {
 
     @Test("apply drops a deleted file's vector from the ranker")
     func applyRemovesRankerVectorForDeletedFile() async {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "reindex", [
             "src/pages/index.astro": "---\ntitle: Home\n---\n# Home",
             "src/pages/gone.astro": "---\ntitle: Gone\n---\nbody",
         ])
@@ -156,7 +145,7 @@ struct IncrementalReindexTests {
 
     @Test("apply re-embeds a changed file so the ranker reflects new content")
     func applyReembedsChangedFile() async {
-        let root = makeSite(["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
+        let root = try! writeSiteTree(prefix: "reindex", ["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
         let provider = CountingFake()
         let (index, ranker) = await seededIndexAndRanker(root, provider: provider)
         let baseline = provider.calls
@@ -172,7 +161,7 @@ struct IncrementalReindexTests {
 
     @Test("apply does not re-embed when a touched file's content is unchanged")
     func applySkipsReembedForUnchangedFile() async {
-        let root = makeSite(["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
+        let root = try! writeSiteTree(prefix: "reindex", ["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
         let provider = CountingFake()
         let (index, ranker) = await seededIndexAndRanker(root, provider: provider)
         let baseline = provider.calls
@@ -189,7 +178,7 @@ struct IncrementalReindexTests {
 
     @Test("apply with needsFullRescan re-syncs the ranker with files absent from the batch")
     func applyFullRescanResyncsRanker() async {
-        let root = makeSite(["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
+        let root = try! writeSiteTree(prefix: "reindex", ["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
         let (index, ranker) = await seededIndexAndRanker(root)
         #expect(await ranker.vectorCount(siteID: "s") == 1)
 
@@ -206,7 +195,7 @@ struct IncrementalReindexTests {
         // A file exists on disk (so fileExists is true and it isn't in a skipped dir) but its kind
         // is not indexed (.png) — `upsertFile` runs yet persists no document. Exercises the branch
         // where the ranker still holds a vector for that path and must drop it.
-        let root = makeSite([:])
+        let root = try! writeSiteTree(prefix: "reindex", [:])
         let pngPath = "assets/logo.png"
         let pngURL = root.appendingPathComponent(pngPath)
         try! FileManager.default.createDirectory(at: pngURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -232,7 +221,7 @@ struct IncrementalReindexTests {
 
     @Test("apply with a nil ranker still updates the index (back-compat)")
     func applyWithNilRankerUpdatesIndex() async {
-        let root = makeSite(["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
+        let root = try! writeSiteTree(prefix: "reindex", ["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
         let index = SiteKnowledgeIndex()
         await index.rebuild(siteID: "s", projectRoot: root)
 
@@ -246,7 +235,7 @@ struct IncrementalReindexTests {
 
     @Test("apply deduplicates repeated paths within a single batch")
     func applyDeduplicatesRepeatedPaths() async {
-        let root = makeSite(["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
+        let root = try! writeSiteTree(prefix: "reindex", ["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
         let index = SiteKnowledgeIndex()
         await index.rebuild(siteID: "s", projectRoot: root)
 

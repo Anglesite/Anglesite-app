@@ -1,25 +1,15 @@
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 @Suite("SiteGraphExplorer")
 struct SiteGraphExplorerTests {
     private let siteID = "site-graph"
 
-    private func makeSite(_ files: [String: String]) -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("site-graph-\(UUID().uuidString)", isDirectory: true)
-        for (rel, contents) in files {
-            let url = root.appendingPathComponent(rel)
-            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try! Data(contents.utf8).write(to: url)
-        }
-        return root
-    }
-
     @Test("pages, layouts, components, collections, entries, and assets become graph nodes")
     func nodeKinds() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/pages/index.astro": "---\nimport Base from '../layouts/Base.astro';\n---\n<Base />",
             "src/layouts/Base.astro": "---\nimport Nav from '../components/Nav.astro';\n---\n<Nav />",
             "src/components/Nav.astro": "<nav />",
@@ -46,7 +36,7 @@ struct SiteGraphExplorerTests {
 
     @Test("imports create layout and component dependency edges")
     func importEdges() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/pages/index.astro": "---\nimport Base from '../layouts/Base.astro';\n---\n<Base />",
             "src/layouts/Base.astro": "---\nimport Nav from '../components/Nav.astro';\n---\n<Nav />",
             "src/components/Nav.astro": "<nav />",
@@ -75,7 +65,7 @@ struct SiteGraphExplorerTests {
 
     @Test("content collections contain their entries")
     func collectionEdges() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/content/posts/hello.md": "---\ntitle: Hello\n---\nBody",
         ])
         defer { try? FileManager.default.removeItem(at: root) }
@@ -96,7 +86,7 @@ struct SiteGraphExplorerTests {
 
     @Test("public image src references create asset edges while unused images remain visible")
     func assetEdgesAndUnusedAssets() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/pages/index.astro": "<img src=\"/images/hero.png\" />",
             "public/images/hero.png": "PNG",
             "public/images/unused.png": "PNG",
@@ -122,7 +112,7 @@ struct SiteGraphExplorerTests {
 
     @Test("source image imports create asset reference edges")
     func sourceImageImportEdges() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/pages/index.astro": "---\nimport hero from '../assets/hero.png';\n---\n<img src={hero.src} />",
             "src/assets/hero.png": "PNG",
         ])
@@ -146,7 +136,7 @@ struct SiteGraphExplorerTests {
 
     @Test("relative src asset references resolve from source files")
     func relativeAssetReferences() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/components/Hero.astro": "<img src=\"../assets/hero.webp\" />",
             "src/assets/hero.webp": "WEBP",
         ])
@@ -169,7 +159,7 @@ struct SiteGraphExplorerTests {
 
     @Test("bare relative src asset references resolve from source files")
     func bareRelativeAssetReferences() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/components/Hero.astro": "<img src=\"hero.png\" />",
             "src/components/hero.png": "PNG",
         ])
@@ -192,7 +182,7 @@ struct SiteGraphExplorerTests {
 
     @Test("src references with a trailing query string or fragment still resolve")
     func queryStringAssetReferences() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/pages/index.astro": "<img src=\"/images/hero.png?width=400\" />",
             "public/images/hero.png": "PNG",
         ])
@@ -216,7 +206,7 @@ struct SiteGraphExplorerTests {
 
     @Test("protocol-relative asset URLs are not treated as public-root paths")
     func protocolRelativeAssetReferences() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/pages/index.astro": "<img src=\"//cdn.example.com/hero.png\" />",
         ])
         defer { try? FileManager.default.removeItem(at: root) }
@@ -234,7 +224,7 @@ struct SiteGraphExplorerTests {
 
     @Test("@ alias imports resolve to src-relative nodes")
     func aliasImports() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/pages/index.astro": "---\nimport Nav from '@/components/Nav.astro';\n---\n<Nav />",
             "src/components/Nav.astro": "<nav />",
         ])
@@ -257,7 +247,7 @@ struct SiteGraphExplorerTests {
 
     @Test("dynamic imports create dependency edges")
     func dynamicImports() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/pages/index.astro": "<script>const Card = await import('../components/Card.astro')</script>",
             "src/components/Card.astro": "<article />",
         ])
@@ -280,7 +270,7 @@ struct SiteGraphExplorerTests {
 
     @Test("markdown frontmatter layout fields create usesLayout edges")
     func frontmatterLayoutEdges() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/pages/about.md": "---\ntitle: About\nlayout: ../layouts/Base.astro\n---\nBody",
             "src/layouts/Base.astro": "<slot />",
         ])
@@ -303,7 +293,7 @@ struct SiteGraphExplorerTests {
 
     @Test("markdown without frontmatter creates no layout edge")
     func markdownWithoutFrontmatter() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/pages/plain.md": "Just a body, no frontmatter block.",
             "src/layouts/Base.astro": "<slot />",
         ])
@@ -323,7 +313,7 @@ struct SiteGraphExplorerTests {
 
     @Test("unresolvable frontmatter layout references are skipped, not guessed")
     func unresolvableFrontmatterLayout() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             // A bare specifier and a relative path to a file that doesn't exist — neither may
             // produce an edge (`resolveImport` returns nil for both, never a best-effort guess).
             "src/pages/bare.md": "---\ntitle: Bare\nlayout: some-package-layout\n---\nBody",
@@ -347,7 +337,7 @@ struct SiteGraphExplorerTests {
 
     @Test("src styles files become style nodes")
     func styleNodes() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "site-graph", [
             "src/styles/global.css": "body { color: black; }",
         ])
         defer { try? FileManager.default.removeItem(at: root) }

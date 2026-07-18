@@ -7,19 +7,10 @@ import Testing
 // embedding providers below are deterministic test doubles.
 #if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
+import AnglesiteTestSupport
 
 @Suite("SearchKnowledgeTool hybrid")
 struct SearchKnowledgeToolHybridTests {
-    private func makeSite(_ files: [String: String]) -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("khybrid-\(UUID().uuidString)", isDirectory: true)
-        for (rel, contents) in files {
-            let url = root.appendingPathComponent(rel)
-            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try! Data(contents.utf8).write(to: url)
-        }
-        return root
-    }
 
     /// Returns the index of a path token in the formatted tool output, or `Int.max` if absent —
     /// so `<` comparisons express "ranked earlier".
@@ -46,7 +37,7 @@ struct SearchKnowledgeToolHybridTests {
         // Both pages match the query term "team" in their body equally, so lexical scoring ties and
         // breaks by path: aaa before zzz. Semantically, only zzz is "near" the query, so the blend
         // must lift zzz above aaa — a flip a lexical-only run can never produce.
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "khybrid", [
             "src/pages/aaa.astro": "---\ntitle: AAA\n---\nOur team works far from the topic.",
             "src/pages/zzz.astro": "---\ntitle: ZZZ\n---\nOur team works near the topic.",
         ])
@@ -67,7 +58,7 @@ struct SearchKnowledgeToolHybridTests {
 
     @Test("hybrid mode tolerates a fake provider and still returns matching results")
     func hybridRanksWithFakeProvider() async {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "khybrid", [
             "src/pages/pricing.astro": "---\ntitle: Pricing\n---\n# Pricing\nSubscription plans for teams.",
             "src/pages/about.astro": "---\ntitle: About\n---\n# About\nOur team story.",
         ])
@@ -83,7 +74,7 @@ struct SearchKnowledgeToolHybridTests {
 
     @Test("a nil ranker yields pure lexical output")
     func lexicalFallback() async {
-        let root = makeSite(["src/pages/pricing.astro": "---\ntitle: Pricing\n---\n# Pricing\nPlans."])
+        let root = try! writeSiteTree(prefix: "khybrid", ["src/pages/pricing.astro": "---\ntitle: Pricing\n---\n# Pricing\nPlans."])
         let index = SiteKnowledgeIndex()
         await index.rebuild(siteID: "s", projectRoot: root)
         let lexicalOnly = SearchKnowledgeTool(index: index, siteID: "s")

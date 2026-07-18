@@ -6,6 +6,7 @@ import Foundation
 // These tests need no live model: the tools' `call(...)` is pure mapping/routing/query logic.
 #if compiler(>=6.4) && canImport(FoundationModels)
 import FoundationModels
+import AnglesiteTestSupport
 
 /// Records the EditMessage it receives and returns a canned reply.
 private actor FakeEditRouter: EditRouter {
@@ -260,20 +261,10 @@ struct SearchContentToolTests {
 
 @Suite("On-device tools: SearchKnowledgeTool")
 struct SearchKnowledgeToolTests {
-    private func makeSite(_ files: [String: String]) -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("knowledge-tool-\(UUID().uuidString)", isDirectory: true)
-        for (rel, contents) in files {
-            let url = root.appendingPathComponent(rel)
-            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try! Data(contents.utf8).write(to: url)
-        }
-        return root
-    }
 
     @Test("formats cited project excerpts")
     func formatsCitedProjectExcerpts() async throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "knowledge-tool", [
             "src/pages/pricing.astro": "---\ntitle: Pricing\n---\n# Pricing\nTeam plans mention annual billing.",
         ])
         let index = SiteKnowledgeIndex()

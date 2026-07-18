@@ -6,19 +6,16 @@ import AnglesiteTestSupport
 @Suite("Business type render smoke")
 struct BusinessTypeRenderSmokeTests {
 
-    static var templateDir: URL {
-        URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-            .appendingPathComponent("Resources/Template", isDirectory: true)
-    }
+    static var templateDir: URL { get throws { try templateRoot() } }
 
     /// True when the template can actually be built: a Node binary plus an installed Astro.
-    static var buildable: Bool { E2EPrerequisites.astroBuildable(templateDir: templateDir) }
+    static var buildable: Bool { ((try? templateDir).map { E2EPrerequisites.astroBuildable(templateDir: $0) }) ?? false }
 
     @Test("seeded business types build and render their mf2 classes",
           .enabled(if: BusinessTypeRenderSmokeTests.buildable))
     func rendersMicroformats() async throws {
         let node = try #require(E2EPrerequisites.locateNode())
-        let dist = Self.templateDir.appendingPathComponent("dist", isDirectory: true)
+        let dist = try Self.templateDir.appendingPathComponent("dist", isDirectory: true)
 
         func html(_ rel: String) throws -> String {
             try String(contentsOf: dist.appendingPathComponent(rel), encoding: .utf8)
