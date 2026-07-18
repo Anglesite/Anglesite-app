@@ -22,8 +22,8 @@ public enum DesignTokenWriter {
         ]
     }
 
-    /// A built-in ``Theme``'s `cssVars` already use the template's naming scheme (parsed from
-    /// `Resources/Template/scripts/themes.ts`) — pass through unchanged.
+    /// A built-in ``Theme``'s `cssVars` already use the template's naming scheme (decoded from
+    /// `Resources/Template/scripts/themes.json`) — pass through unchanged.
     public static func templateCSSVars(for theme: Theme) -> [String: String] { theme.cssVars }
 
     /// Human-readable `DESIGN.md` rationale, ported from `generateDesignRationale` in

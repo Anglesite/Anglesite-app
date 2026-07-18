@@ -1,3 +1,8 @@
+// Theme DATA lives in themes.json — the single shared source of truth. The app's
+// AnglesiteCore/ThemeCatalog decodes the same file, so edits there flow to both sides.
+// This module just re-exposes it with the historical typed `THEMES` record shape.
+import themesData from "./themes.json";
+
 export interface Theme {
   displayName: string;
   description: string;
@@ -5,93 +10,6 @@ export interface Theme {
   vars: Record<string, string>;
 }
 
-export const THEMES: Record<string, Theme> = {
-  classic: {
-    displayName: "Classic",
-    description: "Traditional, trustworthy, professional",
-    bestFor: ["legal", "finance", "consulting"],
-    vars: {
-      "color-primary": "#1e3a5f",
-      "color-accent": "#c8a951",
-      "font-heading": "Georgia, 'Times New Roman', serif",
-      "font-body": "system-ui, -apple-system, sans-serif",
-    },
-  },
-  elegant: {
-    displayName: "Elegant",
-    description: "Refined and sophisticated with a modern edge",
-    bestFor: ["photography", "luxury", "personal"],
-    vars: {
-      "color-primary": "#2d2d2d",
-      "color-accent": "#b08d57",
-      "font-heading": "'Palatino Linotype', 'Book Antiqua', serif",
-      "font-body": "system-ui, -apple-system, sans-serif",
-    },
-  },
-  warm: {
-    displayName: "Warm",
-    description: "Friendly, inviting, approachable",
-    bestFor: ["blog", "cafe", "bakery", "lifestyle"],
-    vars: {
-      "color-primary": "#8b4513",
-      "color-accent": "#d4956a",
-      "font-heading": "Georgia, 'Times New Roman', serif",
-      "font-body": "system-ui, -apple-system, sans-serif",
-    },
-  },
-  bold: {
-    displayName: "Bold",
-    description: "High contrast, confident, striking",
-    bestFor: ["portfolio", "agency", "startup"],
-    vars: {
-      "color-primary": "#1a1a2e",
-      "color-accent": "#e94560",
-      "font-heading": "system-ui, -apple-system, sans-serif",
-      "font-body": "system-ui, -apple-system, sans-serif",
-    },
-  },
-  community: {
-    displayName: "Community",
-    description: "Open, inclusive, collaborative",
-    bestFor: ["nonprofit", "organization", "club"],
-    vars: {
-      "color-primary": "#2e7d32",
-      "color-accent": "#ff8f00",
-      "font-heading": "system-ui, -apple-system, sans-serif",
-      "font-body": "system-ui, -apple-system, sans-serif",
-    },
-  },
-  studio: {
-    displayName: "Studio",
-    description: "Dark mode for creative coders",
-    bestFor: ["generative-art", "developer", "creative"],
-    vars: {
-      "color-primary": "#00ff88",
-      "color-accent": "#00ff88",
-      "font-heading": "monospace",
-      "font-body": "monospace",
-    },
-  },
-  coastal: {
-    displayName: "Coastal",
-    description: "Calm, breezy, ocean-inspired",
-    bestFor: ["wellness", "travel", "retreat"],
-    vars: {
-      "color-primary": "#1a5276",
-      "color-accent": "#48c9b0",
-      "font-heading": "system-ui, -apple-system, sans-serif",
-      "font-body": "system-ui, -apple-system, sans-serif",
-    },
-  },
-  minimal: {
-    displayName: "Minimal",
-    description: "Clean, focused, distraction-free",
-    bestFor: ["writer", "researcher", "documentation"],
-    vars: {
-      "color-primary": "#333333",
-      "color-accent": "#0066cc",
-      "font-heading": "system-ui, -apple-system, sans-serif",
-      "font-body": "system-ui, -apple-system, sans-serif",
-    },
-  },
-};
+export const THEMES: Record<string, Theme> = Object.fromEntries(
+  themesData.map(({ id, ...theme }) => [id, theme]),
+);
