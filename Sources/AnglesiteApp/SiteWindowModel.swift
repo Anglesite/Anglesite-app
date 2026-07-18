@@ -1173,6 +1173,40 @@ final class SiteWindowModel {
         }
     }
 
+    /// Publishes the post at `id` (#798): sets `draft: false`, re-stamping `publishDate` only on
+    /// a first publish. Non-destructive (Unpublish reverses it), so no confirmation — same
+    /// no-confirmation precedent as `duplicate(id:)`.
+    @MainActor
+    func publish(id: String) async {
+        guard let site, let post = await contentGraph.post(id: id) else { return }
+        let result = await contentCreation.publish(
+            siteID: site.id, relativePath: post.filePath, collection: post.collection)
+        switch result {
+        case .created:
+            await navigator?.refreshNow()
+        case .failed(let reason):
+            contentActionError = reason
+        case .siteNotFound:
+            break
+        }
+    }
+
+    /// Unpublishes the post at `id` (#798): sets `draft: true`, leaving `publishDate` untouched.
+    @MainActor
+    func unpublish(id: String) async {
+        guard let site, let post = await contentGraph.post(id: id) else { return }
+        let result = await contentCreation.unpublish(
+            siteID: site.id, relativePath: post.filePath, collection: post.collection)
+        switch result {
+        case .created:
+            await navigator?.refreshNow()
+        case .failed(let reason):
+            contentActionError = reason
+        case .siteNotFound:
+            break
+        }
+    }
+
     /// Scan `sourceDirectory` and load the result into `contentGraph`. Called from `loadAndStart`
     /// so the graph is warm (`isPopulated(siteID:) == true`) before the first chat turn, not just
     /// after the first content create/delete (#660).
