@@ -15,11 +15,7 @@ struct JsonLdRenderSmokeTests {
     }
 
     /// True when the template can actually be built: a Node binary plus an installed Astro.
-    static var buildable: Bool {
-        guard E2EPrerequisites.locateNode() != nil else { return false }
-        return FileManager.default.isReadableFile(
-            atPath: templateDir.appendingPathComponent("node_modules/astro/astro.js").path)
-    }
+    static var buildable: Bool { E2EPrerequisites.astroBuildable(templateDir: templateDir) }
 
     @Test("seeded types emit schema.org JSON-LD with the expected @type",
           .enabled(if: JsonLdRenderSmokeTests.buildable))
@@ -39,7 +35,7 @@ struct JsonLdRenderSmokeTests {
 
             let result = try await ProcessSupervisor.shared.run(
                 executable: node,
-                arguments: ["node_modules/astro/astro.js", "build"],
+                arguments: [E2EPrerequisites.astroCLIRelativePath, "build"],
                 currentDirectoryURL: Self.templateDir)
             try #require(result.exitCode == 0, "astro build failed: \(result.stdout)\n\(result.stderr)")
 

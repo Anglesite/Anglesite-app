@@ -11,11 +11,7 @@ struct DraftContentRenderSmokeTests {
             .appendingPathComponent("Resources/Template", isDirectory: true)
     }
 
-    static var buildable: Bool {
-        guard E2EPrerequisites.locateNode() != nil else { return false }
-        return FileManager.default.isReadableFile(
-            atPath: templateDir.appendingPathComponent("node_modules/astro/astro.js").path)
-    }
+    static var buildable: Bool { E2EPrerequisites.astroBuildable(templateDir: templateDir) }
 
     /// One temporary draft entry per draft-bearing collection, with distinguishable slugs/titles
     /// so a leak into `dist/` is unambiguous. `blog` uses `pubDate`; every post-family type uses
@@ -54,7 +50,7 @@ struct DraftContentRenderSmokeTests {
 
             let result = try await ProcessSupervisor.shared.run(
                 executable: node,
-                arguments: ["node_modules/astro/astro.js", "build"],
+                arguments: [E2EPrerequisites.astroCLIRelativePath, "build"],
                 currentDirectoryURL: Self.templateDir)
             try #require(result.exitCode == 0, "astro build failed: \(result.stdout)\n\(result.stderr)")
 
