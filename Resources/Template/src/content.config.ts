@@ -1,6 +1,18 @@
 import { defineCollection } from "astro:content";
 import { glob } from "astro/loaders";
 import { z } from "astro/zod";
+import { readConfig } from "../scripts/config.ts";
+import { createContentAPILoader } from "./lib/content-loader";
+
+/**
+ * Picks the CMS content-API loader when `.site-config`'s `CMS_CONTENT_API_URL` is set (CMS mode,
+ * slice 4), otherwise the existing `glob()` loader (today's behavior, unchanged for every
+ * un-provisioned site). Same zod schema validates entries from either loader (#799 §C.4).
+ */
+function collectionLoader(name: string) {
+  const apiURL = readConfig("CMS_CONTENT_API_URL");
+  return apiURL ? createContentAPILoader(name, { apiURL }) : glob({ pattern: "**/*.md", base: `./src/content/${name}` });
+}
 
 // Shared outbound-social metadata. POSSE is explicit per entry; `syndication` is written back by
 // Anglesite after the remote APIs return and is projected as u-syndication by the layouts.
@@ -17,7 +29,7 @@ const socialFields = {
 // entry's `id` from its filename (e.g. welcome-to-your-blog.md -> "welcome-to-your-blog"),
 // which becomes the /blog/<id>/ URL.
 const blog = defineCollection({
-  loader: glob({ pattern: "**/*.md", base: "./src/content/blog" }),
+  loader: collectionLoader("blog"),
   schema: z.object({
     ...socialFields,
     title: z.string(),

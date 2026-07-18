@@ -32,6 +32,12 @@ public struct SiteSettings: Sendable, Codable, Equatable {
     /// Bluesky PDS origin. `nil` uses the public `https://bsky.social` service.
     public var blueskyPDSURL: String?
 
+    /// Git commit SHA of `Source/`'s `HEAD` at the time of the last successful deployed-source
+    /// bundle upload to R2 (#799, spec §C.4 — the code side of a future Worker-triggered bake).
+    /// `nil` until the first successful upload. Compared against the current `HEAD` (via
+    /// `InProcessGit`) by `SourceBundleStatus` to surface "code changes not yet deployed."
+    public var deployedSourceBundleCommit: String?
+
     /// `@dwk/workers` catalog ids the user has manually toggled on. Component-tied workers are
     /// never stored here — their active state is always recomputed live from Site Graph
     /// Explorer / `ImpactAnalysis` (`WorkerActivation`, #709), so it can't drift from site
@@ -56,6 +62,7 @@ public struct SiteSettings: Sendable, Codable, Equatable {
         mastodonBaseURL: String? = nil,
         blueskyIdentifier: String? = nil,
         blueskyPDSURL: String? = nil,
+        deployedSourceBundleCommit: String? = nil,
         activeWorkerIDs: [String]? = nil,
         lastDeployedWorkerIDs: [String]? = nil,
         provisionedWorkerResources: WorkerComposition.ProvisionedResources? = nil
@@ -66,6 +73,7 @@ public struct SiteSettings: Sendable, Codable, Equatable {
         self.mastodonBaseURL = mastodonBaseURL
         self.blueskyIdentifier = blueskyIdentifier
         self.blueskyPDSURL = blueskyPDSURL
+        self.deployedSourceBundleCommit = deployedSourceBundleCommit
         self.activeWorkerIDs = activeWorkerIDs
         self.lastDeployedWorkerIDs = lastDeployedWorkerIDs
         self.provisionedWorkerResources = provisionedWorkerResources

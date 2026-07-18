@@ -29,6 +29,7 @@ struct DeployCommandTests {
             case .build: return "build"
             case .preflight: return "preflight"
             case .wrangler: return "wrangler"
+            case .bundleUpload: return "bundleUpload"
             }
         }
 
@@ -555,6 +556,8 @@ struct DeployCommandTests {
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"version":1,"ok":true,"failures":[],"warnings":[]}'; exit 0"#])
                     case .wrangler:
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo 'Published angle-app (1.23 sec)'; echo '  https://angle-app.example.workers.dev'; exit 0"])
+                    case .bundleUpload:
+                        return .unavailable(reason: "not exercised in this test")
                     }
                 }
             }
@@ -585,6 +588,8 @@ struct DeployCommandTests {
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"version":1,"ok":true,"failures":[],"warnings":[]}'"#])
                     case .wrangler:
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo \"TOKEN=$CLOUDFLARE_API_TOKEN\"; echo 'Published x (0.1 sec)'; echo '  https://x.workers.dev'"])
+                    case .bundleUpload:
+                        return .unavailable(reason: "not exercised in this test")
                     }
                 }
             }
@@ -631,6 +636,8 @@ struct DeployCommandTests {
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"version":1,"ok":true,"failures":[],"warnings":[]}'"#])
                     case .wrangler:
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "trap 'echo __SIGTERM__; exit 143' TERM; echo __STARTED__; sleep 20; echo __COMPLETED__"])
+                    case .bundleUpload:
+                        return .unavailable(reason: "not exercised in this test")
                     }
                 }
             }
@@ -785,6 +792,149 @@ struct DeployCommandTests {
         #expect(config.contains("SITE_NAME=Acme"))
         #expect(config.contains("SITE_URL=https://new.example.workers.dev"))
         #expect(!config.contains("old.example.workers.dev"))
+    }
+
+    // MARK: Bundle-upload orchestration (#799)
+
+    @Test("a successful deploy uploads the source bundle when CF_SOURCE_BUCKET is configured")
+    func successfulDeployUploadsBundleWhenBucketConfigured() async throws {
+        let siteDir = try makeGitRepo()   // see makeGitRepo below for this helper
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        try "CF_SOURCE_BUCKET=my-site-source\n".write(
+            to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+        let configDir = tmpDir.appendingPathComponent("deploy-config-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: configDir) }
+
+        let executor = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Deployed my-site (1.2 sec)\n https://my-site.example.workers.dev")
+            .set(.bundleUpload, exitCode: 0, output: "")
+        let command = DeployCommand(tokenSource: { "test-token" }, executor: executor)
+
+        let result = await command.deploy(siteID: "test", siteDirectory: siteDir, configDirectory: configDir)
+        guard case .succeeded = result else {
+            Issue.record("expected .succeeded, got \(result)")
+            return
+        }
+        #expect(executor.ran(.bundleUpload))
+        #expect(
+            executor.environment(for: .bundleUpload)?["CLOUDFLARE_API_TOKEN"] == "test-token",
+            "bundle-upload runs `wrangler r2 object put --remote`, which needs the same CLOUDFLARE_API_TOKEN the .wrangler step gets — not the token-stripped base environment"
+        )
+
+        let settings = try await SiteConfigStore(configDirectory: configDir).load()
+        #expect(settings.deployedSourceBundleCommit != nil)
+    }
+
+    @Test("a successful deploy skips the bundle-upload step when CF_SOURCE_BUCKET is not configured")
+    func successfulDeploySkipsBundleUploadWithoutBucket() async throws {
+        let siteDir = try makeGitRepo()
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        // No .site-config at all — matches every real site today (no provisioning writes CF_SOURCE_BUCKET yet).
+        let configDir = tmpDir.appendingPathComponent("deploy-config-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: configDir) }
+
+        let executor = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Deployed my-site (1.2 sec)\n https://my-site.example.workers.dev")
+        let command = DeployCommand(tokenSource: { "test-token" }, executor: executor)
+
+        let result = await command.deploy(siteID: "test", siteDirectory: siteDir, configDirectory: configDir)
+        guard case .succeeded = result else {
+            Issue.record("expected .succeeded, got \(result)")
+            return
+        }
+        #expect(!executor.ran(.bundleUpload))
+    }
+
+    /// A minimal real git repo (`git init` + one commit) at a fresh temp directory — the
+    /// bundle-upload orchestration reads `Source/`'s HEAD SHA via `InProcessGit`, which needs a
+    /// real repository, not just a directory.
+    private func makeGitRepo() throws -> URL {
+        let dir = tmpDir.appendingPathComponent("deploy-source-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "hello".write(to: dir.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["sh", "-c", "git init -q && git config user.email t@example.com && git config user.name Test && git add -A && git commit -q -m init"]
+        process.currentDirectoryURL = dir
+        try process.run()
+        process.waitUntilExit()
+        return dir
+    }
+
+    @Test("ContainerDeployExecutor maps .bundleUpload to a tar+wrangler-r2-put argv naming the configured bucket")
+    func bundleUploadArgvNamesConfiguredBucket() throws {
+        let siteDir = tmpDir.appendingPathComponent("bundle-upload-argv-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        try "CF_SOURCE_BUCKET=my-site-source\n".write(
+            to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        let argv = ContainerDeployExecutorTestHook.guestArgv(for: .bundleUpload, siteDirectory: siteDir)
+        // The bucket must be a separate positional argv element (passed as `$1` to `sh -c`), not
+        // interpolated into the script text — that's what makes it injection-safe (see the
+        // adjoining injection test).
+        #expect(argv.contains("my-site-source"))
+        #expect(argv.contains { $0.contains("wrangler") })
+    }
+
+    @Test(
+        """
+        ContainerDeployExecutor's .bundleUpload argv passes the CF_SOURCE_BUCKET value as a positional \
+        shell parameter, so shell metacharacters in it cannot execute as commands
+        """
+    )
+    func bundleUploadArgvIsSafeAgainstShellInjectionInBucketName() throws {
+        // `.site-config` is owned by the site (or a future provisioning flow) and its raw value
+        // flows straight into `guestArgv` unvalidated — this proves a malicious/malformed bucket
+        // name can't break out of the intended tar/wrangler invocation when the produced argv is
+        // actually executed by `sh`, not just that the argv strings "look" quoted.
+        let siteDir = tmpDir.appendingPathComponent("bundle-upload-injection-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+
+        let markerFile = tmpDir.appendingPathComponent("bundle-upload-pwned-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: markerFile) }
+        #expect(!FileManager.default.fileExists(atPath: markerFile.path))
+
+        let payload = "my-bucket'; touch \(markerFile.path); echo '"
+        try "CF_SOURCE_BUCKET=\(payload)\n".write(
+            to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        let argv = ContainerDeployExecutorTestHook.guestArgv(for: .bundleUpload, siteDirectory: siteDir)
+        #expect(argv.contains(payload))
+
+        // Stub `tar`/`npx` on PATH so the script doesn't need a real workspace or network — the
+        // point is only to observe whether the shell executes the injected `touch`, not whether
+        // the real tar/wrangler commands succeed.
+        let binDir = tmpDir.appendingPathComponent("bundle-upload-injection-bin-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: binDir) }
+        for name in ["tar", "npx"] {
+            let stub = binDir.appendingPathComponent(name)
+            try "#!/bin/sh\nexit 0\n".write(to: stub, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+        }
+
+        // argv is ["sh", "-c", script, "sh", bucket] — feed it to a real `sh` exactly as
+        // `ContainerDeployExecutor` would hand it to the guest's exec call.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = Array(argv.dropFirst())
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = binDir.path + ":" + (environment["PATH"] ?? "")
+        process.environment = environment
+        try process.run()
+        process.waitUntilExit()
+
+        #expect(
+            !FileManager.default.fileExists(atPath: markerFile.path),
+            "shell metacharacters in CF_SOURCE_BUCKET executed as commands — injection is not blocked")
     }
 
     /// Minimal thread-safe box for recording values appended from `@Sendable` closures.

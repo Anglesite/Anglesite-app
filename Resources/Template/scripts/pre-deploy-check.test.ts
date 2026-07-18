@@ -197,3 +197,14 @@ test("checkArtifactPresence: backslash paths are normalized", () => {
   const paths = ["dist\\robots.txt", "dist\\.well-known\\security.txt"];
   assert.deepEqual(checkArtifactPresence(paths), []);
 });
+
+test("--strict promotes warnings into failures for exit-code purposes (unit-level check on the promotion helper)", () => {
+  // checkArtifactPresence always returns warnings (missing-security-artifact) — this test
+  // documents the contract main() relies on: in --strict mode, ALL warnings (not just this
+  // category) become failures. The end-to-end exit-code behavior is covered by the real-script
+  // fixture tests in PreDeployCheckFixtureTests.swift (Swift side, #799 Task 3), since --strict's
+  // effect lives in main()'s promotion logic, not in an exported pure function.
+  const warnings = checkArtifactPresence([]);
+  assert.equal(warnings.length, 2);
+  assert.ok(warnings.every((w) => w.severity === "warning"));
+});

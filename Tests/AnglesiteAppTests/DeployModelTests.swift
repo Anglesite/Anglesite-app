@@ -26,6 +26,8 @@ private actor GatedDeployExecutor: DeployExecutor {
                 exitCode: 0,
                 output: "Published test (0.1 sec)\n  https://test.example.workers.dev"
             )
+        case .bundleUpload:
+            return DeployStepResult(exitCode: 0, output: "")
         }
     }
 

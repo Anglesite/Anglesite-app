@@ -19,7 +19,9 @@ import Foundation
 /// **Environment contract:**
 ///   - `.build` and `.preflight` get a curated subset of the host environment (see
 ///     `hostDeployEnvironment()`) — safe shell/locale/proxy/Node vars only, no unrelated secrets.
-///   - `.wrangler` gets that curated environment *plus* `CLOUDFLARE_API_TOKEN`.
+///   - `.wrangler` gets that curated environment *plus* `CLOUDFLARE_API_TOKEN`. `.bundleUpload`
+///     (the optional post-deploy source-bundle upload) reuses that same token-bearing environment,
+///     since it also authenticates to Cloudflare (R2 via wrangler).
 ///
 /// **Cancellation**: cancelling the deploy task propagates through `executor.run` (the host
 /// executor wraps its `waitForExit` in a cancellation handler that SIGTERMs the in-flight
@@ -216,6 +218,12 @@ public actor DeployCommand {
                 }
                 Self.persistSiteURL(url, siteDirectory: siteDirectory)
                 Self.persistWorkerDeployed(siteDirectory: siteDirectory)
+                if let configDirectory {
+                    await Self.uploadSourceBundleIfConfigured(
+                        siteDirectory: siteDirectory, configDirectory: configDirectory,
+                        environment: wranglerEnvironment, executor: executor, siteID: siteID
+                    )
+                }
                 return .succeeded(url: url, duration: duration)
             }
             return .failed(
@@ -319,6 +327,43 @@ public actor DeployCommand {
         guard SiteConfigFile.value(forKey: "CF_WORKER_DEPLOYED", in: config) == nil else { return }
         let updated = SiteConfigFile.upsert([("CF_WORKER_DEPLOYED", "true")], into: config)
         try? updated.write(to: configURL, atomically: true, encoding: .utf8)
+    }
+
+    /// Uploads `Source/`'s snapshot to R2 (`DeployStep.bundleUpload`) when `.site-config`'s
+    /// `CF_SOURCE_BUCKET` is set, then persists the uploaded commit SHA into `Config/settings.plist`
+    /// (#799, spec §C.4 — the code side of a future Worker-triggered bake). A no-op today for every
+    /// real site — no provisioning flow writes `CF_SOURCE_BUCKET` yet — and the executor call is
+    /// skipped entirely rather than run-and-ignore-the-result, so a redeploy on an unprovisioned
+    /// site pays no extra subprocess cost. Best-effort like `persistSiteURL`/`persistWorkerDeployed`:
+    /// a failure here must never turn a successful deploy into a failed one.
+    static func uploadSourceBundleIfConfigured(
+        siteDirectory: URL,
+        configDirectory: URL,
+        environment: [String: String],
+        executor: any DeployExecutor,
+        siteID: String
+    ) async {
+        let configURL = siteDirectory.appendingPathComponent(WebsiteAnalyticsAsset.configRelativePath)
+        let config = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+        guard SiteConfigFile.value(forKey: "CF_SOURCE_BUCKET", in: config) != nil else { return }
+
+        let uploadResult = await executor.run(
+            step: .bundleUpload,
+            siteDirectory: siteDirectory,
+            environment: environment,
+            source: "deploy:\(siteID):bundle"
+        )
+        guard uploadResult.exitCode == 0 else { return }
+
+        guard let headResult = try? await BackupCommand.defaultRunner(siteDirectory, ["rev-parse", "HEAD"]) else { return }
+        guard headResult.exitCode == 0 else { return }
+        let commitSHA = headResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !commitSHA.isEmpty else { return }
+
+        let store = SiteConfigStore(configDirectory: configDirectory)
+        guard var settings = try? await store.load() else { return }
+        settings.deployedSourceBundleCommit = commitSHA
+        try? await store.save(settings)
     }
 
     /// Checks whether `.site-config`'s `CF_PROJECT_NAME` collides with an existing Worker on the

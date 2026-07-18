@@ -27,6 +27,11 @@ final class DeployModel {
     private(set) var currentMilestone: String?
     /// On-device summary of the most recent *failed* deploy, or nil if none/unavailable.
     private(set) var failureSummary: DeployFailureSummary?
+    /// "Code changes not yet deployed" status for the deployed-source bundle (#799). Refreshed
+    /// after every successful deploy; `nil` before any deploy has completed this session or when
+    /// the check couldn't be performed. `.notConfigured` (no `CF_SOURCE_BUCKET`) is the expected
+    /// value for every site today — the drawer only renders a line for `.dirty`.
+    private(set) var sourceBundleStatus: SourceBundleStatus?
     /// True while the failure summary is being generated (drives a spinner in the drawer).
     private(set) var summarizing: Bool = false
 
@@ -518,6 +523,9 @@ final class DeployModel {
             )
             currentMilestone = nil
             workerNameConflictPresented = false
+            if let settings = try? await SiteConfigStore(configDirectory: configDirectory).load() {
+                sourceBundleStatus = await SourceBundleStatus.check(siteDirectory: siteDirectory, settings: settings)
+            }
             transition(siteID: siteID, to: .succeeded(url: url, duration: duration))
         case .failed(let reason, let exit):
             workerNameConflictPresented = false

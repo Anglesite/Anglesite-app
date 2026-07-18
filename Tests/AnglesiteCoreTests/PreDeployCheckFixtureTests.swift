@@ -124,4 +124,110 @@ struct PreDeployCheckFixtureTests {
         }
         #expect(warnings.isEmpty)
     }
+
+    /// Writes a fixture `package.json` whose `build` step is a no-op (`true`) and whose `build:ci`
+    /// chains that no-op build with the REAL `pre-deploy-check.ts --json --strict`, exactly as
+    /// `Resources/Template/package.json` does (#799). `dist/` is pre-seeded by the caller, standing
+    /// in for a real `astro build` output — this test proves `build:ci`'s chaining and `--strict`
+    /// promotion against the real script, not a reimplementation of it.
+    private func writeFixturePackageJSON(in siteDir: URL) throws {
+        let packageJSON = """
+        {
+          "name": "build-ci-fixture",
+          "type": "module",
+          "scripts": {
+            "build": "true",
+            "build:ci": "npm run build && npx tsx \(Self.templateScriptsDirectory.appendingPathComponent("pre-deploy-check.ts").path) --json --strict"
+          }
+        }
+        """
+        try packageJSON.write(to: siteDir.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+    }
+
+    /// Runs `npm run build:ci` with `siteDir` as cwd and returns captured stdout + exit code.
+    private func runBuildCI(siteDir: URL) throws -> (stdout: String, exitCode: Int32) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["npm", "run", "build:ci"]
+        process.currentDirectoryURL = siteDir
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe   // npm's own "> build:ci" banner goes to stderr; merge so the
+                                        // envelope-extraction test below has real noise to skip past.
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (stdout: String(data: data, encoding: .utf8) ?? "", exitCode: process.terminationStatus)
+    }
+
+    @Test("build:ci on a fixture with a seeded PII blocker exits non-zero after building",
+          .enabled(if: PreDeployCheckFixtureTests.buildable))
+    func buildCIWithPIIBlockerExitsNonZero() throws {
+        let siteDir = try makeFixtureDist(html: "<html><body><p>Contact us at hello@example.com</p></body></html>")
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        try writeFixturePackageJSON(in: siteDir)
+
+        let result = try runBuildCI(siteDir: siteDir)
+        #expect(result.exitCode != 0)
+
+        let extracted = BuildLogEnvelope.extract(fromLog: result.stdout, exitCode: result.exitCode)
+        guard case .outcome(.blocked(let failures, _)) = extracted else {
+            Issue.record("expected .outcome(.blocked) extracted from the combined log, got \(extracted) — raw: \(result.stdout)")
+            return
+        }
+        #expect(failures.contains { $0.category == .piiEmail })
+    }
+
+    @Test("build:ci on a clean fixture exits zero",
+          .enabled(if: PreDeployCheckFixtureTests.buildable))
+    func buildCIOnCleanFixtureExitsZero() throws {
+        let siteDir = try makeFixtureDist(html: "<html><body><p>Nothing sensitive here.</p></body></html>")
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        try "/*\n  Content-Security-Policy: default-src 'self'\n".write(
+            to: siteDir.appendingPathComponent("dist/_headers"), atomically: true, encoding: .utf8)
+        try "User-agent: *\n".write(
+            to: siteDir.appendingPathComponent("dist/robots.txt"), atomically: true, encoding: .utf8)
+        let wellKnown = siteDir.appendingPathComponent("dist/.well-known", isDirectory: true)
+        try FileManager.default.createDirectory(at: wellKnown, withIntermediateDirectories: true)
+        try "Contact: mailto:security@example.com\n".write(
+            to: wellKnown.appendingPathComponent("security.txt"), atomically: true, encoding: .utf8)
+        try writeFixturePackageJSON(in: siteDir)
+
+        let result = try runBuildCI(siteDir: siteDir)
+        #expect(result.exitCode == 0)
+    }
+
+    @Test("build:ci's --strict promotes a warning-only fixture to non-zero",
+          .enabled(if: PreDeployCheckFixtureTests.buildable))
+    func buildCIStrictPromotesWarningsToFailure() throws {
+        // Deliberately missing dist/_headers/robots.txt/security.txt: `pre-deploy-check.ts --json`
+        // (no --strict) would still exit 1 here because a missing _headers is itself an ERROR
+        // (checkHeaders), so to isolate the --strict promotion this fixture supplies a passing
+        // _headers but omits robots.txt/security.txt, which are WARNINGS (missing-security-artifact)
+        // — exit 0 without --strict, exit 1 with it.
+        let siteDir = try makeFixtureDist(html: "<html><body><p>Nothing sensitive here.</p></body></html>")
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        try "/*\n  Content-Security-Policy: default-src 'self'\n".write(
+            to: siteDir.appendingPathComponent("dist/_headers"), atomically: true, encoding: .utf8)
+        try writeFixturePackageJSON(in: siteDir)
+
+        let result = try runBuildCI(siteDir: siteDir)
+        #expect(result.exitCode != 0)
+
+        let extracted = BuildLogEnvelope.extract(fromLog: result.stdout, exitCode: result.exitCode)
+        guard case .outcome(.blocked(let failures, let warnings)) = extracted else {
+            Issue.record("expected .outcome(.blocked), got \(extracted) — raw: \(result.stdout)")
+            return
+        }
+        // NOTE (#799 concern, not fixed here — out of scope for this task): `ScanFailure.Category`
+        // (Sources/AnglesiteCore/PreDeployCheck.swift, pre-existing #742 code) has no
+        // `.missingSecurityArtifact` case — that raw value only exists on `ScanWarning.Category`.
+        // When `--strict` promotes a "missing-security-artifact" warning into the JSON `failures`
+        // array, `PreDeployCheck.parse` decodes it as a `ScanFailure`, whose `Category.init(from:)`
+        // falls back unrecognized raw values to `.other` — the specific category is silently lost
+        // on the failures side. Asserting on `.other` here (plus the message text) documents that
+        // real, current behavior rather than asserting a category value that can't compile.
+        #expect(failures.contains { $0.category == .other && $0.message.contains("Missing security artifact") })
+        #expect(warnings.isEmpty)   // --strict moves everything into failures
+    }
 }

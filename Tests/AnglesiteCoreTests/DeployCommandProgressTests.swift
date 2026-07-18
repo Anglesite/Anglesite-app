@@ -28,6 +28,8 @@ private struct BlockingPreflightExecutor: DeployExecutor {
             return DeployStepResult(exitCode: 0, output: #"{"version":1,"ok":false,"failures":[],"warnings":[]}"#)
         case .wrangler:
             return DeployStepResult(exitCode: 0, output: "")
+        case .bundleUpload:
+            return DeployStepResult(exitCode: 0, output: "")
         }
     }
 }
