@@ -41,16 +41,25 @@ public func writeSiteTree(prefix: String = "anglesite-test", _ files: [String: S
 
 // MARK: - In-repo template resolution
 
+/// Failure surfaced by the fixture resolvers. Thrown (not trapped) so a drifted checkout fails
+/// the calling test with a readable message and the rest of the run continues — matching the
+/// soft-fail semantics of the old per-file `#expect` guards these helpers replaced.
+public struct TestFixtureError: Error, CustomStringConvertible {
+    public let description: String
+    public init(_ description: String) { self.description = description }
+}
+
 /// The repo root of this checkout, resolved by walking up from `#filePath`.
 ///
 /// Robust to the test process's CWD (Xcode-hosted runs don't start in the package root; the
 /// older `FileManager.default.currentDirectoryPath` approach only worked under `swift test`).
+/// Throws `TestFixtureError` if the walk-up no longer lands on `Package.swift`.
 ///
 /// NOTE: classic URL APIs only (`fileURLWithPath` / `appendingPathComponent` / `.path`), NOT the
 /// newer `URL(filePath:)` / `appending(path:)` / `path(percentEncoded:)`. The latter are vended
 /// by the swift-foundation overlay (`libswift_DarwinFoundation3.dylib`), which the macOS-26 CI
 /// runners don't ship — a test bundle that links it can't load there. See PR #283 CI notes.
-public func packageRepoRoot() -> URL {
+public func packageRepoRoot() throws -> URL {
     let here = URL(fileURLWithPath: #filePath)
     // here      = .../Tests/AnglesiteTestSupport/TestFixtures.swift
     // parent[0] = .../Tests/AnglesiteTestSupport/
@@ -60,13 +69,14 @@ public func packageRepoRoot() -> URL {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .deletingLastPathComponent()
-    precondition(
-        FileManager.default.fileExists(atPath: root.appendingPathComponent("Package.swift").path),
-        "repo-root detection drifted: \(root.path)")
+    guard FileManager.default.fileExists(atPath: root.appendingPathComponent("Package.swift").path) else {
+        throw TestFixtureError(
+            "repo-root detection drifted: no Package.swift at \(root.path) (walked up from \(here.path))")
+    }
     return root
 }
 
 /// The committed website template (`Resources/Template/`) in this checkout.
-public func templateRoot() -> URL {
-    packageRepoRoot().appendingPathComponent("Resources/Template", isDirectory: true)
+public func templateRoot() throws -> URL {
+    try packageRepoRoot().appendingPathComponent("Resources/Template", isDirectory: true)
 }

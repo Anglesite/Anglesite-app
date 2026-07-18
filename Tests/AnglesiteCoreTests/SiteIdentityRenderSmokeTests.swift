@@ -6,18 +6,18 @@ import AnglesiteTestSupport
 @Suite("Site identity h-card render smoke")
 struct SiteIdentityRenderSmokeTests {
 
-    static var templateDir: URL { templateRoot() }
+    static var templateDir: URL { get throws { try templateRoot() } }
 
     /// True when the template can actually be built: a Node binary plus an installed Astro.
-    static var buildable: Bool { E2EPrerequisites.astroBuildable(templateDir: templateDir) }
+    static var buildable: Bool { ((try? templateDir).map { E2EPrerequisites.astroBuildable(templateDir: $0) }) ?? false }
 
     @Test("footer h-card renders per profile kind, and nothing when unconfigured",
           .enabled(if: SiteIdentityRenderSmokeTests.buildable))
     func rendersFooterHcard() async throws {
         let node = try #require(E2EPrerequisites.locateNode())
-        let dataDir = Self.templateDir.appendingPathComponent("src/data", isDirectory: true)
+        let dataDir = try Self.templateDir.appendingPathComponent("src/data", isDirectory: true)
         let profile = dataDir.appendingPathComponent("profile.json")
-        let dist = Self.templateDir.appendingPathComponent("dist", isDirectory: true)
+        let dist = try Self.templateDir.appendingPathComponent("dist", isDirectory: true)
 
         func build() async throws {
             try? FileManager.default.removeItem(at: dist)

@@ -176,7 +176,7 @@ struct POSSESyndicationTests {
 
     @Test("template accepts POSSE metadata and projects returned URLs as u-syndication")
     func templateContract() throws {
-        let root = templateRoot().appendingPathComponent("src", isDirectory: true)
+        let root = try templateRoot().appendingPathComponent("src", isDirectory: true)
         let config = try String(contentsOf: root.appendingPathComponent("content.config.ts"), encoding: .utf8)
         let links = try String(
             contentsOf: root.appendingPathComponent("components/SyndicationLinks.astro"), encoding: .utf8)

@@ -6,9 +6,9 @@ import AnglesiteTestSupport
 @Suite("Draft content render smoke")
 struct DraftContentRenderSmokeTests {
 
-    static var templateDir: URL { templateRoot() }
+    static var templateDir: URL { get throws { try templateRoot() } }
 
-    static var buildable: Bool { E2EPrerequisites.astroBuildable(templateDir: templateDir) }
+    static var buildable: Bool { ((try? templateDir).map { E2EPrerequisites.astroBuildable(templateDir: $0) }) ?? false }
 
     /// One temporary draft entry per draft-bearing collection, with distinguishable slugs/titles
     /// so a leak into `dist/` is unambiguous. `blog` uses `pubDate`; every post-family type uses
@@ -28,12 +28,12 @@ struct DraftContentRenderSmokeTests {
           .enabled(if: DraftContentRenderSmokeTests.buildable))
     func draftsNeverBuild() async throws {
         let node = try #require(E2EPrerequisites.locateNode())
-        let dist = Self.templateDir.appendingPathComponent("dist", isDirectory: true)
+        let dist = try Self.templateDir.appendingPathComponent("dist", isDirectory: true)
         let fm = FileManager.default
 
         var writtenFiles: [URL] = []
         for fixture in Self.draftFixtures {
-            let dir = Self.templateDir.appendingPathComponent("src/content/\(fixture.collection)", isDirectory: true)
+            let dir = try Self.templateDir.appendingPathComponent("src/content/\(fixture.collection)", isDirectory: true)
             let file = dir.appendingPathComponent("\(fixture.slug).md")
             let contents = "---\n\(fixture.frontmatter)\n---\n\nDraft smoke fixture; must not build.\n"
             try contents.write(to: file, atomically: true, encoding: .utf8)

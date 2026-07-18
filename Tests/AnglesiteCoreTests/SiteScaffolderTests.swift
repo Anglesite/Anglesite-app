@@ -1,5 +1,6 @@
 import XCTest
 import os
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 final class SiteScaffolderTests: XCTestCase {
@@ -200,9 +201,7 @@ final class SiteScaffolderTests: XCTestCase {
 
     func testHappyPathWritesADependencyBaselineAndStampsTheRealAppVersion() async throws {
         let root = tmpDir()
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let templateURL = repoRoot.appendingPathComponent("Resources/Template", isDirectory: true)
+        let templateURL = try templateRoot()
         let calls = CallRecorder()
         let scaffolder = SiteScaffolder(
             sitesRoot: root, templateURL: templateURL, catalog: ThemeCatalog(themes: [theme]),

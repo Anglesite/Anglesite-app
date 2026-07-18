@@ -142,6 +142,9 @@ struct DeadAssetScannerScanTests {
 
     @Test("empty project produces no candidates")
     func emptyProject() {
+        // Unlike the old per-file makeSite, writeSiteTree creates the root even for an empty
+        // file dictionary — `root` here exists but is empty, where it used to not exist at all.
+        // DeadAssetScanner.scan returns no candidates for both, so the assertion is unchanged.
         let root = try! writeSiteTree(prefix: "dead-asset-scan", [:])
         #expect(DeadAssetScanner.scan(projectRoot: root, images: []).isEmpty)
     }
