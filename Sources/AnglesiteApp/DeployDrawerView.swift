@@ -43,6 +43,11 @@ struct DeployDrawerView: View {
                 if let subtitle = headerSubtitle {
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
+                if case .succeeded = model.phase, case .dirty = model.sourceBundleStatus {
+                    Text("Code changes not yet deployed to the CMS bundle.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
             if case .succeeded(let url, _) = model.phase {
