@@ -119,9 +119,6 @@ final class SiteNavigatorModel {
     /// pages too — so it checks `postIDs` rather than the page-or-post `isContentRow`.
     func canRepurpose(_ id: String) -> Bool { postIDs.contains(id) }
 
-    /// Publish/Unpublish (#798) apply only to registry-backed typed post-family entries — `blog`
-    /// posts have no `ContentTypeDescriptor` (they predate the registry, per `content.config.ts`'s
-    /// hand-authored `blog` block) and keep their existing verb-less draft workflow.
     /// Publish/Unpublish (#798) apply only to registry-backed typed post-family entries that
     /// actually declare a `draft` field — `blog` posts have no `ContentTypeDescriptor` at all, and
     /// business types (event/review/announcement/member) are registered but draftless (out of this
