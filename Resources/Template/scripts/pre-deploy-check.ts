@@ -8,10 +8,13 @@
  * - No third-party tracking scripts
  * - No Keystatic admin routes in production output
  *
- * Usage: npx tsx scripts/pre-deploy-check.ts [--json]
+ * Usage: npx tsx scripts/pre-deploy-check.ts [--json] [--strict]
  *
  * Exit code 0: all clear. Exit code 1: issues found.
  * With --json: prints the versioned {version, ok, failures, warnings} envelope (#742).
+ * With --strict: warnings are promoted into `failures` (both in the --json envelope and for
+ * exit-code purposes) — used by `npm run build:ci`, the single entry point for non-interactive
+ * runners (#799), where a warning-only issue must still block an automated bake/deploy.
  */
 
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -34,6 +37,7 @@ interface ScanReport {
 }
 
 const JSON_MODE = process.argv.includes("--json");
+const STRICT_MODE = process.argv.includes("--strict");
 const DIST_DIR = join(process.cwd(), "dist");
 const HEADERS_FILE = join(DIST_DIR, "_headers");
 const CONFIG_FILE = join(process.cwd(), ".site-config");
@@ -306,8 +310,13 @@ async function scan(): Promise<Issue[]> {
 
 async function main() {
   const issues = await scan();
-  const failures = issues.filter((i) => i.severity === "error");
-  const warnings = issues.filter((i) => i.severity === "warning");
+  let failures = issues.filter((i) => i.severity === "error");
+  let warnings = issues.filter((i) => i.severity === "warning");
+
+  if (STRICT_MODE) {
+    failures = failures.concat(warnings);
+    warnings = [];
+  }
 
   if (JSON_MODE) {
     const report: ScanReport = { version: 1, ok: failures.length === 0, failures, warnings };
