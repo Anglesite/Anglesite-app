@@ -124,4 +124,18 @@ public protocol LocalContainerControl: Sendable {
         workingDirectory: String,
         onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> InteractiveExecHandle
+
+    /// Explicit, scoped network-layer recovery (#812): discards whatever shared network state this
+    /// control's boot path caches, so the *next* boot attempt builds fresh state instead of reusing
+    /// something possibly wedged — without an app relaunch. Surfaced as the failure pane's "Restart
+    /// Networking" button, gated on `VmnetFailureRecovery.isRecoverable`.
+    ///
+    /// Defaults to a no-op below for conformers with no such shared state to reset (Podman on
+    /// Linux, test fakes) — only `ContainerizationControl`'s vmnet-backed network is ever the
+    /// target.
+    func resetNetworking() async
+}
+
+extension LocalContainerControl {
+    public func resetNetworking() async {}
 }

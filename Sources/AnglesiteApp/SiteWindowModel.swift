@@ -364,6 +364,17 @@ final class SiteWindowModel {
         preview.startDevServer()
     }
 
+    /// The `.failed`-state pane's "Restart Networking" button (#812), shown only when
+    /// `VmnetFailureRecovery.isRecoverable` recognizes the failure. Drops this process's cached
+    /// vmnet network (`PreviewModel.resetNetworking()`) before retrying, so the retry that follows
+    /// doesn't just fail against the same wedged network object.
+    func restartNetworkingAndRetry() {
+        Task {
+            await preview.resetNetworking()
+            retryPreview()
+        }
+    }
+
     func previewStateChanged(_ state: SiteRuntimeState) {
         startup.ingest(state: state)
         guard preview.canDeploy, let invisiblePublishQueue else { return }
@@ -787,7 +798,7 @@ final class SiteWindowModel {
             guard await leaveCurrentEditor(), await leaveCurrentInspector() else { return }
             inspectorContext = nil
             switch EditorKind.resolve(for: file) {
-            case .text, .component:
+            case .text, .component, .markdown:
                 // `.component` also builds a plain `FileEditorModel`: `MainPaneEditorView` re-resolves
                 // `EditorKind` itself and renders `ComponentEditorView` (backed by the same
                 // `FileEditorModel` for its Source-mode escape hatch) when a `componentContext` is
@@ -1162,6 +1173,40 @@ final class SiteWindowModel {
         case .created(_, let identifier):
             await navigator?.refreshNow()
             navigator?.selection = isPost ? "\(site.id):post:\(identifier)" : "\(site.id):page:\(identifier)"
+        case .failed(let reason):
+            contentActionError = reason
+        case .siteNotFound:
+            break
+        }
+    }
+
+    /// Publishes the post at `id` (#798): sets `draft: false`, re-stamping `publishDate` only on
+    /// a first publish. Non-destructive (Unpublish reverses it), so no confirmation — same
+    /// no-confirmation precedent as `duplicate(id:)`.
+    @MainActor
+    func publish(id: String) async {
+        guard let site, let post = await contentGraph.post(id: id) else { return }
+        let result = await contentCreation.publish(
+            siteID: site.id, relativePath: post.filePath, collection: post.collection)
+        switch result {
+        case .created:
+            await navigator?.refreshNow()
+        case .failed(let reason):
+            contentActionError = reason
+        case .siteNotFound:
+            break
+        }
+    }
+
+    /// Unpublishes the post at `id` (#798): sets `draft: true`, leaving `publishDate` untouched.
+    @MainActor
+    func unpublish(id: String) async {
+        guard let site, let post = await contentGraph.post(id: id) else { return }
+        let result = await contentCreation.unpublish(
+            siteID: site.id, relativePath: post.filePath, collection: post.collection)
+        switch result {
+        case .created:
+            await navigator?.refreshNow()
         case .failed(let reason):
             contentActionError = reason
         case .siteNotFound:

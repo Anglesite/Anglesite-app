@@ -14,13 +14,15 @@ struct NewContentActions {
     let newComponent: @MainActor () -> Void
 }
 
-/// Delete/Duplicate acting on the Navigator's current selection (#516). Each action is `nil` when
-/// there is no selection, or the selection isn't a page/post (`SiteNavigatorModel.canDelete`/
-/// `canDuplicate`) — that's what lets the Edit-menu items enable/disable correctly without the
-/// menu needing to know Navigator internals.
+/// Delete/Duplicate/Publish/Unpublish acting on the Navigator's current selection (#516, #798).
+/// Each action is `nil` when there is no selection, or the selection doesn't support that verb
+/// (`SiteNavigatorModel.canDelete`/`canDuplicate`/`canPublish`/`canUnpublish`) — that's what lets
+/// the Edit-menu items enable/disable correctly without the menu needing to know Navigator internals.
 struct NavigatorSelectionActions {
     let delete: (@MainActor () -> Void)?
     let duplicate: (@MainActor () -> Void)?
+    let publish: (@MainActor () -> Void)?
+    let unpublish: (@MainActor () -> Void)?
 }
 
 extension FocusedValues {
@@ -74,9 +76,9 @@ struct NewContentCommands: Commands {
     }
 }
 
-/// Edit ▸ Delete (⌘⌫) / Duplicate (⌘D) for the focused window's Navigator selection (#516).
-/// Placed in the Edit menu next to Cut/Copy/Paste — the macOS convention for selection-scoped
-/// destructive/duplicate actions — rather than the File menu.
+/// Edit ▸ Delete (⌘⌫) / Duplicate (⌘D) / Publish / Unpublish for the focused window's Navigator
+/// selection (#516, #798). Placed in the Edit menu next to Cut/Copy/Paste — the macOS convention
+/// for selection-scoped destructive/duplicate actions — rather than the File menu.
 struct NavigatorEditCommands: Commands {
     @FocusedValue(\.navigatorSelectionActions) private var actions
 
@@ -93,6 +95,18 @@ struct NavigatorEditCommands: Commands {
             }
             .keyboardShortcut("d", modifiers: [.command])
             .disabled(actions?.duplicate == nil)
+
+            Divider()
+
+            Button("Publish") {
+                actions?.publish?()
+            }
+            .disabled(actions?.publish == nil)
+
+            Button("Unpublish") {
+                actions?.unpublish?()
+            }
+            .disabled(actions?.unpublish == nil)
         }
     }
 }

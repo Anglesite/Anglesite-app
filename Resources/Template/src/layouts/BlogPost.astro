@@ -9,15 +9,17 @@ import { blogPostingSchema } from "../lib/schema.ts";
 import { ownerName } from "../lib/profile.ts";
 import BaseLayout from "./BaseLayout.astro";
 import SyndicationLinks from "../components/SyndicationLinks.astro";
+import DraftBadge from "../components/DraftBadge.astro";
 
 interface Props {
   title: string;
   description?: string;
   pubDate?: Date;
+  draft?: boolean;
   syndication?: string[];
 }
 
-const { title, description, pubDate, syndication } = Astro.props;
+const { title, description, pubDate, draft, syndication } = Astro.props;
 // pubDate is already a Date; pin the locale + UTC so static output is deterministic.
 const iso = pubDate ? pubDate.toISOString() : undefined;
 const human = pubDate
@@ -35,6 +37,7 @@ const jsonLd = blogPostingSchema(
   <Schema slot="head" item={jsonLd} />
   <p><a href="/blog/">← All posts</a></p>
   <article class="h-entry">
+    <DraftBadge draft={draft} />
     <h1 class="p-name">{title}</h1>
     {description && <p class="p-summary">{description}</p>}
     {/* The permalink (u-url) is unconditional; the dt-published time renders inside it when present. */}

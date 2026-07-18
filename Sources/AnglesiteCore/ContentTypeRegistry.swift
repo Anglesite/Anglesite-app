@@ -209,6 +209,7 @@ extension ContentTypeRegistry {
             ContentTypeField("body", .markdown, required: true),
             ContentTypeField("publishDate", .datetime, required: true),
             ContentTypeField("tags", .stringArray),
+            ContentTypeField("draft", .bool),
         ],
         projections: ContentTypeProjections(
             microformat: "h-entry",
@@ -232,6 +233,7 @@ extension ContentTypeRegistry {
             ContentTypeField("publishDate", .datetime, required: true),
             ContentTypeField("updated", .datetime),
             ContentTypeField("tags", .stringArray),
+            ContentTypeField("draft", .bool),
         ],
         projections: ContentTypeProjections(
             microformat: "h-entry",
@@ -256,6 +258,7 @@ extension ContentTypeRegistry {
             ContentTypeField("caption", .text),
             ContentTypeField("publishDate", .datetime, required: true),
             ContentTypeField("tags", .stringArray),
+            ContentTypeField("draft", .bool),
         ],
         projections: ContentTypeProjections(
             microformat: "h-entry",
@@ -279,6 +282,7 @@ extension ContentTypeRegistry {
             ContentTypeField("body", .markdown),
             ContentTypeField("publishDate", .datetime, required: true),
             ContentTypeField("tags", .stringArray),
+            ContentTypeField("draft", .bool),
         ],
         projections: ContentTypeProjections(
             microformat: "h-entry",
@@ -303,6 +307,7 @@ extension ContentTypeRegistry {
             ContentTypeField("body", .markdown),
             ContentTypeField("publishDate", .datetime, required: true),
             ContentTypeField("tags", .stringArray),
+            ContentTypeField("draft", .bool),
         ],
         projections: ContentTypeProjections(
             microformat: "h-entry",
@@ -325,6 +330,7 @@ extension ContentTypeRegistry {
             ContentTypeField("inReplyTo", .url, required: true),
             ContentTypeField("body", .markdown, required: true),
             ContentTypeField("publishDate", .datetime, required: true),
+            ContentTypeField("draft", .bool),
         ],
         projections: ContentTypeProjections(
             microformat: "h-entry",
@@ -344,6 +350,7 @@ extension ContentTypeRegistry {
         fields: [
             ContentTypeField("likeOf", .url, required: true),
             ContentTypeField("publishDate", .datetime, required: true),
+            ContentTypeField("draft", .bool),
         ],
         projections: ContentTypeProjections(
             microformat: "h-entry",

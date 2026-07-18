@@ -302,6 +302,28 @@ struct NativeContentOperationsTests {
         #expect(status.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
+    @Test("hasCommit finds an exact commit-message match in a real repo, and doesn't substring-match a shorter message")
+    func realGitHasCommit() async throws {
+        let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        for args in [["init"], ["config", "user.email", "t@t.io"], ["config", "user.name", "t"]] {
+            _ = try await ProcessSupervisor.shared.run(executable: git, arguments: args, currentDirectoryURL: repo)
+        }
+        // Commit message is a superstring of the shorter message we'll also search for below —
+        // this is the exact false-positive risk the review flagged: `git log --grep` substring-
+        // matches by default, so a naive implementation would incorrectly report the shorter
+        // message as found too.
+        try "note".write(to: repo.appendingPathComponent("my-note-extra.md"), atomically: true, encoding: .utf8)
+        _ = await NativeContentOperations.processGitCommit(repo, "my-note-extra.md", "anglesite: publish note my-note-extra")
+
+        let found = await NativeContentOperations.hasCommit(repo, "anglesite: publish note my-note-extra")
+        #expect(found == true)
+
+        let notFound = await NativeContentOperations.hasCommit(repo, "anglesite: publish note my-note")
+        #expect(notFound == false)
+    }
+
     @Test("processGitDelete refuses a staged-but-never-committed file (no HEAD copy to roll back to)")
     func refusesUncommittedFile() async throws {
         let repo = FileManager.default.temporaryDirectory.appendingPathComponent("git-\(UUID().uuidString)", isDirectory: true)
@@ -322,6 +344,122 @@ struct NativeContentOperationsTests {
         let sha = await NativeContentOperations.processGitDelete(repo, "staged-only.astro", "Remove staged-only.astro")
         #expect(sha == nil)
         #expect(FileManager.default.fileExists(atPath: filePath.path))
+    }
+
+    private func makePublishOps(
+        publishedBefore: Bool = false,
+        now: Date = Date(timeIntervalSince1970: 1_750_000_000)
+    ) -> (ops: NativeContentOperations, root: URL, calls: Spy) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("native-content-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let spy = Spy()
+        let ops = NativeContentOperations(
+            siteDirectory: { _ in root },
+            gitCommit: { proj, rel, msg in await spy.record(proj, rel, msg); return "deadbeef" },
+            gitHasCommit: { _, _ in publishedBefore },
+            now: { now }
+        )
+        return (ops, root, spy)
+    }
+
+    @Test("publish sets draft: false and re-stamps publishDate on a first publish")
+    func publishFirstTime() async throws {
+        let (ops, root, spy) = makePublishOps(publishedBefore: false)
+        let dir = root.appendingPathComponent("src/content/notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("my-note.md")
+        try """
+        ---
+        publishDate: 2020-01-01T00:00:00.000Z
+        tags: []
+        draft: true
+        ---
+
+        Hello.
+        """.write(to: file, atomically: true, encoding: .utf8)
+
+        let result = await ops.publish(siteID: "s1", relativePath: "src/content/notes/my-note.md", collection: "notes")
+        #expect(result == .created(filePath: "src/content/notes/my-note.md", identifier: "my-note"))
+
+        let written = try String(contentsOf: file, encoding: .utf8)
+        #expect(written.contains("draft: false"))
+        #expect(written.contains("publishDate: 2025-06-15T15:06:40.000Z")) // re-stamped to `now`
+        #expect(!written.contains("2020-01-01"))
+
+        let calls = await spy.calls
+        #expect(calls.count == 1)
+        #expect(calls.first?.2 == "anglesite: publish note my-note")
+    }
+
+    @Test("publish keeps the original publishDate on a republish")
+    func publishRepublish() async throws {
+        let (ops, root, spy) = makePublishOps(publishedBefore: true)
+        let dir = root.appendingPathComponent("src/content/notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("my-note.md")
+        try """
+        ---
+        publishDate: 2020-01-01T00:00:00.000Z
+        tags: []
+        draft: true
+        ---
+
+        Hello.
+        """.write(to: file, atomically: true, encoding: .utf8)
+
+        let result = await ops.publish(siteID: "s1", relativePath: "src/content/notes/my-note.md", collection: "notes")
+        #expect(result == .created(filePath: "src/content/notes/my-note.md", identifier: "my-note"))
+
+        let written = try String(contentsOf: file, encoding: .utf8)
+        #expect(written.contains("draft: false"))
+        #expect(written.contains("publishDate: 2020-01-01T00:00:00.000Z")) // untouched
+
+        let calls = await spy.calls
+        #expect(calls.first?.2 == "anglesite: publish note my-note")
+    }
+
+    @Test("unpublish sets draft: true and leaves publishDate untouched")
+    func unpublish() async throws {
+        let (ops, root, spy) = makePublishOps()
+        let dir = root.appendingPathComponent("src/content/notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("my-note.md")
+        try """
+        ---
+        publishDate: 2025-06-15T15:06:40.000Z
+        tags: []
+        draft: false
+        ---
+
+        Hello.
+        """.write(to: file, atomically: true, encoding: .utf8)
+
+        let result = await ops.unpublish(siteID: "s1", relativePath: "src/content/notes/my-note.md", collection: "notes")
+        #expect(result == .created(filePath: "src/content/notes/my-note.md", identifier: "my-note"))
+
+        let written = try String(contentsOf: file, encoding: .utf8)
+        #expect(written.contains("draft: true"))
+        #expect(written.contains("publishDate: 2025-06-15T15:06:40.000Z"))
+
+        let calls = await spy.calls
+        #expect(calls.first?.2 == "anglesite: unpublish note my-note")
+    }
+
+    @Test("publish reports .failed for an unregistered collection")
+    func publishUnknownCollection() async {
+        let (ops, _, _) = makePublishOps()
+        let result = await ops.publish(siteID: "s1", relativePath: "src/content/blog/hello.md", collection: "blog")
+        guard case let .failed(reason) = result else { Issue.record("expected .failed"); return }
+        #expect(reason.contains("blog"))
+    }
+
+    @Test("publish reports .failed for a registered collection with no draft field, instead of silently no-opping")
+    func publishDraftlessCollection() async {
+        let (ops, _, _) = makePublishOps()
+        let result = await ops.publish(siteID: "s1", relativePath: "src/content/events/party.md", collection: "events")
+        guard case let .failed(reason) = result else { Issue.record("expected .failed"); return }
+        #expect(reason.contains("events"))
     }
 }
 

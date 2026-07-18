@@ -12,10 +12,16 @@ public struct NativeContentOperations: ContentOperationsService {
 
     public typealias GitCommit = @Sendable (_ projectRoot: URL, _ relPath: String, _ message: String) async -> String?
     public typealias GitDelete = @Sendable (_ projectRoot: URL, _ relPath: String, _ message: String) async -> String?
+    /// Whether `projectRoot`'s commit history already contains a commit whose message is exactly
+    /// `message` — used by `publish` to tell a first-time publish from a republish (#798), without
+    /// a persisted "everPublished" flag. Injectable for the same reason `GitCommit`/`GitDelete` are:
+    /// tests supply a fake in-memory history instead of a real git repo.
+    public typealias GitHasCommit = @Sendable (_ projectRoot: URL, _ message: String) async -> Bool
 
     private let siteDirectory: @Sendable (_ siteID: String) async -> URL?
     private let gitCommit: GitCommit
     private let gitDelete: GitDelete
+    private let gitHasCommit: GitHasCommit
     private let now: @Sendable () -> Date
     private let copyGenerator: any PageCopyGenerating
     // FileManager is a thread-safe singleton but not Sendable; nonisolated(unsafe) preserves the
@@ -27,6 +33,7 @@ public struct NativeContentOperations: ContentOperationsService {
         siteDirectory: @escaping @Sendable (_ siteID: String) async -> URL?,
         gitCommit: @escaping GitCommit = NativeContentOperations.processGitCommit,
         gitDelete: @escaping GitDelete = NativeContentOperations.processGitDelete,
+        gitHasCommit: @escaping GitHasCommit = NativeContentOperations.hasCommit,
         now: @escaping @Sendable () -> Date = { Date() },
         copyGenerator: any PageCopyGenerating = NoopPageCopyGenerator(),
         fileManager: FileManager = .default
@@ -34,6 +41,7 @@ public struct NativeContentOperations: ContentOperationsService {
         self.siteDirectory = siteDirectory
         self.gitCommit = gitCommit
         self.gitDelete = gitDelete
+        self.gitHasCommit = gitHasCommit
         self.now = now
         self.copyGenerator = copyGenerator
         self.fileManager = fileManager
@@ -254,6 +262,81 @@ public struct NativeContentOperations: ContentOperationsService {
         return .created(filePath: relativePath, identifier: relativePath)
     }
 
+    /// "Publish" (#798): flip `draft: false`, re-stamping `publishDate` to now only when this
+    /// entry has never been published before — a fresh draft's `publishDate` is already stamped
+    /// to its creation time by `ContentScaffold.renderEntry`, and `unpublish` doesn't clear it, so
+    /// "never published" is detected via `gitHasCommit` rather than the frontmatter itself: this
+    /// exact commit message has never appeared in history. A republish (published → unpublished →
+    /// published again) keeps its original date, per the design doc's "an explicitly user-edited
+    /// date is respected" rule — a previously-published date counts as user-visible, not provisional.
+    public func publish(
+        siteID: String,
+        relativePath: String,
+        collection: String,
+        registry: ContentTypeRegistry = ContentTypeRegistry()
+    ) async -> ContentCreateResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        guard let descriptor = registry.descriptor(forCollection: collection) else {
+            return .failed(reason: "\(collection) is not a registered content type")
+        }
+        guard descriptor.fields.contains(where: { $0.name == "draft" }) else {
+            return .failed(reason: "\(collection) entries don't support draft/publish")
+        }
+        let abs = root.appendingPathComponent(relativePath)
+        guard let raw = try? String(contentsOf: abs, encoding: .utf8) else {
+            return .failed(reason: "Couldn't read \(relativePath)")
+        }
+        let slug = abs.deletingPathExtension().lastPathComponent
+        let message = "anglesite: publish \(descriptor.id) \(slug)"
+
+        var values = TypedContentEditor.read(raw, descriptor: descriptor)
+        values["draft"] = .flag(false)
+        let publishedBefore = await gitHasCommit(root, message)
+        if !publishedBefore {
+            values["publishDate"] = .date(now())
+        }
+        let newContents = TypedContentEditor.write(values, into: raw, descriptor: descriptor)
+        do { try write(newContents, to: abs) }
+        catch { return .failed(reason: "\(error)") }
+
+        guard await gitCommit(root, relativePath, message) != nil else {
+            return .failed(reason: "Published \(relativePath), but couldn't save it to your site's history. Try again in a moment.")
+        }
+        return .created(filePath: relativePath, identifier: slug)
+    }
+
+    /// "Unpublish": the inverse of `publish` — flip `draft: true`, leave `publishDate` untouched
+    /// so a later `publish` can still tell (via `gitHasCommit`) that this entry was public once.
+    public func unpublish(
+        siteID: String,
+        relativePath: String,
+        collection: String,
+        registry: ContentTypeRegistry = ContentTypeRegistry()
+    ) async -> ContentCreateResult {
+        guard let root = await siteDirectory(siteID) else { return .siteNotFound }
+        guard let descriptor = registry.descriptor(forCollection: collection) else {
+            return .failed(reason: "\(collection) is not a registered content type")
+        }
+        guard descriptor.fields.contains(where: { $0.name == "draft" }) else {
+            return .failed(reason: "\(collection) entries don't support draft/publish")
+        }
+        let abs = root.appendingPathComponent(relativePath)
+        guard let raw = try? String(contentsOf: abs, encoding: .utf8) else {
+            return .failed(reason: "Couldn't read \(relativePath)")
+        }
+        var values = TypedContentEditor.read(raw, descriptor: descriptor)
+        values["draft"] = .flag(true)
+        let newContents = TypedContentEditor.write(values, into: raw, descriptor: descriptor)
+        do { try write(newContents, to: abs) }
+        catch { return .failed(reason: "\(error)") }
+
+        let slug = abs.deletingPathExtension().lastPathComponent
+        guard await gitCommit(root, relativePath, "anglesite: unpublish \(descriptor.id) \(slug)") != nil else {
+            return .failed(reason: "Unpublished \(relativePath), but couldn't save it to your site's history. Try again in a moment.")
+        }
+        return .created(filePath: relativePath, identifier: slug)
+    }
+
     /// Duplicate an existing page: read its contents, retitle to `"<title> Copy"` (bumping to
     /// `"<title> Copy 2"`, `"<title> Copy 3"`… on route collision — which slugifies to the
     /// `-copy`/`-copy-2` file-name convention), write the new file, commit. Title rewrite reuses
@@ -437,6 +520,20 @@ public struct NativeContentOperations: ContentOperationsService {
         guard case .success(let commit) = repo.commit(message: message, signature: signature) else { return nil }
         return commit.oid.description
     }
+
+    /// Default `GitHasCommit`: walks history from HEAD looking for an exact message match.
+    /// Best-effort like `processGitCommit` — an unreadable repo or unresolvable HEAD (e.g. zero
+    /// commits) reports `false`, which `publish` treats as "never published," the safe default.
+    @Sendable public static func hasCommit(_ projectRoot: URL, _ message: String) async -> Bool {
+        SwiftGit2Bootstrap.ensureInitialized
+        guard case .success(let repo) = Repository.at(projectRoot) else { return false }
+        guard case .success(let head) = repo.HEAD() else { return false }
+        for result in repo.commits(from: head.oid) {
+            guard case .success(let commit) = result else { continue }
+            if commit.message.trimmingCharacters(in: .whitespacesAndNewlines) == message { return true }
+        }
+        return false
+    }
     #else
     /// Stage and commit exactly `relPath` on the current branch. Returns the new HEAD SHA,
     /// or nil on any failure (not a repo, rejecting hook, git missing) — best-effort, mirroring
@@ -454,6 +551,18 @@ public struct NativeContentOperations: ContentOperationsService {
               await run(["commit", "-m", message, "--", relPath]) != nil,
               let head = await run(["rev-parse", "HEAD"]) else { return nil }
         return head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Default `GitHasCommit` off-Darwin: `git log --grep` narrows to candidates, then each is
+    /// confirmed for an exact match (the message shell-metacharacter-escaped via -F/--fixed-strings
+    /// wouldn't itself need this, but this avoids depending on --grep's own exact-match semantics).
+    @Sendable public static func hasCommit(_ projectRoot: URL, _ message: String) async -> Bool {
+        let git = URL(fileURLWithPath: "/usr/bin/git")
+        guard let result = try? await ProcessSupervisor.shared.run(
+            executable: git,
+            arguments: ["log", "--format=%s", "--fixed-strings", "--grep=\(message)"],
+            currentDirectoryURL: projectRoot), result.exitCode == 0 else { return false }
+        return result.stdout.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces) == message }
     }
     #endif
 

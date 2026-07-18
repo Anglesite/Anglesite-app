@@ -186,6 +186,12 @@ struct SiteWindow: View {
                     },
                     onRepurposeRequested: { item in
                         Task { await model.presentRepurpose(postRowID: item.id) }
+                    },
+                    onPublishRequested: { item in
+                        Task { await model.publish(id: item.id) }
+                    },
+                    onUnpublishRequested: { item in
+                        Task { await model.unpublish(id: item.id) }
                     }
                 )
                     .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
@@ -777,6 +783,13 @@ struct SiteWindow: View {
                     Text(message)
                         .font(.callout).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).frame(maxWidth: 420)
+                    // Only for the vmnet failures `VmnetFailureRecovery` recognizes — plain Retry
+                    // alone would keep reusing the same wedged network object (#812).
+                    if VmnetFailureRecovery.isRecoverable(failureMessage: message) {
+                        Button("Restart Networking & Retry") {
+                            model.restartNetworkingAndRetry()
+                        }
+                    }
                     Button("Retry") {
                         model.retryPreview()
                     }
@@ -843,6 +856,23 @@ struct SiteWindow: View {
         } else {
             duplicateAction = nil
         }
-        return NavigatorSelectionActions(delete: deleteAction, duplicate: duplicateAction)
+        let publishAction: (() -> Void)?
+        if navigator.canPublish(id) {
+            publishAction = {
+                Task { await model.publish(id: id) }
+            }
+        } else {
+            publishAction = nil
+        }
+        let unpublishAction: (() -> Void)?
+        if navigator.canUnpublish(id) {
+            unpublishAction = {
+                Task { await model.unpublish(id: id) }
+            }
+        } else {
+            unpublishAction = nil
+        }
+        return NavigatorSelectionActions(
+            delete: deleteAction, duplicate: duplicateAction, publish: publishAction, unpublish: unpublishAction)
     }
 }

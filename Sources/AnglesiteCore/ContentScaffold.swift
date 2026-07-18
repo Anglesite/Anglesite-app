@@ -156,8 +156,10 @@ public enum ContentScaffold {
                 lines.append("\(field.required ? "" : "# ")\(field.name): \(dateTime)")
             case .date:
                 lines.append("\(field.required ? "" : "# ")\(field.name): \(String(dateTime.prefix(10)))")
+            // New entries are drafts by default (#798) — every other .bool field (none exist
+            // yet) keeps its false default.
             case .bool:
-                lines.append("\(field.name): false")
+                lines.append("\(field.name): \(field.name == "draft" ? "true" : "false")")
             case .number:
                 lines.append("\(field.name): 0")
             case .stringArray, .imageArray:
