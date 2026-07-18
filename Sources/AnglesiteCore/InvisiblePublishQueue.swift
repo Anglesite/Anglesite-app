@@ -27,6 +27,10 @@ public actor InvisiblePublishQueue {
 
     public typealias Publisher = @Sendable () async -> Result
     public typealias StateObserver = @Sendable (State) -> Void
+    /// Debounce timer seam. Production always uses `Task.sleep`; tests can substitute a
+    /// manually-triggered gate so the debounce "elapses" only when the test says so, instead of
+    /// racing a real timer against actor scheduling under CI load (#762).
+    public typealias Sleep = @Sendable (Duration) async throws -> Void
 
     private struct Record: Codable {
         static let currentVersion = 1
@@ -43,6 +47,7 @@ public actor InvisiblePublishQueue {
     private let publisher: Publisher
     private let onStateChange: StateObserver?
     private let now: @Sendable () -> Date
+    private let sleep: Sleep
 
     private var state: State = .idle
     private var isOnline = false
@@ -57,13 +62,15 @@ public actor InvisiblePublishQueue {
         debounce: Duration = .seconds(3),
         publisher: @escaping Publisher,
         onStateChange: StateObserver? = nil,
-        now: @escaping @Sendable () -> Date = { Date.now }
+        now: @escaping @Sendable () -> Date = { Date.now },
+        sleep: @escaping Sleep = { try await Task.sleep(for: $0) }
     ) {
         self.recordURL = configDirectory.appendingPathComponent(Self.filename)
         self.debounce = debounce
         self.publisher = publisher
         self.onStateChange = onStateChange
         self.now = now
+        self.sleep = sleep
     }
 
     /// Loads a pending marker from disk and begins scheduling against the current connectivity.
@@ -136,9 +143,9 @@ public actor InvisiblePublishQueue {
         debounceTask?.cancel()
         transition(to: .debouncing)
         let delay = debounce
-        debounceTask = Task { [weak self] in
+        debounceTask = Task { [weak self, sleep] in
             do {
-                try await Task.sleep(for: delay)
+                try await sleep(delay)
             } catch {
                 return
             }
