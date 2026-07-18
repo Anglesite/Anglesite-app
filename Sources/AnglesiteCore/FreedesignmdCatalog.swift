@@ -26,7 +26,7 @@ public enum FreedesignmdCatalogError: Error, Sendable, Equatable {
 /// Browses the freedesignmd.com catalog deterministically. The catalog page has no JSON API, but
 /// server-renders a JSON-LD `ItemList` with every system's slug/name — this parses that block
 /// directly rather than doing LLM-mediated page extraction (unlike the plugin's WebFetch-based
-/// `freedesignmd` skill), following `ThemeCatalog.parse(themesTS:)`'s tolerant-regex pattern.
+/// `freedesignmd` skill), using a tolerant regex over the server-rendered markup.
 public enum FreedesignmdCatalog {
     static let systemsURL = URL(string: "https://freedesignmd.com/systems")!
     static func systemURL(slug: String) -> URL { URL(string: "https://freedesignmd.com/system/\(slug)")! }

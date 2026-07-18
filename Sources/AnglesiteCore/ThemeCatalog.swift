@@ -1,8 +1,8 @@
 import Foundation
 
-/// One built-in visual theme, parsed from `Resources/Template/scripts/themes.ts`.
+/// One built-in visual theme, decoded from `Resources/Template/scripts/themes.json`.
 public struct Theme: Sendable, Identifiable, Equatable {
-    public let id: String                    // THEMES record key, e.g. "warm"
+    public let id: String                    // theme id, e.g. "warm"
     public let name: String                  // displayName
     public let blurb: String                 // description
     public let swatch: [String]              // [color-primary, color-accent] for the gallery
@@ -18,8 +18,6 @@ public struct ThemeCatalog: Sendable {
     public let themes: [Theme]
     public init(themes: [Theme]) { self.themes = themes }
 
-    public enum ParseError: Error, Sendable, Equatable { case noThemesDeclaration }
-
     public func theme(id: String) -> Theme? { themes.first { $0.id == id } }
 
     /// App-side default theme per broad site type. Falls back to the first available theme
@@ -34,43 +32,32 @@ public struct ThemeCatalog: Sendable {
         return themes.first?.id ?? want
     }
 
-    /// Load + parse the bundled template's themes.ts. `templateURL` is the template root
-    /// (`TemplateRuntime.resolve().url`); themes.ts lives at scripts/themes.ts.
+    /// Load the bundled template's theme catalog. `templateURL` is the template root
+    /// (`TemplateRuntime.resolve().url`); the data lives at scripts/themes.json — the same
+    /// file the template's `scripts/themes.ts` imports, so both sides share one source of truth.
     public static func load(templateURL: URL) throws -> ThemeCatalog {
-        let url = templateURL.appendingPathComponent("scripts/themes.ts")
-        let ts = try String(contentsOf: url, encoding: .utf8)
-        return ThemeCatalog(themes: try parse(themesTS: ts))
+        let url = templateURL.appendingPathComponent("scripts/themes.json")
+        return ThemeCatalog(themes: try parse(themesJSON: Data(contentsOf: url)))
     }
 
-    /// Tolerant parser keyed on the known field order (displayName, description, bestFor, vars).
-    public static func parse(themesTS: String) throws -> [Theme] {
-        guard themesTS.contains("THEMES") else { throw ParseError.noThemesDeclaration }
-
-        // Per-theme block: id, displayName, description, bestFor[...], vars{...}.
-        // `vars` body uses [^}]* — CSS values inside `vars` must not contain a literal `}`
-        // (the capture stops at the first closing brace). The real themes.ts satisfies this.
-        let themePattern = #"(\w+):\s*\{\s*displayName:\s*"([^"]*)",\s*description:\s*"([^"]*)",\s*bestFor:\s*\[[^\]]*\],\s*vars:\s*\{([^}]*)\}"#
-        let varPattern = #""([^"]+)":\s*"([^"]*)""#
-
-        let themeRE = try NSRegularExpression(pattern: themePattern, options: [.dotMatchesLineSeparators])
-        let varRE = try NSRegularExpression(pattern: varPattern, options: [])
-
-        let ns = themesTS as NSString
-        var result: [Theme] = []
-        for m in themeRE.matches(in: themesTS, range: NSRange(location: 0, length: ns.length)) {
-            let id = ns.substring(with: m.range(at: 1))
-            let name = ns.substring(with: m.range(at: 2))
-            let blurb = ns.substring(with: m.range(at: 3))
-            let varsBody = ns.substring(with: m.range(at: 4))
-
-            var vars: [String: String] = [:]
-            let vns = varsBody as NSString
-            for vm in varRE.matches(in: varsBody, range: NSRange(location: 0, length: vns.length)) {
-                vars[vns.substring(with: vm.range(at: 1))] = vns.substring(with: vm.range(at: 2))
-            }
-            let swatch = ["color-primary", "color-accent"].compactMap { vars[$0] }
-            result.append(Theme(id: id, name: name, blurb: blurb, swatch: swatch, cssVars: vars))
+    /// The shared catalog is an ordered JSON array of theme records; decoding preserves
+    /// the array order (the first entry is the fallback default theme).
+    public static func parse(themesJSON data: Data) throws -> [Theme] {
+        struct Record: Decodable {
+            let id: String
+            let displayName: String
+            let description: String
+            let bestFor: [String]
+            let vars: [String: String]
         }
-        return result
+        return try JSONDecoder().decode([Record].self, from: data).map { record in
+            Theme(
+                id: record.id,
+                name: record.displayName,
+                blurb: record.description,
+                swatch: ["color-primary", "color-accent"].compactMap { record.vars[$0] },
+                cssVars: record.vars
+            )
+        }
     }
 }

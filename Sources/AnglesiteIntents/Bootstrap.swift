@@ -64,8 +64,8 @@ public enum AnglesiteIntents {
             DomainOperations()
         }
         // `ApplyThemeIntent` (ThemeIntents.swift) resolves `@Dependency private var catalog:
-        // ThemeCatalog` against whatever is registered here. `ThemeCatalog.load` parses the
-        // bundled template's scripts/themes.ts and can throw (missing/unreadable template),
+        // ThemeCatalog` against whatever is registered here. `ThemeCatalog.load` decodes the
+        // bundled template's scripts/themes.json and can throw (missing/unreadable template),
         // so — matching `SitesLauncherView.presentNewSite()`'s handling of the same call —
         // fall back to an empty catalog rather than letting bootstrap throw or the intent trap
         // on an unregistered dependency. `perform()` already has a "I don't recognize that
