@@ -26,6 +26,8 @@ public struct ContentCreationWorkflow: ContentOperationsService {
     public typealias ContentRestorer = @Sendable (_ siteID: String, _ relativePath: String, _ contents: String) async -> ContentCreateResult
     public typealias PageDuplicator = @Sendable (_ siteID: String, _ relativePath: String, _ title: String) async -> ContentCreateResult
     public typealias PostDuplicator = @Sendable (_ siteID: String, _ relativePath: String, _ collection: String, _ title: String) async -> ContentCreateResult
+    public typealias PostPublisher = @Sendable (_ siteID: String, _ relativePath: String, _ collection: String) async -> ContentCreateResult
+    public typealias PostUnpublisher = @Sendable (_ siteID: String, _ relativePath: String, _ collection: String) async -> ContentCreateResult
     public typealias ComponentCreator = @Sendable (_ siteID: String, _ name: String) async -> ContentCreateResult
     public typealias ComponentDuplicator = @Sendable (_ siteID: String, _ relativePath: String) async -> ContentCreateResult
 
@@ -39,6 +41,8 @@ public struct ContentCreationWorkflow: ContentOperationsService {
     private let contentRestorer: ContentRestorer?
     private let pageDuplicator: PageDuplicator?
     private let postDuplicator: PostDuplicator?
+    private let postPublisher: PostPublisher?
+    private let postUnpublisher: PostUnpublisher?
     private let componentCreator: ComponentCreator?
     private let componentDuplicator: ComponentDuplicator?
 
@@ -53,6 +57,8 @@ public struct ContentCreationWorkflow: ContentOperationsService {
         contentRestorer: ContentRestorer? = nil,
         pageDuplicator: PageDuplicator? = nil,
         postDuplicator: PostDuplicator? = nil,
+        postPublisher: PostPublisher? = nil,
+        postUnpublisher: PostUnpublisher? = nil,
         componentCreator: ComponentCreator? = nil,
         componentDuplicator: ComponentDuplicator? = nil
     ) {
@@ -66,6 +72,8 @@ public struct ContentCreationWorkflow: ContentOperationsService {
         self.contentRestorer = contentRestorer
         self.pageDuplicator = pageDuplicator
         self.postDuplicator = postDuplicator
+        self.postPublisher = postPublisher
+        self.postUnpublisher = postUnpublisher
         self.componentCreator = componentCreator
         self.componentDuplicator = componentDuplicator
     }
@@ -114,6 +122,12 @@ public struct ContentCreationWorkflow: ContentOperationsService {
             },
             postDuplicator: { siteID, relativePath, collection, title in
                 await native.duplicatePost(siteID: siteID, relativePath: relativePath, collection: collection, title: title)
+            },
+            postPublisher: { siteID, relativePath, collection in
+                await native.publish(siteID: siteID, relativePath: relativePath, collection: collection)
+            },
+            postUnpublisher: { siteID, relativePath, collection in
+                await native.unpublish(siteID: siteID, relativePath: relativePath, collection: collection)
             },
             componentCreator: { siteID, name in
                 await native.createComponent(siteID: siteID, name: name)
@@ -277,6 +291,20 @@ public struct ContentCreationWorkflow: ContentOperationsService {
     public func duplicatePost(siteID: String, relativePath: String, collection: String, title: String) async -> ContentCreateResult {
         guard let postDuplicator else { return .failed(reason: "Duplicate is not configured for this workflow") }
         let result = await postDuplicator(siteID, relativePath, collection, title)
+        await refreshContentGraphIfCreated(result, siteID: siteID)
+        return result
+    }
+
+    public func publish(siteID: String, relativePath: String, collection: String) async -> ContentCreateResult {
+        guard let postPublisher else { return .failed(reason: "Publish is not configured for this workflow") }
+        let result = await postPublisher(siteID, relativePath, collection)
+        await refreshContentGraphIfCreated(result, siteID: siteID)
+        return result
+    }
+
+    public func unpublish(siteID: String, relativePath: String, collection: String) async -> ContentCreateResult {
+        guard let postUnpublisher else { return .failed(reason: "Unpublish is not configured for this workflow") }
+        let result = await postUnpublisher(siteID, relativePath, collection)
         await refreshContentGraphIfCreated(result, siteID: siteID)
         return result
     }

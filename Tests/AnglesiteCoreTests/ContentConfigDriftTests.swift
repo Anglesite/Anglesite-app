@@ -30,7 +30,10 @@ struct ContentConfigDriftTests {
         var schemaLines: [String] = []
         for field in d.fields {
             guard let zod = zod(for: field.kind) else { continue }
-            let expr = field.required ? zod : "\(zod).optional()"
+            // Every `.bool` field ships with `.default(false)` (matching `blog`'s pre-existing
+            // `draft` line) rather than `.optional()` — a defaulted field is never bare either way,
+            // so `required` doesn't affect this branch.
+            let expr = field.kind == .bool ? "\(zod).default(false)" : (field.required ? zod : "\(zod).optional()")
             schemaLines.append("    \(field.name): \(expr),")
         }
         return """

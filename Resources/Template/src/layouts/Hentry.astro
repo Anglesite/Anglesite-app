@@ -6,6 +6,7 @@ import { entrySchema, type HentryData } from "../lib/schema.ts";
 import { ownerName } from "../lib/profile.ts";
 import BaseLayout from "./BaseLayout.astro";
 import SyndicationLinks from "../components/SyndicationLinks.astro";
+import DraftBadge from "../components/DraftBadge.astro";
 
 interface Props {
   entry: CollectionEntry<HentryCollection>;
@@ -24,6 +25,7 @@ interface HentryFields {
   inReplyTo?: string;
   likeOf?: string;
   syndication?: string[];
+  draft?: boolean;
 }
 
 const { entry } = Astro.props;
@@ -49,6 +51,7 @@ const jsonLd = entrySchema(entry.collection, entry.data as HentryData, {
 <BaseLayout title={title ?? "Post"} description={d.summary}>
   {jsonLd && <Schema slot="head" item={jsonLd} />}
   <article class="h-entry">
+    <DraftBadge draft={d.draft} />
     {title && <h1 class="p-name">{title}</h1>}
     {d.image && <img class="u-photo" src={d.image} alt={d.caption ?? ""} />}
     {images.map((src) => <img class="u-photo" src={src} alt="" />)}

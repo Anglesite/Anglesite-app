@@ -169,6 +169,18 @@ struct ContentTypeRegistryTests {
         #expect(like.projections.microformatProperties["likeOf"] == "u-like-of")
     }
 
+    @Test("every post-family descriptor has a trailing draft field")
+    func postFamilyHasDraft() {
+        let registry = ContentTypeRegistry()
+        for id in ["note", "article", "photo", "album", "bookmark", "reply", "like"] {
+            let descriptor = try! #require(registry.descriptor(id: id))
+            #expect(descriptor.fields.last?.name == "draft", "\(id): draft should be the last field")
+            #expect(descriptor.fields.last?.kind == .bool, "\(id): draft should be .bool")
+            #expect(descriptor.projections.microformatProperties["draft"] == nil,
+                    "\(id): draft has no mf2 projection")
+        }
+    }
+
     // MARK: Reverse lookup
 
     @Test("descriptor(forCollection:) maps a collection name back to its type")

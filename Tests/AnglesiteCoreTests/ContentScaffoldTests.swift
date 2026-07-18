@@ -84,7 +84,7 @@ struct ContentScaffoldTests {
         #expect(out.contains("description: \"How we shipped it.\""))
     }
 
-    @Test("renderEntry emits frontmatter for a note with body below the block")
+    @Test("renderEntry emits frontmatter for a note with body below the block, as a draft")
     func renderEntryNote() {
         let note = try! #require(ContentTypeRegistry().descriptor(id: "note"))
         let out = ContentScaffold.renderEntry(
@@ -93,6 +93,7 @@ struct ContentScaffoldTests {
         ---
         publishDate: 2025-06-15T15:06:40.000Z
         tags: []
+        draft: true
         ---
 
         Write your note here.

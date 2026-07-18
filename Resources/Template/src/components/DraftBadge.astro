@@ -1,0 +1,27 @@
+---
+// src/components/DraftBadge.astro — dev-only marker for an unpublished entry (#798). Renders
+// nothing in a production build: draft entries never reach `astro build` output at all (their
+// routes are filtered out before this component would ever be reached), so the `import.meta.env.DEV`
+// check here is a belt-and-suspenders guard, not the only thing keeping drafts out of `dist/`.
+interface Props {
+  draft?: boolean;
+}
+const { draft } = Astro.props;
+---
+
+{import.meta.env.DEV && draft && (
+  <p class="draft-badge" role="status">Draft — not included in the published build</p>
+)}
+
+<style>
+  .draft-badge {
+    display: inline-block;
+    margin: 0 0 1rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 0.3rem;
+    background: #fff3cd;
+    color: #664d03;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+</style>
