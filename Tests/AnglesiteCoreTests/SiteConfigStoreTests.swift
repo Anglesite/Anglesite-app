@@ -65,6 +65,22 @@ struct SiteConfigStoreTests {
         #expect(try await store.load() == SiteSettings())
     }
 
+    @Test("deployedSourceBundleCommit round-trips through save/load")
+    func deployedSourceBundleCommitRoundTrips() async throws {
+        let dir = try tempConfigDir()
+        defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+        let store = SiteConfigStore(configDirectory: dir)
+
+        var settings = try await store.load()
+        #expect(settings.deployedSourceBundleCommit == nil)
+
+        settings.deployedSourceBundleCommit = "abc123def456"
+        try await store.save(settings)
+
+        let reloaded = try await store.load()
+        #expect(reloaded.deployedSourceBundleCommit == "abc123def456")
+    }
+
     // MARK: - Synchronous `read` seam (#266)
 
     @Test("read returns empty settings when the file is absent")

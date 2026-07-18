@@ -32,13 +32,20 @@ public struct SiteSettings: Sendable, Codable, Equatable {
     /// Bluesky PDS origin. `nil` uses the public `https://bsky.social` service.
     public var blueskyPDSURL: String?
 
+    /// Git commit SHA of `Source/`'s `HEAD` at the time of the last successful deployed-source
+    /// bundle upload to R2 (#799, spec §C.4 — the code side of a future Worker-triggered bake).
+    /// `nil` until the first successful upload. Compared against the current `HEAD` (via
+    /// `InProcessGit`) by `SourceBundleStatus` to surface "code changes not yet deployed."
+    public var deployedSourceBundleCommit: String?
+
     public init(
         displayName: String? = nil,
         inboxCaptureAccountID: String? = nil,
         inboxCaptureKVNamespaceID: String? = nil,
         mastodonBaseURL: String? = nil,
         blueskyIdentifier: String? = nil,
-        blueskyPDSURL: String? = nil
+        blueskyPDSURL: String? = nil,
+        deployedSourceBundleCommit: String? = nil
     ) {
         self.displayName = displayName
         self.inboxCaptureAccountID = inboxCaptureAccountID
@@ -46,6 +53,7 @@ public struct SiteSettings: Sendable, Codable, Equatable {
         self.mastodonBaseURL = mastodonBaseURL
         self.blueskyIdentifier = blueskyIdentifier
         self.blueskyPDSURL = blueskyPDSURL
+        self.deployedSourceBundleCommit = deployedSourceBundleCommit
     }
 }
 

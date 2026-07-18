@@ -794,6 +794,75 @@ struct DeployCommandTests {
         #expect(!config.contains("old.example.workers.dev"))
     }
 
+    // MARK: Bundle-upload orchestration (#799)
+
+    @Test("a successful deploy uploads the source bundle when CF_SOURCE_BUCKET is configured")
+    func successfulDeployUploadsBundleWhenBucketConfigured() async throws {
+        let siteDir = try makeGitRepo()   // see makeGitRepo below for this helper
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        try "CF_SOURCE_BUCKET=my-site-source\n".write(
+            to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+        let configDir = tmpDir.appendingPathComponent("deploy-config-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: configDir) }
+
+        let executor = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Deployed my-site (1.2 sec)\n https://my-site.example.workers.dev")
+            .set(.bundleUpload, exitCode: 0, output: "")
+        let command = DeployCommand(tokenSource: { "test-token" }, executor: executor)
+
+        let result = await command.deploy(siteID: "test", siteDirectory: siteDir, configDirectory: configDir)
+        guard case .succeeded = result else {
+            Issue.record("expected .succeeded, got \(result)")
+            return
+        }
+        #expect(executor.ran(.bundleUpload))
+
+        let settings = try await SiteConfigStore(configDirectory: configDir).load()
+        #expect(settings.deployedSourceBundleCommit != nil)
+    }
+
+    @Test("a successful deploy skips the bundle-upload step when CF_SOURCE_BUCKET is not configured")
+    func successfulDeploySkipsBundleUploadWithoutBucket() async throws {
+        let siteDir = try makeGitRepo()
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        // No .site-config at all — matches every real site today (no provisioning writes CF_SOURCE_BUCKET yet).
+        let configDir = tmpDir.appendingPathComponent("deploy-config-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: configDir) }
+
+        let executor = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Deployed my-site (1.2 sec)\n https://my-site.example.workers.dev")
+        let command = DeployCommand(tokenSource: { "test-token" }, executor: executor)
+
+        let result = await command.deploy(siteID: "test", siteDirectory: siteDir, configDirectory: configDir)
+        guard case .succeeded = result else {
+            Issue.record("expected .succeeded, got \(result)")
+            return
+        }
+        #expect(!executor.ran(.bundleUpload))
+    }
+
+    /// A minimal real git repo (`git init` + one commit) at a fresh temp directory — the
+    /// bundle-upload orchestration reads `Source/`'s HEAD SHA via `InProcessGit`, which needs a
+    /// real repository, not just a directory.
+    private func makeGitRepo() throws -> URL {
+        let dir = tmpDir.appendingPathComponent("deploy-source-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "hello".write(to: dir.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["sh", "-c", "git init -q && git config user.email t@example.com && git config user.name Test && git add -A && git commit -q -m init"]
+        process.currentDirectoryURL = dir
+        try process.run()
+        process.waitUntilExit()
+        return dir
+    }
+
     @Test("ContainerDeployExecutor maps .bundleUpload to a tar+wrangler-r2-put argv naming the configured bucket")
     func bundleUploadArgvNamesConfiguredBucket() throws {
         let siteDir = tmpDir.appendingPathComponent("bundle-upload-argv-\(UUID().uuidString)", isDirectory: true)
