@@ -79,6 +79,12 @@ final class PublishModel {
         }
 
         tokenVerification = .checking
+        // `onConnected` can fire after the user has already hit Cancel (mid-verify or mid-delay) —
+        // `isCancelled` is only re-checked once, after `delay()`. That's harmless: the token really
+        // did verify, so persisting it and flashing `.connected`/`AppSettings.gitHubAccount` here
+        // is no different from the identity a Settings-row verify would show, and `.abort` below
+        // resets `tokenVerification` back to `.idle` before the (already-dismissed) sheet could
+        // display it.
         let outcome = await onboarding.run(
             token: token,
             persist: { try keychain.writeGitHubToken($0) },
@@ -99,7 +105,11 @@ final class PublishModel {
         case .stay(let message):
             tokenVerification = .failed(message: message)
         case .abort:
-            // The user cancelled mid-flow; `cancelTokenPrompt` already cleared the parked publish.
+            // `cancelTokenPrompt` already clears `pendingPublish`, but clearing it again here too
+            // makes this branch self-contained rather than relying on that ordering — a future
+            // dismissal path that skips `cancelTokenPrompt` shouldn't be able to leave a stale
+            // parked publish behind.
+            pendingPublish = nil
             tokenVerification = .idle
         }
     }
