@@ -23,8 +23,9 @@ public enum SourceBundleStatus: Sendable, Equatable {
         guard SiteConfigFile.value(forKey: "CF_SOURCE_BUCKET", in: config) != nil else { return .notConfigured }
         guard let uploadedCommit = settings.deployedSourceBundleCommit else { return .notYetUploaded }
 
-        let headResult = await InProcessGit.run(siteDirectory: siteDirectory, arguments: ["rev-parse", "HEAD"])
-        guard headResult.exitCode == 0 else { return .upToDate }   // can't determine HEAD — fail quiet, not alarming
+        guard let headResult = try? await BackupCommand.defaultRunner(siteDirectory, ["rev-parse", "HEAD"]),
+              headResult.exitCode == 0
+        else { return .upToDate }   // can't determine HEAD — fail quiet, not alarming
         let currentCommit = headResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
 
         return currentCommit == uploadedCommit

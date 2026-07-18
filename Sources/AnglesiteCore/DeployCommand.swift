@@ -355,7 +355,7 @@ public actor DeployCommand {
         )
         guard uploadResult.exitCode == 0 else { return }
 
-        let headResult = await InProcessGit.run(siteDirectory: siteDirectory, arguments: ["rev-parse", "HEAD"])
+        guard let headResult = try? await BackupCommand.defaultRunner(siteDirectory, ["rev-parse", "HEAD"]) else { return }
         guard headResult.exitCode == 0 else { return }
         let commitSHA = headResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !commitSHA.isEmpty else { return }
