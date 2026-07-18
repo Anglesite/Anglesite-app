@@ -19,7 +19,9 @@ import Foundation
 /// **Environment contract:**
 ///   - `.build` and `.preflight` get a curated subset of the host environment (see
 ///     `hostDeployEnvironment()`) — safe shell/locale/proxy/Node vars only, no unrelated secrets.
-///   - `.wrangler` gets that curated environment *plus* `CLOUDFLARE_API_TOKEN`.
+///   - `.wrangler` gets that curated environment *plus* `CLOUDFLARE_API_TOKEN`. `.bundleUpload`
+///     (the optional post-deploy source-bundle upload) reuses that same token-bearing environment,
+///     since it also authenticates to Cloudflare (R2 via wrangler).
 ///
 /// **Cancellation**: cancelling the deploy task propagates through `executor.run` (the host
 /// executor wraps its `waitForExit` in a cancellation handler that SIGTERMs the in-flight
@@ -219,7 +221,7 @@ public actor DeployCommand {
                 if let configDirectory {
                     await Self.uploadSourceBundleIfConfigured(
                         siteDirectory: siteDirectory, configDirectory: configDirectory,
-                        environment: baseEnvironment, executor: executor, siteID: siteID
+                        environment: wranglerEnvironment, executor: executor, siteID: siteID
                     )
                 }
                 return .succeeded(url: url, duration: duration)

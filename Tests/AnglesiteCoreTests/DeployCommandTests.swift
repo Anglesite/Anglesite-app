@@ -819,6 +819,10 @@ struct DeployCommandTests {
             return
         }
         #expect(executor.ran(.bundleUpload))
+        #expect(
+            executor.environment(for: .bundleUpload)?["CLOUDFLARE_API_TOKEN"] == "test-token",
+            "bundle-upload runs `wrangler r2 object put --remote`, which needs the same CLOUDFLARE_API_TOKEN the .wrangler step gets — not the token-stripped base environment"
+        )
 
         let settings = try await SiteConfigStore(configDirectory: configDir).load()
         #expect(settings.deployedSourceBundleCommit != nil)
