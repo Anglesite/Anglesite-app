@@ -8,6 +8,8 @@ struct SiteNavigatorView: View {
     var onDeleteRequested: (NavigatorItem) -> Void
     var onDuplicateRequested: (NavigatorItem) -> Void
     var onRepurposeRequested: (NavigatorItem) -> Void
+    var onPublishRequested: (NavigatorItem) -> Void
+    var onUnpublishRequested: (NavigatorItem) -> Void
     @FocusState private var editingFocused: Bool
 
     var body: some View {
@@ -91,6 +93,12 @@ struct SiteNavigatorView: View {
                     }
                     if model.canRepurpose(node.id), let item = model.item(for: node.id) {
                         Button("Repurpose Post…") { onRepurposeRequested(item) }
+                    }
+                    if model.canPublish(node.id), let item = model.item(for: node.id) {
+                        Button("Publish") { onPublishRequested(item) }
+                    }
+                    if model.canUnpublish(node.id), let item = model.item(for: node.id) {
+                        Button("Unpublish") { onUnpublishRequested(item) }
                     }
                     if model.canDelete(node.id), let item = model.item(for: node.id) {
                         Button("Delete", role: .destructive) { onDeleteRequested(item) }
