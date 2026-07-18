@@ -128,4 +128,25 @@ struct FrontmatterTests {
         let src = "---\ntitle: x\nno closing fence"
         #expect(Frontmatter.body(src) == src)
     }
+
+    // MARK: - Shared line-based helpers (frontmatter-parsing unification)
+
+    @Test("closingFenceIndex: exact `---` lines only, index into the original array")
+    func closingFence() {
+        #expect(Frontmatter.closingFenceIndex(of: ["---", "title: x", "---", "body"]) == 2)
+        #expect(Frontmatter.closingFenceIndex(of: ["---", "---"]) == 1)
+        #expect(Frontmatter.closingFenceIndex(of: ["---", "title: x"]) == nil)     // unterminated
+        #expect(Frontmatter.closingFenceIndex(of: ["--- ", "x", "---"]) == nil)    // trailing space
+        #expect(Frontmatter.closingFenceIndex(of: ["---"]) == nil)                 // lone fence
+        #expect(Frontmatter.closingFenceIndex(of: ["body"]) == nil)                // no fence
+        #expect(Frontmatter.closingFenceIndex(of: []) == nil)
+    }
+
+    @Test("doubleQuoted round-trips through parse, including newlines")
+    func doubleQuotedRoundTrip() {
+        for original in ["plain", "a\"b\\c", "line1\nline2", "cr\rlf", "tab\there", ""] {
+            let fm = Frontmatter.parse("---\ntitle: \(Frontmatter.doubleQuoted(original))\n---")
+            #expect(fm["title"] == .string(original), "round-trip failed for \(original.debugDescription)")
+        }
+    }
 }

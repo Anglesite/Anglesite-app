@@ -138,4 +138,38 @@ struct PageTitleEditorTests {
         // The description value is untouched.
         #expect(out.contains("description: \"has a title: suffix\""))
     }
+
+    // MARK: - Characterization: fence and key edges shared with `Frontmatter`
+
+    @Test("markdown: unterminated fence → treated as no frontmatter, fresh block prepended")
+    func mdUnterminatedFence() {
+        let src = "---\ntitle: \"Old\"\nno closing fence\n"
+        let out = ok(PageTitleEditor.rewrite(contents: src, fileExtension: "md", newTitle: "New"))
+        #expect(out == "---\ntitle: \"New\"\n---\n\n" + src)
+    }
+
+    @Test("markdown: empty frontmatter block gains a title line")
+    func mdEmptyBlock() {
+        let out = ok(PageTitleEditor.rewrite(contents: "---\n---\nBody\n", fileExtension: "md", newTitle: "New"))
+        #expect(out == "---\ntitle: \"New\"\n---\nBody\n")
+    }
+
+    @Test("markdown: newline inside the new title is escaped, keeping the file parseable")
+    func mdNewlineInTitle() {
+        let out = ok(PageTitleEditor.rewrite(
+            contents: "---\ntitle: \"x\"\n---\nBody\n", fileExtension: "md", newTitle: "line1\nline2"))
+        #expect(out.contains("title: \"line1\\nline2\""))
+        #expect(Frontmatter.parse(out)["title"] == .string("line1\nline2"))
+    }
+
+    @Test("markdown: `title :` with a space before the colon is not a canonical key")
+    func mdSpacedColonKey() {
+        // `Frontmatter.splitKeyValue` (the canonical key reader) rejects `title :`, so the editor
+        // inserts a fresh canonical `title:` line rather than editing a line the scanner never
+        // reads as the title. The stale spaced line stays verbatim.
+        let src = "---\ntitle : \"Old\"\n---\nBody\n"
+        let out = ok(PageTitleEditor.rewrite(contents: src, fileExtension: "md", newTitle: "New"))
+        #expect(Frontmatter.parse(out)["title"] == .string("New"))
+        #expect(out.contains("title : \"Old\""))
+    }
 }

@@ -2,26 +2,41 @@ import Foundation
 
 /// Deterministic POSSE trail (#465): records published-copy URLs in the post's `syndication:`
 /// frontmatter list (the u-syndication source the mf2 layer projects). Pure string → string.
+///
+/// Fence detection and value parsing delegate to `Frontmatter`'s helpers so what this writer
+/// edits is exactly what the canonical reader (`Frontmatter.parse`) sees; only the line-level
+/// splicing — which must preserve the file's existing formatting — lives here.
 public enum SyndicationFrontmatter {
     public static func adding(urls: [String], to contents: String) -> String {
         let newURLs = urls.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         guard !newURLs.isEmpty else { return contents }
-        var lines = contents.components(separatedBy: "\n")
 
-        // No frontmatter at all: synthesize a fence around the syndication block.
-        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---",
-              let closing = lines.dropFirst().firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == "---" })
-        else {
-            let block = ["---", "syndication:"] + newURLs.map { "  - \($0)" } + ["---"]
-            return (block + [contents]).joined(separator: "\n")
+        // Work in LF internally so fence/key scanning matches canonical `Frontmatter` semantics,
+        // restoring CRLF on output if the source used it (mirrors `PageTitleEditor`).
+        let usesCRLF = contents.contains("\r\n")
+        let normalized = usesCRLF ? contents.replacingOccurrences(of: "\r\n", with: "\n") : contents
+        func finish(_ s: String) -> String {
+            usesCRLF ? s.replacingOccurrences(of: "\n", with: "\r\n") : s
         }
 
+        var lines = normalized.components(separatedBy: "\n")
+
+        // No leading fence (or an unterminated one): synthesize a fence around the syndication
+        // block so the canonical reader actually sees the URLs.
+        guard let closing = Frontmatter.closingFenceIndex(of: lines) else {
+            let block = ["---", "syndication:"] + newURLs.map { "  - \($0)" } + ["---"]
+            return finish((block + [normalized]).joined(separator: "\n"))
+        }
+
+        // Only a *top-level* `syndication:` key counts — `Frontmatter.splitKeyValue` rejects
+        // indented lines, so a `syndication:` nested under another key (which the canonical
+        // reader ignores) is never spliced into.
         guard let keyIndex = lines[..<closing].firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespaces) == "syndication:" || $0.hasPrefix("syndication:")
+            Frontmatter.splitKeyValue($0)?.key == "syndication"
         }) else {
             // No syndication key yet: nothing to dedup against.
             lines.insert(contentsOf: ["syndication:"] + newURLs.map { "  - \($0)" }, at: closing)
-            return lines.joined(separator: "\n")
+            return finish(lines.joined(separator: "\n"))
         }
 
         if let inlineItems = inlineListItems(lines[keyIndex]) {
@@ -34,50 +49,38 @@ public enum SyndicationFrontmatter {
             guard !toAdd.isEmpty else { return contents }
             let blockLines = ["syndication:"] + (inlineItems + toAdd).map { "  - \($0)" }
             lines.replaceSubrange(keyIndex...keyIndex, with: blockLines)
-            return lines.joined(separator: "\n")
+            return finish(lines.joined(separator: "\n"))
         }
 
-        // Block form: existing items are the consecutive "  - item" lines right after the key.
+        // Block form: existing items are the consecutive `- item` lines right after the key,
+        // read with the canonical item/unquote semantics so quoted items still dedup.
         var itemEnd = keyIndex + 1
-        while itemEnd < closing, lines[itemEnd].trimmingCharacters(in: .whitespaces).hasPrefix("- ") {
+        var existing = Set<String>()
+        while itemEnd < closing, let item = Frontmatter.blockArrayItem(lines[itemEnd]) {
+            existing.insert(Frontmatter.unquote(item))
             itemEnd += 1
         }
-        let existing = Set(lines[(keyIndex + 1)..<itemEnd]
-            .map { $0.trimmingCharacters(in: .whitespaces).dropFirst(2).trimmingCharacters(in: .whitespaces) })
         let toAdd = newURLs.filter { !existing.contains($0) }
         guard !toAdd.isEmpty else { return contents }
         lines.insert(contentsOf: toAdd.map { "  - \($0)" }, at: itemEnd)
-        return lines.joined(separator: "\n")
+        return finish(lines.joined(separator: "\n"))
     }
 
     /// Parses the inline value(s) of a `syndication:` key line that already carries content —
     /// either an inline array (`syndication: [a, b]`) or a bare scalar
     /// (`syndication: https://a.test/1`), the latter written by hand or another tool. Returns
     /// `nil` for a bare `syndication:` key with nothing after the colon (block form, or empty).
+    /// Value parsing delegates to `Frontmatter.parseScalarOrArray` so quoting and inline-array
+    /// semantics match the canonical reader.
     private static func inlineListItems(_ line: String) -> [String]? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("syndication:") else { return nil }
-        let rest = trimmed.dropFirst("syndication:".count).trimmingCharacters(in: .whitespaces)
-        guard !rest.isEmpty else { return nil }
-        guard rest.hasPrefix("[") else {
-            // Bare scalar value on the key line itself — a single existing item.
-            return [unquoted(rest)].filter { !$0.isEmpty }
+        guard let (key, raw) = Frontmatter.splitKeyValue(line),
+              key == "syndication", !raw.isEmpty
+        else { return nil }
+        switch Frontmatter.parseScalarOrArray(raw) {
+        case .array(let items): return items.filter { !$0.isEmpty }
+        case .string(let s): return s.isEmpty ? [] : [s]
+        case .bool(let b): return [b ? "true" : "false"]
+        case .number, .date: return nil  // write-only cases; parseScalarOrArray never produces them
         }
-        var inner = rest
-        if inner.hasSuffix("]") { inner.removeLast() }
-        inner.removeFirst()
-        let items = inner.split(separator: ",").map { unquoted($0.trimmingCharacters(in: .whitespaces)) }
-        return items.filter { !$0.isEmpty }
-    }
-
-    /// Strips a single layer of matching `"`/`'` quotes from a YAML scalar.
-    private static func unquoted(_ value: String) -> String {
-        var value = value
-        if value.count >= 2,
-           (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) {
-            value.removeFirst()
-            value.removeLast()
-        }
-        return value
     }
 }
