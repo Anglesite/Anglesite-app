@@ -222,6 +222,10 @@ struct SiteNavigatorModelPublishGatingTests {
                     id: "site-1:post:blog-post", siteID: "site-1", collection: "blog", slug: "blog-post",
                     title: "Blog post", draft: true, publishDate: nil, tags: [],
                     filePath: "src/content/blog/blog-post.md", lastModified: Date()),
+                SiteContentGraph.Post(
+                    id: "site-1:post:event-post", siteID: "site-1", collection: "events", slug: "event-post",
+                    title: "Event post", draft: false, publishDate: Date(), tags: [],
+                    filePath: "src/content/events/event-post.md", lastModified: Date()),
             ],
             images: []
         )
@@ -236,6 +240,12 @@ struct SiteNavigatorModelPublishGatingTests {
         #expect(model.canUnpublish("site-1:post:live-note") == true)
         #expect(model.canPublish("site-1:post:blog-post") == false)
         #expect(model.canUnpublish("site-1:post:blog-post") == false)
+        // Business types (event/review/announcement/member) are registry-backed but draftless —
+        // explicitly out of #798's scope — so both verbs must stay unavailable (the regression
+        // this test guards: descriptor-presence alone used to gate `canUnpublish`, which wrongly
+        // returned true here since `post.draft` can never be true without a `draft` field).
+        #expect(model.canPublish("site-1:post:event-post") == false)
+        #expect(model.canUnpublish("site-1:post:event-post") == false)
         model.stop()
     }
 }

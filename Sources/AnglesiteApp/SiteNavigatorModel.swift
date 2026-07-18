@@ -122,9 +122,18 @@ final class SiteNavigatorModel {
     /// Publish/Unpublish (#798) apply only to registry-backed typed post-family entries — `blog`
     /// posts have no `ContentTypeDescriptor` (they predate the registry, per `content.config.ts`'s
     /// hand-authored `blog` block) and keep their existing verb-less draft workflow.
+    /// Publish/Unpublish (#798) apply only to registry-backed typed post-family entries that
+    /// actually declare a `draft` field — `blog` posts have no `ContentTypeDescriptor` at all, and
+    /// business types (event/review/announcement/member) are registered but draftless (out of this
+    /// feature's scope per the plan). Both keep their existing verb-less draft workflow. Mirrors the
+    /// same `draft`-field guard `NativeContentOperations.publish`/`.unpublish` already enforce, so a
+    /// gating bug here can't surface as a confusing "not configured" failure toast instead of simply
+    /// not offering the verb.
     private func publishableDescriptor(_ id: String) -> ContentTypeDescriptor? {
-        guard let post = postsByID[id] else { return nil }
-        return contentTypeRegistry.descriptor(forCollection: post.collection)
+        guard let post = postsByID[id],
+              let descriptor = contentTypeRegistry.descriptor(forCollection: post.collection),
+              descriptor.fields.contains(where: { $0.name == "draft" }) else { return nil }
+        return descriptor
     }
 
     func canPublish(_ id: String) -> Bool {
