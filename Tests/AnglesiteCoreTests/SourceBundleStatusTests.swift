@@ -2,7 +2,11 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
-struct SourceBundleStatusTests {
+/// .serialized: libgit2 isn't safe for uncoordinated concurrent use (see the fork's specs).
+/// Each test drives `InProcessGit.run` (SwiftGit2 / in-process libgit2), so Swift Testing's
+/// default concurrent-within-struct execution is a documented crash hazard here — see
+/// `InProcessGitTests`'s identical `.serialized` trait.
+@Suite("SourceBundleStatus", .serialized) struct SourceBundleStatusTests {
     private func makeGitRepo() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("SourceBundleStatusTests-\(UUID().uuidString)", isDirectory: true)
