@@ -28,8 +28,11 @@ public enum SyndicationFrontmatter {
             return finish((block + [normalized]).joined(separator: "\n"))
         }
 
+        // Only a *top-level* `syndication:` key counts — `Frontmatter.splitKeyValue` rejects
+        // indented lines, so a `syndication:` nested under another key (which the canonical
+        // reader ignores) is never spliced into.
         guard let keyIndex = lines[..<closing].firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespaces) == "syndication:" || $0.hasPrefix("syndication:")
+            Frontmatter.splitKeyValue($0)?.key == "syndication"
         }) else {
             // No syndication key yet: nothing to dedup against.
             lines.insert(contentsOf: ["syndication:"] + newURLs.map { "  - \($0)" }, at: closing)
@@ -70,7 +73,7 @@ public enum SyndicationFrontmatter {
     /// Value parsing delegates to `Frontmatter.parseScalarOrArray` so quoting and inline-array
     /// semantics match the canonical reader.
     private static func inlineListItems(_ line: String) -> [String]? {
-        guard let (key, raw) = Frontmatter.splitKeyValue(line.trimmingCharacters(in: .whitespaces)),
+        guard let (key, raw) = Frontmatter.splitKeyValue(line),
               key == "syndication", !raw.isEmpty
         else { return nil }
         switch Frontmatter.parseScalarOrArray(raw) {

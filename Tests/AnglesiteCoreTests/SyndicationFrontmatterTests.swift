@@ -65,6 +65,18 @@ struct SyndicationFrontmatterTests {
         #expect(out == "---\r\ntitle: T\r\nsyndication:\r\n  - https://a.test/1\r\n---\r\nBody.\r\n")
     }
 
+    @Test("indented syndication: nested under another key is not the top-level key (canonical)")
+    func nestedSyndicationKeyIgnored() {
+        // Canonical `Frontmatter.parse` reads top-level keys only, so a nested `syndication:`
+        // must not be spliced into — the URLs would be invisible to the reader. A proper
+        // top-level block is added instead; the nested line stays verbatim.
+        let src = "---\ntitle: T\nmeta:\n  syndication:\n---\nBody.\n"
+        let out = SyndicationFrontmatter.adding(urls: ["https://a.test/1"], to: src)
+        #expect(out.contains("meta:\n  syndication:\n"))
+        #expect(out.contains("\nsyndication:\n  - https://a.test/1\n---"))
+        #expect(Frontmatter.parse(out)["syndication"] == .array(["https://a.test/1"]))
+    }
+
     @Test("fence with trailing whitespace is not a fence (canonical): fresh block prepended")
     func trailingWhitespaceFence() {
         // Canonical `Frontmatter.parse` would not read a `--- ` fence either, so the URLs must
