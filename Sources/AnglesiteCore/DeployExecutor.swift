@@ -170,11 +170,22 @@ public struct ContainerDeployExecutor: DeployExecutor {
             return ["npx", "wrangler", "deploy"]
         case .bundleUpload:
             let bucket = bundleUploadBucket(siteDirectory: siteDirectory) ?? ""
+            // `bucket` comes from `.site-config` — attacker/owner-controlled content that must
+            // never be spliced into shell script text. Instead of interpolating it, the script
+            // references it only via `$1`, a POSITIONAL shell parameter: `sh -c 'script' sh
+            // "$bucket"` sets `$1` to `bucket`'s value as a single opaque word. The shell
+            // substitutes that word without re-parsing its *content* as syntax, so characters
+            // like `;`, `` ` ``, `$()`, or quotes inside `bucket` can't break out of the
+            // intended command — verified locally with
+            // `sh -c 'echo "$1"' sh '$(echo pwned)'` printing the literal string, not executing
+            // it. `"sh"` (the second argv element) fills the `$0`/argv0 slot that `sh -c` expects
+            // before the first real positional parameter; it is never itself used as `$1`.
             return [
                 "sh", "-c",
                 "tar czf /tmp/source-bundle.tar.gz -C /workspace/site --exclude=dist --exclude=node_modules . " +
-                "&& npx wrangler r2 object put \(bucket)/source/$(basename \(bucket) 2>/dev/null; true).tar.gz " +
-                "--file=/tmp/source-bundle.tar.gz --remote"
+                "&& npx wrangler r2 object put \"$1/source/$(basename \"$1\").tar.gz\" " +
+                "--file=/tmp/source-bundle.tar.gz --remote",
+                "sh", bucket
             ]
         }
     }

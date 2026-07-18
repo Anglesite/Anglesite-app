@@ -803,8 +803,65 @@ struct DeployCommandTests {
             to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
 
         let argv = ContainerDeployExecutorTestHook.guestArgv(for: .bundleUpload, siteDirectory: siteDir)
-        #expect(argv.contains { $0.contains("my-site-source") })
+        // The bucket must be a separate positional argv element (passed as `$1` to `sh -c`), not
+        // interpolated into the script text — that's what makes it injection-safe (see the
+        // adjoining injection test).
+        #expect(argv.contains("my-site-source"))
         #expect(argv.contains { $0.contains("wrangler") })
+    }
+
+    @Test(
+        """
+        ContainerDeployExecutor's .bundleUpload argv passes the CF_SOURCE_BUCKET value as a positional \
+        shell parameter, so shell metacharacters in it cannot execute as commands
+        """
+    )
+    func bundleUploadArgvIsSafeAgainstShellInjectionInBucketName() throws {
+        // `.site-config` is owned by the site (or a future provisioning flow) and its raw value
+        // flows straight into `guestArgv` unvalidated — this proves a malicious/malformed bucket
+        // name can't break out of the intended tar/wrangler invocation when the produced argv is
+        // actually executed by `sh`, not just that the argv strings "look" quoted.
+        let siteDir = tmpDir.appendingPathComponent("bundle-upload-injection-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+
+        let markerFile = tmpDir.appendingPathComponent("bundle-upload-pwned-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: markerFile) }
+        #expect(!FileManager.default.fileExists(atPath: markerFile.path))
+
+        let payload = "my-bucket'; touch \(markerFile.path); echo '"
+        try "CF_SOURCE_BUCKET=\(payload)\n".write(
+            to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        let argv = ContainerDeployExecutorTestHook.guestArgv(for: .bundleUpload, siteDirectory: siteDir)
+        #expect(argv.contains(payload))
+
+        // Stub `tar`/`npx` on PATH so the script doesn't need a real workspace or network — the
+        // point is only to observe whether the shell executes the injected `touch`, not whether
+        // the real tar/wrangler commands succeed.
+        let binDir = tmpDir.appendingPathComponent("bundle-upload-injection-bin-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: binDir) }
+        for name in ["tar", "npx"] {
+            let stub = binDir.appendingPathComponent(name)
+            try "#!/bin/sh\nexit 0\n".write(to: stub, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+        }
+
+        // argv is ["sh", "-c", script, "sh", bucket] — feed it to a real `sh` exactly as
+        // `ContainerDeployExecutor` would hand it to the guest's exec call.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = Array(argv.dropFirst())
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = binDir.path + ":" + (environment["PATH"] ?? "")
+        process.environment = environment
+        try process.run()
+        process.waitUntilExit()
+
+        #expect(
+            !FileManager.default.fileExists(atPath: markerFile.path),
+            "shell metacharacters in CF_SOURCE_BUCKET executed as commands — injection is not blocked")
     }
 
     /// Minimal thread-safe box for recording values appended from `@Sendable` closures.
