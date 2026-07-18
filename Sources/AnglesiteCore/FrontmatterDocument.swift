@@ -81,16 +81,9 @@ public struct FrontmatterDocument: Equatable, Sendable {
         let newline = source.contains("\r\n") ? "\r\n" : "\n"
         let normalized = source.replacingOccurrences(of: "\r\n", with: "\n")
 
-        guard normalized.hasPrefix("---\n") else {
-            return FrontmatterDocument(segments: [], indexByKey: [:], body: normalized,
-                                       newline: newline, hadFrontmatter: false, hasBodySection: false)
-        }
         let all = normalized.components(separatedBy: "\n")
-        // all[0] == "---"; find the closing fence.
-        var close = -1
-        var i = 1
-        while i < all.count { if all[i] == "---" { close = i; break }; i += 1 }
-        guard close >= 0 else {
+        // No leading fence, or an unterminated one — treat the whole source as body.
+        guard let close = Frontmatter.closingFenceIndex(of: all) else {
             return FrontmatterDocument(segments: [], indexByKey: [:], body: normalized,
                                        newline: newline, hadFrontmatter: false, hasBodySection: false)
         }
@@ -150,7 +143,7 @@ public struct FrontmatterDocument: Equatable, Sendable {
     private static func render(key: String, value: FrontmatterValue) -> String {
         switch value {
         case .string(let s):
-            return "\(key): \"\(escape(s))\""
+            return "\(key): \(Frontmatter.doubleQuoted(s))"
         case .bool(let b):
             // Bool fields canonicalize to true/false on write. YAML also accepts yes/no/on/off/1/0,
             // but we intentionally normalize here (matching ContentScaffold) — an edited bool loses
@@ -168,18 +161,7 @@ public struct FrontmatterDocument: Equatable, Sendable {
             return "\(key): \(s)"
         case .array(let items):
             if items.isEmpty { return "\(key): []" }
-            return ([ "\(key):" ] + items.map { "  - \"\(escape($0))\"" }).joined(separator: "\n")
+            return ([ "\(key):" ] + items.map { "  - \(Frontmatter.doubleQuoted($0))" }).joined(separator: "\n")
         }
-    }
-
-    /// Escapes a scalar for a double-quoted YAML value. Order matters: backslash first, then the
-    /// quote, then control characters — a literal newline in a `text`-kind field (e.g. a pasted
-    /// multi-line description) must become `\n`, or it would break `---` fence detection on
-    /// re-parse. `Frontmatter.unquote`'s decoder reverses each of these.
-    private static func escape(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\")
-         .replacingOccurrences(of: "\"", with: "\\\"")
-         .replacingOccurrences(of: "\n", with: "\\n")
-         .replacingOccurrences(of: "\r", with: "\\r")
     }
 }

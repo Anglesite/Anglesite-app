@@ -33,9 +33,11 @@ public enum PageTitleEditor {
     // MARK: - Markdown frontmatter
 
     /// Replace the `title:` line inside a leading `---` block, insert one if the block lacks it,
-    /// or synthesize a block at the top of the file.
+    /// or synthesize a block at the top of the file. Fence detection, key matching, and scalar
+    /// quoting delegate to `Frontmatter`'s helpers; only the line-level splice — which preserves
+    /// the file's existing formatting — lives here.
     private static func rewriteMarkdown(_ contents: String, title: String) -> String {
-        let yaml = "title: \(yamlQuoted(title))"
+        let yaml = "title: \(Frontmatter.doubleQuoted(title))"
 
         // Work in LF internally so the line logic is newline-agnostic, then restore CRLF on output
         // if the source used it. (A trailing `\r` left on each split line would make `lines[0]`
@@ -46,40 +48,20 @@ public enum PageTitleEditor {
             usesCRLF ? s.replacingOccurrences(of: "\n", with: "\r\n") : s
         }
 
-        // A frontmatter block must start at byte 0 with `---` on its own line.
-        guard normalized.hasPrefix("---\n") || normalized == "---" else {
-            return finish("---\n\(yaml)\n---\n\n\(normalized)")
-        }
-
         var lines = normalized.components(separatedBy: "\n")
-        // lines[0] == "---". Find the closing fence.
-        guard let close = lines.dropFirst().firstIndex(of: "---") else {
-            // Malformed (no closing fence) — treat as no frontmatter and prepend a fresh block.
+        // No leading fence, or an unterminated (malformed) one — prepend a fresh block.
+        guard let close = Frontmatter.closingFenceIndex(of: lines) else {
             return finish("---\n\(yaml)\n---\n\n\(normalized)")
         }
 
-        // Look for an existing top-level `title:` between the fences.
-        if let titleIdx = (1..<close).first(where: { lineKey(lines[$0]) == "title" }) {
+        // Look for an existing top-level `title:` between the fences, using the canonical key
+        // reader so the editor only rewrites a line `Frontmatter.parse` reads as the title.
+        if let titleIdx = (1..<close).first(where: { Frontmatter.splitKeyValue(lines[$0])?.key == "title" }) {
             lines[titleIdx] = yaml
         } else {
             lines.insert(yaml, at: 1)
         }
         return finish(lines.joined(separator: "\n"))
-    }
-
-    /// The top-level key of a frontmatter line (`title: "x"` → `title`), or nil for indented /
-    /// keyless lines. Mirrors `Frontmatter`'s "top-level keys only" rule.
-    private static func lineKey(_ line: String) -> String? {
-        guard let first = line.first, first != " ", first != "\t" else { return nil }
-        guard let colon = line.firstIndex(of: ":") else { return nil }
-        return String(line[line.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
-    }
-
-    /// Double-quote a YAML scalar, escaping `\` then `"`.
-    private static func yamlQuoted(_ s: String) -> String {
-        let escaped = s.replacingOccurrences(of: "\\", with: "\\\\")
-                       .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
     }
 
     // MARK: - Attribute (astro / html)

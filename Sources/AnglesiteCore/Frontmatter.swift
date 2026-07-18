@@ -165,6 +165,31 @@ public enum Frontmatter {
         return s
     }
 
+    /// The index of the closing `---` fence line in an LF-normalized `lines` array whose first
+    /// element is the opening fence — or `nil` when the content doesn't start with a fence or the
+    /// fence is unterminated. Line-based companion to `parse`'s regex for the in-place editors
+    /// (`FrontmatterDocument`, `PageTitleEditor`, `SyndicationFrontmatter`) that need *line
+    /// indices*, not just the block text. Fences are exact `---` lines; normalize CRLF away
+    /// before splitting.
+    static func closingFenceIndex(of lines: [String]) -> Int? {
+        guard lines.first == "---" else { return nil }
+        // `dropFirst()` yields an `ArraySlice`, so the returned index is valid in `lines`.
+        return lines.dropFirst().firstIndex(of: "---")
+    }
+
+    /// Render a scalar as a double-quoted YAML value that `parse`/`unquote` reads back verbatim.
+    /// Order matters: backslash first, then the quote, then control characters — a literal
+    /// newline in the value (e.g. a pasted multi-line title or description) must become `\n`, or
+    /// it would break `---` fence detection on re-parse. `decodeDoubleQuoted` reverses each of
+    /// these. Shared by every frontmatter writer (`FrontmatterDocument`, `PageTitleEditor`).
+    static func doubleQuoted(_ s: String) -> String {
+        let escaped = s.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+        return "\"\(escaped)\""
+    }
+
     /// Single-pass YAML double-quoted escape decoder. Processes each character once so that
     /// `\\n` (two source chars) decodes to `\` + `n` (not newline), guarding the chained-replace
     /// pitfall.
