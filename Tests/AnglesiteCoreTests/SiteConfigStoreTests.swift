@@ -91,4 +91,47 @@ struct SiteConfigStoreTests {
         try Data("not a plist".utf8).write(to: dir.appendingPathComponent("settings.plist"))
         #expect(try SiteConfigStore.read(from: dir) == SiteSettings())
     }
+
+    @Test("save then load round-trips the persisted worker-state fields")
+    func saveLoadRoundTripsWorkerState() async throws {
+        let dir = try tempConfigDir()
+        defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+        let store = SiteConfigStore(configDirectory: dir)
+        let settings = SiteSettings(
+            activeWorkerIDs: ["solid-pod", "webdav"],
+            lastDeployedWorkerIDs: ["webmention", "indieauth"],
+            provisionedWorkerResources: .init(d1DatabaseID: "d1-id", kvNamespaceID: "kv-id", r2BucketName: nil)
+        )
+        try await store.save(settings)
+
+        let loaded = try await store.load()
+        #expect(loaded.activeWorkerIDs == ["solid-pod", "webdav"])
+        #expect(loaded.lastDeployedWorkerIDs == ["webmention", "indieauth"])
+        #expect(loaded.provisionedWorkerResources == .init(d1DatabaseID: "d1-id", kvNamespaceID: "kv-id", r2BucketName: nil))
+    }
+
+    @Test("an old-format settings.plist missing the worker-state keys still decodes")
+    func loadOldFormatWithoutWorkerState() async throws {
+        let dir = try tempConfigDir()
+        defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+        // Simulates a plist written by a build that predates these fields: only `displayName`.
+        let oldFormat = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>displayName</key>
+            <string>Old Site</string>
+        </dict>
+        </plist>
+        """
+        try oldFormat.write(to: dir.appendingPathComponent("settings.plist"), atomically: true, encoding: .utf8)
+        let store = SiteConfigStore(configDirectory: dir)
+
+        let loaded = try await store.load()
+        #expect(loaded.displayName == "Old Site")
+        #expect(loaded.activeWorkerIDs == nil)
+        #expect(loaded.lastDeployedWorkerIDs == nil)
+        #expect(loaded.provisionedWorkerResources == nil)
+    }
 }

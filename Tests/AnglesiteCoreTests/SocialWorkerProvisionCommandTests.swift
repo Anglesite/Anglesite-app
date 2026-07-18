@@ -183,8 +183,8 @@ struct SocialWorkerProvisionCommandTests {
         #expect(toml.contains("id = \"kv-id\""))
     }
 
-    @Test("a worker-name conflict from the deployer maps to a failed provisioning result")
-    func workerNameConflictMapsToFailed() async throws {
+    @Test("a worker-name conflict from the deployer is propagated, not collapsed to failed")
+    func workerNameConflictPropagates() async throws {
         let site = try temporaryDirectory()
         let recorder = WranglerRecorder([
             ["d1", "create", "my-site-social", "--json"]: .init(stdout: #"{"result":{"uuid":"d1-id"}}"#, stderr: "", exitCode: 0),
@@ -196,10 +196,12 @@ struct SocialWorkerProvisionCommandTests {
 
         let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site")
 
-        guard case .failed(let reason, _, _) = result else {
-            Issue.record("expected .failed, got \(result)"); return
+        guard case .workerNameConflict(let name, let resources) = result else {
+            Issue.record("expected .workerNameConflict, got \(result)"); return
         }
-        #expect(reason.contains("taken-name"))
+        #expect(name == "taken-name")
+        #expect(resources.d1DatabaseID == "d1-id")
+        #expect(resources.kvNamespaceID == "kv-id")
     }
 
     @Test("stops before deploy when the IndieAuth schema migration fails")
@@ -254,6 +256,83 @@ struct SocialWorkerProvisionCommandTests {
         #expect(resources.d1DatabaseID == "d1-id")
         #expect(resources.kvNamespaceID == "kv-id")
         #expect(resources.r2BucketName == "media-bucket")
+    }
+
+    @Test("knownResources is reused instead of re-scraping wrangler.toml, so a deactivated-then-reactivated worker doesn't recreate its Cloudflare resource")
+    func reusesKnownResourcesOverFileScrape() async throws {
+        let site = try temporaryDirectory()
+        // wrangler.toml on disk reflects the CURRENT (deactivated) feature set — no R2 block, so
+        // a file-scrape alone would find no bucket name and try to recreate it.
+        let currentToml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site",
+            features: [.indieauth],
+            resources: .init(d1DatabaseID: "d1-id", kvNamespaceID: "kv-id", r2BucketName: nil)
+        )
+        try currentToml.write(to: site.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
+
+        // knownResources (as persisted in SiteSettings before deactivation) still remembers the bucket.
+        let known = WorkerComposition.ProvisionedResources(
+            d1DatabaseID: "d1-id", kvNamespaceID: "kv-id", r2BucketName: "my-site-media"
+        )
+        let recorder = WranglerRecorder([
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migrations applied", stderr: "", exitCode: 0),
+        ])
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "token" },
+            runner: recorder.runner,
+            deployer: DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1)).deployer
+        )
+
+        // Reactivating micropub (needs R2) should reuse the known bucket, not call `r2 bucket create` again.
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site",
+            features: [.indieauth, .micropub], knownResources: known
+        )
+
+        guard case .succeeded(_, let resources, _) = result else {
+            Issue.record("expected success, got \(result)")
+            return
+        }
+        #expect(resources.r2BucketName == "my-site-media")
+        #expect(await recorder.arguments == [
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"],
+        ])
+    }
+
+    @Test("asDeployCommandResult maps succeeded, dropping the resources payload")
+    func asDeployCommandResultMapsSucceeded() {
+        let url = URL(string: "https://my-site.example.workers.dev")!
+        let result = SocialWorkerProvisionCommand.Result.succeeded(
+            url: url, resources: .init(d1DatabaseID: "d1-id"), duration: 3
+        )
+        #expect(result.asDeployCommandResult == .succeeded(url: url, duration: 3))
+    }
+
+    @Test("asDeployCommandResult maps blocked, dropping the resources payload")
+    func asDeployCommandResultMapsBlocked() {
+        let failure = PreDeployCheck.ScanFailure(
+            category: .exposedToken, message: "API key committed", file: "src/index.md", remediation: "Remove it"
+        )
+        let result = SocialWorkerProvisionCommand.Result.blocked(
+            failures: [failure], warnings: [], resources: .init(kvNamespaceID: "kv-id")
+        )
+        #expect(result.asDeployCommandResult == .blocked(failures: [failure], warnings: []))
+    }
+
+    @Test("asDeployCommandResult maps workerNameConflict, dropping the resources payload")
+    func asDeployCommandResultMapsWorkerNameConflict() {
+        let result = SocialWorkerProvisionCommand.Result.workerNameConflict(
+            name: "taken-name", resources: .init(r2BucketName: "media")
+        )
+        #expect(result.asDeployCommandResult == .workerNameConflict(name: "taken-name"))
+    }
+
+    @Test("asDeployCommandResult maps failed, dropping the resources payload")
+    func asDeployCommandResultMapsFailed() {
+        let result = SocialWorkerProvisionCommand.Result.failed(
+            reason: "KV failed", exitCode: 1, resources: .init(d1DatabaseID: "d1-id")
+        )
+        #expect(result.asDeployCommandResult == .failed(reason: "KV failed", exitCode: 1))
     }
 
     private func temporaryDirectory() throws -> URL {
