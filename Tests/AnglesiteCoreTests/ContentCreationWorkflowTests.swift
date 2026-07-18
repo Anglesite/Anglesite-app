@@ -518,3 +518,43 @@ private actor Emissions {
         recorded.append(value)
     }
 }
+
+@Suite("ContentCreationWorkflow publish/unpublish")
+struct ContentCreationWorkflowPublishTests {
+    @Test("publish rescans the content graph on success")
+    func publishRescans() async {
+        let graph = SiteContentGraph()
+        // No `generation:` here — it's guarded against `beginScan` tokens this test never claims;
+        // omitting it (nil default) applies unconditionally, per `SiteContentGraph.load`'s own doc
+        // comment and every other test in this file.
+        await graph.load(siteID: "s1", pages: [], posts: [], images: [])
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        var publishCalls = 0
+        let workflow = ContentCreationWorkflow(
+            operations: NativeContentOperations(siteDirectory: { _ in root }),
+            contentGraph: graph,
+            siteDirectory: { _ in root },
+            postPublisher: { _, relativePath, _ in
+                publishCalls += 1
+                return .created(filePath: relativePath, identifier: "my-note")
+            }
+        )
+
+        let result = await workflow.publish(siteID: "s1", relativePath: "src/content/notes/my-note.md", collection: "notes")
+        #expect(result == .created(filePath: "src/content/notes/my-note.md", identifier: "my-note"))
+        #expect(publishCalls == 1)
+    }
+
+    @Test("publish reports .failed when the workflow has no publisher configured")
+    func publishUnconfigured() async {
+        let workflow = ContentCreationWorkflow(
+            operations: NativeContentOperations(siteDirectory: { _ in nil }),
+            contentGraph: nil,
+            siteDirectory: { _ in nil }
+        )
+        let result = await workflow.publish(siteID: "s1", relativePath: "x.md", collection: "notes")
+        #expect(result == .failed(reason: "Publish is not configured for this workflow"))
+    }
+}
