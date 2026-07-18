@@ -73,9 +73,7 @@ final class SiteWindowModel {
     var annotationProvider: PreviewAnnotationProvider?
     var deploy = DeployModel()
     private(set) var invisiblePublishState: InvisiblePublishQueue.State = .idle
-    #if !ANGLESITE_MAS
     var publish = PublishModel()
-    #endif
     var backup = BackupModel()
     var audit = AuditModel()
     // Chat is now on both targets and backed by the on-device `FoundationModelAssistant`;
@@ -472,9 +470,7 @@ final class SiteWindowModel {
     var canOpenIntegrationWizard: Bool { site != nil }
     var canOpenPreviewInBrowser: Bool { preview.readyURL != nil }
     var canShowGraph: Bool { site != nil }
-    #if !ANGLESITE_MAS
     var canPublishToGitHub: Bool { site?.isValid == true && !publish.isRunning }
-    #endif
 
     /// Build, scan, and `wrangler deploy` — resolves the active container control first, like the
     /// toolbar button always has.
@@ -1394,9 +1390,7 @@ final class SiteWindowModel {
         deploy.onScanComplete = { [health] outcome in
             health.ingestDeployOutcome(outcome)
         }
-        #if !ANGLESITE_MAS
         publish.refreshRemote(source: resolved.sourceDirectory)
-        #endif
     }
 
     // MARK: - Invisible publishing (#357)

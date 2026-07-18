@@ -33,7 +33,7 @@ public enum GitHubTokenVerifyError: Error, Equatable, Sendable {
     public var userMessage: String {
         switch self {
         case .invalidToken:
-            return "That token didn’t work. Create a fine-grained token with Contents: Read and write access at github.com/settings/tokens and paste the whole token."
+            return "That token didn’t work. Create a fine-grained token scoped to All repositories with Contents: Read and write and Administration: Read and write access at github.com/settings/tokens and paste the whole token."
         case .network:
             return "Couldn’t reach GitHub. Check your connection and try again."
         case .unavailable(let reason):

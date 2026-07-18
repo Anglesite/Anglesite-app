@@ -320,12 +320,6 @@ private struct AdvancedSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                #if !ANGLESITE_MAS
-                GitHubAuthRow()
-                Text("Anglesite shells out to `gh` for GitHub operations and does not store the token itself — `gh` keeps it in its own keychain entry. Clicking Connect runs `gh auth login`; sign-out is `gh auth logout` in Terminal.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                #else
                 KeychainTokenRow(
                     title: "GitHub personal access token",
                     read: { try KeychainStore().readGitHubToken() },
@@ -347,10 +341,9 @@ private struct AdvancedSettingsView: View {
                         AppSettings.shared.gitHubAccount.map { .init(label: $0.login, detail: $0.name, avatarURL: $0.avatarURL) }
                     }
                 )
-                Text("Used to push backups and publish sites to GitHub over HTTPS (the sandboxed app can't run `git` or `gh`, so it pushes in-process with this token). Create a fine-grained token with Contents read/write access at github.com/settings/tokens. Stored in the macOS Keychain under `io.dwk.anglesite` and never written to logs.")
+                Text("Used to push backups and publish sites to GitHub over HTTPS (the sandboxed app can't run `git` or `gh`, so it pushes in-process with this token). Create a fine-grained token scoped to All repositories with Contents: Read and write and Administration: Read and write access (Administration is needed to create a new repo when publishing) at github.com/settings/tokens. Stored in the macOS Keychain under `io.dwk.anglesite` and never written to logs.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                #endif
             }
 
             if showsLANRuntimeSection {
@@ -437,10 +430,9 @@ private struct CloudflareTokenRow: View {
 /// When `verify` is supplied, `Save` checks the token against the provider's API first and, on
 /// success, surfaces the connected account — "Signed in as octocat" with an avatar for GitHub,
 /// a checkmark + account name for Cloudflare — instead of a bare "Saved." This mirrors Xcode's
-/// Accounts pane, which shows who you're signed in as rather than just "credential stored", and
-/// matches `GitHubAuthRow` below (the non-MAS `gh`-backed row already does this). `verify`
-/// defaults to `nil` — a future token slot with nothing to verify against just omits it and
-/// keeps the plain "Saved."/"Token stored" behavior.
+/// Accounts pane, which shows who you're signed in as rather than just "credential stored".
+/// `verify` defaults to `nil` — a future token slot with nothing to verify against just omits it
+/// and keeps the plain "Saved."/"Token stored" behavior.
 private struct KeychainTokenRow: View {
     /// The identity to display after a token verifies. `detail` is a secondary line (e.g. a
     /// GitHub display name, a Cloudflare account email) shown only when it differs from `label`.
@@ -645,137 +637,6 @@ private struct KeychainTokenRow: View {
         }
     }
 }
-
-// The gh-backed GitHub panel is compiled out of the App Store build. A sandboxed app can't rely
-// on a user-installed `gh` (nor spawn `git` at all, #640) — it stores its own GitHub token and
-// pushes in-process instead; see the KeychainTokenRow in the #else branch above (#653).
-#if !ANGLESITE_MAS
-/// "Connect GitHub" row. The app never sees the GitHub token — `gh` stores it in its own
-/// credential store. This row just launches the `gh auth login` device-code flow and
-/// surfaces the result. Status reflects what `gh auth status` reports at appear-time.
-private struct GitHubAuthRow: View {
-    @State private var status: Status = .unknown
-    @State private var sheetPresented = false
-    @State private var resultMessage: ResultMessage?
-
-    private enum Status: Equatable {
-        case unknown
-        case signedIn(account: String)
-        case signedOut
-        case unavailable(String)
-    }
-
-    private struct ResultMessage: Equatable {
-        let text: String
-        let isError: Bool
-    }
-
-    var body: some View {
-        LabeledContent("GitHub") {
-            VStack(alignment: .trailing, spacing: 6) {
-                HStack(spacing: 8) {
-                    statusLabel
-                    Spacer()
-                    Button("Connect…") {
-                        resultMessage = nil
-                        sheetPresented = true
-                    }
-                    .disabled(isUnavailable)
-                    .accessibilityHint(isUnavailable ? "GitHub tools are unavailable on this Mac" : "")
-                }
-                if let resultMessage {
-                    Text(resultMessage.text)
-                        .font(.caption)
-                        .foregroundStyle(resultMessage.isError ? .red : .secondary)
-                }
-            }
-        }
-        .task { await refreshStatus() }
-        .sheet(isPresented: $sheetPresented) {
-            GitHubAuthSheetView { result in
-                sheetPresented = false
-                switch result {
-                case .authenticated:
-                    resultMessage = ResultMessage(text: "Connected.", isError: false)
-                    Task { await refreshStatus() }
-                case .failed(let reason):
-                    resultMessage = ResultMessage(text: reason, isError: true)
-                case .cancelled:
-                    resultMessage = nil
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var statusLabel: some View {
-        switch status {
-        case .signedIn(let account):
-            Label("Signed in as \(account)", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-                .labelStyle(.titleAndIcon)
-        case .signedOut:
-            Text("Not signed in").foregroundStyle(.secondary)
-        case .unknown:
-            Text("Checking…").foregroundStyle(.secondary)
-        case .unavailable(let reason):
-            Text(reason).foregroundStyle(.orange).font(.caption)
-        }
-    }
-
-    private var isUnavailable: Bool {
-        if case .unavailable = status { return true }
-        return false
-    }
-
-    private func refreshStatus() async {
-        // Probe `gh auth status` — robust to gh not being installed.
-        guard let gh = ResolveBinary.locate("gh") else {
-            status = .unavailable("`gh` not installed (brew install gh).")
-            return
-        }
-        let result: ProcessSupervisor.RunResult
-        do {
-            result = try await ProcessSupervisor.shared.run(
-                executable: gh,
-                arguments: ["auth", "status", "--hostname", "github.com"]
-            )
-        } catch {
-            status = .unavailable("couldn't run `gh`: \(error.localizedDescription)")
-            return
-        }
-        // gh writes its status to stderr; combine both streams as the old single-pipe code did.
-        let output = result.stdout + result.stderr
-        if result.exitCode == 0 {
-            // Look for "account davidwkeith" or "Logged in to github.com account <name>"
-            if let range = output.range(of: #"account\s+(\S+)"#, options: .regularExpression) {
-                let token = output[range].split(separator: " ").last.map(String.init) ?? ""
-                let cleaned = token.trimmingCharacters(in: CharacterSet(charactersIn: "()"))
-                status = .signedIn(account: cleaned)
-            } else {
-                status = .signedIn(account: "github.com")
-            }
-        } else {
-            status = .signedOut
-        }
-    }
-}
-
-/// Tiny PATH-walker for finding a binary by name. Avoids depending on `which` (which itself
-/// requires a shell), and respects the environment Anglesite was launched with.
-private enum ResolveBinary {
-    static func locate(_ name: String) -> URL? {
-        let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/opt/homebrew/bin"
-        for dir in path.split(separator: ":") {
-            let candidate = URL(fileURLWithPath: String(dir), isDirectory: true).appendingPathComponent(name)
-            if FileManager.default.isExecutableFile(atPath: candidate.path) {
-                return candidate
-            }
-        }
-        return nil
-    }
-}
-#endif
 
 private struct FolderPickerRow: View {
     let label: String
