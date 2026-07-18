@@ -75,6 +75,10 @@ struct ThemeCatalogTests {
     @Test func realThemesFileParsesToEightCompleteThemes() throws {
         let themes = try ThemeCatalog.parse(themesJSON: Data(contentsOf: Self.realThemesURL()))
         #expect(themes.count == 8, "expected 8 built-in themes")
+        // A duplicate id would silently collide in theme(id:)'s first{} lookup (and in the
+        // template's Object.fromEntries) — enforce uniqueness at the source.
+        let ids = themes.map(\.id)
+        #expect(Set(ids).count == ids.count, "duplicate theme id in themes.json: \(ids)")
         for theme in themes {
             for key in ["color-primary", "color-accent", "font-heading", "font-body"] {
                 #expect(theme.cssVars[key] != nil, "\(theme.id) missing --\(key)")
