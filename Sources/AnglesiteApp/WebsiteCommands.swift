@@ -78,7 +78,6 @@ struct WebsiteCommands: Commands {
                     .disabled(model?.canOpenDesignInterview != true)
             }
 
-            #if !ANGLESITE_MAS
             Menu("GitHub") {
                 // Same identity swap as the toolbar: menus rebuild on every open, so a
                 // state-dependent item is fine here (unlike the customizable toolbar, #519).
@@ -92,7 +91,6 @@ struct WebsiteCommands: Commands {
                     .disabled(model?.canPublishToGitHub != true)
                 }
             }
-            #endif
 
             Divider()
 

@@ -1,9 +1,8 @@
-#if !ANGLESITE_MAS
 import SwiftUI
 import AnglesiteCore
 
 /// Progress + result for "Publish to GitHub". The auth sub-flow is a separate sheet
-/// (`GitHubAuthSheetView`) presented by `SiteWindow` when the model enters `.needsAuth`.
+/// (`GitHubTokenPromptView`) presented by `SiteWindow` when the model enters `.needsAuth`.
 struct PublishSheet: View {
     @Bindable var model: PublishModel
     let siteName: String
@@ -44,4 +43,3 @@ struct PublishSheet: View {
         }
     }
 }
-#endif

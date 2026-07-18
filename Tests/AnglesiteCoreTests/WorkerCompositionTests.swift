@@ -1,5 +1,6 @@
 // Tests/AnglesiteCoreTests/WorkerCompositionTests.swift
 import Testing
+import Foundation
 @testable import AnglesiteCore
 
 @Suite("WorkerComposition")
@@ -116,5 +117,15 @@ struct WorkerCompositionTests {
         let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", features: [])
         #expect(!toml.contains("INBOX_KV"))
         #expect(!toml.contains("main ="))
+    }
+
+    @Test("ProvisionedResources round-trips through JSONEncoder/JSONDecoder")
+    func provisionedResourcesCodable() throws {
+        let resources = WorkerComposition.ProvisionedResources(
+            d1DatabaseID: "d1-id", kvNamespaceID: "kv-id", r2BucketName: "media-bucket"
+        )
+        let data = try JSONEncoder().encode(resources)
+        let decoded = try JSONDecoder().decode(WorkerComposition.ProvisionedResources.self, from: data)
+        #expect(decoded == resources)
     }
 }

@@ -41,6 +41,19 @@ public enum E2EPrerequisites {
         return candidate
     }
 
+    /// Relative path (from a template checkout's root) to the installed Astro CLI entry point,
+    /// matching the `"bin"` field of the template's pinned `astro` package.json. Astro 6 ships this
+    /// as an ESM `.mjs` file under `bin/` — there is no `astro.js` at the package root.
+    public static let astroCLIRelativePath = "node_modules/astro/bin/astro.mjs"
+
+    /// True when a template checkout can actually be built: a Node binary plus an installed Astro
+    /// CLI at `astroCLIRelativePath`.
+    public static func astroBuildable(templateDir: URL) -> Bool {
+        guard locateNode() != nil else { return false }
+        return FileManager.default.isReadableFile(
+            atPath: templateDir.appendingPathComponent(astroCLIRelativePath).path)
+    }
+
     /// A Node binary: `NODE_BINARY` override, then common install paths, then nvm-managed versions.
     public static func locateNode() -> URL? {
         if let override = ProcessInfo.processInfo.environment["NODE_BINARY"], !override.isEmpty,

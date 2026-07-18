@@ -18,7 +18,7 @@ public actor RepoBootstrap {
 
     public enum Event: Sendable, Equatable {
         case progress(step: Step, message: String)
-        /// Provider has no credentials. The UI presents `GitHubAuthSheetView`, then retries `publish`.
+        /// Provider has no credentials. The UI presents a GitHub token prompt, then retries `publish`.
         case needsAuth
         case published(RemoteRepo)
         case failed(reason: String)
