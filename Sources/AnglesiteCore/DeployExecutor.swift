@@ -10,6 +10,11 @@ public enum DeployStep: Sendable {
     case preflight
     /// `wrangler deploy` — publishes the built site to Cloudflare Workers.
     case wrangler
+    /// Tars `Source/` and uploads it to the site's configured R2 bucket via `wrangler r2 object
+    /// put` — the code side of a future Worker-triggered bake (#799, spec §C.4). Only reached
+    /// when `.site-config`'s `CF_SOURCE_BUCKET` is set; `DeployCommand.deploy` skips this step
+    /// entirely otherwise (today, for every site — no provisioning flow writes that key yet).
+    case bundleUpload
 }
 
 /// The result of running a single deploy step.
@@ -82,7 +87,7 @@ public struct ContainerDeployExecutor: DeployExecutor {
         source: String
     ) async -> DeployStepResult {
         // `siteDirectory` is the HOST path — the guest always uses /workspace/site.
-        let argv = guestArgv(for: step)
+        let argv = Self.guestArgv(for: step, siteDirectory: siteDirectory)
         // Stream guest output to LogCenter LIVE (matching the host path): the `@escaping @Sendable`
         // `onOutput` callback yields each (line, stream) into an AsyncStream (`yield` is nonisolated
         // + Sendable, so it's safe from the closure even when fired after `exec` returns), and a
@@ -155,7 +160,7 @@ public struct ContainerDeployExecutor: DeployExecutor {
 
     // MARK: argv mapping
 
-    private func guestArgv(for step: DeployStep) -> [String] {
+    static func guestArgv(for step: DeployStep, siteDirectory: URL) -> [String] {
         switch step {
         case .build:
             return ["npm", "run", "build"]
@@ -163,7 +168,34 @@ public struct ContainerDeployExecutor: DeployExecutor {
             return ["npx", "tsx", "scripts/pre-deploy-check.ts", "--json"]
         case .wrangler:
             return ["npx", "wrangler", "deploy"]
+        case .bundleUpload:
+            let bucket = bundleUploadBucket(siteDirectory: siteDirectory) ?? ""
+            return [
+                "sh", "-c",
+                "tar czf /tmp/source-bundle.tar.gz -C /workspace/site --exclude=dist --exclude=node_modules . " +
+                "&& npx wrangler r2 object put \(bucket)/source/$(basename \(bucket) 2>/dev/null; true).tar.gz " +
+                "--file=/tmp/source-bundle.tar.gz --remote"
+            ]
         }
+    }
+
+    /// Reads `.site-config`'s `CF_SOURCE_BUCKET` from the HOST `siteDirectory` (the guest's copy is
+    /// a clone of the same repo, so the value is identical) — `nil` when unset, which
+    /// `DeployCommand.deploy` treats as "skip this step" before it ever reaches the executor.
+    private static func bundleUploadBucket(siteDirectory: URL) -> String? {
+        let configURL = siteDirectory.appendingPathComponent(".site-config")
+        guard let config = try? String(contentsOf: configURL, encoding: .utf8) else { return nil }
+        return SiteConfigFile.value(forKey: "CF_SOURCE_BUCKET", in: config)
+    }
+}
+
+/// Test-only visibility onto `ContainerDeployExecutor`'s argv mapping — `guestArgv` itself is
+/// `static` and package-internal so `@testable import AnglesiteCore` sees it directly; this
+/// wrapper exists only so tests don't depend on `ContainerDeployExecutor`'s internal method name
+/// staying `guestArgv` specifically. Kept minimal since it's exercised by exactly one test.
+enum ContainerDeployExecutorTestHook {
+    static func guestArgv(for step: DeployStep, siteDirectory: URL) -> [String] {
+        ContainerDeployExecutor.guestArgv(for: step, siteDirectory: siteDirectory)
     }
 }
 
@@ -280,6 +312,8 @@ public struct HostDeployExecutor: DeployExecutor {
             return preflightResolver
         case .wrangler:
             return DeployCommand.resolveWranglerCommand
+        case .bundleUpload:
+            return { _ in .unavailable(reason: HostNodeRetirement.reason("source bundle upload")) }
         }
     }
 

@@ -29,6 +29,7 @@ struct DeployCommandTests {
             case .build: return "build"
             case .preflight: return "preflight"
             case .wrangler: return "wrangler"
+            case .bundleUpload: return "bundleUpload"
             }
         }
 
@@ -555,6 +556,8 @@ struct DeployCommandTests {
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"version":1,"ok":true,"failures":[],"warnings":[]}'; exit 0"#])
                     case .wrangler:
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo 'Published angle-app (1.23 sec)'; echo '  https://angle-app.example.workers.dev'; exit 0"])
+                    case .bundleUpload:
+                        return .unavailable(reason: "not exercised in this test")
                     }
                 }
             }
@@ -585,6 +588,8 @@ struct DeployCommandTests {
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"version":1,"ok":true,"failures":[],"warnings":[]}'"#])
                     case .wrangler:
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "echo \"TOKEN=$CLOUDFLARE_API_TOKEN\"; echo 'Published x (0.1 sec)'; echo '  https://x.workers.dev'"])
+                    case .bundleUpload:
+                        return .unavailable(reason: "not exercised in this test")
                     }
                 }
             }
@@ -631,6 +636,8 @@ struct DeployCommandTests {
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", #"echo '{"version":1,"ok":true,"failures":[],"warnings":[]}'"#])
                     case .wrangler:
                         return .run(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "trap 'echo __SIGTERM__; exit 143' TERM; echo __STARTED__; sleep 20; echo __COMPLETED__"])
+                    case .bundleUpload:
+                        return .unavailable(reason: "not exercised in this test")
                     }
                 }
             }
@@ -785,6 +792,19 @@ struct DeployCommandTests {
         #expect(config.contains("SITE_NAME=Acme"))
         #expect(config.contains("SITE_URL=https://new.example.workers.dev"))
         #expect(!config.contains("old.example.workers.dev"))
+    }
+
+    @Test("ContainerDeployExecutor maps .bundleUpload to a tar+wrangler-r2-put argv naming the configured bucket")
+    func bundleUploadArgvNamesConfiguredBucket() throws {
+        let siteDir = tmpDir.appendingPathComponent("bundle-upload-argv-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        try "CF_SOURCE_BUCKET=my-site-source\n".write(
+            to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        let argv = ContainerDeployExecutorTestHook.guestArgv(for: .bundleUpload, siteDirectory: siteDir)
+        #expect(argv.contains { $0.contains("my-site-source") })
+        #expect(argv.contains { $0.contains("wrangler") })
     }
 
     /// Minimal thread-safe box for recording values appended from `@Sendable` closures.
