@@ -1,29 +1,15 @@
 import Foundation
 import Testing
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 @Suite("ContentCreationWorkflow")
 struct ContentCreationWorkflowTests {
     private static let siteID = "site-1"
 
-    private func makeSite(_ files: [String: String] = [:]) throws -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("content-workflow-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        for (relativePath, contents) in files {
-            let url = root.appendingPathComponent(relativePath)
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try Data(contents.utf8).write(to: url)
-        }
-        return root
-    }
-
     @Test("successful page create reloads content graph and emits for indexer")
     func createPageRefreshesGraph() async throws {
-        let root = try makeSite()
+        let root = try makeTempDir(prefix: "content-workflow")
         let graph = SiteContentGraph()
         let emissions = Emissions()
         await graph.setChangeHandler { siteID in await emissions.record(siteID) }
@@ -60,7 +46,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("failed create leaves graph unchanged and does not emit")
     func failedCreateDoesNotRefreshGraph() async throws {
-        let root = try makeSite([
+        let root = try writeSiteTree(prefix: "content-workflow", [
             "src/pages/original.md": "---\ntitle: Original\n---\nBody",
         ])
         let graph = SiteContentGraph()
@@ -99,7 +85,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("successful post create reloads posts through the same workflow")
     func createPostRefreshesGraph() async throws {
-        let root = try makeSite()
+        let root = try makeTempDir(prefix: "content-workflow")
         let graph = SiteContentGraph()
         let operations = FakeCreateOperations { _, _, _ in
             .failed(reason: "unexpected")
@@ -145,7 +131,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("successful typed create refreshes graph and knowledge index")
     func createTypedRefreshesGraphAndKnowledgeIndex() async throws {
-        let root = try makeSite()
+        let root = try makeTempDir(prefix: "content-workflow")
         let graph = SiteContentGraph()
         let knowledgeIndex = SiteKnowledgeIndex()
         let operations = FakeCreateOperations { _, _, _ in
@@ -193,7 +179,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("successful delete reloads content graph so the deleted page is gone")
     func deleteContentRefreshesGraph() async throws {
-        let root = try makeSite([
+        let root = try writeSiteTree(prefix: "content-workflow", [
             "src/pages/about.astro": ContentScaffold.renderPage(title: "About", layoutImport: "../layouts/BaseLayout.astro"),
         ])
         let graph = SiteContentGraph()
@@ -228,7 +214,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("failed delete leaves content graph unchanged")
     func failedDeleteDoesNotRefreshGraph() async throws {
-        let root = try makeSite([
+        let root = try writeSiteTree(prefix: "content-workflow", [
             "src/pages/about.astro": ContentScaffold.renderPage(title: "About", layoutImport: "../layouts/BaseLayout.astro"),
         ])
         let graph = SiteContentGraph()
@@ -260,7 +246,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("duplicatePage reloads content graph with the new page")
     func duplicatePageRefreshesGraph() async throws {
-        let root = try makeSite()
+        let root = try makeTempDir(prefix: "content-workflow")
         let graph = SiteContentGraph()
         let operations = FakeCreateOperations { _, _, _ in
             .failed(reason: "unexpected")
@@ -291,7 +277,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("createComponent does not require content graph access and returns the operation's result")
     func createComponentPassesThrough() async throws {
-        let root = try makeSite()
+        let root = try makeTempDir(prefix: "content-workflow")
         let operations = FakeCreateOperations { _, _, _ in
             .failed(reason: "unexpected")
         } createPost: { _, _, _, _ in
@@ -313,7 +299,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("duplicateComponent does not require content graph access and returns the operation's result")
     func duplicateComponentPassesThrough() async throws {
-        let root = try makeSite()
+        let root = try makeTempDir(prefix: "content-workflow")
         let operations = FakeCreateOperations { _, _, _ in
             .failed(reason: "unexpected")
         } createPost: { _, _, _, _ in
@@ -335,7 +321,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("duplicateComponent reports failed when the workflow has no componentDuplicator configured")
     func duplicateComponentUnconfigured() async throws {
-        let root = try makeSite()
+        let root = try makeTempDir(prefix: "content-workflow")
         let operations = FakeCreateOperations { _, _, _ in
             .failed(reason: "unexpected")
         } createPost: { _, _, _, _ in
@@ -352,7 +338,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("deleteContent reports failed when the workflow has no contentDeleter configured")
     func deleteContentUnconfigured() async throws {
-        let root = try makeSite()
+        let root = try makeTempDir(prefix: "content-workflow")
         let operations = FakeCreateOperations { _, _, _ in
             .failed(reason: "unexpected")
         } createPost: { _, _, _, _ in
@@ -369,7 +355,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("successful restoreContent reloads content graph so the restored page reappears")
     func restoreContentRefreshesGraph() async throws {
-        let root = try makeSite()
+        let root = try makeTempDir(prefix: "content-workflow")
         let graph = SiteContentGraph()
         let operations = FakeCreateOperations { _, _, _ in
             .failed(reason: "unexpected")
@@ -400,7 +386,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("failed restoreContent leaves content graph unchanged")
     func failedRestoreContentDoesNotRefreshGraph() async throws {
-        let root = try makeSite()
+        let root = try makeTempDir(prefix: "content-workflow")
         let graph = SiteContentGraph()
         let operations = FakeCreateOperations { _, _, _ in
             .failed(reason: "unexpected")
@@ -424,7 +410,7 @@ struct ContentCreationWorkflowTests {
 
     @Test("restoreContent reports failed when the workflow has no contentRestorer configured")
     func restoreContentUnconfigured() async throws {
-        let root = try makeSite()
+        let root = try makeTempDir(prefix: "content-workflow")
         let operations = FakeCreateOperations { _, _, _ in
             .failed(reason: "unexpected")
         } createPost: { _, _, _, _ in

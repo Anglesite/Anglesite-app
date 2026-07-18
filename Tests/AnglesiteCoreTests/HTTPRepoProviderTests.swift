@@ -1,6 +1,7 @@
 #if canImport(Darwin)
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 /// `HTTPRepoProvider` replaces `GHRepoProvider` on Darwin (#654): REST API repo creation
@@ -12,12 +13,6 @@ import Foundation
 /// .serialized: libgit2 isn't safe for uncoordinated concurrent use (see the fork's specs, and
 /// `InProcessGitTests`, which follows the same fixture style this file mirrors).
 @Suite("HTTPRepoProvider", .serialized) struct HTTPRepoProviderTests {
-    private func makeTempDir(_ label: String) throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("http-repo-provider-\(label)-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
 
     @discardableResult
     private func git(_ arguments: [String], in dir: URL) async throws -> String {
@@ -38,7 +33,7 @@ import Foundation
     /// A repo on `main` with local identity configured and one commit — mirrors `ensureCommittable`
     /// having already run by the time `createAndPush` is called in the real `publish` flow.
     private func makeRepo() async throws -> URL {
-        let dir = try makeTempDir("work")
+        let dir = try makeTempDir(prefix: "http-repo-provider-work")
         try await git(["init", "-b", "main"], in: dir)
         try await git(["config", "user.name", "Test"], in: dir)
         try await git(["config", "user.email", "test@example.com"], in: dir)
@@ -51,7 +46,7 @@ import Foundation
     /// Empty bare repo standing in for the "GitHub repo" `createRepo`'s mocked transport reports
     /// as created — `addRemote`/`push` target this for real.
     private func makeBareRemote() async throws -> URL {
-        let dir = try makeTempDir("origin")
+        let dir = try makeTempDir(prefix: "http-repo-provider-origin")
         try await git(["init", "--bare"], in: dir)
         return dir
     }
@@ -129,7 +124,7 @@ import Foundation
     func createAndPushSurfacesCreatedURLWhenSourceIsNotARepo() async throws {
         // The remote repository now genuinely exists on GitHub even though the local push can't
         // happen — the failure message must say so, not read like nothing happened.
-        let notARepo = try makeTempDir("not-a-repo")
+        let notARepo = try makeTempDir(prefix: "http-repo-provider-not-a-repo")
         let client = HTTPGitHubClient(transport: transport(
             status: 201,
             json: #"{"name":"site","html_url":"https://github.com/acme/site","owner":{"login":"acme"}}"#))

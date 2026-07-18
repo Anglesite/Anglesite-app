@@ -1,28 +1,15 @@
 import Foundation
 import Testing
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 @Suite("SocialPublishPlan")
 struct SocialPublishPlanTests {
     private let referenceDate = Date(timeIntervalSince1970: 1_782_777_600) // 2026-06-30T00:00:00Z
 
-    private func makeSite(_ files: [String: String]) throws -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("social-plan-\(UUID().uuidString)", isDirectory: true)
-        for (rel, contents) in files {
-            let url = root.appendingPathComponent(rel)
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try Data(contents.utf8).write(to: url)
-        }
-        return root
-    }
-
     @Test("collects webmention targets from mf2 frontmatter and body links")
     func webmentionTargets() throws {
-        let root = try makeSite([
+        let root = try writeSiteTree(prefix: "social-plan", [
             "src/content/replies/hello.md": """
             ---
             slug: reply-to-someone
@@ -52,7 +39,7 @@ struct SocialPublishPlanTests {
 
     @Test("collects requested POSSE destinations without requiring outbound links")
     func posseTargets() throws {
-        let root = try makeSite([
+        let root = try writeSiteTree(prefix: "social-plan", [
             "src/content/notes/today.md": """
             ---
             publishDate: 2026-06-29
@@ -78,7 +65,7 @@ struct SocialPublishPlanTests {
 
     @Test("skips drafts and entries with no outbound social work")
     func skipsNonPublishableEntries() throws {
-        let root = try makeSite([
+        let root = try writeSiteTree(prefix: "social-plan", [
             "src/content/notes/draft.md": """
             ---
             draft: "yes"
@@ -107,7 +94,7 @@ struct SocialPublishPlanTests {
 
     @Test("nested content paths keep their collection-relative slug")
     func nestedContentPathSlug() throws {
-        let root = try makeSite([
+        let root = try writeSiteTree(prefix: "social-plan", [
             "src/content/notes/2026/june/hello.md": """
             ---
             publishDate: 2026-06-29
@@ -128,7 +115,7 @@ struct SocialPublishPlanTests {
 
     @Test("body URL scan ignores unrelated frontmatter URLs")
     func ignoresUnrelatedFrontmatterURLs() throws {
-        let root = try makeSite([
+        let root = try writeSiteTree(prefix: "social-plan", [
             "src/content/articles/photo-credit.md": """
             ---
             publishDate: 2026-06-29
@@ -154,7 +141,7 @@ struct SocialPublishPlanTests {
 
     @Test("skips future-dated content")
     func skipsFutureDatedContent() throws {
-        let root = try makeSite([
+        let root = try writeSiteTree(prefix: "social-plan", [
             "src/content/notes/tomorrow.md": """
             ---
             publishDate: 2026-07-01

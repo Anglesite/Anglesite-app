@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 /// #307: `LocalContainerSiteRuntime` wires the filesystem watcher the same way the retired host runtime
@@ -15,18 +16,6 @@ struct LocalContainerSiteRuntimeReindexTests {
         previewURL: URL(string: "http://127.0.0.1:51001")!,
         mcpURL: URL(string: "http://127.0.0.1:51002/mcp")!)
 
-    private func makeSite(_ files: [String: String]) -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("container-reindex-\(UUID().uuidString)", isDirectory: true)
-        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        for (rel, contents) in files {
-            let url = root.appendingPathComponent(rel)
-            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try! Data(contents.utf8).write(to: url)
-        }
-        return root
-    }
-
     /// Wait until `condition` holds or `timeout` elapses (state settles across actor hops).
     private func poll(_ timeout: TimeInterval, _ condition: @Sendable () async -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
@@ -39,7 +28,7 @@ struct LocalContainerSiteRuntimeReindexTests {
 
     @Test("container runtime starts the watcher after rebuild and routes a batch to the index")
     func routesBatchToIndex() async {
-        let root = makeSite(["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
+        let root = try! writeSiteTree(prefix: "container-reindex", ["src/pages/index.astro": "---\ntitle: Home\n---\n# Home"])
         let index = SiteKnowledgeIndex()
         let watcher = ControllableWatcher()
         let fake = FakeLocalContainerControl(startResult: .success(Self.ok))
@@ -69,7 +58,7 @@ struct LocalContainerSiteRuntimeReindexTests {
 
     @Test("container runtime rebuilds and re-scans project conventions the same way it does the knowledge index")
     func routesBatchToConventionsEngine() async {
-        let root = makeSite(["src/pages/index.astro": "# Home\n"])
+        let root = try! writeSiteTree(prefix: "container-reindex", ["src/pages/index.astro": "# Home\n"])
         let index = SiteKnowledgeIndex()
         let conventions = ProjectConventionsEngine()
         let watcher = ControllableWatcher()

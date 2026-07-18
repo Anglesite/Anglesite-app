@@ -1,22 +1,12 @@
 // Tests/AnglesiteCoreTests/BlogTemplateAssetsTests.swift
 // Hermetic test — no app bundle or TemplateRuntime needed. Resolves the template
-// by walking up from #filePath (Tests/AnglesiteCoreTests/ -> Tests/ -> repo root).
-// Classic URL APIs only (see IntegrationTemplateAssetsTests / PR #283 CI notes).
+// via AnglesiteTestSupport.templateRoot() (a #filePath walk-up to the repo root).
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 @Suite struct BlogTemplateAssetsTests {
-
-    private func templateRoot() -> URL {
-        let here = URL(fileURLWithPath: #filePath)
-        let repoRoot = here
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        #expect(FileManager.default.fileExists(atPath: repoRoot.appendingPathComponent("Package.swift").path), "repo-root detection drifted")
-        return repoRoot.appendingPathComponent("Resources/Template")
-    }
 
     @Test func contentConfigDefinesBlogCollection() throws {
         let root = templateRoot()

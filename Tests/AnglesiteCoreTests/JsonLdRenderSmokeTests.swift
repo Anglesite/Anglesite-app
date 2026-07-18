@@ -9,10 +9,7 @@ import AnglesiteTestSupport
 @Suite("JSON-LD render smoke")
 struct JsonLdRenderSmokeTests {
 
-    static var templateDir: URL {
-        URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-            .appendingPathComponent("Resources/Template", isDirectory: true)
-    }
+    static var templateDir: URL { templateRoot() }
 
     /// True when the template can actually be built: a Node binary plus an installed Astro.
     static var buildable: Bool { E2EPrerequisites.astroBuildable(templateDir: templateDir) }

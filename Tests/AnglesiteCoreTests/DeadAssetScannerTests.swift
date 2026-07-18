@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 @Suite("DeadAssetScanner reference extraction")
@@ -81,20 +82,10 @@ struct DeadAssetScannerExtractionTests {
 
 @Suite("DeadAssetScanner full scan")
 struct DeadAssetScannerScanTests {
-    private func makeSite(_ files: [String: String]) -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("dead-asset-scan-\(UUID().uuidString)", isDirectory: true)
-        for (rel, contents) in files {
-            let url = root.appendingPathComponent(rel)
-            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try! Data(contents.utf8).write(to: url)
-        }
-        return root
-    }
 
     @Test("dead component is flagged, imported component is not")
     func componentDetection() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/pages/index.astro": "---\nimport Header from '../components/Header.astro';\n---\n<Header />",
             "src/components/Header.astro": "<header>Site</header>",
             "src/components/Orphan.astro": "<div>never imported</div>",
@@ -107,7 +98,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("layout referenced only via frontmatter is not flagged")
     func layoutFrontmatterReference() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/content/posts/hello.md": "---\ntitle: Hello\nlayout: ../../layouts/Post.astro\n---\nBody",
             "src/layouts/Post.astro": "<slot />",
             "src/layouts/Unused.astro": "<slot />",
@@ -120,7 +111,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("Astro.glob-covered directory suppresses false positives for every file inside it")
     func globCoveredDirectory() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/pages/index.astro": "---\nconst widgets = await Astro.glob('../components/widgets/*.astro');\n---\n<div></div>",
             "src/components/widgets/Card.astro": "<div>card</div>",
         ])
@@ -130,7 +121,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("unused image (public path) is flagged; referenced image is not")
     func imageDetection() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/pages/index.astro": #"<img src="/images/hero.png">"#,
         ])
         let images = [
@@ -151,13 +142,13 @@ struct DeadAssetScannerScanTests {
 
     @Test("empty project produces no candidates")
     func emptyProject() {
-        let root = makeSite([:])
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [:])
         #expect(DeadAssetScanner.scan(projectRoot: root, images: []).isEmpty)
     }
 
     @Test("path alias from tsconfig.json paths resolves to the real file, suppressing a false-unused flag")
     func tsconfigPathAlias() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "tsconfig.json": #"{"compilerOptions": {"paths": {"@components/*": ["src/components/*"]}}}"#,
             "src/pages/index.astro": "---\nimport Header from '@components/Header.astro';\n---\n<Header />",
             "src/components/Header.astro": "<header>Site</header>",
@@ -168,7 +159,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("KNOWN LIMITATION: an alias with no matching tsconfig/jsconfig paths entry (e.g. vite.resolve.alias in astro.config.mjs) still produces a false-positive unused flag")
     func aliasWithNoPathsEntryIsNotResolved() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/pages/index.astro": "---\nimport Header from '@components/Header.astro';\n---\n<Header />",
             "src/components/Header.astro": "<header>Site</header>",
         ])
@@ -178,7 +169,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("baseUrl-relative path alias resolves to the real file")
     func tsconfigBaseURLAlias() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "tsconfig.json": #"{"compilerOptions": {"baseUrl": "./src", "paths": {"@components/*": ["components/*"]}}}"#,
             "src/pages/index.astro": "---\nimport Header from '@components/Header.astro';\n---\n<Header />",
             "src/components/Header.astro": "<header>Site</header>",
@@ -189,7 +180,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("exact (non-wildcard) path alias resolves to the real file")
     func tsconfigExactAlias() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "tsconfig.json": #"{"compilerOptions": {"paths": {"@header": ["src/components/Header.astro"]}}}"#,
             "src/pages/index.astro": "---\nimport Header from '@header';\n---\n<Header />",
             "src/components/Header.astro": "<header>Site</header>",
@@ -200,7 +191,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("path alias inherited through an extends chain resolves to the real file")
     func tsconfigExtendsChain() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "tsconfig.base.json": #"{"compilerOptions": {"paths": {"@components/*": ["src/components/*"]}}}"#,
             "tsconfig.json": #"{"extends": "./tsconfig.base.json"}"#,
             "src/pages/index.astro": "---\nimport Header from '@components/Header.astro';\n---\n<Header />",
@@ -212,7 +203,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("reference matching is case-insensitive (default APFS is case-insensitive-but-case-preserving)")
     func caseInsensitiveMatch() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/pages/index.astro": "---\nimport Header from '../components/header.astro';\n---\n<Header />",
             "src/components/Header.astro": "<header>Site</header>",
         ])
@@ -222,7 +213,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("multi-target path alias: a component under a later target is still resolved")
     func tsconfigMultiTargetAlias() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "tsconfig.json": #"{"compilerOptions": {"paths": {"@shared/*": ["src/nonexistent/*", "src/components/*"]}}}"#,
             "src/pages/index.astro": "---\nimport Header from '@shared/Header.astro';\n---\n<Header />",
             "src/components/Header.astro": "<header>Site</header>",
@@ -233,7 +224,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("import.meta.glob (array of patterns) marks the resolved directories, not exact files")
     func importMetaGlobDirectory() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/pages/index.astro": "---\nconst modules = import.meta.glob([\"../components/**/*.astro\", \"../layouts/**/*.astro\"]);\n---\n<div></div>",
             "src/components/Card.astro": "<div>card</div>",
             "src/layouts/Post.astro": "<slot />",
@@ -246,7 +237,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("import.meta.glob with a root-relative pattern (leading slash) resolves against the project root, not public/")
     func importMetaGlobRootRelative() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/pages/index.astro": "---\nconst modules = import.meta.glob(\"/src/components/**/*.astro\");\n---\n<div></div>",
             "src/components/Card.astro": "<div>card</div>",
         ])
@@ -256,7 +247,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("top-level scripts/ (dev-harness glob) does not contribute glob-directory coverage")
     func scriptsDirectoryExcluded() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "scripts/harness/component.astro": "---\nconst modules = import.meta.glob([\"/src/components/**/*.astro\", \"/src/layouts/**/*.astro\"]);\n---\n<div></div>",
             "src/pages/index.astro": "<div>no imports here</div>",
             "src/components/Orphan.astro": "<div>never imported</div>",
@@ -267,7 +258,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("a discrete (non-glob) reference from a top-level scripts/ file is still credited")
     func scriptsDirectoryDiscreteReferenceStillCredited() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "scripts/catalog.ts": "import Header from '../src/components/Header.astro';",
             "src/components/Header.astro": "<header>Site</header>",
         ])
@@ -277,7 +268,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("a nested src/scripts/ directory (not the top-level dev-tooling one) is still scanned")
     func nestedScriptsDirectoryStillScanned() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/scripts/analytics.js": "import Icon from '../components/Icon.astro';",
             "src/components/Icon.astro": "<svg></svg>",
         ])
@@ -287,7 +278,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("components referenced only from a .tsx file are not flagged as unused")
     func referencedFromTypeScriptFile() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/components/Icon.astro": "<svg></svg>",
             "src/widgets/Widget.tsx": "import Icon from '../components/Icon.astro';\nexport default function Widget() { return null; }",
         ])
@@ -297,7 +288,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("images referenced only from a .jsx island's src attribute are not flagged as unused")
     func imageReferencedFromJSXIsland() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/islands/Hero.jsx": "export default function Hero() { return <img src=\"/images/hero.png\" />; }",
         ])
         let images = [
@@ -312,7 +303,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("layout: frontmatter alias resolves the same way body references do")
     func layoutFrontmatterAlias() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "tsconfig.json": #"{"compilerOptions": {"paths": {"@layouts/*": ["src/layouts/*"]}}}"#,
             "src/content/posts/hello.md": "---\ntitle: Hello\nlayout: @layouts/Post.astro\n---\nBody",
             "src/layouts/Post.astro": "<slot />",
@@ -323,7 +314,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("non-layout frontmatter fields (image:, cover:, gallery array) are scanned as references too")
     func frontmatterImageFieldsScanned() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/content/posts/hello.md": "---\ntitle: Hello\nimage: /images/cover.png\ngallery: [/images/one.png, /images/two.png]\n---\nBody",
         ])
         let images = ["cover.png", "one.png", "two.png", "unused.png"].map { name in
@@ -342,7 +333,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("overlapping alias patterns resolve deterministically to the more specific (longer literal prefix) one")
     func overlappingAliasPatternsPreferMoreSpecific() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "tsconfig.json": #"{"compilerOptions": {"paths": {"@/*": ["src/wrong/*"], "@/components/*": ["src/components/*"]}}}"#,
             "src/pages/index.astro": "---\nimport Header from '@/components/Header.astro';\n---\n<Header />",
             "src/components/Header.astro": "<header>Site</header>",
@@ -356,7 +347,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("a same-directory glob pattern (./*.astro) suppresses false positives for files beside it")
     func globSameDirectorySuppressesCandidate() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/components/index.astro": "---\nconst modules = import.meta.glob('./*.astro');\n---\n<div></div>",
             "src/components/Card.astro": "<div>card</div>",
         ])
@@ -366,7 +357,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("top-level scripts/ exclusion is case-insensitive")
     func scriptsDirectoryExclusionCaseInsensitive() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "Scripts/harness/component.astro": "---\nconst modules = import.meta.glob([\"/src/components/**/*.astro\", \"/src/layouts/**/*.astro\"]);\n---\n<div></div>",
             "src/pages/index.astro": "<div>no imports here</div>",
             "src/components/Orphan.astro": "<div>never imported</div>",
@@ -377,7 +368,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("referencedPaths attributes a shared asset to every referencing source file")
     func referencedPathsAttributesMultipleSources() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/pages/index.astro": #"<img src="/images/hero.png" />"#,
             "src/pages/about.astro": #"<img src="/images/hero.png" />"#,
         ])
@@ -391,7 +382,7 @@ struct DeadAssetScannerScanTests {
 
     @Test("referencedPaths attributes a glob-only-covered file to the file that declared the glob — matching scan()'s glob-directory floor instead of contradicting it")
     func referencedPathsIncludesGlobCoveredFiles() throws {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "dead-asset-scan", [
             "src/pages/index.astro": "---\nconst widgets = await Astro.glob('../components/widgets/*.astro');\n---\n<div></div>",
             "src/components/widgets/Card.astro": "<div>card</div>",
         ])

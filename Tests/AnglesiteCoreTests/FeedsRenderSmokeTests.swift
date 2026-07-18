@@ -7,10 +7,7 @@ import AnglesiteTestSupport
 struct FeedsRenderSmokeTests {
 
     /// Repo-root-relative path to the committed template. `swift test` runs with CWD = package root.
-    static var templateDir: URL {
-        URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-            .appendingPathComponent("Resources/Template", isDirectory: true)
-    }
+    static var templateDir: URL { templateRoot() }
 
     /// True when the template can actually be built: a Node binary plus an installed Astro.
     static var buildable: Bool { E2EPrerequisites.astroBuildable(templateDir: templateDir) }

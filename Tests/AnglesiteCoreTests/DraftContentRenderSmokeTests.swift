@@ -6,10 +6,7 @@ import AnglesiteTestSupport
 @Suite("Draft content render smoke")
 struct DraftContentRenderSmokeTests {
 
-    static var templateDir: URL {
-        URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-            .appendingPathComponent("Resources/Template", isDirectory: true)
-    }
+    static var templateDir: URL { templateRoot() }
 
     static var buildable: Bool { E2EPrerequisites.astroBuildable(templateDir: templateDir) }
 

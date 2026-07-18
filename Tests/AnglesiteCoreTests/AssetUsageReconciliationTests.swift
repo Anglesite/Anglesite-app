@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 /// Pins SiteGraphExplorer's asset referencedByCount and DeadAssetScanner's referencedPaths to
@@ -10,21 +11,10 @@ import Foundation
 /// detector that silently changes basic src=/href= handling should fail this test.
 @Suite("Asset usage reconciliation")
 struct AssetUsageReconciliationTests {
-    private func makeSite(_ files: [String: String]) throws -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("asset-usage-\(UUID().uuidString)")
-        for (relPath, contents) in files {
-            let url = root.appendingPathComponent(relPath)
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try contents.write(to: url, atomically: true, encoding: .utf8)
-        }
-        return root
-    }
 
     @Test("both detectors agree a referenced image is used and an orphan is not")
     func detectorsAgreeOnBasicCase() throws {
-        let root = try makeSite([
+        let root = try writeSiteTree(prefix: "asset-usage", [
             "src/pages/index.astro": #"<img src="/images/hero.png" />"#,
         ])
         defer { try? FileManager.default.removeItem(at: root) }

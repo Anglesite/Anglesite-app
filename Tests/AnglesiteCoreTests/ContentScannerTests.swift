@@ -1,6 +1,7 @@
 // Tests/AnglesiteCoreTests/ContentScannerTests.swift
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 /// Native port of `server/list-content.mjs` — scans a site's `Source/` directory into a
@@ -8,24 +9,11 @@ import Foundation
 @Suite("ContentScanner")
 struct ContentScannerTests {
 
-    /// Build a temp site root and write `files` (relative path → contents).
-    private func makeSite(_ files: [String: String]) -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("content-scan-\(UUID().uuidString)", isDirectory: true)
-        for (rel, contents) in files {
-            let url = root.appendingPathComponent(rel)
-            // `try!` so a failed setup write points here, not at a confusing downstream assertion.
-            try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try! Data(contents.utf8).write(to: url)
-        }
-        return root
-    }
-
     private let siteID = "site-1"
 
     @Test("pages: route derivation, dynamic-route + non-page skips")
     func pages() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "content-scan", [
             "src/pages/index.astro": "<h1>Home</h1>",
             "src/pages/about.astro": "<h1>About</h1>",
             "src/pages/blog/index.astro": "<h1>Blog</h1>",
@@ -43,7 +31,7 @@ struct ContentScannerTests {
 
     @Test("page title: frontmatter title, then title= prop, else nil")
     func pageTitles() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "content-scan", [
             "src/pages/fm.md": "---\ntitle: From Frontmatter\n---\nbody",
             "src/pages/prop.astro": "---\nimport L from '../layouts/Base.astro';\n---\n<L title=\"From Prop\">x</L>",
             "src/pages/none.astro": "<h1>no title</h1>",
@@ -57,7 +45,7 @@ struct ContentScannerTests {
 
     @Test("posts: article collections only, fields derived from frontmatter")
     func posts() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "content-scan", [
             "src/content/posts/hello-world.md": "---\ntitle: Hello World\npublishDate: 2026-06-01\ndraft: false\ntags: [intro, news]\n---\nBody",
             "src/content/notes/2026-06-05-quick.md": "---\nslug: quick-note\npublishDate: 2026-06-05\ndraft: false\n---\njust a note",
             "src/content/gallery/photo.md": "---\ntitle: Not A Post\n---\nx",  // non-article collection → ignored
@@ -81,7 +69,7 @@ struct ContentScannerTests {
 
     @Test("post slug falls back to filename when frontmatter omits it")
     func postSlugFallback() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "content-scan", [
             "src/content/posts/my-file.mdx": "---\ntitle: T\n---\nx",
         ])
         let posts = ContentScanner.scan(projectRoot: root, siteID: siteID).posts
@@ -90,7 +78,7 @@ struct ContentScannerTests {
 
     @Test("images: public/images scanned with byte size, non-images skipped")
     func images() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "content-scan", [
             "public/images/hero.png": "PNGDATA",
             "public/images/nested/logo.svg": "<svg/>",
             "public/images/readme.txt": "notes",   // non-image → skipped
@@ -106,7 +94,7 @@ struct ContentScannerTests {
 
     @Test("images: usedOnPages is populated from real references, not left empty")
     func usedOnPagesPopulatedFromReferences() {
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "content-scan", [
             "public/images/hero.png": "PNGDATA",
             "public/images/orphan.png": "PNGDATA",
             "src/pages/index.astro": #"<img src="/images/hero.png" />"#,
@@ -120,7 +108,7 @@ struct ContentScannerTests {
 
     @Test("missing directories yield empty lists, not errors")
     func emptySite() {
-        let root = makeSite(["README.md": "nothing here"])
+        let root = try! writeSiteTree(prefix: "content-scan", ["README.md": "nothing here"])
         let listing = ContentScanner.scan(projectRoot: root, siteID: siteID)
         #expect(listing.pages.isEmpty)
         #expect(listing.posts.isEmpty)
@@ -132,7 +120,7 @@ struct ContentScannerTests {
     @Test("page title: title= attribute HTML entities are decoded")
     func pageTitleAttrEntityDecoding() {
         // Writer emits: title="Tom &amp; &quot;X&quot;"  for original title: Tom & "X"
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "content-scan", [
             "src/pages/test.astro": "<Layout title=\"Tom &amp; &quot;X&quot;\" />"
         ])
         let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
@@ -142,7 +130,7 @@ struct ContentScannerTests {
     @Test("page title: all five emitted entities decode correctly")
     func pageTitleAttrAllEntities() {
         // &amp; &lt; &gt; &quot; &#39;
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "content-scan", [
             "src/pages/ent.astro": "<L title=\"a&amp;b&lt;c&gt;d&quot;e&#39;f\" />"
         ])
         let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
@@ -153,7 +141,7 @@ struct ContentScannerTests {
     func pageTitleAttrAmpLast() {
         // If &amp; is decoded first, &amp;lt; would become &lt; then < — wrong.
         // Correct: &amp;lt; → &lt; (only one decode pass, amp last).
-        let root = makeSite([
+        let root = try! writeSiteTree(prefix: "content-scan", [
             "src/pages/amp.astro": "<L title=\"&amp;lt;\" />"
         ])
         let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
@@ -170,7 +158,7 @@ struct ContentScannerTests {
         guard case let .success(content) = written else {
             Issue.record("rewrite failed: \(written)"); return
         }
-        let root = makeSite(["src/pages/rt.astro": content])
+        let root = try! writeSiteTree(prefix: "content-scan", ["src/pages/rt.astro": content])
         let pages = ContentScanner.scan(projectRoot: root, siteID: siteID).pages
         #expect(pages.first?.title == original)
     }

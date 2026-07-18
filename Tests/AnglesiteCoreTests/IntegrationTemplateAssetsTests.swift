@@ -1,32 +1,13 @@
 // Tests/AnglesiteCoreTests/IntegrationTemplateAssetsTests.swift
 // Hermetic test — no app bundle or TemplateRuntime needed.
-// Resolves the template by walking up from #filePath:
-//   .../Tests/AnglesiteCoreTests/IntegrationTemplateAssetsTests.swift
-//   → deletingLastPathComponent x3 → repo root
-//   → appending "Resources/Template"
+// Resolves the template via AnglesiteTestSupport.templateRoot() (a #filePath
+// walk-up to the repo root; see that helper for the PR #283 classic-URL-API note).
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 @Suite struct IntegrationTemplateAssetsTests {
-
-    private func templateRoot() -> URL {
-        // NOTE: use the classic URL APIs (fileURLWithPath / appendingPathComponent / .path), NOT the
-        // newer URL(filePath:) / appending(path:) / path(percentEncoded:). The latter are vended by
-        // the swift-foundation overlay (libswift_DarwinFoundation3.dylib), which the macOS-26 CI
-        // runners don't ship — a test bundle that links it can't load there. See PR #283 CI notes.
-        let here = URL(fileURLWithPath: #filePath)
-        // here      = .../Tests/AnglesiteCoreTests/IntegrationTemplateAssetsTests.swift
-        // parent[0] = .../Tests/AnglesiteCoreTests/
-        // parent[1] = .../Tests/
-        // parent[2] = repo root
-        let repoRoot = here
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        #expect(FileManager.default.fileExists(atPath: repoRoot.appendingPathComponent("Package.swift").path), "repo-root detection drifted")
-        return repoRoot.appendingPathComponent("Resources/Template")
-    }
 
     @Test func configHelperExists() {
         #expect(FileManager.default.fileExists(atPath: templateRoot().appendingPathComponent("scripts/config.ts").path))

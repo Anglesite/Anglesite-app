@@ -1,6 +1,7 @@
 #if canImport(Darwin)
 import Testing
 import Foundation
+import AnglesiteTestSupport
 @testable import AnglesiteCore
 
 /// End-to-end coverage for #653: `BackupCommand` with its **default** seams must run the whole
@@ -11,13 +12,6 @@ import Foundation
 ///
 /// .serialized: libgit2 isn't safe for uncoordinated concurrent use.
 @Suite("BackupCommand in-process defaults", .serialized) struct BackupCommandInProcessTests {
-
-    private func makeTempDir(_ label: String) throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("backup-e2e-\(label)-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
 
     @discardableResult
     private func git(_ arguments: [String], in dir: URL) async throws -> String {
@@ -38,14 +32,14 @@ import Foundation
     @Test("default seams run the full backup — add, commit, push — in-process")
     func backupEndToEndInProcess() async throws {
         // Site repo on `draft` with identity, one commit, and a bare file:// origin.
-        let site = try makeTempDir("site")
+        let site = try makeTempDir(prefix: "backup-e2e-site")
         try await git(["init", "-b", "draft"], in: site)
         try await git(["config", "user.name", "Test"], in: site)
         try await git(["config", "user.email", "test@example.com"], in: site)
         try "hello".write(to: site.appendingPathComponent("hello.txt"), atomically: true, encoding: .utf8)
         try await git(["add", "-A"], in: site)
         try await git(["commit", "-m", "first"], in: site)
-        let remote = try makeTempDir("origin")
+        let remote = try makeTempDir(prefix: "backup-e2e-origin")
         try await git(["init", "--bare"], in: remote)
         try await git(["remote", "add", "origin", remote.absoluteString], in: site)
         try await git(["push", "origin", "draft"], in: site)
@@ -78,14 +72,14 @@ import Foundation
 
     @Test("default seams surface a clean tree with no unpushed commits as .noChanges")
     func backupNoChangesInProcess() async throws {
-        let site = try makeTempDir("site")
+        let site = try makeTempDir(prefix: "backup-e2e-site")
         try await git(["init", "-b", "draft"], in: site)
         try await git(["config", "user.name", "Test"], in: site)
         try await git(["config", "user.email", "test@example.com"], in: site)
         try "hello".write(to: site.appendingPathComponent("hello.txt"), atomically: true, encoding: .utf8)
         try await git(["add", "-A"], in: site)
         try await git(["commit", "-m", "first"], in: site)
-        let remote = try makeTempDir("origin")
+        let remote = try makeTempDir(prefix: "backup-e2e-origin")
         try await git(["init", "--bare"], in: remote)
         try await git(["remote", "add", "origin", remote.absoluteString], in: site)
         try await git(["push", "origin", "draft"], in: site)
@@ -96,14 +90,14 @@ import Foundation
 
     @Test("default seams push a stranded commit on a clean tree (#246)")
     func backupPushesStrandedCommit() async throws {
-        let site = try makeTempDir("site")
+        let site = try makeTempDir(prefix: "backup-e2e-site")
         try await git(["init", "-b", "draft"], in: site)
         try await git(["config", "user.name", "Test"], in: site)
         try await git(["config", "user.email", "test@example.com"], in: site)
         try "hello".write(to: site.appendingPathComponent("hello.txt"), atomically: true, encoding: .utf8)
         try await git(["add", "-A"], in: site)
         try await git(["commit", "-m", "first"], in: site)
-        let remote = try makeTempDir("origin")
+        let remote = try makeTempDir(prefix: "backup-e2e-origin")
         try await git(["init", "--bare"], in: remote)
         try await git(["remote", "add", "origin", remote.absoluteString], in: site)
         try await git(["push", "origin", "draft"], in: site)
