@@ -317,7 +317,10 @@ public struct ContainerizationControl: LocalContainerControl {
         // 2. Boot the container: Apple-Silicon VZ-backed VM, NAT outbound, auto vsock device.
         do {
             let kernel = Kernel(path: kernelURL, platform: .linuxArm)
-            let vmm = VZVirtualMachineManager(kernel: kernel, initialFilesystem: initfs)
+            // Wrapped so a failure inside `container.create()` can reap the VM upstream strands
+            // there (apple/containerization#804) — see `OrphanReapingVirtualMachineManager`.
+            let vmm = OrphanReapingVirtualMachineManager(
+                wrapping: VZVirtualMachineManager(kernel: kernel, initialFilesystem: initfs))
 
             // Let vmnet choose an available shared-mode subnet. Hard-coding 192.168.64.0/24
             // works only while this is the first vmnet consumer on the host: Apple's container
@@ -391,7 +394,13 @@ public struct ContainerizationControl: LocalContainerControl {
                     onOutput(
                         "[boot] VM finished booting after its \(Self.vmBootTimeout) timeout already failed "
                         + "this request; stopping it now to avoid an orphaned VM", .stderr)
-                    Task { await self.stopBareContainer(lateContainer, siteID: siteID) }
+                    Task {
+                        await self.stopBareContainer(lateContainer, siteID: siteID)
+                        // If `container.stop()` failed inside (it's best-effort `try?`), the VM is
+                        // still `.running` and the reap catches it; otherwise the reap sees
+                        // `.stopped` and does nothing.
+                        await vmm.reapStranded(onOutput: onOutput)
+                    }
                 }
             ) {
                 do {
@@ -407,6 +416,11 @@ public struct ContainerizationControl: LocalContainerControl {
                     // VM in `.created` state, and only an explicit `stop()` releases it instead of
                     // leaking it until the app quits.
                     await stopBareContainer(container, siteID: siteID)
+                    // And when `create()` itself threw at its internal `vm.start()`, the container
+                    // never reached `.created`, so the `container.stop()` above can't touch the VM
+                    // — that's the upstream gap (apple/containerization#804). The wrapper holds the
+                    // only other reference to it; stop it through that.
+                    await vmm.reapStranded(onOutput: onOutput)
                     throw error
                 }
             }
