@@ -433,6 +433,40 @@ struct ContainerDeployExecutorTests {
         #expect(seamResult == WellKnownBuildSeamResult())
     }
 
+    @Test("build seam splits on the LAST marker occurrence, not the first, when the build's own output coincidentally contains the marker line")
+    func seamSplitsOnLastMarkerOccurrence() async {
+        let fake = FakeLocalContainerControl(
+            startResult: .failure(.virtualizationUnavailable),
+            execResult: ContainerExecResult(
+                exitCode: 0,
+                stdout: """
+                building...
+                ---ANGLESITE-WELLKNOWN-RESULT---
+                done
+                ---ANGLESITE-WELLKNOWN-RESULT---
+                {"observedArtifacts":["security.txt"],"findings":[]}
+                """,
+                stderr: ""
+            )
+        )
+        let executor = makeExecutor(fake: fake)
+        let outcome = await executor.runBuildWithClaimManifest(
+            siteDirectory: URL(fileURLWithPath: "/host"),
+            environment: [:],
+            source: "src",
+            claimManifest: WellKnownClaimManifest()
+        )
+        guard case .completed(let stepResult, let seamResult) = outcome else {
+            Issue.record("expected .completed, got \(outcome)")
+            return
+        }
+        // The real, guest-script-echoed marker is always the LAST occurrence — everything before
+        // it (including a stray earlier occurrence in the build's own stdout) is build output.
+        #expect(stepResult.output == "building...\n---ANGLESITE-WELLKNOWN-RESULT---\ndone")
+        #expect(seamResult.observedArtifacts == ["security.txt"])
+        #expect(seamResult.findings.isEmpty)
+    }
+
     // MARK: - #748 build seam: cancellation
 
     @Test("a cancelled build seam resolves as .cancelled, not a hang")

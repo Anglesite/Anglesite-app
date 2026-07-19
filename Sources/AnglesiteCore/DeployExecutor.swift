@@ -236,7 +236,13 @@ public struct ContainerDeployExecutor: DeployExecutor {
         let outputLines = result.stdout.components(separatedBy: "\n")
         let seamResult: WellKnownBuildSeamResult
         let buildOutput: String
-        if let markerIndex = outputLines.firstIndex(of: Self.wellKnownResultMarker) {
+        // `lastIndex`, not `firstIndex`: the guest script echoes this marker exactly once, as the
+        // last thing it does before `cat`-ing the result file (see `wellKnownSeamArgv` below), so
+        // the real split point is always the LAST occurrence in stdout. `firstIndex` would
+        // misparse if `npm run build`'s own output ever coincidentally contained this exact line,
+        // or if a future #744 build script violated the "never echo this marker yourself"
+        // contract documented on `wellKnownResultMarker` above.
+        if let markerIndex = outputLines.lastIndex(of: Self.wellKnownResultMarker) {
             buildOutput = outputLines[..<markerIndex].joined(separator: "\n")
             seamResult = .parsing(outputLines[(markerIndex + 1)...].joined(separator: "\n"))
         } else {
