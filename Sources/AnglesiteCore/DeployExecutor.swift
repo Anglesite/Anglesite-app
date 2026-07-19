@@ -51,6 +51,35 @@ public protocol DeployExecutor: Sendable {
         environment: [String: String],
         source: String
     ) async -> DeployStepResult
+
+    /// Paths this deploy provider affirmatively owns (e.g. ACME managed-TLS challenge paths) —
+    /// see docs/superpowers/specs/2026-07-14-well-known-support-design.md. Defaults to no claims;
+    /// override only when this executor can prove ownership, never speculatively.
+    func reportOwnedPathClaims() async -> [RuntimeOwnedPathClaim]
+
+    /// Runs the `.build` step with `claimManifest` made available to the build, returning the
+    /// observed `.well-known` artifact inventory and findings alongside the normal step result.
+    /// Defaults to `.unsupported` — #744 must not claim cross-owner collision protection when
+    /// this returns `.unsupported`.
+    func runBuildWithClaimManifest(
+        siteDirectory: URL,
+        environment: [String: String],
+        source: String,
+        claimManifest: WellKnownClaimManifest
+    ) async -> WellKnownBuildSeamOutcome
+}
+
+public extension DeployExecutor {
+    func reportOwnedPathClaims() async -> [RuntimeOwnedPathClaim] { [] }
+
+    func runBuildWithClaimManifest(
+        siteDirectory: URL,
+        environment: [String: String],
+        source: String,
+        claimManifest: WellKnownClaimManifest
+    ) async -> WellKnownBuildSeamOutcome {
+        .unsupported
+    }
 }
 
 // MARK: - ContainerDeployExecutor
@@ -144,6 +173,104 @@ public struct ContainerDeployExecutor: DeployExecutor {
         continuation.finish()
         _ = await drain.value
         return DeployStepResult(exitCode: result.exitCode, output: result.stdout)
+    }
+
+    // MARK: Well-known claim manifest seam (#748)
+
+    /// Marks the boundary in `.build` stdout between ordinary build output and the seam's JSON
+    /// result blob. `wellKnownSeamArgv`'s guest script echoes this line itself, after the build
+    /// exits — a future template-side consumer (#744) only needs to write its result JSON to
+    /// `wellKnownResultGuestPath`; it must NOT also echo this marker itself, or the script's own
+    /// `cat` would emit it twice and break the host-side split.
+    static let wellKnownResultMarker = "---ANGLESITE-WELLKNOWN-RESULT---"
+    /// Guest-side scratch path for the incoming manifest — deliberately under `/tmp`, never
+    /// `/workspace/site` (the guest's clone of `Source/`).
+    static let wellKnownManifestGuestPath = "/tmp/anglesite-wellknown-manifest.json"
+    /// Guest-side scratch path a future build script writes its result JSON to — also `/tmp`,
+    /// for the same "never inside Source/" reason.
+    static let wellKnownResultGuestPath = "/tmp/anglesite-wellknown-result.json"
+
+    public func runBuildWithClaimManifest(
+        siteDirectory: URL,
+        environment: [String: String],
+        source: String,
+        claimManifest: WellKnownClaimManifest
+    ) async -> WellKnownBuildSeamOutcome {
+        guard let manifestData = try? JSONEncoder().encode(claimManifest) else {
+            return .completed(
+                DeployStepResult(exitCode: nil, output: "couldn't encode well-known claim manifest"),
+                WellKnownBuildSeamResult())
+        }
+        let argv = Self.wellKnownSeamArgv(manifestBase64: manifestData.base64EncodedString())
+
+        let (lines, continuation) = AsyncStream<(String, LogCenter.Stream)>.makeStream(bufferingPolicy: .unbounded)
+        let logCenter = self.logCenter
+        let drain = Task.detached(priority: .utility) {
+            for await (line, stream) in lines {
+                await logCenter.append(source: source, stream: stream, text: line)
+            }
+        }
+        let result: ContainerExecResult
+        do {
+            result = try await control.exec(
+                siteID: siteID,
+                argv: argv,
+                environment: Self.guestEnvironment(from: environment),
+                workingDirectory: "/workspace/site",
+                onOutput: { line, stream in continuation.yield((line, stream)) }
+            )
+        } catch is CancellationError {
+            continuation.finish()
+            _ = await drain.value
+            return .cancelled
+        } catch {
+            continuation.finish()
+            _ = await drain.value
+            return .completed(
+                DeployStepResult(exitCode: nil, output: "couldn't exec in the container: \(error)"),
+                WellKnownBuildSeamResult())
+        }
+        continuation.finish()
+        _ = await drain.value
+
+        let outputLines = result.stdout.components(separatedBy: "\n")
+        let seamResult: WellKnownBuildSeamResult
+        let buildOutput: String
+        // `lastIndex`, not `firstIndex`: the guest script echoes this marker exactly once, as the
+        // last thing it does before `cat`-ing the result file (see `wellKnownSeamArgv` below), so
+        // the real split point is always the LAST occurrence in stdout. `firstIndex` would
+        // misparse if `npm run build`'s own output ever coincidentally contained this exact line,
+        // or if a future #744 build script violated the "never echo this marker yourself"
+        // contract documented on `wellKnownResultMarker` above.
+        if let markerIndex = outputLines.lastIndex(of: Self.wellKnownResultMarker) {
+            buildOutput = outputLines[..<markerIndex].joined(separator: "\n")
+            seamResult = .parsing(outputLines[(markerIndex + 1)...].joined(separator: "\n"))
+        } else {
+            buildOutput = result.stdout
+            seamResult = WellKnownBuildSeamResult()
+        }
+        return .completed(DeployStepResult(exitCode: result.exitCode, output: buildOutput), seamResult)
+    }
+
+    /// Builds the guest shell command that: (1) writes the base64-decoded manifest to
+    /// `/tmp` — passed as `$1`, a positional parameter, never spliced into the script string,
+    /// mirroring `guestArgv`'s `.bundleUpload` injection-safety pattern; (2) runs `npm run build`
+    /// with both #748 env vars pointed at their `/tmp` paths; (3) echoes the result marker plus
+    /// whatever the build wrote to the result path; and (4) traps EXIT/INT/TERM to remove both
+    /// `/tmp` scratch files on every path this shell can gracefully reach (a hard-killed guest
+    /// process's `/tmp` is still disposed of when its ephemeral VM is next torn down or rebooted).
+    static func wellKnownSeamArgv(manifestBase64: String) -> [String] {
+        let script = """
+        trap 'rm -f \(wellKnownManifestGuestPath) \(wellKnownResultGuestPath)' EXIT INT TERM
+        printf '%s' "$1" | base64 -d > \(wellKnownManifestGuestPath)
+        \(WellKnownClaimManifest.environmentVariableName)=\(wellKnownManifestGuestPath) \
+        \(WellKnownClaimManifest.resultPathEnvironmentVariable)=\(wellKnownResultGuestPath) npm run build
+        code=$?
+        echo "\(wellKnownResultMarker)"
+        cat \(wellKnownResultGuestPath) 2>/dev/null || true
+        exit $code
+        """
+        return ["sh", "-c", script, "sh", manifestBase64]
     }
 
     /// `DeployCommand` hands every step the full HOST (macOS) environment; almost none of it is valid

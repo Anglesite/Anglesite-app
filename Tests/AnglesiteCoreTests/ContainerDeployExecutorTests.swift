@@ -272,6 +272,222 @@ struct ContainerDeployExecutorTests {
         let calls = await fake.execCalls
         #expect(calls[0].siteID == "my-special-site")
     }
+
+    // MARK: - #748 capability defaults
+
+    @Test("HostDeployExecutor reports no owned path claims by default")
+    func hostExecutorReportsNoOwnedClaims() async {
+        let executor = HostDeployExecutor()
+        let claims = await executor.reportOwnedPathClaims()
+        #expect(claims.isEmpty)
+    }
+
+    @Test("HostDeployExecutor's build seam is unsupported by default")
+    func hostExecutorSeamIsUnsupported() async {
+        let executor = HostDeployExecutor()
+        let outcome = await executor.runBuildWithClaimManifest(
+            siteDirectory: URL(fileURLWithPath: "/host/irrelevant"),
+            environment: [:],
+            source: "src",
+            claimManifest: WellKnownClaimManifest()
+        )
+        #expect(outcome == .unsupported)
+    }
+
+    // MARK: - #748 build seam: manifest transport in
+
+    @Test("build seam writes the manifest to guest /tmp, never /workspace/site, via a positional-parameter shell script")
+    func seamArgvUsesInjectionSafePositionalParameter() async {
+        let fake = fakePassing()
+        let executor = makeExecutor(fake: fake)
+        let manifest = WellKnownClaimManifest(entries: [
+            .init(id: "acme", path: "acme-challenge/", match: .prefix, owner: "cloudflare-managed-tls")
+        ])
+        _ = await executor.runBuildWithClaimManifest(
+            siteDirectory: URL(fileURLWithPath: "/host/irrelevant"),
+            environment: [:],
+            source: "src",
+            claimManifest: manifest
+        )
+        let calls = await fake.execCalls
+        #expect(calls.count == 1)
+        let argv = calls[0].argv
+        #expect(argv.count == 5)
+        #expect(argv[0] == "sh")
+        #expect(argv[1] == "-c")
+        #expect(argv[3] == "sh")
+        // The script must reference the guest manifest/result paths and the env vars a future
+        // build script reads, and must never touch /workspace/site for the manifest itself.
+        let script = argv[2]
+        #expect(script.contains("/tmp/anglesite-wellknown-manifest.json"))
+        #expect(!script.contains("/workspace/site/anglesite-wellknown"))
+        #expect(script.contains(WellKnownClaimManifest.environmentVariableName))
+        #expect(script.contains(WellKnownClaimManifest.resultPathEnvironmentVariable))
+        #expect(script.contains("npm run build"))
+        // Cleanup trap covers cancellation/failure per #748's cleanup requirement.
+        #expect(script.contains("trap"))
+        #expect(script.contains("EXIT INT TERM"))
+        // The manifest payload itself travels as $1, a positional parameter — never spliced into
+        // the script string — mirroring the existing bundleUpload injection-safety pattern.
+        let manifestBase64 = argv[4]
+        let decodedData = try? Data(base64Encoded: manifestBase64, options: .ignoreUnknownCharacters).map { $0 }
+        #expect(decodedData != nil)
+        let decodedManifest = decodedData.flatMap { try? JSONDecoder().decode(WellKnownClaimManifest.self, from: $0) }
+        #expect(decodedManifest == manifest)
+    }
+
+    @Test("build seam round-trips an empty manifest")
+    func seamRoundTripsEmptyManifest() async {
+        let fake = fakePassing()
+        let executor = makeExecutor(fake: fake)
+        _ = await executor.runBuildWithClaimManifest(
+            siteDirectory: URL(fileURLWithPath: "/host"),
+            environment: [:],
+            source: "src",
+            claimManifest: WellKnownClaimManifest()
+        )
+        let argv = await fake.execCalls[0].argv
+        let decoded = Data(base64Encoded: argv[4], options: .ignoreUnknownCharacters)
+            .flatMap { try? JSONDecoder().decode(WellKnownClaimManifest.self, from: $0) }
+        #expect(decoded == WellKnownClaimManifest())
+    }
+
+    // MARK: - #748 build seam: output round trip
+
+    @Test("build seam parses the marker-delimited result blob out of stdout")
+    func seamParsesResultBlob() async {
+        let fake = FakeLocalContainerControl(
+            startResult: .failure(.virtualizationUnavailable),
+            execResult: ContainerExecResult(
+                exitCode: 0,
+                stdout: """
+                building...
+                done
+                ---ANGLESITE-WELLKNOWN-RESULT---
+                {"observedArtifacts":["security.txt"],"findings":[]}
+                """,
+                stderr: ""
+            )
+        )
+        let executor = makeExecutor(fake: fake)
+        let outcome = await executor.runBuildWithClaimManifest(
+            siteDirectory: URL(fileURLWithPath: "/host"),
+            environment: [:],
+            source: "src",
+            claimManifest: WellKnownClaimManifest()
+        )
+        guard case .completed(let stepResult, let seamResult) = outcome else {
+            Issue.record("expected .completed, got \(outcome)")
+            return
+        }
+        #expect(stepResult.exitCode == 0)
+        #expect(stepResult.output == "building...\ndone")
+        #expect(seamResult.observedArtifacts == ["security.txt"])
+        #expect(seamResult.findings.isEmpty)
+    }
+
+    @Test("build seam degrades to an empty result when the marker is missing entirely")
+    func seamDegradesWhenMarkerMissing() async {
+        let fake = FakeLocalContainerControl(
+            startResult: .failure(.virtualizationUnavailable),
+            execResult: ContainerExecResult(exitCode: 0, stdout: "plain build output, no seam marker", stderr: "")
+        )
+        let executor = makeExecutor(fake: fake)
+        let outcome = await executor.runBuildWithClaimManifest(
+            siteDirectory: URL(fileURLWithPath: "/host"),
+            environment: [:],
+            source: "src",
+            claimManifest: WellKnownClaimManifest()
+        )
+        guard case .completed(let stepResult, let seamResult) = outcome else {
+            Issue.record("expected .completed, got \(outcome)")
+            return
+        }
+        #expect(stepResult.output == "plain build output, no seam marker")
+        #expect(seamResult == WellKnownBuildSeamResult())
+    }
+
+    @Test("build seam degrades to an empty result when the blob after the marker is malformed")
+    func seamDegradesOnMalformedBlob() async {
+        let fake = FakeLocalContainerControl(
+            startResult: .failure(.virtualizationUnavailable),
+            execResult: ContainerExecResult(
+                exitCode: 1,
+                stdout: "build failed\n---ANGLESITE-WELLKNOWN-RESULT---\nnot json at all",
+                stderr: ""
+            )
+        )
+        let executor = makeExecutor(fake: fake)
+        let outcome = await executor.runBuildWithClaimManifest(
+            siteDirectory: URL(fileURLWithPath: "/host"),
+            environment: [:],
+            source: "src",
+            claimManifest: WellKnownClaimManifest()
+        )
+        guard case .completed(let stepResult, let seamResult) = outcome else {
+            Issue.record("expected .completed, got \(outcome)")
+            return
+        }
+        #expect(stepResult.exitCode == 1)
+        #expect(stepResult.output == "build failed")
+        #expect(seamResult == WellKnownBuildSeamResult())
+    }
+
+    @Test("build seam splits on the LAST marker occurrence, not the first, when the build's own output coincidentally contains the marker line")
+    func seamSplitsOnLastMarkerOccurrence() async {
+        let fake = FakeLocalContainerControl(
+            startResult: .failure(.virtualizationUnavailable),
+            execResult: ContainerExecResult(
+                exitCode: 0,
+                stdout: """
+                building...
+                ---ANGLESITE-WELLKNOWN-RESULT---
+                done
+                ---ANGLESITE-WELLKNOWN-RESULT---
+                {"observedArtifacts":["security.txt"],"findings":[]}
+                """,
+                stderr: ""
+            )
+        )
+        let executor = makeExecutor(fake: fake)
+        let outcome = await executor.runBuildWithClaimManifest(
+            siteDirectory: URL(fileURLWithPath: "/host"),
+            environment: [:],
+            source: "src",
+            claimManifest: WellKnownClaimManifest()
+        )
+        guard case .completed(let stepResult, let seamResult) = outcome else {
+            Issue.record("expected .completed, got \(outcome)")
+            return
+        }
+        // The real, guest-script-echoed marker is always the LAST occurrence — everything before
+        // it (including a stray earlier occurrence in the build's own stdout) is build output.
+        #expect(stepResult.output == "building...\n---ANGLESITE-WELLKNOWN-RESULT---\ndone")
+        #expect(seamResult.observedArtifacts == ["security.txt"])
+        #expect(seamResult.findings.isEmpty)
+    }
+
+    // MARK: - #748 build seam: cancellation
+
+    @Test("a cancelled build seam resolves as .cancelled, not a hang")
+    func seamCancellationResolves() async {
+        let fake = CancelParkingFakeContainerControl()
+        let executor = ContainerDeployExecutor(control: fake, siteID: "s", logCenter: LogCenter())
+
+        let task = Task {
+            await executor.runBuildWithClaimManifest(
+                siteDirectory: URL(fileURLWithPath: "/host"),
+                environment: [:],
+                source: "src",
+                claimManifest: WellKnownClaimManifest()
+            )
+        }
+        await fake.waitUntilParked()
+        task.cancel()
+
+        let outcome = await task.value
+        #expect(outcome == .cancelled)
+    }
 }
 
 // MARK: - ThrowingFakeLocalContainerControl
