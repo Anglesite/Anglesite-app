@@ -80,11 +80,13 @@ struct WorkerRouteClaimsTests {
 
     // MARK: Method validation
 
-    @Test("rejects empty, unknown, lowercase, and duplicate method lists", arguments: [
+    @Test("rejects empty, unknown, lowercase, duplicate, and unpaired-HEAD method lists", arguments: [
         [String](),
         ["FETCH"],
         ["get"],
         ["GET", "GET"],
+        ["HEAD"],           // HEAD is served by mirroring GET, so it requires a paired GET
+        ["HEAD", "POST"],
     ])
     func rejectsBadMethods(methods: [String]) {
         #expect(throws: WorkerRouteClaims.ValidationError.self) {

@@ -118,9 +118,15 @@ public enum WorkerComposition {
         if inboxCaptureEnabled {
             effectiveClaims.append(inboxCaptureRouteClaim)
         }
+        // Full single-claim validation (not just path syntax), so a future caller that skips
+        // `WorkerRouteClaims.activeClaims` still can't emit an invalid claim into TOML. Cross-
+        // claim overlap detection remains `activeClaims`'s job — it needs owner attribution
+        // this signature doesn't carry.
         for claim in effectiveClaims {
-            if let problem = WorkerRouteClaims.pathProblem(claim.path) {
-                throw ConfigError.invalidRouteClaim(path: claim.path, reason: problem)
+            do {
+                try WorkerRouteClaims.validate(claim, owner: "composition")
+            } catch {
+                throw ConfigError.invalidRouteClaim(path: claim.path, reason: "\(error)")
             }
         }
         var lines: [String] = []

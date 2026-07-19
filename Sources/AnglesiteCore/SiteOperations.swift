@@ -80,10 +80,20 @@ public struct SiteOperations: Sendable {
         // still lets active workers keep their `run_worker_first` routes — otherwise a headless
         // deploy would silently regenerate wrangler.toml without them. Validation failures refuse
         // the deploy before any Cloudflare call, mirroring `DeployModel.runDeploy`.
+        let cachedCatalog = WorkerCatalogFetcher.cachedCatalog()
+        if cachedCatalog.isEmpty && !effectiveActiveIDs.isEmpty {
+            // The shadowing-protection gap this leaves (an active worker's routes deploy without
+            // their run_worker_first entries) must be visible in the debug pane, not silent.
+            await LogCenter.shared.append(
+                source: "deploy:\(site.id)",
+                stream: .stderr,
+                text: "no cached worker catalog — deploying active workers (\(effectiveActiveIDs.sorted().joined(separator: ", "))) without route claims; run_worker_first will be omitted until a catalog fetch succeeds"
+            )
+        }
         let routeClaims: [WorkerRouteClaims.OwnedClaim]
         do {
             routeClaims = try WorkerRouteClaims.activeClaims(
-                catalog: WorkerCatalogFetcher.cachedCatalog(), activeIDs: effectiveActiveIDs)
+                catalog: cachedCatalog, activeIDs: effectiveActiveIDs)
         } catch {
             return .failed(reason: "worker route claims are invalid: \(error)", exitCode: nil)
         }

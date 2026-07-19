@@ -173,6 +173,17 @@ struct WorkerCompositionTests {
         }
     }
 
+    @Test("composition runs full claim validation, not just path syntax")
+    func rejectsSemanticallyInvalidRouteClaim() {
+        // Valid path, invalid methods (HEAD without paired GET) — only full validation catches it.
+        let headOnly = WorkerRouteClaim(
+            path: "/status", match: .exact, methods: ["HEAD"], handler: "x")
+        #expect(throws: WorkerComposition.ConfigError.self) {
+            try WorkerComposition.generateWranglerToml(
+                siteName: "my-site", features: [.indieauth], routeClaims: [headOnly])
+        }
+    }
+
     @Test("ProvisionedResources round-trips through JSONEncoder/JSONDecoder")
     func provisionedResourcesCodable() throws {
         let resources = WorkerComposition.ProvisionedResources(

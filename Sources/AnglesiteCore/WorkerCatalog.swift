@@ -130,8 +130,9 @@ public struct WorkerRouteClaim: Sendable, Equatable, Hashable, Codable {
     public let path: String
     public let match: Match
     /// Uppercase HTTP methods the handler serves. `HEAD` must be declared explicitly to be
-    /// supported (the handler mirrors `GET` headers without a body); undeclared methods get
-    /// `405` + `Allow` from the Worker's dispatcher.
+    /// supported and requires a paired `GET` (the dispatcher serves HEAD by mirroring GET's
+    /// headers without a body — enforced by `WorkerRouteClaims.validate`); undeclared methods
+    /// get `405` + `Allow` from the Worker's dispatcher.
     public let methods: [String]
     /// Stable handler identity inside the composed Worker script — ties the claim to the code
     /// that answers it.

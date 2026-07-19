@@ -106,6 +106,13 @@ public enum WorkerRouteClaims {
         if Set(claim.methods).count != claim.methods.count {
             throw ValidationError.invalidMethods(owner: owner, path: claim.path, reason: "duplicate method")
         }
+        // The composed Worker serves HEAD by mirroring GET (never by handing handlers a raw
+        // HEAD request), so a HEAD claim with no paired GET is undeliverable.
+        if claim.methods.contains("HEAD") && !claim.methods.contains("GET") {
+            throw ValidationError.invalidMethods(
+                owner: owner, path: claim.path,
+                reason: "HEAD requires a paired GET (HEAD is served by mirroring GET)")
+        }
         if claim.match == .prefix && claim.specificationURL == nil {
             throw ValidationError.undeclaredPrefix(owner: owner, path: claim.path)
         }

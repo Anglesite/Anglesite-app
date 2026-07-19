@@ -427,7 +427,9 @@ export interface WorkerRoute {
   path: string;
   /** `exact` matches only `path`; `prefix` additionally matches `path` + `/…` descendants. */
   match: "exact" | "prefix";
-  /** Declared methods. HEAD is served only when listed, by mirroring GET without a body. */
+  /** Declared methods. HEAD is served only when listed alongside GET — the dispatcher mirrors
+   *  GET's status/headers without a body and never hands handlers a raw HEAD request (catalog
+   *  claims enforce the same GET pairing app-side). */
   methods: readonly string[];
   handler: (request: Request, env: WorkerEnv, ctx: ExecutionContext) => Promise<Response> | Response;
 }
