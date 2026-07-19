@@ -17,6 +17,15 @@ import {
  * Static assets are served by the [assets] binding in wrangler.toml; this Worker handles only
  * the social + inbox endpoint paths. When neither is enabled, this file is not referenced
  * (wrangler.toml has no `main` entry and deploys static-only).
+ *
+ * Routing (#746): `ROUTES` below is a declarative table mirroring the generic HTTP route claims
+ * the app's Worker catalog declares for the active workers; Anglesite generates matching
+ * selective `[assets].run_worker_first` entries so only these routes bypass asset-first serving.
+ * The dispatcher is generic: exact/prefix matching, `405` + `Allow` for undeclared methods, HEAD
+ * mirroring GET where declared, queries passed through untouched, and a true (plain-text) 404 —
+ * never an HTML page — for unclaimed `/.well-known/` names, the bare directory, malformed
+ * encodings, and case/trailing-slash variants (RFC 8615: the namespace has no index and no
+ * fallback representation). Every other unmatched path falls through to static assets.
  */
 
 /** Minimal Workers KV surface shared by inbox capture and consent throttling. */
@@ -40,12 +49,6 @@ const MAX_MESSAGE_LENGTH = 10_000;
 const MAX_CONSENT_BODY_BYTES = 16_384;
 const CONSENT_TTL_SECONDS = 300;
 const CONSENT_VERSION = 1;
-const INDIEAUTH_PATHS = new Set([
-  "/.well-known/oauth-authorization-server",
-  "/authorize",
-  "/token",
-  "/revocation",
-]);
 
 interface ConsentGrant {
   v: 1;
@@ -418,18 +421,136 @@ export async function handleInbox(
   return new Response(null, { status: 202 });
 }
 
+/** One dynamic route this Worker serves — the handler-side mirror of a catalog route claim. */
+export interface WorkerRoute {
+  /** Absolute claimed path, e.g. `"/.well-known/oauth-authorization-server"`. */
+  path: string;
+  /** `exact` matches only `path`; `prefix` additionally matches `path` + `/…` descendants. */
+  match: "exact" | "prefix";
+  /** Declared methods. HEAD is served only when listed alongside GET — the dispatcher mirrors
+   *  GET's status/headers without a body and never hands handlers a raw HEAD request (catalog
+   *  claims enforce the same GET pairing app-side). */
+  methods: readonly string[];
+  handler: (request: Request, env: WorkerEnv, ctx: ExecutionContext) => Promise<Response> | Response;
+}
+
+export const ROUTES: readonly WorkerRoute[] = [
+  {
+    // RFC 8414 authorization-server metadata (linked via rel=indieauth-metadata in BaseLayout).
+    path: "/.well-known/oauth-authorization-server",
+    match: "exact",
+    methods: ["GET", "HEAD"],
+    handler: (request, env, ctx) => indieAuthHandler(request, env)(request, env, ctx),
+  },
+  {
+    // GET renders/redirects the authorization request; POST redeems an authorization code for
+    // profile information (IndieAuth authorization-endpoint code exchange).
+    path: "/authorize",
+    match: "exact",
+    methods: ["GET", "POST"],
+    handler: (request, env, ctx) => indieAuthHandler(request, env)(request, env, ctx),
+  },
+  {
+    // POST is the token grant; GET is IndieAuth token-endpoint access-token verification.
+    path: "/token",
+    match: "exact",
+    methods: ["GET", "POST"],
+    handler: (request, env, ctx) => indieAuthHandler(request, env)(request, env, ctx),
+  },
+  {
+    path: "/revocation",
+    match: "exact",
+    methods: ["POST"],
+    handler: (request, env, ctx) => indieAuthHandler(request, env)(request, env, ctx),
+  },
+  {
+    path: "/indieauth/consent",
+    match: "exact",
+    methods: ["POST"],
+    handler: (request, env) => handleIndieAuthConsent(request, env),
+  },
+  {
+    path: "/inbox",
+    match: "exact",
+    methods: ["POST"],
+    handler: (request, env) => handleInbox(request, env),
+  },
+];
+
+export function matchRoute(pathname: string, routes: readonly WorkerRoute[] = ROUTES): WorkerRoute | null {
+  for (const route of routes) {
+    if (pathname === route.path) return route;
+    if (route.match === "prefix" && pathname.startsWith(`${route.path}/`)) return route;
+  }
+  return null;
+}
+
+/** A protocol-grade 404: correct status, no HTML error page, nothing for a client to mis-parse. */
+function notFound(): Response {
+  return new Response("Not Found", {
+    status: 404,
+    headers: { "content-type": "text/plain; charset=utf-8", "x-content-type-options": "nosniff" },
+  });
+}
+
+/** True for the bare `/.well-known` directory and anything under it, case-insensitively — the
+ *  case fold exists so `/.Well-Known/...` variants get the namespace's true-404 policy instead
+ *  of leaking to an HTML asset 404 (claimed routes themselves match case-sensitively). */
+function isWellKnownNamespace(pathname: string): boolean {
+  const lower = pathname.toLowerCase();
+  return lower === "/.well-known" || lower === "/.well-known/" || lower.startsWith("/.well-known/");
+}
+
 export default {
   async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/indieauth/consent") {
-      return handleIndieAuthConsent(request, env);
+    const pathname = url.pathname;
+
+    // Malformed percent-encoding can't name any claimed route or asset; answer plainly instead
+    // of handing it to an HTML 404 page.
+    let decoded: string | null;
+    try {
+      decoded = decodeURIComponent(pathname);
+    } catch {
+      decoded = null;
     }
-    if (INDIEAUTH_PATHS.has(url.pathname)) {
-      return indieAuthHandler(request, env)(request, env, ctx);
+    if (decoded === null) {
+      return notFound();
     }
-    if (url.pathname === "/inbox") {
-      return handleInbox(request, env);
+
+    const route = matchRoute(pathname);
+    if (route) {
+      const mirrorsGet = request.method === "HEAD" && route.methods.includes("HEAD") && route.methods.includes("GET");
+      if (mirrorsGet) {
+        // Query string rides along in `request.url`; only the method changes.
+        const getResponse = await route.handler(
+          new Request(request.url, { method: "GET", headers: request.headers }),
+          env,
+          ctx,
+        );
+        return new Response(null, {
+          status: getResponse.status,
+          statusText: getResponse.statusText,
+          headers: getResponse.headers,
+        });
+      }
+      if (!route.methods.includes(request.method)) {
+        return new Response("Method Not Allowed", {
+          status: 405,
+          headers: { allow: route.methods.join(", "), "content-type": "text/plain; charset=utf-8" },
+        });
+      }
+      return route.handler(request, env, ctx);
     }
+
+    // Unclaimed well-known names, the bare directory, and case/trailing-slash or encoded
+    // variants (checked post-decode so `/%2Ewell-known/...` can't slip past) return a true 404
+    // rather than falling through to an HTML asset 404. Genuinely static well-known files (e.g.
+    // security.txt) are served asset-first and never reach this Worker.
+    if (isWellKnownNamespace(pathname) || isWellKnownNamespace(decoded)) {
+      return notFound();
+    }
+
     const assets = env.ASSETS;
     if (!assets) {
       return new Response("No assets binding configured", { status: 500 });

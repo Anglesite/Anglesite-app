@@ -92,6 +92,21 @@ public actor WorkerCatalogFetcher {
         try data.write(to: url, options: [.atomic])
     }
 
+    /// The last successfully cached catalog, without any network fetch — for callers with no
+    /// fetcher wiring (the headless deploy path, `SiteOperations`) that still need descriptor
+    /// metadata such as route claims (#746). Returns an empty catalog when nothing has ever been
+    /// cached or the cache is unreadable, mirroring `catalog()`'s final degradation step — and,
+    /// like `catalog()`, never degrades silently: the fallback is logged so a headless deploy
+    /// that loses route claims to a missing/corrupt cache leaves a diagnostic trace.
+    public static func cachedCatalog(cacheURL: URL = WorkerCatalogFetcher.defaultCacheURL()) -> [WorkerDescriptor] {
+        do {
+            return try readCache(cacheURL)
+        } catch {
+            logDegradation("catalog cache read failed, falling back to empty catalog: \(error)")
+            return []
+        }
+    }
+
     /// The published `@dwk/workers` monorepo catalog manifest — verified live 2026-07-17
     /// (davidwkeith/workers#255, merged in davidwkeith/workers#258). Callers still supply
     /// `catalogURL` explicitly at `init`; this is the value production call sites should pass.

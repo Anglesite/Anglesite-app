@@ -167,6 +167,87 @@ async function fetchWorker(request: Request): Promise<Response> {
   return worker.fetch(request, testEnv, createExecutionContext());
 }
 
+// --- Generic route dispatch (#746) ---------------------------------------------------------
+// These run through worker.fetch inside the workerd pool, i.e. the same runtime `wrangler dev`
+// uses, so the dispatch behavior they pin down is what local preview and production serve.
+
+test("routing: undeclared method gets 405 with an Allow header naming the declared methods", async () => {
+  const inbox = await fetchWorker(new Request("https://owner.example/inbox", { method: "GET" }));
+  expect(inbox.status).toBe(405);
+  expect(inbox.headers.get("allow")).toBe("POST");
+
+  const metadata = await fetchWorker(
+    new Request("https://owner.example/.well-known/oauth-authorization-server", { method: "POST" }),
+  );
+  expect(metadata.status).toBe(405);
+  expect(metadata.headers.get("allow")).toBe("GET, HEAD");
+});
+
+test("routing: HEAD mirrors GET's status and headers with an empty body where declared", async () => {
+  const get = await fetchWorker(new Request("https://owner.example/.well-known/oauth-authorization-server"));
+  const head = await fetchWorker(
+    new Request("https://owner.example/.well-known/oauth-authorization-server", { method: "HEAD" }),
+  );
+  expect(head.status).toBe(get.status);
+  expect(head.headers.get("content-type")).toBe(get.headers.get("content-type"));
+  expect(await head.text()).toBe("");
+});
+
+test("routing: query parameters reach the handler unchanged", async () => {
+  // The authorize handler can only render this consent page by reading the query it was sent.
+  const authorize = new URL("https://owner.example/authorize");
+  authorize.search = new URLSearchParams({
+    client_id: "https://client.example/app",
+    redirect_uri: "https://client.example/callback",
+    response_type: "code",
+    state: "state-query-preserved",
+    code_challenge: await pkceChallenge("query-preservation-verifier-that-is-long-enough-to-be-valid"),
+    code_challenge_method: "S256",
+    scope: "create",
+  }).toString();
+  const response = await fetchWorker(new Request(authorize));
+  expect(response.status).toBe(200);
+  const body = await response.text();
+  expect(body).toContain("https://client.example/app");
+  expect(body).toContain("state-query-preserved");
+});
+
+test("routing: unknown well-known names and the bare directory return a plain 404, not HTML", async () => {
+  for (const path of ["/.well-known", "/.well-known/", "/.well-known/does-not-exist"]) {
+    const response = await fetchWorker(new Request(`https://owner.example${path}`));
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toContain("text/plain");
+  }
+});
+
+test("routing: case, trailing-slash, and encoded well-known variants return a true 404", async () => {
+  for (const path of [
+    "/.WELL-KNOWN/oauth-authorization-server",
+    "/.well-known/oauth-authorization-server/",
+    "/.well-known/OAuth-Authorization-Server",
+    "/%2Ewell-known/oauth-authorization-server",
+  ]) {
+    const response = await fetchWorker(new Request(`https://owner.example${path}`));
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toContain("text/plain");
+  }
+});
+
+test("routing: malformed percent-encoding returns a true 404", async () => {
+  const response = await fetchWorker(new Request("https://owner.example/%E0%A4%A"));
+  expect(response.status).toBe(404);
+  expect(response.headers.get("content-type")).toContain("text/plain");
+});
+
+test("routing: unrelated paths fall through to the asset-first branch", async () => {
+  // The vitest miniflare env deliberately has no ASSETS binding, so reaching the asset branch
+  // surfaces as its 500 sentinel — proving an unclaimed path was neither 404'd nor 405'd by
+  // the dispatcher.
+  const response = await fetchWorker(new Request("https://owner.example/about"));
+  expect(response.status).toBe(500);
+  expect(await response.text()).toBe("No assets binding configured");
+});
+
 test("IndieAuth metadata advertises the authorization and token endpoints", async () => {
   const response = await fetchWorker(new Request("https://owner.example/.well-known/oauth-authorization-server"));
   expect(response.status).toBe(200);

@@ -449,6 +449,24 @@ final class DeployModel {
         }
         let features = WorkerActivation.mapToFeatures(effectiveActiveIDs)
 
+        // Dynamic-route claims of the effective active set (#746). Validation failures (a
+        // malformed path, two active workers claiming overlapping routes) refuse the deploy
+        // before any Cloudflare call — never silently drop a claim and deploy a Worker whose
+        // routes don't match its catalog contract.
+        let routeClaims: [WorkerRouteClaims.OwnedClaim]
+        do {
+            routeClaims = try WorkerRouteClaims.activeClaims(catalog: catalog, activeIDs: effectiveActiveIDs)
+        } catch {
+            let reason = "worker route claims are invalid: \(error)"
+            await logCenter.append(source: "deploy:\(siteID)", stream: .stderr, text: reason)
+            subscription.cancel()
+            _ = await logTask.value
+            currentMilestone = nil
+            workerNameConflictPresented = false
+            transition(siteID: siteID, to: .failed(reason: reason, exitCode: nil))
+            return .failed(reason: reason, exitCode: nil)
+        }
+
         let socialCommand = SocialWorkerProvisionCommand(
             tokenSource: { [weak self] in try await self?.command.tokenSource() },
             runner: containerRunner ?? SocialWorkerProvisionCommand.defaultRunner,
@@ -486,6 +504,7 @@ final class DeployModel {
             siteDirectory: siteDirectory,
             siteName: workerSiteName,
             features: features,
+            routeClaims: routeClaims.map(\.claim),
             knownResources: settings.provisionedWorkerResources ?? .init()
         )
 

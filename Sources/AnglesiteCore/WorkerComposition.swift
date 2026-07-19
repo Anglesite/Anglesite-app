@@ -55,7 +55,22 @@ public enum WorkerComposition {
 
     public enum ConfigError: Error, Sendable {
         case invalidSiteName(String)
+        /// A route claim reached TOML generation without passing `WorkerRouteClaims` validation
+        /// (callers derive claims via `WorkerRouteClaims.activeClaims`, which validates; this is
+        /// the defense-in-depth backstop so an unvalidated path can never be interpolated into
+        /// the generated file).
+        case invalidRouteClaim(path: String, reason: String)
     }
+
+    /// The bespoke app-side inbox-capture route (#587) — not a `@dwk/workers` catalog worker, so
+    /// its claim lives here rather than in `catalog.json`. Appended automatically when
+    /// `generateWranglerToml` is called with `inboxCaptureEnabled`.
+    public static let inboxCaptureRouteClaim = WorkerRouteClaim(
+        path: "/inbox",
+        match: .exact,
+        methods: ["POST"],
+        handler: "inbox-capture"
+    )
 
     private static let validNameCharacters = CharacterSet(
         charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
@@ -79,18 +94,40 @@ public enum WorkerComposition {
     ///   - siteName: The Worker name (used as the Cloudflare Workers project name).
     ///     Must match `[A-Za-z0-9_-]+`.
     ///   - features: Which `@dwk/*` social endpoints to compose. Empty = static-only deploy.
+    ///   - routeClaims: The effective active dynamic-route claims (#746), already validated by
+    ///     `WorkerRouteClaims.activeClaims`. Emitted as selective `[assets].run_worker_first`
+    ///     patterns so *only* claimed routes bypass asset-first serving — a static asset can no
+    ///     longer shadow an active dynamic route, while every unclaimed path keeps Cloudflare's
+    ///     asset-first fallback. Omitted entirely when there are no active dynamic routes.
     /// - Returns: A complete wrangler.toml string.
     /// - Throws: ``ConfigError/invalidSiteName(_:)`` if `siteName` contains
-    ///   characters outside `[A-Za-z0-9_-]`.
+    ///   characters outside `[A-Za-z0-9_-]`, or ``ConfigError/invalidRouteClaim(path:reason:)``
+    ///   for a claim that never passed `WorkerRouteClaims` validation.
     public static func generateWranglerToml(
         siteName: String,
         features: [Feature],
+        routeClaims: [WorkerRouteClaim] = [],
         resources: ProvisionedResources = .init(),
         inboxCaptureEnabled: Bool = false,
         inboxKVNamespaceID: String? = nil
     ) throws -> String {
         guard isValidSiteName(siteName) else {
             throw ConfigError.invalidSiteName(siteName)
+        }
+        var effectiveClaims = routeClaims
+        if inboxCaptureEnabled {
+            effectiveClaims.append(inboxCaptureRouteClaim)
+        }
+        // Full single-claim validation (not just path syntax), so a future caller that skips
+        // `WorkerRouteClaims.activeClaims` still can't emit an invalid claim into TOML. Cross-
+        // claim overlap detection remains `activeClaims`'s job — it needs owner attribution
+        // this signature doesn't carry.
+        for claim in effectiveClaims {
+            do {
+                try WorkerRouteClaims.validate(claim, owner: "composition")
+            } catch {
+                throw ConfigError.invalidRouteClaim(path: claim.path, reason: "\(error)")
+            }
         }
         var lines: [String] = []
         lines.append("name = \"\(siteName)\"")
@@ -106,7 +143,11 @@ public enum WorkerComposition {
         lines.append("directory = \"dist\"")
         if hasSocialFeatures || inboxCaptureEnabled {
             lines.append("binding = \"ASSETS\"")
-            lines.append("run_worker_first = true")
+            let patterns = WorkerRouteClaims.runWorkerFirstPatterns(effectiveClaims)
+            if !patterns.isEmpty {
+                let list = patterns.map { "\"\($0)\"" }.joined(separator: ", ")
+                lines.append("run_worker_first = [\(list)]")
+            }
         }
 
         if features.contains(where: { $0.needsD1 }) {

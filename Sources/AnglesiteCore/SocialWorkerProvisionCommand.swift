@@ -52,6 +52,10 @@ public actor SocialWorkerProvisionCommand {
         siteDirectory: URL,
         siteName: String,
         features: [WorkerComposition.Feature] = WorkerComposition.Feature.v2,
+        /// Effective active dynamic-route claims (#746), pre-validated via
+        /// `WorkerRouteClaims.activeClaims`. Written into `wrangler.toml` as selective
+        /// `[assets].run_worker_first` patterns; empty = no worker-first routes.
+        routeClaims: [WorkerRouteClaim] = [],
         /// Resources already known from `SiteSettings.provisionedWorkerResources` (#709), checked
         /// before falling back to `readPersistedResources`'s wrangler.toml scrape. Durable across
         /// a worker being deactivated (which drops its binding block from the file) and later
@@ -105,7 +109,7 @@ public actor SocialWorkerProvisionCommand {
                     return .failed(reason: "wrangler created D1 database \(name) but no database id was found", exitCode: 0, resources: resources)
                 }
                 resources.d1DatabaseID = id
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, resources: resources) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, routeClaims: routeClaims, resources: resources) {
                     return failure
                 }
             }
@@ -132,7 +136,7 @@ public actor SocialWorkerProvisionCommand {
                     return .failed(reason: "wrangler created KV namespace \(name) but no namespace id was found", exitCode: 0, resources: resources)
                 }
                 resources.kvNamespaceID = id
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, resources: resources) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, routeClaims: routeClaims, resources: resources) {
                     return failure
                 }
             }
@@ -152,13 +156,13 @@ public actor SocialWorkerProvisionCommand {
                     return failure
                 }
                 resources.r2BucketName = name
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, resources: resources) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, routeClaims: routeClaims, resources: resources) {
                     return failure
                 }
             }
         }
 
-        if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, resources: resources) {
+        if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, routeClaims: routeClaims, resources: resources) {
             return failure
         }
 
@@ -222,6 +226,7 @@ public actor SocialWorkerProvisionCommand {
         siteDirectory: URL,
         siteName: String,
         features: [WorkerComposition.Feature],
+        routeClaims: [WorkerRouteClaim],
         resources: WorkerComposition.ProvisionedResources
     ) -> Result? {
         do {
@@ -233,6 +238,7 @@ public actor SocialWorkerProvisionCommand {
             let toml = try WorkerComposition.generateWranglerToml(
                 siteName: siteName,
                 features: features,
+                routeClaims: routeClaims,
                 resources: resources
             )
             try toml.write(

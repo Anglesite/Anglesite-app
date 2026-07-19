@@ -13,15 +13,26 @@ Anglesite integrates `@dwk/workers` as its social/protocol backend by **composin
 
 ### Integration model
 
+> **Route correction (2026-07-19, #690/#746):** this document's original sketches routed
+> IndieAuth at `/.well-known/indieauth` and WebSub at `/.well-known/websub`. Neither path
+> exists in either protocol — IndieAuth discovers a `rel=indieauth-metadata` link (with server
+> metadata at RFC 8414's `/.well-known/oauth-authorization-server`), and WebSub advertises its
+> hub via `rel=hub`/`rel=self` links on each topic, not a well-known URI. The #690 design
+> ([2026-07-14-well-known-support-design.md](../superpowers/specs/2026-07-14-well-known-support-design.md))
+> rejects both routes, and #746 replaced ad-hoc prefix routing with catalog-declared route
+> claims. The sketches below are corrected in place; the integration-seam decision itself is
+> unchanged.
+
 ```
 ┌─────────────────────────────────────────────────┐
 │ Per-site Cloudflare Worker                       │
 │                                                  │
 │   worker.ts (entry point)                        │
-│     ├── @dwk/indieauth  → /.well-known/indieauth│
+│     ├── @dwk/indieauth  → /authorize, /token,    │
+│     │     /.well-known/oauth-authorization-server│
 │     ├── @dwk/webmention → /webmention            │
 │     ├── @dwk/micropub   → /micropub              │
-│     ├── @dwk/websub     → /.well-known/websub    │
+│     ├── @dwk/websub     → /websub (rel=hub link) │
 │     └── env.ASSETS      → /* (static fallback)   │
 │                                                  │
 │   Bindings:                                      │
@@ -31,7 +42,7 @@ Anglesite integrates `@dwk/workers` as its social/protocol backend by **composin
 └─────────────────────────────────────────────────┘
 ```
 
-Each `@dwk/*` package exports a `createXxx({ baseUrl, ... })` factory returning a `fetch`-compatible handler. The Worker entry point routes by path prefix, falling through to static assets for everything else.
+Each `@dwk/*` package exports a `createXxx({ baseUrl, ... })` factory returning a `fetch`-compatible handler. The Worker entry point routes from a declarative table of the routes each package's catalog entry claims (#746), falling through to static assets for everything else.
 
 ### Version pinning
 
@@ -125,9 +136,12 @@ const webmention = createWebmention({ baseUrl });
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/.well-known/indieauth"))
+    // Routes come from each package's catalog route claims (#746) — exact paths, not
+    // ad-hoc prefixes. See Resources/Template/worker/worker.ts's ROUTES table.
+    if (url.pathname === "/.well-known/oauth-authorization-server"
+      || url.pathname === "/authorize" || url.pathname === "/token")
       return indieauth.fetch(request, env, ctx);
-    if (url.pathname.startsWith("/webmention"))
+    if (url.pathname === "/webmention")
       return webmention.fetch(request, env, ctx);
     return env.ASSETS.fetch(request);
   }

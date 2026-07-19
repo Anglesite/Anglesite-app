@@ -75,6 +75,29 @@ public struct SiteOperations: Sendable {
         let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: [], graph: nil)
         let features = WorkerActivation.mapToFeatures(effectiveActiveIDs)
 
+        // Dynamic-route claims (#746): this path has no catalog fetcher wired (matching the
+        // `catalog: []` activation choice above), but the on-disk cache from a previous GUI fetch
+        // still lets active workers keep their `run_worker_first` routes — otherwise a headless
+        // deploy would silently regenerate wrangler.toml without them. Validation failures refuse
+        // the deploy before any Cloudflare call, mirroring `DeployModel.runDeploy`.
+        let cachedCatalog = WorkerCatalogFetcher.cachedCatalog()
+        if cachedCatalog.isEmpty && !effectiveActiveIDs.isEmpty {
+            // The shadowing-protection gap this leaves (an active worker's routes deploy without
+            // their run_worker_first entries) must be visible in the debug pane, not silent.
+            await LogCenter.shared.append(
+                source: "deploy:\(site.id)",
+                stream: .stderr,
+                text: "no cached worker catalog — deploying active workers (\(effectiveActiveIDs.sorted().joined(separator: ", "))) without route claims; run_worker_first will be omitted until a catalog fetch succeeds"
+            )
+        }
+        let routeClaims: [WorkerRouteClaims.OwnedClaim]
+        do {
+            routeClaims = try WorkerRouteClaims.activeClaims(
+                catalog: cachedCatalog, activeIDs: effectiveActiveIDs)
+        } catch {
+            return .failed(reason: "worker route claims are invalid: \(error)", exitCode: nil)
+        }
+
         // Prefer the site's already-established Worker name (`.site-config`'s `CF_PROJECT_NAME`,
         // set at the first successful deploy or by a worker-name-conflict rename, #740) over
         // re-deriving one from the site's display name — mirrors `DeployModel.runDeploy`'s
@@ -90,6 +113,7 @@ public struct SiteOperations: Sendable {
             siteDirectory: siteDirectory,
             siteName: workerSiteName,
             features: features,
+            routeClaims: routeClaims.map(\.claim),
             knownResources: settings.provisionedWorkerResources ?? .init()
         )
         onProgress?(.deployFinalizing)
