@@ -178,7 +178,10 @@ public struct ContainerDeployExecutor: DeployExecutor {
     // MARK: Well-known claim manifest seam (#748)
 
     /// Marks the boundary in `.build` stdout between ordinary build output and the seam's JSON
-    /// result blob. Any future template-side consumer (#744) must echo this exact line.
+    /// result blob. `wellKnownSeamArgv`'s guest script echoes this line itself, after the build
+    /// exits — a future template-side consumer (#744) only needs to write its result JSON to
+    /// `wellKnownResultGuestPath`; it must NOT also echo this marker itself, or the script's own
+    /// `cat` would emit it twice and break the host-side split.
     static let wellKnownResultMarker = "---ANGLESITE-WELLKNOWN-RESULT---"
     /// Guest-side scratch path for the incoming manifest — deliberately under `/tmp`, never
     /// `/workspace/site` (the guest's clone of `Source/`).
