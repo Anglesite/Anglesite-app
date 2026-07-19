@@ -77,6 +77,7 @@ Notes:
 - **Conventional commits** — `feat(scope): …`, `fix(scope): …`, `ci: …`, etc. Reference the issue number in the subject when there is one (see `git log` for examples).
 - **Fill out the [PR template](.github/PULL_REQUEST_TEMPLATE.md)**, including the paired-PR check and test plan.
 - **Paired PRs.** Changes to the MCP message schema or plugin skills need a paired PR in [`Anglesite/anglesite`](https://github.com/Anglesite/anglesite): the plugin PR ships first in a tagged release, then the app PR consumes it. Template changes (`Resources/Template/`) are app-only. See `AGENTS.md` ▸ "Two-repo coordination".
+- **`@dwk/workers` catalog coordination.** The Worker catalog (`WorkerCatalog.swift` and friends) consumes `catalog.json` published by the separate [`davidwkeith/workers`](https://github.com/davidwkeith/workers) monorepo — a third repo outside the `Anglesite/anglesite` pairing above. Schema extensions there land the same way: keep the app-side decoding **backward-compatible** (new manifest fields optional, feature inert until the catalog publishes them) so the app PR can merge first, and note the pending catalog change in the PR body. Example: the #746 route-claims PR ([#829](https://github.com/Anglesite/Anglesite-app/pull/829)) shipped an optional `routes` field the catalog can adopt later.
 - Keep PRs focused; opportunistic cleanup near the code you're touching is fine, drive-by refactors of unrelated code are not.
 
 ## License
