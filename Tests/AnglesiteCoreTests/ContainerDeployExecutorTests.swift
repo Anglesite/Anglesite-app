@@ -272,6 +272,27 @@ struct ContainerDeployExecutorTests {
         let calls = await fake.execCalls
         #expect(calls[0].siteID == "my-special-site")
     }
+
+    // MARK: - #748 capability defaults
+
+    @Test("HostDeployExecutor reports no owned path claims by default")
+    func hostExecutorReportsNoOwnedClaims() async {
+        let executor = HostDeployExecutor()
+        let claims = await executor.reportOwnedPathClaims()
+        #expect(claims.isEmpty)
+    }
+
+    @Test("HostDeployExecutor's build seam is unsupported by default")
+    func hostExecutorSeamIsUnsupported() async {
+        let executor = HostDeployExecutor()
+        let outcome = await executor.runBuildWithClaimManifest(
+            siteDirectory: URL(fileURLWithPath: "/host/irrelevant"),
+            environment: [:],
+            source: "src",
+            claimManifest: WellKnownClaimManifest()
+        )
+        #expect(outcome == .unsupported)
+    }
 }
 
 // MARK: - ThrowingFakeLocalContainerControl

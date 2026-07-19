@@ -51,6 +51,35 @@ public protocol DeployExecutor: Sendable {
         environment: [String: String],
         source: String
     ) async -> DeployStepResult
+
+    /// Paths this deploy provider affirmatively owns (e.g. ACME managed-TLS challenge paths) —
+    /// see docs/superpowers/specs/2026-07-14-well-known-support-design.md. Defaults to no claims;
+    /// override only when this executor can prove ownership, never speculatively.
+    func reportOwnedPathClaims() async -> [RuntimeOwnedPathClaim]
+
+    /// Runs the `.build` step with `claimManifest` made available to the build, returning the
+    /// observed `.well-known` artifact inventory and findings alongside the normal step result.
+    /// Defaults to `.unsupported` — #744 must not claim cross-owner collision protection when
+    /// this returns `.unsupported`.
+    func runBuildWithClaimManifest(
+        siteDirectory: URL,
+        environment: [String: String],
+        source: String,
+        claimManifest: WellKnownClaimManifest
+    ) async -> WellKnownBuildSeamOutcome
+}
+
+public extension DeployExecutor {
+    func reportOwnedPathClaims() async -> [RuntimeOwnedPathClaim] { [] }
+
+    func runBuildWithClaimManifest(
+        siteDirectory: URL,
+        environment: [String: String],
+        source: String,
+        claimManifest: WellKnownClaimManifest
+    ) async -> WellKnownBuildSeamOutcome {
+        .unsupported
+    }
 }
 
 // MARK: - ContainerDeployExecutor
