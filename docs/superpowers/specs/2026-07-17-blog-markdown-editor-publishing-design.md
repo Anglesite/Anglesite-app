@@ -244,7 +244,9 @@ errors.
 ### C.4 The CMS data path (per-site Worker, user's Cloudflare account)
 
 The server side is the pivot's per-site Worker (V-2.1, #353 — `@dwk/micropub` at
-`/micropub`, IndieAuth at `/.well-known/indieauth`, D1 + R2 bindings). Under the
+`/micropub`, IndieAuth at `/authorize` + `/token` with RFC 8414 metadata at
+`/.well-known/oauth-authorization-server` (there is no `/.well-known/indieauth` —
+#690/#746), D1 + R2 bindings). Under the
 Cloudflare-canonical model, a post's life is:
 
 1. **Accept (canonical):** the Micropub endpoint validates the IndieAuth token,

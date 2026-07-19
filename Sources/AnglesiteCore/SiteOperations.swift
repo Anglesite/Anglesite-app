@@ -75,6 +75,19 @@ public struct SiteOperations: Sendable {
         let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: [], graph: nil)
         let features = WorkerActivation.mapToFeatures(effectiveActiveIDs)
 
+        // Dynamic-route claims (#746): this path has no catalog fetcher wired (matching the
+        // `catalog: []` activation choice above), but the on-disk cache from a previous GUI fetch
+        // still lets active workers keep their `run_worker_first` routes — otherwise a headless
+        // deploy would silently regenerate wrangler.toml without them. Validation failures refuse
+        // the deploy before any Cloudflare call, mirroring `DeployModel.runDeploy`.
+        let routeClaims: [WorkerRouteClaims.OwnedClaim]
+        do {
+            routeClaims = try WorkerRouteClaims.activeClaims(
+                catalog: WorkerCatalogFetcher.cachedCatalog(), activeIDs: effectiveActiveIDs)
+        } catch {
+            return .failed(reason: "worker route claims are invalid: \(error)", exitCode: nil)
+        }
+
         // Prefer the site's already-established Worker name (`.site-config`'s `CF_PROJECT_NAME`,
         // set at the first successful deploy or by a worker-name-conflict rename, #740) over
         // re-deriving one from the site's display name — mirrors `DeployModel.runDeploy`'s
@@ -90,6 +103,7 @@ public struct SiteOperations: Sendable {
             siteDirectory: siteDirectory,
             siteName: workerSiteName,
             features: features,
+            routeClaims: routeClaims.map(\.claim),
             knownResources: settings.provisionedWorkerResources ?? .init()
         )
         onProgress?(.deployFinalizing)

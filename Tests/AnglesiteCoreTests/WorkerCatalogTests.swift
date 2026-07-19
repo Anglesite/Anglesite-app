@@ -99,4 +99,78 @@ struct WorkerCatalogReaderTests {
             _ = try WorkerCatalogReader.parse(json)
         }
     }
+
+    @Test("a catalog without route claims still parses (routes is nil)")
+    func parsesWithoutRoutes() throws {
+        let workers = try WorkerCatalogReader.parse(sampleJSON)
+        #expect(workers.allSatisfy { $0.routes == nil })
+    }
+
+    @Test("parses generic HTTP route claims, defaulting authorityBinding to false")
+    func parsesRouteClaims() throws {
+        let json = """
+        {
+          "workers": [
+            {
+              "id": "webfinger",
+              "displayName": "WebFinger",
+              "description": "RFC 7033 account discovery",
+              "group": "social",
+              "binding": { "kind": "settingsActivated" },
+              "resources": { "needsD1": false, "needsKV": false, "needsR2": false },
+              "routes": [
+                {
+                  "path": "/.well-known/webfinger",
+                  "match": "exact",
+                  "methods": ["GET", "HEAD"],
+                  "handler": "webfinger",
+                  "validatorID": "rfc7033",
+                  "authorityBinding": true,
+                  "specificationURL": "https://www.rfc-editor.org/rfc/rfc7033"
+                },
+                {
+                  "path": "/webmention",
+                  "match": "exact",
+                  "methods": ["POST"],
+                  "handler": "webmention"
+                }
+              ]
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let workers = try WorkerCatalogReader.parse(json)
+        let routes = try #require(workers.first?.routes)
+        #expect(routes.count == 2)
+
+        let webfinger = try #require(routes.first { $0.path == "/.well-known/webfinger" })
+        #expect(webfinger.match == .exact)
+        #expect(webfinger.methods == ["GET", "HEAD"])
+        #expect(webfinger.handler == "webfinger")
+        #expect(webfinger.validatorID == "rfc7033")
+        #expect(webfinger.authorityBinding)
+        #expect(webfinger.specificationURL == URL(string: "https://www.rfc-editor.org/rfc/rfc7033"))
+
+        let webmention = try #require(routes.first { $0.path == "/webmention" })
+        #expect(webmention.validatorID == nil)
+        #expect(!webmention.authorityBinding)
+        #expect(webmention.specificationURL == nil)
+    }
+
+    @Test("route claims round-trip through JSONEncoder/JSONDecoder")
+    func routeClaimRoundTrip() throws {
+        let claim = WorkerRouteClaim(
+            path: "/.well-known/acme-challenge",
+            match: .prefix,
+            methods: ["GET"],
+            handler: "acme",
+            validatorID: "rfc8555",
+            authorityBinding: true,
+            specificationURL: URL(string: "https://www.rfc-editor.org/rfc/rfc8555")
+        )
+        let decoded = try JSONDecoder().decode(
+            WorkerRouteClaim.self, from: JSONEncoder().encode(claim))
+        #expect(decoded == claim)
+    }
 }

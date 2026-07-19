@@ -1,0 +1,244 @@
+import Testing
+import Foundation
+@testable import AnglesiteCore
+
+@Suite("WorkerRouteClaims")
+struct WorkerRouteClaimsTests {
+    private func descriptor(
+        id: String,
+        routes: [WorkerRouteClaim]?
+    ) -> WorkerDescriptor {
+        WorkerDescriptor(
+            id: id,
+            displayName: id,
+            description: "test worker",
+            group: "social",
+            binding: .settingsActivated,
+            resources: .init(needsD1: false, needsKV: false, needsR2: false),
+            routes: routes
+        )
+    }
+
+    private func claim(
+        _ path: String,
+        match: WorkerRouteClaim.Match = .exact,
+        methods: [String] = ["GET"],
+        specificationURL: URL? = nil
+    ) -> WorkerRouteClaim {
+        WorkerRouteClaim(
+            path: path, match: match, methods: methods, handler: "handler",
+            specificationURL: specificationURL)
+    }
+
+    private let spec = URL(string: "https://www.rfc-editor.org/rfc/rfc8555")!
+
+    // MARK: Path validation
+
+    @Test("accepts a well-formed exact claim")
+    func acceptsWellFormedClaim() throws {
+        let claims = try WorkerRouteClaims.activeClaims(
+            catalog: [descriptor(id: "w", routes: [claim("/.well-known/webfinger", methods: ["GET", "HEAD"])])],
+            activeIDs: ["w"])
+        #expect(claims.map(\.claim.path) == ["/.well-known/webfinger"])
+        #expect(claims.map(\.owner) == ["w"])
+    }
+
+    @Test("rejects malformed, traversal, and encoded paths", arguments: [
+        "",                          // empty
+        "webfinger",                 // relative
+        "/",                         // origin root
+        "/.well-known",              // bare directory
+        "/a//b",                     // empty segment
+        "/a/b/",                     // trailing slash
+        "/a/../b",                   // traversal
+        "/a/./b",                    // dot segment
+        "/a%2Fb",                    // encoded separator
+        "/%2E%2E/secrets",           // encoded traversal
+        "/a?x=1",                    // query
+        "/a#frag",                   // fragment
+        "/a b",                      // whitespace
+        "/a\\b",                     // backslash
+        "/a\"b",                     // quote (TOML injection)
+    ])
+    func rejectsBadPaths(path: String) {
+        #expect(throws: WorkerRouteClaims.ValidationError.self) {
+            try WorkerRouteClaims.activeClaims(
+                catalog: [descriptor(id: "w", routes: [claim(path)])],
+                activeIDs: ["w"])
+        }
+    }
+
+    @Test("rejects an over-long path")
+    func rejectsOverlongPath() {
+        let path = "/" + String(repeating: "a", count: 600)
+        #expect(throws: WorkerRouteClaims.ValidationError.self) {
+            try WorkerRouteClaims.activeClaims(
+                catalog: [descriptor(id: "w", routes: [claim(path)])],
+                activeIDs: ["w"])
+        }
+    }
+
+    // MARK: Method validation
+
+    @Test("rejects empty, unknown, lowercase, and duplicate method lists", arguments: [
+        [String](),
+        ["FETCH"],
+        ["get"],
+        ["GET", "GET"],
+    ])
+    func rejectsBadMethods(methods: [String]) {
+        #expect(throws: WorkerRouteClaims.ValidationError.self) {
+            try WorkerRouteClaims.activeClaims(
+                catalog: [descriptor(id: "w", routes: [claim("/a", methods: methods)])],
+                activeIDs: ["w"])
+        }
+    }
+
+    // MARK: Prefix claims
+
+    @Test("rejects a prefix claim with no governing specification (undeclared prefix)")
+    func rejectsUndeclaredPrefix() {
+        #expect(throws: WorkerRouteClaims.ValidationError.undeclaredPrefix(
+            owner: "w", path: "/.well-known/acme-challenge")
+        ) {
+            try WorkerRouteClaims.activeClaims(
+                catalog: [descriptor(id: "w", routes: [claim("/.well-known/acme-challenge", match: .prefix)])],
+                activeIDs: ["w"])
+        }
+    }
+
+    @Test("accepts a specification-approved prefix claim")
+    func acceptsSpecApprovedPrefix() throws {
+        let claims = try WorkerRouteClaims.activeClaims(
+            catalog: [descriptor(id: "w", routes: [
+                claim("/.well-known/acme-challenge", match: .prefix, specificationURL: spec)
+            ])],
+            activeIDs: ["w"])
+        #expect(claims.count == 1)
+    }
+
+    // MARK: Overlap rejection
+
+    @Test("rejects two exact claims for the same path, naming both owners")
+    func rejectsDuplicateExact() {
+        #expect(throws: WorkerRouteClaims.ValidationError.duplicateClaim(
+            path: "/.well-known/webfinger", owners: ["a", "b"])
+        ) {
+            try WorkerRouteClaims.activeClaims(
+                catalog: [
+                    descriptor(id: "b", routes: [claim("/.well-known/webfinger")]),
+                    descriptor(id: "a", routes: [claim("/.well-known/webfinger")]),
+                ],
+                activeIDs: ["a", "b"])
+        }
+    }
+
+    @Test("rejects an exact claim inside another worker's prefix claim")
+    func rejectsExactInsidePrefix() {
+        #expect(throws: WorkerRouteClaims.ValidationError.self) {
+            try WorkerRouteClaims.activeClaims(
+                catalog: [
+                    descriptor(id: "acme", routes: [
+                        claim("/.well-known/acme-challenge", match: .prefix, specificationURL: spec)
+                    ]),
+                    descriptor(id: "rogue", routes: [claim("/.well-known/acme-challenge/token")]),
+                ],
+                activeIDs: ["acme", "rogue"])
+        }
+    }
+
+    @Test("rejects overlapping prefix claims")
+    func rejectsOverlappingPrefixes() {
+        #expect(throws: WorkerRouteClaims.ValidationError.self) {
+            try WorkerRouteClaims.activeClaims(
+                catalog: [
+                    descriptor(id: "outer", routes: [claim("/api", match: .prefix, specificationURL: spec)]),
+                    descriptor(id: "inner", routes: [claim("/api/v1", match: .prefix, specificationURL: spec)]),
+                ],
+                activeIDs: ["outer", "inner"])
+        }
+    }
+
+    @Test("disjoint sibling claims from different workers coexist")
+    func acceptsDisjointClaims() throws {
+        let claims = try WorkerRouteClaims.activeClaims(
+            catalog: [
+                descriptor(id: "webfinger", routes: [claim("/.well-known/webfinger")]),
+                descriptor(id: "webmention", routes: [claim("/webmention", methods: ["POST"])]),
+            ],
+            activeIDs: ["webfinger", "webmention"])
+        #expect(claims.count == 2)
+    }
+
+    // MARK: Effective active-set filtering
+
+    @Test("only active workers' claims are exposed; a colliding inactive claim is invisible")
+    func filtersToActiveSet() throws {
+        let catalog = [
+            descriptor(id: "active", routes: [claim("/.well-known/webfinger")]),
+            // Same path — would be a duplicateClaim error if it were active.
+            descriptor(id: "inactive", routes: [claim("/.well-known/webfinger")]),
+        ]
+        let claims = try WorkerRouteClaims.activeClaims(catalog: catalog, activeIDs: ["active"])
+        #expect(claims.map(\.owner) == ["active"])
+    }
+
+    @Test("a descriptor without routes contributes nothing")
+    func noRoutesNoClaims() throws {
+        let claims = try WorkerRouteClaims.activeClaims(
+            catalog: [descriptor(id: "w", routes: nil)], activeIDs: ["w"])
+        #expect(claims.isEmpty)
+    }
+
+    @Test("output order is deterministic regardless of catalog order")
+    func deterministicOrder() throws {
+        let routesA = [claim("/zeta", methods: ["POST"])]
+        let routesB = [claim("/alpha")]
+        let forward = try WorkerRouteClaims.activeClaims(
+            catalog: [descriptor(id: "a", routes: routesA), descriptor(id: "b", routes: routesB)],
+            activeIDs: ["a", "b"])
+        let reversed = try WorkerRouteClaims.activeClaims(
+            catalog: [descriptor(id: "b", routes: routesB), descriptor(id: "a", routes: routesA)],
+            activeIDs: ["a", "b"])
+        #expect(forward == reversed)
+        #expect(forward.map(\.claim.path) == ["/alpha", "/zeta"])
+    }
+
+    // MARK: run_worker_first derivation
+
+    @Test("exact claims map to their path; prefix claims add a glob; sorted and deduplicated")
+    func runWorkerFirstPatterns() {
+        let patterns = WorkerRouteClaims.runWorkerFirstPatterns([
+            claim("/token", methods: ["POST"]),
+            claim("/authorize"),
+            claim("/authorize"),  // duplicate collapses
+            claim("/.well-known/acme-challenge", match: .prefix, specificationURL: spec),
+        ])
+        #expect(patterns == [
+            "/.well-known/acme-challenge",
+            "/.well-known/acme-challenge/*",
+            "/authorize",
+            "/token",
+        ])
+    }
+
+    @Test("no claims yields no patterns")
+    func emptyPatterns() {
+        #expect(WorkerRouteClaims.runWorkerFirstPatterns([]).isEmpty)
+    }
+
+    // MARK: #744 seam
+
+    @Test("wellKnownClaims filters to the /.well-known/ namespace, keeping ownership")
+    func wellKnownFilter() throws {
+        let claims = try WorkerRouteClaims.activeClaims(
+            catalog: [descriptor(id: "w", routes: [
+                claim("/.well-known/webfinger"),
+                claim("/webmention", methods: ["POST"]),
+            ])],
+            activeIDs: ["w"])
+        let wellKnown = WorkerRouteClaims.wellKnownClaims(claims)
+        #expect(wellKnown.map(\.claim.path) == ["/.well-known/webfinger"])
+        #expect(wellKnown.map(\.owner) == ["w"])
+    }
+}
