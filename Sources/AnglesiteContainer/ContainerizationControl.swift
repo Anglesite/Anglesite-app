@@ -236,15 +236,35 @@ public struct ContainerizationControl: LocalContainerControl {
             argv: ["sh", "-lc",
                 "cd /workspace/site && npx wrangler dev --local --config \(configPath) --port \(Self.workersPort)"],
             restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.5),
-            onOutput: { line, stream in onOutput("[workers-dev] \(line)", stream) })
+            onOutput: onOutput)
         try await supervisor.start()
 
+        // Vsock<->TCP bridge for the workers-dev port, matching the bridge-preview/bridge-mcp
+        // pattern above: wrangler-dev only ever binds a plain TCP socket, and
+        // container.dialVsock(port:) dials an AF_VSOCK listener — without this bridge the proxy
+        // below has nothing to connect to at the vsock layer, and every dial fails.
+        do {
+            try await runDetached(container, id: "bridge-workers-dev", label: "bridge-workers-dev", onOutput: onOutput,
+                ["/usr/bin/socat", "VSOCK-LISTEN:\(Self.workersPort),reuseaddr,fork", "TCP:127.0.0.1:\(Self.workersPort)"])
+        } catch {
+            await supervisor.stop()
+            throw LocalContainerError.bootFailed("workers-dev vsock bridge failed to start: \(error)")
+        }
+
+        // Rate-limited the same way previewProxy/mcpProxy are (see their construction above): a
+        // persistently-failing dial can otherwise emit enough identical events to evict one-time
+        // boot lines out of LogCenter's bounded ring buffer. Scoped to this call rather than
+        // shared with the boot-time limiter, since a workers-dev session's lifecycle is
+        // independent of the container's boot.
+        let workersDevEventLimiter = EventRateLimiter()
         let dial: VsockDialer = { port in try await container.dialVsock(port: port) }
         let proxy = VsockTCPProxy(
             guestPort: Self.workersPort,
             dial: dial,
-            onDialError: { error in onOutput("[proxy:workers-dev] dialVsock(\(Self.workersPort)) failed: \(error)", .stderr) },
-            onEvent: { event in onOutput("[proxy:workers-dev] \(event)", .stdout) })
+            onDialError: { error in
+                workersDevEventLimiter.log("[proxy:workers-dev] dialVsock(\(Self.workersPort)) failed: \(error)", onOutput: onOutput)
+            },
+            onEvent: { event in workersDevEventLimiter.log("[proxy:workers-dev] \(event)", onOutput: onOutput) })
         let url: URL
         do {
             url = try await proxy.start()
@@ -936,8 +956,8 @@ public struct ContainerizationControl: LocalContainerControl {
         }
     }
 
-    /// Writes `contents` to `path` inside the guest via a one-shot `sh -c 'cat > path'` fed the
-    /// text as a heredoc-safe base64 payload (avoiding any shell-quoting/escaping surface for
+    /// Writes `contents` to `path` inside the guest via a one-shot `sh -c "echo <b64> | base64 -d
+    /// > path"`, base64-encoding the text first (avoiding any shell-quoting/escaping surface for
     /// `contents`, which is a generated wrangler.toml — untrusted only in the sense that it embeds
     /// a site name, already validated by `WorkerComposition.isValidSiteName`).
     private func writeGuestFile(
