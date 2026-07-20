@@ -16,6 +16,11 @@ public struct SiteOperations: Sendable {
     private let factory: CommandFactory
     private let store: SiteStore
     private let socialWorkerAccess: SocialWorkerAccess
+    /// The on-disk cached `@dwk/workers` catalog, consulted by the headless deploy path for
+    /// resource composition and route claims (#708/#746). Injectable so tests can supply fixture
+    /// descriptors instead of touching the real `~/Library/Application Support/Anglesite/`
+    /// cache file `WorkerCatalogFetcher.cachedCatalog` reads from.
+    private let cachedWorkerCatalog: @Sendable () -> [WorkerDescriptor]
 
     public init(factory: CommandFactory = LiveCommandFactory(), store: SiteStore = .shared) {
         self.init(
@@ -27,10 +32,16 @@ public struct SiteOperations: Sendable {
         )
     }
 
-    init(factory: CommandFactory, store: SiteStore, socialWorkerAccess: @escaping SocialWorkerAccess) {
+    init(
+        factory: CommandFactory,
+        store: SiteStore,
+        socialWorkerAccess: @escaping SocialWorkerAccess,
+        cachedWorkerCatalog: @escaping @Sendable () -> [WorkerDescriptor] = { WorkerCatalogFetcher.cachedCatalog() }
+    ) {
         self.factory = factory
         self.store = store
         self.socialWorkerAccess = socialWorkerAccess
+        self.cachedWorkerCatalog = cachedWorkerCatalog
     }
 
     /// Resolve a site id (as carried by `SiteEntity`) to the registry's `Site`.
@@ -78,7 +89,7 @@ public struct SiteOperations: Sendable {
         // data, which the `catalog: []` activation call above deliberately doesn't have (matching
         // the effectiveActiveIDs "settings-activated only" comment above). The on-disk cache from
         // a previous GUI fetch is the only source of that data on this headless path.
-        let cachedCatalog = WorkerCatalogFetcher.cachedCatalog()
+        let cachedCatalog = cachedWorkerCatalog()
         let workers = WorkerActivation.activeDescriptors(catalog: cachedCatalog, activeIDs: effectiveActiveIDs)
         if cachedCatalog.isEmpty && !effectiveActiveIDs.isEmpty {
             // The gap this leaves (an active worker deploys with no D1/KV/R2 bindings and no
@@ -152,13 +163,31 @@ public struct SiteOperations: Sendable {
         }
     }
 
+    /// The fixed V-2 starter pack (webmention + indieauth) this one-button "turn on social
+    /// basics" operation provisions. Unlike `deployWithWorkerComposition`, this isn't driven by
+    /// a site's catalog/effective-active-worker set — it's always the same two workers, matching
+    /// `WorkerComposition.Feature.v2`'s pre-migration default. Fixed literals, not fetched from
+    /// the `@dwk/workers` catalog, since this operation predates catalog-driven composition and
+    /// has no site-settings or catalog input to derive from.
+    private static let v2StarterWorkers: [WorkerDescriptor] = [
+        WorkerDescriptor(
+            id: "webmention", displayName: "Webmentions", description: "Outbound webmention sending",
+            group: "social", binding: .settingsActivated, resources: .init(needsD1: true, needsKV: true, needsR2: false)
+        ),
+        WorkerDescriptor(
+            id: "indieauth", displayName: "IndieAuth", description: "IndieAuth sign-in",
+            group: "social", binding: .settingsActivated, resources: .init(needsD1: true, needsKV: true, needsR2: false)
+        ),
+    ]
+
     public func provisionSocialWorker(site: SiteStore.Site) async -> SocialWorkerProvisionCommand.Result {
         do {
             return try await socialWorkerAccess(site, store) { url in
                 await factory.socialWorkerProvision().provision(
                     siteID: site.id,
                     siteDirectory: url,
-                    siteName: SiteSlug.derive(from: site.name)
+                    siteName: SiteSlug.derive(from: site.name),
+                    workers: Self.v2StarterWorkers
                 )
             }
         } catch let SiteAccess.AccessError.noGrant(message) {

@@ -71,6 +71,16 @@ struct SiteOperationsTests {
         return package
     }
 
+    /// A fixture `WorkerDescriptor` for the headless-deploy tests below — stands in for what
+    /// `WorkerCatalogFetcher.cachedCatalog()` would return from a real on-disk cache, without
+    /// touching the real `~/Library/Application Support/Anglesite/` cache file from a test.
+    private func descriptor(id: String, d1: Bool = true, kv: Bool = true, r2: Bool = false) -> WorkerDescriptor {
+        WorkerDescriptor(
+            id: id, displayName: id, description: "test fixture", group: "social",
+            binding: .settingsActivated, resources: .init(needsD1: d1, needsKV: kv, needsR2: r2)
+        )
+    }
+
     private func finding(_ severity: AuditReport.Finding.Severity) -> AuditReport.Finding {
         AuditReport.Finding(
             category: .seo, severity: severity, title: "t", detail: "d",
@@ -302,7 +312,12 @@ struct SiteOperationsTests {
         )
 
         let recorder = SocialWorkerRecorder()
-        let ops = SiteOperations(factory: SocialWorkerFactory(recorder: recorder), store: throwawayStore())
+        let ops = SiteOperations(
+            factory: SocialWorkerFactory(recorder: recorder),
+            store: throwawayStore(),
+            socialWorkerAccess: { site, store, body in try await SiteAccess.withScopedAccess(to: site, in: store, body) },
+            cachedWorkerCatalog: { [self.descriptor(id: "indieauth")] }
+        )
 
         let result = await ops.deploy(site: site)
 
