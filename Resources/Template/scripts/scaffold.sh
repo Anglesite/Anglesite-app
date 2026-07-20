@@ -57,6 +57,7 @@ printf '%s\n' \
     "ANGLESITE_VERSION=$VERSION" \
     "# SITE_URL=https://example.com        — site domain (used in feeds, sitemap, security.txt)" \
     "# SECURITY_CONTACT=security@example.com — RFC 9116 security.txt contact (email or URI)" \
+    "# SECURITY_TXT_MODE=generated          — generated|manual|disabled (default: inferred from SECURITY_CONTACT)" \
     "# HSTS_PRELOAD=true                    — opt-in HSTS preload submission (hard to reverse)" \
     "# SCRIPT_ALLOW=example.com             — additional CSP script-src domains (comma-separated)" \
     "# BLOCK_AI=true                        — block AI training crawlers via robots.txt (off by default;" \

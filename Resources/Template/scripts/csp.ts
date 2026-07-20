@@ -93,6 +93,9 @@ export function buildHeaders(configContent: string, serviceWorkerPresent = false
 
 /_astro/*
   Cache-Control: public, max-age=31536000, immutable
+
+/.well-known/security.txt
+  Content-Type: text/plain; charset=utf-8
 `;
   if (serviceWorkerPresent) {
     out += `

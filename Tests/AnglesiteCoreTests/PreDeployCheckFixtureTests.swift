@@ -104,14 +104,17 @@ struct PreDeployCheckFixtureTests {
     func realScriptWithNoIssuesDecodesToPassed() throws {
         let siteDir = try makeFixtureDist(html: "<html><body><p>Nothing sensitive here.</p></body></html>")
         defer { try? FileManager.default.removeItem(at: siteDir) }
-        // A CSP-satisfying _headers file and both security artifacts, so this fixture is fully clean.
+        // A CSP-satisfying _headers file, robots.txt, and a valid hand-authored (manual-mode)
+        // security.txt, so this fixture is fully clean under the state-aware check (#743).
         try "/*\n  Content-Security-Policy: default-src 'self'\n".write(
             to: siteDir.appendingPathComponent("dist/_headers"), atomically: true, encoding: .utf8)
         try "User-agent: *\n".write(
             to: siteDir.appendingPathComponent("dist/robots.txt"), atomically: true, encoding: .utf8)
+        try "SECURITY_TXT_MODE=manual\n".write(
+            to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
         let wellKnown = siteDir.appendingPathComponent("dist/.well-known", isDirectory: true)
         try FileManager.default.createDirectory(at: wellKnown, withIntermediateDirectories: true)
-        try "Contact: mailto:security@example.com\n".write(
+        try "Contact: mailto:security@example.com\nExpires: 2099-01-01T00:00:00.000Z\n".write(
             to: wellKnown.appendingPathComponent("security.txt"), atomically: true, encoding: .utf8)
 
         let result = try runRealScript(siteDir: siteDir)
@@ -123,6 +126,33 @@ struct PreDeployCheckFixtureTests {
             return
         }
         #expect(warnings.isEmpty)
+    }
+
+    @Test("Real script: SECURITY_TXT_MODE=disabled but a published security.txt is a mode/file contradiction",
+          .enabled(if: PreDeployCheckFixtureTests.buildable))
+    func realScriptFlagsDisabledModeContradiction() throws {
+        let siteDir = try makeFixtureDist(html: "<html><body><p>Nothing sensitive here.</p></body></html>")
+        defer { try? FileManager.default.removeItem(at: siteDir) }
+        try "/*\n  Content-Security-Policy: default-src 'self'\n".write(
+            to: siteDir.appendingPathComponent("dist/_headers"), atomically: true, encoding: .utf8)
+        try "User-agent: *\n".write(
+            to: siteDir.appendingPathComponent("dist/robots.txt"), atomically: true, encoding: .utf8)
+        try "SECURITY_TXT_MODE=disabled\n".write(
+            to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+        let wellKnown = siteDir.appendingPathComponent("dist/.well-known", isDirectory: true)
+        try FileManager.default.createDirectory(at: wellKnown, withIntermediateDirectories: true)
+        try "Contact: mailto:security@example.com\nExpires: 2099-01-01T00:00:00.000Z\n".write(
+            to: wellKnown.appendingPathComponent("security.txt"), atomically: true, encoding: .utf8)
+
+        let result = try runRealScript(siteDir: siteDir)
+        #expect(result.exitCode == 0) // security-txt-issue is a warning, not a blocking failure
+
+        let outcome = PreDeployCheck.parse(output: result.stdout, exitCode: result.exitCode)
+        guard case .passed(let warnings) = outcome else {
+            Issue.record("expected .passed(warnings:), got \(outcome) — raw stdout: \(result.stdout)")
+            return
+        }
+        #expect(warnings.contains { $0.category == .securityTxtIssue })
     }
 
     /// Writes a fixture `package.json` whose `build` step is a no-op (`true`) and whose `build:ci`
@@ -187,9 +217,11 @@ struct PreDeployCheckFixtureTests {
             to: siteDir.appendingPathComponent("dist/_headers"), atomically: true, encoding: .utf8)
         try "User-agent: *\n".write(
             to: siteDir.appendingPathComponent("dist/robots.txt"), atomically: true, encoding: .utf8)
+        try "SECURITY_TXT_MODE=manual\n".write(
+            to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
         let wellKnown = siteDir.appendingPathComponent("dist/.well-known", isDirectory: true)
         try FileManager.default.createDirectory(at: wellKnown, withIntermediateDirectories: true)
-        try "Contact: mailto:security@example.com\n".write(
+        try "Contact: mailto:security@example.com\nExpires: 2099-01-01T00:00:00.000Z\n".write(
             to: wellKnown.appendingPathComponent("security.txt"), atomically: true, encoding: .utf8)
         try writeFixturePackageJSON(in: siteDir)
 
