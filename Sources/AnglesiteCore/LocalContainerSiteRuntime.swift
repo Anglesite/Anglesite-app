@@ -24,9 +24,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private var fileWatcher: (any SiteFileWatching)?
     private var containerTerminationLease: SuddenTerminationController.Lease?
 
-    private var current: SiteRuntimeState = .idle
-    private var observers: [UUID: AsyncStream<SiteRuntimeState>.Continuation] = [:]
-    private var generation = 0
+    private let stateMachine = SiteRuntimeStateMachine()
     private var activeSiteID: String?
     private var activeSiteDirectory: URL?
     private var loadedKnowledgeSiteID: String?
@@ -76,7 +74,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         self.beginActivity = beginActivity
     }
 
-    public var state: SiteRuntimeState { current }
+    public var state: SiteRuntimeState { stateMachine.state }
 
     /// The `LocalContainerControl` held by this runtime, or `nil` if no site is currently
     /// started. Callers (e.g. `PreviewModel`) read this to build a `ContainerDeployExecutor`
@@ -124,7 +122,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
               commit.unicodeScalars.allSatisfy({ Self.hexDigits.contains($0) })
         else { throw SiteRuntimePersistenceError.missingOrInvalidCommit }
 
-        let expectedGeneration = generation
+        let expectedGeneration = stateMachine.currentGeneration
         guard let siteID = activeSiteID, let siteDirectory = activeSiteDirectory else {
             throw SiteRuntimePersistenceError.runtimeNotRunning
         }
@@ -132,7 +130,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         await acquirePersistenceSlot()
         defer { releasePersistenceSlot() }
 
-        guard expectedGeneration == generation,
+        guard stateMachine.isCurrent(expectedGeneration),
               activeSiteID == siteID,
               activeSiteDirectory == siteDirectory
         else {
@@ -180,7 +178,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
                 }
             )
         } catch {
-            guard expectedGeneration == generation, activeSiteID == siteID else {
+            guard stateMachine.isCurrent(expectedGeneration), activeSiteID == siteID else {
                 throw SiteRuntimePersistenceError.runtimeNotRunning
             }
             throw SiteRuntimePersistenceError.syncFailed(error.localizedDescription)
@@ -191,7 +189,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
                 detail.isEmpty ? "git handoff exited \(result.exitCode)" : detail)
         }
 
-        guard expectedGeneration == generation,
+        guard stateMachine.isCurrent(expectedGeneration),
               activeSiteID == siteID,
               activeSiteDirectory == siteDirectory
         else {
@@ -232,30 +230,14 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     }
 
     public func observe() -> AsyncStream<SiteRuntimeState> {
-        let (stream, continuation) = AsyncStream<SiteRuntimeState>.makeStream(bufferingPolicy: .unbounded)
-        let id = UUID()
-        observers[id] = continuation
-        continuation.onTermination = { [weak self] _ in Task { await self?.removeObserver(id) } }
-        continuation.yield(current)
-        return stream
+        stateMachine.observe()
     }
 
     /// `siteDirectory` is the package's `Source/` directory; it becomes the `file://` repo the
     /// container clones (git is the source of truth, #72). The configured `ref` selects the commit.
     public func start(siteID: String, siteDirectory: URL) async {
         await teardown()
-        generation += 1
-        let gen = generation
-        // `setState` dedups against the current value, so re-entering `.starting(siteID:)` for the
-        // same site (Restart while already `.starting` — the "wedged boot" case this command exists
-        // for) would otherwise be silently dropped: observers never see a change, so the progress
-        // bar stays frozen on the superseded attempt. Force a transient `.idle` first only in that
-        // specific case — `.ready`/`.failed`/`.idle` already differ from the new `.starting` value
-        // and don't need it.
-        if case .starting(let existingSiteID) = current, existingSiteID == siteID {
-            setState(.idle)
-        }
-        setState(.starting(siteID: siteID))
+        let gen = stateMachine.beginStarting(siteID: siteID)
         let suddenTerminationLease = suddenTerminationController.acquire()
         // Scoped to the boot window only (unlike suddenTerminationLease, which outlives it as
         // containerTerminationLease) — released on every exit path below, including success:
@@ -301,12 +283,12 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
                 siteID: siteID, sourceRepo: siteDirectory, ref: ref,
                 onOutput: { line, stream in continuation.yield((line, stream)) })
             containerStarted = true
-            guard gen == generation else { await abandonSupersededAttempt(); return }
+            guard stateMachine.isCurrent(gen) else { await abandonSupersededAttempt(); return }
             try await connect(mcpClient, session.mcpURL)
-            guard gen == generation else { await abandonSupersededAttempt(); return }
+            guard stateMachine.isCurrent(gen) else { await abandonSupersededAttempt(); return }
             await knowledgeIndex?.rebuild(siteID: siteID, projectRoot: siteDirectory)
             await conventionsEngine?.rebuild(siteID: siteID, projectRoot: siteDirectory)
-            guard gen == generation else {
+            guard stateMachine.isCurrent(gen) else {
                 await knowledgeIndex?.unload(siteID: siteID)
                 await conventionsEngine?.unload(siteID: siteID)
                 await abandonSupersededAttempt()
@@ -315,7 +297,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             if let documents = await knowledgeIndex?.documents(siteID: siteID) {
                 await semanticRanker?.sync(siteID: siteID, documents: documents)
             }
-            guard gen == generation else {
+            guard stateMachine.isCurrent(gen) else {
                 await knowledgeIndex?.unload(siteID: siteID)
                 await semanticRanker?.unload(siteID: siteID)
                 await conventionsEngine?.unload(siteID: siteID)
@@ -328,7 +310,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             activeSiteDirectory = siteDirectory
             containerTerminationLease = suddenTerminationLease
             activityLease.release()
-            setState(.ready(siteID: siteID, url: session.previewURL))
+            stateMachine.settle(gen: gen, to: .ready(siteID: siteID, url: session.previewURL))
         } catch {
             // Finish this attempt's own (locally-captured) boot log stream immediately rather than
             // leaving it for the next start()/stop() call to clean up via teardown() — control.start()
@@ -344,10 +326,10 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             }
             suddenTerminationLease.release()
             activityLease.release()
-            guard gen == generation else { return }
+            guard stateMachine.isCurrent(gen) else { return }
             bootLogContinuation = nil
             bootLogDrainTask = nil
-            setState(.failed(siteID: siteID, message: Self.friendlyMessage(for: error)))
+            stateMachine.settle(gen: gen, to: .failed(siteID: siteID, message: Self.friendlyMessage(for: error)))
         }
     }
 
@@ -355,15 +337,13 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     /// callsite: queued `readabilityHandler`s on the vsock proxy may still fire after teardown but
     /// are idempotent; in-flight bytes are not drained by design.
     public func stop() async {
-        generation += 1
-        let gen = generation
+        let gen = stateMachine.beginAttempt()
         await teardown()
         // Actors are reentrant, so a start()/stop() issued while teardown() was suspended has
         // superseded this stop and owns the state now — emitting `.idle` here would clobber its
         // `.starting`/`.ready` (the rapid Stop → Restart race, PR #542 review): the UI would show
         // the boot spinner forever while the dev server is actually running.
-        guard gen == generation else { return }
-        setState(.idle)
+        stateMachine.settle(gen: gen, to: .idle)
     }
 
     // MARK: Internals
@@ -445,7 +425,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     }
 
     private func applyFileChanges(_ batch: FileChangeBatch, siteID: String, projectRoot: URL, generation gen: Int) async {
-        guard gen == generation else { return }
+        guard stateMachine.isCurrent(gen) else { return }
         if let knowledgeIndex {
             await KnowledgeReindex.apply(batch, to: knowledgeIndex, ranker: semanticRanker, siteID: siteID, projectRoot: projectRoot)
         }
@@ -455,7 +435,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         // A stop()/site-switch may have superseded us during the apply above; if so, drop anything
         // we re-added for a site this runtime no longer owns — mirroring populateSharedIndexes'
         // post-await unload discipline.
-        guard gen == generation else {
+        guard stateMachine.isCurrent(gen) else {
             await knowledgeIndex?.unload(siteID: siteID)
             await semanticRanker?.unload(siteID: siteID)
             await conventionsEngine?.unload(siteID: siteID)
@@ -486,14 +466,6 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             }
         }
     }
-
-    private func setState(_ s: SiteRuntimeState) {
-        guard s != current else { return }
-        current = s
-        for c in observers.values { c.yield(s) }
-    }
-
-    private func removeObserver(_ id: UUID) { observers[id] = nil }
 
     static func friendlyMessage(for error: Error) -> String {
         switch error {
