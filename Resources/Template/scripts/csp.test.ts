@@ -52,7 +52,12 @@ test("buildHeaders: includes security headers, CSP, and astro caching", () => {
   assert.match(out, /X-Frame-Options: DENY/);
   assert.match(out, /X-Content-Type-Options: nosniff/);
   assert.match(out, /Content-Security-Policy: .*js\.stripe\.com/);
-  assert.match(out, /\/_astro\/\*\n  Cache-Control: public, max-age=31536000, immutable\n$/);
+  assert.match(out, /\/_astro\/\*\n  Cache-Control: public, max-age=31536000, immutable\n/);
+});
+
+test("buildHeaders: security.txt gets its exact RFC 9116 media type", () => {
+  const out = buildHeaders("");
+  assert.match(out, /\n\/\.well-known\/security\.txt\n  Content-Type: text\/plain; charset=utf-8\n/);
 });
 
 test("buildHeaders: includes cross-origin isolation headers", () => {

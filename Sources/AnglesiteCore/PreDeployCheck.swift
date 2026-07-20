@@ -77,6 +77,11 @@ public actor PreDeployCheck {
             case sriMissing = "sri-missing"
             case externalLinkRel = "external-link-rel"
             case missingSecurityArtifact = "missing-security-artifact"
+            /// A `security.txt` mode/file mismatch (e.g. `SECURITY_TXT_MODE=disabled` but the file
+            /// was published) or RFC 9116 content defect (missing Contact, wrong Expires count,
+            /// stale/malformed Expires, wrong-origin or insecure Canonical, no final newline).
+            /// See `Resources/Template/scripts/pre-deploy-check.ts`'s `checkSecurityTxt` (#743).
+            case securityTxtIssue = "security-txt-issue"
             case thirdPartyScript = "third-party-script"
             /// Any category code this build doesn't recognize yet — decoding falls back here
             /// instead of throwing, so a future/typo'd category can't crash the whole scan (#742).

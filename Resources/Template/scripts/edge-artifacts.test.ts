@@ -3,7 +3,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildRobotsTxt, buildSecurityTxt, aiCrawlers, normalizeContentSignal } from "./edge-artifacts";
+import {
+  buildRobotsTxt,
+  buildSecurityTxt,
+  aiCrawlers,
+  normalizeContentSignal,
+  normalizeSecurityContact,
+  resolveSecurityTxtMode,
+  isSecurityTxtMarkerOwned,
+  planSecurityTxt,
+  SECURITY_TXT_MARKER,
+} from "./edge-artifacts";
 
 test("buildRobotsTxt: allows all crawlers by default and ends with a newline", () => {
   const out = buildRobotsTxt();
@@ -119,10 +129,14 @@ test("buildSecurityTxt: a URL or mailto contact is used as-is", () => {
   assert.match(mailto, /^Contact: mailto:s@example\.com$/m);
 });
 
-test("buildSecurityTxt: Expires is one year out at UTC midnight", () => {
+test("buildSecurityTxt: an insecure http:// web contact is rejected", () => {
+  assert.equal(buildSecurityTxt("http://example.com/report", "https://example.com", NOW), null);
+});
+
+test("buildSecurityTxt: Expires is 180 days out", () => {
   const out = buildSecurityTxt("security@example.com", "https://example.com", NOW);
   assert.ok(out !== null);
-  assert.match(out, /^Expires: 2027-06-28T00:00:00\.000Z$/m);
+  assert.match(out, /^Expires: 2026-12-25T12:00:00\.000Z$/m);
 });
 
 test("buildSecurityTxt: includes a Canonical URL and trailing newline", () => {
@@ -130,4 +144,155 @@ test("buildSecurityTxt: includes a Canonical URL and trailing newline", () => {
   assert.ok(out !== null);
   assert.match(out, /^Canonical: https:\/\/example\.com\/\.well-known\/security\.txt$/m);
   assert.match(out, /\n$/);
+});
+
+test("buildSecurityTxt: starts with the ownership marker", () => {
+  const out = buildSecurityTxt("security@example.com", "https://example.com", NOW);
+  assert.ok(out !== null);
+  assert.equal(out.split("\n")[0], SECURITY_TXT_MARKER);
+});
+
+test("buildSecurityTxt: omits Canonical when SITE_URL is unset", () => {
+  const out = buildSecurityTxt("security@example.com", undefined, NOW);
+  assert.ok(out !== null);
+  assert.doesNotMatch(out, /Canonical:/);
+});
+
+test("buildSecurityTxt: omits Canonical (no example.com fallback) when SITE_URL is insecure", () => {
+  const out = buildSecurityTxt("security@example.com", "http://example.com", NOW);
+  assert.ok(out !== null);
+  assert.doesNotMatch(out, /Canonical:/);
+  assert.doesNotMatch(out, /example\.com\/\.well-known/);
+});
+
+test("normalizeSecurityContact: rejects http:// but accepts https:// and mailto:/tel:", () => {
+  assert.equal(normalizeSecurityContact("http://example.com/report"), null);
+  assert.equal(normalizeSecurityContact("https://example.com/report"), "https://example.com/report");
+  assert.equal(normalizeSecurityContact("mailto:s@example.com"), "mailto:s@example.com");
+  assert.equal(normalizeSecurityContact("tel:+15005550006"), "tel:+15005550006");
+  assert.equal(normalizeSecurityContact("s@example.com"), "mailto:s@example.com");
+  assert.equal(normalizeSecurityContact(undefined), null);
+});
+
+test("resolveSecurityTxtMode: an explicit mode always wins over SECURITY_CONTACT", () => {
+  assert.equal(resolveSecurityTxtMode("manual", "s@example.com"), "manual");
+  assert.equal(resolveSecurityTxtMode("disabled", "s@example.com"), "disabled");
+  assert.equal(resolveSecurityTxtMode("generated", undefined), "generated");
+});
+
+test("resolveSecurityTxtMode: unset mode infers from SECURITY_CONTACT (legacy behavior)", () => {
+  assert.equal(resolveSecurityTxtMode(undefined, "s@example.com"), "generated");
+  assert.equal(resolveSecurityTxtMode(undefined, undefined), "disabled");
+  assert.equal(resolveSecurityTxtMode(undefined, "  "), "disabled");
+});
+
+test("resolveSecurityTxtMode: an unrecognized raw value falls back to inference", () => {
+  assert.equal(resolveSecurityTxtMode("bogus", "s@example.com"), "generated");
+});
+
+test("isSecurityTxtMarkerOwned: true only for content whose first line is the exact marker", () => {
+  assert.ok(isSecurityTxtMarkerOwned(`${SECURITY_TXT_MARKER}\nContact: mailto:s@example.com\n`));
+  assert.equal(isSecurityTxtMarkerOwned("Contact: mailto:s@example.com\n"), false);
+  assert.equal(isSecurityTxtMarkerOwned(null), false);
+});
+
+test("planSecurityTxt: disabled + absent is silent", () => {
+  const plan = planSecurityTxt({
+    mode: "disabled",
+    contact: undefined,
+    siteUrl: undefined,
+    now: NOW,
+    existingContent: null,
+  });
+  assert.deepEqual(plan.action, { kind: "none" });
+  assert.equal(plan.note, undefined);
+});
+
+test("planSecurityTxt: disabled + present is a contradiction that is not deleted", () => {
+  const plan = planSecurityTxt({
+    mode: "disabled",
+    contact: undefined,
+    siteUrl: undefined,
+    now: NOW,
+    existingContent: "Contact: mailto:s@example.com\n",
+  });
+  assert.deepEqual(plan.action, { kind: "none" });
+  assert.match(plan.note ?? "", /disabled but public\/\.well-known\/security\.txt exists/);
+});
+
+test("planSecurityTxt: manual mode never writes or deletes, present or absent", () => {
+  const absent = planSecurityTxt({
+    mode: "manual",
+    contact: "s@example.com",
+    siteUrl: "https://example.com",
+    now: NOW,
+    existingContent: null,
+  });
+  assert.deepEqual(absent.action, { kind: "none" });
+  const present = planSecurityTxt({
+    mode: "manual",
+    contact: undefined,
+    siteUrl: undefined,
+    now: NOW,
+    existingContent: "Contact: mailto:hand-authored@example.com\n",
+  });
+  assert.deepEqual(present.action, { kind: "none" });
+});
+
+test("planSecurityTxt: generated mode with a valid contact writes when absent or marker-owned", () => {
+  const absent = planSecurityTxt({
+    mode: "generated",
+    contact: "s@example.com",
+    siteUrl: "https://example.com",
+    now: NOW,
+    existingContent: null,
+  });
+  assert.equal(absent.action.kind, "write");
+  const markerOwned = planSecurityTxt({
+    mode: "generated",
+    contact: "s@example.com",
+    siteUrl: "https://example.com",
+    now: NOW,
+    existingContent: `${SECURITY_TXT_MARKER}\nContact: mailto:old@example.com\nExpires: 2020-01-01T00:00:00.000Z\n`,
+  });
+  assert.equal(markerOwned.action.kind, "write");
+});
+
+test("planSecurityTxt: generated mode refuses to overwrite an unmarked hand-authored file", () => {
+  const plan = planSecurityTxt({
+    mode: "generated",
+    contact: "s@example.com",
+    siteUrl: "https://example.com",
+    now: NOW,
+    existingContent: "Contact: mailto:hand-authored@example.com\n",
+  });
+  assert.deepEqual(plan.action, { kind: "none" });
+  assert.match(plan.note ?? "", /refusing to overwrite it/);
+});
+
+test("planSecurityTxt: generated mode with an invalid contact deletes only marker-owned stale output", () => {
+  const deletesOwned = planSecurityTxt({
+    mode: "generated",
+    contact: undefined,
+    siteUrl: "https://example.com",
+    now: NOW,
+    existingContent: `${SECURITY_TXT_MARKER}\nContact: mailto:old@example.com\n`,
+  });
+  assert.deepEqual(deletesOwned.action, { kind: "delete-stale" });
+  const leavesUnmarkedAlone = planSecurityTxt({
+    mode: "generated",
+    contact: undefined,
+    siteUrl: "https://example.com",
+    now: NOW,
+    existingContent: "Contact: mailto:hand-authored@example.com\n",
+  });
+  assert.deepEqual(leavesUnmarkedAlone.action, { kind: "none" });
+  const noPriorFile = planSecurityTxt({
+    mode: "generated",
+    contact: undefined,
+    siteUrl: "https://example.com",
+    now: NOW,
+    existingContent: null,
+  });
+  assert.deepEqual(noPriorFile.action, { kind: "none" });
 });

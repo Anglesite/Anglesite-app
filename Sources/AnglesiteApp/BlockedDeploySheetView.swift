@@ -156,6 +156,7 @@ private struct WarningCard: View {
         case .sriMissing: return "Missing subresource integrity"
         case .externalLinkRel: return "Missing rel=noopener"
         case .missingSecurityArtifact: return "Missing security artifact"
+        case .securityTxtIssue: return "security.txt issue"
         case .thirdPartyScript: return "Third-party script"
         case .other: return "Other"
         }
