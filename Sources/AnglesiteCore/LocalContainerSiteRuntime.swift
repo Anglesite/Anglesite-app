@@ -4,7 +4,7 @@ import Foundation
 /// 2026-06-25). Drives a `LocalContainerControl`: boot the container, hydrate it from the site's `Source/` git
 /// repo, connect the MCP client to the returned MCP endpoint, settle to `.ready`/`.failed`.
 /// Spawns nothing in-process.
-public actor LocalContainerSiteRuntime: SiteRuntime {
+public actor LocalContainerSiteRuntime: SiteRuntime, SiteRuntimeContainerCapability {
     /// Shared by `persistEdit`'s two commit-hash validity checks — built once rather than per
     /// character inside each `allSatisfy` closure.
     private static let hexDigits = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
@@ -76,6 +76,14 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
 
     public var state: SiteRuntimeState { stateMachine.state }
 
+    /// This runtime's own capability surface (#823) — `LocalContainerSiteRuntime` is the only
+    /// `SiteRuntime` conformer that returns non-nil here (every other conformer inherits the
+    /// protocol extension's `nil` default). Callers (`PreviewModel`) reach `containerSnapshot()`,
+    /// `resetNetworking()`, and `persistEdit(commit:)` through this instead of downcasting to
+    /// the concrete type. `nonisolated` per the protocol requirement — returning `self` never
+    /// touches actor-isolated state.
+    public nonisolated var containerCapability: (any SiteRuntimeContainerCapability)? { self }
+
     /// The `LocalContainerControl` held by this runtime, or `nil` if no site is currently
     /// started. Callers (e.g. `PreviewModel`) read this to build a `ContainerDeployExecutor`
     /// for the in-container deploy path (Task 5).
@@ -96,7 +104,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     ///
     /// Returns `nil` when no container is started (i.e. `activeSiteID` is nil — before
     /// `start()` completes successfully and after `stop()`).
-    public func containerSnapshot() -> (control: any LocalContainerControl, siteID: String)? {
+    public func containerSnapshot() async -> (control: any LocalContainerControl, siteID: String)? {
         guard let id = activeSiteID else { return nil }
         return (control: control, siteID: id)
     }

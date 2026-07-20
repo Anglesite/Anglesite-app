@@ -205,6 +205,76 @@ struct LocalContainerSiteRuntimeControlExposureTests {
         let snap = await rt.containerSnapshot()
         #expect(snap == nil)
     }
+
+    // MARK: - containerCapability (#823) — the SiteRuntime-protocol accessor callers use instead
+    // of `as? LocalContainerSiteRuntime`.
+
+    @Test("containerCapability is non-nil even before start() — it reflects the runtime's type, not its live state")
+    func containerCapabilityNonNilBeforeStart() async {
+        let fake = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let rt = LocalContainerSiteRuntime(ref: "HEAD", control: fake, mcpClient: mcp, connect: { _, _ in })
+        // Read through the `any SiteRuntime` existential — a fresh downcast-based reader wouldn't
+        // even need to await this (it's `nonisolated`), but the point is that it works the same
+        // whether accessed via the concrete type or the protocol box below.
+        let asProtocol: any SiteRuntime = rt
+        #expect(asProtocol.containerCapability != nil)
+    }
+
+    @Test("containerCapability.containerSnapshot() mirrors the concrete containerSnapshot() through the SiteRuntime existential")
+    func containerCapabilitySnapshotMirrorsConcreteAccessor() async throws {
+        let fake = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let rt: any SiteRuntime = LocalContainerSiteRuntime(ref: "HEAD", control: fake, mcpClient: mcp, connect: { _, _ in })
+
+        let beforeStart = await rt.containerCapability?.containerSnapshot()
+        #expect(beforeStart == nil)
+
+        await rt.start(siteID: "cap-site", siteDirectory: URL(fileURLWithPath: "/unused"))
+        let afterStart = try #require(await rt.containerCapability?.containerSnapshot())
+        #expect(afterStart.siteID == "cap-site")
+
+        await rt.stop()
+        let afterStop = await rt.containerCapability?.containerSnapshot()
+        #expect(afterStop == nil)
+    }
+
+    @Test("containerCapability.resetNetworking() reaches the underlying control")
+    func containerCapabilityResetNetworkingReachesControl() async {
+        let fake = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
+        let rt: any SiteRuntime = LocalContainerSiteRuntime(ref: "HEAD", control: fake, mcpClient: mcp, connect: { _, _ in })
+
+        await rt.containerCapability?.resetNetworking()
+
+        #expect(await fake.resetNetworkingCallCount == 1)
+    }
+
+    @Test("containerCapability.persistEdit(commit:) runs the same canonical git handoff as the concrete accessor")
+    func containerCapabilityPersistEditRunsGitHandoff() async throws {
+        let commit = "abc1234567890abcdef1234567890abcdef12345"
+        let bundle = Data("test bundle".utf8).base64EncodedString()
+        let host = BundleImportRecorder()
+        let source = URL(fileURLWithPath: "/sites/Foo.anglesite/Source")
+        let fake = FakeLocalContainerControl(
+            startResult: .success(Self.ok),
+            execResult: .init(exitCode: 0, stdout: "\(commit)\n\(bundle)\n", stderr: ""))
+        let rt: any SiteRuntime = LocalContainerSiteRuntime(
+            ref: "HEAD",
+            control: fake,
+            mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
+            connect: { _, _ in },
+            importBundle: { bundleURL, importedCommit, sourceDirectory in
+                try await host.run(bundleURL: bundleURL, commit: importedCommit, sourceDirectory: sourceDirectory)
+            })
+        await rt.start(siteID: "s1", siteDirectory: source)
+
+        try await rt.containerCapability?.persistEdit(commit: commit)
+
+        let hostCalls = await host.calls
+        #expect(hostCalls.count == 1)
+        #expect(hostCalls[0].commit == commit)
+    }
 }
 
 // MARK: - StepAwareFakeContainerControl

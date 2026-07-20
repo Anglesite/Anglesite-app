@@ -28,6 +28,28 @@ public enum SiteRuntimePersistenceError: LocalizedError, Sendable, Equatable {
     }
 }
 
+/// The local-Apple-Containerization-only capability surface reachable from a `SiteRuntime` via
+/// `containerCapability` (#823): the container control snapshot the deploy/ACP path executes
+/// commands through, the network-reset action the failure pane's "Restart Networking" button
+/// drives, and the guest-to-host edit persistence hop. `AnyObject`-bound so callers (e.g.
+/// `PreviewModel.editPersister(for:)`) can capture it `[weak]` the same way they used to capture
+/// a weak `LocalContainerSiteRuntime`.
+///
+/// Only `LocalContainerSiteRuntime` conforms and returns itself from `containerCapability`; every
+/// other `SiteRuntime` inherits the `nil` default below, so callers reach these members through
+/// this accessor instead of `as? LocalContainerSiteRuntime`.
+public protocol SiteRuntimeContainerCapability: AnyObject, Sendable {
+    /// The control and the currently-started site ID, read in a single hop — `nil` before the
+    /// container finishes booting and after it stops.
+    func containerSnapshot() async -> (control: any LocalContainerControl, siteID: String)?
+    /// Restarts the container's network path after a networking failure. Reaches the underlying
+    /// control unconditionally (no live-container gate), mirroring
+    /// `LocalContainerSiteRuntime.resetNetworking()`.
+    func resetNetworking() async
+    /// Hands a guest-side edit commit back to the canonical `Source/` repo.
+    func persistEdit(commit: String?) async throws
+}
+
 /// One runtime = one site's live preview. This is the seam for swapping execution substrates
 /// (see #59 / design doc §4): a container exposes an HTTP/WS URL rather than a pid + pipes, so the
 /// abstraction lives here — at `PreviewSession`'s old level — not at `SupervisorBackend`.
@@ -45,4 +67,20 @@ public protocol SiteRuntime: Actor {
     func stop() async
     func observe() -> AsyncStream<SiteRuntimeState>
     var mcpClient: MCPClient { get }
+    /// The container-only capability surface (deploy execution context, network reset, edit
+    /// persistence) — `nil` unless this runtime is a local Apple-Containerization runtime. See
+    /// `SiteRuntimeContainerCapability`.
+    ///
+    /// `nonisolated`, unlike `mcpClient` above: callers need to branch on nil-vs-non-nil
+    /// synchronously (the same way the `as? LocalContainerSiteRuntime` downcast it replaces was
+    /// synchronous) — e.g. `PreviewModel.editPersister(for:)` resolves it inside a non-`async`
+    /// function. Every conformer's witness just returns `self` or `nil`, never touching isolated
+    /// state, so `nonisolated` is safe to implement everywhere.
+    nonisolated var containerCapability: (any SiteRuntimeContainerCapability)? { get }
+}
+
+public extension SiteRuntime {
+    /// Default for every conformer that isn't `LocalContainerSiteRuntime`: no container-only
+    /// capabilities to expose.
+    nonisolated var containerCapability: (any SiteRuntimeContainerCapability)? { nil }
 }
