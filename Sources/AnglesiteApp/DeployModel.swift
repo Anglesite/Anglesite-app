@@ -447,7 +447,7 @@ final class DeployModel {
                 text: "Deactivating workers: \(removedIDs.sorted().joined(separator: ", "))"
             )
         }
-        let features = WorkerActivation.mapToFeatures(effectiveActiveIDs)
+        let workers = WorkerActivation.activeDescriptors(catalog: catalog, activeIDs: effectiveActiveIDs)
 
         // Dynamic-route claims of the effective active set (#746). Validation failures (a
         // malformed path, two active workers claiming overlapping routes) refuse the deploy
@@ -503,7 +503,7 @@ final class DeployModel {
             siteID: siteID,
             siteDirectory: siteDirectory,
             siteName: workerSiteName,
-            features: features,
+            workers: workers,
             routeClaims: routeClaims.map(\.claim),
             knownResources: settings.provisionedWorkerResources ?? .init()
         )
