@@ -1,7 +1,6 @@
 name: "🐛 Bug report"
 description: Report something broken in the Anglesite macOS app
 title: "[Bug]: "
-labels: []
 body:
   - type: markdown
     attributes:
