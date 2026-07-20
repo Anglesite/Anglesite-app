@@ -327,4 +327,14 @@ private actor StepAwareFakeContainerControl: LocalContainerControl {
     ) async throws -> InteractiveExecHandle {
         InteractiveExecHandle(write: { _ in }, terminate: {})
     }
+
+    func startWorkersDev(
+        siteID: String,
+        workers: [WorkerDescriptor],
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> URL {
+        URL(string: "http://127.0.0.1:51003")!
+    }
+
+    func stopWorkersDev(siteID: String) async throws {}
 }

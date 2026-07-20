@@ -5,9 +5,14 @@ import Foundation
 public struct LocalContainerSession: Sendable, Equatable {
     public let previewURL: URL
     public let mcpURL: URL
-    public init(previewURL: URL, mcpURL: URL) {
+    /// The local `wrangler dev --local` endpoint, populated only when `startWorkersDev` has been
+    /// called for this session (#708) — not part of the initial `start()` payload, since the
+    /// workers-dev process is started conditionally, after boot, not during it.
+    public let workersDevURL: URL?
+    public init(previewURL: URL, mcpURL: URL, workersDevURL: URL? = nil) {
         self.previewURL = previewURL
         self.mcpURL = mcpURL
+        self.workersDevURL = workersDevURL
     }
 }
 
@@ -124,6 +129,24 @@ public protocol LocalContainerControl: Sendable {
         workingDirectory: String,
         onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> InteractiveExecHandle
+
+    /// Starts a local `wrangler dev --local` (Miniflare-backed, no real Cloudflare account calls)
+    /// guest process for the given site's currently-active workers, as a fourth guest process
+    /// sibling to astro/mcp/bridges — called only after `start()` has already succeeded, and only
+    /// when `workers` is non-empty (#708 design §7 "started on demand, not unconditionally").
+    /// Crash-restart-capable (via `GuestProcessSupervisor`) — a wrangler-dev crash after this
+    /// returns does not throw back to any caller; it's handled internally.
+    /// - Returns: The host-proxied URL wrangler-dev is reachable at.
+    func startWorkersDev(
+        siteID: String,
+        workers: [WorkerDescriptor],
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> URL
+
+    /// Stops the workers-dev process (and its supervisor) for `siteID`, independent of astro/mcp —
+    /// used both when the effective active set becomes empty and as part of a full container
+    /// teardown (`LiveContainers.teardown` already calls this before `container.stop()`).
+    func stopWorkersDev(siteID: String) async throws
 
     /// Explicit, scoped network-layer recovery (#812): discards whatever shared network state this
     /// control's boot path caches, so the *next* boot attempt builds fresh state instead of reusing

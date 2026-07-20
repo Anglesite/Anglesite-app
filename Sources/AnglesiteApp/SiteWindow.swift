@@ -751,7 +751,7 @@ struct SiteWindow: View {
     @ViewBuilder
     private func previewPane(for site: SiteStore.Site) -> some View {
         switch model.preview.state {
-        case .ready(_, let url):
+        case .ready(_, let url, _):
             PreviewView(
                 url: model.preview.displayURL ?? url,
                 router: model.preview.editRouter,

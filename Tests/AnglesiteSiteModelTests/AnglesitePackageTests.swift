@@ -23,6 +23,13 @@ struct AnglesitePackageTests {
         #expect(pkg.sourceURL.deletingLastPathComponent().path == pkgURL.path)
     }
 
+    @Test("packageRoot(fromSourceURL:) is the inverse of sourceURL")
+    func packageRootFromSourceURLRoundTrips() {
+        let root = URL(fileURLWithPath: "/tmp/my-site.anglesite", isDirectory: true)
+        let pkg = AnglesitePackage(url: root)
+        #expect(AnglesitePackage.packageRoot(fromSourceURL: pkg.sourceURL) == root)
+    }
+
     @Test("quickLookThumbnailURL resolves under Config/")
     func quickLookThumbnailURLResolves() throws {
         let pkgURL = URL(fileURLWithPath: "/tmp/Acme.anglesite", isDirectory: true)

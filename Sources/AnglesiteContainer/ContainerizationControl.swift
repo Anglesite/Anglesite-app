@@ -200,6 +200,19 @@ public struct ContainerizationControl: LocalContainerControl {
         await network.reset()
     }
 
+    public func startWorkersDev(
+        siteID: String,
+        workers: [WorkerDescriptor],
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> URL {
+        // Stub implementation — real behavior lands in Task 4.
+        URL(string: "http://127.0.0.1:51003")!
+    }
+
+    public func stopWorkersDev(siteID: String) async throws {
+        // Stub implementation — real behavior lands in Task 4.
+    }
+
     /// Phases 0–2 of `start()`: resolve bundled artifacts, unpack rootfs/initfs, boot the VM.
     /// `sourceRepo: nil` boots a bare container (no virtio-fs share) — used by the vsock e2e test.
     /// Does NOT register the container in `live` — the caller owns its lifecycle (either `start()`'s

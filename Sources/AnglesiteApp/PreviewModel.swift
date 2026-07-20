@@ -310,7 +310,7 @@ final class PreviewModel {
 
     /// The ready preview URL, if the session is currently `.ready`.
     var readyURL: URL? {
-        if case .ready(_, let url) = state { return url }
+        if case .ready(_, let url, _) = state { return url }
         return nil
     }
 

@@ -4,7 +4,12 @@ import Foundation
 public enum SiteRuntimeState: Sendable, Equatable {
     case idle
     case starting(siteID: String)
-    case ready(siteID: String, url: URL)
+    /// `workersDevURL` is the local `wrangler dev --local` endpoint, present only when the site's
+    /// effective active-worker set was non-empty at start time (#708) — `nil` for a static-only
+    /// site, and always `nil` for `RemoteSandboxSiteRuntime`/`UnavailableSiteRuntime` (a
+    /// local-container-only capability for v1). Defaulted so every existing `.ready(siteID:url:)`
+    /// construction site keeps compiling unchanged.
+    case ready(siteID: String, url: URL, workersDevURL: URL? = nil)
     /// Couldn't preview this site (deps not installed, dev server crashed, etc.). `message` is
     /// shown to the owner; the Debug pane has the full subprocess output.
     case failed(siteID: String, message: String)
