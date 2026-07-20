@@ -2,6 +2,20 @@ import Foundation
 import Testing
 @testable import AnglesiteCore
 
+private func worker(_ id: String, d1: Bool, kv: Bool, r2: Bool) -> WorkerDescriptor {
+    WorkerDescriptor(
+        id: id, displayName: id, description: "test fixture", group: "test",
+        binding: .settingsActivated, resources: .init(needsD1: d1, needsKV: kv, needsR2: r2)
+    )
+}
+
+private let webmentionWorker = worker("webmention", d1: true, kv: true, r2: false)
+private let indieauthWorker = worker("indieauth", d1: true, kv: true, r2: false)
+private let micropubWorker = worker("micropub", d1: true, kv: true, r2: true)
+private let websubWorker = worker("websub", d1: true, kv: true, r2: false)
+private let v2Workers = [webmentionWorker, indieauthWorker]
+private let v3Workers = [webmentionWorker, indieauthWorker, micropubWorker, websubWorker]
+
 @Suite("SocialWorkerProvisionCommand")
 struct SocialWorkerProvisionCommandTests {
     @Test("provisions V-2 D1 and KV, writes wrangler.toml, then deploys through DeployCommand seam")
@@ -15,7 +29,7 @@ struct SocialWorkerProvisionCommandTests {
         let deployer = DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1))
         let command = SocialWorkerProvisionCommand(tokenSource: { "token" }, runner: recorder.runner, deployer: deployer.deployer)
 
-        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site")
+        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers)
 
         guard case .succeeded(let url, let resources, _) = result else {
             Issue.record("expected success, got \(result)")
@@ -59,7 +73,7 @@ struct SocialWorkerProvisionCommandTests {
             siteID: "site-1",
             siteDirectory: site,
             siteName: "my-site",
-            features: WorkerComposition.Feature.v3
+            workers: v3Workers
         )
 
         guard case .succeeded(_, let resources, _) = result else {
@@ -95,7 +109,7 @@ struct SocialWorkerProvisionCommandTests {
         let site = try temporaryDirectory()
         let existing = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
-            features: WorkerComposition.Feature.v3,
+            workers: v3Workers,
             resources: .init(d1DatabaseID: "d1-existing", kvNamespaceID: "kv-existing", r2BucketName: "media-existing")
         )
         try existing.write(to: site.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
@@ -113,7 +127,7 @@ struct SocialWorkerProvisionCommandTests {
             siteID: "site-1",
             siteDirectory: site,
             siteName: "my-site",
-            features: WorkerComposition.Feature.v3
+            workers: v3Workers
         )
 
         guard case .succeeded(_, let resources, _) = result else {
@@ -138,7 +152,7 @@ struct SocialWorkerProvisionCommandTests {
         let deployer = DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1))
         let command = SocialWorkerProvisionCommand(tokenSource: { "token" }, runner: recorder.runner, deployer: deployer.deployer)
 
-        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site")
+        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers)
 
         guard case .failed(let reason, let exitCode, let resources) = result else {
             Issue.record("expected failure, got \(result)")
@@ -168,7 +182,7 @@ struct SocialWorkerProvisionCommandTests {
             deployer: DeployRecorder(result: .failed(reason: "pre-deploy scan could not run", exitCode: nil)).deployer
         )
 
-        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site")
+        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers)
 
         guard case .failed(let reason, nil, let resources) = result else {
             Issue.record("expected deploy failure, got \(result)")
@@ -194,7 +208,7 @@ struct SocialWorkerProvisionCommandTests {
         let deployer = DeployRecorder(result: .workerNameConflict(name: "taken-name"))
         let command = SocialWorkerProvisionCommand(tokenSource: { "token" }, runner: recorder.runner, deployer: deployer.deployer)
 
-        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site")
+        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers)
 
         guard case .workerNameConflict(let name, let resources) = result else {
             Issue.record("expected .workerNameConflict, got \(result)"); return
@@ -215,7 +229,7 @@ struct SocialWorkerProvisionCommandTests {
         let deployer = DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1))
         let command = SocialWorkerProvisionCommand(tokenSource: { "token" }, runner: recorder.runner, deployer: deployer.deployer)
 
-        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site")
+        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers)
 
         guard case .failed(let reason, let exitCode, let resources) = result else {
             Issue.record("expected migration failure, got \(result)")
@@ -265,7 +279,7 @@ struct SocialWorkerProvisionCommandTests {
         // a file-scrape alone would find no bucket name and try to recreate it.
         let currentToml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
-            features: [.indieauth],
+            workers: [indieauthWorker],
             resources: .init(d1DatabaseID: "d1-id", kvNamespaceID: "kv-id", r2BucketName: nil)
         )
         try currentToml.write(to: site.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
@@ -286,7 +300,7 @@ struct SocialWorkerProvisionCommandTests {
         // Reactivating micropub (needs R2) should reuse the known bucket, not call `r2 bucket create` again.
         let result = await command.provision(
             siteID: "site-1", siteDirectory: site, siteName: "my-site",
-            features: [.indieauth, .micropub], knownResources: known
+            workers: [indieauthWorker, micropubWorker], knownResources: known
         )
 
         guard case .succeeded(_, let resources, _) = result else {

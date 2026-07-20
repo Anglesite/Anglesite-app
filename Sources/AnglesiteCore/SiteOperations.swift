@@ -73,21 +73,21 @@ public struct SiteOperations: Sendable {
         let configStore = SiteConfigStore(configDirectory: site.configDirectory)
         let settings = (try? await configStore.load()) ?? SiteSettings()
         let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: [], graph: nil)
-        let features = WorkerActivation.mapToFeatures(effectiveActiveIDs)
 
-        // Dynamic-route claims (#746): this path has no catalog fetcher wired (matching the
-        // `catalog: []` activation choice above), but the on-disk cache from a previous GUI fetch
-        // still lets active workers keep their `run_worker_first` routes — otherwise a headless
-        // deploy would silently regenerate wrangler.toml without them. Validation failures refuse
-        // the deploy before any Cloudflare call, mirroring `DeployModel.runDeploy`.
+        // Dynamic-route claims (#746) and resource composition (#708) both need real descriptor
+        // data, which the `catalog: []` activation call above deliberately doesn't have (matching
+        // the effectiveActiveIDs "settings-activated only" comment above). The on-disk cache from
+        // a previous GUI fetch is the only source of that data on this headless path.
         let cachedCatalog = WorkerCatalogFetcher.cachedCatalog()
+        let workers = WorkerActivation.activeDescriptors(catalog: cachedCatalog, activeIDs: effectiveActiveIDs)
         if cachedCatalog.isEmpty && !effectiveActiveIDs.isEmpty {
-            // The shadowing-protection gap this leaves (an active worker's routes deploy without
-            // their run_worker_first entries) must be visible in the debug pane, not silent.
+            // The gap this leaves (an active worker deploys with no D1/KV/R2 bindings and no
+            // run_worker_first entries — there's no catalog data to resolve its active id against)
+            // must be visible in the debug pane, not silent.
             await LogCenter.shared.append(
                 source: "deploy:\(site.id)",
                 stream: .stderr,
-                text: "no cached worker catalog — deploying active workers (\(effectiveActiveIDs.sorted().joined(separator: ", "))) without route claims; run_worker_first will be omitted until a catalog fetch succeeds"
+                text: "no cached worker catalog — deploying active workers (\(effectiveActiveIDs.sorted().joined(separator: ", "))) with no resource bindings or route claims; wrangler.toml will be static-only until a catalog fetch succeeds"
             )
         }
         let routeClaims: [WorkerRouteClaims.OwnedClaim]
@@ -112,7 +112,7 @@ public struct SiteOperations: Sendable {
             siteID: site.id,
             siteDirectory: siteDirectory,
             siteName: workerSiteName,
-            features: features,
+            workers: workers,
             routeClaims: routeClaims.map(\.claim),
             knownResources: settings.provisionedWorkerResources ?? .init()
         )
