@@ -1,0 +1,49 @@
+name: "✨ Feature request"
+description: Suggest an idea or enhancement for Anglesite
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [`docs/build-plan.md`](https://github.com/Anglesite/Anglesite-app/blob/main/docs/build-plan.md) and [open issues](https://github.com/Anglesite/Anglesite-app/issues) first — this may already be planned or in flight.
+
+        For anything beyond a small improvement, this issue **is** the "discuss big changes first" step from `CONTRIBUTING.md` — please describe the problem and proposed approach before opening a PR.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What's missing or painful today? Who does this help?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you'd like to see happen.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: dropdown
+    id: repo
+    attributes:
+      label: Which repo does this touch?
+      description: Changes to the MCP message schema need a paired PR — see CLAUDE.md ▸ "Two-repo coordination".
+      options:
+        - Anglesite-app only (SwiftUI shell, template, preview, edit overlay)
+        - anglesite only (MCP sidecar server)
+        - Both (paired PR)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Mockups, related issues, prior discussion.
+    validations:
+      required: false
