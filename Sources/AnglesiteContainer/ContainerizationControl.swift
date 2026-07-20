@@ -38,6 +38,8 @@ public struct ContainerizationControl: LocalContainerControl {
     // Guest-side ports the dev server + MCP sidecar listen on (also the vsock ports the bridge maps to).
     private static let previewPort: UInt32 = 4321
     private static let mcpPort: UInt32 = 4399
+    /// Wrangler's own conventional local-dev port.
+    private static let workersPort: UInt32 = 8787
 
     /// Guest mountpoint for the read-only virtio-fs share of the host `Source/` repo (see `start()` step 3).
     private static let repoSharePath = "/run/anglesite-source"
@@ -200,17 +202,64 @@ public struct ContainerizationControl: LocalContainerControl {
         await network.reset()
     }
 
+    /// See `LocalContainerControl.startWorkersDev` for the full contract.
     public func startWorkersDev(
         siteID: String,
         workers: [WorkerDescriptor],
         onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> URL {
-        // Stub implementation — real behavior lands in Task 4.
-        URL(string: "http://127.0.0.1:51003")!
+        guard let container = await live.container(for: siteID) else {
+            throw LocalContainerError.bootFailed("startWorkersDev: no live container for siteID '\(siteID)'")
+        }
+
+        // Any previously-running workers-dev session for this site is torn down first — this
+        // method also serves as the "restart with a new active set" entry point once a future
+        // Workers tab calls `LocalContainerSiteRuntime.updateActiveWorkers(_:)` (#708 design §2:
+        // this PR builds that capability even though `start()` is its only caller today).
+        await live.teardownWorkersDev(siteID: siteID)
+
+        // Ephemeral, git-ignore-free local config: lives outside /workspace/site entirely, so a
+        // transient local-dev session can never dirty the site's real, git-tracked wrangler.toml
+        // (#708 design §4). No real resource ids — Miniflare creates local-persisted D1/KV/R2
+        // stores automatically for declared bindings in --local mode.
+        let toml = try WorkerComposition.generateWranglerToml(siteName: siteID, workers: workers)
+        let configDir = "/tmp/anglesite-workers-dev/\(siteID)"
+        let configPath = "\(configDir)/wrangler.toml"
+        try await runToCompletion(container, id: "workers-dev-mkdir", onOutput: onOutput,
+            ["mkdir", "-p", configDir])
+        try await writeGuestFile(container, path: configPath, contents: toml, onOutput: onOutput)
+
+        let launcher = LinuxContainerProcessLauncher(container: container)
+        let supervisor = GuestProcessSupervisor(
+            launcher: launcher,
+            id: "workers-dev",
+            argv: ["sh", "-lc",
+                "cd /workspace/site && npx wrangler dev --local --config \(configPath) --port \(Self.workersPort)"],
+            restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.5),
+            onOutput: { line, stream in onOutput("[workers-dev] \(line)", stream) })
+        try await supervisor.start()
+
+        let dial: VsockDialer = { port in try await container.dialVsock(port: port) }
+        let proxy = VsockTCPProxy(
+            guestPort: Self.workersPort,
+            dial: dial,
+            onDialError: { error in onOutput("[proxy:workers-dev] dialVsock(\(Self.workersPort)) failed: \(error)", .stderr) },
+            onEvent: { event in onOutput("[proxy:workers-dev] \(event)", .stdout) })
+        let url: URL
+        do {
+            url = try await proxy.start()
+        } catch {
+            await supervisor.stop()
+            throw LocalContainerError.bootFailed("workers-dev proxy start failed: \(error)")
+        }
+
+        await live.storeWorkersDev(siteID: siteID, supervisor: supervisor, proxy: proxy)
+        return url
     }
 
+    /// See `LocalContainerControl.stopWorkersDev` for the full contract.
     public func stopWorkersDev(siteID: String) async throws {
-        // Stub implementation — real behavior lands in Task 4.
+        await live.teardownWorkersDev(siteID: siteID)
     }
 
     /// Phases 0–2 of `start()`: resolve bundled artifacts, unpack rootfs/initfs, boot the VM.
@@ -887,6 +936,20 @@ public struct ContainerizationControl: LocalContainerControl {
         }
     }
 
+    /// Writes `contents` to `path` inside the guest via a one-shot `sh -c 'cat > path'` fed the
+    /// text as a heredoc-safe base64 payload (avoiding any shell-quoting/escaping surface for
+    /// `contents`, which is a generated wrangler.toml — untrusted only in the sense that it embeds
+    /// a site name, already validated by `WorkerComposition.isValidSiteName`).
+    private func writeGuestFile(
+        _ container: LinuxContainer, path: String, contents: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws {
+        let encoded = Data(contents.utf8).base64EncodedString()
+        try await runToCompletion(container, id: "write-\(path.replacingOccurrences(of: "/", with: "-"))",
+            onOutput: onOutput,
+            ["sh", "-c", "echo \(encoded) | base64 -d > \(path)"])
+    }
+
     /// Start a guest process detached (no `wait`), e.g. a long-running dev server. Its stdout/stderr
     /// stream to `onOutput` live via `LineStreamingWriter`, each line prefixed `[label]` so a single
     /// stream can distinguish astro/mcp/bridge output — this is the only visibility into the guest
@@ -1036,6 +1099,10 @@ actor LiveContainers {
     private var proxies: [String: [VsockTCPProxy]] = [:]
     /// Per-site ext4 files (rootfs + initfs) to delete on teardown so disk doesn't grow per start/stop.
     private var ext4Artifacts: [String: [URL]] = [:]
+    /// The workers-dev supervisor + its own proxy, present only while `startWorkersDev` has an
+    /// active session for that site — absent entirely for a static-only site.
+    private var workersDevSupervisors: [String: GuestProcessSupervisor] = [:]
+    private var workersDevProxies: [String: VsockTCPProxy] = [:]
 
     func container(for siteID: String) -> LinuxContainer? { containers[siteID] }
 
@@ -1045,7 +1112,25 @@ actor LiveContainers {
         ext4Artifacts[siteID] = artifacts
     }
 
+    func storeWorkersDev(siteID: String, supervisor: GuestProcessSupervisor, proxy: VsockTCPProxy) {
+        workersDevSupervisors[siteID] = supervisor
+        workersDevProxies[siteID] = proxy
+    }
+
+    func workersDevSupervisor(for siteID: String) -> GuestProcessSupervisor? { workersDevSupervisors[siteID] }
+
+    /// Stops just the workers-dev process + its proxy for `siteID`, leaving astro/mcp/the
+    /// container itself untouched — used both for an explicit `stopWorkersDev` call and as the
+    /// first step of a full `teardown`.
+    func teardownWorkersDev(siteID: String) async {
+        if let supervisor = workersDevSupervisors[siteID] { await supervisor.stop() }
+        workersDevSupervisors[siteID] = nil
+        if let proxy = workersDevProxies[siteID] { await proxy.stop() }
+        workersDevProxies[siteID] = nil
+    }
+
     func teardown(siteID: String) async {
+        await teardownWorkersDev(siteID: siteID)
         for p in proxies[siteID] ?? [] { await p.stop() }
         proxies[siteID] = nil
         // Stop the VM first (releases the file handles), then remove the backing ext4 images.
