@@ -312,6 +312,42 @@ struct DeployModelTests {
         }
     }
 
+    @Test("an active worker with no matching catalog entry logs a warning instead of deploying silently")
+    func emptyCatalogWithActiveWorkerWarnsInDebugPane() async throws {
+        let executor = GatedDeployExecutor()
+        let command = DeployCommand(tokenSource: { "test-token" }, executor: executor)
+        let contentGraph = SiteContentGraph()
+        let logCenter = LogCenter()
+        let model = DeployModel(
+            command: command,
+            logCenter: logCenter,
+            suddenTerminationController: SuddenTerminationController(disable: {}, enable: {}),
+            tokenAvailabilityOverride: { true },
+            contentGraph: contentGraph,
+            workerCatalog: { [] }
+        )
+        let dir = try temporaryDirectory()
+        let configDir = dir.appendingPathComponent("Config", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let configStore = SiteConfigStore(configDirectory: configDir)
+        try await configStore.save(SiteSettings(activeWorkerIDs: ["indieauth"]))
+
+        // With no catalog entry to resolve "indieauth" against, `workers` ends up empty — same
+        // D1/KV-free path as a genuinely static site, so this reaches the build step and
+        // succeeds like `staticSiteDeploysUnaffected` — but it must also warn, unlike that case.
+        model.deploy(siteID: "test-site", siteDirectory: dir, configDirectory: configDir, currentRoutes: [])
+        await executor.waitUntilBuildIsParked()
+        await executor.resumeBuild()
+        while model.isRunning { await Task.yield() }
+
+        guard case .succeeded = model.phase else {
+            Issue.record("Expected deploy to succeed, got \(model.phase)")
+            return
+        }
+        let lines = await logCenter.snapshot()
+        #expect(lines.contains { $0.text.contains("no catalog entry for active worker(s) indieauth") })
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("DeployModelTests-\(UUID().uuidString)", isDirectory: true)

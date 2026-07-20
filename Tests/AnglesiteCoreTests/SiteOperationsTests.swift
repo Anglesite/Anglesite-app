@@ -157,7 +157,7 @@ struct SiteOperationsTests {
 
         let result = await ops.provisionSocialWorker(site: site)
 
-        guard case .succeeded(let url, _, _) = result else {
+        guard case .succeeded(let url, let resources, _) = result else {
             Issue.record("expected success, got \(result)")
             return
         }
@@ -170,6 +170,36 @@ struct SiteOperationsTests {
         #expect(await recorder.deployCalls == [
             .init(token: "token", siteID: "s1", siteDirectory: package.appendingPathComponent("Source", isDirectory: true))
         ])
+        #expect(resources.d1DatabaseID == "d1-id")
+        #expect(resources.kvNamespaceID == "kv-id")
+    }
+
+    @Test("provisionSocialWorker's fixed V-2 starter pack (webmention + indieauth) restores the pre-#708 Feature.v2 default")
+    func provisionSocialWorkerRestoresV2Default() async throws {
+        // provisionSocialWorker never accepted a workers/features parameter and always relied on
+        // provision(...)'s default value — Feature.v2 pre-#708, now the fixed v2StarterWorkers
+        // constant. This asserts every observable trace of that default's composition: D1 create
+        // (both webmention and indieauth need it), KV create (same), and the AUTH_DB migration
+        // step that only runs when "indieauth" specifically is among the composed workers.
+        let package = try temporaryPackage()
+        defer { try? FileManager.default.removeItem(at: package) }
+        let site = makeSite(name: "Blue Bottle Cafe", packageURL: package)
+        let recorder = SocialWorkerRecorder()
+        let ops = SiteOperations(factory: SocialWorkerFactory(recorder: recorder), store: throwawayStore())
+
+        let result = await ops.provisionSocialWorker(site: site)
+
+        guard case .succeeded = result else {
+            Issue.record("expected success, got \(result)")
+            return
+        }
+        let arguments = await recorder.arguments
+        #expect(arguments.contains(["d1", "create", "blue-bottle-cafe-social", "--json"]))
+        #expect(arguments.contains(["kv", "namespace", "create", "blue-bottle-cafe-social", "--json"]))
+        #expect(arguments.contains(["d1", "migrations", "apply", "AUTH_DB", "--remote"]))
+        let toml = try String(
+            contentsOf: package.appendingPathComponent("Source/wrangler.toml"), encoding: .utf8)
+        #expect(!toml.contains("[[r2_buckets]]"))
     }
 
     @Test("social worker provisioning maps missing folder grants to failed results")

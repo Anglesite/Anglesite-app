@@ -91,15 +91,11 @@ public struct SiteOperations: Sendable {
         // a previous GUI fetch is the only source of that data on this headless path.
         let cachedCatalog = cachedWorkerCatalog()
         let workers = WorkerActivation.activeDescriptors(catalog: cachedCatalog, activeIDs: effectiveActiveIDs)
-        if cachedCatalog.isEmpty && !effectiveActiveIDs.isEmpty {
-            // The gap this leaves (an active worker deploys with no D1/KV/R2 bindings and no
-            // run_worker_first entries — there's no catalog data to resolve its active id against)
-            // must be visible in the debug pane, not silent.
-            await LogCenter.shared.append(
-                source: "deploy:\(site.id)",
-                stream: .stderr,
-                text: "no cached worker catalog — deploying active workers (\(effectiveActiveIDs.sorted().joined(separator: ", "))) with no resource bindings or route claims; wrangler.toml will be static-only until a catalog fetch succeeds"
-            )
+        let unresolvedIDs = WorkerActivation.unresolvedActiveIDs(activeIDs: effectiveActiveIDs, resolved: workers)
+        if let warning = WorkerActivation.missingDescriptorWarning(unresolvedIDs: unresolvedIDs) {
+            // Mirrors DeployModel.runDeploy's identical warning — shared text via
+            // WorkerActivation so the two paths can't drift (#708 review feedback).
+            await LogCenter.shared.append(source: "deploy:\(site.id)", stream: .stderr, text: warning)
         }
         let routeClaims: [WorkerRouteClaims.OwnedClaim]
         do {

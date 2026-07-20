@@ -124,4 +124,38 @@ struct WorkerActivationTests {
         let indieauth = descriptor(id: "indieauth", binding: .settingsActivated)
         #expect(WorkerActivation.activeDescriptors(catalog: [indieauth], activeIDs: []).isEmpty)
     }
+
+    @Test("unresolvedActiveIDs is empty when every active id resolved")
+    func unresolvedActiveIDsEmptyWhenFullyResolved() {
+        let indieauth = descriptor(id: "indieauth", binding: .settingsActivated)
+        let unresolved = WorkerActivation.unresolvedActiveIDs(activeIDs: ["indieauth"], resolved: [indieauth])
+        #expect(unresolved.isEmpty)
+    }
+
+    @Test("unresolvedActiveIDs catches a fully-empty catalog")
+    func unresolvedActiveIDsFullyEmptyCatalog() {
+        let unresolved = WorkerActivation.unresolvedActiveIDs(activeIDs: ["indieauth", "webmention"], resolved: [])
+        #expect(unresolved == ["indieauth", "webmention"])
+    }
+
+    @Test("unresolvedActiveIDs catches a partial mismatch, not just a fully-empty catalog")
+    func unresolvedActiveIDsPartialMismatch() {
+        let indieauth = descriptor(id: "indieauth", binding: .settingsActivated)
+        // "webmention" is active but has no catalog entry — the catalog isn't empty, so a
+        // catalog.isEmpty check alone would miss this.
+        let unresolved = WorkerActivation.unresolvedActiveIDs(
+            activeIDs: ["indieauth", "webmention"], resolved: [indieauth])
+        #expect(unresolved == ["webmention"])
+    }
+
+    @Test("missingDescriptorWarning is nil when nothing is unresolved")
+    func missingDescriptorWarningNilWhenResolved() {
+        #expect(WorkerActivation.missingDescriptorWarning(unresolvedIDs: []) == nil)
+    }
+
+    @Test("missingDescriptorWarning names every unresolved id, sorted")
+    func missingDescriptorWarningNamesUnresolvedIDs() {
+        let warning = WorkerActivation.missingDescriptorWarning(unresolvedIDs: ["webmention", "indieauth"])
+        #expect(warning?.contains("indieauth, webmention") == true)
+    }
 }
