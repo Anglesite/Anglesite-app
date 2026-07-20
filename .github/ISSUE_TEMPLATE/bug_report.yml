@@ -1,0 +1,80 @@
+name: "🐛 Bug report"
+description: Report something broken in the Anglesite macOS app
+title: "[Bug]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please check [open issues](https://github.com/Anglesite/Anglesite-app/issues) first to avoid duplicates — if one already exists, add a comment there instead.
+
+        This repo is the native macOS app. If the bug is actually in the MCP sidecar server, file it in [`Anglesite/anglesite`](https://github.com/Anglesite/anglesite) instead — use the "Which repo" field below if you're not sure.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong, in a sentence or two.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps from a clean state, if possible.
+      placeholder: |
+        1. Open site '...'
+        2. Click '...'
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: repo
+    attributes:
+      label: Which repo does this affect?
+      options:
+        - Anglesite-app (this repo — SwiftUI shell, template, preview, edit overlay)
+        - anglesite (MCP sidecar server)
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: e.g. 27.0
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: App version / build
+      description: From the app's About window, or the git commit if you built from source.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Every spawned subprocess streams stdout/stderr to the app's debug pane — paste anything relevant from there, plus any Console.app crash logs.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, related issues, anything else that helps.
+    validations:
+      required: false
