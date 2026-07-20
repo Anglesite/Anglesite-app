@@ -128,6 +128,28 @@ struct GuestProcessSupervisorTests {
         #expect(await launcher.launchCalls.count == 3)
     }
 
+    @Test("a clean exit (code 0) under .onCrash stops without restarting — clean exit is never a crash")
+    func cleanExitUnderOnCrashStopsWithoutRestarting() async throws {
+        let launcher = FakeGuestProcessLauncher()
+        let supervisor = GuestProcessSupervisor(
+            launcher: launcher, id: "test", argv: ["true"],
+            restartPolicy: .onCrash(maxAttempts: 3, baseBackoff: 0.01), onOutput: { _, _ in })
+        try await supervisor.start()
+        let stream = await supervisor.observe()
+        var iterator = stream.makeAsyncIterator()
+        while await iterator.next() != .running {}
+
+        await launcher.handles[0].exit(code: 0)
+        var final: GuestProcessSupervisor.State?
+        while let s = await iterator.next() {
+            final = s
+            if s == .stopped { break }
+        }
+        #expect(final == .stopped)
+        // No relaunch happened — a clean exit isn't a crash.
+        #expect(await launcher.launchCalls.count == 1)
+    }
+
     @Test("stop() suppresses the next restart — an intentional stop never relaunches")
     func stopSuppressesRestart() async throws {
         let launcher = FakeGuestProcessLauncher()
