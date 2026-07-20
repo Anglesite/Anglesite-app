@@ -448,6 +448,17 @@ final class DeployModel {
             )
         }
         let workers = WorkerActivation.activeDescriptors(catalog: catalog, activeIDs: effectiveActiveIDs)
+        if catalog.isEmpty && !effectiveActiveIDs.isEmpty {
+            // Mirrors SiteOperations.deployWithWorkerComposition's identical warning: with no
+            // catalog data to resolve an active id's resource needs against, this deploy composes
+            // a static-only wrangler.toml — active workers ship with no D1/KV/R2 bindings and no
+            // route claims. Must be visible in the debug pane, not silent (#708).
+            await logCenter.append(
+                source: "deploy:\(siteID)",
+                stream: .stderr,
+                text: "no worker catalog available — deploying active workers (\(effectiveActiveIDs.sorted().joined(separator: ", "))) with no resource bindings or route claims; wrangler.toml will be static-only until a catalog fetch succeeds"
+            )
+        }
 
         // Dynamic-route claims of the effective active set (#746). Validation failures (a
         // malformed path, two active workers claiming overlapping routes) refuse the deploy

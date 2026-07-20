@@ -78,8 +78,9 @@ public struct WorkerDescriptor: Sendable, Equatable, Codable, Identifiable {
         }
     }
 
-    /// Generalizes `WorkerComposition.Feature`'s hand-maintained `needsD1`/`needsKV`/`needsR2`
-    /// switch statements (`WorkerComposition.swift:28-53`) into manifest-driven data.
+    /// Manifest-driven equivalent of the `needsD1`/`needsKV`/`needsR2` flags the old
+    /// `WorkerComposition.Feature` enum used to hand-maintain as switch statements (removed by
+    /// #708's descriptor migration).
     public struct Resources: Sendable, Equatable, Codable {
         public let needsD1: Bool
         public let needsKV: Bool
