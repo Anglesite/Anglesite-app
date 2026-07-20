@@ -102,20 +102,26 @@ struct WorkerActivationTests {
         #expect(WorkerActivation.removedIDs(previous: ["a"], next: ["a", "b"]).isEmpty)
     }
 
-    @Test("mapToFeatures maps known catalog ids to Feature cases in declaration order")
-    func mapToFeaturesKnownIDs() {
-        let features = WorkerActivation.mapToFeatures(["websub", "indieauth"])
-        #expect(features == [.indieauth, .websub])
+    @Test("activeDescriptors resolves known ids against the catalog")
+    func activeDescriptorsKnownIDs() {
+        let webmention = descriptor(id: "webmention", binding: .settingsActivated)
+        let indieauth = descriptor(id: "indieauth", binding: .settingsActivated)
+        let resolved = WorkerActivation.activeDescriptors(
+            catalog: [webmention, indieauth], activeIDs: ["indieauth", "webmention"])
+        #expect(Set(resolved.map(\.id)) == ["indieauth", "webmention"])
     }
 
-    @Test("mapToFeatures silently drops ids with no matching Feature case")
-    func mapToFeaturesDropsUnknownIDs() {
-        let features = WorkerActivation.mapToFeatures(["indieauth", "solid-pod"])
-        #expect(features == [.indieauth])
+    @Test("activeDescriptors drops ids with no matching catalog entry")
+    func activeDescriptorsDropsUnknownIDs() {
+        let indieauth = descriptor(id: "indieauth", binding: .settingsActivated)
+        let resolved = WorkerActivation.activeDescriptors(
+            catalog: [indieauth], activeIDs: ["indieauth", "solid-pod"])
+        #expect(resolved.map(\.id) == ["indieauth"])
     }
 
-    @Test("mapToFeatures of an empty set is empty")
-    func mapToFeaturesEmpty() {
-        #expect(WorkerActivation.mapToFeatures([]).isEmpty)
+    @Test("activeDescriptors of an empty id set is empty")
+    func activeDescriptorsEmpty() {
+        let indieauth = descriptor(id: "indieauth", binding: .settingsActivated)
+        #expect(WorkerActivation.activeDescriptors(catalog: [indieauth], activeIDs: []).isEmpty)
     }
 }

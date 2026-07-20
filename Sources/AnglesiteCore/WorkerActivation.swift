@@ -54,13 +54,13 @@ public enum WorkerActivation {
         previous.subtracting(next)
     }
 
-    /// Interim catalog-id → `Feature` shim (#709 design §4/§10): `generateWranglerToml` and
-    /// `SocialWorkerProvisionCommand.provision` still take `[WorkerComposition.Feature]`, not
-    /// `[WorkerDescriptor]`, until #708 migrates them. An id with no matching `Feature` case (a
-    /// future, not-yet-composed catalog worker) is silently dropped — there is nothing else this
-    /// call can do with it today. Iterating `Feature.allCases` (rather than mapping `ids`
-    /// directly) gives deterministic, declaration-order output for stable `wrangler.toml` diffs.
-    public static func mapToFeatures(_ ids: Set<String>) -> [WorkerComposition.Feature] {
-        WorkerComposition.Feature.allCases.filter { ids.contains($0.rawValue) }
+    /// The effective active worker set as full `WorkerDescriptor`s, resolved by id against
+    /// `catalog` — what `WorkerComposition.generateWranglerToml` and
+    /// `SocialWorkerProvisionCommand.provision` need now that composition is descriptor-driven
+    /// (#708). An id present in `activeIDs` but absent from `catalog` (a stale id, or a catalog
+    /// fetch that hasn't happened yet) is silently dropped — there is no descriptor data to
+    /// compose it with. Mirrors `WorkerRouteClaims.activeClaims(catalog:activeIDs:)`'s shape.
+    public static func activeDescriptors(catalog: [WorkerDescriptor], activeIDs: Set<String>) -> [WorkerDescriptor] {
+        catalog.filter { activeIDs.contains($0.id) }
     }
 }
