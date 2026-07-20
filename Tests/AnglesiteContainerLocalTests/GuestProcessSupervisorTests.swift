@@ -63,8 +63,8 @@ struct GuestProcessSupervisorTests {
         #expect(await launcher.launchCalls.count == 1)
     }
 
-    @Test("a clean exit under .never gives up without restarting")
-    func neverPolicyGivesUpOnExit() async throws {
+    @Test("a non-zero exit under .never gives up without restarting")
+    func neverPolicyGivesUpOnNonZeroExit() async throws {
         let launcher = FakeGuestProcessLauncher()
         let supervisor = GuestProcessSupervisor(
             launcher: launcher, id: "test", argv: ["true"], restartPolicy: .never, onOutput: { _, _ in })
@@ -82,6 +82,25 @@ struct GuestProcessSupervisorTests {
             Issue.record("expected .failed, got \(String(describing: final))")
             return
         }
+        #expect(await launcher.launchCalls.count == 1)
+    }
+
+    @Test("a clean exit (code 0) under .never stops, not fails — clean exit is never a crash regardless of policy")
+    func cleanExitUnderNeverStopsNotFails() async throws {
+        let launcher = FakeGuestProcessLauncher()
+        let supervisor = GuestProcessSupervisor(
+            launcher: launcher, id: "test", argv: ["true"], restartPolicy: .never, onOutput: { _, _ in })
+        try await supervisor.start()
+        let stream = await supervisor.observe()
+        var iterator = stream.makeAsyncIterator()
+        while await iterator.next() != .running {}
+        await launcher.handles[0].exit(code: 0)
+        var final: GuestProcessSupervisor.State?
+        while let s = await iterator.next() {
+            final = s
+            if s == .stopped { break }
+        }
+        #expect(final == .stopped)
         #expect(await launcher.launchCalls.count == 1)
     }
 

@@ -165,7 +165,8 @@ actor GuestProcessSupervisor {
             let exitCode = try? await handle.wait()
             try? await handle.delete()
             guard gen == generation, !isStopping else { return }
-            // A clean exit (code 0) is never a crash — it stops regardless of restart policy,
+            // A clean exit (code 0) is never a crash — it stops regardless of restart policy
+            // (.never included: a deliberate exit isn't the same as giving up after failures),
             // mirroring RestartPolicy's own documented contract ("clean exit code 0 always
             // stops", SupervisorBackend.swift:14) that InProcessBackend.superviseLoop already
             // honors but this loop didn't.
