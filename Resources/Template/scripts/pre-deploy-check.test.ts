@@ -305,6 +305,25 @@ test("checkSecurityTxt: an insecure http:// Canonical is a finding", () => {
   assert.ok(issues.some((i) => /must be a valid HTTPS URL/.test(i.message)));
 });
 
+test("checkSecurityTxt: an unrecognized SECURITY_TXT_MODE value is flagged and falls back to inference", () => {
+  const config = "SECURITY_TXT_MODE=Generated\nSECURITY_CONTACT=security@example.com";
+  const issues = checkSecurityTxt(null, config, NOW);
+  // No usable contact-matching content published, and the typo'd mode still infers "generated"
+  // (SECURITY_CONTACT is set) — so both the typo finding and the missing-file finding fire.
+  assert.ok(issues.some((i) => /not a recognized value/.test(i.message)));
+  assert.ok(issues.some((i) => /is missing/.test(i.message)));
+});
+
+test("checkSecurityTxt: an unrecognized mode is still flagged even when disabled-inferred and absent", () => {
+  const issues = checkSecurityTxt(null, "SECURITY_TXT_MODE=bogus", NOW);
+  assert.equal(issues.length, 1);
+  assert.match(issues[0].message, /not a recognized value/);
+});
+
+test("checkSecurityTxt: an empty SECURITY_TXT_MODE value is treated as unset, not a typo", () => {
+  assert.deepEqual(checkSecurityTxt(null, "SECURITY_TXT_MODE=", NOW), []);
+});
+
 test("checkSecurityTxt: missing final newline is a finding", () => {
   const content = "Contact: mailto:s@example.com\nExpires: 2027-01-01T00:00:00.000Z";
   const issues = checkSecurityTxt(content, "SECURITY_TXT_MODE=manual", NOW);

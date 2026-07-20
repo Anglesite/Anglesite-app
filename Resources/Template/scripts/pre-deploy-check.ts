@@ -270,16 +270,33 @@ function parseSecurityTxtFields(content: string): SecurityTxtFields {
  * exactly one (non-expired) Expires, at most one Canonical (matching `SITE_URL`'s origin when
  * both are set), and a final newline.
  */
+const RECOGNIZED_SECURITY_TXT_MODES = new Set(["generated", "manual", "disabled"]);
+
 export function checkSecurityTxt(content: string | null, configContent: string, now: Date): Issue[] {
   const file = "dist/.well-known/security.txt";
-  const mode = resolveSecurityTxtMode(
-    readConfigFromString(configContent, "SECURITY_TXT_MODE"),
-    readConfigFromString(configContent, "SECURITY_CONTACT"),
-  );
+  const rawMode = readConfigFromString(configContent, "SECURITY_TXT_MODE");
+  const mode = resolveSecurityTxtMode(rawMode, readConfigFromString(configContent, "SECURITY_CONTACT"));
+
+  // An unset key legitimately falls back to inference (see resolveSecurityTxtMode's own doc
+  // comment) — but a non-empty, unrecognized value (e.g. a typo like "Generated") silently gets
+  // the same fallback with no signal that the key was ignored. Surface that distinctly, then keep
+  // evaluating with the inferred mode rather than short-circuiting on it.
+  const modeIssues: Issue[] =
+    rawMode !== undefined && rawMode.trim().length > 0 && !RECOGNIZED_SECURITY_TXT_MODES.has(rawMode)
+      ? [
+          {
+            severity: "warning",
+            category: "security-txt-issue",
+            message: `SECURITY_TXT_MODE="${rawMode}" is not a recognized value (generated|manual|disabled) — falling back to inferring from SECURITY_CONTACT.`,
+            file,
+          },
+        ]
+      : [];
 
   if (mode === "disabled") {
-    if (content === null) return [];
+    if (content === null) return modeIssues;
     return [
+      ...modeIssues,
       {
         severity: "warning",
         category: "security-txt-issue",
@@ -291,6 +308,7 @@ export function checkSecurityTxt(content: string | null, configContent: string, 
 
   if (mode === "generated" && content !== null && !isSecurityTxtMarkerOwned(content)) {
     return [
+      ...modeIssues,
       {
         severity: "warning",
         category: "security-txt-issue",
@@ -302,6 +320,7 @@ export function checkSecurityTxt(content: string | null, configContent: string, 
 
   if (content === null) {
     return [
+      ...modeIssues,
       {
         severity: "warning",
         category: "security-txt-issue",
@@ -314,7 +333,7 @@ export function checkSecurityTxt(content: string | null, configContent: string, 
     ];
   }
 
-  const issues: Issue[] = [];
+  const issues: Issue[] = [...modeIssues];
   const fields = parseSecurityTxtFields(content);
 
   if (fields.contactCount === 0) {
