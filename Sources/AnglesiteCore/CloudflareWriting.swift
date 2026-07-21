@@ -18,6 +18,8 @@ public protocol CloudflareWriting: Sendable {
     /// appends the rule to the existing ruleset.
     func enableZstandardCompression(zoneID: String, apiToken: String) async throws
     func setPageShield(zoneID: String, enabled: Bool, apiToken: String) async throws
+    /// Enable/Disable Cloudflare's Onion Routing feature.
+    func enableOnionRouting(zoneID: String, enabled: Bool, apiToken: String) async throws
 }
 
 /// Payload for creating a DNS record via the Cloudflare API.

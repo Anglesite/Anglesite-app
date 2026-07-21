@@ -361,6 +361,19 @@ struct SiteWindow: View {
             }
             .defaultCustomization(.hidden)
 
+            ToolbarItem(id: SiteToolbarItemID.onionRouting.rawValue, placement: .primaryAction) {
+                Button {
+                    model.onionRouting.openSheet()
+                } label: {
+                    Label("Onion Routing", systemImage: "network")
+                }
+                .disabled(!model.canRunOnionRouting)
+                .help(site.isValid
+                      ? "Enable Tor Browser access for this site via Cloudflare's zone-level setting"
+                      : "Site is missing required files")
+            }
+            .defaultCustomization(.hidden)
+
             ToolbarItem(id: SiteToolbarItemID.domain.rawValue, placement: .primaryAction) {
                 Button {
                     model.domain.openSheet()
@@ -520,6 +533,9 @@ struct SiteWindow: View {
         }
         .sheet(isPresented: $bindableModel.harden.sheetPresented) {
             HardenSheetView(model: model.harden)
+        }
+        .sheet(isPresented: $bindableModel.onionRouting.sheetPresented) {
+            OnionRoutingSheetView(model: model.onionRouting)
         }
         .sheet(isPresented: Binding(
             get: { bindableModel.styleGuide?.sheetPresented ?? false },

@@ -594,6 +594,9 @@
     "Cloudflare's Content Signals Policy states a usage preference per purpose in robots.txt. It's a signal that well-behaved crawlers honor, not an enforced block." : {
 
     },
+    "Cloudflare's Onion Routing lets Tor Browser users reach your site over the Tor network without exiting through a third-party relay. No changes to your site or URLs." : {
+
+    },
     "Code" : {
 
     },
@@ -919,6 +922,9 @@
     "Emphasis" : {
 
     },
+    "Enable Onion Routing" : {
+
+    },
     "Enter the domain to harden" : {
 
     },
@@ -971,6 +977,9 @@
 
     },
     "Failed" : {
+
+    },
+    "Failed to load zone settings" : {
 
     },
     "Figure" : {
@@ -1237,6 +1246,9 @@
     "Lemon Squeezy" : {
 
     },
+    "Lets Tor Browser users reach your site over the Tor network without exiting through a third-party relay. No changes to your site or URLs." : {
+
+    },
     "Likely cause: %@" : {
 
     },
@@ -1250,6 +1262,12 @@
 
     },
     "Live" : {
+
+    },
+    "Load" : {
+
+    },
+    "Load Settings" : {
 
     },
     "Load records" : {
@@ -1436,6 +1454,9 @@
 
     },
     "On" : {
+
+    },
+    "Onion Routing" : {
 
     },
     "Open" : {
@@ -1628,6 +1649,9 @@
 
     },
     "Re-check" : {
+
+    },
+    "Reading %@ zone settings from Cloudflare…" : {
 
     },
     "Recheck" : {
@@ -2298,6 +2322,9 @@
 
     },
     "Update" : {
+
+    },
+    "Updating %@ zone settings in Cloudflare…" : {
 
     },
     "Upload Logo…" : {

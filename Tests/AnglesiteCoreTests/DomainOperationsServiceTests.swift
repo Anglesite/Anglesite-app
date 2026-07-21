@@ -157,4 +157,5 @@ final class FakeWriter: CloudflareWriting, @unchecked Sendable {
     func setECH(zoneID: String, enabled: Bool, apiToken: String) async throws {}
     func enableZstandardCompression(zoneID: String, apiToken: String) async throws {}
     func setPageShield(zoneID: String, enabled: Bool, apiToken: String) async throws {}
+    func enableOnionRouting(zoneID: String, enabled: Bool, apiToken: String) async throws {}
 }

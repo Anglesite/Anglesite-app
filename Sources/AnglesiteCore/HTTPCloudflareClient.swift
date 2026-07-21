@@ -188,6 +188,7 @@ public struct HTTPCloudflareClient: CloudflareReading {
         let ech = await settingIsOn("/zones/\(zoneID)/settings/ech", apiToken: apiToken)
         let zstd = await zstdEnabled(zoneID: zoneID, apiToken: apiToken)
         let pageShield = await pageShieldState(zoneID: zoneID, apiToken: apiToken)
+        let onionRouting = await settingIsOn("/zones/\(zoneID)/settings/opportunistic_onion", apiToken: apiToken)
 
         let sts = header.value.strict_transport_security
         let hsts: CloudflareZoneState.HSTS? = sts.enabled
@@ -218,7 +219,7 @@ public struct HTTPCloudflareClient: CloudflareReading {
             dmarcRecords: dmarc,
             botFightMode: botFight,
             wafCustomRules: wafRules,
-            speedBrain: speedBrain, ech: ech, zstdCompression: zstd, pageShield: pageShield)
+            speedBrain: speedBrain, ech: ech, zstdCompression: zstd, pageShield: pageShield, onionRouting: onionRouting)
     }
 
     private func fetchWAFCustomRules(zoneID: String, apiToken: String) async throws -> [CloudflareZoneState.WAFCustomRule] {
@@ -391,6 +392,11 @@ extension HTTPCloudflareClient: CloudflareWriting {
     public func setPageShield(zoneID: String, enabled: Bool, apiToken: String) async throws {
         try await mutate(method: "PUT", "/zones/\(zoneID)/page_shield",
                          body: ["enabled": enabled], apiToken: apiToken)
+    }
+
+    public func enableOnionRouting(zoneID: String, enabled: Bool, apiToken: String) async throws {
+        try await mutate(method: "PATCH", "/zones/\(zoneID)/settings/opportunistic_onion",
+                         body: ["value": enabled ? "on" : "off"], apiToken: apiToken)
     }
 
     public func enableZstandardCompression(zoneID: String, apiToken: String) async throws {
