@@ -140,7 +140,7 @@ public actor InProcessBackend: SupervisorBackend {
         let waiterID = UUID()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { (cont: CheckedContinuation<ProcessExitReason, Never>) in
-                entry.exitWaiters[waiterID] = cont
+                registerWaiter(entry: entry, waiterID: waiterID, continuation: cont)
             }
         } onCancel: { [weak self] in
             // Hop back to the actor to remove and resume our continuation. The cancel handler
@@ -149,6 +149,10 @@ public actor InProcessBackend: SupervisorBackend {
                 await self?.resumeCancelledWaiter(handleID: handle.id, waiterID: waiterID)
             }
         }
+    }
+
+    private func registerWaiter(entry: Entry, waiterID: UUID, continuation: CheckedContinuation<ProcessExitReason, Never>) {
+        entry.exitWaiters[waiterID] = continuation
     }
 
     private func resumeCancelledWaiter(handleID: UUID, waiterID: UUID) {

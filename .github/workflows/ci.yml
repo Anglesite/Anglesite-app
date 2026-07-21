@@ -287,8 +287,8 @@ jobs:
       - name: Build (release)
         run: swift build -c release
 
-  relay-tsan:
-    name: Relay concurrency suites (ThreadSanitizer)
+  concurrency-tsan:
+    name: Concurrency suites (ThreadSanitizer)
     # macos-26 for the same OS-runtime reason as build-test: this lane runs Swift concurrency
     # suites against the host's libswift_Concurrency, so it has the same exposure to the
     # macos-15 image's Swift 6.2.x task-allocator bug.
@@ -296,9 +296,11 @@ jobs:
     if: needs.changes.outputs.swift == 'true'
     runs-on: macos-26
     timeout-minutes: 15
-    # The relay suites (TurnRelay/TextStreamRelay) have no plugin/Node dependency, so this lane
-    # skips the sibling-plugin checkout. TSan deterministically flags data races the probabilistic
-    # `concurrentDeliver*` tests would otherwise only catch by timing luck (#203).
+    # The relay suites (TurnRelay/TextStreamRelay) and the ProcessSupervisor/InProcessBackend
+    # suites have no plugin/Node dependency, so this lane skips the sibling-plugin checkout.
+    # TSan deterministically flags data races the probabilistic `concurrentDeliver*` tests would
+    # otherwise only catch by timing luck (#203), and gives the ProcessSupervisor suites (#856)
+    # the same deterministic coverage.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -332,8 +334,8 @@ jobs:
             swiftpm-tsan-macos-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}-
             swiftpm-tsan-macos-${{ steps.xcode.outputs.version }}-
 
-      - name: Run relay suites under ThreadSanitizer
-        run: scripts/test-relay-tsan.sh
+      - name: Run concurrency suites under ThreadSanitizer
+        run: scripts/test-concurrency-tsan.sh
 
   xcodeproj-sync:
     name: Anglesite.xcodeproj ↔ project.yml in sync
@@ -482,7 +484,7 @@ jobs:
       - help-book-links
       - linux-build-test
       - build-test
-      - relay-tsan
+      - concurrency-tsan
       - xcodeproj-sync
       - localization-catalog
       - appintents-schema
