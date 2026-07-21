@@ -358,23 +358,23 @@ struct SiteWindow: View {
                 .help(site.isValid
                       ? "Preview and apply Cloudflare security hardening for this site"
                       : "Site is missing required files")
-           }
+            }
             .defaultCustomization(.hidden)
 
-           ToolbarItem(id: SiteToolbarItemID.onionRouting.rawValue, placement: .primaryAction) {
-               Button {
-                   model.openOnionRoutingSheet()
-               } label: {
-                   Label("Onion Routing", systemImage: "network")
-               }
-               .disabled(!model.canRunOnionRouting)
-               .help(site.isValid
+            ToolbarItem(id: SiteToolbarItemID.onionRouting.rawValue, placement: .primaryAction) {
+                Button {
+                    model.onionRouting.openSheet()
+                } label: {
+                    Label("Onion Routing", systemImage: "network")
+                }
+                .disabled(!model.canRunOnionRouting)
+                .help(site.isValid
                       ? "Enable Tor Browser access for this site via Cloudflare's zone-level setting"
                       : "Site is missing required files")
             }
-           .defaultCustomization(.hidden)
+            .defaultCustomization(.hidden)
 
-           ToolbarItem(id: SiteToolbarItemID.domain.rawValue, placement: .primaryAction) {
+            ToolbarItem(id: SiteToolbarItemID.domain.rawValue, placement: .primaryAction) {
                 Button {
                     model.domain.openSheet()
                 } label: {
@@ -532,14 +532,14 @@ struct SiteWindow: View {
             )
         }
         .sheet(isPresented: $bindableModel.harden.sheetPresented) {
-          HardenSheetView(model: model.harden)
+            HardenSheetView(model: model.harden)
         }
-        .sheet(isPresented: $bindableModel.onionRoutingSheetPresented) {
-          OnionRoutingSheetView(model: model.onionRouting)
+        .sheet(isPresented: $bindableModel.onionRouting.sheetPresented) {
+            OnionRoutingSheetView(model: model.onionRouting)
         }
         .sheet(isPresented: Binding(
-          get: { bindableModel.styleGuide?.sheetPresented ?? false },
-          set: { bindableModel.styleGuide?.sheetPresented = $0 }
+            get: { bindableModel.styleGuide?.sheetPresented ?? false },
+            set: { bindableModel.styleGuide?.sheetPresented = $0 }
         )) {
             if let styleGuide = model.styleGuide {
                 ProjectStyleGuideView(model: styleGuide, siteName: site.name)
@@ -575,23 +575,24 @@ struct SiteWindow: View {
                 }
             }
         }
-                           sheet(item: $bindableModel.dependencyUpdateModel) { updateModel in
-                        NavigationStack {
-                            List(updateModel.offers, id: \.name) { offer in
-                                Text(offer.currentRange + " → " + offer.offeredRange)
-                                       .font(.system(.body, design: .monospaced))
-                                      }
-                              .listStyle(.plain)
-                              .navigationTitle("Dependency Updates Available")
-                              .toolbar {
-                                ToolbarItem(placement: .cancellationAction) {
-                                    Button("Skip") { updateModel.skip() }
-                                  }
-                                ToolbarItem(placement: .confirmationAction) {
-                                    Button("Update") { updateModel.update() }
-                                  }
-                              }
-                          }
+        .sheet(item: $bindableModel.dependencyUpdateModel) { updateModel in
+            NavigationStack {
+                List(updateModel.offers, id: \.name) { offer in
+                    LabeledContent(offer.name) {
+                        Text("\(offer.currentRange) → \(offer.offeredRange)")
+                            .font(.system(.body, design: .monospaced))
+                    }
+                }
+                .navigationTitle("Dependency Updates Available")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Skip") { updateModel.skip() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Update") { updateModel.update() }
+                    }
+                }
+            }
             .frame(minWidth: 420, minHeight: 260)
             // `loadAndStart()` suspends on a `CheckedContinuation` that only Skip/Update resume
             // (see `SiteWindowModel.loadAndStart`). Block outside-tap/swipe dismissal so those two

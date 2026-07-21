@@ -182,23 +182,23 @@ extension CloudflareWritingTests {
         """
         let (client, spy) = spiedClient([
             "/zones/z/rulesets/comp1": (200, existingRuleJSON),
-             "/zones/z/rulesets": (200, #"{"success":true,"result":[{"id":"comp1","phase":"http_response_compression"}]}"#),
-         ])
+            "/zones/z/rulesets": (200, #"{"success":true,"result":[{"id":"comp1","phase":"http_response_compression"}]}"#),
+        ])
         try await client.enableZstandardCompression(zoneID: "z", apiToken: "t")
-         #expect(spy.requests.allSatisfy { $0.httpMethod == "GET" })
+        #expect(spy.requests.allSatisfy { $0.httpMethod == "GET" })
         let last = try #require(spy.requests.last)
-         #expect(last.url!.path.hasSuffix("/zones/z/rulesets/comp1"))
-      }
+        #expect(last.url!.path.hasSuffix("/zones/z/rulesets/comp1"))
+    }
 
-     @Test("enableOnionRouting PATCHes the opportunistic_onion setting")
-      func onionRoutingWrite() async throws {
-          let (client, spy) = spiedClient([
-               "/settings/opportunistic_onion": (200, #"{"success":true,"result":{}}"#),
-           ])
-          try await client.enableOnionRouting(zoneID: "z", enabled: true, apiToken: "t")
-          let request = try #require(spy.requests.last)
-          #expect(request.httpMethod == "PATCH")
-          #expect(request.url!.path.hasSuffix("/zones/z/settings/opportunistic_onion"))
-          #expect(String(data: request.httpBody ?? Data(), encoding: .utf8)!.contains(#""value":"on""#))
-       }
-     }
+    @Test("enableOnionRouting PATCHes the opportunistic_onion setting")
+    func onionRoutingWrite() async throws {
+        let (client, spy) = spiedClient([
+            "/settings/opportunistic_onion": (200, #"{"success":true,"result":{}}"#),
+        ])
+        try await client.enableOnionRouting(zoneID: "z", enabled: true, apiToken: "t")
+        let request = try #require(spy.requests.last)
+        #expect(request.httpMethod == "PATCH")
+        #expect(request.url!.path.hasSuffix("/zones/z/settings/opportunistic_onion"))
+        #expect(String(data: request.httpBody ?? Data(), encoding: .utf8)!.contains(#""value":"on""#))
+    }
+}

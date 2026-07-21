@@ -85,5 +85,5 @@ public struct CloudflareZoneState: Sendable, Equatable {
         self.zstdCompression = zstdCompression
         self.pageShield = pageShield
         self.onionRouting = onionRouting
-     }
+    }
 }

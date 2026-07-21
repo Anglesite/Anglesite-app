@@ -123,11 +123,10 @@ final class MockCloudflareReader: CloudflareReading, @unchecked Sendable {
     }
 
     func resolveZoneID(domain: String, apiToken: String) async throws -> String? { "z" }
-    func zones(apiToken: String) async throws -> [String] { ["example.com"] }
     func zoneState(zoneID: String, domain: String, apiToken: String) async throws -> CloudflareZoneState {
         if shouldFail { throw CloudflareError.malformedResponse }
         return state
-        }
+    }
     func listDNSRecords(zoneID: String, apiToken: String) async throws -> [DNSRecord] { [] }
     func workerScriptNames(apiToken: String) async throws -> [String] { [] }
 }
@@ -183,8 +182,8 @@ final class MockCloudflareWriter: CloudflareWriting, @unchecked Sendable {
     }
     func setPageShield(zoneID: String, enabled: Bool, apiToken: String) async throws {
         try record("setPageShield")
-      }
+    }
     func enableOnionRouting(zoneID: String, enabled: Bool, apiToken: String) async throws {
         try record("enableOnionRouting")
-      }
+    }
 }
