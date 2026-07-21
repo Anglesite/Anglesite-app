@@ -3,7 +3,7 @@ import Foundation
 /// Orchestrates #587's "pull staged submissions and commit them into the site's git working
 /// copy" step: list what's staged in `INBOX_KV` (`InboxKVClient`), write + commit the new ones
 /// (`InboxSubmissionCommitter`), then clear only the ones that made it into a commit. Designed to
-/// be called once per site-open (`PreviewModel.open(siteID:siteDirectory:)`).
+/// be called once per site-open (`PreviewModel.open(site:)`).
 public enum InboxSubmissionSync {
     /// Pulls every staged submission from `client`, commits the new ones into `siteDirectory`,
     /// and deletes only the ones that were actually committed — a submission that fails to write

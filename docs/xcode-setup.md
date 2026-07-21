@@ -63,3 +63,8 @@ ASC_API_KEY_ID=XXXXXXXXXX \
 ASC_API_ISSUER_ID=00000000-0000-0000-0000-000000000000 \
   scripts/release.sh --validate-only
 ```
+
+## Xcode Cloud
+
+For a build+test CI signal from Xcode Cloud (in addition to GitHub Actions), see
+[xcode-cloud.md](xcode-cloud.md).

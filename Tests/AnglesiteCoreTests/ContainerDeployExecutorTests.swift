@@ -521,6 +521,16 @@ private actor ThrowingFakeLocalContainerControl: LocalContainerControl {
     ) async throws -> InteractiveExecHandle {
         throw ExecError.boom
     }
+    func startWorkersDev(
+        siteID: String,
+        workers: [WorkerDescriptor],
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> URL {
+        throw ExecError.boom
+    }
+    func stopWorkersDev(siteID: String) async throws {
+        throw ExecError.boom
+    }
 }
 
 // MARK: - CancelParkingFakeContainerControl
@@ -568,6 +578,16 @@ private actor CancelParkingFakeContainerControl: LocalContainerControl {
     ) async throws -> InteractiveExecHandle {
         InteractiveExecHandle(write: { _ in }, terminate: {})
     }
+
+    func startWorkersDev(
+        siteID: String,
+        workers: [WorkerDescriptor],
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> URL {
+        URL(string: "http://127.0.0.1:51003")!
+    }
+
+    func stopWorkersDev(siteID: String) async throws {}
 
     private func signalParked() {
         parkedContinuation?.resume()

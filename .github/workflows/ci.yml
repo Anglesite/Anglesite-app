@@ -342,6 +342,22 @@ jobs:
       - name: Check project sync
         run: scripts/check-xcodeproj-sync.sh
 
+  localization-catalog:
+    name: Localizable.xcstrings covers scanned string literals
+    needs: changes
+    if: needs.changes.outputs.swift == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    # SWIFT_EMIT_LOC_STRINGS only performs the real String Catalog merge in an interactive
+    # Xcode IDE build (#811) — a CLI-only `xcodebuild build`, the only option here, never
+    # merges new/removed keys into Localizable.xcstrings. This lane is a static heuristic
+    # substitute: it needs only python3, so it runs on ubuntu-latest with no Xcode/xcodegen.
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: scripts/check-localization-catalog.sh
+
   appintents-schema:
     name: AppIntents schema conformance (metadata processor)
     # macOS 27 / Xcode 27 runner: the AppSchema.WordProcessor surface and its
@@ -439,6 +455,7 @@ jobs:
       - build-test
       - relay-tsan
       - xcodeproj-sync
+      - localization-catalog
       - appintents-schema
     runs-on: ubuntu-latest
     timeout-minutes: 5

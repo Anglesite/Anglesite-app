@@ -108,7 +108,7 @@ struct AnglesiteLinuxApp: App {
                 .title("Starting \(name)…")
                 .description("Booting the site container and dev server. First boot clones the site and installs dependencies.")
                 .child { Spinner() }
-        case .ready(_, let url):
+        case .ready(_, let url, _):
             PreviewWebView(
                 url: url,
                 router: router ?? MCPApplyEditRouter(mcpClient: { nil }),
@@ -166,7 +166,7 @@ struct AnglesiteLinuxApp: App {
                         break
                     case .starting:
                         status = .starting(name: site.displayName)
-                    case .ready(_, let url):
+                    case .ready(_, let url, _):
                         status = .ready(name: site.displayName, url: url.absoluteString)
                     case .failed(_, let message):
                         status = .failed(name: site.displayName, message: message)
