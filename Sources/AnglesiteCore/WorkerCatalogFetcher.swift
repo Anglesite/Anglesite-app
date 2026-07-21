@@ -122,7 +122,7 @@ public actor WorkerCatalogFetcher {
             in: .userDomainMask,
             appropriateFor: nil,
             create: true
-        )) ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        )) ?? fileManager.portableHomeDirectory
             .appendingPathComponent("Library/Application Support", isDirectory: true)
         return support
             .appendingPathComponent("Anglesite", isDirectory: true)
