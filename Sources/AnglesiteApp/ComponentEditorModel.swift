@@ -13,11 +13,12 @@ struct ComponentEditorContext {
     let modelClient: ComponentModelClient?
     let sourceRoot: URL
     /// The open site's identity/paths (#822's shared current-site value type), threaded in
-    /// alongside `sourceRoot` rather than replacing it — `sourceRoot` predates `CurrentSite` and
-    /// this file's draft/commit-state migration (#824) is a separate, larger in-flight change to
-    /// this same type, so this field is deliberately additive and unused beyond being available:
-    /// `nil` in tests/previews that don't construct it (matching `onOpenFile`/`duplicateComponent`
-    /// below).
+    /// alongside `sourceRoot` rather than replacing it — `sourceRoot` predates `CurrentSite`.
+    /// #824's draft/commit-state migration (PR #846) landed a much larger restructuring of
+    /// `ComponentEditorModel` itself, but left this context struct untouched, so this field
+    /// stays deliberately additive groundwork rather than a replacement for any existing
+    /// plumbing: `nil` in tests/previews that don't construct it (matching
+    /// `onOpenFile`/`duplicateComponent` below).
     var site: CurrentSite? = nil
     /// Routes canvas-originated edits (e.g. a style tweak from the Styles
     /// panel) to the running site's MCP server. At the production call site
