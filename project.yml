@@ -142,6 +142,11 @@ targets:
         IPHONEOS_DEPLOYMENT_TARGET: "27.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
+        # String Catalog scaffolding, mirroring the macOS target (#528): Xcode IDE builds merge
+        # extracted literals into Sources/AnglesiteMobile/Localizable.xcstrings; CLI builds need
+        # the manual `xcstringstool sync` recipe from CONTRIBUTING.md.
+        SWIFT_EMIT_LOC_STRINGS: YES
+        LOCALIZATION_PREFERS_STRING_CATALOGS: YES
         SWIFT_VERSION: "5.10"
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: "0.1.0"

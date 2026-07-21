@@ -90,14 +90,19 @@ public final class RemoteSessionModel {
         return url
     }
 
-    /// Boot (or reboot) the remote session. Safe to call repeatedly — the runtime tears down
-    /// any previous session first.
+    /// Boot (or reboot) the remote session. Safe to call repeatedly — any previous runtime is
+    /// stopped (its sandbox session told to shut down) before the replacement starts, so a
+    /// retry after `.failed` can never orphan a running Cloudflare session.
     public func start() {
         guard isConfigured, let workerURL, let gitRemote else {
             state = .failed(siteID: siteID, message: String(localized: "Connect your Cloudflare Worker first."))
             return
         }
         observationTask?.cancel()
+        if let previousRuntime = runtime {
+            runtime = nil
+            Task { await previousRuntime.stop() }
+        }
 
         let token = SessionToken.mint()
         sessionToken = token
