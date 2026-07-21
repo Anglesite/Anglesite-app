@@ -11,8 +11,9 @@
 # process that really is entitled.
 #
 # Usage:
-#   scripts/run-container-probe.sh echo   # THE Task 4b decision gate (vsock round-trip)
-#   scripts/run-container-probe.sh boot    # Task 5's gate (full boot + preview HTTP poll)
+#   scripts/run-container-probe.sh echo         # THE Task 4b decision gate (vsock round-trip)
+#   scripts/run-container-probe.sh boot         # Task 5's gate (full boot + preview HTTP poll)
+#   scripts/run-container-probe.sh workers-dev  # #708's gate (boot + local wrangler-dev HTTP poll)
 #
 # The boot probe is also the #715 concurrent-vmnet regression gate. Before running it, use
 # `container network create anglesite-715-regression` to hold a second vmnet shared-mode network;
@@ -31,9 +32,9 @@ cd "${ROOT_DIR}"
 
 SUBCOMMAND="${1:-}"
 case "${SUBCOMMAND}" in
-    echo|boot) ;;
+    echo|boot|workers-dev) ;;
     *)
-        echo "usage: $(basename "$0") <echo|boot>" >&2
+        echo "usage: $(basename "$0") <echo|boot|workers-dev>" >&2
         exit 2
         ;;
 esac

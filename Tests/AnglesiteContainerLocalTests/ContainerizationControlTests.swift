@@ -66,6 +66,54 @@ struct ContainerizationControlTests {
         try? await control.stop(siteID: "e2e-interactive")
     }
 
+    @Test("startWorkersDev boots a reachable local wrangler-dev endpoint for an active worker")
+    func startsWorkersDevForActiveWorker() async throws {
+        try #require(enabled, "set ANGLESITE_CONTAINER_E2E=1 on an entitled Apple-Silicon Mac")
+
+        let siteID = "workers-dev-e2e"
+        let control = ContainerizationControl()
+        let repo = try makeThrowawayAstroRepo()
+        defer { try? FileManager.default.removeItem(at: repo) }
+
+        _ = try await control.start(siteID: siteID, sourceRepo: repo, ref: "HEAD", onOutput: { _, _ in })
+        // Safety net: fires on any exit path (incl. a thrown #expect below) so a failed
+        // assertion doesn't leave the VM running. stop() is idempotent, so the awaited
+        // happy-path stop below is harmless after this.
+        defer { Task { try? await control.stop(siteID: siteID) } }
+
+        let workers = [WorkerDescriptor(
+            id: "indieauth", displayName: "IndieAuth", description: "d", group: "identity",
+            binding: .settingsActivated, resources: .init(needsD1: true, needsKV: true, needsR2: false))]
+        let workersDevURL = try await control.startWorkersDev(siteID: siteID, workers: workers, onOutput: { _, _ in })
+
+        let ok = await pollForHTTPResponse(workersDevURL, timeout: .seconds(60))
+        #expect(ok, "wrangler dev --local never answered within the timeout")
+
+        try? await control.stop(siteID: siteID)
+    }
+
+    /// Polls `url` for any HTTP response (any status code is a pass — we only care that
+    /// wrangler-dev is accepting connections and speaking HTTP), bounded by `timeout`. There is no
+    /// internal readiness wait for `startWorkersDev` equivalent to `start()`'s `waitUntilServing`
+    /// (wrangler-dev can take a few seconds to bind its port after the call returns), so this test
+    /// needs its own retry loop. Mirrors `AnglesiteContainerProbe.pollForHTTPResponse` in
+    /// `Sources/AnglesiteContainerProbe/main.swift` — kept as a small, self-contained duplicate
+    /// here rather than sharing code across the test target/executable boundary (SwiftPM test
+    /// targets aren't importable from an executable target).
+    private func pollForHTTPResponse(_ url: URL, timeout: Duration) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            do {
+                let (_, response) = try await URLSession.shared.data(from: url)
+                if response is HTTPURLResponse { return true }
+            } catch {
+                // Not ready yet — wrangler-dev may still be starting up inside the guest.
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        return false
+    }
+
     /// Create a throwaway on-disk git repo containing a minimal Astro site and an initial commit.
     /// Returns the repo directory URL (a `file://` path the driver clones into the guest).
     private func makeThrowawayAstroRepo() throws -> URL {
