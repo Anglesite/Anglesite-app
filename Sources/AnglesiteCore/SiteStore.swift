@@ -395,7 +395,7 @@ public actor SiteStore {
             in: .userDomainMask,
             appropriateFor: nil,
             create: true
-        )) ?? fileManager.homeDirectoryForCurrentUser
+        )) ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent("Library/Application Support", isDirectory: true)
         return support
             .appendingPathComponent("Anglesite", isDirectory: true)

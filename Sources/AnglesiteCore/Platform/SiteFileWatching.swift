@@ -50,7 +50,7 @@ public struct UnavailableFileWatcher: SiteFileWatching {
 /// inject fakes (e.g. `ControllableWatcher`) directly.
 public enum PlatformFileWatcher {
     public static func make() -> any SiteFileWatching {
-        #if canImport(CoreServices)
+        #if os(macOS)
         FSEventsFileWatcher()
         #elseif canImport(Glibc)
         InotifyFileWatcher()

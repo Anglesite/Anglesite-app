@@ -1,6 +1,7 @@
 // Darwin implementation of the SecurityScopedBookmark seam. The whole file compiles out on
-// platforms without Darwin's security-scoped bookmark APIs.
-#if canImport(Darwin)
+// platforms without the App Sandbox's `.withSecurityScope` bookmark APIs (macOS-only —
+// iOS Foundation has no `.withSecurityScope`, so iOS takes the Unavailable path).
+#if os(macOS)
 import Foundation
 
 /// MAS-only at runtime: the sandboxed app persists one bookmark per site (on

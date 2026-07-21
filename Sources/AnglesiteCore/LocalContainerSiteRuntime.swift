@@ -1,3 +1,7 @@
+// The iOS thin client is remote-only (#71): it must never link the local container runtime, so
+// the whole file compiles out there. macOS (Apple Containerization) and Linux (Podman control)
+// both keep it.
+#if !os(iOS)
 import Foundation
 
 /// `SiteRuntime` over a local Apple-Containerization VM (macOS 26+/Apple Silicon; see design
@@ -580,3 +584,4 @@ public actor LocalContainerSiteRuntime: SiteRuntime, SiteRuntimeContainerCapabil
         }
     }
 }
+#endif

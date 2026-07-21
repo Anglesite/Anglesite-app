@@ -525,6 +525,10 @@ public actor FoundationModelAssistant: ConversationalAssistant {
     /// the same tools a freshly-created one would.
     private func conversationTools(for context: AssistantContext, includeSpotlight: Bool) -> [any Tool] {
         var tools: [any Tool] = []
+        // The iOS *simulator* SDK doesn't vend `SpotlightSearchTool` (device and macOS SDKs do),
+        // so the append compiles out there — simulators have no Apple Intelligence session to
+        // reach the tool anyway.
+        #if !targetEnvironment(simulator)
         if includeSpotlight {
             // Default GuidanceLevel.complete injects a ~13k-token query manual that exceeds the
             // on-device 4,096-token window. .focused(.items) scopes guidance to our page/post
@@ -533,6 +537,7 @@ public actor FoundationModelAssistant: ConversationalAssistant {
                 sources: [.coreSpotlight],
                 guide: .init(level: .focused(.items), format: .compact))))
         }
+        #endif
         if let editBridge, let contentGraph {
             tools.append(ApplyEditTool(
                 bridge: editBridge,

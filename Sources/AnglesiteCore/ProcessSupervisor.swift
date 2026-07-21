@@ -60,10 +60,17 @@ public actor ProcessSupervisor {
 
     /// Convenience for the app and tests: the default in-process backend. The app is sandboxed and
     /// still uses subprocesses for non-Node helper tools, holding a per-`SiteWindow`
-    /// security-scoped grant so spawned children inherit folder access.
+    /// security-scoped grant so spawned children inherit folder access. iOS has no
+    /// `Foundation.Process`, so `InProcessBackend` compiles out there (#71) and the remote-only
+    /// client gets `UnavailableProcessBackend` — every spawn fails capability-flagged; the iOS
+    /// runtime selection never reaches this backend in normal operation.
     public init(suddenTerminationController: SuddenTerminationController = .shared) {
         _ = Self.ignoreSIGPIPE
+        #if os(iOS)
+        self.backend = UnavailableProcessBackend()
+        #else
         self.backend = InProcessBackend()
+        #endif
         self.defaultEnvironment = { nil }
         self.suddenTerminationController = suddenTerminationController
     }

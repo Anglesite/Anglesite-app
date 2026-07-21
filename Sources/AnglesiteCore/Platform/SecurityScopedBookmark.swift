@@ -67,7 +67,7 @@ public struct UnavailableSecurityScopedBookmark: SecurityScopedBookmarking {
 /// production default; tests inject fakes directly.
 public enum PlatformSecurityScopedBookmark {
     public static func make() -> any SecurityScopedBookmarking {
-        #if canImport(Darwin)
+        #if os(macOS)
         DarwinSecurityScopedBookmark()
         #else
         UnavailableSecurityScopedBookmark()

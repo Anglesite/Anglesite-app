@@ -423,7 +423,8 @@ if ProcessInfo.processInfo.environment["ANGLESITE_LINUX_SHELL"] == "1" {
 let package = Package(
     name: "Anglesite",
     platforms: [
-        .macOS("27.0")
+        .macOS("27.0"),
+        .iOS("27.0")
     ],
     products: packageProducts,
     dependencies: packageDependencies,
