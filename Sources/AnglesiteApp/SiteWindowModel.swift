@@ -115,7 +115,8 @@ final class SiteWindowModel {
     /// Rescan button re-runs it on demand afterward.
     var cleanup: ProjectCleanupModel
     var harden = HardenModel()
-    var onionRouting = OnionRoutingModel()
+    var onionRouting = OnionRoutingModel(domain: "")
+    var onionRoutingSheetPresented: Bool = false
     var domain = DomainModel()
     var health = HealthModel(runner: DefaultHealthCheckRunner())
     /// Drives the determinate startup progress bar shown in `mainPane` while the dev server boots.
@@ -508,8 +509,15 @@ final class SiteWindowModel {
 
     func openOnionRoutingSheet() {
         guard let site, canRunOnionRouting else { return }
+        onionRouting = OnionRoutingModel(
+            domain: site.name,
+            reader: HTTPCloudflareClient(),
+            writer: HTTPCloudflareClient(),
+            keychain: KeychainStore()
+           )
+        onionRoutingSheetPresented = true
         onionRouting.load()
-     }
+       }
 
     func recheckHealth() {
         guard let site else { return }

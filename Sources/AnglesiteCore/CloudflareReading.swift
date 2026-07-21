@@ -42,12 +42,14 @@ public protocol CloudflareReading: Sendable {
     /// (already known to callers via `resolveZoneID`) — used to scope CAA/MX/SPF/DMARC
     /// grading to the apex, so a record on an unrelated subdomain can't count toward it.
     func zoneState(zoneID: String, domain: String, apiToken: String) async throws -> CloudflareZoneState
-    /// Full DNS record listing for a zone — distinct from `zoneState`'s narrow security-relevant
-    /// subset (CAA/MX/SPF/DMARC only). Used by the Domain DNS management feature.
-    func listDNSRecords(zoneID: String, apiToken: String) async throws -> [DNSRecord]
+   /// Full DNS record listing for a zone — distinct from `zoneState`'s narrow security-relevant
+   /// subset (CAA/MX/SPF/DMARC only). Used by the Domain DNS management feature.
+   func listDNSRecords(zoneID: String, apiToken: String) async throws -> [DNSRecord]
+    /// List all zone IDs visible to the token, in lowercase. Used for multi-domain zone discovery.
+   func zones(apiToken: String) async throws -> [String]
     /// Every Worker script name (the `id` field) visible to the token's first account. Used to
-    /// detect a Worker-name collision before a site's first deploy (#740).
-    func workerScriptNames(apiToken: String) async throws -> [String]
+   /// detect a Worker-name collision before a site's first deploy (#740).
+   func workerScriptNames(apiToken: String) async throws -> [String]
 }
 
 /// Injectable HTTP boundary — identical shape to `CloudflareAPITokenVerifier.Transport`.

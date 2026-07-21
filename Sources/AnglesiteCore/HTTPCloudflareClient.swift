@@ -280,17 +280,17 @@ public struct HTTPCloudflareClient: CloudflareReading {
         return scripts.map(\.id)
        }
 
-     /// Return a list of zone IDs visible to the token. Used for UI zone discovery.
-    public func listZoneIDs(apiToken: String) async throws -> [String] {
-        let accounts = try await get("/accounts?per_page=1", apiToken: apiToken, as: [CFAccount].self)
-        guard let accountID = accounts.first?.id else {
-            throw CloudflareError.api(message: "no Cloudflare account visible to this token")
-          }
-        let zones = try await get("/accounts/\(accountID)/zones?per_page=100", apiToken: apiToken, as: [CFZone].self)
-        return zones.map(\.id)
-       }
+   /// Return a list of zone IDs visible to the token. Used for UI zone discovery.
+  public func zones(apiToken: String) async throws -> [String] {
+      let accounts = try await get("/accounts?per_page=1", apiToken: apiToken, as: [CFAccount].self)
+      guard let accountID = accounts.first?.id else {
+          throw CloudflareError.api(message: "no Cloudflare account visible to this token")
+         }
+      let zones = try await get("/accounts/\(accountID)/zones?per_page=100", apiToken: apiToken, as: [CFZone].self)
+      return zones.map { $0.id.lowercased() }
+      }
 
-     // MARK: - Write helpers
+    // MARK: - Write helpers
 
     private func mutate<Body: Encodable & Sendable>(
         method: String,

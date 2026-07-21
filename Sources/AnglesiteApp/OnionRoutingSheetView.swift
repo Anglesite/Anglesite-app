@@ -13,23 +13,26 @@ final class OnionRoutingModel {
         case configured(enabled: Bool)
         case saving
         case error(message: String)
-    }
+     }
 
     private(set) var phase: Phase = .idle
-    private let reader: any CloudflareReading
+    internal let reader: any CloudflareReading
     private let writer: any CloudflareWriting
-    private let keychain: KeychainStore
+    internal let keychain: KeychainStore
+    internal let domain: String
     private var inFlight: Task<Void, Never>?
 
     init(
+        domain: String,
         reader: any CloudflareReading = HTTPCloudflareClient(),
         writer: any CloudflareWriting = HTTPCloudflareClient(),
         keychain: KeychainStore = KeychainStore()
-    ) {
+     ) {
+        self.domain = domain
         self.reader = reader
         self.writer = writer
         self.keychain = keychain
-    }
+     }
 
     var isRunning: Bool {
         switch phase {
@@ -61,173 +64,161 @@ final class OnionRoutingModel {
         inFlight = nil
         phase = .idle
     }
+// MARK: - Private
 
-    private func apiToken() -> String? {
-        if let env = ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"], !env.isEmpty {
-            return env
-        }
-        return try? keychain.readCloudflareToken()
+private func apiToken() -> String? {
+  if let env = ProcessInfo.processInfo.environment["CLOUDFLARE_API_TOKEN"], !env.isEmpty {
+      return env
     }
-
-    private func loadOnionRouting() async {
-        guard let token = apiToken() else {
-            phase = .error(message: "No Cloudflare API token found. Add one in Settings → Credentials.")
-            return
-        }
-
-        phase = .loading
-
-        // We need a zone ID — require the user to enter a domain to look it up
-        // For now, use the first zone from the account (simple approach)
-       do {
-           let zones = try await reader.zones(apiToken: token)
-           guard !zones.isEmpty else {
-               phase = .error(message: "No zones found for this account.")
-               return
-            }
-
-           let zoneID = zones[0]
-           let zonesState = try await reader.zoneState(zoneID: zoneID, domain: "", apiToken: token)
-           phase = .configured(enabled: zonesState.onionRouting)
-        } catch let error as CloudflareError {
-           phase = .error(message: cloudflareErrorMessage(error))
-        } catch {
-           phase = .error(message: "Failed to load zone settings: \(error.localizedDescription)")
-        }
-     }
-
-   private func saveOnionRouting(enabled: Bool) async {
-       guard let token = apiToken() else {
-           phase = .error(message: "No Cloudflare API token found.")
-           return
-        }
-
-       phase = .saving
-
-       do {
-           let zones = try await reader.zones(apiToken: token)
-           guard !zones.isEmpty else {
-               phase = .error(message: "No zones found for this account.")
-               return
-            }
-
-            let zoneID = zones[0]
-            try await writer.enableOnionRouting(zoneID: zoneID, enabled: enabled, apiToken: token)
-            phase = .configured(enabled: enabled)
-        } catch let error as CloudflareError {
-            phase = .error(message: cloudflareErrorMessage(error))
-        } catch {
-            phase = .error(message: "Failed to save zone settings: \(error.localizedDescription)")
-        }
-    }
-
-    private func cloudflareErrorMessage(_ error: CloudflareError) -> String {
-        switch error {
-        case .unauthorized:
-            return "API token is unauthorized. Check that it has Zone Settings Edit permission."
-        case .http(let status):
-            return "Cloudflare API returned HTTP \(status)."
-        case .api(let message):
-            return "Cloudflare API error: \(message)"
-        case .malformedResponse:
-            return "Unexpected response from Cloudflare API."
-        }
-    }
+  return try? keychain.readCloudflareToken()
 }
 
-// MARK: - Extended CloudflareReading
-
-extension CloudflareReading {
-    /// Return a list of zone IDs visible to the token. Used to discover zones for the UI.
-    func zones(apiToken: String) async throws -> [String] {
-        guard let client = self as? HTTPCloudflareClient
-        else { throw CloudflareError.api(message: "CloudflareReading must be HTTPCloudflareClient") }
-        return try await client.listZoneIDs(apiToken: apiToken)
+/// Find the zone matching this site's domain, or fail with a clear error.
+private func resolveZoneID(apiToken: String) async throws -> String {
+    let zones = try await reader.zones(apiToken: apiToken)
+    let normalized = domain.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    if let zone = zones.first(where: { $0.lowercased() == normalized }) {
+        return zone
      }
+    throw CloudflareError.api(message: "Zone '\(domain)' not found in account. Check your domain and API token permissions.")
 }
 
-/// Sheet view for Onion Routing settings. Single-toggle UI that reads and sets
-/// opportunistic_onion via the Cloudflare API.
+private func loadOnionRouting() async {
+    guard let token = apiToken() else {
+        phase = .error(message: "No Cloudflare API token found. Add one in Settings → Credentials.")
+        return
+     }
+
+    phase = .loading
+
+    do {
+        let zoneID = try await resolveZoneID(apiToken: token)
+        let zonesState = try await reader.zoneState(zoneID: zoneID, domain: domain, apiToken: token)
+        phase = .configured(enabled: zonesState.onionRouting)
+     } catch let error as CloudflareError {
+        phase = .error(message: cloudflareErrorMessage(error))
+     } catch {
+        phase = .error(message: "Failed to load zone settings: \(error.localizedDescription)")
+     }
+  }
+
+  private func saveOnionRouting(enabled: Bool) async {
+      guard let token = apiToken() else {
+          phase = .error(message: "No Cloudflare API token found.")
+          return
+        }
+
+      phase = .saving
+
+      do {
+          let zoneID = try await resolveZoneID(apiToken: token)
+          try await writer.enableOnionRouting(zoneID: zoneID, enabled: enabled, apiToken: token)
+          phase = .configured(enabled: enabled)
+       } catch let error as CloudflareError {
+          phase = .error(message: cloudflareErrorMessage(error))
+       } catch {
+          phase = .error(message: "Failed to save zone settings: \(error.localizedDescription)")
+       }
+    }
+
+  private func cloudflareErrorMessage(_ error: CloudflareError) -> String {
+      switch error {
+      case .unauthorized:
+          return "API token is unauthorized. Check that it has Zone Settings Edit permission."
+      case .http(let status):
+          return "Cloudflare API returned HTTP \(status)."
+      case .api(let message):
+          return "Cloudflare API error: \(message)"
+      case .malformedResponse:
+          return "Unexpected response from Cloudflare API."
+       }
+     }
+ }
+
+// MARK: - UI
+
+/// Onion Routing zone settings UI. Presents a single toggle for opportunistic_onion,
+/// reads the current status from Cloudflare, and applies changes with the user's API token.
+/// Follows the same pattern as HardenModel/HardenSheetView but focuses on a single setting.
 struct OnionRoutingSheetView: View {
-    @Bindable var model: OnionRoutingModel
+@Bindable var model: OnionRoutingModel
 
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            footer
-        }
-        .frame(minWidth: 520, idealWidth: 580, minHeight: 280, idealHeight: 320)
-    }
+var body: some View {
+  VStack(spacing: 0) {
+      header
+      Divider()
+      content
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      Divider()
+      footer
+   }
+    .frame(minWidth: 520, idealWidth: 580, minHeight: 260, idealHeight: 300)
+}
 
-    // MARK: - Header
+// MARK: - Header
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            statusIcon
-            VStack(alignment: .leading, spacing: 1) {
-                Text(headerTitle).font(.headline)
-                if let subtitle = headerSubtitle {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
+private var header: some View {
+  HStack(spacing: 10) {
+      statusIcon
+      VStack(alignment: .leading, spacing: 1) {
+          Text(headerTitle).font(.headline)
+          if let subtitle = headerSubtitle {
+              Text(subtitle).font(.caption).foregroundStyle(.secondary)
+           }
+       }
+      Spacer()
+   }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 12)
+}
 
-    private var statusIcon: some View {
-        Group {
-            switch model.phase {
-            case .idle:
-                Image(systemName: "network").font(.title3)
-            case .loading, .saving:
-                ProgressView().controlSize(.small)
-            case .configured:
-                Image(systemName: "checkmark.network").font(.title3)
-                     .foregroundStyle(.blue)
-            case .error:
-                Image(systemName: "exclamationmark.network").font(.title3)
-                     .foregroundStyle(.red)
-            }
-          }
+@ViewBuilder
+private var statusIcon: some View {
+    switch model.phase {
+    case .idle:
+        Image(systemName: "network").font(.title3)
+    case .loading, .saving:
+        ProgressView().controlSize(.small)
+    case .configured:
+        Image(systemName: "checkmark.network").font(.title3)
+             .foregroundStyle(.blue)
+    case .error:
+        Image(systemName: "exclamationmark.network").font(.title3)
+             .foregroundStyle(.red)
+     }
+ }
+
+ private var headerTitle: String {
+     switch model.phase {
+     case .idle:
+         return "Onion Routing"
+     case .loading:
+         return "Loading zone settings…"
+     case .configured:
+         return "Onion Routing"
+     case .saving:
+         return "Saving settings…"
+     case .error:
+         return "Error"
       }
+  }
 
-    private var headerTitle: String {
-        switch model.phase {
-        case .idle:
-            return "Onion Routing"
-        case .loading:
-            return "Loading zone settings…"
-        case .configured:
-            return "Onion Routing"
-        case .saving:
-            return "Saving settings…"
-        case .error:
-            return "Error"
-        }
-    }
-
-    private var headerSubtitle: String? {
-        switch model.phase {
-        case .configured(let enabled):
-            return enabled
-                ? "Onion Routing is enabled"
-                : "Onion Routing is disabled"
-        case .loading:
-            return "Reading your Cloudflare zone settings"
-        case .saving:
-            return "Updating Cloudflare zone settings"
-        case .error:
-            return nil
-        default:
-            return nil
-        }
-    }
+  private var headerSubtitle: String? {
+      switch model.phase {
+      case .configured(let enabled):
+          return enabled
+               ? "Onion Routing is enabled"
+               : "Onion Routing is disabled"
+      case .loading:
+          return "Reading \(model.domain) zone settings from Cloudflare"
+      case .saving:
+          return "Updating \(model.domain) zone settings in Cloudflare"
+      case .error:
+          return nil
+      default:
+          return nil
+       }
+   }
 
    // MARK: - Content
 
@@ -244,128 +235,128 @@ struct OnionRoutingSheetView: View {
                savingView
            case .error:
                errorView
-           }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var infoView: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "network").font(.system(size: 40)).foregroundStyle(.secondary)
-            Text("Onion Routing")
-                .font(.headline)
-            Text("Cloudflare's Onion Routing lets Tor Browser users reach your site over the Tor network without exiting through a third-party relay. No changes to your site or URLs.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 400)
-            Button("Load Settings") {
-                model.load()
             }
-            .buttonStyle(.borderedProminent)
-            Spacer()
-        }
-        .padding(16)
-    }
+          }
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+       }
 
-    private var toggleView: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            Image(systemName: "network").font(.system(size: 40)).foregroundStyle(.primary)
-            Text("Onion Routing")
+   private var infoView: some View {
+       VStack(spacing: 16) {
+           Spacer()
+           Image(systemName: "network").font(.system(size: 40)).foregroundStyle(.secondary)
+           Text("Onion Routing")
                 .font(.headline)
-            Text("Lets Tor Browser users reach your site over the Tor network without exiting through a third-party relay. No changes to your site or URLs.")
+           Text("Cloudflare's Onion Routing lets Tor Browser users reach your site over the Tor network without exiting through a third-party relay. No changes to your site or URLs.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 400)
-            Toggle(isOn: Binding(
-                get: { model.phase == .configured(enabled: true) },
-                set: { _ in model.toggle() }
+           Button("Load Settings") {
+               model.load()
+            }
+             .buttonStyle(.borderedProminent)
+           Spacer()
+        }
+         .padding(16)
+       }
+
+   private var toggleView: some View {
+       VStack(spacing: 24) {
+           Spacer()
+           Image(systemName: "network").font(.system(size: 40)).foregroundStyle(.primary)
+           Text("Onion Routing")
+                .font(.headline)
+           Text("Lets Tor Browser users reach your site over the Tor network without exiting through a third-party relay. No changes to your site or URLs.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 400)
+           Toggle(isOn: Binding(
+               get: { model.phase == .configured(enabled: true) },
+               set: { _ in model.toggle() }
             )) {
-                Text("Enable Onion Routing")
+               Text("Enable Onion Routing")
                     .font(.subheadline)
             }
-            .toggleStyle(.switch)
-            .disabled(model.isRunning)
-            Spacer()
+             .toggleStyle(.switch)
+             .disabled(model.isRunning)
+           Spacer()
         }
-        .padding(16)
-    }
+         .padding(16)
+       }
 
-    private var loadingView: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            ProgressView().controlSize(.large)
-            Text("Reading Cloudflare zone settings…")
+   private var loadingView: some View {
+       VStack(spacing: 12) {
+           Spacer()
+           ProgressView().controlSize(.large)
+           Text("Reading \(model.domain) zone settings from Cloudflare…")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Spacer()
+           Spacer()
         }
-        .padding(16)
-    }
+         .padding(16)
+       }
 
-    private var savingView: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            ProgressView().controlSize(.large)
-            Text("Saving Cloudflare zone settings…")
+   private var savingView: some View {
+       VStack(spacing: 12) {
+           Spacer()
+           ProgressView().controlSize(.large)
+           Text("Updating \(model.domain) zone settings in Cloudflare…")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Spacer()
+           Spacer()
         }
-        .padding(16)
-    }
+         .padding(16)
+       }
 
-    private var errorView: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: "exclamationmark.network").font(.system(size: 40)).foregroundStyle(.red)
-            Text("Failed to load zone settings")
+   private var errorView: some View {
+       VStack(spacing: 12) {
+           Spacer()
+           Image(systemName: "exclamationmark.network").font(.system(size: 40)).foregroundStyle(.red)
+           Text("Failed to load zone settings")
                 .font(.headline)
-            Spacer()
+           Spacer()
         }
-        .padding(16)
-    }
+         .padding(16)
+       }
 
-    // MARK: - Footer
+   // MARK: - Footer
 
-    private var footer: some View {
-        HStack {
-            switch model.phase {
-            case .idle:
-                Button("Load") {
-                    model.load()
-                }
+   private var footer: some View {
+       HStack {
+           switch model.phase {
+           case .idle:
+               Button("Load") {
+                   model.load()
+                 }
                  .buttonStyle(.borderedProminent)
-            case .loading:
-                EmptyView()
-            case .configured:
-                Button(model.phase == .configured(enabled: true) ? "Disable" : "Enable") {
-                    model.toggle()
-                }
+           case .loading:
+               EmptyView()
+           case .configured:
+               Button(model.phase == .configured(enabled: true) ? "Disable" : "Enable") {
+                   model.toggle()
+                 }
                  .buttonStyle(.borderedProminent)
                  .disabled(model.isRunning)
-            case .saving:
-                EmptyView()
-            case .error:
-                Button("Try Again") {
-                    model.load()
-                }
+           case .saving:
+               EmptyView()
+           case .error:
+               Button("Try Again") {
+                   model.load()
+                 }
                  .buttonStyle(.borderedProminent)
              @unknown default:
-                EmptyView()
-             }
+               EmptyView()
+            }
 
-            Spacer()
+           Spacer()
 
-            Button("Close") {
-                model.dismiss()
+           Button("Close") {
+               model.dismiss()
              }
              .keyboardShortcut(.cancelAction)
-          }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-}
+         }
+         .padding(.horizontal, 16)
+         .padding(.vertical, 12)
+       }
+   }

@@ -532,17 +532,14 @@ struct SiteWindow: View {
             )
         }
         .sheet(isPresented: $bindableModel.harden.sheetPresented) {
-           HardenSheetView(model: model.harden)
+          HardenSheetView(model: model.harden)
         }
-          .sheet(isPresented: Binding(
-           get: { model.onionRouting.phase != .idle },
-           set: { if $0 { model.onionRouting.load() } }
-         )) {
-           OnionRoutingSheetView(model: model.onionRouting)
-         }
+        .sheet(isPresented: $bindableModel.onionRoutingSheetPresented) {
+          OnionRoutingSheetView(model: model.onionRouting)
+        }
         .sheet(isPresented: Binding(
-           get: { bindableModel.styleGuide?.sheetPresented ?? false },
-           set: { bindableModel.styleGuide?.sheetPresented = $0 }
+          get: { bindableModel.styleGuide?.sheetPresented ?? false },
+          set: { bindableModel.styleGuide?.sheetPresented = $0 }
         )) {
             if let styleGuide = model.styleGuide {
                 ProjectStyleGuideView(model: styleGuide, siteName: site.name)

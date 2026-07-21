@@ -120,15 +120,18 @@ final class FakeReader: CloudflareReading, @unchecked Sendable {
     func resolveZoneID(domain: String, apiToken: String) async throws -> String? {
         resolvedDomain = domain
         return zoneID
-    }
+      }
+    func zones(apiToken: String) async throws -> [String] {
+        zoneID != nil ? ["example.com"] : []
+       }
     func zoneState(zoneID: String, domain: String, apiToken: String) async throws -> CloudflareZoneState {
         fatalError("not used by DomainOperations")
-    }
+       }
     func listDNSRecords(zoneID: String, apiToken: String) async throws -> [DNSRecord] {
         listedZoneID = zoneID
         if let listError { throw listError }
         return records
-    }
+       }
     func workerScriptNames(apiToken: String) async throws -> [String] { [] }
 }
 
