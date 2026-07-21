@@ -21,6 +21,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime, SiteRuntimeContainerCapabil
     private let importBundle: @Sendable (URL, String, URL) async throws -> Void
     private let suddenTerminationController: SuddenTerminationController
     private let beginActivity: @Sendable (String) -> ActivityAssertion.Lease
+    private let workerCatalog: @Sendable () async -> [WorkerDescriptor]
     private var fileWatcher: (any SiteFileWatching)?
     private var containerTerminationLease: SuddenTerminationController.Lease?
 
@@ -58,7 +59,10 @@ public actor LocalContainerSiteRuntime: SiteRuntime, SiteRuntimeContainerCapabil
             #endif
         },
         suddenTerminationController: SuddenTerminationController = .shared,
-        beginActivity: @escaping @Sendable (String) -> ActivityAssertion.Lease = ActivityAssertion.begin
+        beginActivity: @escaping @Sendable (String) -> ActivityAssertion.Lease = ActivityAssertion.begin,
+        workerCatalog: @escaping @Sendable () async -> [WorkerDescriptor] = {
+            await WorkerCatalogFetcher(catalogURL: WorkerCatalogFetcher.productionCatalogURL).catalog()
+        }
     ) {
         self.ref = ref
         self.control = control
@@ -72,6 +76,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime, SiteRuntimeContainerCapabil
         self.importBundle = importBundle
         self.suddenTerminationController = suddenTerminationController
         self.beginActivity = beginActivity
+        self.workerCatalog = workerCatalog
     }
 
     public var state: SiteRuntimeState { stateMachine.state }
@@ -115,6 +120,68 @@ public actor LocalContainerSiteRuntime: SiteRuntime, SiteRuntimeContainerCapabil
     /// the most recent boot failed.
     public func resetNetworking() async {
         await control.resetNetworking()
+    }
+
+    /// Computes the site's effective active-worker set (mirroring `DeployModel.runDeploy`'s own
+    /// pipeline) and starts local `wrangler dev` if it's non-empty. Returns `nil` on any failure —
+    /// logged, never thrown — or when there are no active workers. #708 design §7/§6: a settings-
+    /// activated worker reliably resolves here; a component-tied worker may not, if this site's
+    /// `SiteGraphExplorerSnapshot` hasn't been populated yet (accepted thin-slice limitation, not
+    /// solved by this PR — see the design doc §6).
+    ///
+    /// `logCenter`/`source` are captured locally (not read from `self` inside `onOutput`) so late-
+    /// arriving wrangler-dev output — it's a long-lived guest process, crash-restart-supervised, and
+    /// can keep emitting long after this call returns — is always attributed to the `siteID` this
+    /// call started it for, even if this runtime has since been reused for a different site (its
+    /// `activeSiteID` would otherwise have moved on by the time a late line arrives).
+    private func startWorkersDevIfActive(siteID: String, siteDirectory: URL) async -> URL? {
+        let configDirectory = AnglesitePackage(url: AnglesitePackage.packageRoot(fromSourceURL: siteDirectory)).configURL
+        let settings = (try? await SiteConfigStore(configDirectory: configDirectory).load()) ?? SiteSettings()
+        let catalog = await workerCatalog()
+        let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: catalog, graph: nil)
+        let workers = WorkerActivation.activeDescriptors(catalog: catalog, activeIDs: effectiveActiveIDs)
+        guard !workers.isEmpty else { return nil }
+        let logCenter = self.logCenter
+        let source = "container:\(siteID)"
+        do {
+            return try await control.startWorkersDev(
+                siteID: siteID, workers: workers,
+                onOutput: { line, stream in
+                    Task { await logCenter.append(source: source, stream: stream, text: line) }
+                })
+        } catch {
+            await logCenter.append(
+                source: source, stream: .stderr,
+                text: "local wrangler-dev failed to start: \(error) — active workers will have no local dev endpoint this session")
+            return nil
+        }
+    }
+
+    /// Recomputes the effective active-worker set and restarts local wrangler-dev to match — the
+    /// capability a future Workers tab (#700c) calls on toggle. Not called anywhere in this PR
+    /// besides `start()`'s own initial computation (which goes through `startWorkersDevIfActive`
+    /// directly, not through this method) — built and left as public API now so #700c needs no
+    /// further runtime-side work. Guards on `gen == generation` and `activeSiteID == siteID` after
+    /// its own await, matching `start()`'s discipline, even though nothing exercises that race yet:
+    /// a future caller inherits the same actor-reentrancy hazard `start()` has, and shipping this
+    /// unguarded now would just be latent.
+    public func updateActiveWorkers(_ settings: SiteSettings) async {
+        guard let siteID = activeSiteID, let siteDirectory = activeSiteDirectory else { return }
+        let gen = generation
+        let catalog = await workerCatalog()
+        let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: catalog, graph: nil)
+        let workers = WorkerActivation.activeDescriptors(catalog: catalog, activeIDs: effectiveActiveIDs)
+        let workersDevURL: URL?
+        if workers.isEmpty {
+            try? await control.stopWorkersDev(siteID: siteID)
+            workersDevURL = nil
+        } else {
+            workersDevURL = await startWorkersDevIfActive(siteID: siteID, siteDirectory: siteDirectory)
+        }
+        guard gen == generation, activeSiteID == siteID else { return }
+        if case .ready(let readySiteID, let url, _) = current, readySiteID == siteID {
+            setState(.ready(siteID: readySiteID, url: url, workersDevURL: workersDevURL))
+        }
     }
 
     /// Copies one commit produced by the MCP sidecar in `/workspace/site` back into the host's
@@ -318,7 +385,23 @@ public actor LocalContainerSiteRuntime: SiteRuntime, SiteRuntimeContainerCapabil
             activeSiteDirectory = siteDirectory
             containerTerminationLease = suddenTerminationLease
             activityLease.release()
-            stateMachine.settle(gen: gen, to: .ready(siteID: siteID, url: session.previewURL))
+            // Local wrangler-dev (#708): computed once here, not wired to a live Settings
+            // toggle yet (no Workers tab exists to trigger one — #700c). A start failure here
+            // degrades to `workersDevURL: nil` rather than failing the whole runtime — wrangler-
+            // dev is an add-on capability, unlike the MCP connection above.
+            let workersDevURL = await self.startWorkersDevIfActive(siteID: siteID, siteDirectory: siteDirectory)
+            // Unlike every earlier `stateMachine.isCurrent(gen)` guard in this method,
+            // `activeSiteID`/`activeSiteDirectory`/`containerTerminationLease` are already assigned
+            // above by the time this await returns — a superseding stop()/start() during it
+            // discovers this attempt's container via the ordinary activeSiteID-based teardown()
+            // path and already tears it down (or, in a rapid stop→restart, replaces it) correctly.
+            // `settle` itself already no-ops when superseded (gen != generation internally), which
+            // is exactly the "just bail" behavior this needs — no explicit guard or
+            // `abandonSupersededAttempt()` call required (that helper's own `control.stop(siteID:)`
+            // is keyed by siteID, not container instance, so re-issuing it here could stop a BRAND
+            // NEW container a later start() has since booted and settled to `.ready` under the same
+            // siteID — a real, if narrow, race an unconditional cleanup call here would reintroduce).
+            stateMachine.settle(gen: gen, to: .ready(siteID: siteID, url: session.previewURL, workersDevURL: workersDevURL))
         } catch {
             // Finish this attempt's own (locally-captured) boot log stream immediately rather than
             // leaving it for the next start()/stop() call to clean up via teardown() — control.start()
