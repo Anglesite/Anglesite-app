@@ -239,6 +239,9 @@
     "Add rule" : {
 
     },
+    "Adds View → Show Debug Pane (⌥⌘D), a live tail of every subprocess. Takes effect on the next launch. You can also hold ⌥ while launching Anglesite to reveal it once." : {
+
+    },
     "Adds robots.txt rules refusing known AI-training crawlers (GPTBot, ClaudeBot, and others). This reduces your site's visibility to AI assistants and AI-generated search summaries — it does not affect traditional search engines." : {
 
     },
@@ -645,7 +648,13 @@
     "Connect & deploy" : {
 
     },
+    "Connect & publish" : {
+
+    },
     "Connect to Cloudflare" : {
+
+    },
+    "Connect to GitHub" : {
 
     },
     "Connected to %@" : {
@@ -722,6 +731,9 @@
 
     },
     "Couldn't open that site" : {
+
+    },
+    "Couldn't publish" : {
 
     },
     "Couldn't run the check" : {
@@ -1037,6 +1049,9 @@
 
     },
     "Generates recommended platforms, bios, content pillars, and a weekly calendar — saved into your site repo, never posted for you." : {
+
+    },
+    "GitHub" : {
 
     },
     "Got it" : {
@@ -1444,6 +1459,9 @@
     "Open File" : {
 
     },
+    "Open GitHub personal access tokens" : {
+
+    },
     "Open Recent" : {
 
     },
@@ -1516,6 +1534,9 @@
     "Permanent (301)" : {
 
     },
+    "Personal access token" : {
+
+    },
     "Physical goods" : {
 
     },
@@ -1585,7 +1606,22 @@
     "Publish" : {
 
     },
+    "Publish to GitHub" : {
+
+    },
+    "Publish to GitHub…" : {
+
+    },
+    "Publish “%@” to GitHub" : {
+
+    },
     "Published URL (paste after posting)" : {
+
+    },
+    "Published to GitHub" : {
+
+    },
+    "Publishing needs a one-time personal access token. It takes about a minute." : {
 
     },
     "Publish…" : {
@@ -1863,6 +1899,9 @@
 
     },
     "See and edit this site's learned writing, image, and naming conventions" : {
+
+    },
+    "Select **All repositories**, then grant **Contents: Read and write** and **Administration: Read and write** (Administration is what lets a new repo be created) — then copy the token and paste it below." : {
 
     },
     "Select Parent" : {
@@ -2273,7 +2312,7 @@
     "Use a temporary Cloudflare Workers domain later, such as %@." : {
 
     },
-    "Used to push backups and publish sites to GitHub over HTTPS (the sandboxed app can't run `git` or `gh`, so it pushes in-process with this token). Create a fine-grained token with Contents read/write access at github.com/settings/tokens. Stored in the macOS Keychain under `io.dwk.anglesite` and never written to logs." : {
+    "Used to push backups and publish sites to GitHub over HTTPS (the sandboxed app can't run `git` or `gh`, so it pushes in-process with this token). Create a fine-grained token scoped to All repositories with Contents: Read and write and Administration: Read and write access (Administration is needed to create a new repo when publishing) at github.com/settings/tokens. Stored in the macOS Keychain under `io.dwk.anglesite` and never written to logs." : {
 
     },
     "Uses Apple Intelligence on your device. No content leaves your Mac without your say-so." : {
@@ -2295,6 +2334,9 @@
 
     },
     "View and manage this domain's DNS records" : {
+
+    },
+    "View on GitHub" : {
 
     },
     "Waiting for output…" : {

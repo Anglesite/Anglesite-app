@@ -16,7 +16,8 @@ struct LocalContainerSiteRuntimeTests {
             control: fake,
             mcpClient: mcp,
             connect: connect,
-            importBundle: importBundle)
+            importBundle: importBundle,
+            workerCatalog: { [] })
         return (rt, fake)
     }
 
@@ -33,7 +34,8 @@ struct LocalContainerSiteRuntimeTests {
             control: fake,
             mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
             connect: { _, _ in },
-            suddenTerminationController: controller
+            suddenTerminationController: controller,
+            workerCatalog: { [] }
         )
 
         await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
@@ -51,7 +53,8 @@ struct LocalContainerSiteRuntimeTests {
             control: fake,
             mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
             connect: { _, _ in },
-            suddenTerminationController: controller
+            suddenTerminationController: controller,
+            workerCatalog: { [] }
         )
 
         await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
@@ -84,7 +87,8 @@ struct LocalContainerSiteRuntimeTests {
             control: fake,
             mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
             connect: { _, _ in },
-            beginActivity: counter.beginActivity
+            beginActivity: counter.beginActivity,
+            workerCatalog: { [] }
         )
 
         await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
@@ -101,7 +105,8 @@ struct LocalContainerSiteRuntimeTests {
             control: fake,
             mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
             connect: { _, _ in },
-            beginActivity: counter.beginActivity
+            beginActivity: counter.beginActivity,
+            workerCatalog: { [] }
         )
 
         await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
@@ -121,7 +126,8 @@ struct LocalContainerSiteRuntimeTests {
             control: fake,
             mcpClient: MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter()),
             connect: { _, _ in },
-            beginActivity: counter.beginActivity
+            beginActivity: counter.beginActivity,
+            workerCatalog: { [] }
         )
 
         await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
@@ -215,7 +221,8 @@ struct LocalContainerSiteRuntimeTests {
             connect: { _, _ in },
             importBundle: { bundleURL, importedCommit, sourceDirectory in
                 try await host.run(bundleURL: bundleURL, commit: importedCommit, sourceDirectory: sourceDirectory)
-            }
+            },
+            workerCatalog: { [] }
         )
         await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
 
@@ -245,7 +252,8 @@ struct LocalContainerSiteRuntimeTests {
             connect: { _, _ in },
             importBundle: { bundleURL, importedCommit, sourceDirectory in
                 try await host.run(bundleURL: bundleURL, commit: importedCommit, sourceDirectory: sourceDirectory)
-            }
+            },
+            workerCatalog: { [] }
         )
         await runtime.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/sites/One/Source"))
 
@@ -287,7 +295,8 @@ struct LocalContainerSiteRuntimeTests {
         let subscription = await logCenter.subscribe()
         let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
         let rt = LocalContainerSiteRuntime(
-            ref: "HEAD", control: fake, mcpClient: mcp, logCenter: logCenter, connect: { _, _ in })
+            ref: "HEAD", control: fake, mcpClient: mcp, logCenter: logCenter, connect: { _, _ in },
+            workerCatalog: { [] })
 
         await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
 
@@ -322,7 +331,8 @@ struct LocalContainerSiteRuntimeTests {
             control: fake,
             mcpClient: mcp,
             logCenter: logCenter,
-            connect: { _, _ in })
+            connect: { _, _ in },
+            workerCatalog: { [] })
 
         await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
 
@@ -353,7 +363,8 @@ struct LocalContainerSiteRuntimeTests {
         let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
         let rt = LocalContainerSiteRuntime(
             ref: "HEAD",
-            control: gated, mcpClient: mcp, connect: { _, _ in })
+            control: gated, mcpClient: mcp, connect: { _, _ in },
+            workerCatalog: { [] })
         let startTask = Task { await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused")) }
         await gated.waitUntilParked()
         await rt.stop()
@@ -376,7 +387,8 @@ struct LocalContainerSiteRuntimeTests {
         let control = StopGatedFakeLocalContainerControl(result: .success(Self.ok))
         let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
         let rt = LocalContainerSiteRuntime(
-            ref: "HEAD", control: control, mcpClient: mcp, connect: { _, _ in })
+            ref: "HEAD", control: control, mcpClient: mcp, connect: { _, _ in },
+            workerCatalog: { [] })
         let dir = URL(fileURLWithPath: "/unused")
         await rt.start(siteID: "s1", siteDirectory: dir)
 
@@ -441,13 +453,95 @@ struct LocalContainerSiteRuntimeTests {
 
     /// Attaches the observer BEFORE start() runs, then drives start() through a suspending control
     /// client so `.starting` is delivered to a live observer (not drained from a buffer after the fact).
+    // MARK: - Workers-dev worker-awareness (#708)
+
+    private func temporaryPackage() throws -> URL {
+        let package = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalContainerSiteRuntimeTests-\(UUID().uuidString).anglesite", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: AnglesitePackage(url: package).sourceURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: AnglesitePackage(url: package).configURL, withIntermediateDirectories: true)
+        return package
+    }
+
+    @Test("workers-dev starts when the effective active set is non-empty")
+    func startsWorkersDevWhenActiveSetNonEmpty() async throws {
+        let control = FakeLocalContainerControl(startResult: .success(Self.ok))
+        // FakeLocalContainerControl.startWorkersDevResult already defaults to a `.success` of this
+        // same URL — it's an actor-isolated `var`, so it can't be assigned from outside via a bare
+        // `await control.startWorkersDevResult = ...` (the brief's original test code did that; it
+        // doesn't compile — mutating actor-isolated stored state needs an isolated method, not just
+        // `await` at the call site). The default already matches what this test expects.
+        let package = try temporaryPackage()
+        let configStore = SiteConfigStore(configDirectory: AnglesitePackage(url: package).configURL)
+        try await configStore.save(SiteSettings(activeWorkerIDs: ["indieauth"]))
+        let rt = LocalContainerSiteRuntime(
+            ref: "HEAD", control: control, mcpClient: MCPClient(supervisor: .shared),
+            connect: { _, _ in },
+            workerCatalog: { [WorkerDescriptor(
+                id: "indieauth", displayName: "IndieAuth", description: "d", group: "identity",
+                binding: .settingsActivated, resources: .init(needsD1: true, needsKV: true, needsR2: false))] })
+
+        await rt.start(siteID: "s1", siteDirectory: AnglesitePackage(url: package).sourceURL)
+
+        guard case .ready(_, _, let workersDevURL) = await rt.state else {
+            Issue.record("expected .ready, got \(await rt.state)")
+            return
+        }
+        #expect(workersDevURL == URL(string: "http://127.0.0.1:51003")!)
+        #expect(await control.startWorkersDevCalls.map(\.siteID) == ["s1"])
+    }
+
+    @Test("workers-dev does not start when the effective active set is empty")
+    func doesNotStartWorkersDevWhenActiveSetEmpty() async throws {
+        let control = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let package = try temporaryPackage()
+        let rt = LocalContainerSiteRuntime(
+            ref: "HEAD", control: control, mcpClient: MCPClient(supervisor: .shared),
+            connect: { _, _ in },
+            workerCatalog: { [] })
+
+        await rt.start(siteID: "s1", siteDirectory: AnglesitePackage(url: package).sourceURL)
+
+        guard case .ready(_, _, let workersDevURL) = await rt.state else {
+            Issue.record("expected .ready, got \(await rt.state)")
+            return
+        }
+        #expect(workersDevURL == nil)
+        #expect(await control.startWorkersDevCalls.isEmpty)
+    }
+
+    @Test("teardown stops workers-dev via the ordinary control.stop(siteID:) path")
+    func teardownStopsWorkersDev() async throws {
+        let control = FakeLocalContainerControl(startResult: .success(Self.ok))
+        let package = try temporaryPackage()
+        let configStore = SiteConfigStore(configDirectory: AnglesitePackage(url: package).configURL)
+        try await configStore.save(SiteSettings(activeWorkerIDs: ["indieauth"]))
+        let rt = LocalContainerSiteRuntime(
+            ref: "HEAD", control: control, mcpClient: MCPClient(supervisor: .shared),
+            connect: { _, _ in },
+            workerCatalog: { [WorkerDescriptor(
+                id: "indieauth", displayName: "IndieAuth", description: "d", group: "identity",
+                binding: .settingsActivated, resources: .init(needsD1: true, needsKV: true, needsR2: false))] })
+
+        await rt.start(siteID: "s1", siteDirectory: AnglesitePackage(url: package).sourceURL)
+        await rt.stop()
+
+        // stopWorkersDev is not called directly — teardown relies on the same control.stop(siteID:)
+        // call it already makes, which (per Task 4) tears down workers-dev too. This test documents
+        // that expectation against the fake, which only records `stop`, not `stopWorkersDev`.
+        #expect(await control.stopped == ["s1"])
+    }
+
     @Test("observe delivers .starting to a live observer while runtime is mid-start")
     func observeDeliversStartingToLiveObserver() async throws {
         let gated = GatedFakeLocalContainerControl(result: .success(Self.ok))
         let mcp = MCPClient(supervisor: ProcessSupervisor(), logCenter: LogCenter())
         let rt = LocalContainerSiteRuntime(
             ref: "HEAD",
-            control: gated, mcpClient: mcp, connect: { _, _ in })
+            control: gated, mcpClient: mcp, connect: { _, _ in },
+            workerCatalog: { [] })
 
         // Attach the observer BEFORE start().
         let stream = await rt.observe()

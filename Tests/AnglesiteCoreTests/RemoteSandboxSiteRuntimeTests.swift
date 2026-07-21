@@ -76,6 +76,21 @@ struct RemoteSandboxSiteRuntimeTests {
         #expect(seen.last == .ready(siteID: "s1", url: Self.ok.previewURL))
     }
 
+    // MARK: - containerCapability (#823)
+
+    /// `RemoteSandboxSiteRuntime` inherits the `nil` default from the `SiteRuntime` protocol
+    /// extension — it never exposes local-container-only members (deploy execution context,
+    /// network reset, edit persistence), started or not.
+    @Test("containerCapability is always nil, running or not")
+    func containerCapabilityAlwaysNil() async {
+        let (rt, _) = makeRuntime(.success(Self.ok))
+        let asProtocol: any SiteRuntime = rt
+        #expect(asProtocol.containerCapability == nil)
+
+        await rt.start(siteID: "s1", siteDirectory: URL(fileURLWithPath: "/unused"))
+        #expect(asProtocol.containerCapability == nil)
+    }
+
     // MARK: - Stale-generation guard
 
     /// Verifies that if `stop()` bumps `generation` while `control.start(...)` is suspended,

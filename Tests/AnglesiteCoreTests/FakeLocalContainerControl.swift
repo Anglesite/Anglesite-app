@@ -5,6 +5,9 @@ actor FakeLocalContainerControl: LocalContainerControl {
     var startResult: Result<LocalContainerSession, LocalContainerError>
     private(set) var stopped: [String] = []
     private(set) var startedRepos: [(siteID: String, repo: URL, ref: String)] = []
+    /// Overrides `LocalContainerControl`'s default no-op so tests can assert
+    /// `resetNetworking()` calls actually reach the control, not just that the call compiles.
+    private(set) var resetNetworkingCallCount = 0
 
     /// Lines replayed to `start`'s `onOutput` in order before it returns (or throws).
     var startStdoutLines: [String]
@@ -27,6 +30,15 @@ actor FakeLocalContainerControl: LocalContainerControl {
     private(set) var execInteractiveWrites: [Data] = []
     /// Whether the most recently returned handle's `terminate()` was called.
     private(set) var execInteractiveTerminated = false
+
+    /// Canned result returned by `startWorkersDev`. Defaults to a successful fixed URL.
+    var startWorkersDevResult: Result<URL, LocalContainerError> = .success(URL(string: "http://127.0.0.1:51003")!)
+    /// Lines replayed to `startWorkersDev`'s `onOutput` in order before it returns.
+    var startWorkersDevStdoutLines: [String] = []
+    /// All `startWorkersDev` invocations recorded for assertion.
+    private(set) var startWorkersDevCalls: [(siteID: String, workers: [WorkerDescriptor])] = []
+    /// All `stopWorkersDev` invocations recorded for assertion.
+    private(set) var stopWorkersDevCalls: [String] = []
 
     init(
         startResult: Result<LocalContainerSession, LocalContainerError>,
@@ -54,6 +66,22 @@ actor FakeLocalContainerControl: LocalContainerControl {
     }
 
     func stop(siteID: String) async throws { stopped.append(siteID) }
+
+    func resetNetworking() async { resetNetworkingCallCount += 1 }
+
+    func startWorkersDev(
+        siteID: String,
+        workers: [WorkerDescriptor],
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> URL {
+        startWorkersDevCalls.append((siteID: siteID, workers: workers))
+        for line in startWorkersDevStdoutLines { onOutput(line, .stdout) }
+        return try startWorkersDevResult.get()
+    }
+
+    func stopWorkersDev(siteID: String) async throws {
+        stopWorkersDevCalls.append(siteID)
+    }
 
     func exec(
         siteID: String,
@@ -139,6 +167,16 @@ actor PersistenceGatedFakeLocalContainerControl: LocalContainerControl {
 
     func stop(siteID: String) async throws {}
 
+    func startWorkersDev(
+        siteID: String,
+        workers: [WorkerDescriptor],
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> URL {
+        URL(string: "http://127.0.0.1:51003")!
+    }
+
+    func stopWorkersDev(siteID: String) async throws {}
+
     func exec(
         siteID: String,
         argv: [String],
@@ -215,6 +253,16 @@ actor StopGatedFakeLocalContainerControl: LocalContainerControl {
         }
     }
 
+    func startWorkersDev(
+        siteID: String,
+        workers: [WorkerDescriptor],
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> URL {
+        URL(string: "http://127.0.0.1:51003")!
+    }
+
+    func stopWorkersDev(siteID: String) async throws {}
+
     func exec(
         siteID: String,
         argv: [String],
@@ -263,6 +311,16 @@ actor GatedFakeLocalContainerControl: LocalContainerControl {
         return try result.get()
     }
     func stop(siteID: String) async throws { stopped.append(siteID) }
+
+    func startWorkersDev(
+        siteID: String,
+        workers: [WorkerDescriptor],
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> URL {
+        URL(string: "http://127.0.0.1:51003")!
+    }
+
+    func stopWorkersDev(siteID: String) async throws {}
 
     func exec(
         siteID: String,

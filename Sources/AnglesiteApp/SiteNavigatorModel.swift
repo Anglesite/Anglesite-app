@@ -43,8 +43,10 @@ final class SiteNavigatorModel {
         self.graph = graph
     }
 
-    func start(siteID: String, siteRoot: URL, sourceDirectory: URL, websiteTitle: String) {
-        self.sourceDirectory = sourceDirectory
+    func start(site: CurrentSite, websiteTitle: String) {
+        let siteID = site.id
+        let siteRoot = site.packageURL
+        self.sourceDirectory = site.sourceDirectory
         self.websiteTitle = websiteTitle
         self.siteID = siteID
         self.siteRoot = siteRoot

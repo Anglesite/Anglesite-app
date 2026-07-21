@@ -44,9 +44,9 @@ final class ProjectCleanupModel {
 
     /// Records which site this model scans. Cheap — does no I/O. Called once per site open from
     /// `SiteWindowModel.loadAndStart()`.
-    func configure(siteID: String, sourceDirectory: URL) {
-        self.siteID = siteID
-        self.sourceDirectory = sourceDirectory
+    func configure(site: CurrentSite) {
+        self.siteID = site.id
+        self.sourceDirectory = site.sourceDirectory
     }
 
     /// Runs (or re-runs) the full cleanup scan. On-demand only — never called automatically.

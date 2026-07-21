@@ -11,9 +11,7 @@ public actor RemoteSandboxSiteRuntime: SiteRuntime {
     private let mintToken: @Sendable () -> SessionToken
     private let connect: @Sendable (MCPClient, URL, SessionToken) async throws -> Void
 
-    private var current: SiteRuntimeState = .idle
-    private var observers: [UUID: AsyncStream<SiteRuntimeState>.Continuation] = [:]
-    private var generation = 0
+    private let stateMachine = SiteRuntimeStateMachine()
     private var activeSiteID: String?
 
     public init(
@@ -34,33 +32,17 @@ public actor RemoteSandboxSiteRuntime: SiteRuntime {
         self.connect = connect
     }
 
-    public var state: SiteRuntimeState { current }
+    public var state: SiteRuntimeState { stateMachine.state }
 
     public func observe() -> AsyncStream<SiteRuntimeState> {
-        let (stream, continuation) = AsyncStream<SiteRuntimeState>.makeStream(bufferingPolicy: .unbounded)
-        let id = UUID()
-        observers[id] = continuation
-        continuation.onTermination = { [weak self] _ in Task { await self?.removeObserver(id) } }
-        continuation.yield(current)
-        return stream
+        stateMachine.observe()
     }
 
     /// `siteDirectory` is unused on the remote path (no local files on iOS); the git remote + ref
     /// come from `init`. Tears down any previous session, then settles to `.ready`/`.failed`.
     public func start(siteID: String, siteDirectory: URL) async {
         await teardown()
-        generation += 1
-        let gen = generation
-        // `setState` dedups against the current value, so re-entering `.starting(siteID:)` for the
-        // same site (Restart while already `.starting` — the "wedged boot" case this command exists
-        // for) would otherwise be silently dropped: observers never see a change, so the progress
-        // bar stays frozen on the superseded attempt. Force a transient `.idle` first only in that
-        // specific case — `.ready`/`.failed`/`.idle` already differ from the new `.starting` value
-        // and don't need it.
-        if case .starting(let existingSiteID) = current, existingSiteID == siteID {
-            setState(.idle)
-        }
-        setState(.starting(siteID: siteID))
+        let gen = stateMachine.beginStarting(siteID: siteID)
         do {
             let token = mintToken()
             let session = try await control.start(
@@ -69,27 +51,24 @@ public actor RemoteSandboxSiteRuntime: SiteRuntime {
             // suspended above — before `activeSiteID` was assigned, so that teardown() had nothing
             // of ours to stop. If we've been superseded, this attempt alone knows about the session
             // it just created, so it alone is responsible for tearing it down.
-            guard gen == generation else { try? await control.stop(siteID: siteID); return }
+            guard stateMachine.isCurrent(gen) else { try? await control.stop(siteID: siteID); return }
             try await connect(mcpClient, session.mcpURL, token)
-            guard gen == generation else { try? await control.stop(siteID: siteID); return }
+            guard stateMachine.isCurrent(gen) else { try? await control.stop(siteID: siteID); return }
             activeSiteID = siteID
-            setState(.ready(siteID: siteID, url: session.previewURL))
+            stateMachine.settle(gen: gen, to: .ready(siteID: siteID, url: session.previewURL))
         } catch {
-            guard gen == generation else { return }
-            setState(.failed(siteID: siteID, message: Self.friendlyMessage(for: error)))
+            stateMachine.settle(gen: gen, to: .failed(siteID: siteID, message: Self.friendlyMessage(for: error)))
         }
     }
 
     public func stop() async {
-        generation += 1
-        let gen = generation
+        let gen = stateMachine.beginAttempt()
         await teardown()
         // Actors are reentrant, so a start()/stop() issued while teardown() was suspended has
         // superseded this stop and owns the state now — emitting `.idle` here would clobber its
         // `.starting`/`.ready` (the rapid Stop → Restart race, PR #542 review): the UI would show
         // the boot spinner forever while the dev server is actually running.
-        guard gen == generation else { return }
-        setState(.idle)
+        stateMachine.settle(gen: gen, to: .idle)
     }
 
     // MARK: Internals
@@ -107,14 +86,6 @@ public actor RemoteSandboxSiteRuntime: SiteRuntime {
             try? await control.stop(siteID: id)
         }
     }
-
-    private func setState(_ s: SiteRuntimeState) {
-        guard s != current else { return }
-        current = s
-        for c in observers.values { c.yield(s) }
-    }
-
-    private func removeObserver(_ id: UUID) { observers[id] = nil }
 
     static func friendlyMessage(for error: Error) -> String {
         switch error {

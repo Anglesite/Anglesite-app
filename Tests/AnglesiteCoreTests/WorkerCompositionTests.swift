@@ -3,13 +3,27 @@ import Testing
 import Foundation
 @testable import AnglesiteCore
 
+private func worker(_ id: String, d1: Bool, kv: Bool, r2: Bool) -> WorkerDescriptor {
+    WorkerDescriptor(
+        id: id, displayName: id, description: "test fixture", group: "test",
+        binding: .settingsActivated, resources: .init(needsD1: d1, needsKV: kv, needsR2: r2)
+    )
+}
+
+private let webmentionWorker = worker("webmention", d1: true, kv: true, r2: false)
+private let indieauthWorker = worker("indieauth", d1: true, kv: true, r2: false)
+private let micropubWorker = worker("micropub", d1: true, kv: true, r2: true)
+private let websubWorker = worker("websub", d1: true, kv: true, r2: false)
+private let v2Workers = [webmentionWorker, indieauthWorker]
+private let v3Workers = [webmentionWorker, indieauthWorker, micropubWorker, websubWorker]
+
 @Suite("WorkerComposition")
 struct WorkerCompositionTests {
     @Test("generates wrangler.toml with static assets and no social features")
     func staticOnly() throws {
         let toml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
-            features: []
+            workers: []
         )
         #expect(toml.contains("name = \"my-site\""))
         #expect(toml.contains("[assets]"))
@@ -21,7 +35,7 @@ struct WorkerCompositionTests {
     func withSocialFeatures() throws {
         let toml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
-            features: [.webmention, .indieauth]
+            workers: [webmentionWorker, indieauthWorker]
         )
         #expect(toml.contains("name = \"my-site\""))
         #expect(toml.contains("[assets]"))
@@ -42,22 +56,22 @@ struct WorkerCompositionTests {
         #expect(!toml.contains("[[r2_buckets]]"))
     }
 
-    @Test("generates wrangler.toml with V-2 features (D1 yes, R2 no — micropub is V-3)")
+    @Test("generates wrangler.toml with V-2 workers (D1 yes, R2 no — micropub is V-3)")
     func v2Features() throws {
         let toml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
-            features: WorkerComposition.Feature.v2
+            workers: v2Workers
         )
         #expect(toml.contains("[[d1_databases]]"))
         #expect(toml.contains("[[kv_namespaces]]"))
         #expect(!toml.contains("[[r2_buckets]]"))
     }
 
-    @Test("generates wrangler.toml with V-3 features (D1 + R2 — micropub needs media)")
+    @Test("generates wrangler.toml with V-3 workers (D1 + R2 — micropub needs media)")
     func v3Features() throws {
         let toml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
-            features: WorkerComposition.Feature.v3
+            workers: v3Workers
         )
         #expect(toml.contains("[[d1_databases]]"))
         #expect(toml.contains("[[kv_namespaces]]"))
@@ -69,7 +83,7 @@ struct WorkerCompositionTests {
     func provisionedResources() throws {
         let toml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
-            features: WorkerComposition.Feature.v3,
+            workers: v3Workers,
             resources: .init(d1DatabaseID: "d1-id", kvNamespaceID: "kv-id", r2BucketName: "custom-media")
         )
 
@@ -83,25 +97,15 @@ struct WorkerCompositionTests {
         #expect(throws: WorkerComposition.ConfigError.self) {
             try WorkerComposition.generateWranglerToml(
                 siteName: "my\"site\ninjected",
-                features: []
+                workers: []
             )
         }
     }
 
-    @Test("feature sets are correctly defined per phase")
-    func featureSets() {
-        #expect(WorkerComposition.Feature.v2.contains(.webmention))
-        #expect(WorkerComposition.Feature.v2.contains(.indieauth))
-        #expect(!WorkerComposition.Feature.v2.contains(.micropub))
-
-        #expect(WorkerComposition.Feature.v3.contains(.micropub))
-        #expect(WorkerComposition.Feature.v3.contains(.websub))
-    }
-
-    @Test("inboxCaptureEnabled adds an INBOX_KV binding and uncomments main even with no @dwk/* features")
+    @Test("inboxCaptureEnabled adds an INBOX_KV binding and uncomments main even with no @dwk/* workers")
     func inboxCaptureAddsKVBinding() throws {
         let toml = try WorkerComposition.generateWranglerToml(
-            siteName: "my-site", features: [], inboxCaptureEnabled: true)
+            siteName: "my-site", workers: [], inboxCaptureEnabled: true)
         #expect(toml.contains("main = \"worker/worker.ts\""))
         #expect(toml.contains("binding = \"INBOX_KV\""))
         #expect(toml.contains("id = \"\"  # filled by provisioning"))
@@ -110,13 +114,13 @@ struct WorkerCompositionTests {
     @Test("inboxCaptureEnabled fills the provisioned namespace id when given")
     func inboxCaptureFillsProvisionedID() throws {
         let toml = try WorkerComposition.generateWranglerToml(
-            siteName: "my-site", features: [], inboxCaptureEnabled: true, inboxKVNamespaceID: "abc123")
+            siteName: "my-site", workers: [], inboxCaptureEnabled: true, inboxKVNamespaceID: "abc123")
         #expect(toml.contains("id = \"abc123\""))
     }
 
     @Test("inboxCaptureEnabled false omits the INBOX_KV binding")
     func inboxCaptureDisabledOmitsBinding() throws {
-        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", features: [])
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [])
         #expect(!toml.contains("INBOX_KV"))
         #expect(!toml.contains("main ="))
     }
@@ -132,20 +136,20 @@ struct WorkerCompositionTests {
                 specificationURL: URL(string: "https://www.rfc-editor.org/rfc/rfc8555")),
         ]
         let toml = try WorkerComposition.generateWranglerToml(
-            siteName: "my-site", features: [.indieauth], routeClaims: claims)
+            siteName: "my-site", workers: [indieauthWorker], routeClaims: claims)
         #expect(toml.contains(
             #"run_worker_first = ["/.well-known/acme-challenge", "/.well-known/acme-challenge/*", "/authorize", "/token"]"#
         ))
         // Regeneration is byte-stable regardless of claim order.
         let regenerated = try WorkerComposition.generateWranglerToml(
-            siteName: "my-site", features: [.indieauth], routeClaims: claims.reversed())
+            siteName: "my-site", workers: [indieauthWorker], routeClaims: claims.reversed())
         #expect(toml == regenerated)
     }
 
     @Test("run_worker_first is omitted entirely when there are no active dynamic routes")
     func omitsRunWorkerFirstWithoutClaims() throws {
         let toml = try WorkerComposition.generateWranglerToml(
-            siteName: "my-site", features: [.webmention, .indieauth])
+            siteName: "my-site", workers: [webmentionWorker, indieauthWorker])
         #expect(!toml.contains("run_worker_first"))
         #expect(toml.contains("binding = \"ASSETS\""))
     }
@@ -153,13 +157,13 @@ struct WorkerCompositionTests {
     @Test("inbox capture claims /inbox as a worker-first route")
     func inboxCaptureClaimsRoute() throws {
         let toml = try WorkerComposition.generateWranglerToml(
-            siteName: "my-site", features: [], inboxCaptureEnabled: true)
+            siteName: "my-site", workers: [], inboxCaptureEnabled: true)
         #expect(toml.contains(#"run_worker_first = ["/inbox"]"#))
     }
 
     @Test("static-only sites emit no run_worker_first")
     func staticOnlyOmitsRunWorkerFirst() throws {
-        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", features: [])
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [])
         #expect(!toml.contains("run_worker_first"))
     }
 
@@ -169,7 +173,7 @@ struct WorkerCompositionTests {
             path: "/a\"]\ninjected = true", match: .exact, methods: ["GET"], handler: "x")
         #expect(throws: WorkerComposition.ConfigError.self) {
             try WorkerComposition.generateWranglerToml(
-                siteName: "my-site", features: [.indieauth], routeClaims: [hostile])
+                siteName: "my-site", workers: [indieauthWorker], routeClaims: [hostile])
         }
     }
 
@@ -180,7 +184,7 @@ struct WorkerCompositionTests {
             path: "/status", match: .exact, methods: ["HEAD"], handler: "x")
         #expect(throws: WorkerComposition.ConfigError.self) {
             try WorkerComposition.generateWranglerToml(
-                siteName: "my-site", features: [.indieauth], routeClaims: [headOnly])
+                siteName: "my-site", workers: [indieauthWorker], routeClaims: [headOnly])
         }
     }
 

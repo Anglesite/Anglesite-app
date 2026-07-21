@@ -38,4 +38,12 @@ struct UnavailableSiteRuntimeTests {
 
         #expect(await iterator.next() == .idle)
     }
+
+    /// #823: `UnavailableSiteRuntime` inherits the `SiteRuntime` protocol extension's `nil`
+    /// default — it never had local-container members to reach, so there's nothing to expose.
+    @Test("containerCapability is nil")
+    func containerCapabilityIsNil() async {
+        let runtime: any SiteRuntime = UnavailableSiteRuntime(reason: "no runtime")
+        #expect(runtime.containerCapability == nil)
+    }
 }

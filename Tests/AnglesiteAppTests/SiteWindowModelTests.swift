@@ -117,7 +117,7 @@ extension SiteWindowModelTests {
         // would short-circuit before ever reaching the stale-candidate check this test targets —
         // exactly the trap Task 4's fix-cycle flagged. Configure it directly so execution reaches
         // the second guard.
-        model.cleanup.configure(siteID: "site-a", sourceDirectory: sourceDirectory)
+        model.cleanup.configure(site: CurrentSite(id: "site-a", packageURL: sourceDirectory, sourceDirectory: sourceDirectory))
         let candidate = DeadAssetScanner.CleanupCandidate(
             id: "public/images/ghost.png", path: "public/images/ghost.png",
             kind: .image, lastModified: Date(timeIntervalSince1970: 0), referenceCount: 0
@@ -266,7 +266,7 @@ extension SiteWindowModelTests {
             posts: [], images: []
         )
         let model = makeModel(contentGraph: contentGraph)
-        model.graphExplorer.start(siteID: "site-1", sourceDirectory: root)
+        model.graphExplorer.start(site: CurrentSite(id: "site-1", packageURL: root, sourceDirectory: root))
         while model.graphExplorer.snapshot.nodes.isEmpty { await Task.yield() }
 
         let handled = model.revealCitationInGraph("src/pages/about.astro")
@@ -306,7 +306,7 @@ extension SiteWindowModelTests {
             posts: [], images: []
         )
         let model = makeModel(contentGraph: contentGraph)
-        model.graphExplorer.start(siteID: "site-1", sourceDirectory: root)
+        model.graphExplorer.start(site: CurrentSite(id: "site-1", packageURL: root, sourceDirectory: root))
         while model.graphExplorer.snapshot.nodes.isEmpty { await Task.yield() }
 
         // A dirty editor whose file changed externally under it — `flushBeforeLeaving()`'s real
@@ -468,7 +468,7 @@ extension SiteWindowModelTests {
             isValid: true, missingSentinels: [], lastSeen: Date(), bookmarkData: nil
         )
         let navModel = SiteNavigatorModel(graph: graph)
-        navModel.start(siteID: "site-a", siteRoot: packageURL, sourceDirectory: package.sourceURL, websiteTitle: "Test")
+        navModel.start(site: CurrentSite(id: "site-a", packageURL: packageURL, sourceDirectory: package.sourceURL), websiteTitle: "Test")
         while navModel.nodes.isEmpty { await Task.yield() }
         #expect(navModel.target(for: "website") == .websiteSettings)
         model.navigator = navModel
@@ -517,7 +517,7 @@ extension SiteWindowModelTests {
         model.inspectorContext = .page(PageMetadataModel(file: priorFile, sourceDirectory: package.sourceURL))
 
         let navModel = SiteNavigatorModel(graph: graph)
-        navModel.start(siteID: "site-a", siteRoot: packageURL, sourceDirectory: package.sourceURL, websiteTitle: "Test")
+        navModel.start(site: CurrentSite(id: "site-a", packageURL: packageURL, sourceDirectory: package.sourceURL), websiteTitle: "Test")
         while navModel.nodes.count < 2 { await Task.yield() }
         let directoryID = "dir:/notes/"
         #expect(navModel.target(for: directoryID) == .directory(collection: "notes", route: "/notes/"))
