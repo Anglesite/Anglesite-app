@@ -38,6 +38,14 @@ struct AnglesitePackageTests {
         #expect(pkg.quickLookThumbnailURL.deletingLastPathComponent().path == pkg.configURL.path)
     }
 
+    @Test("liveRepositoryURL is Config/repo.nosync — never uploaded by iCloud, never inside Source/")
+    func liveRepositoryURLLayout() {
+        let pkg = AnglesitePackage(url: URL(fileURLWithPath: "/tmp/Foo.anglesite"))
+        #expect(pkg.liveRepositoryURL.path == "/tmp/Foo.anglesite/Config/repo.nosync")
+        #expect(pkg.liveRepositoryURL.path.hasPrefix(pkg.configURL.path))
+        #expect(!pkg.liveRepositoryURL.path.hasPrefix(pkg.sourceURL.path))
+    }
+
     @Test("marker written to Info.plist round-trips through read")
     func markerRoundTrips() throws {
         let dir = try makeTempDir()

@@ -31,6 +31,13 @@ public struct AnglesitePackage: Sendable, Equatable {
     /// App-owned sync state, inside `Config/` (never in the `Source/` git repo).
     public var syncDirectoryURL: URL { configURL.appendingPathComponent("sync", isDirectory: true) }
 
+    /// The live git repository, out of the iCloud-synced `Source/` tree (#875/#877). iCloud Drive
+    /// never uploads a path whose last component matches `*.nosync`, so this is where the real
+    /// `.git` directory lives once a package is migrated to the split-repo layout — `Source/.git`
+    /// becomes a relative gitfile (`RepoRelocator`) pointing here, which `cd`/git/VS Code/libgit2
+    /// all follow transparently (the same mechanism git uses for submodules).
+    public var liveRepositoryURL: URL { configURL.appendingPathComponent("repo.nosync", isDirectory: true) }
+
     /// Single-file `git bundle` mirror of the `Source/` repo's history.
     ///
     /// This is the iCloud-syncable artifact (#283): iCloud Drive syncs a single opaque file
