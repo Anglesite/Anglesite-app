@@ -49,20 +49,21 @@ final class SiteWindowModel {
     private let contentIndexerStore: ContentIndexerStore
     private let integrationOps = IntegrationOperations.live()
     private let contentCreation: ContentCreationWorkflow
-    @ObservationIgnored private var invisiblePublishQueue: InvisiblePublishQueue?
-    @ObservationIgnored private var invisiblePublishWatcher: (any SiteFileWatching)?
-    @ObservationIgnored private var connectivityMonitor: (any ConnectivityMonitoring)?
-    @ObservationIgnored private var invisiblePublishStartTask: Task<Void, Never>?
+    /// Owns the invisible-publish (#357) queue/watcher/connectivity-monitor lifecycle — see
+    /// `InvisiblePublishCoordinator`'s own doc comment (one of #822's four extracted subsystems).
+    @ObservationIgnored private let invisiblePublish = InvisiblePublishCoordinator()
     @ObservationIgnored
     private var dismissSiteWindow: (() -> Void)?
 
     var site: SiteStore.Site?
 
     #if ANGLESITE_MAS
-    /// The security-scoped URL whose grant is held for this window's lifetime. Resolved from the
-    /// site's persisted bookmark in `loadAndStart()` before any subprocess spawns; the directly
-    /// spawned Node/Astro/wrangler children inherit folder access. Released in `close()`.
-    var scopedURL: URL?
+    /// Owns the security-scoped bookmark grant for this window's lifetime — see
+    /// `SecurityScopedGrantController`'s own doc comment (one of #822's four extracted
+    /// subsystems). Resolved from the site's persisted bookmark in `loadAndStart()` before any
+    /// subprocess spawns; the directly spawned Node/Astro/wrangler children inherit folder
+    /// access. Released in `close()`.
+    @ObservationIgnored private let grantController = SecurityScopedGrantController()
     #endif
 
     var preview: PreviewModel
@@ -207,8 +208,8 @@ final class SiteWindowModel {
         self.cleanup = ProjectCleanupModel(knowledgeIndex: knowledgeIndex, contentGraph: contentGraph)
         // Wired once here (not per-site in loadAndStart): the hooks capture nothing from self
         // and receive the run's site id from the model, so there is nothing to rebind on
-        // window replay — see wireCompletionHooks.
-        wireCompletionHooks()
+        // window replay — see CompletionNotificationHub's own doc comment.
+        CompletionNotificationHub.wire(deploy: deploy, backup: backup, audit: audit)
     }
 
     var activeEditorFile: FileRef? {
@@ -381,8 +382,8 @@ final class SiteWindowModel {
 
     func previewStateChanged(_ state: SiteRuntimeState) {
         startup.ingest(state: state)
-        guard preview.canDeploy, let invisiblePublishQueue else { return }
-        Task { await invisiblePublishQueue.retryPending() }
+        guard preview.canDeploy else { return }
+        invisiblePublish.retryPendingIfDeployable()
     }
 
     func handleSiteChanged() {
@@ -440,8 +441,7 @@ final class SiteWindowModel {
         let closeTerminationLease = suddenTerminationLease
             ?? ((editorSaveTask != nil || inspectorWasDirty) ? SuddenTerminationController.shared.acquire() : nil)
         #if ANGLESITE_MAS
-        let closingScopedURL = scopedURL
-        self.scopedURL = nil
+        let closingScopedURL = grantController.release()
         #endif
         Task { @MainActor in
             await editorSaveTask?.value
@@ -1249,11 +1249,15 @@ final class SiteWindowModel {
             return
         }
         site = resolved
+        // Constructed once and threaded into every child model below instead of each one
+        // separately re-deriving `id`/`sourceDirectory`/`packageURL`/`configDirectory` from
+        // `resolved` at its own call site (#822) — see `CurrentSite`'s own doc comment.
+        let currentSite = CurrentSite(resolved)
         AppSettings.shared.lastOpenedSiteID = resolved.id
         try? await store.touch(id: resolved.id)
 
         #if ANGLESITE_MAS
-        await acquireGrant(for: resolved, in: store)
+        await grantController.acquireGrant(for: resolved, in: store)
         #endif
 
         // Recreate the provider whenever the resolved siteID changes — SwiftUI's
@@ -1315,8 +1319,8 @@ final class SiteWindowModel {
         // value is present, so seeding order matters: seed first, or a restored override is
         // silently discarded by the runtime's fresh scan (#313).
         await styleGuide?.seedFromDisk()
-        preview.open(siteID: resolved.id, siteDirectory: resolved.sourceDirectory)
-        startInvisiblePublishing(for: resolved)
+        preview.open(site: currentSite)
+        startInvisiblePublishing(for: currentSite)
         // Warm the content graph now rather than waiting for the first create/delete (#660), so
         // `SearchContentTool`'s `isPopulated` check is already reliable by the time the chat
         // assistant is wired up below. Kicked off in the background (not awaited here) so its
@@ -1338,46 +1342,23 @@ final class SiteWindowModel {
         // this creation and stop the freshly-made navigator instead.
         navigator?.stop()
         let navModel = SiteNavigatorModel(graph: contentGraph)
-        navModel.start(
-            siteID: resolved.id,
-            siteRoot: resolved.packageURL,
-            sourceDirectory: resolved.sourceDirectory,
-            websiteTitle: resolved.name
-        )
+        navModel.start(site: currentSite, websiteTitle: currentSite.name)
         navigator = navModel
-        graphExplorer.start(siteID: resolved.id, sourceDirectory: resolved.sourceDirectory)
-        cleanup.configure(siteID: resolved.id, sourceDirectory: resolved.sourceDirectory)
+        graphExplorer.start(site: currentSite)
+        cleanup.configure(site: currentSite)
         // Cold-open path for any `PreviewSiteIntent` (#139) navigation; the already-open window
         // is handled reactively by `.onChange(of: router.pendingNavigation)` in `body`.
         applyPendingNavigation(for: resolved.id)
         applyPendingDesignInterviewRequest(for: resolved.id)
-        let mcpClient: @Sendable () async -> MCPClient? = { [preview] in
-            await preview.mcpClient()
-        }
-        let containerControlProvider: SiteAssistantSessionFactory.ContainerControlProvider = { [preview] in
-            await preview.activeContainerControl()
-        }
-        // Best-effort: SetupThemeTool only attaches to the chat assistant when a catalog loads
-        // successfully. A missing/unreadable template must not block opening the site — the
-        // assistant simply runs without the theme-apply tool, same as before this catalog existed.
-        let themeCatalog: ThemeCatalog? = {
-            guard let templateURL = TemplateRuntime.resolve().url else { return nil }
-            return try? ThemeCatalog.load(templateURL: templateURL)
-        }()
         await contentGraphRefresh.value
-        let assistantSession = SiteAssistantSessionFactory.makeSession(
-            siteID: resolved.id,
-            sourceDirectory: resolved.sourceDirectory,
-            configDirectory: resolved.configDirectory,
-            packageURL: resolved.packageURL,
-            mcpClient: mcpClient,
-            containerControlProvider: containerControlProvider,
+        let assistantSession = AssistantSessionAssembler.makeSession(
+            for: currentSite,
+            preview: preview,
             contentGraph: contentGraph,
             knowledgeIndex: knowledgeIndex,
             semanticRanker: semanticRanker,
             conventionsEngine: conventionsEngine,
             integrationService: integrationOps,
-            themeCatalog: themeCatalog,
             graphSnapshotProvider: { [weak self] in
                 guard let self else { return SiteGraphExplorerSnapshot(nodes: [], edges: []) }
                 return await MainActor.run { self.graphExplorer.snapshot }
@@ -1399,57 +1380,19 @@ final class SiteWindowModel {
 
     // MARK: - Invisible publishing (#357)
 
-    private func startInvisiblePublishing(for site: SiteStore.Site) {
-        stopInvisiblePublishing()
-
-        let queue = InvisiblePublishQueue(
-            configDirectory: site.configDirectory,
+    private func startInvisiblePublishing(for site: CurrentSite) {
+        invisiblePublish.start(
+            for: site,
             publisher: { [weak self] in
                 guard let self else { return .deferred(reason: "the site window closed") }
                 return await self.performInvisiblePublish(siteID: site.id)
             },
-            onStateChange: { [weak self] state in
-                Task { @MainActor in self?.invisiblePublishState = state }
-            }
+            onStateChange: { [weak self] state in self?.invisiblePublishState = state }
         )
-        invisiblePublishQueue = queue
-
-        let monitor = PlatformConnectivityMonitor.make()
-        connectivityMonitor = monitor
-        invisiblePublishStartTask = Task { [weak self, queue, monitor] in
-            await queue.start(isOnline: false)
-            guard !Task.isCancelled, self?.invisiblePublishQueue === queue else { return }
-            monitor.start { online in
-                Task { await queue.setOnline(online) }
-            }
-        }
-
-        let watcher = PlatformFileWatcher.make()
-        do {
-            try watcher.start(root: site.sourceDirectory) { [queue, root = site.sourceDirectory] batch in
-                guard Self.isPublishRelevant(batch, sourceDirectory: root) else { return }
-                Task { await queue.recordEdit() }
-            }
-            invisiblePublishWatcher = watcher
-        } catch {
-            Task {
-                await LogCenter.shared.append(
-                    source: "publish:\(site.id)", stream: .stderr,
-                    text: "invisible publish: couldn't watch source edits: \(error.localizedDescription)"
-                )
-            }
-        }
     }
 
     private func stopInvisiblePublishing() {
-        invisiblePublishStartTask?.cancel()
-        invisiblePublishStartTask = nil
-        invisiblePublishWatcher?.stop()
-        invisiblePublishWatcher = nil
-        connectivityMonitor?.stop()
-        connectivityMonitor = nil
-        if let queue = invisiblePublishQueue { Task { await queue.stop() } }
-        invisiblePublishQueue = nil
+        invisiblePublish.stop()
         invisiblePublishState = .idle
     }
 
@@ -1469,177 +1412,4 @@ final class SiteWindowModel {
             siteName: site.name
         )
     }
-
-    nonisolated private static func isPublishRelevant(_ batch: FileChangeBatch, sourceDirectory: URL) -> Bool {
-        if batch.needsFullRescan { return true }
-        let root = sourceDirectory.standardizedFileURL.pathComponents
-        let ignoredTopLevel = Set([".git", ".astro", "dist", "node_modules"])
-        return batch.paths.contains { path in
-            let components = path.standardizedFileURL.pathComponents
-            guard components.starts(with: root) else { return false }
-            guard let firstRelative = components.dropFirst(root.count).first else { return true }
-            return !ignoredTopLevel.contains(firstRelative)
-        }
-    }
-
-    /// Wire Deploy/Backup/Audit phase transitions to the completion notifier and the Dock-tile
-    /// progress bar (#526). Thin glue by design: wording lives in `CompletionNoticeBuilder` and
-    /// the milestone→fraction mapping in `DeployDockProgress` (both unit-tested in
-    /// AnglesiteCore); these closures only forward phase data.
-    ///
-    /// Deliberately captures **nothing** from `self`. Closing a window does *not* stop an
-    /// in-flight operation: the models' `Task { [weak self] in await self?.run…() }` retains the
-    /// model strongly for the whole async call (the optional-chained receiver is kept alive
-    /// across every suspension inside it), so an abandoned operation runs to a real terminal
-    /// phase after this window model is gone — and must still notify, since "the window is no
-    /// longer watching" is exactly the case the feature covers. The site id therefore arrives
-    /// from the model per-run (so a window replayed onto a different site can't mis-attribute a
-    /// still-in-flight run), and the display name is resolved fresh from `SiteStore` at post
-    /// time (so a rename mid-run notifies under the current name). Dock state is likewise
-    /// driven entirely by the run's own transitions — every terminal phase clears its token, so
-    /// no close-time cleanup is needed (or correct: an eager clear would just be re-added by
-    /// the still-running deploy's next milestone).
-    private func wireCompletionHooks() {
-        deploy.onPhaseTransition = { siteID, phase in
-            let dockToken = "deploy:\(siteID)"
-            switch phase {
-            case .idle:
-                DockProgressController.shared.clear(token: dockToken)
-            case .running:
-                // Indeterminate until the first structured milestone arrives.
-                DockProgressController.shared.update(fraction: nil, for: dockToken)
-            case .succeeded(let url, let duration):
-                DockProgressController.shared.clear(token: dockToken)
-                Self.postNotice(siteID: siteID) { name in
-                    CompletionNoticeBuilder.deploy(
-                        siteName: name, siteID: siteID,
-                        outcome: .succeeded(url: url.absoluteString, duration: duration)
-                    )
-                }
-            case .failed(let reason, _):
-                // Command-produced reasons already carry the exit code where it matters
-                // ("npm run build failed (exit 1)"), so don't append it again here.
-                DockProgressController.shared.clear(token: dockToken)
-                Self.postNotice(siteID: siteID) { name in
-                    CompletionNoticeBuilder.deploy(siteName: name, siteID: siteID, outcome: .failed(reason: reason))
-                }
-            case .blocked(let failures, _):
-                DockProgressController.shared.clear(token: dockToken)
-                Self.postNotice(siteID: siteID) { name in
-                    CompletionNoticeBuilder.deploy(
-                        siteName: name, siteID: siteID, outcome: .blocked(failureCount: failures.count)
-                    )
-                }
-            case .workerNameConflict:
-                // The conflict sheet (wired separately) carries the actionable info, and the
-                // deploy is parked rather than finished — no completion notice, just stop
-                // showing progress on the Dock tile.
-                DockProgressController.shared.clear(token: dockToken)
-            }
-        }
-        deploy.onMilestone = { siteID, progress in
-            guard progress.kind == .deploy else { return }
-            DockProgressController.shared.update(
-                fraction: DeployDockProgress.fraction(forPhase: progress.phase),
-                for: "deploy:\(siteID)"
-            )
-        }
-
-        backup.onPhaseTransition = { siteID, phase in
-            switch phase {
-            case .idle, .running:
-                break
-            case .succeeded(let sha, let branch, let remote, _):
-                Self.postNotice(siteID: siteID) { name in
-                    CompletionNoticeBuilder.backup(
-                        siteName: name, siteID: siteID,
-                        outcome: .succeeded(commitSHA: sha, branch: branch, remote: remote)
-                    )
-                }
-            case .noChanges:
-                Self.postNotice(siteID: siteID) { name in
-                    CompletionNoticeBuilder.backup(siteName: name, siteID: siteID, outcome: .noChanges)
-                }
-            case .failed(let reason, _):
-                Self.postNotice(siteID: siteID) { name in
-                    CompletionNoticeBuilder.backup(siteName: name, siteID: siteID, outcome: .failed(reason: reason))
-                }
-            }
-        }
-
-        audit.onPhaseTransition = { siteID, phase in
-            switch phase {
-            case .idle, .running:
-                break
-            case .succeeded(let report, _):
-                let counts = Dictionary(grouping: report.findings, by: \.severity).mapValues(\.count)
-                Self.postNotice(siteID: siteID) { name in
-                    CompletionNoticeBuilder.audit(
-                        siteName: name, siteID: siteID,
-                        outcome: .succeeded(
-                            criticalCount: counts[.critical, default: 0],
-                            warningCount: counts[.warning, default: 0],
-                            infoCount: counts[.info, default: 0]
-                        )
-                    )
-                }
-            case .failed(let reason, _, _):
-                Self.postNotice(siteID: siteID) { name in
-                    CompletionNoticeBuilder.audit(siteName: name, siteID: siteID, outcome: .failed(reason: reason))
-                }
-            }
-        }
-    }
-
-    /// Resolve the site's *current* display name from the registry and hand the notice to the
-    /// notifier (which applies the settings toggle and the not-frontmost gate). `static` on
-    /// purpose: the posting path must not depend on the window model still existing — an
-    /// operation whose window closed mid-run finishes later and still notifies. A site removed
-    /// from the registry mid-run posts with an empty subtitle rather than not at all.
-    private static func postNotice(siteID: String, _ make: @escaping @MainActor (String) -> CompletionNotice) {
-        Task { @MainActor in
-            let name = await SiteStore.shared.find(id: siteID)?.name ?? ""
-            CompletionNotifier.shared.post(make(name))
-        }
-    }
-
-    #if ANGLESITE_MAS
-    /// Resolve the site's persisted security-scoped bookmark and hold the grant for the window's
-    /// lifetime. Must run before any subprocess spawn so direct children inherit folder access.
-    /// On a stale bookmark, re-mint and persist a fresh one (grant must be active to do so).
-    private func acquireGrant(for site: SiteStore.Site, in store: SiteStore) async {
-        // Release any prior grant first (window replay into the same instance): the window now
-        // shows a different site, so keeping the old grant — even on the failure paths below — leaks.
-        if let previous = scopedURL {
-            previous.stopAccessingSecurityScopedResource()
-            scopedURL = nil
-        }
-        guard let bookmark = await store.bookmarkData(for: site.id) else {
-            await LogCenter.shared.append(
-                source: "grant:\(site.id)", stream: .stderr,
-                text: "No security-scoped bookmark for \(site.name); preview will fail until the package is re-added via Open Site…"
-            )
-            return
-        }
-        do {
-            let resolved = try SecurityScopedBookmark.resolve(bookmark)
-            guard resolved.url.startAccessingSecurityScopedResource() else {
-                await LogCenter.shared.append(
-                    source: "grant:\(site.id)", stream: .stderr,
-                    text: "startAccessingSecurityScopedResource() returned false for \(resolved.url.path)"
-                )
-                return
-            }
-            scopedURL = resolved.url
-            if resolved.isStale, let fresh = try? SecurityScopedBookmark.create(for: resolved.url) {
-                try? await store.setBookmark(fresh, for: site.id)
-            }
-        } catch {
-            await LogCenter.shared.append(
-                source: "grant:\(site.id)", stream: .stderr,
-                text: "Couldn't resolve security-scoped bookmark for \(site.name): \(error)"
-            )
-        }
-    }
-    #endif
 }

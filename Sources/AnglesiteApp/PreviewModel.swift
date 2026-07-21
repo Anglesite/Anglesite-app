@@ -173,7 +173,9 @@ final class PreviewModel {
         }
     }
 
-    func open(siteID: String, siteDirectory: URL) {
+    func open(site: CurrentSite) {
+        let siteID = site.id
+        let siteDirectory = site.sourceDirectory
         openSiteID = siteID
         openSiteDirectory = siteDirectory
         devServerStoppedByUser = false
@@ -244,7 +246,7 @@ final class PreviewModel {
     }
 
     /// Whether a site is open enough to (re)start its dev server: both fields are captured by
-    /// `open(siteID:siteDirectory:)`, so this is true from first open until `close()`.
+    /// `open(site:)`, so this is true from first open until `close()`.
     private var siteOpenForDevServer: Bool {
         openSiteID != nil && openSiteDirectory != nil
     }
@@ -278,7 +280,7 @@ final class PreviewModel {
     }
 
     /// Shared Start/Restart dispatch. The edit router stays registered across a stop, so no
-    /// re-registration is needed here (unlike `open(siteID:siteDirectory:)`).
+    /// re-registration is needed here (unlike `open(site:)`).
     private func relaunchDevServer() {
         guard let siteID = openSiteID, let siteDirectory = openSiteDirectory else { return }
         devServerStoppedByUser = false
