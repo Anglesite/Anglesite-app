@@ -33,7 +33,7 @@ jobs:
       template: ${{ steps.filter.outputs.template }}
       helpBook: ${{ steps.filter.outputs.helpBook }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history. We diff push events against `github.event.before`, the tip of `main`
           # before the push — which can be more than one commit back (this repo allows
@@ -109,7 +109,7 @@ jobs:
       run:
         working-directory: JS/edit-overlay
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           # Track the vendored runtime (scripts/vendor-node.sh) so CI tests on the
@@ -132,7 +132,7 @@ jobs:
       run:
         working-directory: Resources/Template
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: scripts/node-version.txt
@@ -151,7 +151,7 @@ jobs:
     # Split out of edit-overlay: a Help Book-only change shouldn't pay for a full npm
     # install/lint/typecheck/test cycle just to reach this check. Plain bash+grep, no deps.
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check Help Book links
         run: scripts/check-help-links.sh
 
@@ -170,7 +170,7 @@ jobs:
     container:
       image: swift:6.3.3-noble
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Show toolchain versions
         run: swift --version
@@ -208,14 +208,14 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The end-to-end tests spawn the real plugin's MCP server, so CI needs the sibling repo
       # present and `npm ci`-installed. Without these, the Swift Testing suites gated with
       # `.enabled(if:)` traits skip cleanly (ANGLESITE_PLUGIN_PATH absent); with them, the full
       # overlay → patcher → file-on-disk round-trip is exercised.
       - name: Checkout sibling Anglesite plugin
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Anglesite/anglesite
           # Pinned to the plugin release the app currently exercises. get_component_model
@@ -300,7 +300,7 @@ jobs:
     # skips the sibling-plugin checkout. TSan deterministically flags data races the probabilistic
     # `concurrentDeliver*` tests would otherwise only catch by timing luck (#203).
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Select latest available Xcode
         # Same toolchain rationale as build-test: CLAUDE.md mandates Xcode 27+.
@@ -356,7 +356,7 @@ jobs:
       # release (or MITM) can't substitute a different binary. Re-fetch and update on every bump.
       XCODEGEN_SHA256: 090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install XcodeGen (pinned)
         run: |
@@ -384,7 +384,7 @@ jobs:
     # merges new/removed keys into Localizable.xcstrings. This lane is a static heuristic
     # substitute: it needs only python3, so it runs on ubuntu-latest with no Xcode/xcodegen.
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: scripts/check-localization-catalog.sh
 
   appintents-schema:
@@ -414,7 +414,7 @@ jobs:
       XCODEGEN_VERSION: 2.45.4
       XCODEGEN_SHA256: 090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Select latest available Xcode
         run: |
