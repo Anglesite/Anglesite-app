@@ -243,9 +243,21 @@ public struct ContainerizationControl: LocalContainerControl {
         // pattern above: wrangler-dev only ever binds a plain TCP socket, and
         // container.dialVsock(port:) dials an AF_VSOCK listener — without this bridge the proxy
         // below has nothing to connect to at the vsock layer, and every dial fails.
+        //
+        // Uses execInteractive (not runDetached) specifically so a later failure in this same
+        // call (the proxy-start catch below) can terminate this one process — unlike astro/mcp's
+        // bridges, which only ever need to live until a full container teardown, this bridge can
+        // be started and torn down many times across a single container's life (every
+        // startWorkersDev call, including future toggle-restarts via updateActiveWorkers), so an
+        // orphaned bridge from a failed attempt would accumulate rather than being reaped once.
+        let bridgeHandle: InteractiveExecHandle
         do {
-            try await runDetached(container, id: "bridge-workers-dev", label: "bridge-workers-dev", onOutput: onOutput,
-                ["/usr/bin/socat", "VSOCK-LISTEN:\(Self.workersPort),reuseaddr,fork", "TCP:127.0.0.1:\(Self.workersPort)"])
+            bridgeHandle = try await execInteractive(
+                siteID: siteID,
+                argv: ["/usr/bin/socat", "VSOCK-LISTEN:\(Self.workersPort),reuseaddr,fork", "TCP:127.0.0.1:\(Self.workersPort)"],
+                environment: [:],
+                workingDirectory: "/",
+                onOutput: { line, stream in onOutput("[bridge-workers-dev] \(line)", stream) })
         } catch {
             await supervisor.stop()
             throw LocalContainerError.bootFailed("workers-dev vsock bridge failed to start: \(error)")
@@ -270,10 +282,11 @@ public struct ContainerizationControl: LocalContainerControl {
             url = try await proxy.start()
         } catch {
             await supervisor.stop()
+            await bridgeHandle.terminate()
             throw LocalContainerError.bootFailed("workers-dev proxy start failed: \(error)")
         }
 
-        await live.storeWorkersDev(siteID: siteID, supervisor: supervisor, proxy: proxy)
+        await live.storeWorkersDev(siteID: siteID, supervisor: supervisor, bridge: bridgeHandle, proxy: proxy)
         return url
     }
 
@@ -1119,10 +1132,16 @@ actor LiveContainers {
     private var proxies: [String: [VsockTCPProxy]] = [:]
     /// Per-site ext4 files (rootfs + initfs) to delete on teardown so disk doesn't grow per start/stop.
     private var ext4Artifacts: [String: [URL]] = [:]
-    /// The workers-dev supervisor + its own proxy, present only while `startWorkersDev` has an
-    /// active session for that site — absent entirely for a static-only site.
+    /// The workers-dev supervisor + its own proxy + its own vsock bridge, present only while
+    /// `startWorkersDev` has an active session for that site — absent entirely for a static-only
+    /// site. Unlike astro/mcp's bridges (which only ever need reaping once, at full container
+    /// teardown), this bridge can be started and torn down many times across one container's
+    /// life — every `startWorkersDev` call, including a future toggle-restart via
+    /// `updateActiveWorkers` — so it's tracked here and explicitly terminated in
+    /// `teardownWorkersDev`, not left for `LinuxContainer.stop()` to reap.
     private var workersDevSupervisors: [String: GuestProcessSupervisor] = [:]
     private var workersDevProxies: [String: VsockTCPProxy] = [:]
+    private var workersDevBridges: [String: InteractiveExecHandle] = [:]
 
     func container(for siteID: String) -> LinuxContainer? { containers[siteID] }
 
@@ -1132,19 +1151,24 @@ actor LiveContainers {
         ext4Artifacts[siteID] = artifacts
     }
 
-    func storeWorkersDev(siteID: String, supervisor: GuestProcessSupervisor, proxy: VsockTCPProxy) {
+    func storeWorkersDev(
+        siteID: String, supervisor: GuestProcessSupervisor, bridge: InteractiveExecHandle, proxy: VsockTCPProxy
+    ) {
         workersDevSupervisors[siteID] = supervisor
+        workersDevBridges[siteID] = bridge
         workersDevProxies[siteID] = proxy
     }
 
     func workersDevSupervisor(for siteID: String) -> GuestProcessSupervisor? { workersDevSupervisors[siteID] }
 
-    /// Stops just the workers-dev process + its proxy for `siteID`, leaving astro/mcp/the
-    /// container itself untouched — used both for an explicit `stopWorkersDev` call and as the
-    /// first step of a full `teardown`.
+    /// Stops just the workers-dev process + its bridge + its proxy for `siteID`, leaving
+    /// astro/mcp/the container itself untouched — used both for an explicit `stopWorkersDev` call
+    /// and as the first step of a full `teardown`.
     func teardownWorkersDev(siteID: String) async {
         if let supervisor = workersDevSupervisors[siteID] { await supervisor.stop() }
         workersDevSupervisors[siteID] = nil
+        if let bridge = workersDevBridges[siteID] { await bridge.terminate() }
+        workersDevBridges[siteID] = nil
         if let proxy = workersDevProxies[siteID] { await proxy.stop() }
         workersDevProxies[siteID] = nil
     }
