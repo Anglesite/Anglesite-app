@@ -233,6 +233,23 @@ public struct PodmanContainerControl: LocalContainerControl {
         }
     }
 
+    /// Local wrangler-dev (#708) is designed and implemented against `ContainerizationControl`'s
+    /// vsock-bridged guest only — the cross-platform Linux port (#571) hasn't reached this guest
+    /// process yet. Throwing a clear, dedicated error here (rather than silently no-op'ing or
+    /// pretending success) keeps `LocalContainerSiteRuntime.startWorkersDevIfActive` honest: it
+    /// already degrades any `startWorkersDev` failure to `workersDevURL: nil` rather than failing
+    /// the whole preview, so this surfaces as "no workers-dev URL" on Linux instead of a crash.
+    public func startWorkersDev(
+        siteID: String,
+        workers: [WorkerDescriptor],
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> URL {
+        throw LocalContainerError.bootFailed(
+            "workers-dev is not yet supported on the Linux/podman runtime (#571 tracks the port)")
+    }
+
+    public func stopWorkersDev(siteID: String) async throws {}
+
     public func exec(
         siteID: String,
         argv: [String],

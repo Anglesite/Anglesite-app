@@ -49,6 +49,13 @@ public struct AnglesitePackage: Sendable, Equatable {
         configURL.appendingPathComponent("quicklook-thumbnail.png", isDirectory: false)
     }
 
+    /// The inverse of `sourceURL`: reconstructs a package's root `url` from its `Source/`
+    /// directory. For callers (like `LocalContainerSiteRuntime`) that are only ever handed the
+    /// `Source/` path, not the package root itself.
+    public static func packageRoot(fromSourceURL sourceURL: URL) -> URL {
+        sourceURL.deletingLastPathComponent()
+    }
+
     // MARK: - Marker
 
     /// The `Info.plist` marker: stable identity + format version + provenance. Encoded with

@@ -310,7 +310,16 @@ final class PreviewModel {
 
     /// The ready preview URL, if the session is currently `.ready`.
     var readyURL: URL? {
-        if case .ready(_, let url) = state { return url }
+        if case .ready(_, let url, _) = state { return url }
+        return nil
+    }
+
+    /// The local `wrangler dev --local` endpoint, if the session is `.ready` and the site has an
+    /// active worker (#708). `nil` for a static-only site — no debug-panel consumer exists yet
+    /// (no Workers tab, #700c), so this is currently unread outside tests, but the accessor
+    /// mirrors `readyURL`'s exact pattern so a future consumer needs no runtime changes.
+    var workersDevURL: URL? {
+        if case .ready(_, _, let workersDevURL) = state { return workersDevURL }
         return nil
     }
 
