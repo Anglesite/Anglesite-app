@@ -314,6 +314,15 @@ final class PreviewModel {
         return nil
     }
 
+    /// The local `wrangler dev --local` endpoint, if the session is `.ready` and the site has an
+    /// active worker (#708). `nil` for a static-only site — no debug-panel consumer exists yet
+    /// (no Workers tab, #700c), so this is currently unread outside tests, but the accessor
+    /// mirrors `readyURL`'s exact pattern so a future consumer needs no runtime changes.
+    var workersDevURL: URL? {
+        if case .ready(_, _, let workersDevURL) = state { return workersDevURL }
+        return nil
+    }
+
     /// Show `route` in the preview. Safe to call before the runtime is `.ready` — `displayURL`
     /// derives the target lazily once a base URL exists (the cold-open Siri case).
     func navigate(toRoute route: String) { activeRoute = route }
