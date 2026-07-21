@@ -16,9 +16,13 @@
 # checks each literal is a key in Localizable.xcstrings. It does NOT type-check call sites (so a
 # same-named local type/function would false-positive) and does NOT catch every extraction vector
 # Xcode recognizes (e.g. a custom view whose init parameter happens to be typed
-# LocalizedStringKey) - it only catches the shapes actually used in this codebase today. Treat a
-# pass here as necessary, not sufficient: it complements, not replaces, the manual `.xcstrings`
-# diff review CONTRIBUTING.md asks for.
+# LocalizedStringKey) - it only catches the shapes actually used in this codebase today. It also
+# only recognizes standard double-quoted literals: a multi-line (`"""..."""`) or raw (`#"..."#`)
+# literal at one of these call sites is invisible to it either way - neither flagged as missing
+# nor required to be present - so a genuinely un-cataloged one of those would pass silently (no
+# such usage exists in Sources/AnglesiteApp today). Treat a pass here as necessary, not
+# sufficient: it complements, not replaces, the manual `.xcstrings` diff review CONTRIBUTING.md
+# asks for.
 #
 # For a string literal containing interpolation (`\(expr)`), Xcode's real extractor turns each
 # interpolation into a positional format specifier (%@, %lld, ...) chosen from the interpolated
