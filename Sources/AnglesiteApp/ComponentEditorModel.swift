@@ -1,6 +1,10 @@
 import Foundation
 import AnglesiteCore
 import Observation
+// This whole target (`Sources/AnglesiteApp` → `AnglesiteAppCore`) is already gated on
+// `canImport(Darwin)` in Package.swift, so CoreGraphics (for `CGPoint` drop locations, #824's
+// moved drag/drop hit-testing) is safe to import unconditionally here.
+import CoreGraphics
 
 /// Everything MainPaneEditorView needs to host a component editor; built by
 /// the site window from PreviewModel state.
@@ -67,6 +71,79 @@ final class ComponentEditorModel {
     /// Sibling project components for the palette — scanned once per `load()`, not per render.
     private(set) var projectComponents: [FileRef] = []
 
+    // MARK: - Draft state (moved from ComponentEditorView — #824)
+    //
+    // The panes are pure renderers over this state: they read a draft's current text via the
+    // `…Draft(for:)`/`…Draft(node:name:)` accessors below, write keystrokes back via the
+    // matching `set…Draft` calls, and trigger a commit (on submit / blur / explicit Save) via
+    // the `commit…`/`save…` methods, which themselves decide whether there's anything dirty to
+    // send and build the `Task` that awaits the underlying write op. None of this needs a live
+    // view to exist, so it's covered directly by `ComponentEditorModelDraftStateTests`.
+
+    /// In-progress edits to a rule's selector, keyed by `Self.spanKey(rule.span)`, pending
+    /// commit (on focus loss) to `setRuleSelector`.
+    var selectorDrafts: [String: String] = [:]
+    /// In-progress edits to a declaration's property name, keyed by `Self.spanKey(decl.span)`,
+    /// pending commit to `setStyleProperty`.
+    var propertyDrafts: [String: String] = [:]
+    /// In-progress edits to a declaration's value, keyed by `Self.spanKey(decl.span)`.
+    var valueDrafts: [String: String] = [:]
+    /// In-progress edits to an attribute value, keyed by `Self.attrKey(nodeId:name:)`, pending
+    /// commit (on submit) to `setAttr`.
+    var attrValueDrafts: [String: String] = [:]
+    /// Pending debounced commit from a `ColorPicker` drag, keyed by `Self.spanKey(decl.span)`.
+    /// macOS `ColorPicker` updates its binding continuously while the system color panel is
+    /// being dragged, so committing on every change would fire a burst of redundant
+    /// `setStyleProperty` round-trips (and risk spurious `.failed`/stale-`baseVersion` conflicts).
+    /// Each new picker value cancels the previous pending commit and restarts the delay, so only
+    /// the settled value after the drag pauses actually commits.
+    private var colorCommitTasks: [String: Task<Void, Never>] = [:]
+    /// Editable draft of the component's Props interface (Props form), seeded from
+    /// `model?.frontmatter?.props` whenever a fresh model loads (`reconcileDrafts`) and
+    /// reconciled back via an explicit "Save Props" action (`savePropsDraft`) — the op replaces
+    /// the whole interface atomically, so there's no per-field auto-commit the way the Styles
+    /// panel's declaration rows have.
+    var propsDraft: [PropDraft] = []
+    /// Editable drafts for the two code panes, keyed by zone — dirty-tracked like
+    /// `FileEditorModel` (design spec §5) and saved explicitly via `setScriptZone`, not on blur.
+    var codeDrafts: [CodeZone: String] = [.frontmatter: "", .client: ""]
+
+    /// One row in the Props form. `id` is a stable SwiftUI identity for `ForEach`/drafting —
+    /// excluded from `==` (see the custom `Equatable` below) so draft-vs-model dirty checks
+    /// compare content only, not incidental per-row identity.
+    struct PropDraft: Identifiable, Equatable {
+        let id = UUID()
+        var name: String
+        var type: String
+        var optional: Bool
+        var defaultValue: String
+
+        init(name: String, type: String, optional: Bool, defaultValue: String) {
+            self.name = name
+            self.type = type
+            self.optional = optional
+            self.defaultValue = defaultValue
+        }
+
+        init(_ prop: ComponentModel.Prop) {
+            self.init(name: prop.name, type: prop.type, optional: prop.optional, defaultValue: prop.defaultValue ?? "")
+        }
+
+        static func == (lhs: PropDraft, rhs: PropDraft) -> Bool {
+            lhs.name == rhs.name && lhs.type == rhs.type && lhs.optional == rhs.optional && lhs.defaultValue == rhs.defaultValue
+        }
+    }
+
+    /// The two code panes' zones (design spec §4.3): frontmatter TS ("Props & Data") and the
+    /// client `<script>` ("Behavior"). Maps 1:1 to `EditMessage.Op.setScriptZone`'s wire values —
+    /// `rawValue` is passed straight through to `setScriptZone(zone:source:)`. UI-only concerns
+    /// (display label, tree-sitter language) are attached as a `private extension` in
+    /// `ComponentEditorCodePane.swift`, the same split `SiteGraphNodeKind` uses for its
+    /// view-only `title`/`systemImage`/`tint`.
+    enum CodeZone: String, CaseIterable, Hashable {
+        case frontmatter, client
+    }
+
     init(file: FileRef, context: ComponentEditorContext) {
         self.file = file
         self.context = context
@@ -109,7 +186,7 @@ final class ComponentEditorModel {
         defer { isLoading = false }
         do {
             let fetched = try await client.fetch(path: relativePath)
-            model = fetched
+            setModel(fetched)
             loadError = nil
             loadErrorReason = nil
             knobValues = Dictionary(
@@ -129,6 +206,31 @@ final class ComponentEditorModel {
             loadError = "Couldn't load this component: \(error.localizedDescription)"
             loadErrorReason = .other
         }
+    }
+
+    /// Every successful write/fetch replaces `model` through this single choke point instead of
+    /// a bare `model = …` assignment, so the Props form / code pane drafts reconcile exactly
+    /// once per genuine version change — matching the old view's
+    /// `.onChange(of: model?.model?.version)` (fires on old-value != new-value, including a
+    /// nil→non-nil first load), not on every reassignment. A version that comes back unchanged
+    /// (e.g. a redundant `load()`) intentionally leaves in-progress drafts alone.
+    private func setModel(_ newModel: ComponentModel?) {
+        let previousVersion = model?.version
+        model = newModel
+        if newModel?.version != previousVersion {
+            reconcileDrafts()
+        }
+    }
+
+    /// Re-seeds `propsDraft`/`codeDrafts` from the freshly adopted `model`. Any in-progress,
+    /// unsaved edits in either are intentionally discarded here — the same tradeoff a stale-write
+    /// "Reload" already makes elsewhere in this editor (see design spec §5).
+    private func reconcileDrafts() {
+        propsDraft = (model?.frontmatter?.props ?? []).map(PropDraft.init)
+        codeDrafts = [
+            .frontmatter: model?.frontmatter?.source ?? "",
+            .client: model?.clientScript?.source ?? "",
+        ]
     }
 
     func canvasSelected(_ message: CanvasSelectionMessage) {
@@ -243,6 +345,119 @@ final class ComponentEditorModel {
         return styles[index].span
     }
 
+    // MARK: - Styles panel drafts & commits (moved from ComponentEditorView — #824)
+
+    /// `ComponentModel.Span` isn't `CustomStringConvertible`, so build a stable dictionary key
+    /// from its optional start/end offsets directly.
+    static func spanKey(_ span: ComponentModel.Span) -> String {
+        "\(span.start ?? -1)-\(span.end ?? -1)"
+    }
+
+    private func spanArray(_ span: ComponentModel.Span) -> [Int?] {
+        [span.start, span.end]
+    }
+
+    /// Current selector text for `rule` — the in-progress draft if there is one, otherwise the
+    /// model's own value.
+    func selectorDraft(for rule: ComponentModel.StyleRule) -> String {
+        selectorDrafts[Self.spanKey(rule.span)] ?? rule.selector
+    }
+
+    func setSelectorDraft(_ text: String, for rule: ComponentModel.StyleRule) {
+        selectorDrafts[Self.spanKey(rule.span)] = text
+    }
+
+    /// Commits `selectorDrafts` for `rule` via `setRuleSelector` if it actually differs from the
+    /// model's current selector — called on the selector field's `onSubmit`.
+    func commitSelector(rule: ComponentModel.StyleRule) {
+        let key = Self.spanKey(rule.span)
+        let newSelector = selectorDrafts[key] ?? rule.selector
+        guard newSelector != rule.selector else { return }
+        Task { await setRuleSelector(ruleSpan: spanArray(rule.span), newSelector: newSelector) }
+    }
+
+    func propertyDraft(for decl: ComponentModel.Declaration) -> String {
+        propertyDrafts[Self.spanKey(decl.span)] ?? decl.property
+    }
+
+    func setPropertyDraft(_ text: String, for decl: ComponentModel.Declaration) {
+        propertyDrafts[Self.spanKey(decl.span)] = text
+    }
+
+    func valueDraft(for decl: ComponentModel.Declaration) -> String {
+        valueDrafts[Self.spanKey(decl.span)] ?? decl.value
+    }
+
+    func setValueDraft(_ text: String, for decl: ComponentModel.Declaration) {
+        valueDrafts[Self.spanKey(decl.span)] = text
+    }
+
+    /// Commits both the property-name and value drafts for a declaration. Called from either
+    /// field's `onSubmit` so an edit to just the property name (value unchanged) still lands,
+    /// not only edits to the value field.
+    ///
+    /// A property rename is a remove-then-add sequence against the *same* rule: removing the
+    /// old declaration shifts byte offsets within the file (including, in general, the rule's
+    /// own end offset), so the second write must target the rule's freshly reloaded span, not
+    /// the one captured before either op ran — reusing the stale span would make the add
+    /// mismatch or fail outright on essentially every rename. `ruleIndex` (the rule's stable
+    /// ordinal position — these two ops never add/remove/reorder rules) is used to re-derive the
+    /// fresh span from `model` after the remove completes. If the remove itself failed, the
+    /// rename is abandoned rather than adding the new name anyway, which would otherwise leave
+    /// both the old and new declarations present.
+    func commitDeclaration(ruleIndex: Int, rule: ComponentModel.StyleRule, decl: ComponentModel.Declaration) async {
+        let key = Self.spanKey(decl.span)
+        let property = propertyDrafts[key] ?? decl.property
+        let value = valueDrafts[key] ?? decl.value
+        guard property != decl.property || value != decl.value else { return }
+        let ruleSpan = spanArray(rule.span)
+        let oldProperty = decl.property
+        if property != oldProperty {
+            let removed = await removeStyleProperty(ruleSpan: ruleSpan, property: oldProperty)
+            guard removed else { return }
+            let freshSpan = self.ruleSpan(atIndex: ruleIndex).map(spanArray) ?? ruleSpan
+            await setStyleProperty(ruleSpan: freshSpan, property: property, value: value)
+        } else {
+            await setStyleProperty(ruleSpan: ruleSpan, property: property, value: value)
+        }
+    }
+
+    /// Cancels any pending debounced `ColorPicker` commit and discards the in-progress drafts
+    /// for `decl` before removing it. Without this, a declaration removed mid-drag (before the
+    /// `debounceColorCommit` delay elapses) would have its pending commit fire afterward and
+    /// resurrect the just-deleted declaration via `setStyleProperty`.
+    func removeDeclaration(rule: ComponentModel.StyleRule, decl: ComponentModel.Declaration) {
+        let key = Self.spanKey(decl.span)
+        colorCommitTasks[key]?.cancel()
+        colorCommitTasks[key] = nil
+        valueDrafts[key] = nil
+        propertyDrafts[key] = nil
+        Task { await removeStyleProperty(ruleSpan: spanArray(rule.span), property: decl.property) }
+    }
+
+    /// Debounces `ColorPicker` writes: cancels any pending commit for this declaration and
+    /// schedules a new one after a short pause, so only the settled value after a drag gesture
+    /// actually calls `commitDeclaration` (see `colorCommitTasks`'s doc comment). `onSettled` lets
+    /// the canvas pane clear its temporary scrub overlay once the real commit lands — the only
+    /// piece of this that still needs the live `WKWebView`, so it stays a view-supplied callback
+    /// rather than something this (webview-less) model can do itself.
+    func debounceColorCommit(
+        ruleIndex: Int,
+        rule: ComponentModel.StyleRule,
+        decl: ComponentModel.Declaration,
+        onSettled: @escaping () -> Void = {}
+    ) {
+        let key = Self.spanKey(decl.span)
+        colorCommitTasks[key]?.cancel()
+        colorCommitTasks[key] = Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            await commitDeclaration(ruleIndex: ruleIndex, rule: rule, decl: decl)
+            onSettled()
+            colorCommitTasks[key] = nil
+        }
+    }
+
     // MARK: - Structure writes
 
     /// Insert a new node as the child at `index` under `parentId` (the fragment root's id for
@@ -306,6 +521,126 @@ final class ComponentEditorModel {
         )
     }
 
+    // MARK: - Attribute drafts & commits (moved from ComponentEditorView — #824)
+
+    private static func attrKey(nodeID: String, name: String) -> String { "\(nodeID):\(name)" }
+
+    func attrValueDraft(node: ComponentModel.Node, name: String) -> String {
+        let key = Self.attrKey(nodeID: node.id, name: name)
+        let current = node.attrs.first(where: { $0.name == name })?.value ?? ""
+        return attrValueDrafts[key] ?? current
+    }
+
+    func setAttrValueDraft(_ text: String, node: ComponentModel.Node, name: String) {
+        attrValueDrafts[Self.attrKey(nodeID: node.id, name: name)] = text
+    }
+
+    func commitAttr(node: ComponentModel.Node, name: String) {
+        let key = Self.attrKey(nodeID: node.id, name: name)
+        guard let draft = attrValueDrafts[key] else { return }
+        let current = node.attrs.first(where: { $0.name == name })?.value ?? ""
+        guard draft != current else { return }
+        Task { await setAttr(nodeId: node.id, name: name, value: draft) }
+    }
+
+    /// Discards any in-progress draft for `name` before removing the attribute. Without this, a
+    /// stale draft (typed but never submitted) would linger in `attrValueDrafts` and resurface if
+    /// the same attribute name is later re-added via "Add attribute" — `attrValueDraft`'s getter
+    /// would render the discarded draft instead of the freshly-committed value, and committing it
+    /// would silently overwrite the new value. Mirrors `removeDeclaration`'s draft-clearing.
+    func removeAttr(node: ComponentModel.Node, name: String) {
+        attrValueDrafts[Self.attrKey(nodeID: node.id, name: name)] = nil
+        Task { await setAttr(nodeId: node.id, name: name, value: nil) }
+    }
+
+    // MARK: - Outline & canvas drag/drop (moved from ComponentEditorView — #824)
+    //
+    // `dropZone`/the parent+sibling-index lookups are pure geometry/tree queries over
+    // `ComponentOutline` (Core, already unit-tested there); what moved here is the *decision*
+    // logic that turns a drop location into an `insertNode`/`moveNode` call. The canvas JS
+    // bridging itself (evaluating `window.anglesiteCanvas?.dropTargetAt?.(...)` against the live
+    // `WKWebView` and decoding its JSON reply) stays in `ComponentEditorCanvasPane` — this model
+    // has no webview handle — but everything downstream of that decode (resolving the drop
+    // target to a node id, the sealed-instance zone redirect, dispatching the op) lives here so
+    // it's testable without a live canvas.
+
+    /// Top third of the row = insert before (same parent as the target); bottom third = insert
+    /// after (same parent); middle third = reparent as the target's last child. A sealed row's
+    /// middle third is redirected to `.after` — the outline hides a sealed component instance's
+    /// slot-fill children (spec §4.1), so an `.into` drop there would silently vanish (it lands as
+    /// markup with nowhere to render).
+    func dropZone(at location: CGPoint, for row: ComponentOutline.Row) -> ComponentOutline.DropZone {
+        let zone = ComponentOutline.dropZone(y: Double(location.y))
+        if row.isSealed && zone == .into { return .after }
+        return zone
+    }
+
+    /// Finds `nodeID`'s parent id by walking `model?.template` — the outline's flat `Row` list
+    /// doesn't carry parent links (per `ComponentOutline.Row`'s shape).
+    private func parentID(of nodeID: String) -> String? {
+        guard let root = model?.template else { return nil }
+        return ComponentOutline.parentID(of: nodeID, in: root)
+    }
+
+    private func childIndex(of nodeID: String, underParent parentID: String) -> Int? {
+        guard let root = model?.template else { return nil }
+        return ComponentOutline.childIndex(of: nodeID, underParent: parentID, in: root)
+    }
+
+    /// Handles an outline-row reorder/reparent drop (dragging one outline row onto another).
+    /// The caller (`ComponentEditorOutlinePane`) has already checked the drag payload is for
+    /// this file and isn't a self-drop before calling this.
+    func performMove(draggedNodeID: String, targetRow: ComponentOutline.Row, location: CGPoint) async {
+        guard let dragged = outlineRows.first(where: { $0.node.id == draggedNodeID }) else { return }
+        // Refuse a reparent that would create a structural cycle — dragging a node onto (or
+        // before/after within) its own subtree.
+        guard let root = model?.template, !ComponentOutline.isNodeOrDescendant(targetRow.node.id, of: dragged.node.id, in: root) else { return }
+        switch dropZone(at: location, for: targetRow) {
+        case .into:
+            await moveNode(nodeId: dragged.node.id, newParentId: targetRow.node.id, newIndex: targetRow.node.children.count)
+        case .before, .after:
+            guard let parentID = parentID(of: targetRow.node.id), let siblingIndex = childIndex(of: targetRow.node.id, underParent: parentID) else { return }
+            let zone = dropZone(at: location, for: targetRow)
+            let targetIndex = zone == .before ? siblingIndex : siblingIndex + 1
+            let draggedIndex = childIndex(of: dragged.node.id, underParent: parentID)
+            let newIndex = ComponentOutline.adjustedMoveIndex(targetIndex: targetIndex, draggedIndex: draggedIndex)
+            await moveNode(nodeId: dragged.node.id, newParentId: parentID, newIndex: newIndex)
+        }
+    }
+
+    /// Handles a palette-item drop onto an outline row (insert as sibling or child).
+    func performInsert(payload: ComponentStructureEditBuilder.NodeSpec, targetRow: ComponentOutline.Row, location: CGPoint) async {
+        switch dropZone(at: location, for: targetRow) {
+        case .into:
+            await insertNode(parentId: targetRow.node.id, index: targetRow.node.children.count, node: payload)
+        case .before, .after:
+            guard let parentID = parentID(of: targetRow.node.id), let siblingIndex = childIndex(of: targetRow.node.id, underParent: parentID) else { return }
+            let zone = dropZone(at: location, for: targetRow)
+            let index = zone == .before ? siblingIndex : siblingIndex + 1
+            await insertNode(parentId: parentID, index: index, node: payload)
+        }
+    }
+
+    /// Resolves a canvas drop point (already mapped by the overlay to a source line/column, the
+    /// same way `canvasSelected` maps a click) to an insertion target, redirects a sealed
+    /// instance's `"into"` zone to `"after"` (same reasoning as `dropZone(at:for:)` — the outline
+    /// path's geometry-level redirect doesn't apply here since the canvas overlay's own zone
+    /// classification has no notion of sealed instances), and issues the `insertNode` op.
+    func performCanvasDrop(atLine line: Int, column: Int, zone: String, payload: ComponentStructureEditBuilder.NodeSpec) async {
+        guard let root = model?.template, let node = ComponentOutline.node(atLine: line, column: column, in: root) else { return }
+        let effectiveZone = (node.kind == .component && zone == "into") ? "after" : zone
+        switch effectiveZone {
+        case "into":
+            await insertNode(parentId: node.id, index: node.children.count, node: payload)
+        case "before", "after":
+            guard let parentID = parentID(of: node.id), let siblingIndex = childIndex(of: node.id, underParent: parentID) else { return }
+            let index = effectiveZone == "before" ? siblingIndex : siblingIndex + 1
+            await insertNode(parentId: parentID, index: index, node: payload)
+        default:
+            break
+        }
+    }
+
     // MARK: - Props & code writes
 
     /// Codegen/replace the `Props` interface + `Astro.props` destructure from a structured props
@@ -355,6 +690,47 @@ final class ComponentEditorModel {
         )
     }
 
+    // MARK: - Props form & code pane drafts (moved from ComponentEditorView — #824)
+
+    /// True when `propsDraft` differs from the current model's props — gates "Save Props" so it
+    /// only enables once there's something to save (and disables again once the piggybacked
+    /// model from a successful save re-seeds the draft via `reconcileDrafts`).
+    var propsDraftDirty: Bool {
+        propsDraft != (model?.frontmatter?.props ?? []).map(PropDraft.init)
+    }
+
+    /// Commits `propsDraft` via `setPropsInterface`, dropping any row with a blank name or type
+    /// (an in-progress "Add Prop" row the user hasn't filled in yet) rather than sending it as a
+    /// malformed prop the plugin would refuse outright. Returns whether the write applied.
+    @discardableResult
+    func savePropsDraft() async -> Bool {
+        let props = propsDraft.compactMap { draft -> ComponentModel.Prop? in
+            let name = draft.name.trimmingCharacters(in: .whitespaces)
+            let type = draft.type.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, !type.isEmpty else { return nil }
+            let defaultValue = draft.defaultValue.trimmingCharacters(in: .whitespaces)
+            return ComponentModel.Prop(name: name, type: type, optional: draft.optional, defaultValue: defaultValue.isEmpty ? nil : defaultValue)
+        }
+        return await setPropsInterface(props: props)
+    }
+
+    private func currentZoneSource(_ zone: CodeZone) -> String {
+        switch zone {
+        case .frontmatter: model?.frontmatter?.source ?? ""
+        case .client: model?.clientScript?.source ?? ""
+        }
+    }
+
+    func codeDraftDirty(zone: CodeZone) -> Bool {
+        (codeDrafts[zone] ?? "") != currentZoneSource(zone)
+    }
+
+    /// Saves the given zone's draft via `setScriptZone`. Returns whether the write applied.
+    @discardableResult
+    func saveCodeDraft(zone: CodeZone) async -> Bool {
+        await setScriptZone(zone: zone.rawValue, source: codeDrafts[zone] ?? "")
+    }
+
     /// Routes a built `EditMessage` to `context.editRouter` and reconciles the result. Shared by
     /// the style writes, the structure writes (`insertNode`/`moveNode`/`removeNode`/`setAttr`),
     /// and the props/code writes above (`setPropsInterface`/`setScriptZone`) — the name is a
@@ -380,7 +756,7 @@ final class ComponentEditorModel {
             conflict = false
             writeError = nil
             if let freshModel = reply.model {
-                model = freshModel
+                setModel(freshModel)
             } else {
                 await load()
             }
@@ -424,7 +800,7 @@ final class ComponentEditorModel {
             conflict = false
             writeError = nil
             if let freshModel = reply.model {
-                model = freshModel
+                setModel(freshModel)
                 projectComponents = SiteFileTree.scan(siteRoot: context.sourceRoot)[.components] ?? []
             } else {
                 await load()
