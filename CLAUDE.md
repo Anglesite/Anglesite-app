@@ -8,7 +8,7 @@ This is the **native macOS app**. The sibling repo at `../anglesite` supplies th
 
 Before handing work off, re-check the changed files against `CONTRIBUTING.md`, run the relevant test/build commands it specifies, and report any required check you could not run. When delegating work, explicitly instruct each agent to read `CONTRIBUTING.md` **in its assigned worktree before acting**; the delegating agent remains responsible for verifying compliance.
 
-**Immediately before running the commit or `gh pr create` command**, re-check against `CONTRIBUTING.md` ▸ "Commits and pull requests" rather than a generic format: commit subject ≤72 characters, and a PR body built from `.github/PULL_REQUEST_TEMPLATE.md`'s actual headings — not the generic Summary/Test-plan shape a general tool default falls back to, which silently drops the **Paired PR check** section. That combination (long subject + missing Paired PR check) is the recurring failure mode; see the CONTRIBUTING.md entry for a concrete example.
+**Immediately before running the commit or `gh pr create` command**, re-check against `CONTRIBUTING.md` ▸ "Commits and pull requests" rather than a generic format: commit subject ≤72 characters, and a PR body built from `.github/PULL_REQUEST_TEMPLATE.md`'s actual headings — not the generic Summary/Test-plan shape a general tool default falls back to, which silently drops the **Paired PR check** section.
 
 ## Two-repo coordination
 
