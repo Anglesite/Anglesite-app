@@ -162,13 +162,17 @@ public actor LocalContainerSiteRuntime: SiteRuntime, SiteRuntimeContainerCapabil
     /// besides `start()`'s own initial computation (which goes through `startWorkersDevIfActive`
     /// directly, not through this method) — built and left as public API now so #700c needs no
     /// further runtime-side work. Guards on `gen == generation` and `activeSiteID == siteID` after
-    /// its own await, matching `start()`'s discipline, even though nothing exercises that race yet:
-    /// a future caller inherits the same actor-reentrancy hazard `start()` has, and shipping this
-    /// unguarded now would just be latent.
+    /// EVERY `await` in this method, not just before the final `setState` — the mutating calls
+    /// (`control.stopWorkersDev`/`startWorkersDevIfActive`) are exactly as siteID-keyed-not-
+    /// container-keyed as the bug `start()`'s own post-assignment guard fixes (#708 review), so a
+    /// stale attempt here could stop or restart a brand-new container a later `start()` already
+    /// booted under the same siteID if it ran unguarded. Currently unreachable (no caller yet),
+    /// but shipping it unguarded would just be a latent repeat of that exact bug.
     public func updateActiveWorkers(_ settings: SiteSettings) async {
         guard let siteID = activeSiteID, let siteDirectory = activeSiteDirectory else { return }
         let gen = generation
         let catalog = await workerCatalog()
+        guard gen == generation, activeSiteID == siteID else { return }
         let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: catalog, graph: nil)
         let workers = WorkerActivation.activeDescriptors(catalog: catalog, activeIDs: effectiveActiveIDs)
         let workersDevURL: URL?
