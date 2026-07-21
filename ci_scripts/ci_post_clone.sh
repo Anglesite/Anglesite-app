@@ -8,8 +8,10 @@
 # CONTRIBUTING.md), so a fresh Xcode Cloud clone has no project file at all. This script
 # regenerates it before Xcode Cloud tries to resolve the scheme it was configured to build.
 #
-# XcodeGen version/digest pinned to match .github/workflows/ci.yml and MIN_XCODEGEN in
-# scripts/check-xcodeproj-sync.sh — bump all three together.
+# XcodeGen version/digest pinned to match the XCODEGEN_VERSION/XCODEGEN_SHA256 exact pin in
+# .github/workflows/ci.yml — bump both together. (scripts/check-xcodeproj-sync.sh's
+# MIN_XCODEGEN is a floor, not an exact pin, so it doesn't need to match this value bump for
+# bump, but it should stay <= it.)
 set -euo pipefail
 
 XCODEGEN_VERSION="2.45.4"
