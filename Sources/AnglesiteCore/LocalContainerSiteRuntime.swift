@@ -161,18 +161,21 @@ public actor LocalContainerSiteRuntime: SiteRuntime, SiteRuntimeContainerCapabil
     /// capability a future Workers tab (#700c) calls on toggle. Not called anywhere in this PR
     /// besides `start()`'s own initial computation (which goes through `startWorkersDevIfActive`
     /// directly, not through this method) — built and left as public API now so #700c needs no
-    /// further runtime-side work. Guards on `gen == generation` and `activeSiteID == siteID` after
-    /// EVERY `await` in this method, not just before the final `setState` — the mutating calls
-    /// (`control.stopWorkersDev`/`startWorkersDevIfActive`) are exactly as siteID-keyed-not-
-    /// container-keyed as the bug `start()`'s own post-assignment guard fixes (#708 review), so a
-    /// stale attempt here could stop or restart a brand-new container a later `start()` already
-    /// booted under the same siteID if it ran unguarded. Currently unreachable (no caller yet),
-    /// but shipping it unguarded would just be a latent repeat of that exact bug.
+    /// further runtime-side work. Guards on `stateMachine.isCurrent(gen)` and `activeSiteID ==
+    /// siteID` after EVERY `await` in this method, not just before the final `settle` — the
+    /// mutating calls (`control.stopWorkersDev`/`startWorkersDevIfActive`) are exactly as
+    /// siteID-keyed-not-container-keyed as the bug `start()`'s own post-assignment guard fixes
+    /// (#708 review), so a stale attempt here could stop or restart a brand-new container a later
+    /// `start()` already booted under the same siteID if it ran unguarded. Currently unreachable
+    /// (no caller yet), but shipping it unguarded would just be a latent repeat of that exact bug.
+    /// `gen` here is a snapshot via `currentGeneration` (not a new attempt via `beginAttempt()`)
+    /// since this method doesn't start a new lifecycle attempt, it supplements an already-running
+    /// one — mirroring `persistEdit`'s identical use of `currentGeneration` for the same reason.
     public func updateActiveWorkers(_ settings: SiteSettings) async {
         guard let siteID = activeSiteID, let siteDirectory = activeSiteDirectory else { return }
-        let gen = generation
+        let gen = stateMachine.currentGeneration
         let catalog = await workerCatalog()
-        guard gen == generation, activeSiteID == siteID else { return }
+        guard stateMachine.isCurrent(gen), activeSiteID == siteID else { return }
         let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: catalog, graph: nil)
         let workers = WorkerActivation.activeDescriptors(catalog: catalog, activeIDs: effectiveActiveIDs)
         let workersDevURL: URL?
@@ -182,9 +185,9 @@ public actor LocalContainerSiteRuntime: SiteRuntime, SiteRuntimeContainerCapabil
         } else {
             workersDevURL = await startWorkersDevIfActive(siteID: siteID, siteDirectory: siteDirectory)
         }
-        guard gen == generation, activeSiteID == siteID else { return }
-        if case .ready(let readySiteID, let url, _) = current, readySiteID == siteID {
-            setState(.ready(siteID: readySiteID, url: url, workersDevURL: workersDevURL))
+        guard stateMachine.isCurrent(gen), activeSiteID == siteID else { return }
+        if case .ready(let readySiteID, let url, _) = stateMachine.state, readySiteID == siteID {
+            stateMachine.settle(gen: gen, to: .ready(siteID: readySiteID, url: url, workersDevURL: workersDevURL))
         }
     }
 
