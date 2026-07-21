@@ -18,6 +18,12 @@ public enum WorkerComposition {
         case invalidRouteClaim(path: String, reason: String)
     }
 
+    /// `@dwk/indieauth`'s catalog id — a magic string composition keys off directly (its binding
+    /// name, `AUTH_DB`, is part of its public contract, unlike every other `@dwk/*` package which
+    /// only needs generic `resources` flags), shared so a typo in one comparison site can't
+    /// silently diverge from another.
+    public static let indieauthWorkerID = "indieauth"
+
     /// The bespoke app-side inbox-capture route (#587) — not a `@dwk/workers` catalog worker, so
     /// its claim lives here rather than in `catalog.json`. Appended automatically when
     /// `generateWranglerToml` is called with `inboxCaptureEnabled`.
@@ -89,7 +95,7 @@ public enum WorkerComposition {
         // @dwk/indieauth's binding name is part of its public composition contract (see the
         // AUTH_DB block below) — the one place composition keys off a specific catalog id rather
         // than generic resource flags.
-        let hasIndieauth = workers.contains(where: { $0.id == "indieauth" })
+        let hasIndieauth = workers.contains(where: { $0.id == indieauthWorkerID })
 
         var lines: [String] = []
         lines.append("name = \"\(siteName)\"")

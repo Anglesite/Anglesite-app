@@ -93,7 +93,7 @@ struct SocialWorkerProvisionCommandTests {
         let recorder = WranglerRecorder([:])
         let command = SocialWorkerProvisionCommand(tokenSource: { nil }, runner: recorder.runner)
 
-        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site")
+        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: [])
 
         guard case .failed(let reason, nil, let resources) = result else {
             Issue.record("expected token failure, got \(result)")

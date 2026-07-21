@@ -51,7 +51,7 @@ public actor SocialWorkerProvisionCommand {
         siteID: String,
         siteDirectory: URL,
         siteName: String,
-        workers: [WorkerDescriptor] = [],
+        workers: [WorkerDescriptor],
         /// Effective active dynamic-route claims (#746), pre-validated via
         /// `WorkerRouteClaims.activeClaims`. Written into `wrangler.toml` as selective
         /// `[assets].run_worker_first` patterns; empty = no worker-first routes.
@@ -169,7 +169,7 @@ public actor SocialWorkerProvisionCommand {
         // @dwk/indieauth deliberately keeps schema deployment outside its request handler. Apply
         // the committed D1 migrations after wrangler.toml contains the concrete database id and
         // before publishing code that can receive authorization requests.
-        if workers.contains(where: { $0.id == "indieauth" }) {
+        if workers.contains(where: { $0.id == WorkerComposition.indieauthWorkerID }) {
             let result = await runWrangler(
                 siteDirectory: siteDirectory,
                 arguments: ["d1", "migrations", "apply", "AUTH_DB", "--remote"],

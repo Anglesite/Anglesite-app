@@ -171,7 +171,7 @@ public struct SiteOperations: Sendable {
             group: "social", binding: .settingsActivated, resources: .init(needsD1: true, needsKV: true, needsR2: false)
         ),
         WorkerDescriptor(
-            id: "indieauth", displayName: "IndieAuth", description: "IndieAuth sign-in",
+            id: WorkerComposition.indieauthWorkerID, displayName: "IndieAuth", description: "IndieAuth sign-in",
             group: "social", binding: .settingsActivated, resources: .init(needsD1: true, needsKV: true, needsR2: false)
         ),
     ]

@@ -61,7 +61,7 @@ public enum WorkerActivation {
     /// fetch that hasn't happened yet) is silently dropped — there is no descriptor data to
     /// compose it with. Mirrors `WorkerRouteClaims.activeClaims(catalog:activeIDs:)`'s shape.
     public static func activeDescriptors(catalog: [WorkerDescriptor], activeIDs: Set<String>) -> [WorkerDescriptor] {
-        catalog.filter { activeIDs.contains($0.id) }
+        catalog.sorted(by: { $0.id < $1.id }).filter { activeIDs.contains($0.id) }
     }
 
     /// Active ids `activeDescriptors` couldn't resolve against the catalog — a fully-empty
