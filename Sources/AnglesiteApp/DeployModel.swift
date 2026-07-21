@@ -438,37 +438,25 @@ final class DeployModel {
             containerRunner = nil
         }
 
-        // Effective active worker set (#709 design §4-5): component-tied workers via
-        // ImpactAnalysis (only when this site's content graph has actually been scanned — a
-        // headless/never-opened site contributes nothing there, matching ImpactAnalysis's own
-        // "never invents, may under-report" bias) unioned with settings-activated workers.
+        // Effective active worker set (#709 design §4-5, #825): the content-graph snapshot build
+        // and the `WorkerActivation` computation now live in `DeployCoordinator.planWorkerActivation`
+        // (AnglesiteCore) so this orchestration is unit-tested outside a hosted app-target test.
         let configStore = SiteConfigStore(configDirectory: configDirectory)
         let settings = (try? await configStore.load()) ?? SiteSettings()
         let catalog = await workerCatalog()
-        let snapshot: SiteGraphExplorerSnapshot?
-        if await contentGraph.isPopulated(siteID: siteID) {
-            snapshot = SiteGraphExplorer.build(
-                projectRoot: siteDirectory,
-                siteID: siteID,
-                pages: await contentGraph.pages(for: siteID),
-                posts: await contentGraph.posts(for: siteID),
-                images: await contentGraph.images(for: siteID)
-            )
-        } else {
-            snapshot = nil
-        }
-        let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: catalog, graph: snapshot)
-        let removedIDs = WorkerActivation.removedIDs(previous: Set(settings.lastDeployedWorkerIDs ?? []), next: effectiveActiveIDs)
-        if !removedIDs.isEmpty {
+        let activationPlan = await DeployCoordinator.planWorkerActivation(
+            siteID: siteID, siteDirectory: siteDirectory, settings: settings, catalog: catalog, contentGraph: contentGraph
+        )
+        let effectiveActiveIDs = activationPlan.effectiveActiveIDs
+        if !activationPlan.removedIDs.isEmpty {
             await logCenter.append(
                 source: "deploy:\(siteID)",
                 stream: .stdout,
-                text: "Deactivating workers: \(removedIDs.sorted().joined(separator: ", "))"
+                text: "Deactivating workers: \(activationPlan.removedIDs.sorted().joined(separator: ", "))"
             )
         }
-        let workers = WorkerActivation.activeDescriptors(catalog: catalog, activeIDs: effectiveActiveIDs)
-        let unresolvedIDs = WorkerActivation.unresolvedActiveIDs(activeIDs: effectiveActiveIDs, resolved: workers)
-        if let warning = WorkerActivation.missingDescriptorWarning(unresolvedIDs: unresolvedIDs) {
+        let workers = activationPlan.workers
+        if let warning = WorkerActivation.missingDescriptorWarning(unresolvedIDs: activationPlan.unresolvedIDs) {
             // Mirrors SiteOperations.deployWithWorkerComposition's identical warning — shared
             // text via WorkerActivation so the two paths can't drift (#708 review feedback).
             await logCenter.append(source: "deploy:\(siteID)", stream: .stderr, text: warning)
@@ -514,16 +502,13 @@ final class DeployModel {
             }
         )
 
-        // Prefer the site's already-established Worker name (`.site-config`'s `CF_PROJECT_NAME`,
-        // set at the first successful deploy or by a worker-name-conflict rename, #740) over
-        // re-deriving one from the site's display name. Otherwise every deploy after a
-        // rename-and-retry would silently regenerate `wrangler.toml` under the original
-        // (still-taken) name basis via `persistConfig`, defeating the rename. Falls back to the
-        // derived slug only when no candidate name has been recorded yet — a genuinely first-ever
-        // deploy.
-        let existingConfig = (try? WebsiteAnalyticsAsset.loadConfig(siteDirectory: siteDirectory)) ?? ""
-        let workerSiteName = SiteConfigFile.value(forKey: "CF_PROJECT_NAME", in: existingConfig)
-            ?? SiteSlug.derive(from: siteName ?? siteID)
+        // Worker-name resolution precedence (#740, #825): moved to
+        // `DeployCoordinator.resolveWorkerSiteName` — prefers the site's already-established
+        // Worker name (`.site-config`'s `CF_PROJECT_NAME`) over re-deriving one from the site's
+        // display name, so a rename-and-retry isn't silently reverted on the next deploy.
+        let workerSiteName = DeployCoordinator.resolveWorkerSiteName(
+            siteDirectory: siteDirectory, siteID: siteID, siteName: siteName
+        )
         let provisionResult = await socialCommand.provision(
             siteID: siteID,
             siteDirectory: siteDirectory,
@@ -534,10 +519,10 @@ final class DeployModel {
         )
 
         if case .succeeded(_, let resources, _) = provisionResult {
-            var updated = settings
-            updated.lastDeployedWorkerIDs = Array(effectiveActiveIDs).sorted()
-            updated.provisionedWorkerResources = resources
-            try? await configStore.save(updated)
+            await DeployCoordinator.persistProvisionedResources(
+                configStore: configStore, settings: settings,
+                effectiveActiveIDs: effectiveActiveIDs, resources: resources
+            )
         }
 
         let result = provisionResult.asDeployCommandResult
@@ -550,20 +535,23 @@ final class DeployModel {
         case .succeeded(let url, let duration):
             // Astro's build above regenerates RSS/Atom/JSON feeds. Social delivery is ordered
             // after the deployed canonical pages exist, and completion is notified only after
-            // both best-effort passes finish.
-            emitPostDeployMilestone(.deployWebmentions, siteID: siteID)
-            await webmentionCommand.send(
-                siteID: siteID,
-                siteDirectory: siteDirectory,
-                configDirectory: configDirectory,
-                siteBase: url
-            )
-            emitPostDeployMilestone(.deploySyndicating, siteID: siteID)
-            await posseCommand.syndicate(
-                siteID: siteID,
-                siteDirectory: siteDirectory,
-                configDirectory: configDirectory,
-                siteBase: url
+            // both best-effort passes finish. The ordering itself is
+            // `DeployCoordinator.runPostDeploySequencing` (#825); this closure-composes it with
+            // the concrete webmention/POSSE commands and the milestone hook.
+            await DeployCoordinator.runPostDeploySequencing(
+                onMilestone: { [weak self] progress in self?.emitPostDeployMilestone(progress, siteID: siteID) },
+                sendWebmentions: { [weak self] in
+                    guard let self else { return }
+                    await self.webmentionCommand.send(
+                        siteID: siteID, siteDirectory: siteDirectory, configDirectory: configDirectory, siteBase: url
+                    )
+                },
+                syndicate: { [weak self] in
+                    guard let self else { return }
+                    await self.posseCommand.syndicate(
+                        siteID: siteID, siteDirectory: siteDirectory, configDirectory: configDirectory, siteBase: url
+                    )
+                }
             )
             currentMilestone = nil
             workerNameConflictPresented = false
