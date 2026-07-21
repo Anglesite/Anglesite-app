@@ -194,10 +194,23 @@ describe("image drop", () => {
     return event;
   }
 
-  /** jsdom's FileReader fires its onload callback after two macrotask ticks. */
+  /** jsdom's FileReader resolves its read via two chained `setImmediate` calls internally
+   *  (see node_modules/jsdom/lib/jsdom/living/file-api/FileReader-impl.js). A fixed count of
+   *  `setTimeout(fn, 0)` ticks is NOT a reliable way to wait for that: Node only guarantees
+   *  `setImmediate` runs before a same-tick `setTimeout(fn, 0)` when both are scheduled from
+   *  inside an I/O callback — here they're scheduled from the test body instead, so their
+   *  relative order across the timers vs. check phases is unspecified and can flip under load
+   *  (confirmed empirically: ~0.1% of trials one way in a tight loop, more when the event loop
+   *  is busier, e.g. CI). That let the "flush" resolve before the reader's onload ran (dropping
+   *  `sent` to 0) or let a *previous* test's still-pending onload fire during the *next* test
+   *  (bumping `sent` to 2) — matching both observed CI failure shapes. Poll for the actual
+   *  effect (a new `sent` entry) instead of guessing tick counts.
+   */
   async function flushFileReader(): Promise<void> {
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const before = sent.length;
+    await vi.waitFor(() => {
+      if (sent.length <= before) throw new Error("FileReader has not completed yet");
+    });
   }
 
   it("highlights every replaceable image while a Finder file is dragged over the page", () => {
