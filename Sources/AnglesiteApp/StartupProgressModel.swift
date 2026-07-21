@@ -39,7 +39,7 @@ final class StartupProgressModel {
         switch state {
         case .starting(let id):
             begin(siteID: id)
-        case .ready(let id, _):
+        case .ready(let id, _, _):
             estimator.ingest(runtimeState: state, at: clock())
             if let profile = estimator.completedProfile {
                 timingStore.record(profile, for: id)

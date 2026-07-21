@@ -8,50 +8,6 @@ import Foundation
 /// prefixes. This type generates the configuration; `SocialWorkerProvisionCommand` fills the
 /// Cloudflare resource identifiers once provisioning has created the backing stores.
 public enum WorkerComposition {
-    /// A social feature that can be composed into the per-site Worker.
-    public enum Feature: String, CaseIterable, Sendable {
-        case indieauth
-        case webmention
-        case micropub
-        case websub
-        case microsub
-        case webfinger
-        case activitypub
-
-        /// V-2 features: outbound social (webmention send + indieauth).
-        public static let v2: [Feature] = [.webmention, .indieauth]
-        /// V-3 features: V-2 + inbound social (micropub + websub).
-        public static let v3: [Feature] = [.webmention, .indieauth, .micropub, .websub]
-        /// V-4 features: V-3 + federation (activitypub + microsub + webfinger).
-        public static let v4: [Feature] = Array(Feature.allCases)
-
-        var needsD1: Bool {
-            switch self {
-            case .webmention, .micropub, .indieauth, .websub, .microsub, .activitypub:
-                return true
-            case .webfinger:
-                return false
-            }
-        }
-
-        var needsKV: Bool {
-            switch self {
-            case .webmention, .micropub, .indieauth, .websub, .microsub, .activitypub:
-                return true
-            case .webfinger:
-                return false
-            }
-        }
-
-        var needsR2: Bool {
-            switch self {
-            case .micropub:
-                return true
-            default:
-                return false
-            }
-        }
-    }
 
     public enum ConfigError: Error, Sendable {
         case invalidSiteName(String)
@@ -61,6 +17,12 @@ public enum WorkerComposition {
         /// the generated file).
         case invalidRouteClaim(path: String, reason: String)
     }
+
+    /// `@dwk/indieauth`'s catalog id — a magic string composition keys off directly (its binding
+    /// name, `AUTH_DB`, is part of its public contract, unlike every other `@dwk/*` package which
+    /// only needs generic `resources` flags), shared so a typo in one comparison site can't
+    /// silently diverge from another.
+    public static let indieauthWorkerID = "indieauth"
 
     /// The bespoke app-side inbox-capture route (#587) — not a `@dwk/workers` catalog worker, so
     /// its claim lives here rather than in `catalog.json`. Appended automatically when
@@ -88,12 +50,13 @@ public enum WorkerComposition {
         }
     }
 
-    /// Generates a wrangler.toml for a site with the given features enabled.
+    /// Generates a wrangler.toml for a site with the given workers enabled.
     ///
     /// - Parameters:
     ///   - siteName: The Worker name (used as the Cloudflare Workers project name).
     ///     Must match `[A-Za-z0-9_-]+`.
-    ///   - features: Which `@dwk/*` social endpoints to compose. Empty = static-only deploy.
+    ///   - workers: The effective active `@dwk/workers` catalog descriptors. Empty = static-only
+    ///     deploy.
     ///   - routeClaims: The effective active dynamic-route claims (#746), already validated by
     ///     `WorkerRouteClaims.activeClaims`. Emitted as selective `[assets].run_worker_first`
     ///     patterns so *only* claimed routes bypass asset-first serving — a static asset can no
@@ -105,7 +68,7 @@ public enum WorkerComposition {
     ///   for a claim that never passed `WorkerRouteClaims` validation.
     public static func generateWranglerToml(
         siteName: String,
-        features: [Feature],
+        workers: [WorkerDescriptor],
         routeClaims: [WorkerRouteClaim] = [],
         resources: ProvisionedResources = .init(),
         inboxCaptureEnabled: Bool = false,
@@ -129,12 +92,17 @@ public enum WorkerComposition {
                 throw ConfigError.invalidRouteClaim(path: claim.path, reason: "\(error)")
             }
         }
+        // @dwk/indieauth's binding name is part of its public composition contract (see the
+        // AUTH_DB block below) — the one place composition keys off a specific catalog id rather
+        // than generic resource flags.
+        let hasIndieauth = workers.contains(where: { $0.id == indieauthWorkerID })
+
         var lines: [String] = []
         lines.append("name = \"\(siteName)\"")
         lines.append("compatibility_date = \"2026-07-15\"")
         lines.append("compatibility_flags = [\"nodejs_compat\"]")
 
-        let hasSocialFeatures = !features.isEmpty
+        let hasSocialFeatures = !workers.isEmpty
         if hasSocialFeatures || inboxCaptureEnabled {
             lines.append("main = \"worker/worker.ts\"")
         }
@@ -150,7 +118,7 @@ public enum WorkerComposition {
             }
         }
 
-        if features.contains(where: { $0.needsD1 }) {
+        if workers.contains(where: { $0.resources.needsD1 }) {
             lines.append("")
             lines.append("[[d1_databases]]")
             lines.append("binding = \"DB\"")
@@ -162,10 +130,9 @@ public enum WorkerComposition {
             }
         }
 
-        // @dwk/indieauth's binding name is part of its public composition contract. Keep the
-        // generic DB binding above for the other @dwk packages, while binding the same per-site
-        // D1 database under AUTH_DB for authorization codes and issued-token state.
-        if features.contains(.indieauth) {
+        // Keep the generic DB binding above for the other @dwk packages, while binding the same
+        // per-site D1 database under AUTH_DB for authorization codes and issued-token state.
+        if hasIndieauth {
             lines.append("")
             lines.append("[[d1_databases]]")
             lines.append("binding = \"AUTH_DB\"")
@@ -178,7 +145,7 @@ public enum WorkerComposition {
             }
         }
 
-        if features.contains(where: { $0.needsKV }) {
+        if workers.contains(where: { $0.resources.needsKV }) {
             lines.append("")
             lines.append("[[kv_namespaces]]")
             lines.append("binding = \"SOCIAL_KV\"")
@@ -189,7 +156,7 @@ public enum WorkerComposition {
             }
         }
 
-        if features.contains(where: { $0.needsR2 }) {
+        if workers.contains(where: { $0.resources.needsR2 }) {
             lines.append("")
             lines.append("[[r2_buckets]]")
             lines.append("binding = \"MEDIA\"")
@@ -207,7 +174,7 @@ public enum WorkerComposition {
             }
         }
 
-        if features.contains(.indieauth) {
+        if hasIndieauth {
             lines.append("")
             // Wrangler has no schema for declaring required secrets in wrangler.toml — secrets are
             // set with `wrangler secret put <NAME>` and are never read back out of this file. Emit

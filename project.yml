@@ -66,6 +66,8 @@ targets:
         PRODUCT_NAME: Anglesite
         INFOPLIST_FILE: Resources/Info.plist
         GENERATE_INFOPLIST_FILE: NO
+        # Release keeps the clean MAS entitlements; Debug adds a temporary-exception
+        # mach-lookup workaround for #775 (see Resources/Anglesite-Debug.entitlements).
         CODE_SIGN_ENTITLEMENTS: Resources/Anglesite.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         MACOSX_DEPLOYMENT_TARGET: "27.0"
@@ -87,6 +89,10 @@ targets:
         Debug:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: "-"
+          # #775 workaround: punch the com.apple.NetworkSharing mach look-up back
+          # through the sandbox so container boots survive macOS 27 seeds
+          # 26A5378n–26A5388g. Debug-only — never ships to MAS.
+          CODE_SIGN_ENTITLEMENTS: Resources/Anglesite-Debug.entitlements
         Release:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: "Apple Distribution"

@@ -102,20 +102,60 @@ struct WorkerActivationTests {
         #expect(WorkerActivation.removedIDs(previous: ["a"], next: ["a", "b"]).isEmpty)
     }
 
-    @Test("mapToFeatures maps known catalog ids to Feature cases in declaration order")
-    func mapToFeaturesKnownIDs() {
-        let features = WorkerActivation.mapToFeatures(["websub", "indieauth"])
-        #expect(features == [.indieauth, .websub])
+    @Test("activeDescriptors resolves known ids against the catalog")
+    func activeDescriptorsKnownIDs() {
+        let webmention = descriptor(id: "webmention", binding: .settingsActivated)
+        let indieauth = descriptor(id: "indieauth", binding: .settingsActivated)
+        let resolved = WorkerActivation.activeDescriptors(
+            catalog: [webmention, indieauth], activeIDs: ["indieauth", "webmention"])
+        #expect(Set(resolved.map(\.id)) == ["indieauth", "webmention"])
     }
 
-    @Test("mapToFeatures silently drops ids with no matching Feature case")
-    func mapToFeaturesDropsUnknownIDs() {
-        let features = WorkerActivation.mapToFeatures(["indieauth", "solid-pod"])
-        #expect(features == [.indieauth])
+    @Test("activeDescriptors drops ids with no matching catalog entry")
+    func activeDescriptorsDropsUnknownIDs() {
+        let indieauth = descriptor(id: "indieauth", binding: .settingsActivated)
+        let resolved = WorkerActivation.activeDescriptors(
+            catalog: [indieauth], activeIDs: ["indieauth", "solid-pod"])
+        #expect(resolved.map(\.id) == ["indieauth"])
     }
 
-    @Test("mapToFeatures of an empty set is empty")
-    func mapToFeaturesEmpty() {
-        #expect(WorkerActivation.mapToFeatures([]).isEmpty)
+    @Test("activeDescriptors of an empty id set is empty")
+    func activeDescriptorsEmpty() {
+        let indieauth = descriptor(id: "indieauth", binding: .settingsActivated)
+        #expect(WorkerActivation.activeDescriptors(catalog: [indieauth], activeIDs: []).isEmpty)
+    }
+
+    @Test("unresolvedActiveIDs is empty when every active id resolved")
+    func unresolvedActiveIDsEmptyWhenFullyResolved() {
+        let indieauth = descriptor(id: "indieauth", binding: .settingsActivated)
+        let unresolved = WorkerActivation.unresolvedActiveIDs(activeIDs: ["indieauth"], resolved: [indieauth])
+        #expect(unresolved.isEmpty)
+    }
+
+    @Test("unresolvedActiveIDs catches a fully-empty catalog")
+    func unresolvedActiveIDsFullyEmptyCatalog() {
+        let unresolved = WorkerActivation.unresolvedActiveIDs(activeIDs: ["indieauth", "webmention"], resolved: [])
+        #expect(unresolved == ["indieauth", "webmention"])
+    }
+
+    @Test("unresolvedActiveIDs catches a partial mismatch, not just a fully-empty catalog")
+    func unresolvedActiveIDsPartialMismatch() {
+        let indieauth = descriptor(id: "indieauth", binding: .settingsActivated)
+        // "webmention" is active but has no catalog entry — the catalog isn't empty, so a
+        // catalog.isEmpty check alone would miss this.
+        let unresolved = WorkerActivation.unresolvedActiveIDs(
+            activeIDs: ["indieauth", "webmention"], resolved: [indieauth])
+        #expect(unresolved == ["webmention"])
+    }
+
+    @Test("missingDescriptorWarning is nil when nothing is unresolved")
+    func missingDescriptorWarningNilWhenResolved() {
+        #expect(WorkerActivation.missingDescriptorWarning(unresolvedIDs: []) == nil)
+    }
+
+    @Test("missingDescriptorWarning names every unresolved id, sorted")
+    func missingDescriptorWarningNamesUnresolvedIDs() {
+        let warning = WorkerActivation.missingDescriptorWarning(unresolvedIDs: ["webmention", "indieauth"])
+        #expect(warning?.contains("indieauth, webmention") == true)
     }
 }

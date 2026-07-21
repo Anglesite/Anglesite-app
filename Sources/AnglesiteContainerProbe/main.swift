@@ -19,13 +19,16 @@ import Containerization
 //           host dialVsock round-trip. THE decision gate for Task 4b.
 //   boot  — mirrors ContainerizationControlTests.bootsAndServes: full start() against a
 //           throwaway Astro repo, polling the preview URL for a live HTTP response. Task 5's gate.
+//   workers-dev — mirrors ContainerizationControlTests.startsWorkersDevForActiveWorker: boot a
+//           container, start local wrangler-dev for one active (fixture) worker, poll its URL
+//           for a live HTTP response. The #708 local-runtime feature's own decision gate.
 
 @main
 struct AnglesiteContainerProbe {
     static func main() async {
         let args = CommandLine.arguments.dropFirst()
         guard let subcommand = args.first else {
-            FileHandle.standardError.write(Data("usage: anglesite-container-probe <echo|boot>\n".utf8))
+            FileHandle.standardError.write(Data("usage: anglesite-container-probe <echo|boot|workers-dev>\n".utf8))
             exit(2)
         }
 
@@ -35,8 +38,11 @@ struct AnglesiteContainerProbe {
             exitCode = await runEcho()
         case "boot":
             exitCode = await runBoot()
+        case "workers-dev":
+            exitCode = await runWorkersDev()
         default:
-            FileHandle.standardError.write(Data("unknown subcommand '\(subcommand)' (expected echo|boot)\n".utf8))
+            FileHandle.standardError.write(
+                Data("unknown subcommand '\(subcommand)' (expected echo|boot|workers-dev)\n".utf8))
             exitCode = 2
         }
         exit(exitCode)
@@ -172,6 +178,55 @@ struct AnglesiteContainerProbe {
         }
 
         print("BOOT: PASS (boot wall-clock: \(elapsed))")
+        return 0
+    }
+
+    // MARK: - workers-dev
+
+    /// Mirrors `ContainerizationControlTests.startsWorkersDevForActiveWorker`: boot a container,
+    /// start local wrangler-dev for one active (fixture) worker, poll its URL for a live HTTP
+    /// response. The #708 local-runtime feature's own decision gate.
+    private static func runWorkersDev() async -> Int32 {
+        let siteID = "workers-dev-probe"
+        let control = ContainerizationControl()
+
+        let repo: URL
+        do {
+            repo = try makeThrowawayAstroRepo()
+        } catch {
+            print("WORKERS-DEV: FAIL — could not create throwaway Astro repo: \(error)")
+            return 1
+        }
+        defer { try? FileManager.default.removeItem(at: repo) }
+
+        do {
+            _ = try await control.start(siteID: siteID, sourceRepo: repo, ref: "HEAD", onOutput: logLine)
+        } catch {
+            print("WORKERS-DEV: FAIL — control.start threw: \(error)")
+            return 1
+        }
+
+        let workers = [WorkerDescriptor(
+            id: "indieauth", displayName: "IndieAuth", description: "probe fixture", group: "identity",
+            binding: .settingsActivated, resources: .init(needsD1: true, needsKV: true, needsR2: false))]
+        let workersDevURL: URL
+        do {
+            workersDevURL = try await control.startWorkersDev(siteID: siteID, workers: workers, onOutput: logLine)
+        } catch {
+            print("WORKERS-DEV: FAIL — control.startWorkersDev threw: \(error)")
+            try? await control.stop(siteID: siteID)
+            return 1
+        }
+
+        let ok = await pollForHTTPResponse(workersDevURL, timeout: .seconds(60))
+        try? await control.stop(siteID: siteID)
+
+        guard ok else {
+            print("WORKERS-DEV: FAIL — \(workersDevURL) never answered within the timeout")
+            return 1
+        }
+
+        print("WORKERS-DEV: PASS")
         return 0
     }
 

@@ -120,7 +120,9 @@ final class SiteGraphExplorerModel {
         SiteGraphExplorerGrouping.summary(nodeCount: filteredNodes.count, edgeCount: filteredEdges.count)
     }
 
-    func start(siteID: String, sourceDirectory: URL) {
+    func start(site: CurrentSite) {
+        let siteID = site.id
+        let sourceDirectory = site.sourceDirectory
         self.siteID = siteID
         self.sourceDirectory = sourceDirectory
         observeTask?.cancel()

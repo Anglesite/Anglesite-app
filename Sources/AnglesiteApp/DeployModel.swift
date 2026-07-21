@@ -11,6 +11,13 @@ import AnglesiteCore
 @MainActor
 @Observable
 final class DeployModel {
+    /// Resolves the local-container capability at the moment a deploy actually runs — including
+    /// a token-prompt/rename retry — rather than once at dispatch time, so a retry queries the
+    /// runtime's current state (via `SiteRuntime.containerCapability`, #823) instead of replaying
+    /// a snapshot that may be stale by the time the user finishes the token/rename prompt. Mirrors
+    /// `ACPAssistant.ContainerControlProvider` / `SiteAssistantSessionFactory.ContainerControlProvider`.
+    typealias ContainerControlProvider = @Sendable () async -> (siteID: String, control: any LocalContainerControl)?
+
     enum Phase: Equatable {
         case idle
         case running(siteID: String, since: Date)
@@ -111,7 +118,7 @@ final class DeployModel {
         siteDirectory: URL,
         configDirectory: URL,
         currentRoutes: [String],
-        containerControl: (siteID: String, control: any LocalContainerControl)?,
+        containerControlProvider: ContainerControlProvider,
         siteName: String?
     )?
 
@@ -158,10 +165,12 @@ final class DeployModel {
 
     /// Kicks off a deploy. No-op if one is already running.
     ///
-    /// When `containerControl` is non-nil the deploy runs inside the already-started container via
-    /// `ContainerDeployExecutor`; otherwise the default executor reports that the container runtime
-    /// is required. The container control is threaded through the pending-deploy flow so a
-    /// token-prompt retry uses the same executor as the original dispatch.
+    /// `containerControlProvider` is invoked inside `runDeploy` at the moment the deploy actually
+    /// runs (#823): when it resolves non-nil the deploy runs inside the already-started container
+    /// via `ContainerDeployExecutor`; otherwise the default executor reports that the container
+    /// runtime is required. The provider itself — not a resolved snapshot — is threaded through
+    /// the pending-deploy flow, so a token-prompt retry re-resolves against the runtime's current
+    /// state instead of an executor built from a possibly-stale earlier snapshot.
     ///
     /// First checks whether a Cloudflare token is available (env > Keychain). If neither has one,
     /// the token-prompt sheet is presented and the deploy is parked until the user pastes and
@@ -172,12 +181,12 @@ final class DeployModel {
         siteDirectory: URL,
         configDirectory: URL,
         currentRoutes: [String],
-        containerControl: (siteID: String, control: any LocalContainerControl)? = nil,
+        containerControlProvider: @escaping ContainerControlProvider = { nil },
         siteName: String? = nil
     ) {
         guard !isRunning else { return }
         if !hasUsableToken() {
-            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl, siteName)
+            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControlProvider, siteName)
             tokenVerification = .idle
             tokenPromptPresented = true
             return
@@ -191,7 +200,7 @@ final class DeployModel {
             _ = await self?.runDeploy(
                 siteID: siteID, siteDirectory: siteDirectory,
                 configDirectory: configDirectory, currentRoutes: currentRoutes,
-                containerControl: containerControl,
+                containerControlProvider: containerControlProvider,
                 suddenTerminationLease: suddenTerminationLease,
                 presentation: .foreground,
                 siteName: siteName)
@@ -207,12 +216,16 @@ final class DeployModel {
         siteDirectory: URL,
         configDirectory: URL,
         currentRoutes: [String],
-        containerControl: (siteID: String, control: any LocalContainerControl)?,
+        containerControlProvider: @escaping ContainerControlProvider,
         siteName: String? = nil
     ) async -> InvisiblePublishQueue.Result {
         guard !isRunning else { return .deferred(reason: "another site operation is running") }
         guard hasUsableToken() else { return .deferred(reason: "Cloudflare credentials are not configured") }
-        guard containerControl != nil else { return .deferred(reason: "the site runtime is not ready") }
+        // Resolved once (there's no user-facing prompt gap on this background path to make a
+        // second resolution meaningfully fresher) and reused both for the readiness guard and the
+        // actual run, so the two can't disagree about whether a container is available.
+        let resolvedContainerControl = await containerControlProvider()
+        guard resolvedContainerControl != nil else { return .deferred(reason: "the site runtime is not ready") }
 
         phase = .running(siteID: siteID, since: Date.now)
         let lease = suddenTerminationController.acquire()
@@ -221,7 +234,7 @@ final class DeployModel {
             siteDirectory: siteDirectory,
             configDirectory: configDirectory,
             currentRoutes: currentRoutes,
-            containerControl: containerControl,
+            containerControlProvider: { resolvedContainerControl },
             suddenTerminationLease: lease,
             presentation: .background,
             siteName: siteName
@@ -272,7 +285,7 @@ final class DeployModel {
             deploy(
                 siteID: pending.siteID, siteDirectory: pending.siteDirectory,
                 configDirectory: pending.configDirectory, currentRoutes: pending.currentRoutes,
-                containerControl: pending.containerControl, siteName: pending.siteName)
+                containerControlProvider: pending.containerControlProvider, siteName: pending.siteName)
         case .stay(let message):
             tokenVerification = .failed(message: message)
         case .abort:
@@ -323,7 +336,7 @@ final class DeployModel {
         deploy(
             siteID: pending.siteID, siteDirectory: pending.siteDirectory,
             configDirectory: pending.configDirectory, currentRoutes: pending.currentRoutes,
-            containerControl: pending.containerControl, siteName: pending.siteName)
+            containerControlProvider: pending.containerControlProvider, siteName: pending.siteName)
     }
 
     func cancelWorkerNameConflictPrompt() {
@@ -369,7 +382,7 @@ final class DeployModel {
         siteDirectory: URL,
         configDirectory: URL,
         currentRoutes: [String],
-        containerControl: (siteID: String, control: any LocalContainerControl)? = nil,
+        containerControlProvider: @escaping ContainerControlProvider = { nil },
         suddenTerminationLease: SuddenTerminationController.Lease,
         presentation: Presentation,
         siteName: String? = nil
@@ -398,6 +411,12 @@ final class DeployModel {
             }
         }
 
+        // Resolved here, at the moment this deploy attempt actually runs, rather than threaded in
+        // as a pre-resolved value (#823) — a token-prompt/rename retry re-invokes the same
+        // provider, so it sees the runtime's current container state instead of a snapshot taken
+        // back when the sheet was first presented.
+        let containerControl = await containerControlProvider()
+
         // Select the executor: in-container when the runtime is a started container;
         // explicit unavailable result otherwise. The token source always comes from the
         // injected `command` so the test-injection path (a fully pre-built
@@ -419,35 +438,29 @@ final class DeployModel {
             containerRunner = nil
         }
 
-        // Effective active worker set (#709 design §4-5): component-tied workers via
-        // ImpactAnalysis (only when this site's content graph has actually been scanned — a
-        // headless/never-opened site contributes nothing there, matching ImpactAnalysis's own
-        // "never invents, may under-report" bias) unioned with settings-activated workers.
+        // Effective active worker set (#709 design §4-5, #825): the content-graph snapshot build
+        // and the `WorkerActivation` computation now live in `DeployCoordinator.planWorkerActivation`
+        // (AnglesiteCore) so this orchestration is unit-tested outside a hosted app-target test.
         let configStore = SiteConfigStore(configDirectory: configDirectory)
         let settings = (try? await configStore.load()) ?? SiteSettings()
         let catalog = await workerCatalog()
-        let snapshot: SiteGraphExplorerSnapshot?
-        if await contentGraph.isPopulated(siteID: siteID) {
-            snapshot = SiteGraphExplorer.build(
-                projectRoot: siteDirectory,
-                siteID: siteID,
-                pages: await contentGraph.pages(for: siteID),
-                posts: await contentGraph.posts(for: siteID),
-                images: await contentGraph.images(for: siteID)
-            )
-        } else {
-            snapshot = nil
-        }
-        let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: catalog, graph: snapshot)
-        let removedIDs = WorkerActivation.removedIDs(previous: Set(settings.lastDeployedWorkerIDs ?? []), next: effectiveActiveIDs)
-        if !removedIDs.isEmpty {
+        let activationPlan = await DeployCoordinator.planWorkerActivation(
+            siteID: siteID, siteDirectory: siteDirectory, settings: settings, catalog: catalog, contentGraph: contentGraph
+        )
+        let effectiveActiveIDs = activationPlan.effectiveActiveIDs
+        if !activationPlan.removedIDs.isEmpty {
             await logCenter.append(
                 source: "deploy:\(siteID)",
                 stream: .stdout,
-                text: "Deactivating workers: \(removedIDs.sorted().joined(separator: ", "))"
+                text: "Deactivating workers: \(activationPlan.removedIDs.sorted().joined(separator: ", "))"
             )
         }
-        let features = WorkerActivation.mapToFeatures(effectiveActiveIDs)
+        let workers = activationPlan.workers
+        if let warning = WorkerActivation.missingDescriptorWarning(unresolvedIDs: activationPlan.unresolvedIDs) {
+            // Mirrors SiteOperations.deployWithWorkerComposition's identical warning — shared
+            // text via WorkerActivation so the two paths can't drift (#708 review feedback).
+            await logCenter.append(source: "deploy:\(siteID)", stream: .stderr, text: warning)
+        }
 
         // Dynamic-route claims of the effective active set (#746). Validation failures (a
         // malformed path, two active workers claiming overlapping routes) refuse the deploy
@@ -489,30 +502,27 @@ final class DeployModel {
             }
         )
 
-        // Prefer the site's already-established Worker name (`.site-config`'s `CF_PROJECT_NAME`,
-        // set at the first successful deploy or by a worker-name-conflict rename, #740) over
-        // re-deriving one from the site's display name. Otherwise every deploy after a
-        // rename-and-retry would silently regenerate `wrangler.toml` under the original
-        // (still-taken) name basis via `persistConfig`, defeating the rename. Falls back to the
-        // derived slug only when no candidate name has been recorded yet — a genuinely first-ever
-        // deploy.
-        let existingConfig = (try? WebsiteAnalyticsAsset.loadConfig(siteDirectory: siteDirectory)) ?? ""
-        let workerSiteName = SiteConfigFile.value(forKey: "CF_PROJECT_NAME", in: existingConfig)
-            ?? SiteSlug.derive(from: siteName ?? siteID)
+        // Worker-name resolution precedence (#740, #825): moved to
+        // `DeployCoordinator.resolveWorkerSiteName` — prefers the site's already-established
+        // Worker name (`.site-config`'s `CF_PROJECT_NAME`) over re-deriving one from the site's
+        // display name, so a rename-and-retry isn't silently reverted on the next deploy.
+        let workerSiteName = DeployCoordinator.resolveWorkerSiteName(
+            siteDirectory: siteDirectory, siteID: siteID, siteName: siteName
+        )
         let provisionResult = await socialCommand.provision(
             siteID: siteID,
             siteDirectory: siteDirectory,
             siteName: workerSiteName,
-            features: features,
+            workers: workers,
             routeClaims: routeClaims.map(\.claim),
             knownResources: settings.provisionedWorkerResources ?? .init()
         )
 
         if case .succeeded(_, let resources, _) = provisionResult {
-            var updated = settings
-            updated.lastDeployedWorkerIDs = Array(effectiveActiveIDs).sorted()
-            updated.provisionedWorkerResources = resources
-            try? await configStore.save(updated)
+            await DeployCoordinator.persistProvisionedResources(
+                configStore: configStore, settings: settings,
+                effectiveActiveIDs: effectiveActiveIDs, resources: resources
+            )
         }
 
         let result = provisionResult.asDeployCommandResult
@@ -525,20 +535,23 @@ final class DeployModel {
         case .succeeded(let url, let duration):
             // Astro's build above regenerates RSS/Atom/JSON feeds. Social delivery is ordered
             // after the deployed canonical pages exist, and completion is notified only after
-            // both best-effort passes finish.
-            emitPostDeployMilestone(.deployWebmentions, siteID: siteID)
-            await webmentionCommand.send(
-                siteID: siteID,
-                siteDirectory: siteDirectory,
-                configDirectory: configDirectory,
-                siteBase: url
-            )
-            emitPostDeployMilestone(.deploySyndicating, siteID: siteID)
-            await posseCommand.syndicate(
-                siteID: siteID,
-                siteDirectory: siteDirectory,
-                configDirectory: configDirectory,
-                siteBase: url
+            // both best-effort passes finish. The ordering itself is
+            // `DeployCoordinator.runPostDeploySequencing` (#825); this closure-composes it with
+            // the concrete webmention/POSSE commands and the milestone hook.
+            await DeployCoordinator.runPostDeploySequencing(
+                onMilestone: { [weak self] progress in self?.emitPostDeployMilestone(progress, siteID: siteID) },
+                sendWebmentions: { [weak self] in
+                    guard let self else { return }
+                    await self.webmentionCommand.send(
+                        siteID: siteID, siteDirectory: siteDirectory, configDirectory: configDirectory, siteBase: url
+                    )
+                },
+                syndicate: { [weak self] in
+                    guard let self else { return }
+                    await self.posseCommand.syndicate(
+                        siteID: siteID, siteDirectory: siteDirectory, configDirectory: configDirectory, siteBase: url
+                    )
+                }
             )
             currentMilestone = nil
             workerNameConflictPresented = false
@@ -571,7 +584,9 @@ final class DeployModel {
             workerNameConflictPresented = false
             blockedPresented = presentation == .foreground
         case .workerNameConflict(let name):
-            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl, siteName)
+            // Parks the provider, not the resolved `containerControl` snapshot above — the
+            // rename-and-retry re-invokes it, so it sees the runtime's state at retry time.
+            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControlProvider, siteName)
             transition(siteID: siteID, to: .workerNameConflict(name: name))
             drawerPresented = false
             workerNameConflictError = nil

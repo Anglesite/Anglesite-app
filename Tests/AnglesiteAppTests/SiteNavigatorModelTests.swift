@@ -25,7 +25,7 @@ struct SiteNavigatorModelTests {
             posts: [], images: []
         )
         let model = SiteNavigatorModel(graph: graph)
-        model.start(siteID: "site-1", siteRoot: root, sourceDirectory: root, websiteTitle: "Test")
+        model.start(site: CurrentSite(id: "site-1", packageURL: root, sourceDirectory: root), websiteTitle: "Test")
         while model.nodes.isEmpty { await Task.yield() }
 
         let id = try #require(flatten(model.nodes).first { $0.title == "About" }?.id)
@@ -52,7 +52,7 @@ struct SiteNavigatorModelTests {
             posts: [], images: []
         )
         let model = SiteNavigatorModel(graph: graph)
-        model.start(siteID: "site-1", siteRoot: root, sourceDirectory: root, websiteTitle: "Test")
+        model.start(site: CurrentSite(id: "site-1", packageURL: root, sourceDirectory: root), websiteTitle: "Test")
         while model.nodes.isEmpty { await Task.yield() }
 
         let id = try #require(model.nodes.first { $0.kind == .website }?.id)
@@ -84,7 +84,7 @@ struct SiteNavigatorModelTests {
             posts: [], images: []
         )
         let model = SiteNavigatorModel(graph: graph)
-        model.start(siteID: "site-1", siteRoot: root, sourceDirectory: root, websiteTitle: "Test")
+        model.start(site: CurrentSite(id: "site-1", packageURL: root, sourceDirectory: root), websiteTitle: "Test")
         while model.nodes.isEmpty { await Task.yield() }
         let id = try #require(flatten(model.nodes).first { $0.title == "About" }?.id)
 
@@ -113,7 +113,7 @@ struct SiteNavigatorModelTests {
             posts: [], images: []
         )
         let model = SiteNavigatorModel(graph: graph)
-        model.start(siteID: "site-1", siteRoot: root, sourceDirectory: root, websiteTitle: "Test")
+        model.start(site: CurrentSite(id: "site-1", packageURL: root, sourceDirectory: root), websiteTitle: "Test")
         while model.nodes.isEmpty { await Task.yield() }
         let id = try #require(flatten(model.nodes).first { $0.title == "About" }?.id)
         model.selection = id
@@ -137,7 +137,7 @@ struct SiteNavigatorModelTests {
             posts: [], images: []
         )
         let model = SiteNavigatorModel(graph: graph)
-        model.start(siteID: "site-1", siteRoot: root, sourceDirectory: root, websiteTitle: "Test")
+        model.start(site: CurrentSite(id: "site-1", packageURL: root, sourceDirectory: root), websiteTitle: "Test")
         while model.nodes.isEmpty { await Task.yield() }
         let id = try #require(model.nodes.first { $0.kind == .website }?.id)
         model.selection = id
@@ -164,8 +164,9 @@ struct SiteNavigatorModelRedirectsTests {
     private func makeModel(sourceDirectory: URL) -> SiteNavigatorModel {
         let graph = SiteContentGraph()
         let model = SiteNavigatorModel(graph: graph)
-        model.start(siteID: "site1", siteRoot: sourceDirectory,
-                     sourceDirectory: sourceDirectory, websiteTitle: "Test")
+        model.start(
+            site: CurrentSite(id: "site1", packageURL: sourceDirectory, sourceDirectory: sourceDirectory),
+            websiteTitle: "Test")
         return model
     }
 
@@ -231,7 +232,7 @@ struct SiteNavigatorModelPublishGatingTests {
         )
 
         let model = SiteNavigatorModel(graph: graph)
-        model.start(siteID: "site-1", siteRoot: root, sourceDirectory: root, websiteTitle: "Test")
+        model.start(site: CurrentSite(id: "site-1", packageURL: root, sourceDirectory: root), websiteTitle: "Test")
         while model.nodes.isEmpty { await Task.yield() }
 
         #expect(model.canPublish("site-1:post:draft-note") == true)
