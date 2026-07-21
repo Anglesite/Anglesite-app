@@ -20,6 +20,15 @@ private actor StubLocalContainerControl: LocalContainerControl {
 
     func stop(siteID: String) async throws {}
 
+    func startWorkersDev(
+        siteID: String, workers: [WorkerDescriptor],
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> URL {
+        URL(string: "http://127.0.0.1:3")!
+    }
+
+    func stopWorkersDev(siteID: String) async throws {}
+
     func exec(
         siteID: String, argv: [String], environment: [String: String], workingDirectory: String,
         onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
