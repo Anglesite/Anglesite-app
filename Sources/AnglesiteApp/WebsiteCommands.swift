@@ -56,6 +56,9 @@ struct WebsiteCommands: Commands {
             Button("Harden…") { model?.harden.openSheet() }
                 .disabled(model?.canRunHarden != true)
 
+            Button("Onion Routing…") { model?.onionRouting.openSheet() }
+                .disabled(model?.canRunOnionRouting != true)
+
             Button("Siri AI Readiness…") { model?.openSiriReadiness() }
                 .disabled(model?.canOpenSiriReadiness != true)
 

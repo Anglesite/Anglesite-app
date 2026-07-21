@@ -745,6 +745,9 @@
     "Create" : {
 
     },
+    "Create a private GitHub repo and push this site" : {
+
+    },
     "Create a website" : {
 
     },
@@ -865,6 +868,9 @@
     "Digital downloads" : {
 
     },
+    "Disable" : {
+
+    },
     "Disallow" : {
 
     },
@@ -922,7 +928,13 @@
     "Emphasis" : {
 
     },
+    "Enable" : {
+
+    },
     "Enable Onion Routing" : {
+
+    },
+    "Enable Tor Browser access for this site via Cloudflare's zone-level setting" : {
 
     },
     "Enter the domain to harden" : {
@@ -1459,6 +1471,9 @@
     "Onion Routing" : {
 
     },
+    "Onion Routing…" : {
+
+    },
     "Open" : {
 
     },
@@ -1505,6 +1520,9 @@
 
     },
     "Open the preview first to start the runtime before deploying" : {
+
+    },
+    "Open this site's GitHub repository" : {
 
     },
     "Opens %@" : {
@@ -1887,6 +1905,9 @@
 
     },
     "Save…" : {
+
+    },
+    "Saving Cloudflare zone settings…" : {
 
     },
     "Scan" : {
@@ -2533,3 +2554,4 @@
   },
   "version" : "1.0"
 }
+
