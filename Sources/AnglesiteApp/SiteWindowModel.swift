@@ -115,6 +115,7 @@ final class SiteWindowModel {
     /// Rescan button re-runs it on demand afterward.
     var cleanup: ProjectCleanupModel
     var harden = HardenModel()
+    var onionRouting = OnionRoutingModel()
     var domain = DomainModel()
     var health = HealthModel(runner: DefaultHealthCheckRunner())
     /// Drives the determinate startup progress bar shown in `mainPane` while the dev server boots.
@@ -469,6 +470,7 @@ final class SiteWindowModel {
     var canRunBackup: Bool { site?.isValid == true && !siteOperationRunning }
     var canRunAudit: Bool { site?.isValid == true && !siteOperationRunning }
     var canRunHarden: Bool { site?.isValid == true && !harden.isRunning }
+    var canRunOnionRouting: Bool { site?.isValid == true && !onionRouting.isRunning }
     var canRecheckHealth: Bool { site != nil }
     var canOpenDomain: Bool { site != nil && !domain.isRunning }
     var canOpenIntegrationWizard: Bool { site != nil }
@@ -502,7 +504,12 @@ final class SiteWindowModel {
     func auditSite() {
         guard let site, canRunAudit else { return }
         audit.audit(siteID: site.id, siteDirectory: site.sourceDirectory)
-    }
+     }
+
+    func openOnionRoutingSheet() {
+        guard let site, canRunOnionRouting else { return }
+        onionRouting.load()
+     }
 
     func recheckHealth() {
         guard let site else { return }

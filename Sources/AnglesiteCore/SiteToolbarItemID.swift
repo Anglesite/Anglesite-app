@@ -15,6 +15,7 @@ public enum SiteToolbarItemID: String, CaseIterable, Sendable {
     case audit
     case openInBrowser
     case harden
+    case onionRouting
     case domain
     case integration
     case siriReadiness

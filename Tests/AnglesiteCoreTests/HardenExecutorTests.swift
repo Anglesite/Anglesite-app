@@ -182,5 +182,8 @@ final class MockCloudflareWriter: CloudflareWriting, @unchecked Sendable {
     }
     func setPageShield(zoneID: String, enabled: Bool, apiToken: String) async throws {
         try record("setPageShield")
-    }
+      }
+    func enableOnionRouting(zoneID: String, enabled: Bool, apiToken: String) async throws {
+        try record("enableOnionRouting")
+      }
 }

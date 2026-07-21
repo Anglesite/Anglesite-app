@@ -39,6 +39,8 @@ public struct CloudflareZoneState: Sendable, Equatable {
     public var zstdCompression: Bool
     /// Page Shield (client-side security) status + detected script hosts. `nil` when unreadable.
     public var pageShield: PageShieldState?
+    /// Whether opportunistic Onion Routing is enabled (free, zone-level).
+    public var onionRouting: Bool
 
     /// A single custom WAF rule from the zone's firewall ruleset.
     public struct WAFCustomRule: Sendable, Equatable {
@@ -67,7 +69,7 @@ public struct CloudflareZoneState: Sendable, Equatable {
                 caaRecords: [String], mxRecords: [String], spfRecords: [String], dmarcRecords: [String],
                 botFightMode: Bool = false, wafCustomRules: [WAFCustomRule] = [],
                 speedBrain: Bool = false, ech: Bool = false, zstdCompression: Bool = false,
-                pageShield: PageShieldState? = nil) {
+                pageShield: PageShieldState? = nil, onionRouting: Bool = false) {
         self.dnssecActive = dnssecActive
         self.sslMode = sslMode
         self.alwaysUseHTTPS = alwaysUseHTTPS
@@ -82,5 +84,6 @@ public struct CloudflareZoneState: Sendable, Equatable {
         self.ech = ech
         self.zstdCompression = zstdCompression
         self.pageShield = pageShield
-    }
+        self.onionRouting = onionRouting
+     }
 }
