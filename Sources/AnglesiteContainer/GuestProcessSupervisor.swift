@@ -36,8 +36,15 @@ struct LinuxContainerProcessLauncher: GuestProcessLauncher {
         environment: [String: String],
         onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
     ) async throws -> any GuestProcessHandle {
-        let stdoutSink = LineStreamingWriter(stream: .stdout, onLine: onOutput)
-        let stderrSink = LineStreamingWriter(stream: .stderr, onLine: onOutput)
+        // Tag raw process output with [id], mirroring runDetached's own tagging convention
+        // (ContainerizationControl.swift) — GuestProcessSupervisor's own status messages
+        // (crash/restart/give-up) already self-prefix with the same id, so this keeps every
+        // line this component ever emits consistently single-tagged.
+        let tag: @Sendable (String, LogCenter.Stream) -> Void = { line, stream in
+            onOutput("[\(id)] \(line)", stream)
+        }
+        let stdoutSink = LineStreamingWriter(stream: .stdout, onLine: tag)
+        let stderrSink = LineStreamingWriter(stream: .stderr, onLine: tag)
         let proc = try await container.exec(id) { config in
             config.arguments = argv
             config.environmentVariables =
