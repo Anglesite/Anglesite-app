@@ -715,6 +715,7 @@ struct SiteWindow: View {
                             await preview.mcpClient()
                         }),
                         sourceRoot: site.sourceDirectory,
+                        site: CurrentSite(site),
                         // Reuse the preview canvas's own router rather than building a second,
                         // unwired MCPApplyEditRouter: model.preview.editRouter is registered in
                         // EditRouterRegistry (Siri/App Intents) and wired to record chat-history
@@ -751,7 +752,7 @@ struct SiteWindow: View {
     @ViewBuilder
     private func previewPane(for site: SiteStore.Site) -> some View {
         switch model.preview.state {
-        case .ready(_, let url):
+        case .ready(_, let url, _):
             PreviewView(
                 url: model.preview.displayURL ?? url,
                 router: model.preview.editRouter,

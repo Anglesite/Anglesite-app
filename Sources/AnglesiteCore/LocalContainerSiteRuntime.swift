@@ -4,7 +4,7 @@ import Foundation
 /// 2026-06-25). Drives a `LocalContainerControl`: boot the container, hydrate it from the site's `Source/` git
 /// repo, connect the MCP client to the returned MCP endpoint, settle to `.ready`/`.failed`.
 /// Spawns nothing in-process.
-public actor LocalContainerSiteRuntime: SiteRuntime {
+public actor LocalContainerSiteRuntime: SiteRuntime, SiteRuntimeContainerCapability {
     /// Shared by `persistEdit`'s two commit-hash validity checks — built once rather than per
     /// character inside each `allSatisfy` closure.
     private static let hexDigits = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
@@ -21,12 +21,11 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     private let importBundle: @Sendable (URL, String, URL) async throws -> Void
     private let suddenTerminationController: SuddenTerminationController
     private let beginActivity: @Sendable (String) -> ActivityAssertion.Lease
+    private let workerCatalog: @Sendable () async -> [WorkerDescriptor]
     private var fileWatcher: (any SiteFileWatching)?
     private var containerTerminationLease: SuddenTerminationController.Lease?
 
-    private var current: SiteRuntimeState = .idle
-    private var observers: [UUID: AsyncStream<SiteRuntimeState>.Continuation] = [:]
-    private var generation = 0
+    private let stateMachine = SiteRuntimeStateMachine()
     private var activeSiteID: String?
     private var activeSiteDirectory: URL?
     private var loadedKnowledgeSiteID: String?
@@ -60,7 +59,10 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             #endif
         },
         suddenTerminationController: SuddenTerminationController = .shared,
-        beginActivity: @escaping @Sendable (String) -> ActivityAssertion.Lease = ActivityAssertion.begin
+        beginActivity: @escaping @Sendable (String) -> ActivityAssertion.Lease = ActivityAssertion.begin,
+        workerCatalog: @escaping @Sendable () async -> [WorkerDescriptor] = {
+            await WorkerCatalogFetcher(catalogURL: WorkerCatalogFetcher.productionCatalogURL).catalog()
+        }
     ) {
         self.ref = ref
         self.control = control
@@ -74,9 +76,18 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         self.importBundle = importBundle
         self.suddenTerminationController = suddenTerminationController
         self.beginActivity = beginActivity
+        self.workerCatalog = workerCatalog
     }
 
-    public var state: SiteRuntimeState { current }
+    public var state: SiteRuntimeState { stateMachine.state }
+
+    /// This runtime's own capability surface (#823) — `LocalContainerSiteRuntime` is the only
+    /// `SiteRuntime` conformer that returns non-nil here (every other conformer inherits the
+    /// protocol extension's `nil` default). Callers (`PreviewModel`) reach `containerSnapshot()`,
+    /// `resetNetworking()`, and `persistEdit(commit:)` through this instead of downcasting to
+    /// the concrete type. `nonisolated` per the protocol requirement — returning `self` never
+    /// touches actor-isolated state.
+    public nonisolated var containerCapability: (any SiteRuntimeContainerCapability)? { self }
 
     /// The `LocalContainerControl` held by this runtime, or `nil` if no site is currently
     /// started. Callers (e.g. `PreviewModel`) read this to build a `ContainerDeployExecutor`
@@ -98,7 +109,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     ///
     /// Returns `nil` when no container is started (i.e. `activeSiteID` is nil — before
     /// `start()` completes successfully and after `stop()`).
-    public func containerSnapshot() -> (control: any LocalContainerControl, siteID: String)? {
+    public func containerSnapshot() async -> (control: any LocalContainerControl, siteID: String)? {
         guard let id = activeSiteID else { return nil }
         return (control: control, siteID: id)
     }
@@ -109,6 +120,75 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     /// the most recent boot failed.
     public func resetNetworking() async {
         await control.resetNetworking()
+    }
+
+    /// Computes the site's effective active-worker set (mirroring `DeployModel.runDeploy`'s own
+    /// pipeline) and starts local `wrangler dev` if it's non-empty. Returns `nil` on any failure —
+    /// logged, never thrown — or when there are no active workers. #708 design §7/§6: a settings-
+    /// activated worker reliably resolves here; a component-tied worker may not, if this site's
+    /// `SiteGraphExplorerSnapshot` hasn't been populated yet (accepted thin-slice limitation, not
+    /// solved by this PR — see the design doc §6).
+    ///
+    /// `logCenter`/`source` are captured locally (not read from `self` inside `onOutput`) so late-
+    /// arriving wrangler-dev output — it's a long-lived guest process, crash-restart-supervised, and
+    /// can keep emitting long after this call returns — is always attributed to the `siteID` this
+    /// call started it for, even if this runtime has since been reused for a different site (its
+    /// `activeSiteID` would otherwise have moved on by the time a late line arrives).
+    private func startWorkersDevIfActive(siteID: String, siteDirectory: URL) async -> URL? {
+        let configDirectory = AnglesitePackage(url: AnglesitePackage.packageRoot(fromSourceURL: siteDirectory)).configURL
+        let settings = (try? await SiteConfigStore(configDirectory: configDirectory).load()) ?? SiteSettings()
+        let catalog = await workerCatalog()
+        let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: catalog, graph: nil)
+        let workers = WorkerActivation.activeDescriptors(catalog: catalog, activeIDs: effectiveActiveIDs)
+        guard !workers.isEmpty else { return nil }
+        let logCenter = self.logCenter
+        let source = "container:\(siteID)"
+        do {
+            return try await control.startWorkersDev(
+                siteID: siteID, workers: workers,
+                onOutput: { line, stream in
+                    Task { await logCenter.append(source: source, stream: stream, text: line) }
+                })
+        } catch {
+            await logCenter.append(
+                source: source, stream: .stderr,
+                text: "local wrangler-dev failed to start: \(error) — active workers will have no local dev endpoint this session")
+            return nil
+        }
+    }
+
+    /// Recomputes the effective active-worker set and restarts local wrangler-dev to match — the
+    /// capability a future Workers tab (#700c) calls on toggle. Not called anywhere in this PR
+    /// besides `start()`'s own initial computation (which goes through `startWorkersDevIfActive`
+    /// directly, not through this method) — built and left as public API now so #700c needs no
+    /// further runtime-side work. Guards on `stateMachine.isCurrent(gen)` and `activeSiteID ==
+    /// siteID` after EVERY `await` in this method, not just before the final `settle` — the
+    /// mutating calls (`control.stopWorkersDev`/`startWorkersDevIfActive`) are exactly as
+    /// siteID-keyed-not-container-keyed as the bug `start()`'s own post-assignment guard fixes
+    /// (#708 review), so a stale attempt here could stop or restart a brand-new container a later
+    /// `start()` already booted under the same siteID if it ran unguarded. Currently unreachable
+    /// (no caller yet), but shipping it unguarded would just be a latent repeat of that exact bug.
+    /// `gen` here is a snapshot via `currentGeneration` (not a new attempt via `beginAttempt()`)
+    /// since this method doesn't start a new lifecycle attempt, it supplements an already-running
+    /// one — mirroring `persistEdit`'s identical use of `currentGeneration` for the same reason.
+    public func updateActiveWorkers(_ settings: SiteSettings) async {
+        guard let siteID = activeSiteID, let siteDirectory = activeSiteDirectory else { return }
+        let gen = stateMachine.currentGeneration
+        let catalog = await workerCatalog()
+        guard stateMachine.isCurrent(gen), activeSiteID == siteID else { return }
+        let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: catalog, graph: nil)
+        let workers = WorkerActivation.activeDescriptors(catalog: catalog, activeIDs: effectiveActiveIDs)
+        let workersDevURL: URL?
+        if workers.isEmpty {
+            try? await control.stopWorkersDev(siteID: siteID)
+            workersDevURL = nil
+        } else {
+            workersDevURL = await startWorkersDevIfActive(siteID: siteID, siteDirectory: siteDirectory)
+        }
+        guard stateMachine.isCurrent(gen), activeSiteID == siteID else { return }
+        if case .ready(let readySiteID, let url, _) = stateMachine.state, readySiteID == siteID {
+            stateMachine.settle(gen: gen, to: .ready(siteID: readySiteID, url: url, workersDevURL: workersDevURL))
+        }
     }
 
     /// Copies one commit produced by the MCP sidecar in `/workspace/site` back into the host's
@@ -124,7 +204,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
               commit.unicodeScalars.allSatisfy({ Self.hexDigits.contains($0) })
         else { throw SiteRuntimePersistenceError.missingOrInvalidCommit }
 
-        let expectedGeneration = generation
+        let expectedGeneration = stateMachine.currentGeneration
         guard let siteID = activeSiteID, let siteDirectory = activeSiteDirectory else {
             throw SiteRuntimePersistenceError.runtimeNotRunning
         }
@@ -132,7 +212,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         await acquirePersistenceSlot()
         defer { releasePersistenceSlot() }
 
-        guard expectedGeneration == generation,
+        guard stateMachine.isCurrent(expectedGeneration),
               activeSiteID == siteID,
               activeSiteDirectory == siteDirectory
         else {
@@ -180,7 +260,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
                 }
             )
         } catch {
-            guard expectedGeneration == generation, activeSiteID == siteID else {
+            guard stateMachine.isCurrent(expectedGeneration), activeSiteID == siteID else {
                 throw SiteRuntimePersistenceError.runtimeNotRunning
             }
             throw SiteRuntimePersistenceError.syncFailed(error.localizedDescription)
@@ -191,7 +271,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
                 detail.isEmpty ? "git handoff exited \(result.exitCode)" : detail)
         }
 
-        guard expectedGeneration == generation,
+        guard stateMachine.isCurrent(expectedGeneration),
               activeSiteID == siteID,
               activeSiteDirectory == siteDirectory
         else {
@@ -232,30 +312,14 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     }
 
     public func observe() -> AsyncStream<SiteRuntimeState> {
-        let (stream, continuation) = AsyncStream<SiteRuntimeState>.makeStream(bufferingPolicy: .unbounded)
-        let id = UUID()
-        observers[id] = continuation
-        continuation.onTermination = { [weak self] _ in Task { await self?.removeObserver(id) } }
-        continuation.yield(current)
-        return stream
+        stateMachine.observe()
     }
 
     /// `siteDirectory` is the package's `Source/` directory; it becomes the `file://` repo the
     /// container clones (git is the source of truth, #72). The configured `ref` selects the commit.
     public func start(siteID: String, siteDirectory: URL) async {
         await teardown()
-        generation += 1
-        let gen = generation
-        // `setState` dedups against the current value, so re-entering `.starting(siteID:)` for the
-        // same site (Restart while already `.starting` — the "wedged boot" case this command exists
-        // for) would otherwise be silently dropped: observers never see a change, so the progress
-        // bar stays frozen on the superseded attempt. Force a transient `.idle` first only in that
-        // specific case — `.ready`/`.failed`/`.idle` already differ from the new `.starting` value
-        // and don't need it.
-        if case .starting(let existingSiteID) = current, existingSiteID == siteID {
-            setState(.idle)
-        }
-        setState(.starting(siteID: siteID))
+        let gen = stateMachine.beginStarting(siteID: siteID)
         let suddenTerminationLease = suddenTerminationController.acquire()
         // Scoped to the boot window only (unlike suddenTerminationLease, which outlives it as
         // containerTerminationLease) — released on every exit path below, including success:
@@ -301,12 +365,12 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
                 siteID: siteID, sourceRepo: siteDirectory, ref: ref,
                 onOutput: { line, stream in continuation.yield((line, stream)) })
             containerStarted = true
-            guard gen == generation else { await abandonSupersededAttempt(); return }
+            guard stateMachine.isCurrent(gen) else { await abandonSupersededAttempt(); return }
             try await connect(mcpClient, session.mcpURL)
-            guard gen == generation else { await abandonSupersededAttempt(); return }
+            guard stateMachine.isCurrent(gen) else { await abandonSupersededAttempt(); return }
             await knowledgeIndex?.rebuild(siteID: siteID, projectRoot: siteDirectory)
             await conventionsEngine?.rebuild(siteID: siteID, projectRoot: siteDirectory)
-            guard gen == generation else {
+            guard stateMachine.isCurrent(gen) else {
                 await knowledgeIndex?.unload(siteID: siteID)
                 await conventionsEngine?.unload(siteID: siteID)
                 await abandonSupersededAttempt()
@@ -315,7 +379,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             if let documents = await knowledgeIndex?.documents(siteID: siteID) {
                 await semanticRanker?.sync(siteID: siteID, documents: documents)
             }
-            guard gen == generation else {
+            guard stateMachine.isCurrent(gen) else {
                 await knowledgeIndex?.unload(siteID: siteID)
                 await semanticRanker?.unload(siteID: siteID)
                 await conventionsEngine?.unload(siteID: siteID)
@@ -328,7 +392,23 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             activeSiteDirectory = siteDirectory
             containerTerminationLease = suddenTerminationLease
             activityLease.release()
-            setState(.ready(siteID: siteID, url: session.previewURL))
+            // Local wrangler-dev (#708): computed once here, not wired to a live Settings
+            // toggle yet (no Workers tab exists to trigger one — #700c). A start failure here
+            // degrades to `workersDevURL: nil` rather than failing the whole runtime — wrangler-
+            // dev is an add-on capability, unlike the MCP connection above.
+            let workersDevURL = await self.startWorkersDevIfActive(siteID: siteID, siteDirectory: siteDirectory)
+            // Unlike every earlier `stateMachine.isCurrent(gen)` guard in this method,
+            // `activeSiteID`/`activeSiteDirectory`/`containerTerminationLease` are already assigned
+            // above by the time this await returns — a superseding stop()/start() during it
+            // discovers this attempt's container via the ordinary activeSiteID-based teardown()
+            // path and already tears it down (or, in a rapid stop→restart, replaces it) correctly.
+            // `settle` itself already no-ops when superseded (gen != generation internally), which
+            // is exactly the "just bail" behavior this needs — no explicit guard or
+            // `abandonSupersededAttempt()` call required (that helper's own `control.stop(siteID:)`
+            // is keyed by siteID, not container instance, so re-issuing it here could stop a BRAND
+            // NEW container a later start() has since booted and settled to `.ready` under the same
+            // siteID — a real, if narrow, race an unconditional cleanup call here would reintroduce).
+            stateMachine.settle(gen: gen, to: .ready(siteID: siteID, url: session.previewURL, workersDevURL: workersDevURL))
         } catch {
             // Finish this attempt's own (locally-captured) boot log stream immediately rather than
             // leaving it for the next start()/stop() call to clean up via teardown() — control.start()
@@ -344,10 +424,10 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             }
             suddenTerminationLease.release()
             activityLease.release()
-            guard gen == generation else { return }
+            guard stateMachine.isCurrent(gen) else { return }
             bootLogContinuation = nil
             bootLogDrainTask = nil
-            setState(.failed(siteID: siteID, message: Self.friendlyMessage(for: error)))
+            stateMachine.settle(gen: gen, to: .failed(siteID: siteID, message: Self.friendlyMessage(for: error)))
         }
     }
 
@@ -355,15 +435,13 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     /// callsite: queued `readabilityHandler`s on the vsock proxy may still fire after teardown but
     /// are idempotent; in-flight bytes are not drained by design.
     public func stop() async {
-        generation += 1
-        let gen = generation
+        let gen = stateMachine.beginAttempt()
         await teardown()
         // Actors are reentrant, so a start()/stop() issued while teardown() was suspended has
         // superseded this stop and owns the state now — emitting `.idle` here would clobber its
         // `.starting`/`.ready` (the rapid Stop → Restart race, PR #542 review): the UI would show
         // the boot spinner forever while the dev server is actually running.
-        guard gen == generation else { return }
-        setState(.idle)
+        stateMachine.settle(gen: gen, to: .idle)
     }
 
     // MARK: Internals
@@ -445,7 +523,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
     }
 
     private func applyFileChanges(_ batch: FileChangeBatch, siteID: String, projectRoot: URL, generation gen: Int) async {
-        guard gen == generation else { return }
+        guard stateMachine.isCurrent(gen) else { return }
         if let knowledgeIndex {
             await KnowledgeReindex.apply(batch, to: knowledgeIndex, ranker: semanticRanker, siteID: siteID, projectRoot: projectRoot)
         }
@@ -455,7 +533,7 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
         // A stop()/site-switch may have superseded us during the apply above; if so, drop anything
         // we re-added for a site this runtime no longer owns — mirroring populateSharedIndexes'
         // post-await unload discipline.
-        guard gen == generation else {
+        guard stateMachine.isCurrent(gen) else {
             await knowledgeIndex?.unload(siteID: siteID)
             await semanticRanker?.unload(siteID: siteID)
             await conventionsEngine?.unload(siteID: siteID)
@@ -486,14 +564,6 @@ public actor LocalContainerSiteRuntime: SiteRuntime {
             }
         }
     }
-
-    private func setState(_ s: SiteRuntimeState) {
-        guard s != current else { return }
-        current = s
-        for c in observers.values { c.yield(s) }
-    }
-
-    private func removeObserver(_ id: UUID) { observers[id] = nil }
 
     static func friendlyMessage(for error: Error) -> String {
         switch error {

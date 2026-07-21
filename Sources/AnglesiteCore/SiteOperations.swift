@@ -16,6 +16,11 @@ public struct SiteOperations: Sendable {
     private let factory: CommandFactory
     private let store: SiteStore
     private let socialWorkerAccess: SocialWorkerAccess
+    /// The on-disk cached `@dwk/workers` catalog, consulted by the headless deploy path for
+    /// resource composition and route claims (#708/#746). Injectable so tests can supply fixture
+    /// descriptors instead of touching the real `~/Library/Application Support/Anglesite/`
+    /// cache file `WorkerCatalogFetcher.cachedCatalog` reads from.
+    private let cachedWorkerCatalog: @Sendable () -> [WorkerDescriptor]
 
     public init(factory: CommandFactory = LiveCommandFactory(), store: SiteStore = .shared) {
         self.init(
@@ -27,10 +32,16 @@ public struct SiteOperations: Sendable {
         )
     }
 
-    init(factory: CommandFactory, store: SiteStore, socialWorkerAccess: @escaping SocialWorkerAccess) {
+    init(
+        factory: CommandFactory,
+        store: SiteStore,
+        socialWorkerAccess: @escaping SocialWorkerAccess,
+        cachedWorkerCatalog: @escaping @Sendable () -> [WorkerDescriptor] = { WorkerCatalogFetcher.cachedCatalog() }
+    ) {
         self.factory = factory
         self.store = store
         self.socialWorkerAccess = socialWorkerAccess
+        self.cachedWorkerCatalog = cachedWorkerCatalog
     }
 
     /// Resolve a site id (as carried by `SiteEntity`) to the registry's `Site`.
@@ -73,22 +84,18 @@ public struct SiteOperations: Sendable {
         let configStore = SiteConfigStore(configDirectory: site.configDirectory)
         let settings = (try? await configStore.load()) ?? SiteSettings()
         let effectiveActiveIDs = WorkerActivation.effectiveActiveIDs(settings: settings, catalog: [], graph: nil)
-        let features = WorkerActivation.mapToFeatures(effectiveActiveIDs)
 
-        // Dynamic-route claims (#746): this path has no catalog fetcher wired (matching the
-        // `catalog: []` activation choice above), but the on-disk cache from a previous GUI fetch
-        // still lets active workers keep their `run_worker_first` routes — otherwise a headless
-        // deploy would silently regenerate wrangler.toml without them. Validation failures refuse
-        // the deploy before any Cloudflare call, mirroring `DeployModel.runDeploy`.
-        let cachedCatalog = WorkerCatalogFetcher.cachedCatalog()
-        if cachedCatalog.isEmpty && !effectiveActiveIDs.isEmpty {
-            // The shadowing-protection gap this leaves (an active worker's routes deploy without
-            // their run_worker_first entries) must be visible in the debug pane, not silent.
-            await LogCenter.shared.append(
-                source: "deploy:\(site.id)",
-                stream: .stderr,
-                text: "no cached worker catalog — deploying active workers (\(effectiveActiveIDs.sorted().joined(separator: ", "))) without route claims; run_worker_first will be omitted until a catalog fetch succeeds"
-            )
+        // Dynamic-route claims (#746) and resource composition (#708) both need real descriptor
+        // data, which the `catalog: []` activation call above deliberately doesn't have (matching
+        // the effectiveActiveIDs "settings-activated only" comment above). The on-disk cache from
+        // a previous GUI fetch is the only source of that data on this headless path.
+        let cachedCatalog = cachedWorkerCatalog()
+        let workers = WorkerActivation.activeDescriptors(catalog: cachedCatalog, activeIDs: effectiveActiveIDs)
+        let unresolvedIDs = WorkerActivation.unresolvedActiveIDs(activeIDs: effectiveActiveIDs, resolved: workers)
+        if let warning = WorkerActivation.missingDescriptorWarning(unresolvedIDs: unresolvedIDs) {
+            // Mirrors DeployModel.runDeploy's identical warning — shared text via
+            // WorkerActivation so the two paths can't drift (#708 review feedback).
+            await LogCenter.shared.append(source: "deploy:\(site.id)", stream: .stderr, text: warning)
         }
         let routeClaims: [WorkerRouteClaims.OwnedClaim]
         do {
@@ -112,7 +119,7 @@ public struct SiteOperations: Sendable {
             siteID: site.id,
             siteDirectory: siteDirectory,
             siteName: workerSiteName,
-            features: features,
+            workers: workers,
             routeClaims: routeClaims.map(\.claim),
             knownResources: settings.provisionedWorkerResources ?? .init()
         )
@@ -152,13 +159,31 @@ public struct SiteOperations: Sendable {
         }
     }
 
+    /// The fixed V-2 starter pack (webmention + indieauth) this one-button "turn on social
+    /// basics" operation provisions. Unlike `deployWithWorkerComposition`, this isn't driven by
+    /// a site's catalog/effective-active-worker set — it's always the same two workers, matching
+    /// `WorkerComposition.Feature.v2`'s pre-migration default. Fixed literals, not fetched from
+    /// the `@dwk/workers` catalog, since this operation predates catalog-driven composition and
+    /// has no site-settings or catalog input to derive from.
+    private static let v2StarterWorkers: [WorkerDescriptor] = [
+        WorkerDescriptor(
+            id: "webmention", displayName: "Webmentions", description: "Outbound webmention sending",
+            group: "social", binding: .settingsActivated, resources: .init(needsD1: true, needsKV: true, needsR2: false)
+        ),
+        WorkerDescriptor(
+            id: WorkerComposition.indieauthWorkerID, displayName: "IndieAuth", description: "IndieAuth sign-in",
+            group: "social", binding: .settingsActivated, resources: .init(needsD1: true, needsKV: true, needsR2: false)
+        ),
+    ]
+
     public func provisionSocialWorker(site: SiteStore.Site) async -> SocialWorkerProvisionCommand.Result {
         do {
             return try await socialWorkerAccess(site, store) { url in
                 await factory.socialWorkerProvision().provision(
                     siteID: site.id,
                     siteDirectory: url,
-                    siteName: SiteSlug.derive(from: site.name)
+                    siteName: SiteSlug.derive(from: site.name),
+                    workers: Self.v2StarterWorkers
                 )
             }
         } catch let SiteAccess.AccessError.noGrant(message) {
