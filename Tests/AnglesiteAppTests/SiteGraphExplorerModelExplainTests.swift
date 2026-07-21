@@ -45,7 +45,7 @@ struct SiteGraphExplorerModelExplainTests {
             posts: [], images: []
         )
         let model = SiteGraphExplorerModel(graph: graph, explainer: explainer)
-        model.start(siteID: "site-1", sourceDirectory: root)
+        model.start(site: CurrentSite(id: "site-1", packageURL: root, sourceDirectory: root))
         while model.snapshot.nodes.isEmpty { await Task.yield() }
         model.selectedNodeID = model.snapshot.nodes.first?.id
         return (model, root)

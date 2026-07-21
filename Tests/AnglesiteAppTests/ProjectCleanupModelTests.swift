@@ -32,7 +32,7 @@ struct ProjectCleanupModelTests {
         let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try? FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDirectory) }
-        model.configure(siteID: "site-a", sourceDirectory: tempDirectory)
+        model.configure(site: CurrentSite(id: "site-a", packageURL: tempDirectory, sourceDirectory: tempDirectory))
 
         // `candidates` starts empty (no scan() has run), so `staleCandidate` is not in the
         // live list — delete must refuse rather than calling gitDelete.
@@ -82,7 +82,7 @@ struct ProjectCleanupModelTests {
             // of this test lacked.
             gitDelete: { _, _, _ in await gate.waitUntilOpen(); return "deadbeef" }
         )
-        model.configure(siteID: "site-a", sourceDirectory: root)
+        model.configure(site: CurrentSite(id: "site-a", packageURL: root, sourceDirectory: root))
         await model.scan()
         let candidate = try #require(model.candidates.first { $0.path == "public/images/orphan.png" })
 
