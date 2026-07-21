@@ -103,7 +103,7 @@ public final class AppSettings: @unchecked Sendable {
     /// Effective root for site discovery. Returns the override when set, otherwise `~/Sites/`.
     public var sitesRoot: URL {
         sitesRootOverride
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Sites", isDirectory: true)
+            ?? FileManager.default.portableHomeDirectory.appendingPathComponent("Sites", isDirectory: true)
     }
 
     /// Opt-in toggle (Settings → Advanced) that surfaces the Debug pane menu item in Release

@@ -1,6 +1,7 @@
 // Darwin implementation of the SiteFileWatching seam. The whole file compiles out on
-// platforms without the CoreServices framework.
-#if canImport(CoreServices)
+// platforms without the FSEvents API (macOS-only — iOS ships a CoreServices module, but
+// without `FSEventStream*`).
+#if os(macOS)
 import Foundation
 import CoreServices
 

@@ -98,6 +98,31 @@ writing_tools_assignment_is_mac_gated() {
     ' "$path"
 }
 
+# A file is "compiled out of iOS builds" when its first non-comment, non-blank line opens an
+# `#if !os(iOS)` block and the file's last non-blank line closes it. This is how the host
+# subprocess backend and the local container runtime stay in shared Core for macOS/Linux while
+# never reaching the iOS thin client (#71) — same recognize-the-gate approach as the
+# writing-tools check above (PR #451).
+file_is_ios_gated() {
+    local path="$1"
+    [[ -e "$path" ]] || return 1
+    awk '
+        BEGIN { opened = 0; closed = 0 }
+        {
+            line = $0
+            sub(/^[[:space:]]+/, "", line)
+            if (line == "") { next }
+            if (line ~ /^\/\//) { next }
+            if (opened == 0) {
+                if (line ~ /^#if[[:space:]]+!os\(iOS\)/) { opened = 1; next }
+                exit 1
+            }
+            if (line ~ /^#endif/) { closed = 1 } else { closed = 0 }
+        }
+        END { exit (opened == 1 && closed == 1) ? 0 : 1 }
+    ' "$path"
+}
+
 ios_shell_target_is_safe() {
     path_exists "Sources/AnglesiteIOS" || return 1
     awk '
@@ -163,10 +188,11 @@ else
     ready "Security-scoped bookmark code is platform-gated or split out of iOS Core"
 fi
 
-if pattern_exists "Sources/AnglesiteCore/InProcessBackend.swift" "Process\\("; then
+if pattern_exists "Sources/AnglesiteCore/InProcessBackend.swift" "Process\\(" \
+    && ! file_is_ios_gated "Sources/AnglesiteCore/InProcessBackend.swift"; then
     blocker "Host subprocess backend remains in shared Core" "Sources/AnglesiteCore/InProcessBackend.swift"
 else
-    ready "Shared Core has no direct host Process backend"
+    ready "Host subprocess backend compiles out of iOS builds"
 fi
 
 if pattern_exists "Sources/AnglesiteCore/LocalSiteRuntime.swift" "LocalSiteRuntime|ProcessSupervisor|NodeRuntime"; then
@@ -175,10 +201,11 @@ else
     ready "Shared Core has no local host runtime dependency"
 fi
 
-if pattern_exists "Sources/AnglesiteCore/LocalContainerSiteRuntime.swift" "LocalContainerSiteRuntime|FSEventsFileWatcher"; then
+if pattern_exists "Sources/AnglesiteCore/LocalContainerSiteRuntime.swift" "LocalContainerSiteRuntime|FSEventsFileWatcher" \
+    && ! file_is_ios_gated "Sources/AnglesiteCore/LocalContainerSiteRuntime.swift"; then
     blocker "Local container runtime is still visible from shared Core" "Sources/AnglesiteCore/LocalContainerSiteRuntime.swift"
 else
-    ready "Local container runtime is split away from iOS Core"
+    ready "Local container runtime compiles out of iOS builds"
 fi
 
 if pattern_exists "Sources/AnglesiteIntents/PreviewAnnotationProvider.swift" "import AppKit"; then

@@ -1,3 +1,6 @@
+// AppKit print plumbing for the macOS File ▸ Print path; the iOS thin client (#71) has no
+// NSPrintInfo/printOperation, so the whole file compiles out there.
+#if os(macOS)
 import AppKit
 import WebKit
 import AnglesiteCore
@@ -94,3 +97,4 @@ public enum PreviewPrinting {
         view.frame = NSRect(origin: .zero, size: operation.printInfo.paperSize)
     }
 }
+#endif

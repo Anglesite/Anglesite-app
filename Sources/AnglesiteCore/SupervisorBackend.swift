@@ -75,3 +75,41 @@ public protocol SupervisorBackend: Sendable {
     /// live file descriptor across the boundary returns `nil` and exposes `writeStdin` instead.
     func stdinHandle(_ handle: SpawnedProcessHandle) async -> FileHandle?
 }
+
+/// Placeholder backend for platforms without `Foundation.Process` (iOS, #71): every spawn fails
+/// with `spawnFailed`, mirroring the `UnavailableFileWatcher`/`UnavailableSecurityScopedBookmark`
+/// seam pattern — features degrade capability-flagged, never by pretending a subprocess ran. The
+/// iOS thin client is remote-only and selects `RemoteSandboxSiteRuntime`, so nothing reaches this
+/// in normal operation.
+public struct UnavailableProcessBackend: SupervisorBackend {
+    public init() {}
+
+    private static let message = "Subprocess spawning is unavailable on this platform."
+
+    public func runOneShot(_ spec: SpawnSpec) async throws -> ProcessResult {
+        throw SupervisorBackendError.spawnFailed(Self.message)
+    }
+
+    public func launch(
+        _ spec: SpawnSpec,
+        restartPolicy: RestartPolicy,
+        onRespawn: RespawnHandler?,
+        logCenter: LogCenter
+    ) async throws -> SpawnedProcessHandle {
+        throw SupervisorBackendError.spawnFailed(Self.message)
+    }
+
+    public func waitForExit(_ handle: SpawnedProcessHandle) async -> ProcessExitReason { .terminated }
+
+    public func isRunning(_ handle: SpawnedProcessHandle) async -> Bool { false }
+
+    public func terminate(_ handle: SpawnedProcessHandle, timeout: TimeInterval) async {}
+
+    public func shutdownAll(timeout: TimeInterval) async {}
+
+    public func writeStdin(_ handle: SpawnedProcessHandle, _ bytes: Data) async throws {
+        throw SupervisorBackendError.spawnFailed(Self.message)
+    }
+
+    public func stdinHandle(_ handle: SpawnedProcessHandle) async -> FileHandle? { nil }
+}

@@ -395,7 +395,7 @@ public actor SiteStore {
             in: .userDomainMask,
             appropriateFor: nil,
             create: true
-        )) ?? fileManager.homeDirectoryForCurrentUser
+        )) ?? fileManager.portableHomeDirectory
             .appendingPathComponent("Library/Application Support", isDirectory: true)
         return support
             .appendingPathComponent("Anglesite", isDirectory: true)

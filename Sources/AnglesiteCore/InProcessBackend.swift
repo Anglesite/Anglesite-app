@@ -1,3 +1,6 @@
+// `Foundation.Process` exists on every supported platform except iOS (the iOS thin client is
+// remote-only, #71); the whole host-spawn backend compiles out there.
+#if !os(iOS)
 import Foundation
 #if canImport(Darwin)
 import Darwin
@@ -471,3 +474,4 @@ public actor InProcessBackend: SupervisorBackend {
         }
     }
 }
+#endif
