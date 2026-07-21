@@ -183,7 +183,7 @@ public actor SiteScaffolder {
     /// `npx wrangler deploy` with no manual setup. `SocialWorkerProvisionCommand` overwrites this
     /// with a features-enabled config if the owner opts into social features later.
     private func writeWranglerConfig(siteName: String, siteDir: URL) throws {
-        let toml = try WorkerComposition.generateWranglerToml(siteName: siteName, features: [])
+        let toml = try WorkerComposition.generateWranglerToml(siteName: siteName, workers: [])
         try toml.write(to: siteDir.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
     }
 

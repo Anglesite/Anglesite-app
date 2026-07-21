@@ -51,7 +51,7 @@ public actor SocialWorkerProvisionCommand {
         siteID: String,
         siteDirectory: URL,
         siteName: String,
-        features: [WorkerComposition.Feature] = WorkerComposition.Feature.v2,
+        workers: [WorkerDescriptor],
         /// Effective active dynamic-route claims (#746), pre-validated via
         /// `WorkerRouteClaims.activeClaims`. Written into `wrangler.toml` as selective
         /// `[assets].run_worker_first` patterns; empty = no worker-first routes.
@@ -88,7 +88,7 @@ public actor SocialWorkerProvisionCommand {
 
         var resources = knownResources == .init() ? Self.readPersistedResources(from: siteDirectory) : knownResources
 
-        if features.contains(where: { $0.needsD1 }) {
+        if workers.contains(where: { $0.resources.needsD1 }) {
             if resources.d1DatabaseID == nil {
                 let name = "\(siteName)-social"
                 let result = await runWrangler(
@@ -109,13 +109,13 @@ public actor SocialWorkerProvisionCommand {
                     return .failed(reason: "wrangler created D1 database \(name) but no database id was found", exitCode: 0, resources: resources)
                 }
                 resources.d1DatabaseID = id
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, routeClaims: routeClaims, resources: resources) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources) {
                     return failure
                 }
             }
         }
 
-        if features.contains(where: { $0.needsKV }) {
+        if workers.contains(where: { $0.resources.needsKV }) {
             if resources.kvNamespaceID == nil {
                 let name = "\(siteName)-social"
                 let result = await runWrangler(
@@ -136,13 +136,13 @@ public actor SocialWorkerProvisionCommand {
                     return .failed(reason: "wrangler created KV namespace \(name) but no namespace id was found", exitCode: 0, resources: resources)
                 }
                 resources.kvNamespaceID = id
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, routeClaims: routeClaims, resources: resources) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources) {
                     return failure
                 }
             }
         }
 
-        if features.contains(where: { $0.needsR2 }) {
+        if workers.contains(where: { $0.resources.needsR2 }) {
             if resources.r2BucketName == nil {
                 let name = "\(siteName)-media"
                 let result = await runWrangler(
@@ -156,20 +156,20 @@ public actor SocialWorkerProvisionCommand {
                     return failure
                 }
                 resources.r2BucketName = name
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, routeClaims: routeClaims, resources: resources) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources) {
                     return failure
                 }
             }
         }
 
-        if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, features: features, routeClaims: routeClaims, resources: resources) {
+        if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources) {
             return failure
         }
 
         // @dwk/indieauth deliberately keeps schema deployment outside its request handler. Apply
         // the committed D1 migrations after wrangler.toml contains the concrete database id and
         // before publishing code that can receive authorization requests.
-        if features.contains(.indieauth) {
+        if workers.contains(where: { $0.id == WorkerComposition.indieauthWorkerID }) {
             let result = await runWrangler(
                 siteDirectory: siteDirectory,
                 arguments: ["d1", "migrations", "apply", "AUTH_DB", "--remote"],
@@ -225,7 +225,7 @@ public actor SocialWorkerProvisionCommand {
     private func persistConfig(
         siteDirectory: URL,
         siteName: String,
-        features: [WorkerComposition.Feature],
+        workers: [WorkerDescriptor],
         routeClaims: [WorkerRouteClaim],
         resources: WorkerComposition.ProvisionedResources
     ) -> Result? {
@@ -237,7 +237,7 @@ public actor SocialWorkerProvisionCommand {
             // deploy.
             let toml = try WorkerComposition.generateWranglerToml(
                 siteName: siteName,
-                features: features,
+                workers: workers,
                 routeClaims: routeClaims,
                 resources: resources
             )

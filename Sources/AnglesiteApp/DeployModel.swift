@@ -447,7 +447,13 @@ final class DeployModel {
                 text: "Deactivating workers: \(removedIDs.sorted().joined(separator: ", "))"
             )
         }
-        let features = WorkerActivation.mapToFeatures(effectiveActiveIDs)
+        let workers = WorkerActivation.activeDescriptors(catalog: catalog, activeIDs: effectiveActiveIDs)
+        let unresolvedIDs = WorkerActivation.unresolvedActiveIDs(activeIDs: effectiveActiveIDs, resolved: workers)
+        if let warning = WorkerActivation.missingDescriptorWarning(unresolvedIDs: unresolvedIDs) {
+            // Mirrors SiteOperations.deployWithWorkerComposition's identical warning — shared
+            // text via WorkerActivation so the two paths can't drift (#708 review feedback).
+            await logCenter.append(source: "deploy:\(siteID)", stream: .stderr, text: warning)
+        }
 
         // Dynamic-route claims of the effective active set (#746). Validation failures (a
         // malformed path, two active workers claiming overlapping routes) refuse the deploy
@@ -503,7 +509,7 @@ final class DeployModel {
             siteID: siteID,
             siteDirectory: siteDirectory,
             siteName: workerSiteName,
-            features: features,
+            workers: workers,
             routeClaims: routeClaims.map(\.claim),
             knownResources: settings.provisionedWorkerResources ?? .init()
         )
