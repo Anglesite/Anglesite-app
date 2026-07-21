@@ -476,12 +476,11 @@ final class SiteWindowModel {
     var canShowGraph: Bool { site != nil }
     var canPublishToGitHub: Bool { site?.isValid == true && !publish.isRunning }
 
-    /// Build, scan, and `wrangler deploy` — resolves the active container control first, like the
-    /// toolbar button always has.
+    /// Build, scan, and `wrangler deploy` — the container control is resolved by `DeployModel`
+    /// itself, via the provider below, at the moment the deploy actually runs (#823).
     func deploySite() {
         guard let site, canRunDeploy else { return }
         Task { @MainActor in
-            let containerControl = await preview.activeContainerControl()
             // Posts are routed too (#584) — a vanished post's URL must trip the same
             // orphaned-route scan as a vanished page's, not vanish silently from the snapshot.
             let pageRoutes = await contentGraph.pages(for: site.id).map(\.route)
@@ -490,7 +489,8 @@ final class SiteWindowModel {
             deploy.deploy(
                 siteID: site.id, siteDirectory: site.sourceDirectory,
                 configDirectory: site.configDirectory, currentRoutes: currentRoutes,
-                containerControl: containerControl, siteName: site.name)
+                containerControlProvider: { [preview] in await preview.activeContainerControl() },
+                siteName: site.name)
         }
     }
 
@@ -1458,7 +1458,6 @@ final class SiteWindowModel {
         guard !backup.isRunning, !audit.isRunning else {
             return .deferred(reason: "another site operation is running")
         }
-        let containerControl = await preview.activeContainerControl()
         let pageRoutes = await contentGraph.pages(for: site.id).map(\.route)
         let postRoutes = await contentGraph.posts(for: site.id).map(postRoute(for:))
         return await deploy.deployAutomatically(
@@ -1466,7 +1465,7 @@ final class SiteWindowModel {
             siteDirectory: site.sourceDirectory,
             configDirectory: site.configDirectory,
             currentRoutes: pageRoutes + postRoutes,
-            containerControl: containerControl,
+            containerControlProvider: { [preview] in await preview.activeContainerControl() },
             siteName: site.name
         )
     }

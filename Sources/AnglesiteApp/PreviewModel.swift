@@ -162,13 +162,14 @@ final class PreviewModel {
 
     /// Local container edits happen in a hydrated clone. Their commit must be handed back to the
     /// host repo before the bridge acknowledges success. Other runtime types retain their own
-    /// persistence semantics, so the hook is intentionally absent for them.
+    /// persistence semantics, so the hook is intentionally absent for them — reached via
+    /// `containerCapability` (#823) rather than an `as? LocalContainerSiteRuntime` downcast.
     private static func editPersister(for runtime: any SiteRuntime) -> MCPApplyEditRouter.EditPersister? {
-        guard let localRuntime = runtime as? LocalContainerSiteRuntime else { return nil }
-        return { [weak localRuntime] reply in
-            guard let localRuntime else { throw SiteRuntimePersistenceError.runtimeNotRunning }
+        guard let capability = runtime.containerCapability else { return nil }
+        return { [weak capability] reply in
+            guard let capability else { throw SiteRuntimePersistenceError.runtimeNotRunning }
             guard reply.commit != nil else { return }
-            try await localRuntime.persistEdit(commit: reply.commit)
+            try await capability.persistEdit(commit: reply.commit)
         }
     }
 
@@ -451,32 +452,33 @@ final class PreviewModel {
         await runtime.mcpClient
     }
 
-    /// Returns the active container control and site ID when the runtime is a
-    /// `LocalContainerSiteRuntime` that has successfully started a container.
+    /// Returns the active container control and site ID when the runtime exposes a container
+    /// capability (#823) that has successfully started a container.
     ///
-    /// Returns `nil` when the capability gate chose the host runtime or when the container runtime
-    /// has not completed `start()` yet.
+    /// Returns `nil` when the capability gate chose a runtime with no container capability (e.g.
+    /// `RemoteSandboxSiteRuntime`/`UnavailableSiteRuntime`) or when the container runtime has not
+    /// completed `start()` yet.
     ///
-    /// Uses only `AnglesiteCore` types (`LocalContainerControl`, `LocalContainerSiteRuntime`)
+    /// Uses only `AnglesiteCore` types (`LocalContainerControl`, `SiteRuntimeContainerCapability`)
     /// — no `AnglesiteContainer` import needed here.
     ///
     /// Reads both fields in a single actor hop via `containerSnapshot()` to avoid a
     /// theoretical TOCTOU window between two separate `await` reads.
     func activeContainerControl() async -> (siteID: String, control: any LocalContainerControl)? {
-        guard let containerRuntime = runtime as? LocalContainerSiteRuntime else { return nil }
-        guard let snapshot = await containerRuntime.containerSnapshot() else { return nil }
+        guard let capability = runtime.containerCapability else { return nil }
+        guard let snapshot = await capability.containerSnapshot() else { return nil }
         return (siteID: snapshot.siteID, control: snapshot.control)
     }
 
     /// The failure pane's "Restart Networking" action (#812) — unlike `activeContainerControl()`,
     /// works from a `.failed` state (no live container to snapshot) since
     /// `LocalContainerSiteRuntime.resetNetworking()` reaches its `control` unconditionally. No-ops
-    /// for other runtime types; the button that calls this is only shown when
+    /// for runtimes with no container capability; the button that calls this is only shown when
     /// `VmnetFailureRecovery.isRecoverable` recognized the failure, which only the local-container
     /// path can produce.
     func resetNetworking() async {
-        guard let containerRuntime = runtime as? LocalContainerSiteRuntime else { return }
-        await containerRuntime.resetNetworking()
+        guard let capability = runtime.containerCapability else { return }
+        await capability.resetNetworking()
     }
 
     /// True when the preview runtime is ready — used to gate the Deploy button so a user

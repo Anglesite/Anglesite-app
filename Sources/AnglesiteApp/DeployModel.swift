@@ -11,6 +11,13 @@ import AnglesiteCore
 @MainActor
 @Observable
 final class DeployModel {
+    /// Resolves the local-container capability at the moment a deploy actually runs — including
+    /// a token-prompt/rename retry — rather than once at dispatch time, so a retry queries the
+    /// runtime's current state (via `SiteRuntime.containerCapability`, #823) instead of replaying
+    /// a snapshot that may be stale by the time the user finishes the token/rename prompt. Mirrors
+    /// `ACPAssistant.ContainerControlProvider` / `SiteAssistantSessionFactory.ContainerControlProvider`.
+    typealias ContainerControlProvider = @Sendable () async -> (siteID: String, control: any LocalContainerControl)?
+
     enum Phase: Equatable {
         case idle
         case running(siteID: String, since: Date)
@@ -111,7 +118,7 @@ final class DeployModel {
         siteDirectory: URL,
         configDirectory: URL,
         currentRoutes: [String],
-        containerControl: (siteID: String, control: any LocalContainerControl)?,
+        containerControlProvider: ContainerControlProvider,
         siteName: String?
     )?
 
@@ -158,10 +165,12 @@ final class DeployModel {
 
     /// Kicks off a deploy. No-op if one is already running.
     ///
-    /// When `containerControl` is non-nil the deploy runs inside the already-started container via
-    /// `ContainerDeployExecutor`; otherwise the default executor reports that the container runtime
-    /// is required. The container control is threaded through the pending-deploy flow so a
-    /// token-prompt retry uses the same executor as the original dispatch.
+    /// `containerControlProvider` is invoked inside `runDeploy` at the moment the deploy actually
+    /// runs (#823): when it resolves non-nil the deploy runs inside the already-started container
+    /// via `ContainerDeployExecutor`; otherwise the default executor reports that the container
+    /// runtime is required. The provider itself — not a resolved snapshot — is threaded through
+    /// the pending-deploy flow, so a token-prompt retry re-resolves against the runtime's current
+    /// state instead of an executor built from a possibly-stale earlier snapshot.
     ///
     /// First checks whether a Cloudflare token is available (env > Keychain). If neither has one,
     /// the token-prompt sheet is presented and the deploy is parked until the user pastes and
@@ -172,12 +181,12 @@ final class DeployModel {
         siteDirectory: URL,
         configDirectory: URL,
         currentRoutes: [String],
-        containerControl: (siteID: String, control: any LocalContainerControl)? = nil,
+        containerControlProvider: @escaping ContainerControlProvider = { nil },
         siteName: String? = nil
     ) {
         guard !isRunning else { return }
         if !hasUsableToken() {
-            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl, siteName)
+            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControlProvider, siteName)
             tokenVerification = .idle
             tokenPromptPresented = true
             return
@@ -191,7 +200,7 @@ final class DeployModel {
             _ = await self?.runDeploy(
                 siteID: siteID, siteDirectory: siteDirectory,
                 configDirectory: configDirectory, currentRoutes: currentRoutes,
-                containerControl: containerControl,
+                containerControlProvider: containerControlProvider,
                 suddenTerminationLease: suddenTerminationLease,
                 presentation: .foreground,
                 siteName: siteName)
@@ -207,12 +216,16 @@ final class DeployModel {
         siteDirectory: URL,
         configDirectory: URL,
         currentRoutes: [String],
-        containerControl: (siteID: String, control: any LocalContainerControl)?,
+        containerControlProvider: @escaping ContainerControlProvider,
         siteName: String? = nil
     ) async -> InvisiblePublishQueue.Result {
         guard !isRunning else { return .deferred(reason: "another site operation is running") }
         guard hasUsableToken() else { return .deferred(reason: "Cloudflare credentials are not configured") }
-        guard containerControl != nil else { return .deferred(reason: "the site runtime is not ready") }
+        // Resolved once (there's no user-facing prompt gap on this background path to make a
+        // second resolution meaningfully fresher) and reused both for the readiness guard and the
+        // actual run, so the two can't disagree about whether a container is available.
+        let resolvedContainerControl = await containerControlProvider()
+        guard resolvedContainerControl != nil else { return .deferred(reason: "the site runtime is not ready") }
 
         phase = .running(siteID: siteID, since: Date.now)
         let lease = suddenTerminationController.acquire()
@@ -221,7 +234,7 @@ final class DeployModel {
             siteDirectory: siteDirectory,
             configDirectory: configDirectory,
             currentRoutes: currentRoutes,
-            containerControl: containerControl,
+            containerControlProvider: { resolvedContainerControl },
             suddenTerminationLease: lease,
             presentation: .background,
             siteName: siteName
@@ -272,7 +285,7 @@ final class DeployModel {
             deploy(
                 siteID: pending.siteID, siteDirectory: pending.siteDirectory,
                 configDirectory: pending.configDirectory, currentRoutes: pending.currentRoutes,
-                containerControl: pending.containerControl, siteName: pending.siteName)
+                containerControlProvider: pending.containerControlProvider, siteName: pending.siteName)
         case .stay(let message):
             tokenVerification = .failed(message: message)
         case .abort:
@@ -323,7 +336,7 @@ final class DeployModel {
         deploy(
             siteID: pending.siteID, siteDirectory: pending.siteDirectory,
             configDirectory: pending.configDirectory, currentRoutes: pending.currentRoutes,
-            containerControl: pending.containerControl, siteName: pending.siteName)
+            containerControlProvider: pending.containerControlProvider, siteName: pending.siteName)
     }
 
     func cancelWorkerNameConflictPrompt() {
@@ -369,7 +382,7 @@ final class DeployModel {
         siteDirectory: URL,
         configDirectory: URL,
         currentRoutes: [String],
-        containerControl: (siteID: String, control: any LocalContainerControl)? = nil,
+        containerControlProvider: @escaping ContainerControlProvider = { nil },
         suddenTerminationLease: SuddenTerminationController.Lease,
         presentation: Presentation,
         siteName: String? = nil
@@ -397,6 +410,12 @@ final class DeployModel {
                 self?.logLines.append(line)
             }
         }
+
+        // Resolved here, at the moment this deploy attempt actually runs, rather than threaded in
+        // as a pre-resolved value (#823) — a token-prompt/rename retry re-invokes the same
+        // provider, so it sees the runtime's current container state instead of a snapshot taken
+        // back when the sheet was first presented.
+        let containerControl = await containerControlProvider()
 
         // Select the executor: in-container when the runtime is a started container;
         // explicit unavailable result otherwise. The token source always comes from the
@@ -577,7 +596,9 @@ final class DeployModel {
             workerNameConflictPresented = false
             blockedPresented = presentation == .foreground
         case .workerNameConflict(let name):
-            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControl, siteName)
+            // Parks the provider, not the resolved `containerControl` snapshot above — the
+            // rename-and-retry re-invokes it, so it sees the runtime's state at retry time.
+            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControlProvider, siteName)
             transition(siteID: siteID, to: .workerNameConflict(name: name))
             drawerPresented = false
             workerNameConflictError = nil

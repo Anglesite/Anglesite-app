@@ -5,6 +5,9 @@ actor FakeLocalContainerControl: LocalContainerControl {
     var startResult: Result<LocalContainerSession, LocalContainerError>
     private(set) var stopped: [String] = []
     private(set) var startedRepos: [(siteID: String, repo: URL, ref: String)] = []
+    /// Overrides `LocalContainerControl`'s default no-op so tests can assert
+    /// `resetNetworking()` calls actually reach the control, not just that the call compiles.
+    private(set) var resetNetworkingCallCount = 0
 
     /// Lines replayed to `start`'s `onOutput` in order before it returns (or throws).
     var startStdoutLines: [String]
@@ -54,6 +57,8 @@ actor FakeLocalContainerControl: LocalContainerControl {
     }
 
     func stop(siteID: String) async throws { stopped.append(siteID) }
+
+    func resetNetworking() async { resetNetworkingCallCount += 1 }
 
     func exec(
         siteID: String,

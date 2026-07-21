@@ -348,10 +348,115 @@ struct DeployModelTests {
         #expect(lines.contains { $0.text.contains("no catalog entry for active worker(s) indieauth") })
     }
 
+    // MARK: - containerControlProvider (#823)
+
+    @Test("a container control resolved via containerControlProvider routes deploy execs through it")
+    func containerControlProviderRoutesToContainer() async throws {
+        let fake = RecordingLocalContainerControl()
+        let command = DeployCommand(tokenSource: { "test-token" })
+        let model = DeployModel(command: command, logCenter: LogCenter(), tokenAvailabilityOverride: { true })
+        let dir = try temporaryDirectory()
+
+        model.deploy(
+            siteID: "s", siteDirectory: dir, configDirectory: dir, currentRoutes: [],
+            containerControlProvider: { (siteID: "s", control: fake) })
+        while model.isRunning { await Task.yield() }
+
+        let calls = await fake.execCalls
+        #expect(!calls.isEmpty, "expected the deploy to route at least one step through the resolved container control")
+    }
+
+    /// The provider — not a resolved snapshot — is what's parked across a token-prompt/rename
+    /// retry (#823): a stale container-control tuple captured back when the sheet first appeared
+    /// could point at a container that has since restarted or stopped. Reusing the same
+    /// worker-name-conflict-then-rename flow as `renameAndRetrySucceedsUnderNewName`, this asserts
+    /// the provider closure itself is invoked again on the retry rather than replayed from a cache.
+    @Test("containerControlProvider is re-invoked on a rename-and-retry, not replayed from the original resolution")
+    func containerControlProviderIsReinvokedOnRetry() async {
+        let executor = GatedDeployExecutor()
+        await executor.resumeBuild()
+        let command = DeployCommand(
+            tokenSource: { "test-token" },
+            // "my-site" is taken; "my-site-2" (what the retry submits) is free.
+            workerScriptNamesSource: { _ in ["my-site"] },
+            executor: executor
+        )
+        let model = DeployModel(command: command, logCenter: LogCenter(), tokenAvailabilityOverride: { true })
+        let siteDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try! FileManager.default.createDirectory(at: siteDir, withIntermediateDirectories: true)
+        try! #"name = "my-site""#.write(to: siteDir.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
+        try! "CF_PROJECT_NAME=my-site\n".write(to: siteDir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        let providerCalls = ProviderCallCounter()
+        model.deploy(
+            siteID: "s", siteDirectory: siteDir, configDirectory: siteDir, currentRoutes: [],
+            containerControlProvider: {
+                await providerCalls.increment()
+                return nil
+            })
+        while model.isRunning { await Task.yield() }
+        guard case .workerNameConflict = model.phase else {
+            Issue.record("expected .workerNameConflict before renaming, got \(model.phase)"); return
+        }
+        #expect(await providerCalls.count == 1)
+
+        await model.renameWorkerAndRetry("my-site-2")
+        await executor.waitUntilBuildIsParked()
+        await executor.resumeBuild()
+        while model.isRunning { await Task.yield() }
+
+        guard case .succeeded = model.phase else {
+            Issue.record("expected .succeeded after rename-and-retry, got \(model.phase)"); return
+        }
+        #expect(await providerCalls.count == 2)
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("DeployModelTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+}
+
+/// Thread-safe invocation counter for a `DeployModel.ContainerControlProvider` under test —
+/// proves the provider closure itself (not a resolved value) crosses the token-prompt/rename
+/// retry boundary (#823).
+private actor ProviderCallCounter {
+    private(set) var count = 0
+    func increment() { count += 1 }
+}
+
+/// A `LocalContainerControl` that records every `exec` call's siteID/argv, so a test can assert
+/// deploy steps actually routed through the control resolved via `containerControlProvider`
+/// rather than the host path. Mirrors `FakeLocalContainerControl` in `AnglesiteCoreTests` (not
+/// reusable here directly — it lives in a different test target).
+private actor RecordingLocalContainerControl: LocalContainerControl {
+    private(set) var execCalls: [(siteID: String, argv: [String])] = []
+
+    func start(
+        siteID: String, sourceRepo: URL, ref: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> LocalContainerSession {
+        throw LocalContainerError.virtualizationUnavailable
+    }
+
+    func stop(siteID: String) async throws {}
+
+    func exec(
+        siteID: String, argv: [String], environment: [String: String], workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> ContainerExecResult {
+        execCalls.append((siteID: siteID, argv: argv))
+        // Valid scan JSON so a preflight step reached mid-pipeline doesn't just fail parsing —
+        // only the routing (was `exec` called at all) matters to this test.
+        return ContainerExecResult(exitCode: 0, stdout: #"{"version":1,"ok":true,"failures":[],"warnings":[]}"#, stderr: "")
+    }
+
+    func execInteractive(
+        siteID: String, argv: [String], environment: [String: String], workingDirectory: String,
+        onOutput: @escaping @Sendable (String, LogCenter.Stream) -> Void
+    ) async throws -> InteractiveExecHandle {
+        InteractiveExecHandle(write: { _ in }, terminate: {})
     }
 }
