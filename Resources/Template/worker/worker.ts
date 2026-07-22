@@ -3,6 +3,13 @@ import {
   type AuthorizationRequest,
   type IndieAuthEnv,
 } from "@dwk/indieauth";
+import {
+  createWebmention,
+  createWebmentionQueueConsumer,
+  createD1Inbox,
+  type WebmentionEnv,
+  type WebmentionJob,
+} from "@dwk/webmention";
 
 /**
  * Per-site Cloudflare Worker entry point.
@@ -39,6 +46,17 @@ export interface WorkerEnv extends IndieAuthEnv {
   INBOX_KV?: InboxKV;
   SOCIAL_KV?: InboxKV;
   INDIEAUTH_OWNER_PASSWORD: string;
+  /**
+   * Inbound-Webmention bindings (V-3.1, #359). All optional: a site that hasn't provisioned
+   * inbound Webmention has none of them bound, and the `/webmention` route + `queue` consumer
+   * degrade gracefully (503 / ack-without-work) rather than throwing. Provisioning wires them —
+   * a Cloudflare Queue for async verification, a D1 database for the verified-mention inbox, and
+   * the site's canonical origin (the `queue` consumer has no request to derive it from).
+   * See `WorkerComposition.generateWranglerToml` (Swift) for the binding generation.
+   */
+  WEBMENTION_QUEUE?: Queue<WebmentionJob>;
+  WEBMENTION_INBOX?: D1Database;
+  SITE_URL?: string;
 }
 
 const RATE_LIMIT_WINDOW_SECONDS = 3600;
@@ -331,6 +349,66 @@ function indieAuthHandler(request: Request, env: WorkerEnv) {
   });
 }
 
+/**
+ * Inbound-Webmention receive endpoint (V-3.1, #359).
+ *
+ * Composes `@dwk/webmention`'s receiver: a form-encoded `POST` of `source` + `target` is
+ * validated synchronously (both `http(s)` URLs, distinct, `target` under this origin) and, on
+ * success, enqueued to `WEBMENTION_QUEUE` for asynchronous link-verification before a `202`.
+ * The heavy work — fetching the source through an SSRF-safe wrapper and confirming it links to
+ * the target — happens in the `queue` consumer, keeping the request path cheap and spam-resistant.
+ *
+ * Returns `503` when inbound Webmention isn't provisioned for this site (no `WEBMENTION_QUEUE`),
+ * so a stray request to an un-provisioned site gets a clean "not configured" rather than the
+ * library's loud throw. The `/webmention` route is only advertised (`<link rel="webmention">`)
+ * once provisioning is on — that discovery wiring is the paired template/Swift follow-up.
+ */
+function handleWebmentionReceive(
+  request: Request,
+  env: WorkerEnv,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  if (!env.WEBMENTION_QUEUE) {
+    return Promise.resolve(new Response("Webmention receiving is not configured", { status: 503 }));
+  }
+  const baseUrl = new URL(request.url).origin;
+  const receiver = createWebmention({ baseUrl });
+  const webmentionEnv: WebmentionEnv = {
+    WEBMENTION_QUEUE: env.WEBMENTION_QUEUE,
+    WEBMENTION_INBOX: env.WEBMENTION_INBOX,
+  };
+  return receiver(request, webmentionEnv, ctx);
+}
+
+/**
+ * Queue consumer for asynchronous Webmention verification (V-3.1, #359).
+ *
+ * For each queued `(source, target)` job, `@dwk/webmention` fetches the source through its
+ * SSRF-safe wrapper and upserts a verified mention into the D1 inbox — or removes it when the
+ * source no longer links. Acks-without-work (rather than throwing) when the inbox or the site
+ * origin isn't provisioned, so an un-provisioned site's stray queue delivery can't wedge the
+ * consumer. `SITE_URL` scopes which targets verification accepts; the consumer has no request to
+ * derive the origin from, so provisioning supplies it as a plain var.
+ */
+function handleWebmentionQueue(
+  batch: MessageBatch<WebmentionJob>,
+  env: WorkerEnv,
+  ctx: ExecutionContext,
+): Promise<void> {
+  if (!env.WEBMENTION_QUEUE || !env.WEBMENTION_INBOX || !env.SITE_URL) {
+    return Promise.resolve();
+  }
+  const consumer = createWebmentionQueueConsumer({
+    baseUrl: env.SITE_URL,
+    inbox: createD1Inbox(env.WEBMENTION_INBOX),
+  });
+  const webmentionEnv: WebmentionEnv = {
+    WEBMENTION_QUEUE: env.WEBMENTION_QUEUE,
+    WEBMENTION_INBOX: env.WEBMENTION_INBOX,
+  };
+  return consumer(batch, webmentionEnv, ctx);
+}
+
 export interface InboxFields {
   subject: string;
   from: string;
@@ -475,6 +553,13 @@ export const ROUTES: readonly WorkerRoute[] = [
     methods: ["POST"],
     handler: (request, env) => handleInbox(request, env),
   },
+  {
+    // Inbound Webmention receiver (V-3.1, #359): POST source+target, validate, enqueue, 202.
+    path: "/webmention",
+    match: "exact",
+    methods: ["POST"],
+    handler: (request, env, ctx) => handleWebmentionReceive(request, env, ctx),
+  },
 ];
 
 export function matchRoute(pathname: string, routes: readonly WorkerRoute[] = ROUTES): WorkerRoute | null {
@@ -557,4 +642,10 @@ export default {
     }
     return assets.fetch(request);
   },
-} satisfies ExportedHandler<WorkerEnv>;
+
+  // Async Webmention verification (V-3.1, #359). Present unconditionally; no-ops for sites
+  // without inbound Webmention provisioned (see `handleWebmentionQueue`).
+  async queue(batch: MessageBatch<WebmentionJob>, env: WorkerEnv, ctx: ExecutionContext): Promise<void> {
+    return handleWebmentionQueue(batch, env, ctx);
+  },
+} satisfies ExportedHandler<WorkerEnv, WebmentionJob>;

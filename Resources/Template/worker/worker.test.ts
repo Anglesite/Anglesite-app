@@ -438,3 +438,71 @@ test("handleIndieAuthConsent: 429s once the per-IP login attempt limit is exceed
   const limited = await handleIndieAuthConsent(makeRequest(), testEnv);
   expect(limited.status).toBe(429);
 });
+
+// --- Inbound Webmention receive (V-3.1, #359) ----------------------------------------------
+// Composition of @dwk/webmention's receiver. These run through worker.fetch in the workerd pool
+// with WEBMENTION_QUEUE/WEBMENTION_INBOX/SITE_URL bound (see vitest.config.ts), so they exercise
+// the same synchronous validate-then-enqueue path production serves. Async link-verification is
+// the library's own concern (covered by its suite + webmention.rocks), not re-tested here.
+
+function webmentionForm(fields: Record<string, string>): Request {
+  return new Request("https://owner.example/webmention", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(fields).toString(),
+  });
+}
+
+test("webmention receive: a valid source/target under this origin is accepted (202)", async () => {
+  const response = await fetchWorker(
+    webmentionForm({ source: "https://commenter.example/reply", target: "https://owner.example/blog/hello/" }),
+  );
+  expect(response.status).toBe(202);
+});
+
+test("webmention receive: a missing field is rejected (400)", async () => {
+  const noTarget = await fetchWorker(webmentionForm({ source: "https://commenter.example/reply" }));
+  expect(noTarget.status).toBe(400);
+  const noSource = await fetchWorker(webmentionForm({ target: "https://owner.example/blog/hello/" }));
+  expect(noSource.status).toBe(400);
+});
+
+test("webmention receive: source equal to target is rejected (400)", async () => {
+  const response = await fetchWorker(
+    webmentionForm({ source: "https://owner.example/x/", target: "https://owner.example/x/" }),
+  );
+  expect(response.status).toBe(400);
+});
+
+test("webmention receive: a target on a foreign host is rejected (400)", async () => {
+  const response = await fetchWorker(
+    webmentionForm({ source: "https://commenter.example/reply", target: "https://elsewhere.example/post/" }),
+  );
+  expect(response.status).toBe(400);
+});
+
+test("webmention receive: a non-POST method gets 405 with Allow: POST", async () => {
+  const response = await fetchWorker(new Request("https://owner.example/webmention", { method: "GET" }));
+  expect(response.status).toBe(405);
+  expect(response.headers.get("allow")).toBe("POST");
+});
+
+test("webmention receive: 503 when inbound Webmention isn't provisioned (no queue binding)", async () => {
+  const { WEBMENTION_QUEUE: _unusedQueue, ...envWithoutQueue } = testEnv;
+  const response = await worker.fetch(
+    webmentionForm({ source: "https://commenter.example/reply", target: "https://owner.example/blog/hello/" }),
+    envWithoutQueue as WorkerEnv,
+    createExecutionContext(),
+  );
+  expect(response.status).toBe(503);
+});
+
+test("webmention queue consumer: no-ops (does not throw) when the inbox/site origin is unprovisioned", async () => {
+  const { WEBMENTION_INBOX: _unusedInbox, SITE_URL: _unusedSiteURL, ...envWithoutInbox } = testEnv;
+  const emptyBatch = { queue: "site-webmentions", messages: [] } as unknown as Parameters<
+    NonNullable<typeof worker.queue>
+  >[0];
+  await expect(
+    worker.queue!(emptyBatch, envWithoutInbox as WorkerEnv, createExecutionContext()),
+  ).resolves.toBeUndefined();
+});
