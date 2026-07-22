@@ -480,6 +480,71 @@ struct SocialWorkerProvisionCommandTests {
         #expect(SiteConfigFile.value(forKey: "WEBMENTION_RECEIVE_ENABLED", in: config) == "true")
     }
 
+    @Test("deactivating webmention reconciles WEBMENTION_RECEIVE_ENABLED back to false")
+    func webmentionDeactivationReconcilesFlagToFalse() async throws {
+        let siteDirectory = try temporaryDirectory()
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "tok" },
+            runner: { _, arguments, _, _ in
+                if arguments.first == "queues" {
+                    return .init(stdout: #"{"result":{"queue_name":"my-site-webmention"}}"#, stderr: "", exitCode: 0)
+                }
+                return .init(stdout: "", stderr: "", exitCode: 0)
+            },
+            deployer: { _, _, _ in .succeeded(url: URL(string: "https://example.com")!, duration: 0) }
+        )
+        let webmention = WorkerDescriptor(
+            id: "webmention", displayName: "Webmentions", description: "test", group: "social",
+            binding: .settingsActivated, resources: .init(needsD1: false, needsKV: false, needsR2: false))
+
+        _ = await command.provision(
+            siteID: "site-1", siteDirectory: siteDirectory, siteName: "my-site",
+            workers: [webmention], acknowledgesPaidPlan: true)
+
+        let enabledConfig = try String(contentsOf: siteDirectory.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(SiteConfigFile.value(forKey: "WEBMENTION_RECEIVE_ENABLED", in: enabledConfig) == "true")
+
+        _ = await command.provision(
+            siteID: "site-1", siteDirectory: siteDirectory, siteName: "my-site",
+            workers: [], acknowledgesPaidPlan: true)
+
+        let disabledConfig = try String(contentsOf: siteDirectory.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(SiteConfigFile.value(forKey: "WEBMENTION_RECEIVE_ENABLED", in: disabledConfig) == "false")
+    }
+
+    @Test("cancelling the paid-plan gate never lets WEBMENTION_RECEIVE_ENABLED reach true")
+    func webmentionPaidPlanGateCancelKeepsFlagFalse() async throws {
+        let siteDirectory = try temporaryDirectory()
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "tok" },
+            runner: { _, arguments, _, _ in
+                #expect(arguments.first != "queues", "must not create the Queue before the paid-plan gate is acknowledged")
+                if arguments.first == "d1" {
+                    return .init(stdout: #"{"result":{"uuid":"d1-id"}}"#, stderr: "", exitCode: 0)
+                }
+                return .init(stdout: "", stderr: "", exitCode: 0)
+            },
+            deployer: { _, _, _ in .succeeded(url: URL(string: "https://example.com")!, duration: 0) }
+        )
+        // needsD1: true so the D1 block's persistConfig call runs (and reconciles the flag to
+        // "false") before the code reaches the paid-plan gate below it — mirrors production,
+        // where webmention's real WorkerComposition resources need D1 for the inbox table.
+        let webmention = WorkerDescriptor(
+            id: "webmention", displayName: "Webmentions", description: "test", group: "social",
+            binding: .settingsActivated, resources: .init(needsD1: true, needsKV: false, needsR2: false))
+
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: siteDirectory, siteName: "my-site",
+            workers: [webmention], acknowledgesPaidPlan: false)
+
+        guard case .webmentionPaidPlanConfirmationNeeded = result else {
+            Issue.record("expected .webmentionPaidPlanConfirmationNeeded, got \(result)")
+            return
+        }
+        let config = try String(contentsOf: siteDirectory.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(SiteConfigFile.value(forKey: "WEBMENTION_RECEIVE_ENABLED", in: config) == "false")
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("SocialWorkerProvisionCommandTests-\(UUID().uuidString)", isDirectory: true)

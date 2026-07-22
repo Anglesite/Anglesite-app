@@ -18,8 +18,10 @@ public actor SocialWorkerProvisionCommand {
         /// rather than collapsing it, so callers can drive the same rename-and-retry UX (#740).
         case workerNameConflict(name: String, resources: WorkerComposition.ProvisionedResources)
         /// Webmention receive is active but the site hasn't explicitly acknowledged that
-        /// Cloudflare Queues require the Workers Paid plan (#359). Returned *before* any
-        /// wrangler call — `DeployModel` parks the deploy and presents a confirmation sheet;
+        /// Cloudflare Queues require the Workers Paid plan (#359). Returned *before any wrangler
+        /// call for the Queue* — earlier D1/KV/R2 wrangler calls (and their `persistConfig`
+        /// writes) may already have run in this same `provision()` invocation before this gate
+        /// is reached. `DeployModel` parks the deploy and presents a confirmation sheet;
         /// retrying with `acknowledgesPaidPlan: true` proceeds to create the Queue.
         case webmentionPaidPlanConfirmationNeeded(resources: WorkerComposition.ProvisionedResources)
         case failed(reason: String, exitCode: Int32?, resources: WorkerComposition.ProvisionedResources)
@@ -290,14 +292,22 @@ public actor SocialWorkerProvisionCommand {
                 atomically: true,
                 encoding: .utf8
             )
+            // Reflects "the receiver is actually live" (webmention worker active AND its Queue
+            // exists), not just "webmention worker is in the active set" — and is written
+            // unconditionally on every call (not gated behind `if hasWebmentionReceive`), so a
+            // redeploy always reconciles it to the current true state, the same way the
+            // D1/KV/R2/Queue TOML blocks above are always regenerated fresh. Without this, a
+            // site that later deactivates webmention would keep advertising
+            // `<link rel="webmention">` at an endpoint the Worker no longer serves.
             let hasWebmentionReceive = workers.contains(where: { $0.id == WorkerComposition.webmentionWorkerID })
-            if hasWebmentionReceive {
-                let configURL = siteDirectory.appendingPathComponent(".site-config")
-                let existing = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
-                let updated = SiteConfigFile.upsert([("WEBMENTION_RECEIVE_ENABLED", "true")], into: existing)
-                if updated != existing {
-                    try updated.write(to: configURL, atomically: true, encoding: .utf8)
-                }
+            let webmentionReceiveEnabled = hasWebmentionReceive && resources.queueName != nil
+            let configURL = siteDirectory.appendingPathComponent(".site-config")
+            let existing = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+            let updated = SiteConfigFile.upsert(
+                [("WEBMENTION_RECEIVE_ENABLED", webmentionReceiveEnabled ? "true" : "false")], into: existing
+            )
+            if updated != existing {
+                try updated.write(to: configURL, atomically: true, encoding: .utf8)
             }
             return nil
         } catch {
