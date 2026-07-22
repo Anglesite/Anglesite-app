@@ -223,7 +223,7 @@ public enum WorkerComposition {
             }
         }
 
-        if hasWebmentionReceive, let siteURL, !siteURL.isEmpty {
+        if hasWebmentionReceive, let siteURL, !siteURL.isEmpty, isSafeTomlStringValue(siteURL) {
             lines.append("")
             lines.append("[vars]")
             lines.append("SITE_URL = \"\(siteURL)\"")
@@ -253,5 +253,16 @@ public enum WorkerComposition {
     static func isValidSiteName(_ siteName: String) -> Bool {
         guard !siteName.isEmpty else { return false }
         return siteName.unicodeScalars.allSatisfy { validNameCharacters.contains($0) }
+    }
+
+    /// Whether `value` is safe to interpolate as-is into a TOML basic string (`"..."`) — no
+    /// double quote, backslash, or control character that could break out of the string literal
+    /// or corrupt the generated file. `siteURL` is sourced from `.site-config`, which lives in
+    /// the site's git-tracked `Source/` — externally clonable/editable content (CLAUDE.md's "Git
+    /// is the source of truth"), so it must be treated the same as any other untrusted input
+    /// before being interpolated into generated infrastructure config.
+    static func isSafeTomlStringValue(_ value: String) -> Bool {
+        !value.contains("\"") && !value.contains("\\")
+            && !value.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F })
     }
 }
