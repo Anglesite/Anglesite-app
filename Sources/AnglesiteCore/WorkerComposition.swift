@@ -24,6 +24,13 @@ public enum WorkerComposition {
     /// silently diverge from another.
     public static let indieauthWorkerID = "indieauth"
 
+    /// `@dwk/webmention`'s catalog id — like `indieauthWorkerID`, composition keys off this
+    /// directly for the receiver's three bespoke bindings (`WEBMENTION_INBOX`, the Queue,
+    /// `SITE_URL`), since those binding names are part of `@dwk/webmention`'s public composition
+    /// contract, not something a generic `resources` flag can express without a paired schema
+    /// change in the external `davidwkeith/workers` catalog repo.
+    public static let webmentionWorkerID = "webmention"
+
     /// The bespoke app-side inbox-capture route (#587) — not a `@dwk/workers` catalog worker, so
     /// its claim lives here rather than in `catalog.json`. Appended automatically when
     /// `generateWranglerToml` is called with `inboxCaptureEnabled`.
@@ -96,6 +103,7 @@ public enum WorkerComposition {
         // AUTH_DB block below) — the one place composition keys off a specific catalog id rather
         // than generic resource flags.
         let hasIndieauth = workers.contains(where: { $0.id == indieauthWorkerID })
+        let hasWebmentionReceive = workers.contains(where: { $0.id == webmentionWorkerID })
 
         var lines: [String] = []
         lines.append("name = \"\(siteName)\"")
@@ -138,6 +146,21 @@ public enum WorkerComposition {
             lines.append("binding = \"AUTH_DB\"")
             lines.append("database_name = \"\(siteName)-social\"")
             lines.append("migrations_dir = \"worker/migrations\"")
+            if let id = resources.d1DatabaseID, !id.isEmpty {
+                lines.append("database_id = \"\(id)\"")
+            } else {
+                lines.append("database_id = \"\"  # filled by provisioning")
+            }
+        }
+
+        // Same shared per-site D1 database as DB/AUTH_DB, bound a third time under
+        // WEBMENTION_INBOX — @dwk/webmention's createD1Inbox creates its own `webmentions`
+        // table on first use, so no separate database or migration is needed here.
+        if hasWebmentionReceive {
+            lines.append("")
+            lines.append("[[d1_databases]]")
+            lines.append("binding = \"WEBMENTION_INBOX\"")
+            lines.append("database_name = \"\(siteName)-social\"")
             if let id = resources.d1DatabaseID, !id.isEmpty {
                 lines.append("database_id = \"\(id)\"")
             } else {

@@ -16,6 +16,7 @@ private let micropubWorker = worker("micropub", d1: true, kv: true, r2: true)
 private let websubWorker = worker("websub", d1: true, kv: true, r2: false)
 private let v2Workers = [genericD1KVWorker, indieauthWorker]
 private let v3Workers = [genericD1KVWorker, indieauthWorker, micropubWorker, websubWorker]
+private let webmentionWorker = worker(WorkerComposition.webmentionWorkerID, d1: false, kv: false, r2: false)
 
 @Suite("WorkerComposition")
 struct WorkerCompositionTests {
@@ -186,6 +187,23 @@ struct WorkerCompositionTests {
             try WorkerComposition.generateWranglerToml(
                 siteName: "my-site", workers: [indieauthWorker], routeClaims: [headOnly])
         }
+    }
+
+    @Test("webmention receive adds a WEBMENTION_INBOX D1 binding on the shared database")
+    func webmentionAddsInboxBinding() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site",
+            workers: [webmentionWorker],
+            resources: .init(d1DatabaseID: "d1-id")
+        )
+        #expect(toml.contains("binding = \"WEBMENTION_INBOX\""))
+        #expect(toml.contains("database_id = \"d1-id\""))
+    }
+
+    @Test("no webmention worker means no WEBMENTION_INBOX binding")
+    func noWebmentionOmitsInboxBinding() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [indieauthWorker])
+        #expect(!toml.contains("WEBMENTION_INBOX"))
     }
 
     @Test("ProvisionedResources round-trips through JSONEncoder/JSONDecoder")
