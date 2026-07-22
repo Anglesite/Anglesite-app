@@ -150,4 +150,39 @@ struct SiteConfigStoreTests {
         #expect(loaded.lastDeployedWorkerIDs == nil)
         #expect(loaded.provisionedWorkerResources == nil)
     }
+
+    @Test("webmentionReceivePaidPlanAcknowledged round-trips through save/load")
+    func webmentionPaidPlanFlagRoundTrips() async throws {
+        let dir = try tempConfigDir()
+        defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+        let store = SiteConfigStore(configDirectory: dir)
+
+        let settings = SiteSettings(webmentionReceivePaidPlanAcknowledged: true)
+        try await store.save(settings)
+
+        let loaded = try await store.load()
+        #expect(loaded.webmentionReceivePaidPlanAcknowledged == true)
+    }
+
+    @Test("a settings.plist written before webmentionReceivePaidPlanAcknowledged existed still decodes (forward-compat)")
+    func decodesOldPlistWithoutPaidPlanField() async throws {
+        let dir = try tempConfigDir()
+        defer { try? FileManager.default.removeItem(at: dir.deletingLastPathComponent()) }
+        // Simulates a plist written by a build that predates this field.
+        let oldFormat = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>displayName</key>
+            <string>My Site</string>
+        </dict>
+        </plist>
+        """
+        try oldFormat.write(to: dir.appendingPathComponent("settings.plist"), atomically: true, encoding: .utf8)
+        let store = SiteConfigStore(configDirectory: dir)
+
+        let loaded = try await store.load()
+        #expect(loaded.webmentionReceivePaidPlanAcknowledged == nil)
+    }
 }

@@ -55,6 +55,12 @@ public struct SiteSettings: Sendable, Codable, Equatable {
     /// re-scraping the file (#709).
     public var provisionedWorkerResources: WorkerComposition.ProvisionedResources?
 
+    /// Explicit opt-in: the user has acknowledged that enabling inbound Webmention requires the
+    /// Cloudflare Workers **Paid** plan (Cloudflare Queues aren't available on Free). `nil`/`false`
+    /// means `SocialWorkerProvisionCommand.provision` must not attempt to create the Queue —
+    /// see `DeployModel.webmentionPaidPlanConfirmationPresented`.
+    public var webmentionReceivePaidPlanAcknowledged: Bool?
+
     public init(
         displayName: String? = nil,
         inboxCaptureAccountID: String? = nil,
@@ -65,7 +71,8 @@ public struct SiteSettings: Sendable, Codable, Equatable {
         deployedSourceBundleCommit: String? = nil,
         activeWorkerIDs: [String]? = nil,
         lastDeployedWorkerIDs: [String]? = nil,
-        provisionedWorkerResources: WorkerComposition.ProvisionedResources? = nil
+        provisionedWorkerResources: WorkerComposition.ProvisionedResources? = nil,
+        webmentionReceivePaidPlanAcknowledged: Bool? = nil
     ) {
         self.displayName = displayName
         self.inboxCaptureAccountID = inboxCaptureAccountID
@@ -77,6 +84,7 @@ public struct SiteSettings: Sendable, Codable, Equatable {
         self.activeWorkerIDs = activeWorkerIDs
         self.lastDeployedWorkerIDs = lastDeployedWorkerIDs
         self.provisionedWorkerResources = provisionedWorkerResources
+        self.webmentionReceivePaidPlanAcknowledged = webmentionReceivePaidPlanAcknowledged
     }
 }
 
