@@ -72,6 +72,14 @@ var anglesiteCoreDependencies: [Target.Dependency] = ["AnglesiteSiteModel"]
 anglesiteCoreDependencies.append(.product(name: "SwiftGit2", package: "SwiftGit2"))
 #endif
 
+// RepoRelocatorTests (#877) verifies migrated gitfiles resolve via libgit2 directly
+// (Repository.at), matching the InProcessGitTests cross-check style — so the test target
+// needs the same Darwin-only SwiftGit2 dependency as AnglesiteCore itself.
+var anglesiteCoreTestsDependencies: [Target.Dependency] = ["AnglesiteCore", "AnglesiteSiteModel", "AnglesiteTestSupport"]
+#if canImport(Darwin)
+anglesiteCoreTestsDependencies.append(.product(name: "SwiftGit2", package: "SwiftGit2"))
+#endif
+
 var packageTargets: [Target] = [
     .target(
         name: "AnglesiteSiteModel",
@@ -148,7 +156,7 @@ var packageTargets: [Target] = [
     ),
     .testTarget(
         name: "AnglesiteCoreTests",
-        dependencies: ["AnglesiteCore", "AnglesiteSiteModel", "AnglesiteTestSupport"],
+        dependencies: anglesiteCoreTestsDependencies,
         path: "Tests/AnglesiteCoreTests",
         swiftSettings: strictConcurrency,
         linkerSettings: weakLinkFoundationModels
