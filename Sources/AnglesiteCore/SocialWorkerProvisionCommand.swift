@@ -290,6 +290,15 @@ public actor SocialWorkerProvisionCommand {
                 atomically: true,
                 encoding: .utf8
             )
+            let hasWebmentionReceive = workers.contains(where: { $0.id == WorkerComposition.webmentionWorkerID })
+            if hasWebmentionReceive {
+                let configURL = siteDirectory.appendingPathComponent(".site-config")
+                let existing = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+                let updated = SiteConfigFile.upsert([("WEBMENTION_RECEIVE_ENABLED", "true")], into: existing)
+                if updated != existing {
+                    try updated.write(to: configURL, atomically: true, encoding: .utf8)
+                }
+            }
             return nil
         } catch {
             return .failed(reason: "couldn't write wrangler.toml: \(error)", exitCode: nil, resources: resources)

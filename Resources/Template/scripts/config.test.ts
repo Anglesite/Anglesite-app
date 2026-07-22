@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { asBookingProvider, asDonationsProvider, asContactProvider } from "./config";
+import { asBookingProvider, asDonationsProvider, asContactProvider, readConfigFromString } from "./config";
 
 test("asBookingProvider: passes through recognized providers", () => {
   assert.equal(asBookingProvider("cal"), "cal");
@@ -34,4 +34,20 @@ test("asContactProvider: rejects unrecognized or empty values", () => {
   assert.equal(asContactProvider("typeform"), undefined);
   assert.equal(asContactProvider(""), undefined);
   assert.equal(asContactProvider(undefined), undefined);
+});
+
+// BaseLayout.astro gates `<link rel="webmention">` on this key (#359) — only advertise the
+// endpoint once SocialWorkerProvisionCommand has actually provisioned inbound receive.
+test("readConfigFromString: WEBMENTION_RECEIVE_ENABLED reads true when present", () => {
+  assert.equal(
+    readConfigFromString("SITE_URL=https://example.com\nWEBMENTION_RECEIVE_ENABLED=true", "WEBMENTION_RECEIVE_ENABLED"),
+    "true",
+  );
+});
+
+test("readConfigFromString: WEBMENTION_RECEIVE_ENABLED is undefined when absent", () => {
+  assert.equal(
+    readConfigFromString("SITE_URL=https://example.com", "WEBMENTION_RECEIVE_ENABLED"),
+    undefined,
+  );
 });

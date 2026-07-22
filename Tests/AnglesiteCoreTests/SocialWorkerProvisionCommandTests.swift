@@ -455,6 +455,31 @@ struct SocialWorkerProvisionCommandTests {
         #expect(!calledArguments.contains(where: { $0.first == "queues" }))
     }
 
+    @Test("webmention receive writes WEBMENTION_RECEIVE_ENABLED into .site-config")
+    func webmentionWritesReceiveEnabledFlag() async throws {
+        let siteDirectory = try temporaryDirectory()
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "tok" },
+            runner: { _, arguments, _, _ in
+                if arguments.first == "queues" {
+                    return .init(stdout: #"{"result":{"queue_name":"my-site-webmention"}}"#, stderr: "", exitCode: 0)
+                }
+                return .init(stdout: "", stderr: "", exitCode: 0)
+            },
+            deployer: { _, _, _ in .succeeded(url: URL(string: "https://example.com")!, duration: 0) }
+        )
+        let webmention = WorkerDescriptor(
+            id: "webmention", displayName: "Webmentions", description: "test", group: "social",
+            binding: .settingsActivated, resources: .init(needsD1: false, needsKV: false, needsR2: false))
+
+        _ = await command.provision(
+            siteID: "site-1", siteDirectory: siteDirectory, siteName: "my-site",
+            workers: [webmention], acknowledgesPaidPlan: true)
+
+        let config = try String(contentsOf: siteDirectory.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(SiteConfigFile.value(forKey: "WEBMENTION_RECEIVE_ENABLED", in: config) == "true")
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("SocialWorkerProvisionCommandTests-\(UUID().uuidString)", isDirectory: true)
