@@ -96,6 +96,9 @@ export function buildHeaders(configContent: string, serviceWorkerPresent = false
 
 /.well-known/security.txt
   Content-Type: text/plain; charset=utf-8
+
+/.well-known/mta-sts.txt
+  Content-Type: text/plain; charset=utf-8
 `;
   if (serviceWorkerPresent) {
     out += `

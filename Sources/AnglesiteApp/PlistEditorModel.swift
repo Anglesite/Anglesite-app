@@ -41,11 +41,18 @@ final class PlistEditorModel {
     private(set) var savedCrawlerPolicySettings = CrawlerPolicyAsset.Settings()
     private(set) var crawlerPolicyError: String?
     private(set) var isSavingCrawlerPolicy = false
+    var mtaStsSettings = MTAStsPolicyAsset.Settings()
+    private(set) var savedMtaStsSettings = MTAStsPolicyAsset.Settings()
+    private(set) var mtaStsError: String?
+    private(set) var isSavingMtaSts = false
+    private(set) var isPublishingMtaStsDNS = false
+    private let domainOperations: any DomainOperationsService
 
     var isDirty: Bool { entries != savedEntries && loadError == nil && !isLoading }
     var isAnalyticsDirty: Bool { analyticsSettings != savedAnalyticsSettings && loadError == nil && !isLoading }
     var isRedirectsDirty: Bool { redirectEntries != savedRedirectEntries && loadError == nil && !isLoading }
     var isCrawlerPolicyDirty: Bool { crawlerPolicySettings != savedCrawlerPolicySettings && loadError == nil && !isLoading }
+    var isMtaStsDirty: Bool { mtaStsSettings != savedMtaStsSettings && loadError == nil && !isLoading }
     var cloudflareAnalyticsEnabled: Bool { !analyticsSettings.cloudflareToken.isEmpty }
     var customAnalyticsValidationMessage: String? {
         WebsiteAnalyticsAsset.customHeadTagValidationMessage(analyticsSettings.customHeadTag)
@@ -74,13 +81,15 @@ final class PlistEditorModel {
     init(file: FileRef, websiteTitle: String, sourceDirectory: URL,
          analyticsProvider: any CloudflareWebAnalyticsProviding = CloudflareWebAnalyticsClient(),
          customAnalyticsValidator: any CustomAnalyticsHTMLValidating = AstroHTMLValidator(),
-         keychain: KeychainStore = KeychainStore()) {
+         keychain: KeychainStore = KeychainStore(),
+         domainOperations: any DomainOperationsService = DomainOperations()) {
         self.file = file
         self.initialWebsiteTitle = websiteTitle
         self.sourceDirectory = sourceDirectory
         self.analyticsProvider = analyticsProvider
         self.customAnalyticsValidator = customAnalyticsValidator
         self.keychain = keychain
+        self.domainOperations = domainOperations
         self.hasWebsiteIcons = WebsiteIconInstaller.hasInstalledIcons(in: sourceDirectory)
     }
 
@@ -125,6 +134,10 @@ final class PlistEditorModel {
             crawlerPolicySettings = policy
             savedCrawlerPolicySettings = policy
             crawlerPolicyError = nil
+            let mtaSts = MTAStsPolicyAsset.parseSettings(from: config)
+            mtaStsSettings = mtaSts
+            savedMtaStsSettings = mtaSts
+            mtaStsError = nil
         } catch {
             loadError = error.localizedDescription
         }
@@ -176,8 +189,9 @@ final class PlistEditorModel {
             guard await saveRedirects() else { return false }
         }
         if isCrawlerPolicyDirty {
-            return await saveCrawlerPolicy()
+            guard await saveCrawlerPolicy() else { return false }
         }
+        if isMtaStsDirty { return await saveMtaSts() }
         return true
     }
 
@@ -302,6 +316,107 @@ final class PlistEditorModel {
         }
     }
 
+    @discardableResult
+    func saveMtaSts() async -> Bool {
+        guard isMtaStsDirty else { return true }
+        guard !isSavingMtaSts else { return false }
+        isSavingMtaSts = true
+        mtaStsError = nil
+        defer { isSavingMtaSts = false }
+        let sourceDirectory = sourceDirectory
+        let settings = mtaStsSettings
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try MTAStsPolicyAsset.install(settings, siteDirectory: sourceDirectory)
+            }.value
+            let canonical = MTAStsPolicyAsset.Settings(
+                mode: settings.mode,
+                domain: MTAStsPolicyAsset.normalizedDomain(settings.domain),
+                mxHosts: MTAStsPolicyAsset.normalizedMXList(settings.mxHosts).joined(separator: "\n"),
+                reportMailbox: MTAStsPolicyAsset.normalizedReportMailbox(settings.reportMailbox) ?? ""
+            )
+            mtaStsSettings = canonical
+            savedMtaStsSettings = canonical
+            return true
+        } catch {
+            mtaStsError = "Couldn't save MTA-STS policy: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// Reads the zone's existing MX records into the editable policy. This is intentionally an
+    /// explicit action: MTA-STS is a promise about mail delivery, so automatically changing a
+    /// saved policy just because DNS changed would be surprising and potentially disruptive.
+    func detectMtaStsMXHosts() async {
+        let domain = MTAStsPolicyAsset.normalizedDomain(mtaStsSettings.domain)
+        guard !domain.isEmpty, !isPublishingMtaStsDNS else { return }
+        isPublishingMtaStsDNS = true
+        mtaStsError = nil
+        defer { isPublishingMtaStsDNS = false }
+        switch await domainOperations.listRecords(domain: domain) {
+        case .success(let records):
+            let hosts = records
+                .filter { $0.type.caseInsensitiveCompare("MX") == .orderedSame }
+                .map(\.content)
+            let normalized = MTAStsPolicyAsset.normalizedMXList(hosts.joined(separator: "\n"))
+            guard !normalized.isEmpty else {
+                mtaStsError = "No usable MX records were found for \(domain). Enter the receiving mail hosts manually."
+                return
+            }
+            mtaStsSettings.mxHosts = normalized.joined(separator: "\n")
+        case .failure(let error):
+            mtaStsError = mtaStsDNSMessage(for: error)
+        }
+    }
+
+    /// Adds the MTA-STS and optional TLS-RPT TXT records through the existing Cloudflare DNS
+    /// integration. It never overwrites an existing record with different content: multiple
+    /// matching TXT records make MTA-STS invalid, and replacing a hand-managed record is not safe.
+    func publishMtaStsDNSRecords() async {
+        guard await saveMtaSts() else { return }
+        let settings = mtaStsSettings
+        let domain = MTAStsPolicyAsset.normalizedDomain(settings.domain)
+        let desired = MTAStsPolicyAsset.dnsRecords(for: domain, settings: settings)
+        guard !domain.isEmpty, !desired.isEmpty, !isPublishingMtaStsDNS else { return }
+        isPublishingMtaStsDNS = true
+        mtaStsError = nil
+        defer { isPublishingMtaStsDNS = false }
+        switch await domainOperations.listRecords(domain: domain) {
+        case .failure(let error):
+            mtaStsError = mtaStsDNSMessage(for: error)
+        case .success(let existing):
+            for record in desired {
+                let matching = existing.filter {
+                    $0.type.caseInsensitiveCompare("TXT") == .orderedSame
+                        && $0.name.caseInsensitiveCompare(record.name) == .orderedSame
+                }
+                if matching.contains(where: { $0.content == record.content }) { continue }
+                if !matching.isEmpty {
+                    mtaStsError = "A TXT record already exists for \(record.name) with different content. Update it in Website → Manage Domain, then try again."
+                    return
+                }
+                switch await domainOperations.addRecord(domain: domain, type: "TXT", name: record.name, content: record.content, ttl: 1, priority: nil) {
+                case .success:
+                    continue
+                case .failure(let error):
+                    mtaStsError = mtaStsDNSMessage(for: error)
+                    return
+                }
+            }
+        }
+    }
+
+    private func mtaStsDNSMessage(for error: DomainOperationError) -> String {
+        switch error {
+        case .noToken:
+            return "No Cloudflare API token found. Add one in Settings → Credentials."
+        case .zoneNotFound(let domain):
+            return "Zone not found for \(domain). Check that the mail domain is managed in Cloudflare."
+        case .cloudflare(let error):
+            return "Couldn't update MTA-STS DNS records: \(error.localizedDescription)"
+        }
+    }
+
     func setCloudflareAnalyticsEnabled(_ enabled: Bool) async {
         if !enabled {
             analyticsSettings.cloudflareToken = ""
@@ -407,6 +522,7 @@ final class PlistEditorModel {
             DirtyFacet(isDirty: isAnalyticsDirty, isSaving: isSavingAnalytics) { await self.saveAnalytics() },
             DirtyFacet(isDirty: isRedirectsDirty, isSaving: isSavingRedirects) { await self.saveRedirects() },
             DirtyFacet(isDirty: isCrawlerPolicyDirty, isSaving: isSavingCrawlerPolicy) { await self.saveCrawlerPolicy() },
+            DirtyFacet(isDirty: isMtaStsDirty, isSaving: isSavingMtaSts) { await self.saveMtaSts() },
         ]
     }
 

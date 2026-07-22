@@ -13,6 +13,12 @@ import {
   isSecurityTxtMarkerOwned,
   planSecurityTxt,
   SECURITY_TXT_MARKER,
+  buildMTAStsPolicy,
+  isMTAStsMarkerOwned,
+  MTA_STS_MARKER,
+  normalizeMTAStsMX,
+  planMTAStsPolicy,
+  resolveMTAStsMode,
 } from "./edge-artifacts";
 
 test("buildRobotsTxt: allows all crawlers by default and ends with a newline", () => {
@@ -295,4 +301,51 @@ test("planSecurityTxt: generated mode with an invalid contact deletes only marke
     existingContent: null,
   });
   assert.deepEqual(noPriorFile.action, { kind: "none" });
+});
+
+test("normalizeMTAStsMX: accepts exact and left-most wildcard DNS names, normalizes, and deduplicates", () => {
+  assert.deepEqual(
+    normalizeMTAStsMX(" MX1.Example.com., *.mail.example.net, mx1.example.com, invalid, *.*.example.com "),
+    ["mx1.example.com", "*.mail.example.net"],
+  );
+});
+
+test("normalizeMTAStsMX: accepts Punycode A-labels required for internationalized domains", () => {
+  assert.deepEqual(normalizeMTAStsMX("mx.xn--bcher-kva.example, mx.example.xn--p1ai"), ["mx.xn--bcher-kva.example", "mx.example.xn--p1ai"]);
+});
+
+test("resolveMTAStsMode: only testing and enforce enable generation", () => {
+  assert.equal(resolveMTAStsMode("testing"), "testing");
+  assert.equal(resolveMTAStsMode("enforce"), "enforce");
+  assert.equal(resolveMTAStsMode("none"), "disabled");
+  assert.equal(resolveMTAStsMode(undefined), "disabled");
+});
+
+test("buildMTAStsPolicy: emits RFC 8461 fields, one mx line per host, and a valid ownership extension", () => {
+  const out = buildMTAStsPolicy("testing", "mx1.example.com, *.mail.example.net");
+  assert.ok(out !== null);
+  assert.equal(
+    out,
+    "version: STSv1\nmode: testing\nmx: mx1.example.com\nmx: *.mail.example.net\nmax_age: 604800\nx-anglesite: generated\n",
+  );
+  assert.ok(isMTAStsMarkerOwned(out));
+  assert.equal(out.split("\n").at(-2), MTA_STS_MARKER);
+});
+
+test("buildMTAStsPolicy: refuses enabled policies without a valid MX host", () => {
+  assert.equal(buildMTAStsPolicy("enforce", "not a hostname"), null);
+  assert.equal(buildMTAStsPolicy("disabled", "mx.example.com"), null);
+});
+
+test("planMTAStsPolicy: preserves hand-authored policies and reports disabled/file contradictions", () => {
+  const manual = planMTAStsPolicy({
+    mode: "enforce",
+    mxRaw: "mx.example.com",
+    existingContent: "version: STSv1\nmode: enforce\nmx: mx.example.com\nmax_age: 604800\n",
+  });
+  assert.deepEqual(manual.action, { kind: "none" });
+  assert.match(manual.note ?? "", /refusing to overwrite/);
+
+  const disabled = planMTAStsPolicy({ mode: "disabled", mxRaw: undefined, existingContent: "old" });
+  assert.match(disabled.note ?? "", /disabled/);
 });

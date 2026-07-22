@@ -272,6 +272,9 @@
     "Allow" : {
 
     },
+    "Allowed MX hosts" : {
+
+    },
     "Analytics…" : {
 
     },
@@ -940,6 +943,12 @@
     "Enable Tor Browser access for this site via Cloudflare's zone-level setting" : {
 
     },
+    "Enforce" : {
+
+    },
+    "Enter a valid mail domain and at least one MX host to prepare the DNS records." : {
+
+    },
     "Enter the domain to harden" : {
 
     },
@@ -1309,6 +1318,12 @@
     "MCP port" : {
 
     },
+    "MTA-STS" : {
+
+    },
+    "Mail domain" : {
+
+    },
     "Middle" : {
 
     },
@@ -1546,6 +1561,9 @@
     "Optional" : {
 
     },
+    "Optional: tls-reports@example.com" : {
+
+    },
     "Ordered" : {
 
     },
@@ -1592,6 +1610,9 @@
 
     },
     "Point at a checkout of the plugin (e.g. `../anglesite`) to iterate without rebuilding the app." : {
+
+    },
+    "Point mta-sts.%@ at this deployed site and ensure it has a valid HTTPS certificate. Add these TXT records automatically, or copy them into Website → Manage Domain. The MTA-STS ID changes automatically when this policy changes." : {
 
     },
     "Polar" : {
@@ -1649,6 +1670,9 @@
 
     },
     "Publish" : {
+
+    },
+    "Publish DNS Records" : {
 
     },
     "Publish to GitHub" : {
@@ -1781,6 +1805,12 @@
 
     },
     "Repurpose “%@”" : {
+
+    },
+    "Require TLS for mail delivered to this domain. Start in testing mode and only switch to enforce after your mail provider is working cleanly." : {
+
+    },
+    "Required DNS records" : {
 
     },
     "Rescan" : {
@@ -2198,7 +2228,13 @@
     "Syndication recorded" : {
 
     },
+    "TLS report mailbox" : {
+
+    },
     "TTL" : {
+
+    },
+    "TXT %@" : {
 
     },
     "Table" : {
@@ -2211,6 +2247,9 @@
 
     },
     "Temporary (302)" : {
+
+    },
+    "Testing" : {
 
     },
     "Text" : {
@@ -2358,6 +2397,9 @@
 
     },
     "Upload Logo…" : {
+
+    },
+    "Use MX Records from DNS" : {
 
     },
     "Use Selection for Find" : {
@@ -2563,4 +2605,3 @@
   },
   "version" : "1.0"
 }
-
