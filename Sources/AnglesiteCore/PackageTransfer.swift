@@ -74,6 +74,13 @@ public enum PackageTransfer {
 
     /// Copy `package`'s `Source/` working tree to `destinationDir`. Always omits `node_modules/`;
     /// omits `.git` unless `includeGit`. `destinationDir` must not already exist.
+    ///
+    /// If the package has been migrated to the split-repo layout (#875/#877) — `Source/.git` is a
+    /// relative gitfile pointing at `Config/repo.nosync/` — a naive copy of that gitfile would
+    /// produce a dangling pointer outside the package. So when `includeGit` is true and the
+    /// package is split, the real repository is re-embedded as an ordinary `.git` directory
+    /// instead: exported/cloned copies always stay plain, self-contained repos with no
+    /// Anglesite-isms, matching what a package with an embedded (unmigrated) repo already does.
     public static func exportSource(
         of package: AnglesitePackage,
         to destinationDir: URL,
@@ -89,12 +96,25 @@ public enum PackageTransfer {
         // project, so a top-level filtered copy is sufficient (and preserves hidden files like
         // .gitignore / .site-config that aren't excluded).
         var excluded: Set<String> = ["node_modules"]
-        if !includeGit { excluded.insert(".git") }
+        var reembedGitFrom: URL?
+        if includeGit {
+            let gitPath = package.sourceURL.appendingPathComponent(".git", isDirectory: false)
+            var isDir: ObjCBool = false
+            if fileManager.fileExists(atPath: gitPath.path, isDirectory: &isDir), !isDir.boolValue {
+                excluded.insert(".git")
+                reembedGitFrom = package.liveRepositoryURL
+            }
+        } else {
+            excluded.insert(".git")
+        }
         try fileManager.createDirectory(at: destinationDir, withIntermediateDirectories: true)
         let entries = try fileManager.contentsOfDirectory(
             at: package.sourceURL, includingPropertiesForKeys: nil, options: [])
         for entry in entries where !excluded.contains(entry.lastPathComponent) {
             try fileManager.copyItem(at: entry, to: destinationDir.appendingPathComponent(entry.lastPathComponent))
+        }
+        if let reembedGitFrom {
+            try fileManager.copyItem(at: reembedGitFrom, to: destinationDir.appendingPathComponent(".git"))
         }
     }
 }
