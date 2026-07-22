@@ -931,6 +931,9 @@
     "Enable" : {
 
     },
+    "Enable & retry" : {
+
+    },
     "Enable Onion Routing" : {
 
     },
@@ -1187,6 +1190,9 @@
 
     },
     "Impact analysis" : {
+
+    },
+    "Inbound Webmention requires the Workers Paid plan" : {
 
     },
     "Import Site…" : {
@@ -1670,6 +1676,9 @@
 
     },
     "Reading %@ zone settings from Cloudflare…" : {
+
+    },
+    "Receiving webmentions verifies each one asynchronously using a Cloudflare Queue, which isn't available on the Workers Free plan. Continuing will create a Queue on your connected Cloudflare account." : {
 
     },
     "Recheck" : {
