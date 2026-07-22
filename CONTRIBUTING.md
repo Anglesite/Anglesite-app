@@ -1,6 +1,6 @@
 # Contributing to Anglesite (Mac app)
 
-Thanks for your interest in contributing! This repo is the native macOS app that hosts the [Anglesite plugin](https://github.com/Anglesite/anglesite). It's pre-release and moving fast, so a quick read of this page will save you time.
+Thanks for your interest in contributing! This repo is the native macOS app that consumes the MCP server from the published [Anglesite Claude Skill](https://github.com/Anglesite/anglesite). It's pre-release and moving fast, so a quick read of this page will save you time.
 
 ## Before you start
 
@@ -39,7 +39,7 @@ Key things to know:
   ```
   Always pass `--skip-marking-strings-stale`: without it, `sync` deletes any catalog key it can't find in the given `.stringsdata` files, and unless every one of them came from the exact same complete build, that silently nukes real entries — confirmed the hard way while writing this: a from-scratch `-derivedDataPath` build's `.stringsdata` set made `sync` empty the entire 700+-key catalog. This CLI recipe is only known-good against the `DerivedData` your own machine has already accumulated from normal `xcodebuild`/Xcode use — there is no known way yet to make it work reliably from an isolated, from-scratch build (e.g. in CI); review the `.xcstrings` diff yourself and include it in the same commit. Do not blindly restore the catalog when it appears after a build. If extraction looks incomplete or unexpectedly large, run a clean build first (`xcodebuild -project Anglesite.xcodeproj -scheme Anglesite -configuration Debug clean build`) and review the stabilized result before committing it. CI's `localization-catalog` lane (`scripts/check-localization-catalog.sh`, #811) is a static backstop, not a substitute: it heuristically scans `Sources/AnglesiteApp` for common SwiftUI call sites (`Text`, `Button`, `Label`, …) and `String(localized:)`/`LocalizedStringKey(...)` literals with no matching catalog key, but it doesn't type-check call sites and can't catch every extraction vector Xcode recognizes.
 - **Linux contributors welcome.** The portable SwiftPM targets build and test on Linux (Swift 6.3+, no Xcode or Node needed) — see [Developing on Linux](README.md#developing-on-linux). The cross-platform port ([#571](https://github.com/Anglesite/Anglesite-app/issues/571)) is an active track.
-- **Plugin sibling checkout (optional).** Some end-to-end tests expect the plugin repo checked out next to this one (`../anglesite`); they skip cleanly when it's absent.
+- **Plugin sibling checkout (optional).** Some end-to-end tests expect the Anglesite plugin repo checked out next to this one (`../anglesite`); they skip cleanly when it's absent.
 
 ## Testing
 
@@ -59,7 +59,7 @@ npm run lint && npm run typecheck && npm test
 Notes:
 
 - Container runtime tests are opt-in: `ANGLESITE_CONTAINER_TESTS=1` (plus `ANGLESITE_CONTAINER_E2E=1` for end-to-end cases).
-- MCP/apply-edit e2e tests run only when `ANGLESITE_PLUGIN_PATH` points at a plugin checkout; otherwise they skip.
+- MCP/apply-edit e2e tests run only when `ANGLESITE_PLUGIN_PATH` points at an Anglesite plugin checkout; otherwise they skip.
 - If you touch `Resources/Template/`, run `swift test` too — some Swift tests couple to the template markup.
 - CI runs the JS overlay checks, Linux portable-target builds, macOS `swift test` (including ThreadSanitizer lanes), an `Anglesite.xcodeproj` ↔ `project.yml` sync check, and an AppIntents schema check. All must pass.
 
@@ -69,14 +69,14 @@ Notes:
 - **Process spawning is centralized** in `AnglesiteCore/ProcessSupervisor` — never call `Process()` from a view.
 - **Logs are sacred** — every spawned subprocess streams stdout+stderr to the debug pane. Don't silently discard output.
 - **Git is the source of truth for sites** — the app must never become the only way to edit a site. A site's `Source/` repo stays clonable and editable outside the app.
-- **The app cannot bypass plugin security hooks** — `pre-deploy-check.sh` runs before every deploy; surface failures, don't add overrides.
+- **The app cannot bypass the template security gate** — `pre-deploy-check.ts` runs before every deploy; surface failures, don't add overrides.
 - **JS/TypeScript** (edit overlay) uses ES modules, vanilla APIs, and the existing oxlint/tsc/vitest toolchain.
 
 ## Commits and pull requests
 
 - **Conventional commits** — `feat(scope): …`, `fix(scope): …`, `ci: …`, etc. Reference the issue number in the subject when there is one (see `git log` for examples). Keep the whole subject line to **72 characters or fewer** (aim for ~50) — `type(scope): summary (#123)` adds up faster than it looks, and an over-length subject gets silently wrapped or split across `git log --oneline`, GitHub's commit/PR views, and `gh`'s own output. If it doesn't fit, shorten the summary and put the extra detail in the commit body, not the subject.
 - **Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) as-is.** Open the file and copy its exact section headings into the PR body — **Summary**, **Paired PR check**, and **Test plan** — even for a trivial change. Don't substitute a generic "Summary / Test plan" body from a different tool's default PR format: that shape silently drops the Paired PR check. Extra sections (Design notes, screenshots, etc.) are welcome appended after the template's own sections — never in place of them.
-- **Paired PRs.** Changes to the MCP message schema or plugin skills need a paired PR in [`Anglesite/anglesite`](https://github.com/Anglesite/anglesite): the plugin PR ships first in a tagged release, then the app PR consumes it. Template changes (`Resources/Template/`) are app-only. See `AGENTS.md` ▸ "Two-repo coordination".
+- **Paired PRs.** Changes to the MCP message schema need a paired PR in [`Anglesite/anglesite`](https://github.com/Anglesite/anglesite): the sidecar PR ships first in a tagged release, then the app PR consumes it. Template changes (`Resources/Template/`) are app-only. See `AGENTS.md` ▸ "Two-repo coordination".
 - **`@dwk/workers` catalog coordination.** The Worker catalog (`WorkerCatalog.swift` and friends) consumes `catalog.json` published by the separate [`davidwkeith/workers`](https://github.com/davidwkeith/workers) monorepo — a third repo outside the `Anglesite/anglesite` pairing above. Schema extensions there land the same way: keep the app-side decoding **backward-compatible** (new manifest fields optional, feature inert until the catalog publishes them) so the app PR can merge first, and note the pending catalog change in the PR body. Example: the #746 route-claims PR ([#829](https://github.com/Anglesite/Anglesite-app/pull/829)) shipped an optional `routes` field the catalog can adopt later.
 - Keep PRs focused; opportunistic cleanup near the code you're touching is fine, drive-by refactors of unrelated code are not.
 

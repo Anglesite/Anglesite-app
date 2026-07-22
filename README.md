@@ -105,7 +105,7 @@ Notes:
 
 ## Relationship to the sidecar repo
 
-This repo expects to live next to `Anglesite/anglesite` on disk (both checked out under the same parent directory) — or set `ANGLESITE_PLUGIN_SRC` to point elsewhere. The sibling repo supplies the **MCP sidecar** (`server/`), which the container-image scripts (`scripts/vendor-container-image.sh`, `scripts/build-podman-image.sh`) stage into the dev-server image; the MCP end-to-end tests also spawn it directly from the checkout (`ANGLESITE_PLUGIN_PATH`). Nothing from the sibling repo is bundled into the app itself anymore (#466).
+This repo expects to live next to `Anglesite/anglesite` on disk (both checked out under the same parent directory) — or set `ANGLESITE_SIDECAR_SRC` to point elsewhere (`ANGLESITE_PLUGIN_SRC` remains a compatibility alias). The sibling repo supplies the **MCP sidecar** (`server/`), which the container-image scripts (`scripts/vendor-container-image.sh`, `scripts/build-podman-image.sh`) stage into the dev-server image; the MCP end-to-end tests also spawn it directly from the checkout (`ANGLESITE_PLUGIN_PATH`). Nothing from the sibling repo is bundled into the app itself anymore (#466).
 
 ## License
 

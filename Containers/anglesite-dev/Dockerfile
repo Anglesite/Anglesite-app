@@ -4,7 +4,7 @@
 #   - scripts/build-podman-image.sh (podman, native host arch — arm64 or amd64 — tagged
 #     localhost/anglesite-dev:latest for PodmanContainerControl on Linux)
 # Bakes Node + git + socat (the vsock<->TCP bridge, macOS path only) + the app's MCP sidecar
-# (the plugin's server/, npm ci'd for the build's native arch so sharp's native binary is
+# (the MCP sidecar's server/, npm ci'd for the build's native arch so sharp's native binary is
 # correct) so a fresh container needs no in-guest install.
 
 # Per-arch digest pin (reproducible; re-bump periodically for base security updates). The build
@@ -20,16 +20,16 @@ FROM ${BASE_IMAGE} AS base
 # Unused on the podman path (port-mapping replaces vsock there) but harmless to install.
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates socat \
     && rm -rf /var/lib/apt/lists/*
-# MCP sidecar: staged by the build script from the plugin's server/ dir. npm ci runs on the
+# MCP sidecar: staged by the build script from the plugin checkout's server/ dir. npm ci runs on the
 # build's native arch → pulls the matching @img/sharp-linux-{arm64,x64} native prebuilt from the
 # lockfile. --omit=dev drops devDependencies. We intentionally do NOT pass --omit=optional
 # because the sharp prebuilts are marked optional in the lockfile (platform-specific); npm's
 # platform-cpu/os filters already skip the other arch's prebuilt and macOS-only optionals like
 # fsevents.
 COPY mcp-sidecar/ /usr/local/lib/anglesite-mcp/
-# Playwright is an unused optionalDependency of the plugin. We keep `npm ci` (reproducible; lock-exact)
-# and cannot pass --omit=optional because the sharp prebuilt is also optional (platform prebuilt).
-# ENV prevents playwright's postinstall from downloading ~300 MB of browsers; rm strips the pkg dirs.
+# Playwright is an unused optionalDependency of the plugin package. We keep `npm ci`
+# (reproducible; lock-exact) and cannot pass --omit=optional because the sharp prebuilt is also
+# optional. This prevents Playwright from downloading browsers while the image builds.
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN cd /usr/local/lib/anglesite-mcp \
     && npm ci --omit=dev \
