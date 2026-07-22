@@ -17,6 +17,11 @@ public actor SocialWorkerProvisionCommand {
         /// this site has never deployed before — mirrors `DeployCommand.Result.workerNameConflict`
         /// rather than collapsing it, so callers can drive the same rename-and-retry UX (#740).
         case workerNameConflict(name: String, resources: WorkerComposition.ProvisionedResources)
+        /// Webmention receive is active but the site hasn't explicitly acknowledged that
+        /// Cloudflare Queues require the Workers Paid plan (#359). Returned *before* any
+        /// wrangler call — `DeployModel` parks the deploy and presents a confirmation sheet;
+        /// retrying with `acknowledgesPaidPlan: true` proceeds to create the Queue.
+        case webmentionPaidPlanConfirmationNeeded(resources: WorkerComposition.ProvisionedResources)
         case failed(reason: String, exitCode: Int32?, resources: WorkerComposition.ProvisionedResources)
     }
 
@@ -61,7 +66,17 @@ public actor SocialWorkerProvisionCommand {
         /// a worker being deactivated (which drops its binding block from the file) and later
         /// reactivated — the default (`.init()`, all-nil) makes this call fall through to the
         /// existing file-scrape-only behavior unchanged.
-        knownResources: WorkerComposition.ProvisionedResources = .init()
+        knownResources: WorkerComposition.ProvisionedResources = .init(),
+        /// The site's best-known public URL (`.site-config`'s `DOMAIN`/`SITE_DOMAIN`/`SITE_URL`,
+        /// via `DeployCoordinator.resolveSiteURL`), threaded into `WorkerComposition`'s `SITE_URL`
+        /// var. `nil` on a first-ever deploy before any host is known — the composed Worker
+        /// degrades gracefully (worker.ts no-ops the queue consumer without it).
+        siteURL: String? = nil,
+        /// Explicit per-deploy opt-in that the user has acknowledged inbound Webmention requires
+        /// the Cloudflare Workers Paid plan (#359) — `DeployModel` sets this from
+        /// `SiteSettings.webmentionReceivePaidPlanAcknowledged` plus the in-flight confirmation
+        /// sheet's "Enable & retry" action. Ignored unless a `webmention` worker is active.
+        acknowledgesPaidPlan: Bool = false
     ) async -> Result {
         let token: String?
         do {
@@ -109,7 +124,7 @@ public actor SocialWorkerProvisionCommand {
                     return .failed(reason: "wrangler created D1 database \(name) but no database id was found", exitCode: 0, resources: resources)
                 }
                 resources.d1DatabaseID = id
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
                     return failure
                 }
             }
@@ -136,7 +151,7 @@ public actor SocialWorkerProvisionCommand {
                     return .failed(reason: "wrangler created KV namespace \(name) but no namespace id was found", exitCode: 0, resources: resources)
                 }
                 resources.kvNamespaceID = id
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
                     return failure
                 }
             }
@@ -156,13 +171,40 @@ public actor SocialWorkerProvisionCommand {
                     return failure
                 }
                 resources.r2BucketName = name
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
                     return failure
                 }
             }
         }
 
-        if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources) {
+        let hasWebmentionReceive = workers.contains(where: { $0.id == WorkerComposition.webmentionWorkerID })
+        if hasWebmentionReceive, resources.queueName == nil {
+            guard acknowledgesPaidPlan else {
+                return .webmentionPaidPlanConfirmationNeeded(resources: resources)
+            }
+            let name = "\(siteName)-webmention"
+            let result = await runWrangler(
+                siteDirectory: siteDirectory,
+                arguments: ["queues", "create", name, "--json"],
+                environment: environment,
+                source: source,
+                resources: resources
+            )
+            switch result {
+            case .success:
+                resources.queueName = name
+            case .failure(let failure):
+                return failure
+            }
+            if let failure = persistConfig(
+                siteDirectory: siteDirectory, siteName: siteName, workers: workers,
+                routeClaims: routeClaims, resources: resources, siteURL: siteURL
+            ) {
+                return failure
+            }
+        }
+
+        if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
             return failure
         }
 
@@ -227,7 +269,8 @@ public actor SocialWorkerProvisionCommand {
         siteName: String,
         workers: [WorkerDescriptor],
         routeClaims: [WorkerRouteClaim],
-        resources: WorkerComposition.ProvisionedResources
+        resources: WorkerComposition.ProvisionedResources,
+        siteURL: String? = nil
     ) -> Result? {
         do {
             // Called without `inboxCaptureEnabled`/`inboxKVNamespaceID` — #587's inbox-capture
@@ -239,7 +282,8 @@ public actor SocialWorkerProvisionCommand {
                 siteName: siteName,
                 workers: workers,
                 routeClaims: routeClaims,
-                resources: resources
+                resources: resources,
+                siteURL: siteURL
             )
             try toml.write(
                 to: siteDirectory.appendingPathComponent("wrangler.toml"),
@@ -260,7 +304,8 @@ public actor SocialWorkerProvisionCommand {
         return .init(
             d1DatabaseID: extractTomlString(named: "database_id", from: toml),
             kvNamespaceID: extractTomlString(named: "id", from: toml),
-            r2BucketName: extractTomlString(named: "bucket_name", from: toml)
+            r2BucketName: extractTomlString(named: "bucket_name", from: toml),
+            queueName: extractTomlString(named: "queue", from: toml)
         )
     }
 
@@ -340,6 +385,14 @@ extension SocialWorkerProvisionCommand.Result {
             return .blocked(failures: failures, warnings: warnings)
         case .workerNameConflict(let name, _):
             return .workerNameConflict(name: name)
+        case .webmentionPaidPlanConfirmationNeeded:
+            // `DeployCommand.Result` has no equivalent case yet — callers that go through this
+            // convenience mapping (rather than reading `SocialWorkerProvisionCommand.Result`
+            // directly) see this as a plain failure until the confirmation-sheet wiring lands.
+            return .failed(
+                reason: "Inbound Webmention requires the Cloudflare Workers Paid plan — confirm in Settings before deploying",
+                exitCode: nil
+            )
         case .failed(let reason, let exitCode, _):
             return .failed(reason: reason, exitCode: exitCode)
         }
