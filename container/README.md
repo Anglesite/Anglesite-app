@@ -17,7 +17,7 @@ a canonical dev-server image plus the Cloudflare-specific wrapper
 `Resources/container-image/`.
 
 Original design intent: one behavior-defining OCI image, with substrate-specific
-packaging where needed. The Astro dev server and the plugin's MCP server run
+packaging where needed. The Astro dev server and the MCP sidecar run
 inside the Linux container so the dev server behaves consistently:
 
 | Substrate | Current source |
@@ -31,8 +31,8 @@ This realizes the [design doc](../docs/specs/2026-05-30-cloudflare-sandbox-dev-s
 
 - **Node**, pinned to [`scripts/node-version.txt`](../scripts/node-version.txt) (passed as `NODE_VERSION` at build).
 - **`git`** — Git is the source of truth (design §3.1 option A); the container clones the site on start, edits commit/push. No host-share, no embedded Node.
-- **The Astro / site toolchain**, pre-installed from the plugin template's lockfile (`@opt/anglesite/baked`).
-- **The plugin's MCP server runtime** — `server/*.mjs` plus its production deps, baked at `/opt/anglesite/plugin` (`ANGLESITE_MCP_ENTRY`). The plugin is the source of truth for the MCP server (`CLAUDE.md`).
+- **The Astro / site toolchain**, pre-installed from the app template's lockfile (`@opt/anglesite/baked`).
+- **The MCP sidecar runtime** — `server/*.mjs` plus its production deps, baked at `/opt/anglesite/mcp-sidecar` (`ANGLESITE_MCP_ENTRY`).
 - **`tini`** as PID 1 for signal/zombie reaping.
 
 Defaults to **`linux/arm64`** for historical/local builds. Cloudflare Sandbox is
@@ -62,9 +62,9 @@ scripts/build-container-image.sh
 scripts/build-container-image.sh --push
 ```
 
-Env overrides: `IMAGE_REPO` (default `ghcr.io/anglesite/anglesite-devserver`), `IMAGE_TAG` (default `dev`), `ANGLESITE_PLUGIN_SRC` (default `../anglesite`, same as `copy-plugin.sh`).
+Env overrides: `IMAGE_REPO` (default `ghcr.io/anglesite/anglesite-devserver`), `IMAGE_TAG` (default `dev`), and `ANGLESITE_SIDECAR_SRC` (default `../anglesite`; `ANGLESITE_PLUGIN_SRC` remains a compatibility alias).
 
-The script stages a clean build context (plugin runtime + template manifests + helper scripts), so the `Dockerfile` is **not** buildable on its own — build through the script.
+The script stages a clean build context (MCP sidecar + template manifests + helper scripts), so the `Dockerfile` is **not** buildable on its own — build through the script.
 
 ## Runtime contract
 
@@ -78,7 +78,7 @@ The default `ENTRYPOINT` ([`entrypoint.sh`](entrypoint.sh)) hydrates then execs 
 | `PORT` | Astro dev port (default `4321`) |
 | `ANGLESITE_MCP_ENTRY` | path to the baked MCP server entry |
 
-The default CMD ([`start-dev-server.sh`](start-dev-server.sh)) runs `astro dev` bound to `0.0.0.0`. The **network-reachable MCP server** starts here too once the plugin's HTTP/SSE transport (#63) and `MCPClient`'s HTTP transport (#64) land; until then the MCP runtime is baked in and started over stdio by the runtime layer.
+The default CMD ([`start-dev-server.sh`](start-dev-server.sh)) runs `astro dev` bound to `0.0.0.0`. The network-reachable MCP server starts here once the sidecar grows an HTTP/SSE transport and the remote runtime wires its matching HTTP transport; until then the MCP runtime is baked in and started over stdio by the runtime layer.
 
 ## Distribution decision (Q-D)
 
@@ -88,4 +88,4 @@ The default CMD ([`start-dev-server.sh`](start-dev-server.sh)) runs `astro dev` 
 - **Apple Containerization** no longer consumes this lowercase path in the app. It uses the vendored OCI layout produced from `../Containers/anglesite-dev/`.
 - **Cloudflare Sandbox** can't run the base image entirely unmodified: the Sandbox SDK needs its standalone init binary in the image. [`Dockerfile.cloudflare`](Dockerfile.cloudflare) `FROM`s the base image (by digest) and adds **only** that binary. Cloudflare builds/pushes this thin wrapper to its own registry at `wrangler deploy`; the exact init source pin is finalized by the Cloudflare spike (#61).
 
-This keeps the *behavior-defining* layers (Node, git, Astro toolchain, plugin MCP runtime, baked deps) reusable for the remote substrate while keeping the active macOS image source unambiguous.
+This keeps the *behavior-defining* layers (Node, git, Astro toolchain, MCP sidecar, baked deps) reusable for the remote substrate while keeping the active macOS image source unambiguous.

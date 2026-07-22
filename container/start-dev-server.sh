@@ -4,7 +4,7 @@
 # can reach it (local container IP, or a Cloudflare exposed port). HMR rides the
 # same connection (design §2).
 #
-# The network-reachable MCP server starts here too once the plugin grows an
+# The network-reachable MCP server starts here too once the sidecar grows an
 # HTTP/SSE transport (#63) and MCPClient grows the matching HTTP transport (#64).
 # Until then the MCP runtime is baked in (ANGLESITE_MCP_ENTRY) and started by the
 # runtime layer over stdio. See container/README.md.

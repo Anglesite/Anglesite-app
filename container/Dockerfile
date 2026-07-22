@@ -7,7 +7,7 @@
 # is exported into Resources/container-image/ by scripts/vendor-container-image.sh.
 #
 # This Dockerfile remains for the Cloudflare Sandbox / remote-runtime pipeline:
-# the Astro dev server and the plugin's MCP server run inside this Linux
+# the Astro dev server and the MCP sidecar run inside this Linux
 # container so the remote runtime can match the local runtime's behavior.
 #
 #   • Apple Containerization (macOS) — Containers/anglesite-dev/ bundled as OCI.
@@ -35,19 +35,19 @@ ENV ANGLESITE_HOME=/opt/anglesite \
     SITE_DIR=/workspace \
     PORT=4321
 
-# ---- Plugin MCP server runtime ------------------------------------------------
-# The plugin is the source of truth for the MCP server (CLAUDE.md). Bake its
+# ---- MCP sidecar runtime ------------------------------------------------------
+# The sidecar is the source of truth for the MCP server. Bake its
 # runtime — server/*.mjs plus the production dependency closure
 # (@modelcontextprotocol/sdk, sharp, and the SDK's hoisted zod) — so the runtime
 # substrates can start it with no network install. Deps are installed against the
 # committed lockfile before the source is copied so this layer caches well.
-COPY plugin/package.json plugin/package-lock.json ${ANGLESITE_HOME}/plugin/
-RUN cd ${ANGLESITE_HOME}/plugin \
+COPY mcp-sidecar/package.json mcp-sidecar/package-lock.json ${ANGLESITE_HOME}/mcp-sidecar/
+RUN cd ${ANGLESITE_HOME}/mcp-sidecar \
  && ( npm ci --omit=dev \
-      || { echo "WARN: plugin lockfile out of sync — falling back to npm install" >&2; \
+      || { echo "WARN: sidecar lockfile out of sync — falling back to npm install" >&2; \
            npm install --omit=dev; } )
-COPY plugin/ ${ANGLESITE_HOME}/plugin/
-ENV ANGLESITE_MCP_ENTRY=${ANGLESITE_HOME}/plugin/server/index.mjs
+COPY mcp-sidecar/ ${ANGLESITE_HOME}/mcp-sidecar/
+ENV ANGLESITE_MCP_ENTRY=${ANGLESITE_HOME}/mcp-sidecar/server/index.mjs
 
 # ---- Pre-baked site toolchain (skip npm ci on cold start; design §5b) ---------
 # Install the template's full dependency closure once, at build time. This warms

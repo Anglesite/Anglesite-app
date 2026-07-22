@@ -8,7 +8,7 @@
 #
 # This path remains for the Cloudflare Sandbox / remote-runtime image pipeline.
 # Node is pinned to scripts/node-version.txt; git, the Astro/site toolchain, and
-# the plugin's MCP server runtime are baked in; the template's dependency closure
+# the MCP sidecar runtime is baked in; the template's dependency closure
 # is pre-installed so cold starts skip npm ci (design §5b).
 #
 # Usage:
@@ -21,7 +21,8 @@
 #   PLATFORM             build arch   (default: linux/arm64). Set linux/amd64 for the
 #                        Cloudflare substrate (CF Containers are amd64-only), or a
 #                        comma list "linux/amd64,linux/arm64" for a multi-arch manifest.
-#   ANGLESITE_PLUGIN_SRC plugin checkout (default: ../anglesite sibling, like stage-dev-image-context.sh)
+#   ANGLESITE_SIDECAR_SRC sidecar checkout (default: ../anglesite sibling)
+#   ANGLESITE_PLUGIN_SRC  legacy alias for ANGLESITE_SIDECAR_SRC
 #
 # Distribution (decision Q-D): the Cloudflare/shared image is pushed to a registry
 # BY DIGEST. Cloudflare Containers run amd64 (remote); the substrate layers its
@@ -58,11 +59,12 @@ fi
 NODE_VERSION=$(tr -d '[:space:]' < "$VERSION_FILE")
 [[ -n "$NODE_VERSION" ]] || { echo "$VERSION_FILE is empty" >&2; exit 1; }
 
-# Resolve the plugin source the same way scripts/lib/stage-dev-image-context.sh does.
+# Resolve the sidecar source the same way scripts/lib/stage-dev-image-context.sh does.
 DEFAULT_SRC=$(cd "$REPO_ROOT/.." && pwd)/anglesite
-SRC="${ANGLESITE_PLUGIN_SRC:-$DEFAULT_SRC}"
-[[ -d "$SRC" ]] || { echo "plugin source not found at $SRC (set ANGLESITE_PLUGIN_SRC)" >&2; exit 1; }
-[[ -f "$SRC/.claude-plugin/plugin.json" ]] || { echo "$SRC is not the Anglesite plugin (no .claude-plugin/plugin.json)" >&2; exit 1; }
+SIDECAR_SRC="${ANGLESITE_SIDECAR_SRC:-${ANGLESITE_PLUGIN_SRC:-$DEFAULT_SRC}}"
+[[ -d "$SIDECAR_SRC" ]] || { echo "MCP sidecar source not found at $SIDECAR_SRC (set ANGLESITE_SIDECAR_SRC)" >&2; exit 1; }
+[[ -f "$SIDECAR_SRC/server/index.mjs" && -f "$SIDECAR_SRC/package.json" ]] \
+    || { echo "$SIDECAR_SRC is not an Anglesite MCP sidecar (need server/index.mjs and package.json)" >&2; exit 1; }
 TEMPLATE_DIR="$REPO_ROOT/Resources/Template"
 [[ -f "$TEMPLATE_DIR/package.json" ]] \
     || { echo "template manifests missing under $TEMPLATE_DIR" >&2; exit 1; }
@@ -84,17 +86,13 @@ echo "==> Staging build context"
 cp "$CONTAINER_DIR/Dockerfile" "$CONTAINER_DIR/.dockerignore" "$CTX/"
 cp "$CONTAINER_DIR/entrypoint.sh" "$CONTAINER_DIR/hydrate.sh" "$CONTAINER_DIR/start-dev-server.sh" "$CTX/"
 
-# Plugin runtime: server + manifests + lockfile. node_modules/.git and other
-# heavy/private dirs are excluded — production deps are installed inside the image.
-mkdir -p "$CTX/plugin"
+# MCP sidecar runtime: server + manifests + lockfile. Production dependencies
+# are installed inside the image.
+mkdir -p "$CTX/mcp-sidecar"
 rsync -a \
-    --exclude='node_modules/' --exclude='.git/' --exclude='.github/' \
-    --exclude='.worktrees/' --exclude='.serena/' --exclude='.playwright-mcp/' \
-    --exclude='.claude/' --exclude='dist/' --exclude='build/' \
-    --exclude='tests/' --exclude='test/' --exclude='docs/' \
-    --exclude='*.log' --exclude='.DS_Store' \
-    --exclude='template/' \
-    "$SRC/" "$CTX/plugin/"
+    --exclude='node_modules/' --exclude='.git/' \
+    "$SIDECAR_SRC/server/" "$CTX/mcp-sidecar/server/"
+cp "$SIDECAR_SRC/package.json" "$SIDECAR_SRC/package-lock.json" "$CTX/mcp-sidecar/"
 
 # Template: manifests only. We bake the template's dependency closure, not its source.
 mkdir -p "$CTX/template"

@@ -74,9 +74,9 @@ setup_macos() {
     fi
 
     if [[ -d "$REPO_ROOT/../anglesite" ]]; then
-        ok "sibling plugin checkout found (../anglesite) — MCP e2e tests can run (ANGLESITE_PLUGIN_PATH)"
+        ok "sibling Anglesite plugin checkout found (../anglesite) — MCP e2e tests can run (ANGLESITE_PLUGIN_PATH)"
     else
-        note "sibling plugin repo not found at ../anglesite — MCP e2e tests will skip cleanly (optional)"
+        note "sibling Anglesite plugin repo not found at ../anglesite — MCP e2e tests will skip cleanly (optional)"
     fi
 
     echo

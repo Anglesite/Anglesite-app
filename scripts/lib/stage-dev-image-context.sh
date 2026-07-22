@@ -2,7 +2,7 @@
 # Shared staging step for scripts that build Containers/anglesite-dev/Dockerfile (the app's
 # local dev-server image), whichever tool builds it (Apple `container` CLI or podman).
 #
-# Stages the MCP sidecar (from the sibling plugin repo) and the website template's dependency
+# Stages the MCP sidecar (from the sibling Anglesite plugin repo) and the website template's dependency
 # manifests into the build context, and registers a cleanup trap so the staged, gitignored
 # copies don't linger after the build. Source this file, then call stage_dev_image_context "$CTX".
 #
@@ -16,34 +16,35 @@ stage_dev_image_context() {
     local root
     root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-    # Honor $ANGLESITE_PLUGIN_SRC, default to
-    # ../anglesite (sibling under the same parent dir as this repo — wrong from inside a
-    # worktree, so set ANGLESITE_PLUGIN_SRC there).
-    local default_plugin_src="$(cd "$root/.." && pwd)/anglesite"
-    local plugin_src="${ANGLESITE_PLUGIN_SRC:-$default_plugin_src}"
+    # Honor $ANGLESITE_SIDECAR_SRC for the MCP-server source boundary. The sibling
+    # checkout remains the published Anglesite plugin; ANGLESITE_PLUGIN_SRC remains
+    # a compatibility alias for existing local development environments.
+    local default_sidecar_src="$(cd "$root/.." && pwd)/anglesite"
+    local sidecar_src="${ANGLESITE_SIDECAR_SRC:-${ANGLESITE_PLUGIN_SRC:-$default_sidecar_src}}"
 
-    if [[ ! -d "$plugin_src" ]]; then
-        echo "ERROR: plugin source not found at $plugin_src" >&2
-        echo "       Set ANGLESITE_PLUGIN_SRC or clone github.com/Anglesite/anglesite as a sibling." >&2
+    if [[ ! -d "$sidecar_src" ]]; then
+        echo "ERROR: MCP sidecar source not found at $sidecar_src" >&2
+        echo "       Set ANGLESITE_SIDECAR_SRC or clone github.com/Anglesite/anglesite as a sibling." >&2
         exit 1
     fi
-    if [[ ! -f "$plugin_src/.claude-plugin/plugin.json" ]]; then
-        echo "ERROR: $plugin_src does not look like the Anglesite plugin (no .claude-plugin/plugin.json)" >&2
+    if [[ ! -f "$sidecar_src/server/index.mjs" || ! -f "$sidecar_src/package.json" ]]; then
+        echo "ERROR: $sidecar_src does not look like an Anglesite MCP sidecar" >&2
+        echo "       Expected server/index.mjs and package.json." >&2
         exit 1
     fi
 
     local sidecar_stage="$ctx/mcp-sidecar"
-    echo "Staging MCP sidecar from $plugin_src → $sidecar_stage"
+    echo "Staging MCP sidecar from $sidecar_src → $sidecar_stage"
     rm -rf "$sidecar_stage"
     mkdir -p "$sidecar_stage"
 
-    # Copy the plugin's server/ directory + package manifests (no node_modules, no .git).
+    # Copy the sidecar's server/ directory + package manifests (no node_modules, no .git).
     rsync -a --delete \
         --exclude='node_modules/' \
         --exclude='.git/' \
-        "$plugin_src/server/" "$sidecar_stage/server/"
-    cp "$plugin_src/package.json" "$sidecar_stage/"
-    cp "$plugin_src/package-lock.json" "$sidecar_stage/"
+        "$sidecar_src/server/" "$sidecar_stage/server/"
+    cp "$sidecar_src/package.json" "$sidecar_stage/"
+    cp "$sidecar_src/package-lock.json" "$sidecar_stage/"
 
     echo "Sidecar staged: $(ls "$sidecar_stage")"
 
