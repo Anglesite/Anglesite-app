@@ -80,4 +80,28 @@ public enum WorkerActivation {
         guard !unresolvedIDs.isEmpty else { return nil }
         return "no catalog entry for active worker(s) \(unresolvedIDs.sorted().joined(separator: ", ")) — deploying with no resource bindings or route claims for them; wrangler.toml composition will be incomplete until a catalog fetch resolves them"
     }
+
+    /// Advisory-only (#359): reports which required `@dwk/*` packages for an active worker's
+    /// gated phase aren't release-ready yet, per `WorkersConformanceStatus.gateStatus`. Never
+    /// blocks activation or deploy — `conformance/status.json` reporting a package `"pending"`
+    /// is expected during active development (verified live 2026-07-21: V-3's packages are all
+    /// `"pending"` even though #887's webmention receiver already ships and works). This exists
+    /// purely so the debug pane surfaces "you're running ahead of conformance certification"
+    /// rather than the app silently having no opinion. `nil` when nothing to report.
+    public static func conformanceAdvisory(
+        activeIDs: Set<String>, conformance: WorkersConformanceStatus
+    ) -> String? {
+        var messages: [String] = []
+        for phase in [WorkersConformanceStatus.Phase.v2, .v3, .v4] {
+            let required = WorkersConformanceStatus.phaseRequirements[phase] ?? []
+            // Only advise about a phase if one of its required packages corresponds to an
+            // active worker id — npm package names are "@dwk/<id>", matching WorkerDescriptor.id.
+            let relevantActive = required.contains { activeIDs.contains(String($0.dropFirst("@dwk/".count))) }
+            guard relevantActive else { continue }
+            let gate = conformance.gateStatus(for: phase)
+            guard !gate.isUnblocked else { continue }
+            messages.append("conformance: \(gate.blocked.joined(separator: ", ")) not yet release-ready for this phase")
+        }
+        return messages.isEmpty ? nil : messages.joined(separator: "; ")
+    }
 }

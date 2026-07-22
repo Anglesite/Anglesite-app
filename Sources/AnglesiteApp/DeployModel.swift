@@ -493,6 +493,18 @@ final class DeployModel {
             await logCenter.append(source: "deploy:\(siteID)", stream: .stderr, text: warning)
         }
 
+        // Advisory-only (#359): surfaces @dwk/workers conformance status for the active set's
+        // gated phase, if any. Never blocks — a fetch failure degrades to an empty status inside
+        // WorkersConformanceFetcher, and conformanceAdvisory returning nil just skips the log.
+        let conformanceStatus = await WorkersConformanceFetcher(
+            statusURL: WorkersConformanceFetcher.productionStatusURL
+        ).status()
+        if let advisory = WorkerActivation.conformanceAdvisory(
+            activeIDs: effectiveActiveIDs, conformance: conformanceStatus
+        ) {
+            await logCenter.append(source: "deploy:\(siteID)", stream: .stdout, text: advisory)
+        }
+
         // Dynamic-route claims of the effective active set (#746). Validation failures (a
         // malformed path, two active workers claiming overlapping routes) refuse the deploy
         // before any Cloudflare call — never silently drop a claim and deploy a Worker whose

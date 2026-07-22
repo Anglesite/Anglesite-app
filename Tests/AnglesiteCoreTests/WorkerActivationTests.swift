@@ -158,4 +158,20 @@ struct WorkerActivationTests {
         let warning = WorkerActivation.missingDescriptorWarning(unresolvedIDs: ["webmention", "indieauth"])
         #expect(warning?.contains("indieauth, webmention") == true)
     }
+
+    @Test("conformanceAdvisory reports blocked packages for an active phase-gated worker")
+    func advisoryReportsBlockedPackages() {
+        let status = try! WorkersConformanceReader.parse("""
+        { "packages": { "@dwk/webmention": { "standard": "Webmention", "suites": {}, "integration": { "status": "pending" } } } }
+        """.data(using: .utf8)!)
+        let advisory = WorkerActivation.conformanceAdvisory(activeIDs: ["webmention"], conformance: status)
+        #expect(advisory != nil)
+        #expect(advisory!.contains("@dwk/webmention"))
+    }
+
+    @Test("conformanceAdvisory is nil when nothing phase-gated is active")
+    func advisoryNilWithoutRelevantWorkers() {
+        let status = WorkersConformanceStatus(packages: [:])
+        #expect(WorkerActivation.conformanceAdvisory(activeIDs: ["solid-pod"], conformance: status) == nil)
+    }
 }
