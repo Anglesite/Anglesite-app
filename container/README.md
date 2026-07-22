@@ -78,7 +78,7 @@ The default `ENTRYPOINT` ([`entrypoint.sh`](entrypoint.sh)) hydrates then execs 
 | `PORT` | Astro dev port (default `4321`) |
 | `ANGLESITE_MCP_ENTRY` | path to the baked MCP server entry |
 
-The default CMD ([`start-dev-server.sh`](start-dev-server.sh)) runs `astro dev` bound to `0.0.0.0`. The sidecar's Streamable HTTP transport exposes the MCP server on the runtime-managed port, while stdio remains available for direct local use.
+The default CMD ([`start-dev-server.sh`](start-dev-server.sh)) runs `astro dev` bound to `0.0.0.0`. The network-reachable MCP server starts here once the sidecar grows an HTTP/SSE transport and the remote runtime wires its matching HTTP transport; until then the MCP runtime is baked in and started over stdio by the runtime layer.
 
 ## Distribution decision (Q-D)
 
