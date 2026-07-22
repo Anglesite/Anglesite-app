@@ -225,6 +225,28 @@ struct WorkerCompositionTests {
         #expect(toml.contains("queue = \"my-site-webmention\""))
     }
 
+    @Test("webmention receive with a known site URL emits a SITE_URL var")
+    func webmentionEmitsSiteURL() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [webmentionWorker], siteURL: "https://my-site.example")
+        #expect(toml.contains("[vars]"))
+        #expect(toml.contains("SITE_URL = \"https://my-site.example\""))
+    }
+
+    @Test("webmention receive with no known site URL omits the vars block")
+    func webmentionOmitsSiteURLWhenUnknown() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [webmentionWorker])
+        #expect(!toml.contains("[vars]"))
+        #expect(!toml.contains("SITE_URL"))
+    }
+
+    @Test("siteURL is ignored when webmention receive isn't active")
+    func siteURLIgnoredWithoutWebmention() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [indieauthWorker], siteURL: "https://my-site.example")
+        #expect(!toml.contains("SITE_URL"))
+    }
+
     @Test("ProvisionedResources.queueName round-trips through JSONEncoder/JSONDecoder")
     func provisionedResourcesQueueNameCodable() throws {
         let resources = WorkerComposition.ProvisionedResources(queueName: "my-site-webmention")

@@ -87,7 +87,8 @@ public enum WorkerComposition {
         routeClaims: [WorkerRouteClaim] = [],
         resources: ProvisionedResources = .init(),
         inboxCaptureEnabled: Bool = false,
-        inboxKVNamespaceID: String? = nil
+        inboxKVNamespaceID: String? = nil,
+        siteURL: String? = nil
     ) throws -> String {
         guard isValidSiteName(siteName) else {
             throw ConfigError.invalidSiteName(siteName)
@@ -220,6 +221,12 @@ public enum WorkerComposition {
             } else {
                 lines.append("id = \"\"  # filled by provisioning")
             }
+        }
+
+        if hasWebmentionReceive, let siteURL, !siteURL.isEmpty {
+            lines.append("")
+            lines.append("[vars]")
+            lines.append("SITE_URL = \"\(siteURL)\"")
         }
 
         if hasIndieauth {
