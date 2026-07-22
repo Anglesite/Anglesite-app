@@ -206,6 +206,33 @@ struct WorkerCompositionTests {
         #expect(!toml.contains("WEBMENTION_INBOX"))
     }
 
+    @Test("webmention receive adds queue producer/consumer blocks")
+    func webmentionAddsQueueBlocks() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site",
+            workers: [webmentionWorker],
+            resources: .init(queueName: "my-site-webmention")
+        )
+        #expect(toml.contains("[[queues.producers]]"))
+        #expect(toml.contains("[[queues.consumers]]"))
+        #expect(toml.contains("queue = \"my-site-webmention\""))
+        #expect(toml.contains("binding = \"WEBMENTION_QUEUE\""))
+    }
+
+    @Test("webmention queue name defaults to a deterministic placeholder before provisioning")
+    func webmentionQueueDefaultsUnprovisioned() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [webmentionWorker])
+        #expect(toml.contains("queue = \"my-site-webmention\""))
+    }
+
+    @Test("ProvisionedResources.queueName round-trips through JSONEncoder/JSONDecoder")
+    func provisionedResourcesQueueNameCodable() throws {
+        let resources = WorkerComposition.ProvisionedResources(queueName: "my-site-webmention")
+        let data = try JSONEncoder().encode(resources)
+        let decoded = try JSONDecoder().decode(WorkerComposition.ProvisionedResources.self, from: data)
+        #expect(decoded == resources)
+    }
+
     @Test("ProvisionedResources round-trips through JSONEncoder/JSONDecoder")
     func provisionedResourcesCodable() throws {
         let resources = WorkerComposition.ProvisionedResources(

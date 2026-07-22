@@ -49,11 +49,19 @@ public enum WorkerComposition {
         public var d1DatabaseID: String?
         public var kvNamespaceID: String?
         public var r2BucketName: String?
+        /// The Cloudflare Queue name backing `@dwk/webmention`'s async verify step. Like
+        /// `r2BucketName`, this is a deterministic name (`\(siteName)-webmention`), not an id —
+        /// wrangler.toml's `[[queues.*]]` blocks reference queues by name.
+        public var queueName: String?
 
-        public init(d1DatabaseID: String? = nil, kvNamespaceID: String? = nil, r2BucketName: String? = nil) {
+        public init(
+            d1DatabaseID: String? = nil, kvNamespaceID: String? = nil, r2BucketName: String? = nil,
+            queueName: String? = nil
+        ) {
             self.d1DatabaseID = d1DatabaseID
             self.kvNamespaceID = kvNamespaceID
             self.r2BucketName = r2BucketName
+            self.queueName = queueName
         }
     }
 
@@ -166,6 +174,23 @@ public enum WorkerComposition {
             } else {
                 lines.append("database_id = \"\"  # filled by provisioning")
             }
+        }
+
+        // Cloudflare Queue backing @dwk/webmention's async verify step. Queues are referenced by
+        // name (not id), so — like r2BucketName — this falls back to a deterministic
+        // `\(siteName)-webmention` placeholder before provisioning assigns the real one.
+        if hasWebmentionReceive {
+            lines.append("")
+            let queueName = resources.queueName ?? "\(siteName)-webmention"
+            lines.append("[[queues.producers]]")
+            lines.append("queue = \"\(queueName)\"")
+            lines.append("binding = \"WEBMENTION_QUEUE\"")
+            lines.append("")
+            lines.append("[[queues.consumers]]")
+            lines.append("queue = \"\(queueName)\"")
+            lines.append("max_batch_size = 10")
+            lines.append("max_batch_timeout = 30")
+            lines.append("max_retries = 3")
         }
 
         if workers.contains(where: { $0.resources.needsKV }) {
