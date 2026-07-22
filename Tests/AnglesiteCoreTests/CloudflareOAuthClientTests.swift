@@ -77,7 +77,8 @@ struct CloudflareOAuthClientTests {
     private func makeRequest(state: String = "abc123") -> CloudflareOAuthRequest {
         CloudflareOAuthRequest(
             authorizeURL: URL(string: "https://dash.cloudflare.com/oauth2/auth")!,
-            state: state, codeVerifier: "verifier")
+            state: state, codeVerifier: "verifier",
+            tokenEndpoint: URL(string: "https://dash.cloudflare.com/oauth2/token")!)
     }
 
     @Test("a matching state yields the code")
@@ -96,11 +97,20 @@ struct CloudflareOAuthClientTests {
         }
     }
 
-    @Test("an error query param throws .callbackDenied even with a matching state")
+    @Test("an error query param throws .callbackDenied when the state matches")
     func callbackDenied() {
         let request = makeRequest()
         let callback = URL(string: "https://auth.anglesite.dwk.io/oauth-callback?error=access_denied&state=abc123")!
         #expect(throws: CloudflareOAuthError.callbackDenied("access_denied")) {
+            _ = try CloudflareOAuthClient.authorizationCode(from: callback, matching: request)
+        }
+    }
+
+    @Test("an error query param with a non-matching state throws .stateMismatch, not .callbackDenied")
+    func callbackErrorWithMismatchedStateIsStateMismatch() {
+        let request = makeRequest()
+        let callback = URL(string: "https://auth.anglesite.dwk.io/oauth-callback?error=access_denied&state=WRONG")!
+        #expect(throws: CloudflareOAuthError.stateMismatch) {
             _ = try CloudflareOAuthClient.authorizationCode(from: callback, matching: request)
         }
     }
@@ -116,14 +126,16 @@ struct CloudflareOAuthClientTests {
 
     // MARK: Token exchange
 
-    @Test("exchange posts the PKCE verifier and decodes the token")
+    @Test("exchange posts the PKCE verifier and decodes the token, without re-fetching discovery")
     func exchangeParsesToken() async throws {
         let request = makeRequest()
         var capturedBody: String?
+        var transportCallCount = 0
         let client = CloudflareOAuthClient(
             redirectURI: redirectURI, scope: "user.read", discoveryURL: discoveryURL,
-            transport: { [discoveryJSON] req in
-                if req.url == self.discoveryURL { return (discoveryJSON, self.response(200)) }
+            transport: { req in
+                transportCallCount += 1
+                #expect(req.url == request.tokenEndpoint)
                 #expect(req.httpMethod == "POST")
                 capturedBody = req.httpBody.flatMap { String(data: $0, encoding: .utf8) }
                 let body = #"{"access_token":"tok-123","token_type":"bearer","expires_in":3600}"#
@@ -137,6 +149,7 @@ struct CloudflareOAuthClientTests {
         #expect(capturedBody?.contains("code_verifier=verifier") == true)
         #expect(capturedBody?.contains("code=auth-code") == true)
         #expect(capturedBody?.contains("grant_type=authorization_code") == true)
+        #expect(transportCallCount == 1) // no second discovery round trip
     }
 
     @Test("a non-2xx token response throws .tokenExchangeFailed")
@@ -144,10 +157,7 @@ struct CloudflareOAuthClientTests {
         let request = makeRequest()
         let client = CloudflareOAuthClient(
             redirectURI: redirectURI, scope: "user.read", discoveryURL: discoveryURL,
-            transport: { [discoveryJSON] req in
-                if req.url == self.discoveryURL { return (discoveryJSON, self.response(200)) }
-                return (Data("bad code".utf8), self.response(400))
-            })
+            transport: { _ in (Data("bad code".utf8), self.response(400)) })
         await #expect(throws: CloudflareOAuthError.self) {
             _ = try await client.exchange(code: "auth-code", for: request)
         }
@@ -158,10 +168,7 @@ struct CloudflareOAuthClientTests {
         let request = makeRequest()
         let client = CloudflareOAuthClient(
             redirectURI: redirectURI, scope: "user.read", discoveryURL: discoveryURL,
-            transport: { [discoveryJSON] req in
-                if req.url == self.discoveryURL { return (discoveryJSON, self.response(200)) }
-                return (Data("not json".utf8), self.response(200))
-            })
+            transport: { _ in (Data("not json".utf8), self.response(200)) })
         await #expect(throws: CloudflareOAuthError.self) {
             _ = try await client.exchange(code: "auth-code", for: request)
         }

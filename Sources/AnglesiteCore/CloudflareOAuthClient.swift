@@ -64,6 +64,9 @@ public struct CloudflareOAuthRequest: Sendable {
     public let authorizeURL: URL
     let state: String
     let codeVerifier: String
+    /// Resolved from the same discovery fetch that built `authorizeURL`, so `exchange(code:for:)`
+    /// doesn't need a second round trip to `.well-known/openid-configuration` for the same login.
+    let tokenEndpoint: URL
 }
 
 /// Cloudflare's self-managed OAuth (opened to all developers 2026-06-03): Authorization Code +
@@ -120,21 +123,26 @@ public struct CloudflareOAuthClient: Sendable {
         guard let url = components.url else {
             throw CloudflareOAuthError.discoveryUnavailable("couldn't build the authorize URL")
         }
-        return CloudflareOAuthRequest(authorizeURL: url, state: state, codeVerifier: verifier)
+        return CloudflareOAuthRequest(
+            authorizeURL: url, state: state, codeVerifier: verifier, tokenEndpoint: discovery.tokenEndpoint)
     }
 
     /// Extracts and validates the authorization code from a completed browser session's callback
     /// URL against the `state` minted for `request`. Static and side-effect-free: this is pure URL
     /// parsing, not a network call.
+    ///
+    /// `state` is checked before `error` — an `error` param only "belongs" to this request once
+    /// it's bound by a matching `state`, so a forged/unbound error callback reads as a state
+    /// mismatch rather than a denial.
     public static func authorizationCode(from callbackURL: URL, matching request: CloudflareOAuthRequest) throws -> String {
         let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
 
-        if let error = value("error") {
-            throw CloudflareOAuthError.callbackDenied(value("error_description") ?? error)
-        }
         guard let state = value("state"), state == request.state else {
             throw CloudflareOAuthError.stateMismatch
+        }
+        if let error = value("error") {
+            throw CloudflareOAuthError.callbackDenied(value("error_description") ?? error)
         }
         guard let code = value("code"), !code.isEmpty else {
             throw CloudflareOAuthError.missingAuthorizationCode
@@ -143,9 +151,9 @@ public struct CloudflareOAuthClient: Sendable {
     }
 
     /// Exchanges `code` (from `authorizationCode(from:matching:)`) + the matching request's PKCE
-    /// verifier for an access token.
+    /// verifier for an access token. Uses `request.tokenEndpoint` rather than re-fetching
+    /// discovery — already resolved once, by `makeAuthorizationRequest()`, for this same login.
     public func exchange(code: String, for request: CloudflareOAuthRequest) async throws -> OAuthToken {
-        let discovery = try await discover()
         var form = URLComponents()
         form.queryItems = [
             URLQueryItem(name: "grant_type", value: "authorization_code"),
@@ -154,7 +162,7 @@ public struct CloudflareOAuthClient: Sendable {
             URLQueryItem(name: "client_id", value: clientID),
             URLQueryItem(name: "code_verifier", value: request.codeVerifier),
         ]
-        var urlRequest = URLRequest(url: discovery.tokenEndpoint)
+        var urlRequest = URLRequest(url: request.tokenEndpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         urlRequest.httpBody = Data((form.percentEncodedQuery ?? "").utf8)
