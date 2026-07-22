@@ -34,7 +34,12 @@ enum SiteActions {
     /// split-repo layout if it still has an embedded `Source/.git` — already-split packages are a
     /// no-op. `siteStore` is an injection seam for tests; production always uses `.shared`.
     static func registerPackage(_ package: AnglesitePackage, siteStore: SiteStore = .shared) async throws -> SiteStore.Site {
-        try RepoRelocator.migrate(package: package)
+        // `migrate`'s file coordination (NSFileCoordinator) can block waiting on iCloud Drive to
+        // relinquish the item — run it off the main actor so heal-on-open doesn't stall the UI.
+        // `AnglesitePackage` is `Sendable`, so it crosses into the detached task safely.
+        try await Task.detached {
+            _ = try RepoRelocator.migrate(package: package)
+        }.value
         let site = try await siteStore.record(package)
         #if ANGLESITE_MAS
         // The current access grant (open panel, drag, or LaunchServices open) is the only chance
