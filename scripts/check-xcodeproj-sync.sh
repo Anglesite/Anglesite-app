@@ -54,11 +54,6 @@ elif [[ "$(printf '%s\n%s\n' "$MIN_XCODEGEN" "$xcodegen_version" | sort -V | hea
   exit 1
 fi
 
-# The app target's `sources:` root in project.yml. The AnglesiteCore/Bridge/Intents trees are
-# SwiftPM package products (compiled by SwiftPM, not file-referenced in the pbxproj), so only
-# this app-target tree is verifiable against the generated project.
-sources_root="Sources/AnglesiteApp"
-
 # Regenerate the project. A spec-validation error (e.g. a path typo) exits non-zero here and
 # `set -e` aborts. --quiet suppresses the success banner but still emits warnings/errors.
 echo "Regenerating Anglesite.xcodeproj via xcodegen…"
@@ -78,19 +73,31 @@ pbx_json="$(mktemp "${TMPDIR:-/tmp}/anglesite-pbxproj.XXXXXX.json")"
 trap 'rm -f "$pbx_json"' EXIT
 plutil -convert json -o "$pbx_json" "$pbxproj"
 
-python3 - "$sources_root" "$pbx_json" <<'PY'
+python3 - "$pbx_json" <<'PY'
 import json, os, sys
 
-sources_root, pbx_json = sys.argv[1], sys.argv[2]
+pbx_json = sys.argv[1]
 
-# On-disk Swift files, as paths relative to sources_root (e.g. "Foo.swift", "Views/Bar.swift").
-on_disk = {
-    os.path.relpath(os.path.join(root, f), sources_root)
-    for root, _dirs, files in os.walk(sources_root)
-    for f in files if f.endswith(".swift")
+# Each application target's `sources:` root in project.yml. The AnglesiteCore/Bridge/Intents
+# trees are SwiftPM package products (compiled by SwiftPM, not file-referenced in the pbxproj),
+# so only these app-target trees are verifiable against the generated project. A new
+# application target must be added here or the check fails loudly below — the unmapped-target
+# error, not a silent pass, is the contract.
+SOURCES_ROOTS = {
+    "Anglesite": "Sources/AnglesiteApp",
+    "AnglesiteMobile": "Sources/AnglesiteMobile",
 }
-if not on_disk:
-    sys.exit(f"error: no .swift files found under {sources_root} — is the working tree intact?")
+
+def on_disk_swift(sources_root):
+    # On-disk Swift files, as paths relative to sources_root (e.g. "Foo.swift", "Views/Bar.swift").
+    files = {
+        os.path.relpath(os.path.join(root, f), sources_root)
+        for root, _dirs, names in os.walk(sources_root)
+        for f in names if f.endswith(".swift")
+    }
+    if not files:
+        sys.exit(f"error: no .swift files found under {sources_root} — is the working tree intact?")
+    return files
 
 with open(pbx_json) as fh:
     objects = json.load(fh)["objects"]
@@ -124,7 +131,19 @@ if not app_targets:
     sys.exit("error: no application targets found in the generated project.")
 
 failed = False
+checked = []
 for target in sorted(app_targets, key=lambda t: t["name"]):
+    name = target["name"]
+    sources_root = SOURCES_ROOTS.get(name)
+    if sources_root is None:
+        failed = True
+        print(
+            f"error: application target '{name}' has no sources root mapped in "
+            f"SOURCES_ROOTS (scripts/check-xcodeproj-sync.sh) — add it so its compile "
+            "phase is verified.", file=sys.stderr)
+        continue
+    on_disk = on_disk_swift(sources_root)
+
     compiled = set()
     for phase_id in target.get("buildPhases", []):
         phase = objects.get(phase_id, {})
@@ -140,18 +159,18 @@ for target in sorted(app_targets, key=lambda t: t["name"]):
     if missing:
         failed = True
         print(
-            f"error: target '{target['name']}' does not compile {len(missing)} file(s) that "
+            f"error: target '{name}' does not compile {len(missing)} file(s) that "
             f"exist under {sources_root}.", file=sys.stderr)
         print(
             "       project.yml's sources have drifted from disk; an xcodebuild of this target "
             "would fail with 'cannot find … in scope':", file=sys.stderr)
         for rel in missing:
             print(f"         - {sources_root}/{rel}", file=sys.stderr)
+    else:
+        checked.append(f"{name} ({len(on_disk)} file(s) under {sources_root})")
 
 if failed:
     sys.exit(1)
 
-names = ", ".join(sorted(t["name"] for t in app_targets))
-print(f"✓ Anglesite.xcodeproj is in sync: {len(on_disk)} file(s) under {sources_root} "
-      f"compiled by every app target ({names}).")
+print("✓ Anglesite.xcodeproj is in sync: " + "; ".join(checked) + ".")
 PY
