@@ -29,9 +29,18 @@ enum SiteActions {
     }
 
     /// Variant for callers that already hold a constructed package (Import creates one via
-    /// `PackageTransfer` before registering).
-    static func registerPackage(_ package: AnglesitePackage) async throws -> SiteStore.Site {
-        let site = try await SiteStore.shared.record(package)
+    /// `PackageTransfer` before registering). Every open path funnels through here, which makes
+    /// this the natural heal-on-open point (#877): before recording, migrate the package to the
+    /// split-repo layout if it still has an embedded `Source/.git` — already-split packages are a
+    /// no-op. `siteStore` is an injection seam for tests; production always uses `.shared`.
+    static func registerPackage(_ package: AnglesitePackage, siteStore: SiteStore = .shared) async throws -> SiteStore.Site {
+        // `migrate`'s file coordination (NSFileCoordinator) can block waiting on iCloud Drive to
+        // relinquish the item — run it off the main actor so heal-on-open doesn't stall the UI.
+        // `AnglesitePackage` is `Sendable`, so it crosses into the detached task safely.
+        try await Task.detached {
+            _ = try RepoRelocator.migrate(package: package)
+        }.value
+        let site = try await siteStore.record(package)
         #if ANGLESITE_MAS
         // The current access grant (open panel, drag, or LaunchServices open) is the only chance
         // to mint a scoped bookmark — persist it now so the grant survives relaunch. Mint from
@@ -39,7 +48,7 @@ enum SiteActions {
         // matches what subprocesses are spawned against. Propagate failures (never `try?`): a
         // grantless site silently fails to preview at open.
         let bookmark = try SecurityScopedBookmark.create(for: site.packageURL)
-        try await SiteStore.shared.setBookmark(bookmark, for: site.id)
+        try await siteStore.setBookmark(bookmark, for: site.id)
         #endif
         return site
     }

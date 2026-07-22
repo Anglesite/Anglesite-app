@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AnglesiteSiteModel
 @testable import AnglesiteCore
 
 struct PackageTransferTests {
@@ -118,5 +119,69 @@ struct PackageTransferTests {
         #expect(throws: PackageTransfer.TransferError.destinationExists(pkgURL)) {
             _ = try PackageTransfer.importDirectory(src, toPackageAt: pkgURL, displayName: "Collision", fileManager: fm)
         }
+    }
+
+    @Test("export re-embeds a real .git directory when Source/.git has been migrated to a gitfile")
+    func exportReembedsMigratedRepo() async throws {
+        let fm = FileManager.default
+        let root = try tempDir(); defer { try? fm.removeItem(at: root) }
+
+        let pkgURL = root.appendingPathComponent("Migrated.anglesite", isDirectory: true)
+        let (pkg, _) = try AnglesitePackage.createSkeleton(at: pkgURL, displayName: "Migrated")
+        try await gitFixture(["init"], in: pkg.sourceURL)
+        try await gitFixture(["config", "user.email", "t@t.io"], in: pkg.sourceURL)
+        try await gitFixture(["config", "user.name", "t"], in: pkg.sourceURL)
+        try "seed".write(to: pkg.sourceURL.appendingPathComponent("index.md"), atomically: true, encoding: .utf8)
+        try await gitFixture(["add", "-A"], in: pkg.sourceURL)
+        try await gitFixture(["commit", "-m", "seed"], in: pkg.sourceURL)
+        #if canImport(Darwin)
+        _ = try RepoRelocator.migrate(package: pkg)
+        #endif
+
+        let dest = root.appendingPathComponent("exported", isDirectory: true)
+        try PackageTransfer.exportSource(of: pkg, to: dest, includeGit: true, fileManager: fm)
+
+        var isDir: ObjCBool = false
+        #expect(fm.fileExists(atPath: dest.appendingPathComponent(".git").path, isDirectory: &isDir) && isDir.boolValue,
+                "the exported .git is a real directory, not the package's gitfile")
+        #expect(fm.fileExists(atPath: dest.appendingPathComponent(".git/HEAD").path))
+        #expect(fm.fileExists(atPath: dest.appendingPathComponent("index.md").path))
+    }
+
+    @Test("export -> re-import round-trips: the re-imported package has a real embedded .git again")
+    func exportThenReimportRoundTrips() async throws {
+        let fm = FileManager.default
+        let root = try tempDir(); defer { try? fm.removeItem(at: root) }
+
+        let pkgURL = root.appendingPathComponent("Migrated.anglesite", isDirectory: true)
+        let (pkg, _) = try AnglesitePackage.createSkeleton(at: pkgURL, displayName: "Migrated")
+        try await gitFixture(["init"], in: pkg.sourceURL)
+        try await gitFixture(["config", "user.email", "t@t.io"], in: pkg.sourceURL)
+        try await gitFixture(["config", "user.name", "t"], in: pkg.sourceURL)
+        try "seed".write(to: pkg.sourceURL.appendingPathComponent("index.md"), atomically: true, encoding: .utf8)
+        try await gitFixture(["add", "-A"], in: pkg.sourceURL)
+        try await gitFixture(["commit", "-m", "seed"], in: pkg.sourceURL)
+        #if canImport(Darwin)
+        _ = try RepoRelocator.migrate(package: pkg)
+        #endif
+
+        let exported = root.appendingPathComponent("exported", isDirectory: true)
+        try PackageTransfer.exportSource(of: pkg, to: exported, includeGit: true, fileManager: fm)
+
+        let reimportedURL = root.appendingPathComponent("Reimported.anglesite", isDirectory: true)
+        let reimported = try PackageTransfer.importDirectory(exported, toPackageAt: reimportedURL, displayName: "Reimported", fileManager: fm)
+
+        var isDir: ObjCBool = false
+        #expect(fm.fileExists(atPath: reimported.sourceURL.appendingPathComponent(".git").path, isDirectory: &isDir) && isDir.boolValue)
+        #expect(fm.fileExists(atPath: reimported.sourceURL.appendingPathComponent("index.md").path))
+    }
+
+    @discardableResult
+    private func gitFixture(_ arguments: [String], in dir: URL) async throws -> ProcessSupervisor.RunResult {
+        try await ProcessSupervisor.shared.run(
+            executable: URL(fileURLWithPath: "/usr/bin/env"),
+            arguments: ["git"] + arguments,
+            currentDirectoryURL: dir
+        )
     }
 }
