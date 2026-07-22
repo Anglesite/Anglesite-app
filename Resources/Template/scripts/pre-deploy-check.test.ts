@@ -342,6 +342,12 @@ test("checkMTAStsPolicy: a generated testing policy with an MX host is clean", (
   assert.deepEqual(checkMTAStsPolicy(validMTASts(), "MTA_STS_MODE=testing\nMTA_STS_MX=mx.example.com"), []);
 });
 
+test("checkMTAStsPolicy: duplicate MX entries in a marker-owned policy are invalid", () => {
+  const duplicateMX = `version: STSv1\nmode: testing\nmx: mx.example.com\nmx: MX.EXAMPLE.COM\nmax_age: 604800\n${MTA_STS_MARKER}\n`;
+  const issues = checkMTAStsPolicy(duplicateMX, "MTA_STS_MODE=testing\nMTA_STS_MX=mx.example.com");
+  assert.ok(issues.some((issue) => /unique mx field/.test(issue.message)));
+});
+
 test("checkMTAStsPolicy: reports missing, hand-authored, and malformed enabled policies", () => {
   assert.ok(checkMTAStsPolicy(null, "MTA_STS_MODE=enforce\nMTA_STS_MX=mx.example.com").some((i) => /missing/.test(i.message)));
   assert.ok(checkMTAStsPolicy("version: STSv1\nmode: enforce\nmx: mx.example.com\nmax_age: 604800\n", "MTA_STS_MODE=enforce\nMTA_STS_MX=mx.example.com").some((i) => /not generated/.test(i.message)));

@@ -434,9 +434,11 @@ export function checkMTAStsPolicy(content: string | null, configContent: string)
   const policyMode = values("mode");
   const mx = values("mx");
   const maxAge = values("max_age");
+  const normalizedMX = mx.map((host) => normalizeMTAStsMX(host));
+  const mxHosts = normalizedMX.flat();
   if (version.length !== 1 || version[0] !== "STSv1") issues.push({ severity: "warning", category: "mta-sts-issue", message: "MTA-STS policy must contain exactly one version: STSv1 field.", file });
   if (policyMode.length !== 1 || policyMode[0] !== mode) issues.push({ severity: "warning", category: "mta-sts-issue", message: `MTA-STS policy mode must match MTA_STS_MODE=${mode}.`, file });
-  if (mx.length === 0 || mx.some((host) => normalizeMTAStsMX(host).length !== 1)) issues.push({ severity: "warning", category: "mta-sts-issue", message: "MTA-STS policy needs one valid mx field per permitted MX host.", file });
+  if (mx.length === 0 || normalizedMX.some((hosts) => hosts.length !== 1) || new Set(mxHosts).size !== mxHosts.length) issues.push({ severity: "warning", category: "mta-sts-issue", message: "MTA-STS policy needs one valid, unique mx field per permitted MX host.", file });
   if (maxAge.length !== 1 || !/^\d{1,10}$/.test(maxAge[0]) || Number(maxAge[0]) > 31_557_600) issues.push({ severity: "warning", category: "mta-sts-issue", message: "MTA-STS policy must contain one max_age from 0 through 31557600.", file });
   if (!content.endsWith("\n")) issues.push({ severity: "warning", category: "mta-sts-issue", message: "MTA-STS policy does not end with a final newline.", file });
   return issues;
