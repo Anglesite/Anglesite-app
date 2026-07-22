@@ -10,12 +10,12 @@ private func worker(_ id: String, d1: Bool, kv: Bool, r2: Bool) -> WorkerDescrip
     )
 }
 
-private let webmentionWorker = worker("webmention", d1: true, kv: true, r2: false)
+private let genericD1KVWorker = worker("generic-d1kv-fixture", d1: true, kv: true, r2: false)
 private let indieauthWorker = worker("indieauth", d1: true, kv: true, r2: false)
 private let micropubWorker = worker("micropub", d1: true, kv: true, r2: true)
 private let websubWorker = worker("websub", d1: true, kv: true, r2: false)
-private let v2Workers = [webmentionWorker, indieauthWorker]
-private let v3Workers = [webmentionWorker, indieauthWorker, micropubWorker, websubWorker]
+private let v2Workers = [genericD1KVWorker, indieauthWorker]
+private let v3Workers = [genericD1KVWorker, indieauthWorker, micropubWorker, websubWorker]
 
 @Suite("WorkerComposition")
 struct WorkerCompositionTests {
@@ -35,7 +35,7 @@ struct WorkerCompositionTests {
     func withSocialFeatures() throws {
         let toml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
-            workers: [webmentionWorker, indieauthWorker]
+            workers: [genericD1KVWorker, indieauthWorker]
         )
         #expect(toml.contains("name = \"my-site\""))
         #expect(toml.contains("[assets]"))
@@ -149,7 +149,7 @@ struct WorkerCompositionTests {
     @Test("run_worker_first is omitted entirely when there are no active dynamic routes")
     func omitsRunWorkerFirstWithoutClaims() throws {
         let toml = try WorkerComposition.generateWranglerToml(
-            siteName: "my-site", workers: [webmentionWorker, indieauthWorker])
+            siteName: "my-site", workers: [genericD1KVWorker, indieauthWorker])
         #expect(!toml.contains("run_worker_first"))
         #expect(toml.contains("binding = \"ASSETS\""))
     }
