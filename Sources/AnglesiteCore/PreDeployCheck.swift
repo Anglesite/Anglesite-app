@@ -82,6 +82,8 @@ public actor PreDeployCheck {
             /// stale/malformed Expires, wrong-origin or insecure Canonical, no final newline).
             /// See `Resources/Template/scripts/pre-deploy-check.ts`'s `checkSecurityTxt` (#743).
             case securityTxtIssue = "security-txt-issue"
+            /// An RFC 8461 MTA-STS configuration or generated-policy defect.
+            case mtaStsIssue = "mta-sts-issue"
             case thirdPartyScript = "third-party-script"
             /// Any category code this build doesn't recognize yet — decoding falls back here
             /// instead of throwing, so a future/typo'd category can't crash the whole scan (#742).

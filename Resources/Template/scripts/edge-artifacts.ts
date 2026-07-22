@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 /**
  * Build-time generator for repo-owned edge artifacts: public/robots.txt and
- * public/.well-known/security.txt. Runs at prebuild (after csp.ts). robots.txt
+ * public/.well-known/security.txt and public/.well-known/mta-sts.txt. Runs at prebuild (after csp.ts). robots.txt
  * is stable and committed; security.txt carries a per-build Expires and is
  * gitignored (generated only when SECURITY_TXT_MODE resolves to "generated" —
  * see docs/superpowers/specs/2026-07-14-well-known-support-design.md "First
@@ -163,6 +163,78 @@ export function buildSecurityTxt(
   return `${SECURITY_TXT_MARKER}\nContact: ${contactUri}\nExpires: ${expires}${canonicalLine}\n`;
 }
 
+/** MTA-STS policy modes that Anglesite can publish. `disabled` means no generated policy. */
+export type MTAStsMode = "disabled" | "testing" | "enforce";
+
+/** A valid RFC 8461 extension field used solely to identify generator-owned output. */
+export const MTA_STS_MARKER = "x-anglesite: generated";
+
+/**
+ * Normalizes the comma-separated MX patterns from `MTA_STS_MX`. RFC 8461 allows a DNS
+ * hostname or a wildcard in its complete left-most label; Unicode names must be supplied as
+ * their DNS/Punycode A-labels. Invalid entries are dropped, and duplicates are collapsed.
+ */
+export function normalizeMTAStsMX(raw: string | undefined): string[] {
+  if (!raw) return [];
+  // Keep the final label under the same DNS-label rule as every other label: RFC 8461 requires
+  // IDNs to be written as Punycode A-labels, and an A-label TLD can contain hyphens/digits.
+  const label = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
+  const domain = `(?:${label}\\.)+${label}`;
+  const pattern = new RegExp(`^(?:\\*\\.)?${domain}$`, "i");
+  const hosts = new Set<string>();
+  for (const part of raw.split(",")) {
+    const host = part.trim().replace(/\.$/, "").toLowerCase();
+    if (pattern.test(host)) hosts.add(host);
+  }
+  return [...hosts];
+}
+
+export function resolveMTAStsMode(raw: string | undefined): MTAStsMode {
+  return raw === "testing" || raw === "enforce" ? raw : "disabled";
+}
+
+/**
+ * RFC 8461 policy body. The marker is a syntactically-valid extension field, which compliant
+ * senders ignore; it lets a later build distinguish its own policy from a hand-authored one.
+ * A seven-day max_age gives an owner a practical rollback window while still meeting the RFC's
+ * expectation that policies normally live for weeks or longer.
+ */
+export function buildMTAStsPolicy(mode: MTAStsMode, mxRaw: string | undefined): string | null {
+  if (mode === "disabled") return null;
+  const mxHosts = normalizeMTAStsMX(mxRaw);
+  if (mxHosts.length === 0) return null;
+  return `version: STSv1\nmode: ${mode}\n${mxHosts.map((host) => `mx: ${host}`).join("\n")}\nmax_age: 604800\n${MTA_STS_MARKER}\n`;
+}
+
+export function isMTAStsMarkerOwned(content: string | null): boolean {
+  return content !== null && content.split("\n").some((line) => line === MTA_STS_MARKER);
+}
+
+export type MTAStsAction = { kind: "write"; content: string } | { kind: "none" };
+export interface MTAStsPlan { action: MTAStsAction; note?: string }
+
+/** Applies the same non-destructive ownership rules as security.txt to the MTA-STS policy. */
+export function planMTAStsPolicy(params: {
+  mode: MTAStsMode;
+  mxRaw: string | undefined;
+  existingContent: string | null;
+}): MTAStsPlan {
+  const { mode, mxRaw, existingContent } = params;
+  if (mode === "disabled") {
+    return existingContent === null
+      ? { action: { kind: "none" } }
+      : { action: { kind: "none" }, note: "MTA_STS_MODE=disabled but public/.well-known/mta-sts.txt exists — leaving it in place; remove it or enable MTA-STS." };
+  }
+  const body = buildMTAStsPolicy(mode, mxRaw);
+  if (body === null) {
+    return { action: { kind: "none" }, note: `MTA_STS_MODE=${mode} but MTA_STS_MX has no valid MX host — no MTA-STS policy generated.` };
+  }
+  if (existingContent !== null && !isMTAStsMarkerOwned(existingContent)) {
+    return { action: { kind: "none" }, note: "MTA-STS is enabled but public/.well-known/mta-sts.txt is hand-authored — refusing to overwrite it." };
+  }
+  return { action: { kind: "write", content: body } };
+}
+
 /** What `applySecurityTxtPlan` should do to `public/.well-known/security.txt` this build. */
 export type SecurityTxtAction =
   | { kind: "write"; content: string }
@@ -257,6 +329,23 @@ function applySecurityTxtPlan(publicDir: string): void {
   }
 }
 
+function applyMTAStsPlan(publicDir: string): void {
+  const wellKnownDir = resolve(publicDir, ".well-known");
+  const filePath = resolve(wellKnownDir, "mta-sts.txt");
+  const existingContent = existsSync(filePath) ? readFileSync(filePath, "utf-8") : null;
+  const plan = planMTAStsPolicy({
+    mode: resolveMTAStsMode(readConfig("MTA_STS_MODE")),
+    mxRaw: readConfig("MTA_STS_MX"),
+    existingContent,
+  });
+  if (plan.note) console.log(plan.note);
+  if (plan.action.kind === "write") {
+    mkdirSync(wellKnownDir, { recursive: true });
+    writeFileSync(filePath, plan.action.content, "utf-8");
+    console.log("Wrote public/.well-known/mta-sts.txt");
+  }
+}
+
 function main(): void {
   const publicDir = resolve(process.cwd(), "public");
   const blockAI = (readConfig("BLOCK_AI") ?? "").trim().toLowerCase() === "true";
@@ -265,6 +354,7 @@ function main(): void {
   console.log("Wrote public/robots.txt");
 
   applySecurityTxtPlan(publicDir);
+  applyMTAStsPlan(publicDir);
 }
 
 // Run only when invoked directly (e.g. `npx tsx scripts/edge-artifacts.ts`), never on import.

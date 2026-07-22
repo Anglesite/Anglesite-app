@@ -10,3 +10,4 @@ dist/
 # Scoped to the one generated file so future static well-known files
 # (apple-app-site-association, assetlinks.json, …) can still be committed.
 public/.well-known/security.txt
+public/.well-known/mta-sts.txt

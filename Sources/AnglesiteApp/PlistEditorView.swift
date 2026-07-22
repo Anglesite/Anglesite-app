@@ -11,6 +11,7 @@ struct PlistEditorView: View {
         case analytics = "Analytics"
         case redirects = "Redirects"
         case crawlers = "Crawlers"
+        case emailSecurity = "Email Security"
         var id: Self { self }
     }
 
@@ -38,6 +39,8 @@ struct PlistEditorView: View {
                 Task { await model.saveRedirects() }
             } else if oldValue == .crawlers {
                 Task { await model.saveCrawlerPolicy() }
+            } else if oldValue == .emailSecurity {
+                Task { await model.saveMtaSts() }
             }
         }
         .onChange(of: controlActiveState) { _, new in
@@ -92,7 +95,7 @@ struct PlistEditorView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(maxWidth: 260)
+                    .frame(maxWidth: 520)
 
                     if let validationMessage = model.validationMessage {
                         Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
@@ -114,6 +117,11 @@ struct PlistEditorView: View {
                             .foregroundStyle(.orange)
                             .font(.callout)
                     }
+                    if selectedTab != .emailSecurity, let mtaStsError = model.mtaStsError {
+                        Label(mtaStsError, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+                    }
 
                     switch selectedTab {
                     case .website:
@@ -124,6 +132,8 @@ struct PlistEditorView: View {
                         redirectsTab
                     case .crawlers:
                         crawlersTab
+                    case .emailSecurity:
+                        emailSecurityTab
                     }
                 }
                 .padding()
@@ -375,6 +385,97 @@ struct PlistEditorView: View {
                 ProgressView().controlSize(.small)
             }
         }
+    }
+
+    private var emailSecurityTab: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("MTA-STS")
+                    .font(.headline)
+                Text("Require TLS for mail delivered to this domain. Start in testing mode and only switch to enforce after your mail provider is working cleanly.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    Text("Mode").frame(minWidth: 160, alignment: .leading)
+                    Picker("Mode", selection: $model.mtaStsSettings.mode) {
+                        Text("Off").tag(MTAStsPolicyAsset.Mode.disabled)
+                        Text("Testing").tag(MTAStsPolicyAsset.Mode.testing)
+                        Text("Enforce").tag(MTAStsPolicyAsset.Mode.enforce)
+                    }
+                    .labelsHidden()
+                    .frame(width: 160, alignment: .leading)
+                }
+                GridRow {
+                    Text("Mail domain").frame(minWidth: 160, alignment: .leading)
+                    TextField("example.com", text: $model.mtaStsSettings.domain)
+                        .frame(minWidth: 260)
+                }
+                GridRow(alignment: .top) {
+                    Text("Allowed MX hosts").frame(minWidth: 160, alignment: .leading).padding(.top, 4)
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextEditor(text: $model.mtaStsSettings.mxHosts)
+                            .font(.body.monospaced())
+                            .frame(minWidth: 260, minHeight: 72)
+                            .overlay { RoundedRectangle(cornerRadius: 5).stroke(.secondary.opacity(0.25)) }
+                            .accessibilityLabel("Allowed MX hosts")
+                        Button("Use MX Records from DNS") { Task { await model.detectMtaStsMXHosts() } }
+                            .disabled(MTAStsPolicyAsset.normalizedDomain(model.mtaStsSettings.domain).isEmpty || model.isPublishingMtaStsDNS)
+                    }
+                }
+                GridRow {
+                    Text("TLS report mailbox").frame(minWidth: 160, alignment: .leading)
+                    TextField("Optional: tls-reports@example.com", text: $model.mtaStsSettings.reportMailbox)
+                        .frame(minWidth: 260)
+                }
+            }
+            .textFieldStyle(.roundedBorder)
+
+            if model.mtaStsSettings.mode != .disabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Required DNS records", systemImage: "dns")
+                        .font(.headline)
+                    Text("Point mta-sts.\(displayDomain) at this deployed site and ensure it has a valid HTTPS certificate. Add these TXT records automatically, or copy them into Website → Manage Domain. The MTA-STS ID changes automatically when this policy changes.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    if mtaStsDNSRecords.isEmpty {
+                        Text("Enter a valid mail domain and at least one MX host to prepare the DNS records.")
+                            .font(.callout)
+                            .foregroundStyle(.orange)
+                    } else {
+                        ForEach(mtaStsDNSRecords, id: \.name) { record in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text("TXT \(record.name)").font(.callout.monospaced().weight(.medium))
+                                Text(record.content).font(.callout.monospaced()).textSelection(.enabled)
+                            }
+                        }
+                        Button("Publish DNS Records") { Task { await model.publishMtaStsDNSRecords() } }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(model.isPublishingMtaStsDNS)
+                    }
+                }
+                .padding(10)
+                .background(Color.secondary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+
+            if model.isSavingMtaSts || model.isPublishingMtaStsDNS {
+                ProgressView().controlSize(.small)
+            }
+        }
+    }
+
+    private var displayDomain: String {
+        let domain = MTAStsPolicyAsset.normalizedDomain(model.mtaStsSettings.domain)
+        return domain.isEmpty ? "your-domain" : domain
+    }
+
+    private var mtaStsDNSRecords: [MTAStsPolicyAsset.DNSRecord] {
+        let domain = MTAStsPolicyAsset.normalizedDomain(model.mtaStsSettings.domain)
+        guard !domain.isEmpty else { return [] }
+        return MTAStsPolicyAsset.dnsRecords(for: domain, settings: model.mtaStsSettings)
     }
 
     private func contentSignalRow(
