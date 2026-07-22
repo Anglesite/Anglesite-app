@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: io.dwk.anglesite
   deploymentTarget:
     macOS: "27.0"
+    iOS: "27.0"
   developmentLanguage: en
   createIntermediateGroups: true
   generateEmptyDirectories: true
@@ -116,6 +117,54 @@ targets:
       - target: AnglesiteQuickLookThumbnail
         embed: true
 
+  # iOS thin client (#71): remote-only shell over RemoteSandboxSiteRuntime. Links only the
+  # shared pieces it can use (Core's HTTP MCP client + sandbox control, the Bridge boundary,
+  # and the AnglesiteIOS WKWebView wrapper) — never AnglesiteContainer or the editor packages.
+  AnglesiteMobile:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/AnglesiteMobile
+      - path: Resources/edit-overlay
+        type: folder
+        buildPhase: resources
+        optional: true
+    preBuildScripts:
+      - name: Build edit overlay
+        script: "\"${PROJECT_DIR}/scripts/build-overlay.sh\""
+        basedOnDependencyAnalysis: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.dwk.anglesite.ios
+        PRODUCT_NAME: Anglesite
+        INFOPLIST_FILE: Resources/Info-iOS.plist
+        GENERATE_INFOPLIST_FILE: NO
+        IPHONEOS_DEPLOYMENT_TARGET: "27.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        # String Catalog scaffolding, mirroring the macOS target (#528): Xcode IDE builds merge
+        # extracted literals into Sources/AnglesiteMobile/Localizable.xcstrings; CLI builds need
+        # the manual `xcstringstool sync` recipe from CONTRIBUTING.md.
+        SWIFT_EMIT_LOC_STRINGS: YES
+        LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+        SWIFT_VERSION: "5.10"
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "0.1.0"
+      configs:
+        Debug:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+    dependencies:
+      - package: Anglesite
+        product: AnglesiteCore
+      - package: Anglesite
+        product: AnglesiteBridge
+      - package: Anglesite
+        product: AnglesiteIOS
+
   AnglesiteQuickLookPreview:
     type: app-extension
     platform: macOS
@@ -179,6 +228,14 @@ schemes:
     build:
       targets:
         Anglesite: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  AnglesiteMobile:
+    build:
+      targets:
+        AnglesiteMobile: all
     run:
       config: Debug
     archive:

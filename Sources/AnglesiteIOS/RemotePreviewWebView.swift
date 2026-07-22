@@ -16,6 +16,8 @@ public struct RemotePreviewWebView: UIViewRepresentable {
     private let url: URL
     private let scriptHandler: WKScriptMessageHandler?
     private let scriptMessageNamespace: String
+    private let makeConfiguration: (() -> WKWebViewConfiguration)?
+    private let prepareBeforeLoad: ((WKWebView) async -> Void)?
     private let configureWebView: (WKWebView) -> Void
 
     public init(
@@ -27,19 +29,54 @@ public struct RemotePreviewWebView: UIViewRepresentable {
         self.url = url
         self.scriptHandler = scriptHandler
         self.scriptMessageNamespace = scriptMessageNamespace
+        self.makeConfiguration = nil
+        self.prepareBeforeLoad = nil
+        self.configureWebView = configureWebView
+    }
+
+    /// Caller-owned configuration variant: the session shell builds the full
+    /// `WKWebViewConfiguration` itself (script handler, overlay user script) and can await
+    /// `prepareBeforeLoad` — e.g. injecting the session-token cookie so the auth-proxy sees it
+    /// on the very first request — before the preview URL is loaded.
+    public init(
+        url: URL,
+        makeConfiguration: @escaping () -> WKWebViewConfiguration,
+        prepareBeforeLoad: ((WKWebView) async -> Void)? = nil,
+        configureWebView: @escaping (WKWebView) -> Void = { _ in }
+    ) {
+        self.url = url
+        self.scriptHandler = nil
+        self.scriptMessageNamespace = Self.defaultScriptMessageNamespace
+        self.makeConfiguration = makeConfiguration
+        self.prepareBeforeLoad = prepareBeforeLoad
         self.configureWebView = configureWebView
     }
 
     public func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        if let scriptHandler {
-            configuration.userContentController.add(scriptHandler, name: scriptMessageNamespace)
+        let configuration: WKWebViewConfiguration
+        if let makeConfiguration {
+            configuration = makeConfiguration()
+        } else {
+            configuration = WKWebViewConfiguration()
+            if let scriptHandler {
+                configuration.userContentController.add(scriptHandler, name: scriptMessageNamespace)
+            }
         }
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.isInspectable = true
         configureWebView(webView)
-        webView.load(URLRequest(url: url))
         context.coordinator.loadedURL = url
+        if let prepareBeforeLoad {
+            // Await the pre-load work (async cookie-store writes) before the first request;
+            // `WKWebView` tolerates `load` arriving a beat after creation.
+            let target = url
+            Task { @MainActor in
+                await prepareBeforeLoad(webView)
+                webView.load(URLRequest(url: target))
+            }
+        } else {
+            webView.load(URLRequest(url: url))
+        }
         return webView
     }
 

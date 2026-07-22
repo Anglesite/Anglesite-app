@@ -69,6 +69,7 @@ Sources/
 ├── AnglesiteIntents/    App Intents: Siri/Shortcuts/Spotlight entities and intents
 ├── AnglesiteContainer/  Apple Containerization local container runtime
 ├── AnglesiteIOS/        iOS WKWebView preview shell for the remote-only runtime path (#71)
+├── AnglesiteMobile/     iOS thin-client app target (Xcode-only, not a SwiftPM target): remote session shell over RemoteSandboxSiteRuntime
 └── AnglesiteBridge/     WKWebView script messages + JS overlay injection
 JS/
 └── edit-overlay/        TypeScript edit overlay compiled and bundled into app resources

@@ -1,0 +1,75 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Anglesite" : {
+
+    },
+    "Branch" : {
+
+    },
+    "Cloudflare Control Worker" : {
+
+    },
+    "Connect your Cloudflare Worker first." : {
+
+    },
+    "Connect…" : {
+
+    },
+    "Control Worker token" : {
+
+    },
+    "Couldn't Open Site" : {
+
+    },
+    "Done" : {
+
+    },
+    "From the one-time Deploy to Cloudflare setup. The token is stored in the Keychain on this device only." : {
+
+    },
+    "No Site Open" : {
+
+    },
+    "Open Site" : {
+
+    },
+    "Open your site in the remote sandbox to preview and edit it." : {
+
+    },
+    "Remote Session" : {
+
+    },
+    "Session Settings" : {
+
+    },
+    "Session Settings…" : {
+
+    },
+    "Site" : {
+
+    },
+    "Site ID" : {
+
+    },
+    "Starting %@ in the sandbox…" : {
+
+    },
+    "Stop" : {
+
+    },
+    "The sandbox clones this repository — git stays the source of truth for your site." : {
+
+    },
+    "Try Again" : {
+
+    },
+    "https://anglesite-sandbox.example.workers.dev" : {
+
+    },
+    "https://github.com/you/site.git" : {
+
+    }
+  },
+  "version" : "1.0"
+}

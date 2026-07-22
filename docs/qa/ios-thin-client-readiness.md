@@ -18,13 +18,16 @@ scripts/audit-ios-thin-client-readiness.sh
 
 Expected today:
 
-- The command exits 0.
-- It lists the remote-runtime and bridge pieces already present.
-- It lists the remaining blockers, including package/project platform declarations, iOS app bundle
-  metadata, FSEvents/security-scoped/Core host runtime surfaces, and AppKit-bound intents code.
+- The command exits 0 and reports **no tracked blockers** — the seams landed with the
+  `AnglesiteMobile` target: `Package.swift` declares `.iOS`, `project.yml` has the iOS app
+  target + `Resources/Info-iOS.plist`, the host subprocess backend (`InProcessBackend`) and
+  `LocalContainerSiteRuntime` are `#if !os(iOS)`-gated out of iOS builds, and the
+  AppKit-coupled Intents surface lives in its own macOS-gated file.
 
-The `AnglesiteIOS` shell target must not depend on `AnglesiteBridge` until the bridge can be split
-away from `AnglesiteCore`; otherwise SwiftPM pulls macOS-only host runtime files into iOS builds.
+The SwiftPM `AnglesiteIOS` shell target stays dependency-free (WebKit/SwiftUI only) — the audit
+enforces this. The iOS *app* target (`AnglesiteMobile`, Xcode-only) is where `AnglesiteCore`,
+`AnglesiteBridge`, and `AnglesiteIOS` compose; those products all build with
+`--triple arm64-apple-ios27.0`.
 
 ## Readiness Gate
 

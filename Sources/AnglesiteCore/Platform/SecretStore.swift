@@ -33,6 +33,11 @@ public enum SecretAccounts {
     /// REST API (#654). The app owns this credential: the old `gh auth login` flow left the
     /// token with `gh`, which the sandboxed app can neither spawn nor read.
     public static let gitHubToken = "github-token"
+    /// Bearer token for the user's deployed Sandbox Control Worker (#66/#71) — the credential
+    /// `HTTPSandboxControlClient` sends on `start`/`status`/`stop`. Distinct from
+    /// `cloudflareToken` (a Cloudflare *API* token): this one is minted for the Control Worker
+    /// during remote-runtime onboarding and never reaches api.cloudflare.com.
+    public static let sandboxControlToken = "sandbox-control-token"
 
     /// Site-scoped POSSE token slots. Account names include the stable site UUID so credentials
     /// never leak across two packages configured for different social accounts.
