@@ -204,9 +204,12 @@ carried as an open item.
 
 ## Open items (verify during implementation; non-blocking)
 
-- Exact OAuth scopes to request — depends on what the not-yet-built Control Worker template ends
-  up needing (Workers Scripts, Durable Objects, Containers are the likely candidates). Same
-  category of unknown as the 2026-06-23 design's own "exact token permission groups" open item.
+- OAuth scope for v1.0: **User Details (Read)** only — this token authenticates the user to their
+  own Control Worker's custom routes; the app itself never calls Cloudflare's management API with
+  it, so broader scopes (Workers Scripts, Durable Objects, Containers) aren't justified yet per
+  Cloudflare's own "request only what you need" guidance. Request the minimal scope during #890's
+  implementation and widen it later, empirically, if a concrete need shows up — cheaper than
+  guessing broader scopes upfront and matches how OAuth scope creep is normally handled.
 - Whether SwiftUI's `webAuthenticationSession` environment action exposes an `.https(host:path:)`
   overload, or whether raw `ASWebAuthenticationSession` is needed for that callback variant.
 - Whether Associated Domains functions at all under `AnglesiteMobile`'s current ad-hoc Debug
