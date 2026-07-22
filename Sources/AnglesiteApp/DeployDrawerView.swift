@@ -9,9 +9,9 @@ import AnglesiteCore
 ///   - `.succeeded` → deployed URL with Copy / Open buttons + log
 ///   - `.failed`   → reason banner + log + Copy-log
 ///
-/// The `.blocked` and `.workerNameConflict` phases are each rendered by their own modal sheet,
-/// not here — by the time this drawer is on screen, the deploy has either reached wrangler or
-/// failed in a way the user might want to read about.
+/// The `.blocked`, `.workerNameConflict`, and `.webmentionPaidPlanConfirmationNeeded` phases are
+/// each rendered by their own modal sheet, not here — by the time this drawer is on screen, the
+/// deploy has either reached wrangler or failed in a way the user might want to read about.
 struct DeployDrawerView: View {
     @Bindable var model: DeployModel
     let siteName: String
@@ -87,7 +87,7 @@ struct DeployDrawerView: View {
             Image(systemName: "exclamationmark.octagon.fill")
                 .foregroundStyle(.red).font(.title3)
                 .accessibilityHidden(true)
-        case .idle, .blocked, .workerNameConflict:
+        case .idle, .blocked, .workerNameConflict, .webmentionPaidPlanConfirmationNeeded:
             Image(systemName: "shippingbox").font(.title3)
                 .accessibilityHidden(true)
         }
@@ -98,7 +98,7 @@ struct DeployDrawerView: View {
         case .running: return "Deploying \(siteName)…"
         case .succeeded(let url, _): return url.absoluteString
         case .failed: return "Deploy failed"
-        case .idle, .blocked, .workerNameConflict: return siteName
+        case .idle, .blocked, .workerNameConflict, .webmentionPaidPlanConfirmationNeeded: return siteName
         }
     }
 
@@ -225,7 +225,7 @@ struct DeployDrawerView: View {
         case .succeeded(let url, _): return .succeeded(url: url.absoluteString)
         case .failed(let reason, let exit):
             return .failed(reason: exit.map { "\(reason) (exit \($0))" } ?? reason)
-        case .idle, .blocked, .workerNameConflict: return .inactive
+        case .idle, .blocked, .workerNameConflict, .webmentionPaidPlanConfirmationNeeded: return .inactive
         }
     }
 
