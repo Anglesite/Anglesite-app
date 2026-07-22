@@ -24,6 +24,13 @@ public enum WorkerComposition {
     /// silently diverge from another.
     public static let indieauthWorkerID = "indieauth"
 
+    /// `@dwk/webmention`'s catalog id — like `indieauthWorkerID`, composition keys off this
+    /// directly for the receiver's three bespoke bindings (`WEBMENTION_INBOX`, the Queue,
+    /// `SITE_URL`), since those binding names are part of `@dwk/webmention`'s public composition
+    /// contract, not something a generic `resources` flag can express without a paired schema
+    /// change in the external `davidwkeith/workers` catalog repo.
+    public static let webmentionWorkerID = "webmention"
+
     /// The bespoke app-side inbox-capture route (#587) — not a `@dwk/workers` catalog worker, so
     /// its claim lives here rather than in `catalog.json`. Appended automatically when
     /// `generateWranglerToml` is called with `inboxCaptureEnabled`.
@@ -42,11 +49,19 @@ public enum WorkerComposition {
         public var d1DatabaseID: String?
         public var kvNamespaceID: String?
         public var r2BucketName: String?
+        /// The Cloudflare Queue name backing `@dwk/webmention`'s async verify step. Like
+        /// `r2BucketName`, this is a deterministic name (`\(siteName)-webmention`), not an id —
+        /// wrangler.toml's `[[queues.*]]` blocks reference queues by name.
+        public var queueName: String?
 
-        public init(d1DatabaseID: String? = nil, kvNamespaceID: String? = nil, r2BucketName: String? = nil) {
+        public init(
+            d1DatabaseID: String? = nil, kvNamespaceID: String? = nil, r2BucketName: String? = nil,
+            queueName: String? = nil
+        ) {
             self.d1DatabaseID = d1DatabaseID
             self.kvNamespaceID = kvNamespaceID
             self.r2BucketName = r2BucketName
+            self.queueName = queueName
         }
     }
 
@@ -72,7 +87,8 @@ public enum WorkerComposition {
         routeClaims: [WorkerRouteClaim] = [],
         resources: ProvisionedResources = .init(),
         inboxCaptureEnabled: Bool = false,
-        inboxKVNamespaceID: String? = nil
+        inboxKVNamespaceID: String? = nil,
+        siteURL: String? = nil
     ) throws -> String {
         guard isValidSiteName(siteName) else {
             throw ConfigError.invalidSiteName(siteName)
@@ -96,6 +112,7 @@ public enum WorkerComposition {
         // AUTH_DB block below) — the one place composition keys off a specific catalog id rather
         // than generic resource flags.
         let hasIndieauth = workers.contains(where: { $0.id == indieauthWorkerID })
+        let hasWebmentionReceive = workers.contains(where: { $0.id == webmentionWorkerID })
 
         var lines: [String] = []
         lines.append("name = \"\(siteName)\"")
@@ -145,6 +162,38 @@ public enum WorkerComposition {
             }
         }
 
+        // Same shared per-site D1 database as DB/AUTH_DB, bound a third time under
+        // WEBMENTION_INBOX — @dwk/webmention's createD1Inbox creates its own `webmentions`
+        // table on first use, so no separate database or migration is needed here.
+        if hasWebmentionReceive {
+            lines.append("")
+            lines.append("[[d1_databases]]")
+            lines.append("binding = \"WEBMENTION_INBOX\"")
+            lines.append("database_name = \"\(siteName)-social\"")
+            if let id = resources.d1DatabaseID, !id.isEmpty {
+                lines.append("database_id = \"\(id)\"")
+            } else {
+                lines.append("database_id = \"\"  # filled by provisioning")
+            }
+        }
+
+        // Cloudflare Queue backing @dwk/webmention's async verify step. Queues are referenced by
+        // name (not id), so — like r2BucketName — this falls back to a deterministic
+        // `\(siteName)-webmention` placeholder before provisioning assigns the real one.
+        if hasWebmentionReceive {
+            lines.append("")
+            let queueName = resources.queueName ?? "\(siteName)-webmention"
+            lines.append("[[queues.producers]]")
+            lines.append("queue = \"\(queueName)\"")
+            lines.append("binding = \"WEBMENTION_QUEUE\"")
+            lines.append("")
+            lines.append("[[queues.consumers]]")
+            lines.append("queue = \"\(queueName)\"")
+            lines.append("max_batch_size = 10")
+            lines.append("max_batch_timeout = 30")
+            lines.append("max_retries = 3")
+        }
+
         if workers.contains(where: { $0.resources.needsKV }) {
             lines.append("")
             lines.append("[[kv_namespaces]]")
@@ -174,6 +223,12 @@ public enum WorkerComposition {
             }
         }
 
+        if hasWebmentionReceive, let siteURL, !siteURL.isEmpty, isSafeTomlStringValue(siteURL) {
+            lines.append("")
+            lines.append("[vars]")
+            lines.append("SITE_URL = \"\(siteURL)\"")
+        }
+
         if hasIndieauth {
             lines.append("")
             // Wrangler has no schema for declaring required secrets in wrangler.toml — secrets are
@@ -198,5 +253,16 @@ public enum WorkerComposition {
     static func isValidSiteName(_ siteName: String) -> Bool {
         guard !siteName.isEmpty else { return false }
         return siteName.unicodeScalars.allSatisfy { validNameCharacters.contains($0) }
+    }
+
+    /// Whether `value` is safe to interpolate as-is into a TOML basic string (`"..."`) — no
+    /// double quote, backslash, or control character that could break out of the string literal
+    /// or corrupt the generated file. `siteURL` is sourced from `.site-config`, which lives in
+    /// the site's git-tracked `Source/` — externally clonable/editable content (CLAUDE.md's "Git
+    /// is the source of truth"), so it must be treated the same as any other untrusted input
+    /// before being interpolated into generated infrastructure config.
+    static func isSafeTomlStringValue(_ value: String) -> Bool {
+        !value.contains("\"") && !value.contains("\\")
+            && !value.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F })
     }
 }

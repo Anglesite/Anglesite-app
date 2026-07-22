@@ -91,6 +91,22 @@ public enum DeployCoordinator {
             ?? SiteSlug.derive(from: siteName ?? siteID)
     }
 
+    /// The site's best-known public URL for `WorkerComposition`'s `SITE_URL` var (#359): a
+    /// custom domain (`DOMAIN`/`SITE_DOMAIN`, `WebsiteAnalyticsAsset.bestHost`'s own precedence)
+    /// wins, given a scheme since those keys store a bare host; otherwise the workers.dev host
+    /// `DeployCommand.persistSiteURL` writes after the site's first successful deploy. `nil`
+    /// before any deploy has ever run and no custom domain is configured — the composed Worker
+    /// degrades gracefully without it (worker.ts's queue consumer no-ops).
+    public static func resolveSiteURL(siteDirectory: URL) -> String? {
+        let config = (try? WebsiteAnalyticsAsset.loadConfig(siteDirectory: siteDirectory)) ?? ""
+        if let domain = WebsiteAnalyticsAsset.configValue("DOMAIN", in: config)
+            ?? WebsiteAnalyticsAsset.configValue("SITE_DOMAIN", in: config) {
+            let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : "https://\(trimmed)"
+        }
+        return WebsiteAnalyticsAsset.configValue("SITE_URL", in: config)
+    }
+
     /// Persists the newly-provisioned Cloudflare resources and advances the `lastDeployedWorkerIDs`
     /// baseline to `effectiveActiveIDs` (#709) after a successful provision — the diff baseline
     /// `WorkerActivation.removedIDs` compares the *next* deploy's plan against. Best-effort, like

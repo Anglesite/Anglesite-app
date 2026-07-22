@@ -524,6 +524,11 @@ struct SiteWindow: View {
                 }
             }
         }
+        .sheet(isPresented: $bindableModel.deploy.webmentionPaidPlanConfirmationPresented) {
+            WebmentionPaidPlanConfirmationSheetView(model: model.deploy) {
+                model.deploy.cancelWebmentionPaidPlanConfirmation()
+            }
+        }
         .sheet(isPresented: $bindableModel.audit.sheetPresented) {
             AuditSheetView(
                 model: model.audit,

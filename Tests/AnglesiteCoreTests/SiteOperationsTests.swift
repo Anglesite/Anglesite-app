@@ -157,19 +157,20 @@ struct SiteOperationsTests {
 
         let result = await ops.provisionSocialWorker(site: site)
 
-        guard case .succeeded(let url, let resources, _) = result else {
-            Issue.record("expected success, got \(result)")
+        // The fixed V-2 starter pack's "webmention" worker id is `@dwk/webmention`'s catalog id
+        // (`WorkerComposition.webmentionWorkerID`), which also carries inbound receive — so this
+        // call now parks on the Cloudflare Queues paid-plan confirmation gate (#359) before ever
+        // creating the Queue or deploying. D1/KV are still provisioned first (both webmention and
+        // indieauth need them), so their ids are already in `resources` when the gate returns.
+        guard case .webmentionPaidPlanConfirmationNeeded(let resources) = result else {
+            Issue.record("expected webmentionPaidPlanConfirmationNeeded, got \(result)")
             return
         }
-        #expect(url == URL(string: "https://blue-bottle-cafe.example.workers.dev"))
         #expect(await recorder.arguments == [
             ["d1", "create", "blue-bottle-cafe-social", "--json"],
             ["kv", "namespace", "create", "blue-bottle-cafe-social", "--json"],
-            ["d1", "migrations", "apply", "AUTH_DB", "--remote"],
         ])
-        #expect(await recorder.deployCalls == [
-            .init(token: "token", siteID: "s1", siteDirectory: package.appendingPathComponent("Source", isDirectory: true))
-        ])
+        #expect(await recorder.deployCalls.isEmpty)
         #expect(resources.d1DatabaseID == "d1-id")
         #expect(resources.kvNamespaceID == "kv-id")
     }
@@ -189,14 +190,17 @@ struct SiteOperationsTests {
 
         let result = await ops.provisionSocialWorker(site: site)
 
-        guard case .succeeded = result else {
-            Issue.record("expected success, got \(result)")
+        // As in `socialWorkerProvisionOperation` above, the starter pack's real "webmention" id
+        // now parks on the paid-plan confirmation gate (#359) before the IndieAuth migration step
+        // or deploy — so D1/KV are provisioned but the AUTH_DB migration never runs.
+        guard case .webmentionPaidPlanConfirmationNeeded = result else {
+            Issue.record("expected webmentionPaidPlanConfirmationNeeded, got \(result)")
             return
         }
         let arguments = await recorder.arguments
         #expect(arguments.contains(["d1", "create", "blue-bottle-cafe-social", "--json"]))
         #expect(arguments.contains(["kv", "namespace", "create", "blue-bottle-cafe-social", "--json"]))
-        #expect(arguments.contains(["d1", "migrations", "apply", "AUTH_DB", "--remote"]))
+        #expect(!arguments.contains(["d1", "migrations", "apply", "AUTH_DB", "--remote"]))
         let toml = try String(
             contentsOf: package.appendingPathComponent("Source/wrangler.toml"), encoding: .utf8)
         #expect(!toml.contains("[[r2_buckets]]"))

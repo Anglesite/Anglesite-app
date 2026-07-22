@@ -141,6 +141,33 @@ struct DeployCoordinatorTests {
         #expect(name == SiteSlug.derive(from: "site-1"))
     }
 
+    // MARK: - resolveSiteURL
+
+    @Test("resolveSiteURL prefers DOMAIN over everything else")
+    func resolveSiteURLPrefersDomain() throws {
+        let dir = try temporaryDirectory()
+        try "DOMAIN=example.com\nSITE_URL=https://my-site.workers.dev\n".write(
+            to: dir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        #expect(DeployCoordinator.resolveSiteURL(siteDirectory: dir) == "https://example.com")
+    }
+
+    @Test("resolveSiteURL falls back to the persisted SITE_URL when no custom domain is set")
+    func resolveSiteURLFallsBackToSiteURL() throws {
+        let dir = try temporaryDirectory()
+        try "SITE_URL=https://my-site.workers.dev\n".write(
+            to: dir.appendingPathComponent(".site-config"), atomically: true, encoding: .utf8)
+
+        #expect(DeployCoordinator.resolveSiteURL(siteDirectory: dir) == "https://my-site.workers.dev")
+    }
+
+    @Test("resolveSiteURL returns nil before any deploy has ever persisted a host")
+    func resolveSiteURLNilBeforeFirstDeploy() throws {
+        let dir = try temporaryDirectory()
+
+        #expect(DeployCoordinator.resolveSiteURL(siteDirectory: dir) == nil)
+    }
+
     // MARK: - persistProvisionedResources
 
     @Test("persists the sorted effective active set and the provisioned resources")

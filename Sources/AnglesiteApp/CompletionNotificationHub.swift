@@ -61,6 +61,11 @@ enum CompletionNotificationHub {
                 // deploy is parked rather than finished — no completion notice, just stop
                 // showing progress on the Dock tile.
                 DockProgressController.shared.clear(token: dockToken)
+            case .webmentionPaidPlanConfirmationNeeded:
+                // Same reasoning as `.workerNameConflict` — the confirmation sheet (wired
+                // separately) carries the actionable info, and the deploy is parked rather than
+                // finished.
+                DockProgressController.shared.clear(token: dockToken)
             }
         }
         deploy.onMilestone = { siteID, progress in

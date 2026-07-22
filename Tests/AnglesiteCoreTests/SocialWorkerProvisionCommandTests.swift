@@ -24,12 +24,16 @@ struct SocialWorkerProvisionCommandTests {
         let recorder = WranglerRecorder([
             ["d1", "create", "my-site-social", "--json"]: .init(stdout: #"{"result":{"uuid":"d1-id"}}"#, stderr: "", exitCode: 0),
             ["kv", "namespace", "create", "my-site-social", "--json"]: .init(stdout: #"{"result":{"id":"kv-id"}}"#, stderr: "", exitCode: 0),
+            ["queues", "create", "my-site-webmention", "--json"]: .init(stdout: #"{"result":{"queue_name":"my-site-webmention"}}"#, stderr: "", exitCode: 0),
             ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migrations applied", stderr: "", exitCode: 0),
         ])
         let deployer = DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1))
         let command = SocialWorkerProvisionCommand(tokenSource: { "token" }, runner: recorder.runner, deployer: deployer.deployer)
 
-        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers)
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers,
+            acknowledgesPaidPlan: true
+        )
 
         guard case .succeeded(let url, let resources, _) = result else {
             Issue.record("expected success, got \(result)")
@@ -39,9 +43,11 @@ struct SocialWorkerProvisionCommandTests {
         #expect(resources.d1DatabaseID == "d1-id")
         #expect(resources.kvNamespaceID == "kv-id")
         #expect(resources.r2BucketName == nil)
+        #expect(resources.queueName == "my-site-webmention")
         #expect(await recorder.arguments == [
             ["d1", "create", "my-site-social", "--json"],
             ["kv", "namespace", "create", "my-site-social", "--json"],
+            ["queues", "create", "my-site-webmention", "--json"],
             ["d1", "migrations", "apply", "AUTH_DB", "--remote"],
         ])
         #expect(await recorder.environments.allSatisfy { $0["CLOUDFLARE_API_TOKEN"] == "token" })
@@ -61,6 +67,7 @@ struct SocialWorkerProvisionCommandTests {
             ["d1", "create", "my-site-social", "--json"]: .init(stdout: #"{"uuid":"d1-id"}"#, stderr: "", exitCode: 0),
             ["kv", "namespace", "create", "my-site-social", "--json"]: .init(stdout: #"{"id":"kv-id"}"#, stderr: "", exitCode: 0),
             ["r2", "bucket", "create", "my-site-media"]: .init(stdout: "Created bucket my-site-media", stderr: "", exitCode: 0),
+            ["queues", "create", "my-site-webmention", "--json"]: .init(stdout: #"{"result":{"queue_name":"my-site-webmention"}}"#, stderr: "", exitCode: 0),
             ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migrations applied", stderr: "", exitCode: 0),
         ])
         let command = SocialWorkerProvisionCommand(
@@ -73,7 +80,8 @@ struct SocialWorkerProvisionCommandTests {
             siteID: "site-1",
             siteDirectory: site,
             siteName: "my-site",
-            workers: v3Workers
+            workers: v3Workers,
+            acknowledgesPaidPlan: true
         )
 
         guard case .succeeded(_, let resources, _) = result else {
@@ -174,6 +182,7 @@ struct SocialWorkerProvisionCommandTests {
         let recorder = WranglerRecorder([
             ["d1", "create", "my-site-social", "--json"]: .init(stdout: #"{"uuid":"d1-id"}"#, stderr: "", exitCode: 0),
             ["kv", "namespace", "create", "my-site-social", "--json"]: .init(stdout: #"{"id":"kv-id"}"#, stderr: "", exitCode: 0),
+            ["queues", "create", "my-site-webmention", "--json"]: .init(stdout: #"{"result":{"queue_name":"my-site-webmention"}}"#, stderr: "", exitCode: 0),
             ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migrations applied", stderr: "", exitCode: 0),
         ])
         let command = SocialWorkerProvisionCommand(
@@ -182,7 +191,10 @@ struct SocialWorkerProvisionCommandTests {
             deployer: DeployRecorder(result: .failed(reason: "pre-deploy scan could not run", exitCode: nil)).deployer
         )
 
-        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers)
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers,
+            acknowledgesPaidPlan: true
+        )
 
         guard case .failed(let reason, nil, let resources) = result else {
             Issue.record("expected deploy failure, got \(result)")
@@ -203,12 +215,16 @@ struct SocialWorkerProvisionCommandTests {
         let recorder = WranglerRecorder([
             ["d1", "create", "my-site-social", "--json"]: .init(stdout: #"{"result":{"uuid":"d1-id"}}"#, stderr: "", exitCode: 0),
             ["kv", "namespace", "create", "my-site-social", "--json"]: .init(stdout: #"{"result":{"id":"kv-id"}}"#, stderr: "", exitCode: 0),
+            ["queues", "create", "my-site-webmention", "--json"]: .init(stdout: #"{"result":{"queue_name":"my-site-webmention"}}"#, stderr: "", exitCode: 0),
             ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migrations applied", stderr: "", exitCode: 0),
         ])
         let deployer = DeployRecorder(result: .workerNameConflict(name: "taken-name"))
         let command = SocialWorkerProvisionCommand(tokenSource: { "token" }, runner: recorder.runner, deployer: deployer.deployer)
 
-        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers)
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers,
+            acknowledgesPaidPlan: true
+        )
 
         guard case .workerNameConflict(let name, let resources) = result else {
             Issue.record("expected .workerNameConflict, got \(result)"); return
@@ -224,12 +240,16 @@ struct SocialWorkerProvisionCommandTests {
         let recorder = WranglerRecorder([
             ["d1", "create", "my-site-social", "--json"]: .init(stdout: #"{"uuid":"d1-id"}"#, stderr: "", exitCode: 0),
             ["kv", "namespace", "create", "my-site-social", "--json"]: .init(stdout: #"{"id":"kv-id"}"#, stderr: "", exitCode: 0),
+            ["queues", "create", "my-site-webmention", "--json"]: .init(stdout: #"{"result":{"queue_name":"my-site-webmention"}}"#, stderr: "", exitCode: 0),
             ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migration failed", stderr: "", exitCode: 1),
         ])
         let deployer = DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1))
         let command = SocialWorkerProvisionCommand(tokenSource: { "token" }, runner: recorder.runner, deployer: deployer.deployer)
 
-        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers)
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: v2Workers,
+            acknowledgesPaidPlan: true
+        )
 
         guard case .failed(let reason, let exitCode, let resources) = result else {
             Issue.record("expected migration failure, got \(result)")
@@ -347,6 +367,182 @@ struct SocialWorkerProvisionCommandTests {
             reason: "KV failed", exitCode: 1, resources: .init(d1DatabaseID: "d1-id")
         )
         #expect(result.asDeployCommandResult == .failed(reason: "KV failed", exitCode: 1))
+    }
+
+    @Test("webmention worker without paid-plan acknowledgment returns webmentionPaidPlanConfirmationNeeded, no wrangler call")
+    func webmentionWithoutAcknowledgmentBlocksBeforeAnyCall() async throws {
+        let site = try temporaryDirectory()
+        var calledArguments: [[String]] = []
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "tok" },
+            runner: { _, arguments, _, _ in
+                calledArguments.append(arguments)
+                return .init(stdout: "", stderr: "unexpected call", exitCode: 1)
+            },
+            deployer: { _, _, _ in .succeeded(url: URL(string: "https://example.com")!, duration: 0) }
+        )
+        let webmention = WorkerDescriptor(
+            id: "webmention", displayName: "Webmentions", description: "test", group: "social",
+            binding: .settingsActivated, resources: .init(needsD1: false, needsKV: false, needsR2: false))
+
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site",
+            workers: [webmention], acknowledgesPaidPlan: false)
+
+        guard case .webmentionPaidPlanConfirmationNeeded = result else {
+            Issue.record("expected .webmentionPaidPlanConfirmationNeeded, got \(result)")
+            return
+        }
+        #expect(calledArguments.isEmpty, "must not call wrangler before the user acknowledges the paid-plan requirement")
+    }
+
+    @Test("webmention worker with acknowledgment creates the queue")
+    func webmentionWithAcknowledgmentCreatesQueue() async throws {
+        let site = try temporaryDirectory()
+        var calledArguments: [[String]] = []
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "tok" },
+            runner: { _, arguments, _, _ in
+                calledArguments.append(arguments)
+                if arguments.first == "queues" {
+                    return .init(stdout: #"{"result":{"queue_name":"my-site-webmention"}}"#, stderr: "", exitCode: 0)
+                }
+                return .init(stdout: "", stderr: "", exitCode: 0)
+            },
+            deployer: { _, _, _ in .succeeded(url: URL(string: "https://example.com")!, duration: 0) }
+        )
+        let webmention = WorkerDescriptor(
+            id: "webmention", displayName: "Webmentions", description: "test", group: "social",
+            binding: .settingsActivated, resources: .init(needsD1: false, needsKV: false, needsR2: false))
+
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site",
+            workers: [webmention], acknowledgesPaidPlan: true)
+
+        guard case .succeeded(_, let resources, _) = result else {
+            Issue.record("expected .succeeded, got \(result)")
+            return
+        }
+        #expect(resources.queueName == "my-site-webmention")
+        #expect(calledArguments.contains(["queues", "create", "my-site-webmention", "--json"]))
+    }
+
+    @Test("an already-provisioned queue is not re-created")
+    func alreadyProvisionedQueueSkipsCreation() async throws {
+        let site = try temporaryDirectory()
+        var calledArguments: [[String]] = []
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "tok" },
+            runner: { _, arguments, _, _ in
+                calledArguments.append(arguments)
+                return .init(stdout: "", stderr: "", exitCode: 0)
+            },
+            deployer: { _, _, _ in .succeeded(url: URL(string: "https://example.com")!, duration: 0) }
+        )
+        let webmention = WorkerDescriptor(
+            id: "webmention", displayName: "Webmentions", description: "test", group: "social",
+            binding: .settingsActivated, resources: .init(needsD1: false, needsKV: false, needsR2: false))
+
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site",
+            workers: [webmention], knownResources: .init(queueName: "my-site-webmention"),
+            acknowledgesPaidPlan: true)
+
+        guard case .succeeded = result else {
+            Issue.record("expected .succeeded, got \(result)")
+            return
+        }
+        #expect(!calledArguments.contains(where: { $0.first == "queues" }))
+    }
+
+    @Test("webmention receive writes WEBMENTION_RECEIVE_ENABLED into .site-config")
+    func webmentionWritesReceiveEnabledFlag() async throws {
+        let siteDirectory = try temporaryDirectory()
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "tok" },
+            runner: { _, arguments, _, _ in
+                if arguments.first == "queues" {
+                    return .init(stdout: #"{"result":{"queue_name":"my-site-webmention"}}"#, stderr: "", exitCode: 0)
+                }
+                return .init(stdout: "", stderr: "", exitCode: 0)
+            },
+            deployer: { _, _, _ in .succeeded(url: URL(string: "https://example.com")!, duration: 0) }
+        )
+        let webmention = WorkerDescriptor(
+            id: "webmention", displayName: "Webmentions", description: "test", group: "social",
+            binding: .settingsActivated, resources: .init(needsD1: false, needsKV: false, needsR2: false))
+
+        _ = await command.provision(
+            siteID: "site-1", siteDirectory: siteDirectory, siteName: "my-site",
+            workers: [webmention], acknowledgesPaidPlan: true)
+
+        let config = try String(contentsOf: siteDirectory.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(SiteConfigFile.value(forKey: "WEBMENTION_RECEIVE_ENABLED", in: config) == "true")
+    }
+
+    @Test("deactivating webmention reconciles WEBMENTION_RECEIVE_ENABLED back to false")
+    func webmentionDeactivationReconcilesFlagToFalse() async throws {
+        let siteDirectory = try temporaryDirectory()
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "tok" },
+            runner: { _, arguments, _, _ in
+                if arguments.first == "queues" {
+                    return .init(stdout: #"{"result":{"queue_name":"my-site-webmention"}}"#, stderr: "", exitCode: 0)
+                }
+                return .init(stdout: "", stderr: "", exitCode: 0)
+            },
+            deployer: { _, _, _ in .succeeded(url: URL(string: "https://example.com")!, duration: 0) }
+        )
+        let webmention = WorkerDescriptor(
+            id: "webmention", displayName: "Webmentions", description: "test", group: "social",
+            binding: .settingsActivated, resources: .init(needsD1: false, needsKV: false, needsR2: false))
+
+        _ = await command.provision(
+            siteID: "site-1", siteDirectory: siteDirectory, siteName: "my-site",
+            workers: [webmention], acknowledgesPaidPlan: true)
+
+        let enabledConfig = try String(contentsOf: siteDirectory.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(SiteConfigFile.value(forKey: "WEBMENTION_RECEIVE_ENABLED", in: enabledConfig) == "true")
+
+        _ = await command.provision(
+            siteID: "site-1", siteDirectory: siteDirectory, siteName: "my-site",
+            workers: [], acknowledgesPaidPlan: true)
+
+        let disabledConfig = try String(contentsOf: siteDirectory.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(SiteConfigFile.value(forKey: "WEBMENTION_RECEIVE_ENABLED", in: disabledConfig) == "false")
+    }
+
+    @Test("cancelling the paid-plan gate never lets WEBMENTION_RECEIVE_ENABLED reach true")
+    func webmentionPaidPlanGateCancelKeepsFlagFalse() async throws {
+        let siteDirectory = try temporaryDirectory()
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "tok" },
+            runner: { _, arguments, _, _ in
+                #expect(arguments.first != "queues", "must not create the Queue before the paid-plan gate is acknowledged")
+                if arguments.first == "d1" {
+                    return .init(stdout: #"{"result":{"uuid":"d1-id"}}"#, stderr: "", exitCode: 0)
+                }
+                return .init(stdout: "", stderr: "", exitCode: 0)
+            },
+            deployer: { _, _, _ in .succeeded(url: URL(string: "https://example.com")!, duration: 0) }
+        )
+        // needsD1: true so the D1 block's persistConfig call runs (and reconciles the flag to
+        // "false") before the code reaches the paid-plan gate below it — mirrors production,
+        // where webmention's real WorkerComposition resources need D1 for the inbox table.
+        let webmention = WorkerDescriptor(
+            id: "webmention", displayName: "Webmentions", description: "test", group: "social",
+            binding: .settingsActivated, resources: .init(needsD1: true, needsKV: false, needsR2: false))
+
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: siteDirectory, siteName: "my-site",
+            workers: [webmention], acknowledgesPaidPlan: false)
+
+        guard case .webmentionPaidPlanConfirmationNeeded = result else {
+            Issue.record("expected .webmentionPaidPlanConfirmationNeeded, got \(result)")
+            return
+        }
+        let config = try String(contentsOf: siteDirectory.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(SiteConfigFile.value(forKey: "WEBMENTION_RECEIVE_ENABLED", in: config) == "false")
     }
 
     private func temporaryDirectory() throws -> URL {

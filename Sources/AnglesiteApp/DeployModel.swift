@@ -25,6 +25,7 @@ final class DeployModel {
         case failed(reason: String, exitCode: Int32?)
         case blocked(failures: [PreDeployCheck.ScanFailure], warnings: [PreDeployCheck.ScanWarning])
         case workerNameConflict(name: String)
+        case webmentionPaidPlanConfirmationNeeded
     }
 
     private(set) var phase: Phase = .idle
@@ -59,6 +60,11 @@ final class DeployModel {
     /// Set when a rename attempt itself fails (invalid name, or no parked deploy). Cleared on
     /// every fresh presentation and on a successful rename-and-retry.
     private(set) var workerNameConflictError: String?
+    /// Bound to a `.sheet` in `SiteWindow` for the `.webmentionPaidPlanConfirmationNeeded`
+    /// outcome — inbound Webmention needs a Cloudflare Queue, which requires the Workers Paid
+    /// plan. Reuses `pendingDeploy` to park and retry, same as the token-prompt and
+    /// worker-name-conflict flows.
+    var webmentionPaidPlanConfirmationPresented: Bool = false
 
     /// Progress of verifying a pasted token, consumed by `CloudflareTokenPromptView`'s status line
     /// and button-enabled logic. A token is only written to the Keychain once verification reaches
@@ -345,6 +351,31 @@ final class DeployModel {
         workerNameConflictError = nil
     }
 
+    /// Called by the paid-plan confirmation sheet's "Enable & retry" button. Persists the
+    /// acknowledgment into `SiteSettings` (so future deploys never re-prompt) and retries the
+    /// parked deploy — `runDeploy` re-reads settings and passes `acknowledgesPaidPlan: true`
+    /// into `SocialWorkerProvisionCommand.provision`, which then creates the Queue.
+    func acknowledgeWebmentionPaidPlanAndRetry() async {
+        guard let pending = pendingDeploy else { return }
+        let configStore = SiteConfigStore(configDirectory: pending.configDirectory)
+        var settings = (try? await configStore.load()) ?? SiteSettings()
+        settings.webmentionReceivePaidPlanAcknowledged = true
+        try? await configStore.save(settings)
+        pendingDeploy = nil
+        // Deliberately NOT clearing webmentionPaidPlanConfirmationPresented here — mirrors
+        // renameWorkerAndRetry's identical reasoning: the sheet stays open while the retried
+        // deploy runs, and runDeploy's terminal cases dismiss it once the outcome is known.
+        deploy(
+            siteID: pending.siteID, siteDirectory: pending.siteDirectory,
+            configDirectory: pending.configDirectory, currentRoutes: pending.currentRoutes,
+            containerControlProvider: pending.containerControlProvider, siteName: pending.siteName)
+    }
+
+    func cancelWebmentionPaidPlanConfirmation() {
+        pendingDeploy = nil
+        webmentionPaidPlanConfirmationPresented = false
+    }
+
     func dismissDrawer() {
         drawerPresented = false
     }
@@ -462,6 +493,24 @@ final class DeployModel {
             await logCenter.append(source: "deploy:\(siteID)", stream: .stderr, text: warning)
         }
 
+        // Advisory-only (#359): surfaces @dwk/workers conformance status for the active set's
+        // gated phase, if any. Never blocks — a fetch failure degrades to an empty status inside
+        // WorkersConformanceFetcher, and conformanceAdvisory returning nil just skips the log.
+        // Bounded to a short request timeout (rather than URLSession.shared's ~60s default) so
+        // an unreachable raw.githubusercontent.com (offline dev, corporate firewall) can't add
+        // meaningful latency to every deploy before falling back to cache/empty.
+        let conformanceSessionConfig = URLSessionConfiguration.default
+        conformanceSessionConfig.timeoutIntervalForRequest = 5
+        let conformanceStatus = await WorkersConformanceFetcher(
+            statusURL: WorkersConformanceFetcher.productionStatusURL,
+            session: URLSession(configuration: conformanceSessionConfig)
+        ).status()
+        if let advisory = WorkerActivation.conformanceAdvisory(
+            activeIDs: effectiveActiveIDs, conformance: conformanceStatus
+        ) {
+            await logCenter.append(source: "deploy:\(siteID)", stream: .stdout, text: advisory)
+        }
+
         // Dynamic-route claims of the effective active set (#746). Validation failures (a
         // malformed path, two active workers claiming overlapping routes) refuse the deploy
         // before any Cloudflare call — never silently drop a claim and deploy a Worker whose
@@ -476,6 +525,7 @@ final class DeployModel {
             _ = await logTask.value
             currentMilestone = nil
             workerNameConflictPresented = false
+            webmentionPaidPlanConfirmationPresented = false
             transition(siteID: siteID, to: .failed(reason: reason, exitCode: nil))
             return .failed(reason: reason, exitCode: nil)
         }
@@ -509,14 +559,32 @@ final class DeployModel {
         let workerSiteName = DeployCoordinator.resolveWorkerSiteName(
             siteDirectory: siteDirectory, siteID: siteID, siteName: siteName
         )
+        let siteURL = DeployCoordinator.resolveSiteURL(siteDirectory: siteDirectory)
+        let acknowledgesPaidPlan = settings.webmentionReceivePaidPlanAcknowledged ?? false
         let provisionResult = await socialCommand.provision(
             siteID: siteID,
             siteDirectory: siteDirectory,
             siteName: workerSiteName,
             workers: workers,
             routeClaims: routeClaims.map(\.claim),
-            knownResources: settings.provisionedWorkerResources ?? .init()
+            knownResources: settings.provisionedWorkerResources ?? .init(),
+            siteURL: siteURL,
+            acknowledgesPaidPlan: acknowledgesPaidPlan
         )
+
+        if case .webmentionPaidPlanConfirmationNeeded = provisionResult {
+            pendingDeploy = (siteID, siteDirectory, configDirectory, currentRoutes, containerControlProvider, siteName)
+            subscription.cancel()
+            _ = await logTask.value
+            currentMilestone = nil
+            workerNameConflictPresented = false
+            transition(siteID: siteID, to: .webmentionPaidPlanConfirmationNeeded)
+            drawerPresented = false
+            webmentionPaidPlanConfirmationPresented = presentation == .foreground
+            return .failed(
+                reason: "Inbound Webmention requires the Cloudflare Workers Paid plan — confirm to continue",
+                exitCode: nil)
+        }
 
         if case .succeeded(_, let resources, _) = provisionResult {
             await DeployCoordinator.persistProvisionedResources(
@@ -555,12 +623,14 @@ final class DeployModel {
             )
             currentMilestone = nil
             workerNameConflictPresented = false
+            webmentionPaidPlanConfirmationPresented = false
             if let settings = try? await SiteConfigStore(configDirectory: configDirectory).load() {
                 sourceBundleStatus = await SourceBundleStatus.check(siteDirectory: siteDirectory, settings: settings)
             }
             transition(siteID: siteID, to: .succeeded(url: url, duration: duration))
         case .failed(let reason, let exit):
             workerNameConflictPresented = false
+            webmentionPaidPlanConfirmationPresented = false
             transition(siteID: siteID, to: .failed(reason: reason, exitCode: exit))
             guard presentation == .foreground else { return result }
             let capturedLog = logText   // snapshot before the suspension; a later deploy clears logLines
@@ -582,6 +652,7 @@ final class DeployModel {
             // streaming-log drawer would just be noise.
             drawerPresented = false
             workerNameConflictPresented = false
+            webmentionPaidPlanConfirmationPresented = false
             blockedPresented = presentation == .foreground
         case .workerNameConflict(let name):
             // Parks the provider, not the resolved `containerControl` snapshot above — the
@@ -591,6 +662,7 @@ final class DeployModel {
             drawerPresented = false
             workerNameConflictError = nil
             workerNameConflictPresented = presentation == .foreground
+            webmentionPaidPlanConfirmationPresented = false
         }
         return result
     }
