@@ -182,18 +182,22 @@ which `WorkerRouteClaims.validate` requires for any `match: .prefix` claim
 claim would throw `ConfigError.invalidRouteClaim` and hard-fail provisioning
 for every site that activates Micropub.
 
-**Decision:** treat a route claim that fails `WorkerRouteClaims.validate` as
-*skip + log*, not a hard failure — `WorkerRouteClaims.activeClaims` (or its
-caller) drops the invalid claim and logs a diagnostic, the same way a
-missing/unresolved descriptor id already degrades to a logged warning rather
-than aborting deploy. Practical effect: `/media/*` GET (retrieving an
-already-uploaded file) stays inert — falls through to the static-asset
-`[assets]` fallback (a 404, since nothing was actually built at that path) —
-until `catalog.json` publishes a `specificationURL` for that claim. Create
-and upload (`POST /media`, an *exact* claim, unaffected by this) work from
-day one. This is a deliberate, disclosed scope boundary, not a silent gap —
-flagged for you to patch `catalog.json` upstream (its repo, not this PR's
-scope) whenever convenient.
+**Decision (revised during plan-writing):** `DeployModel.swift:514-516`
+documents an existing, deliberate policy at the `WorkerRouteClaims
+.activeClaims` call site — "never silently drop a claim and deploy a Worker
+whose routes don't match its catalog contract." `activeClaims` throws on the
+first invalid claim and both call sites (`DeployModel.swift`,
+`SiteOperations.swift`) hard-fail the deploy on that error, by design. A
+skip+log behavior change would weaken that policy for every worker, not just
+Micropub, so this design does **not** change `activeClaims`. Instead: the
+`/media/` prefix claim's missing `specificationURL` is a `catalog.json` data
+bug to fix upstream (`davidwkeith/workers`, a one-line addition of a
+`specificationURL` pointing at the Micropub spec's media-endpoint section) —
+this app-side implementation makes no code changes for it. Until that catalog
+fix ships, activating Micropub on a site will make `activeClaims` throw and
+the deploy will fail with a clear "invalid route claim" reason — a correct,
+loud failure per the existing policy, not a silent gap. `POST /micropub` and
+`POST /media` (both *exact* claims) are unaffected either way.
 
 ### 5. `SocialWorkerProvisionCommand` — create the R2 bucket
 
@@ -240,8 +244,9 @@ bridge exists.
 
 - Unprovisioned bindings (`MICROPUB_DB`/`AUTH_DB`/`MEDIA`/`TOKEN_SIGNING_KEY`
   not all present) → `503` from the Worker, never a thrown/crashed handler.
-- An invalid route claim (the `/media/` prefix gap above) → skip + log, not
-  a hard deploy failure.
+- An invalid route claim (the `/media/` prefix gap above, until the upstream
+  catalog fix ships) → deploy fails loudly with a clear reason, per
+  `activeClaims`'s existing, unchanged "never silently drop a claim" policy.
 - R2 bucket / D1 creation failures during provisioning surface through the
   existing `SocialWorkerProvisionCommand.Result.failed` case and the debug
   pane, same as every other provisioning step today.
@@ -277,7 +282,7 @@ bridge exists.
   `WorkerDescriptor.requires`)
 - `Sources/AnglesiteCore/WorkerActivation.swift` (`requires` resolution)
 - `Sources/AnglesiteCore/WorkerComposition.swift` (`hasMicropub` branch,
-  `micropubWorkerID` constant, skip-invalid-claim behavior)
+  `micropubWorkerID` constant)
 - `Sources/AnglesiteCore/SocialWorkerProvisionCommand.swift` (verify the
   existing `needsR2` branch covers Micropub once decoding is fixed; add a
   test, not necessarily new production code)
@@ -297,5 +302,7 @@ bridge exists.
   in one slice" scope.
 - **Ambiguity resolved, not left open:** the `/media/` prefix route-claim
   gap could have been silently patched app-side (hardcoding a
-  `specificationURL`) or silently dropped; this doc picks skip+log
-  explicitly and states why, per the user's confirmed choice.
+  `specificationURL`) or handled by weakening `activeClaims`'s existing
+  "never silently drop a claim" policy; this doc picks neither — the fix is
+  an upstream `catalog.json` patch, per the user's confirmed choice, and the
+  app-side `activeClaims` contract is left untouched.
