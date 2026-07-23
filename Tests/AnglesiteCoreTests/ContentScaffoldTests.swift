@@ -93,6 +93,7 @@ struct ContentScaffoldTests {
         ---
         publishDate: 2025-06-15T15:06:40.000Z
         tags: []
+        audience: ""
         draft: true
         ---
 
