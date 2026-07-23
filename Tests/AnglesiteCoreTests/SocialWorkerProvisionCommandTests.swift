@@ -95,6 +95,41 @@ struct SocialWorkerProvisionCommandTests {
         #expect(toml.contains("bucket_name = \"my-site-media\""))
     }
 
+    @Test("provisions Micropub (real catalog id, requires indieauth) end-to-end")
+    func provisionsMicropubWithIndieauth() async throws {
+        let site = try temporaryDirectory()
+        let recorder = WranglerRecorder([
+            ["d1", "create", "my-site-social", "--json"]: .init(stdout: #"{"result":{"uuid":"d1-id"}}"#, stderr: "", exitCode: 0),
+            ["r2", "bucket", "create", "my-site-media"]: .init(stdout: "Created bucket my-site-media", stderr: "", exitCode: 0),
+            ["d1", "migrations", "apply", "AUTH_DB", "--remote"]: .init(stdout: "Migrations applied", stderr: "", exitCode: 0),
+        ])
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "token" },
+            runner: recorder.runner,
+            deployer: DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1)).deployer
+        )
+        let indieauth = worker(WorkerComposition.indieauthWorkerID, d1: true, kv: false, r2: false)
+        let micropub = worker(WorkerComposition.micropubWorkerID, d1: true, kv: false, r2: true)
+
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site",
+            workers: [indieauth, micropub], acknowledgesPaidPlan: true
+        )
+
+        guard case .succeeded(_, let resources, _) = result else {
+            Issue.record("expected success, got \(result)")
+            return
+        }
+        #expect(resources.d1DatabaseID == "d1-id")
+        #expect(resources.r2BucketName == "my-site-media")
+
+        let toml = try String(contentsOf: site.appendingPathComponent("wrangler.toml"), encoding: .utf8)
+        #expect(toml.contains("binding = \"MICROPUB_DB\""))
+        #expect(toml.contains("binding = \"AUTH_DB\""))
+        #expect(toml.contains("[[r2_buckets]]"))
+        #expect(toml.contains("bucket_name = \"my-site-media\""))
+    }
+
     @Test("fails before running wrangler when no token is available")
     func missingToken() async throws {
         let site = try temporaryDirectory()
