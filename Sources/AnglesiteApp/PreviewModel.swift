@@ -492,6 +492,13 @@ final class PreviewModel {
         await capability.resetNetworking()
     }
 
+    /// Forwards a Workers-tab toggle (#710) to the running runtime so a live local wrangler-dev
+    /// session restarts with the new active set. No-op for non-container runtimes — the local
+    /// workers dev server is a local-container-only capability (#708).
+    func activeWorkersChanged(_ settings: SiteSettings) async {
+        await runtime.containerCapability?.updateActiveWorkers(settings)
+    }
+
     /// True when the preview runtime is ready — used to gate the Deploy button so a user
     /// deploying before the container (or dev server) is up sees a coherent error rather than
     /// a silent `ContainerDeployExecutor` "container isn't running" failure.

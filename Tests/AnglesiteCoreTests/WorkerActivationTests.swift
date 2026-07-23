@@ -174,4 +174,55 @@ struct WorkerActivationTests {
         let status = WorkersConformanceStatus(packages: [:])
         #expect(WorkerActivation.conformanceAdvisory(activeIDs: ["solid-pod"], conformance: status) == nil)
     }
+
+    @Test("componentNodeIDs resolves a catalog componentID to a real prefixed component node by filename stem")
+    func componentNodeIDsResolvesRealGraphNode() {
+        let snapshot = SiteGraphExplorerSnapshot(
+            nodes: [
+                SiteGraphNode(
+                    id: "site1:file:src/components/WebmentionForm.astro", kind: .component,
+                    title: "WebmentionForm.astro", detail: nil,
+                    filePath: "src/components/WebmentionForm.astro", route: nil),
+                SiteGraphNode(
+                    id: "site1:file:src/components/Nav.astro", kind: .component,
+                    title: "Nav.astro", detail: nil,
+                    filePath: "src/components/Nav.astro", route: nil),
+                SiteGraphNode(
+                    id: "site1:page:index", kind: .page, title: "Home", detail: nil,
+                    filePath: "src/pages/index.astro", route: "/"),
+            ],
+            edges: [])
+
+        #expect(WorkerActivation.componentNodeIDs(for: "webmention-form", in: snapshot)
+            == ["site1:file:src/components/WebmentionForm.astro"])
+        // Exact-id matching still works (unprefixed fixture graphs, existing tests).
+        #expect(WorkerActivation.componentNodeIDs(for: "site1:page:index", in: snapshot)
+            == ["site1:page:index"])
+        #expect(WorkerActivation.componentNodeIDs(for: "no-such-component", in: snapshot).isEmpty)
+    }
+
+    @Test("componentTied activates through a stem-resolved node with an affected page")
+    func componentTiedActivatesThroughResolvedNode() {
+        let catalog = [descriptor(id: "webmention", binding: .componentTied(componentIDs: ["webmention-form"]))]
+        let snapshot = SiteGraphExplorerSnapshot(
+            nodes: [
+                SiteGraphNode(
+                    id: "site1:file:src/components/WebmentionForm.astro", kind: .component,
+                    title: "WebmentionForm.astro", detail: nil,
+                    filePath: "src/components/WebmentionForm.astro", route: nil),
+                SiteGraphNode(
+                    id: "site1:page:index", kind: .page, title: "Home", detail: nil,
+                    filePath: "src/pages/index.astro", route: "/"),
+            ],
+            edges: [
+                SiteGraphEdge(
+                    sourceID: "site1:page:index",
+                    targetID: "site1:file:src/components/WebmentionForm.astro",
+                    kind: .imports)
+            ])
+
+        let active = WorkerActivation.effectiveActiveIDs(
+            settings: SiteSettings(), catalog: catalog, graph: snapshot)
+        #expect(active == ["webmention"])
+    }
 }
