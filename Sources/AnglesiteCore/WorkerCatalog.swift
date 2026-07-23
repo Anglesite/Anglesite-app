@@ -81,6 +81,14 @@ public struct WorkerDescriptor: Sendable, Equatable, Codable, Identifiable {
     /// Manifest-driven equivalent of the `needsD1`/`needsKV`/`needsR2` flags the old
     /// `WorkerComposition.Feature` enum used to hand-maintain as switch statements (removed by
     /// #708's descriptor migration).
+    ///
+    /// Decodes both published shapes (#914): the original object form (`{"needsD1": true, …}`)
+    /// used by this app's own fixtures and any pre-drift cache, and the array-of-typed-bindings
+    /// form the catalog has actually published since its first commit
+    /// (`[{"type": "d1", "binding": "AUTH_DB"}, …]` — davidwkeith/workers spec/catalog.md).
+    /// `d1`/`kv`/`r2` entry types map to the flags; other types (`secret`, `queue`, `cron`) have
+    /// no provisioning flag yet and are ignored here — adopting their fidelity is future work,
+    /// not silently claimed. Encoding always emits the object form.
     public struct Resources: Sendable, Equatable, Codable {
         public let needsD1: Bool
         public let needsKV: Bool
@@ -90,6 +98,37 @@ public struct WorkerDescriptor: Sendable, Equatable, Codable, Identifiable {
             self.needsD1 = needsD1
             self.needsKV = needsKV
             self.needsR2 = needsR2
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case needsD1, needsKV, needsR2
+        }
+
+        /// One entry of the published array form. Only `type` matters to the flags; `binding`
+        /// and any other keys are ignored.
+        private struct BindingEntry: Decodable {
+            let type: String
+        }
+
+        public init(from decoder: Decoder) throws {
+            if var entries = try? decoder.unkeyedContainer() {
+                var d1 = false, kv = false, r2 = false
+                while !entries.isAtEnd {
+                    switch try entries.decode(BindingEntry.self).type.lowercased() {
+                    case "d1": d1 = true
+                    case "kv": kv = true
+                    case "r2": r2 = true
+                    default: break
+                    }
+                }
+                self.init(needsD1: d1, needsKV: kv, needsR2: r2)
+                return
+            }
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(
+                needsD1: try container.decode(Bool.self, forKey: .needsD1),
+                needsKV: try container.decode(Bool.self, forKey: .needsKV),
+                needsR2: try container.decode(Bool.self, forKey: .needsR2))
         }
     }
 }
