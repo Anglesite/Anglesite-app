@@ -138,11 +138,18 @@ public enum DeployCoordinator {
     public static func runPostDeploySequencing(
         onMilestone: (OperationProgress) -> Void,
         sendWebmentions: () async -> Void,
-        syndicate: () async -> Void
+        syndicate: () async -> Void,
+        /// WebSub publish pings (#361): tells the site's own hub the feeds changed so it fans
+        /// the update out to subscribers. Ordered last — the deployed feeds must exist before
+        /// the hub fetches them, and (like the other two passes) it's best-effort and never
+        /// throws. Callers without the hub provisioned pass a no-op.
+        notifySubscribers: () async -> Void = {}
     ) async {
         onMilestone(.deployWebmentions)
         await sendWebmentions()
         onMilestone(.deploySyndicating)
         await syndicate()
+        onMilestone(.deployNotifyingSubscribers)
+        await notifySubscribers()
     }
 }

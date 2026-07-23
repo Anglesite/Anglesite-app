@@ -14,6 +14,13 @@ import {
   createMicropub,
   type MicropubEnv,
 } from "@dwk/micropub";
+import {
+  createWebSub,
+  createWebSubQueueConsumer,
+  type WebSubConfig,
+  type WebSubEnv,
+  type WebSubJob,
+} from "@dwk/websub";
 
 /**
  * Per-site Cloudflare Worker entry point.
@@ -73,6 +80,19 @@ export interface WorkerEnv extends IndieAuthEnv {
    */
   MICROPUB_DB?: D1Database;
   MEDIA?: R2Bucket;
+  /**
+   * WebSub hub bindings (V-3.3, #361). Optional like the Webmention set above: a site that
+   * hasn't provisioned the hub has none of them bound, and the `/websub` route + queue
+   * consumer degrade gracefully (503 / ack-without-work). Provisioning wires a D1 database
+   * for the strongly-consistent subscription store and a dedicated Cloudflare Queue for
+   * intent verification + per-subscriber delivery fan-out. `WEBSUB_CONTENT` (R2 staging for
+   * snapshots too large to inline in a queue message) is deliberately not provisioned yet —
+   * a feed that outgrows the ~64 KB inline limit fails the fan-out loudly rather than
+   * truncating, and wiring the staging bucket (with its lifecycle expiration rule) is the
+   * documented follow-up.
+   */
+  WEBSUB_DB?: D1Database;
+  WEBSUB_QUEUE?: Queue<WebSubJob>;
 }
 
 const RATE_LIMIT_WINDOW_SECONDS = 3600;
@@ -456,6 +476,91 @@ function handleMicropub(
   return micropub(request, micropubEnv, ctx);
 }
 
+/**
+ * The site's feed paths — the only topics the WebSub hub serves. These are the template's
+ * static root feeds (src/pages/{rss.xml,atom.xml,feed.json}.ts); they cover everything the
+ * site publishes, so a subscriber to any of them sees every update. The same list drives the
+ * `rel="hub"` advertisement in the generated feeds (src/lib/feeds.ts) and Anglesite's
+ * publish ping after a deploy — all three must agree or a discoverable topic would 400 on
+ * subscribe or never receive a push.
+ */
+export const WEBSUB_TOPIC_PATHS = ["/rss.xml", "/atom.xml", "/feed.json"] as const;
+
+/**
+ * WebSub hub configuration for a given canonical site origin. Topics are the root feeds on
+ * that origin; the hub endpoint itself is `/websub` on the same origin.
+ */
+function websubConfig(origin: string): WebSubConfig {
+  return {
+    baseUrl: origin,
+    hubUrl: `${origin}/websub`,
+    allowedTopics: WEBSUB_TOPIC_PATHS.map((path) => `${origin}${path}`),
+  };
+}
+
+/**
+ * The canonical origin WebSub topics are keyed on, or `null` when `SITE_URL` isn't provisioned
+ * or isn't a valid URL. Both the hub route and the queue consumer require this — subscriptions
+ * are keyed on exact topic URLs, and a hub that fell back to the request's origin could accept
+ * a subscription the queue consumer (which has no request to derive an origin from, and always
+ * requires `SITE_URL`) would then silently never fan out to. Failing the hub route closed here
+ * keeps both sides of the same feature agreeing on what "provisioned" means.
+ */
+function websubOrigin(env: WorkerEnv): string | null {
+  if (!env.SITE_URL) return null;
+  try {
+    return new URL(env.SITE_URL).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * WebSub hub endpoint (V-3.3, #361).
+ *
+ * Composes `@dwk/websub`'s hub: a form-encoded `POST` of `hub.mode=subscribe|unsubscribe`
+ * is validated synchronously and a verification-of-intent job enqueued (202);
+ * `hub.mode=publish` for one of this site's feeds enqueues a distribution job (202) — the
+ * consumer fetches the feed once and POSTs it to every verified subscriber, HMAC-signing
+ * the body (`X-Hub-Signature`) for subscribers that registered a secret. Returns 503 when
+ * the hub isn't provisioned for this site (no queue/store binding, or no canonical `SITE_URL`
+ * — see `websubOrigin`), mirroring `handleWebmentionReceive`'s degrade-gracefully contract.
+ */
+function handleWebSubHub(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
+  const origin = websubOrigin(env);
+  if (!env.WEBSUB_QUEUE || !env.WEBSUB_DB || !origin) {
+    return Promise.resolve(new Response("WebSub hub is not configured", { status: 503 }));
+  }
+  const hub = createWebSub(websubConfig(origin));
+  const websubEnv: WebSubEnv = {
+    WEBSUB_DB: env.WEBSUB_DB,
+    WEBSUB_QUEUE: env.WEBSUB_QUEUE,
+  };
+  return hub(request, websubEnv, ctx);
+}
+
+/**
+ * Queue consumer for WebSub verification + distribution + per-subscriber delivery (V-3.3,
+ * #361). Acks-without-work when the hub or the canonical site origin isn't provisioned —
+ * same contract as `handleWebmentionQueue`.
+ */
+function handleWebSubQueue(
+  batch: MessageBatch<WebSubJob>,
+  env: WorkerEnv,
+  ctx: ExecutionContext,
+): Promise<void> {
+  const origin = websubOrigin(env);
+  if (!env.WEBSUB_QUEUE || !env.WEBSUB_DB || !origin) {
+    return Promise.resolve();
+  }
+  const consumer = createWebSubQueueConsumer(websubConfig(origin));
+  const websubEnv: WebSubEnv = {
+    WEBSUB_DB: env.WEBSUB_DB,
+    WEBSUB_QUEUE: env.WEBSUB_QUEUE,
+  };
+  return consumer(batch, websubEnv, ctx);
+}
+
 export interface InboxFields {
   subject: string;
   from: string;
@@ -634,6 +739,13 @@ export const ROUTES: readonly WorkerRoute[] = [
     methods: ["GET", "HEAD"],
     handler: (request, env, ctx) => handleMicropub(request, env, ctx),
   },
+  {
+    // WebSub hub (V-3.3, #361): POST hub.mode=subscribe|unsubscribe|publish, validate, enqueue, 202.
+    path: "/websub",
+    match: "exact",
+    methods: ["POST"],
+    handler: (request, env, ctx) => handleWebSubHub(request, env, ctx),
+  },
 ];
 
 export function matchRoute(pathname: string, routes: readonly WorkerRoute[] = ROUTES): WorkerRoute | null {
@@ -717,9 +829,23 @@ export default {
     return assets.fetch(request);
   },
 
-  // Async Webmention verification (V-3.1, #359). Present unconditionally; no-ops for sites
-  // without inbound Webmention provisioned (see `handleWebmentionQueue`).
-  async queue(batch: MessageBatch<WebmentionJob>, env: WorkerEnv, ctx: ExecutionContext): Promise<void> {
-    return handleWebmentionQueue(batch, env, ctx);
+  // Async queue work, present unconditionally; no-ops for sites without the matching feature
+  // provisioned. Two queues deliver here — Webmention verification (V-3.1, #359) and WebSub
+  // verification/distribution/delivery (V-3.3, #361) — dispatched on the queue's name:
+  // Anglesite provisions deterministic names (`<site>-webmention`, `<site>-websub`). Both
+  // matches are positive (rather than "webmention = anything that isn't -websub") so a future
+  // third queue-backed feature can't get silently misrouted into the webmention consumer.
+  async queue(
+    batch: MessageBatch<WebmentionJob | WebSubJob>,
+    env: WorkerEnv,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    if (batch.queue.endsWith("-websub")) {
+      return handleWebSubQueue(batch as MessageBatch<WebSubJob>, env, ctx);
+    }
+    if (batch.queue.endsWith("-webmention")) {
+      return handleWebmentionQueue(batch as MessageBatch<WebmentionJob>, env, ctx);
+    }
+    return Promise.resolve();
   },
-} satisfies ExportedHandler<WorkerEnv, WebmentionJob>;
+} satisfies ExportedHandler<WorkerEnv, WebmentionJob | WebSubJob>;
