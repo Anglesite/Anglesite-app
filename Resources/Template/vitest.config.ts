@@ -8,8 +8,9 @@ export default defineConfig({
       miniflare: {
         compatibilityDate: "2026-07-15",
         compatibilityFlags: ["nodejs_compat"],
-        d1Databases: ["AUTH_DB", "WEBMENTION_INBOX"],
+        d1Databases: ["AUTH_DB", "WEBMENTION_INBOX", "MICROPUB_DB"],
         kvNamespaces: ["INBOX_KV", "SOCIAL_KV"],
+        r2Buckets: ["MEDIA"],
         queueProducers: { WEBMENTION_QUEUE: "site-webmentions" },
         queueConsumers: ["site-webmentions"],
         bindings: {
