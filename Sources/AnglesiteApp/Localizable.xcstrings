@@ -164,6 +164,9 @@
     "Active Model" : {
 
     },
+    "Active — used on ^[%lld page](inflect: true)" : {
+
+    },
     "Actual Size" : {
 
     },
@@ -273,6 +276,9 @@
 
     },
     "Allowed MX hosts" : {
+
+    },
+    "Analytics" : {
 
     },
     "Analytics…" : {
@@ -745,6 +751,9 @@
     "Couldn't run the check" : {
 
     },
+    "Couldn't save the worker change: %@" : {
+
+    },
     "Create" : {
 
     },
@@ -1201,9 +1210,6 @@
     "Impact analysis" : {
 
     },
-    "Inbound Webmention requires the Workers Paid plan" : {
-
-    },
     "Import Site…" : {
 
     },
@@ -1211,6 +1217,12 @@
 
     },
     "Import from Phone" : {
+
+    },
+    "Inactive — not used" : {
+
+    },
+    "Inbound Webmention requires the Workers Paid plan" : {
 
     },
     "Include Git history (.git)" : {
@@ -1307,6 +1319,9 @@
 
     },
     "Lock" : {
+
+    },
+    "Logs and analytics become available after the first deploy that includes a worker." : {
 
     },
     "Logs…" : {
@@ -1576,6 +1591,9 @@
     "Page" : {
 
     },
+    "Pages using this worker's components" : {
+
+    },
     "Page…" : {
 
     },
@@ -1655,6 +1673,9 @@
 
     },
     "Privacy & Analytics…" : {
+
+    },
+    "Production Logs" : {
 
     },
     "Project Style Guide" : {
@@ -2273,6 +2294,9 @@
     "The preview is paused for %@. Start the dev server to resume." : {
 
     },
+    "The worker catalog couldn't be loaded. Check your network connection and reopen this tab." : {
+
+    },
     "Theme applied." : {
 
     },
@@ -2502,6 +2526,9 @@
 
     },
     "Worker name already in use" : {
+
+    },
+    "Workers are unavailable for this site — its package configuration folder couldn't be found." : {
 
     },
     "Writing" : {
