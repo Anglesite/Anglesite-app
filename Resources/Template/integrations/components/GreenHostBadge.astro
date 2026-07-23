@@ -3,10 +3,10 @@
 // GREEN_HOST_VERIFIED/GREEN_HOST_NAME/GREEN_HOST_CHECKED_AT are written by the greenHostCheck
 // integration wizard at setup time; the caller only renders this when GREEN_HOST_VERIFIED === "true".
 interface Props {
-  hostname: string;
+  hostname?: string;
   checkedAt?: string;
 }
-const { hostname, checkedAt } = Astro.props;
+const { hostname = "", checkedAt } = Astro.props;
 const checkURL = `https://www.thegreenwebfoundation.org/green-web-check/?url=${hostname}`;
 ---
 <a
