@@ -181,6 +181,22 @@ struct ContentTypeRegistryTests {
         }
     }
 
+    @Test("note and article carry an optional, mf2-inert audience field (V-5.2a, #369)")
+    func audienceFieldIsInert() {
+        let registry = ContentTypeRegistry()
+        for id in ["note", "article"] {
+            let descriptor = try! #require(registry.descriptor(id: id))
+            let audience = try! #require(descriptor.fields.first { $0.name == "audience" },
+                                          "\(id): missing audience field")
+            #expect(audience.kind == .url, "\(id): audience should be .url")
+            #expect(!audience.required, "\(id): audience should be optional")
+            #expect(descriptor.projections.microformatProperties["audience"] == nil,
+                    "\(id): audience has no mf2 projection — federation only, per #369")
+            #expect(descriptor.fields.last?.name == "draft",
+                    "\(id): draft must stay the trailing field")
+        }
+    }
+
     // MARK: Reverse lookup
 
     @Test("descriptor(forCollection:) maps a collection name back to its type")
