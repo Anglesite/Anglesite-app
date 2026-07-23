@@ -811,10 +811,19 @@ final class SiteWindowModel {
                 // wired in at the call site — see `SiteWindow.mainPaneContent`.
                 activeEditor = .text(FileEditorModel(file: file))
             case .plist:
+                // Captures the per-window child models directly (both outlive any editor and are
+                // never replaced), not `self` — no ownership cycle: neither owns the editor model.
+                let graphExplorer = graphExplorer
+                let preview = preview
                 activeEditor = .plist(PlistEditorModel(
                     file: file,
                     websiteTitle: site?.name ?? file.name,
-                    sourceDirectory: site?.sourceDirectory ?? file.url.deletingLastPathComponent()
+                    sourceDirectory: site?.sourceDirectory ?? file.url.deletingLastPathComponent(),
+                    configDirectory: site?.configDirectory,
+                    graphSnapshotProvider: { graphExplorer.snapshot },
+                    onActiveWorkersChanged: { settings in
+                        await preview.activeWorkersChanged(settings)
+                    }
                 ))
             }
             mainPaneMode = .editor(file)
