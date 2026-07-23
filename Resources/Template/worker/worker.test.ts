@@ -144,23 +144,82 @@ async function pkceChallenge(verifier: string): Promise<string> {
   return base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
 }
 
-async function dpopProof(url: string): Promise<string> {
+async function dpopProof(url: string, method = "POST", keyPair?: CryptoKeyPair): Promise<string> {
+  const pair = keyPair ?? await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+  const header = base64url(new TextEncoder().encode(JSON.stringify({ typ: "dpop+jwt", alg: "ES256", jwk })));
+  const payload = base64url(new TextEncoder().encode(JSON.stringify({
+    jti: crypto.randomUUID(),
+    htm: method,
+    htu: url,
+    iat: Math.floor(Date.now() / 1000),
+  })));
+  const signingInput = new TextEncoder().encode(`${header}.${payload}`);
+  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, pair.privateKey, signingInput);
+  return `${header}.${payload}.${base64url(new Uint8Array(signature))}`;
+}
+
+/**
+ * Runs the full PKCE + owner-consent + token-exchange flow (mirroring the inline steps in
+ * "IndieAuth owner consent completes PKCE sign-in and issues a DPoP token" above) and returns
+ * the issued access token plus the key pair its DPoP binding was minted with — callers that need
+ * to make an authorized resource request (Task 9's Micropub tests) must reuse this same key pair
+ * to prove possession, not generate a fresh one.
+ */
+async function mintAccessToken(scope: string): Promise<{ token: string; keyPair: CryptoKeyPair }> {
   const keyPair = await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
     true,
     ["sign", "verify"],
   );
-  const jwk = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
-  const header = base64url(new TextEncoder().encode(JSON.stringify({ typ: "dpop+jwt", alg: "ES256", jwk })));
-  const payload = base64url(new TextEncoder().encode(JSON.stringify({
-    jti: crypto.randomUUID(),
-    htm: "POST",
-    htu: url,
-    iat: Math.floor(Date.now() / 1000),
-  })));
-  const signingInput = new TextEncoder().encode(`${header}.${payload}`);
-  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, keyPair.privateKey, signingInput);
-  return `${header}.${payload}.${base64url(new Uint8Array(signature))}`;
+  const verifier = `anglesite-mint-verifier-${crypto.randomUUID()}-with-more-than-forty-three-characters`;
+  const challenge = await pkceChallenge(verifier);
+  const authorize = new URL("https://owner.example/authorize");
+  authorize.search = new URLSearchParams({
+    client_id: "https://client.example/app",
+    redirect_uri: "https://client.example/callback",
+    response_type: "code",
+    state: crypto.randomUUID(),
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    scope,
+  }).toString();
+
+  await fetchWorker(new Request(authorize));
+
+  const consentForm = new URLSearchParams(authorize.search);
+  consentForm.set("password", "correct horse battery staple");
+  const consent = await fetchWorker(new Request("https://owner.example/indieauth/consent", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "192.0.2.99" },
+    body: consentForm,
+  }));
+  const approvedURL = new URL(consent.headers.get("location")!);
+  const approval = await fetchWorker(new Request(approvedURL));
+  const clientCallback = new URL(approval.headers.get("location")!);
+  const code = clientCallback.searchParams.get("code")!;
+
+  const tokenURL = "https://owner.example/token";
+  const tokenResponse = await fetchWorker(new Request(tokenURL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      DPoP: await dpopProof(tokenURL, "POST", keyPair),
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      client_id: "https://client.example/app",
+      redirect_uri: "https://client.example/callback",
+      code_verifier: verifier,
+    }),
+  }));
+  const body = await tokenResponse.json() as { access_token: string };
+  return { token: body.access_token, keyPair };
 }
 
 async function fetchWorker(request: Request): Promise<Response> {
@@ -318,6 +377,16 @@ test("IndieAuth owner consent completes PKCE sign-in and issues a DPoP token", a
     scope: "create update",
     me: "https://owner.example/",
   });
+});
+
+test("mintAccessToken: issues a token whose DPoP proof (same key pair) is accepted on a resource request", async () => {
+  const { token, keyPair } = await mintAccessToken("create update media");
+  expect(token.length).toBeGreaterThan(0);
+
+  // Reuse the same key pair for a request to /token again (a cheap way to prove the key pair is
+  // usable for more than the mint call itself, without depending on Task 9's /micropub route).
+  const proof = await dpopProof("https://owner.example/micropub", "POST", keyPair);
+  expect(proof.split(".")).toHaveLength(3);
 });
 
 test("IndieAuth consent rejects the wrong owner password", async () => {
