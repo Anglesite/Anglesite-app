@@ -46,6 +46,27 @@ public enum WorkerActivation {
             active.formUnion(requested.intersection(settingsActivatedIDs))
         }
 
+        // Resolve `requires` to a fixed point: an active descriptor's required ids become active
+        // too, which may in turn have their own `requires`. `visited` guards a future catalog
+        // entry with a `requires` cycle from looping forever — today's catalog has none, this is
+        // defense-in-depth, not a currently-reachable case. An id a descriptor `requires` but
+        // that isn't in `catalog` is silently dropped, matching this function's existing "never
+        // invents" posture for component-tied workers.
+        let byID = Dictionary(uniqueKeysWithValues: catalog.map { ($0.id, $0) })
+        var visited: Set<String> = []
+        var frontier = active
+        while !frontier.isEmpty {
+            var next: Set<String> = []
+            for id in frontier {
+                guard visited.insert(id).inserted, let descriptor = byID[id] else { continue }
+                for required in descriptor.requires ?? [] where byID[required] != nil {
+                    next.insert(required)
+                }
+            }
+            active.formUnion(next)
+            frontier = next.subtracting(visited)
+        }
+
         return active
     }
 

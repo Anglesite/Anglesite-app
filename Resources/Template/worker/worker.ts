@@ -10,11 +10,16 @@ import {
   type WebmentionEnv,
   type WebmentionJob,
 } from "@dwk/webmention";
+import {
+  createMicropub,
+  type MicropubEnv,
+} from "@dwk/micropub";
 
 /**
  * Per-site Cloudflare Worker entry point.
  *
- * Composes @dwk/* social endpoints behind the site's static assets, plus a runtime inbox-capture
+ * Composes @dwk/* social endpoints (IndieAuth, inbound Webmention, Micropub) behind the site's
+ * static assets, plus a runtime inbox-capture
  * endpoint (#587) that does NOT depend on any @dwk/* package — Webmention's link-verification
  * shape and Micropub's IndieAuth-gated shape don't fit a public "visitor sends us a message"
  * form, so this route is bespoke. It stages submissions into the `INBOX_KV` namespace for the
@@ -57,6 +62,17 @@ export interface WorkerEnv extends IndieAuthEnv {
   WEBMENTION_QUEUE?: Queue<WebmentionJob>;
   WEBMENTION_INBOX?: D1Database;
   SITE_URL?: string;
+  /**
+   * Micropub bindings (V-3.2, #360). Both optional: a site that hasn't provisioned Micropub has
+   * neither bound, and `/micropub`/`/media` degrade gracefully (503) rather than throwing.
+   * `AUTH_DB`/`TOKEN_SIGNING_KEY` are already required by `IndieAuthEnv` above — Micropub's
+   * catalog entry `requires: ["indieauth"]` (resolved by `WorkerActivation`) guarantees both are
+   * provisioned together, so this handler still explicitly checks all four before dispatching,
+   * matching `handleWebmentionReceive`'s defense-in-depth pattern rather than trusting reachability
+   * alone. See `WorkerComposition.generateWranglerToml` (Swift) for the binding generation.
+   */
+  MICROPUB_DB?: D1Database;
+  MEDIA?: R2Bucket;
 }
 
 const RATE_LIMIT_WINDOW_SECONDS = 3600;
@@ -409,6 +425,37 @@ function handleWebmentionQueue(
   return consumer(batch, webmentionEnv, ctx);
 }
 
+/**
+ * Micropub server (V-3.2, #360).
+ *
+ * Composes `@dwk/micropub`'s create/update/delete endpoint and its R2-backed media endpoint.
+ * Requires `@dwk/indieauth` to be active on the same site (catalog `requires`, resolved by
+ * `WorkerActivation`) — Micropub authorizes every request against `AUTH_DB`'s issued-token store
+ * using the same `TOKEN_SIGNING_KEY` IndieAuth signs tokens with.
+ *
+ * Returns `503` when Micropub isn't fully provisioned (`MICROPUB_DB`/`MEDIA` unbound, or
+ * IndieAuth's `AUTH_DB`/`TOKEN_SIGNING_KEY` unbound) rather than letting `@dwk/micropub` throw
+ * its own loud startup error.
+ */
+function handleMicropub(
+  request: Request,
+  env: WorkerEnv,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  if (!env.MICROPUB_DB || !env.MEDIA || !env.AUTH_DB || !env.TOKEN_SIGNING_KEY) {
+    return Promise.resolve(new Response("Micropub is not configured", { status: 503 }));
+  }
+  const baseUrl = new URL(request.url).origin;
+  const micropub = createMicropub({ baseUrl, me: `${baseUrl}/` });
+  const micropubEnv: MicropubEnv = {
+    MEDIA: env.MEDIA,
+    MICROPUB_DB: env.MICROPUB_DB,
+    AUTH_DB: env.AUTH_DB,
+    TOKEN_SIGNING_KEY: env.TOKEN_SIGNING_KEY,
+  };
+  return micropub(request, micropubEnv, ctx);
+}
+
 export interface InboxFields {
   subject: string;
   from: string;
@@ -559,6 +606,33 @@ export const ROUTES: readonly WorkerRoute[] = [
     match: "exact",
     methods: ["POST"],
     handler: (request, env, ctx) => handleWebmentionReceive(request, env, ctx),
+  },
+  {
+    // Micropub create/update/delete + q=config/q=source/q=syndicate-to queries (V-3.2, #360).
+    path: "/micropub",
+    match: "exact",
+    methods: ["GET", "POST"],
+    handler: (request, env, ctx) => handleMicropub(request, env, ctx),
+  },
+  {
+    // Media endpoint upload (V-3.2, #360). GET-on-bare-/media is not served (matches
+    // @dwk/micropub's default extensions.proposed: false — GET is only the media *retrieval*
+    // path below, under /media/<key>, not the collection root).
+    path: "/media",
+    match: "exact",
+    methods: ["POST"],
+    handler: (request, env, ctx) => handleMicropub(request, env, ctx),
+  },
+  {
+    // Media retrieval by key (V-3.2, #360). NOTE: the catalog.json claim for this prefix route
+    // currently has no specificationURL, which WorkerRouteClaims.validate (Swift) requires for
+    // any prefix claim — until that's patched upstream, this route is unreachable in production
+    // (no run_worker_first entry gets generated for it), though it's still exercised directly by
+    // the miniflare test suite below.
+    path: "/media",
+    match: "prefix",
+    methods: ["GET", "HEAD"],
+    handler: (request, env, ctx) => handleMicropub(request, env, ctx),
   },
 ];
 

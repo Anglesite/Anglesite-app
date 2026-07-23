@@ -240,6 +240,34 @@ struct WorkerCompositionTests {
         #expect(!toml.contains("SITE_URL"))
     }
 
+    @Test("micropub adds a MICROPUB_DB D1 binding on the shared database")
+    func micropubAddsDatabaseBinding() throws {
+        let micropub = worker(WorkerComposition.micropubWorkerID, d1: true, kv: false, r2: true)
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [micropub])
+        #expect(toml.contains("binding = \"MICROPUB_DB\""))
+        #expect(toml.contains("database_name = \"my-site-social\""))
+    }
+
+    @Test("no micropub worker means no MICROPUB_DB binding")
+    func noMicropubMeansNoDatabaseBinding() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [])
+        #expect(!toml.contains("MICROPUB_DB"))
+    }
+
+    @Test("micropub's MICROPUB_DB binding uses the provisioned database id when known")
+    func micropubUsesProvisionedDatabaseID() throws {
+        let micropub = worker(WorkerComposition.micropubWorkerID, d1: true, kv: false, r2: true)
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [micropub],
+            resources: .init(d1DatabaseID: "d1-existing"))
+        // Find the MICROPUB_DB block specifically, not just any database_id in the file (the
+        // generic DB block from needsD1 also emits one).
+        let micropubBlock = try #require(toml.range(of: "binding = \"MICROPUB_DB\""))
+        let tail = toml[micropubBlock.upperBound...]
+        #expect(tail.contains("database_id = \"d1-existing\""))
+    }
+
     @Test("siteURL is ignored when webmention receive isn't active")
     func siteURLIgnoredWithoutWebmention() throws {
         let toml = try WorkerComposition.generateWranglerToml(
