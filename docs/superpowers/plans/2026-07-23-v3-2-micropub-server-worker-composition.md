@@ -636,12 +636,12 @@ with:
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Pinned @dwk/workers version range for this template. Read by Anglesite during scaffold and social-feature enablement. Updated when a new @dwk/workers release ships.",
-  "version": "0.1.0-beta.4",
-  "range": "0.1.0-beta.4",
+  "version": "0.1.0-beta.3",
+  "range": "0.1.0-beta.3",
   "note": "IndieAuth, Webmention (inbound receive, V-3.1), and Micropub (V-3.2) are pinned to the exact published betas composed into worker.ts and verified by the template Worker integration suite; the remaining social packages remain gated on their conformance status until composed.",
   "packages": {
-    "@dwk/indieauth": "0.1.0-beta.4",
-    "@dwk/webmention": "0.1.0-beta.4",
+    "@dwk/indieauth": "0.1.0-beta.3",
+    "@dwk/webmention": "0.1.0-beta.3",
     "@dwk/micropub": "0.1.0-beta.4",
     "@dwk/websub": "^0.0.0",
     "@dwk/microsub": "^0.0.0",
@@ -651,11 +651,12 @@ with:
 }
 ```
 
-(`@dwk/indieauth`/`@dwk/webmention` are bumped from `0.1.0-beta.3` to
-`0.1.0-beta.4` alongside — the same release that shipped `@dwk/micropub
-@0.1.0-beta.4` also republished its dependencies at that version; pinning
-all three composed packages to the same beta keeps the template's `npm
-install` deterministic and matches what Task 6/7's tests actually exercise.)
+(`@dwk/indieauth`/`@dwk/webmention` stay pinned at `0.1.0-beta.3`,
+unchanged — bumping already-shipped, already-verified pins is outside this
+task's scope and would introduce unreviewed risk. Only `@dwk/micropub`'s
+placeholder `^0.0.0` becomes a real exact pin. `version`/`range` stay at
+`0.1.0-beta.3` for the same reason — they describe the template's overall
+tracked baseline, which this task isn't bumping.)
 
 - [ ] **Step 2: Verify the file is valid JSON**
 
