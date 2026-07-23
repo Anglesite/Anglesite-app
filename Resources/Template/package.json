@@ -14,6 +14,7 @@
   "dependencies": {
     "@astrojs/rss": "^4.0.0",
     "@dwk/indieauth": "0.1.0-beta.3",
+    "@dwk/micropub": "0.1.0-beta.4",
     "@dwk/webmention": "0.1.0-beta.3",
     "astro": "^7.1.3",
     "astro-embed": "^0.13.0",
