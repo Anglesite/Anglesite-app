@@ -766,8 +766,13 @@ public enum IntegrationCatalog {
                       to: "src/components/CO2Badge.astro", when: .always),
             .copyFile(from: TemplateRef("integrations/pages/carbon-footprint.astro"),
                       to: "src/pages/carbon-footprint.astro", when: .fieldEquals(key: "style", value: "page")),
+            // No readConfig re-import here (contrast with booking/pwa/greenHostCheck's snippets):
+            // BaseLayout.astro already imports it unconditionally at the top of the file (added
+            // for WEBMENTION_RECEIVE_ENABLED), and a real deployed site's copy of that file is
+            // typed by `astro check`, which rejects a duplicate identifier — re-importing it here
+            // would break `npm run build` for any site with the footer placement installed.
             .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "// anglesite:imports",
-                            snippet: "import CO2Badge from \"../components/CO2Badge.astro\";\nimport { readConfig } from \"../../scripts/config\";",
+                            snippet: "import CO2Badge from \"../components/CO2Badge.astro\";",
                             when: .fieldEquals(key: "style", value: "footer"), style: .line),
             .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:body-end -->",
                             snippet: "{readConfig(\"CO2_BADGE_STYLE\") === \"footer\" && (<CO2Badge />)}",
