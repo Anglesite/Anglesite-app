@@ -24,10 +24,12 @@ public enum WorkerActivation {
             for descriptor in catalog {
                 guard case .componentTied(let componentIDs) = descriptor.binding else { continue }
                 let isUsed = componentIDs.contains { componentID in
-                    guard let report = ImpactAnalysis.analyze(snapshot: graph, targetID: componentID) else {
-                        return false
+                    componentNodeIDs(for: componentID, in: graph).contains { nodeID in
+                        guard let report = ImpactAnalysis.analyze(snapshot: graph, targetID: nodeID) else {
+                            return false
+                        }
+                        return !report.affectedPages.isEmpty
                     }
-                    return !report.affectedPages.isEmpty
                 }
                 if isUsed { active.insert(descriptor.id) }
             }
@@ -45,6 +47,35 @@ public enum WorkerActivation {
         }
 
         return active
+    }
+
+    /// Graph node IDs matching one catalog `componentID`. Catalog componentIDs are logical,
+    /// cross-site identifiers ("webmention-form"); real Site Graph node IDs are site-scoped file
+    /// paths ("<siteID>:file:src/components/WebmentionForm.astro" — `SiteGraphExplorer.build`),
+    /// so the two can never be compared directly. The coordinated convention (workers-repo
+    /// spec/catalog.md: componentID values are "coordinated with the app, not invented here"): a
+    /// componentID matches a `.component` node whose file basename stem equals it after
+    /// normalization (lowercased, non-alphanumerics stripped) — plus exact node-id equality,
+    /// which keeps unprefixed fixture graphs and any future catalog that publishes full node IDs
+    /// working.
+    public static func componentNodeIDs(
+        for componentID: String, in snapshot: SiteGraphExplorerSnapshot
+    ) -> [String] {
+        let target = normalizedComponentKey(componentID)
+        return snapshot.nodes.filter { node in
+            if node.id == componentID { return true }
+            guard node.kind == .component, let filePath = node.filePath,
+                  let basename = filePath.split(separator: "/").last else { return false }
+            let stem = basename.split(separator: ".").first.map(String.init) ?? String(basename)
+            return normalizedComponentKey(stem) == target
+        }.map(\.id)
+    }
+
+    /// "WebmentionForm" and "webmention-form" both normalize to "webmentionform".
+    private static func normalizedComponentKey(_ raw: String) -> String {
+        String(raw.lowercased().unicodeScalars.filter {
+            CharacterSet.alphanumerics.contains($0)
+        })
     }
 
     /// Worker ids present in `previous` but absent from `next` — used only to log what a deploy
