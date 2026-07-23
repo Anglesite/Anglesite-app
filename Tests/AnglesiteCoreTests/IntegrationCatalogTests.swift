@@ -38,6 +38,22 @@ import Testing
             }
             return false
         })
+        #expect(d.operations.contains {
+            if case .injectAtAnchor(let file, let anchor, _, let when, _) = $0 {
+                return file.raw == "src/layouts/BaseLayout.astro"
+                    && anchor == "// anglesite:imports"
+                    && when == .fieldEquals(key: "style", value: "footer")
+            }
+            return false
+        })
+        #expect(d.operations.contains {
+            if case .injectAtAnchor(let file, let anchor, _, let when, _) = $0 {
+                return file.raw == "src/layouts/BaseLayout.astro"
+                    && anchor == "<!-- anglesite:body-end -->"
+                    && when == .fieldEquals(key: "style", value: "footer")
+            }
+            return false
+        })
     }
 
     @Test func bookingHasStyleChoiceDrivingPlacement() {
