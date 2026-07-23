@@ -288,6 +288,7 @@ import Foundation
         #expect(!FileManager.default.fileExists(atPath: src.appendingPathComponent("src/pages/carbon-footprint.astro").path))
         let layout = try! String(contentsOf: src.appendingPathComponent("src/layouts/BaseLayout.astro"), encoding: .utf8)
         #expect(layout.contains("<CO2Badge"))
+        #expect(layout.contains("import CO2Badge from"))
         let config = try! String(contentsOf: src.appendingPathComponent(".site-config"), encoding: .utf8)
         #expect(config.contains("CO2_BADGE_STYLE=footer"))
     }
@@ -313,6 +314,7 @@ import Foundation
         #expect(FileManager.default.fileExists(atPath: src.appendingPathComponent("src/pages/carbon-footprint.astro").path))
         let layout = try! String(contentsOf: src.appendingPathComponent("src/layouts/BaseLayout.astro"), encoding: .utf8)
         #expect(!layout.contains("<CO2Badge"))
+        #expect(!layout.contains("import CO2Badge from"))
         let config = try! String(contentsOf: src.appendingPathComponent(".site-config"), encoding: .utf8)
         #expect(config.contains("CO2_BADGE_STYLE=page"))
     }
