@@ -209,6 +209,7 @@ extension ContentTypeRegistry {
             ContentTypeField("body", .markdown, required: true),
             ContentTypeField("publishDate", .datetime, required: true),
             ContentTypeField("tags", .stringArray),
+            ContentTypeField("audience", .url),
             ContentTypeField("draft", .bool),
         ],
         projections: ContentTypeProjections(
@@ -233,6 +234,7 @@ extension ContentTypeRegistry {
             ContentTypeField("publishDate", .datetime, required: true),
             ContentTypeField("updated", .datetime),
             ContentTypeField("tags", .stringArray),
+            ContentTypeField("audience", .url),
             ContentTypeField("draft", .bool),
         ],
         projections: ContentTypeProjections(
