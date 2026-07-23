@@ -9,13 +9,35 @@ import Testing
             .tracking, .share, .podcast,
             .indieweb, .menu,
             .buyButton, .lemonSqueezy, .paddle, .snipcart, .shopifyBuyButton,
-            .inbox, .membership, .carbonTxt, .greenHostCheck,
+            .inbox, .membership, .carbonTxt, .greenHostCheck, .co2Badge,
         ]))
     }
 
     @Test(arguments: IntegrationCatalog.all)
     func eachDescriptorIsStructurallyValid(_ descriptor: IntegrationDescriptor) {
         #expect(descriptor.validate() == [], "\(descriptor.id) has problems: \(descriptor.validate())")
+    }
+
+    @Test func co2BadgeHasNoProvidersOnePlacementFieldNoCSP() {
+        let d = IntegrationCatalog.descriptor(for: .co2Badge)
+        #expect(d.providers.isEmpty)
+        #expect(d.fields.map(\.key) == ["style"])
+        #expect(!d.operations.contains { if case .addCSPDomains = $0 { return true }; return false })
+        #expect(d.operations.contains {
+            if case .copyFile(let from, let to, let when) = $0 {
+                return from.path == "integrations/components/CO2Badge.astro"
+                    && to.raw == "src/components/CO2Badge.astro" && when == .always
+            }
+            return false
+        })
+        #expect(d.operations.contains {
+            if case .copyFile(let from, let to, let when) = $0 {
+                return from.path == "integrations/pages/carbon-footprint.astro"
+                    && to.raw == "src/pages/carbon-footprint.astro"
+                    && when == .fieldEquals(key: "style", value: "page")
+            }
+            return false
+        })
     }
 
     @Test func bookingHasStyleChoiceDrivingPlacement() {
