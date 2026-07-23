@@ -68,6 +68,26 @@ test("skips non-verified interactions", () => {
   );
 });
 
+test("rejects non-http(s) URL schemes on source/target/author fields", () => {
+  const warnings: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args.join(" "));
+  try {
+    const all = parseInteractions(
+      mods(
+        raw({ id: "a", source: "javascript:alert(document.cookie)" }),
+        raw({ id: "b", target: "javascript:alert(1)" }),
+        raw({ id: "c", author: { name: "Evil", url: "javascript:alert(1)" } }),
+        raw({ id: "d", author: { name: "Evil", photo: "javascript:alert(1)" } }),
+      ),
+    );
+    assert.equal(all.length, 0);
+    assert.equal(warnings.length, 4);
+  } finally {
+    console.warn = origWarn;
+  }
+});
+
 test("author and content are optional", () => {
   const all = parseInteractions(mods(raw({ author: undefined, content: undefined })));
   assert.equal(all.length, 1);

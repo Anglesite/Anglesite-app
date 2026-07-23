@@ -14,18 +14,35 @@ import { z } from "astro/zod";
 
 const isoDate = z.string().refine((s) => !Number.isNaN(Date.parse(s)), { message: "not an ISO 8601 date" });
 
+/**
+ * `z.string().url()` accepts any scheme `new URL()` can parse, including `javascript:`.
+ * These fields are attacker-controlled (any anonymous webmention/ActivityPub sender) and
+ * flow straight into `href`/`src` in Interactions.astro, so scheme must be restricted to
+ * http(s) to close the stored-XSS vector.
+ */
+const httpUrl = z.string().url().refine(
+  (s) => {
+    try {
+      return ["http:", "https:"].includes(new URL(s).protocol);
+    } catch {
+      return false;
+    }
+  },
+  { message: "must be an http(s) URL" },
+);
+
 const interactionSchema = z.object({
   /// Path-traversal guard: same rule as ReceivedInteraction.swift's init.
   id: z.string().regex(/^[A-Za-z0-9_-]+$/),
   type: z.enum(["webmention", "activitypub", "micropub"]),
-  source: z.string().url(),
-  target: z.string().url(),
+  source: httpUrl,
+  target: httpUrl,
   interactionType: z.enum(["reply", "like", "repost", "bookmark", "mention"]),
   author: z
     .object({
       name: z.string().optional(),
-      url: z.string().url().optional(),
-      photo: z.string().url().optional(),
+      url: httpUrl.optional(),
+      photo: httpUrl.optional(),
     })
     .optional(),
   content: z.string().optional(),

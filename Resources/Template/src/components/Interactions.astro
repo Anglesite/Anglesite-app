@@ -23,9 +23,6 @@ function initial(i: ReceivedInteraction): string {
 function human(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 }
-function names(items: ReceivedInteraction[]): string {
-  return items.map((i) => i.author?.name ?? new URL(i.source).hostname).join(", ");
-}
 ---
 
 {
