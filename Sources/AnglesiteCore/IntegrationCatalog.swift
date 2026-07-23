@@ -52,7 +52,7 @@ public enum IntegrationCatalog {
         tracking, share, podcast,
         indieweb, menu,
         buyButton, lemonSqueezy, paddle, snipcart, shopifyBuyButton,
-        inbox, membership, carbonTxt,
+        inbox, membership, carbonTxt, greenHostCheck,
     ]
 
     public static func descriptor(for id: IntegrationID) -> IntegrationDescriptor {
@@ -708,5 +708,39 @@ public enum IntegrationCatalog {
         operations: [
             .copyTemplatedFile(from: TemplateRef("integrations/public/carbon.txt"),
                                to: "public/carbon.txt", when: .always),
+        ])
+
+    // MARK: greenHostCheck
+    // No user-facing fields: the check result (`green`/`hostname`/`checkedAt`) is resolved by an
+    // async Greencheck API call in IntegrationOperations.plan (Task 5) and folded into `answers`
+    // before this descriptor’s operations run — so `.wizard` visits `.fields` with zero fields
+    // and falls straight through to `.review` (IntegrationWizardModel.canContinue is vacuously
+    // true for an empty `visibleFields` list).
+    //
+    // The badge component and its render snippet are always applied (`when: .always`), mirroring
+    // PWA’s InstallPrompt/booking’s floating-widget precedent: the runtime `readConfig(...)
+    // === "true"` conditional inside the injected snippet does the gating, not the Operation
+    // itself — this avoids needing "green" declared as a Field (which validate() would otherwise
+    // require, and which would render as an editable GUI control, wrong for an app-computed value).
+    static let greenHostCheck = IntegrationDescriptor(
+        id: .greenHostCheck,
+        displayName: "Green Web Check",
+        summary: "Verify your deploy host is on the Green Web Foundation’s green hosting directory, and show a badge if it is.",
+        providers: [],
+        fields: [],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/GreenHostBadge.astro"),
+                      to: "src/components/GreenHostBadge.astro", when: .always),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "// anglesite:imports",
+                            snippet: "import GreenHostBadge from \"../components/GreenHostBadge.astro\";\nimport { readConfig } from \"../../scripts/config\";",
+                            when: .always, style: .line),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:body-end -->",
+                            snippet: "{readConfig(\"GREEN_HOST_VERIFIED\") === \"true\" && (<GreenHostBadge hostname={readConfig(\"GREEN_HOST_NAME\")} checkedAt={readConfig(\"GREEN_HOST_CHECKED_AT\")} />)}",
+                            when: .always, style: .html),
+            .writeConfig([
+                ConfigEntry(key: "GREEN_HOST_VERIFIED", value: "{{green}}"),
+                ConfigEntry(key: "GREEN_HOST_NAME", value: "{{hostname}}"),
+                ConfigEntry(key: "GREEN_HOST_CHECKED_AT", value: "{{checkedAt}}"),
+            ], when: .always),
         ])
 }

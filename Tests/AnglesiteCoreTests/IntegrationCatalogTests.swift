@@ -9,7 +9,7 @@ import Testing
             .tracking, .share, .podcast,
             .indieweb, .menu,
             .buyButton, .lemonSqueezy, .paddle, .snipcart, .shopifyBuyButton,
-            .inbox, .membership, .carbonTxt,
+            .inbox, .membership, .carbonTxt, .greenHostCheck,
         ]))
     }
 
@@ -299,6 +299,20 @@ import Testing
             return false
         })
         #expect(!carbon.operations.contains { if case .addCSPDomains = $0 { return true }; return false })
+    }
+
+    @Test func greenHostCheckHasNoProvidersNoFieldsNoCSP() {
+        let d = IntegrationCatalog.descriptor(for: .greenHostCheck)
+        #expect(d.providers.isEmpty)
+        #expect(d.fields.isEmpty)
+        #expect(!d.operations.contains { if case .addCSPDomains = $0 { return true }; return false })
+        #expect(d.operations.contains {
+            if case .copyFile(let from, let to, let when) = $0 {
+                return from.path == "integrations/components/GreenHostBadge.astro"
+                    && to.raw == "src/components/GreenHostBadge.astro" && when == .always
+            }
+            return false
+        })
     }
 
     @Test func redirectsHasNoProvidersAndAppendsToRedirectsFile() {
