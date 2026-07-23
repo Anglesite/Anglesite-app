@@ -32,3 +32,46 @@ export function patchHtml(html: string, grams: number): string {
   if (!html.includes(CO2_PLACEHOLDER)) return html;
   return html.split(CO2_PLACEHOLDER).join(formatGrams(grams));
 }
+
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { AstroIntegration } from "astro";
+
+/// Recursively collects every `.html` file under `dir`. Mirrors microformats.ts's walkHtml.
+function walkHtmlFiles(dir: string): string[] {
+  const out: string[] = [];
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return out; // dir absent — not an error here
+  }
+  for (const name of names) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) out.push(...walkHtmlFiles(full));
+    else if (extname(full) === ".html") out.push(full);
+  }
+  return out;
+}
+
+/// Patches every built page carrying CO2_PLACEHOLDER with a real, per-page CO2 estimate computed
+/// from that page's own final byte size. A complete no-op for sites that haven't installed the
+/// co2Badge integration (no page will contain the placeholder), matching redirects()'s
+/// always-registered-but-conditionally-active shape.
+export default function co2Badge(): AstroIntegration {
+  return {
+    name: "anglesite-co2-badge",
+    hooks: {
+      "astro:build:done": ({ dir }) => {
+        const distDir = fileURLToPath(dir);
+        for (const file of walkHtmlFiles(distDir)) {
+          const html = readFileSync(file, "utf-8");
+          if (!html.includes(CO2_PLACEHOLDER)) continue;
+          const grams = estimateGramsPerByte(byteLength(html));
+          writeFileSync(file, patchHtml(html, grams));
+        }
+      },
+    },
+  };
+}
