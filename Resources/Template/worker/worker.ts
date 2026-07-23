@@ -629,7 +629,7 @@ export const ROUTES: readonly WorkerRoute[] = [
     // any prefix claim — until that's patched upstream, this route is unreachable in production
     // (no run_worker_first entry gets generated for it), though it's still exercised directly by
     // the miniflare test suite below.
-    path: "/media/",
+    path: "/media",
     match: "prefix",
     methods: ["GET", "HEAD"],
     handler: (request, env, ctx) => handleMicropub(request, env, ctx),
