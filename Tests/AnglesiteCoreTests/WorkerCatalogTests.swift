@@ -158,6 +158,55 @@ struct WorkerCatalogReaderTests {
         #expect(webmention.specificationURL == nil)
     }
 
+    @Test("parse accepts the published array resources shape (davidwkeith/workers spec/catalog.md)")
+    func parseAcceptsPublishedResourcesArrayShape() throws {
+        let json = Data("""
+        {
+          "workers": [
+            {
+              "id": "indieauth",
+              "package": "@dwk/indieauth",
+              "displayName": "IndieAuth",
+              "description": "Sign in with your own domain",
+              "group": "identity",
+              "binding": { "kind": "settingsActivated" },
+              "requires": [],
+              "resources": [
+                { "type": "d1", "binding": "AUTH_DB" },
+                { "type": "secret", "binding": "TOKEN_SIGNING_KEY" }
+              ]
+            },
+            {
+              "id": "solid-pod",
+              "displayName": "Solid Pod",
+              "description": "Personal data store",
+              "group": "storage",
+              "binding": { "kind": "settingsActivated" },
+              "resources": [
+                { "type": "kv", "binding": "POD_KV" },
+                { "type": "r2", "binding": "POD_BLOBS" }
+              ]
+            }
+          ]
+        }
+        """.utf8)
+
+        let workers = try WorkerCatalogReader.parse(json)
+
+        let indieauth = try #require(workers.first { $0.id == "indieauth" })
+        #expect(indieauth.resources == WorkerDescriptor.Resources(needsD1: true, needsKV: false, needsR2: false))
+        let solidPod = try #require(workers.first { $0.id == "solid-pod" })
+        #expect(solidPod.resources == WorkerDescriptor.Resources(needsD1: false, needsKV: true, needsR2: true))
+    }
+
+    @Test("Resources round-trips through its encoded object shape")
+    func resourcesEncodedObjectShapeRoundTrips() throws {
+        let original = WorkerDescriptor.Resources(needsD1: true, needsKV: false, needsR2: true)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(WorkerDescriptor.Resources.self, from: data)
+        #expect(decoded == original)
+    }
+
     @Test("route claims round-trip through JSONEncoder/JSONDecoder")
     func routeClaimRoundTrip() throws {
         let claim = WorkerRouteClaim(
