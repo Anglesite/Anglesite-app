@@ -225,4 +225,56 @@ struct WorkerActivationTests {
             settings: SiteSettings(), catalog: catalog, graph: snapshot)
         #expect(active == ["webmention"])
     }
+
+    @Test("activating a worker with requires also activates the required id")
+    func requiresResolvesTransitively() {
+        let indieauth = WorkerDescriptor(
+            id: "indieauth", displayName: "IndieAuth", description: "test fixture", group: "identity",
+            binding: .settingsActivated, resources: .init(needsD1: true, needsKV: false, needsR2: false))
+        let micropub = WorkerDescriptor(
+            id: "micropub", displayName: "Micropub", description: "test fixture", group: "publishing",
+            binding: .settingsActivated, resources: .init(needsD1: true, needsKV: false, needsR2: true),
+            requires: ["indieauth"])
+        var settings = SiteSettings()
+        settings.activeWorkerIDs = ["micropub"]
+
+        let active = WorkerActivation.effectiveActiveIDs(
+            settings: settings, catalog: [indieauth, micropub], graph: nil)
+
+        #expect(active == ["micropub", "indieauth"])
+    }
+
+    @Test("a required id not present in the catalog is silently dropped, not invented")
+    func requiresIgnoresUnknownID() {
+        let micropub = WorkerDescriptor(
+            id: "micropub", displayName: "Micropub", description: "test fixture", group: "publishing",
+            binding: .settingsActivated, resources: .init(needsD1: true, needsKV: false, needsR2: true),
+            requires: ["indieauth"])
+        var settings = SiteSettings()
+        settings.activeWorkerIDs = ["micropub"]
+
+        let active = WorkerActivation.effectiveActiveIDs(
+            settings: settings, catalog: [micropub], graph: nil)
+
+        #expect(active == ["micropub"])
+    }
+
+    @Test("a requires cycle terminates instead of looping forever")
+    func requiresCycleTerminates() {
+        let a = WorkerDescriptor(
+            id: "a", displayName: "A", description: "test fixture", group: "test",
+            binding: .settingsActivated, resources: .init(needsD1: false, needsKV: false, needsR2: false),
+            requires: ["b"])
+        let b = WorkerDescriptor(
+            id: "b", displayName: "B", description: "test fixture", group: "test",
+            binding: .settingsActivated, resources: .init(needsD1: false, needsKV: false, needsR2: false),
+            requires: ["a"])
+        var settings = SiteSettings()
+        settings.activeWorkerIDs = ["a"]
+
+        let active = WorkerActivation.effectiveActiveIDs(
+            settings: settings, catalog: [a, b], graph: nil)
+
+        #expect(active == ["a", "b"])
+    }
 }
