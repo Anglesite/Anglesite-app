@@ -144,7 +144,18 @@ async function pkceChallenge(verifier: string): Promise<string> {
   return base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
 }
 
-async function dpopProof(url: string, method = "POST", keyPair?: CryptoKeyPair): Promise<string> {
+/**
+ * `accessToken`, when supplied, adds the RFC 9449 `ath` claim (base64url SHA-256 of the access
+ * token) that `@dwk/dpop`'s `verifyDpopProof` requires whenever it's checking a proof against a
+ * bound access token (i.e. every Micropub/media resource request — Task 9, #360). Omit it for
+ * proofs that don't carry an access token yet, like the `/token` exchange itself.
+ */
+async function dpopProof(
+  url: string,
+  method = "POST",
+  keyPair?: CryptoKeyPair,
+  accessToken?: string,
+): Promise<string> {
   const pair = keyPair ?? await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
     true,
@@ -157,11 +168,24 @@ async function dpopProof(url: string, method = "POST", keyPair?: CryptoKeyPair):
     htm: method,
     htu: url,
     iat: Math.floor(Date.now() / 1000),
+    ...(accessToken !== undefined
+      ? { ath: base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accessToken)))) }
+      : {}),
   })));
   const signingInput = new TextEncoder().encode(`${header}.${payload}`);
   const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, pair.privateKey, signingInput);
   return `${header}.${payload}.${base64url(new Uint8Array(signature))}`;
 }
+
+/**
+ * Distinct `CF-Connecting-IP` per `mintAccessToken` call, so repeated calls across the file's
+ * Micropub tests (Task 9, #360) don't share one IP's consent-endpoint rate-limit bucket
+ * (`RATE_LIMIT_MAX_PER_WINDOW` in worker.ts) — this suite's D1/KV storage is not test-isolated
+ * (see the module-level `beforeEach` re-`init`ing `AUTH_DB`), so counters accumulate across
+ * tests within the file, not just within one test. Starts past the fixed IPs the IndieAuth
+ * consent tests above use explicitly (192.0.2.35-43, .99).
+ */
+let mintAccessTokenIPCounter = 150;
 
 /**
  * Runs the full PKCE + owner-consent + token-exchange flow (mirroring the inline steps in
@@ -195,7 +219,10 @@ async function mintAccessToken(scope: string): Promise<{ token: string; keyPair:
   consentForm.set("password", "correct horse battery staple");
   const consent = await fetchWorker(new Request("https://owner.example/indieauth/consent", {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "192.0.2.99" },
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      "CF-Connecting-IP": `192.0.2.${mintAccessTokenIPCounter++}`,
+    },
     body: consentForm,
   }));
   const approvedURL = new URL(consent.headers.get("location")!);
@@ -574,4 +601,160 @@ test("webmention queue consumer: no-ops (does not throw) when the inbox/site ori
   await expect(
     worker.queue!(emptyBatch, envWithoutInbox as WorkerEnv, createExecutionContext()),
   ).resolves.toBeUndefined();
+});
+
+// --- Micropub server (V-3.2, #360) ---------------------------------------------------------
+// Composition of @dwk/micropub's create/update/delete endpoint + media endpoint. These run
+// through worker.fetch in the workerd pool with MICROPUB_DB/MEDIA/AUTH_DB/TOKEN_SIGNING_KEY
+// bound (see vitest.config.ts), exercising the same dispatch path production serves. The
+// library's own mf2/auth/media internals are its own concern (covered by its suite +
+// micropub.rocks), not re-tested here.
+
+test("micropub: an unauthorized request (no Authorization header) is rejected", async () => {
+  const response = await fetchWorker(new Request("https://owner.example/micropub?q=config"));
+  expect(response.status).toBe(401);
+});
+
+test("micropub: a valid token creates a post (201 + Location)", async () => {
+  const { token, keyPair } = await mintAccessToken("create");
+  const url = "https://owner.example/micropub";
+  const response = await fetchWorker(new Request(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `DPoP ${token}`,
+      DPoP: await dpopProof(url, "POST", keyPair, token),
+    },
+    body: JSON.stringify({
+      type: ["h-entry"],
+      properties: { content: ["Hello from a Micropub client"] },
+    }),
+  }));
+  expect(response.status).toBe(201);
+  expect(response.headers.get("location")).toBeTruthy();
+});
+
+test("micropub: q=config is served to an authorized request", async () => {
+  const { token, keyPair } = await mintAccessToken("create");
+  const url = "https://owner.example/micropub?q=config";
+  const response = await fetchWorker(new Request(url, {
+    headers: {
+      authorization: `DPoP ${token}`,
+      DPoP: await dpopProof(url, "GET", keyPair, token),
+    },
+  }));
+  expect(response.status).toBe(200);
+});
+
+test("micropub: 503 when MICROPUB_DB isn't bound", async () => {
+  const { MICROPUB_DB: _unusedDB, ...envWithoutDB } = testEnv;
+  const response = await worker.fetch(
+    new Request("https://owner.example/micropub?q=config"),
+    envWithoutDB as WorkerEnv,
+    createExecutionContext(),
+  );
+  expect(response.status).toBe(503);
+});
+
+test("micropub: 503 when MEDIA isn't bound", async () => {
+  const { MEDIA: _unusedMedia, ...envWithoutMedia } = testEnv;
+  const response = await worker.fetch(
+    new Request("https://owner.example/micropub?q=config"),
+    envWithoutMedia as WorkerEnv,
+    createExecutionContext(),
+  );
+  expect(response.status).toBe(503);
+});
+
+test("micropub: 503 when AUTH_DB isn't bound (IndieAuth not provisioned)", async () => {
+  const { AUTH_DB: _unusedAuthDB, ...envWithoutAuthDB } = testEnv;
+  const response = await worker.fetch(
+    new Request("https://owner.example/micropub?q=config"),
+    envWithoutAuthDB as WorkerEnv,
+    createExecutionContext(),
+  );
+  expect(response.status).toBe(503);
+});
+
+test("micropub media: uploading a file with the media scope returns 201 + Location", async () => {
+  const { token, keyPair } = await mintAccessToken("media");
+  const url = "https://owner.example/media";
+  const form = new FormData();
+  form.set("file", new File(["hello world"], "hello.txt", { type: "text/plain" }));
+  const response = await fetchWorker(new Request(url, {
+    method: "POST",
+    headers: {
+      authorization: `DPoP ${token}`,
+      DPoP: await dpopProof(url, "POST", keyPair, token),
+    },
+    body: form,
+  }));
+  expect(response.status).toBe(201);
+  const location = response.headers.get("location");
+  expect(location).toBeTruthy();
+  return location;
+});
+
+test("micropub media: uploading without the media scope is rejected", async () => {
+  const { token, keyPair } = await mintAccessToken("create");
+  const url = "https://owner.example/media";
+  const form = new FormData();
+  form.set("file", new File(["hello world"], "hello.txt", { type: "text/plain" }));
+  const response = await fetchWorker(new Request(url, {
+    method: "POST",
+    headers: {
+      authorization: `DPoP ${token}`,
+      DPoP: await dpopProof(url, "POST", keyPair, token),
+    },
+    body: form,
+  }));
+  expect(response.status).toBe(403);
+});
+
+test("micropub media: 503 when MEDIA isn't bound", async () => {
+  const { MEDIA: _unusedMedia, ...envWithoutMedia } = testEnv;
+  const response = await worker.fetch(
+    new Request("https://owner.example/media", { method: "POST" }),
+    envWithoutMedia as WorkerEnv,
+    createExecutionContext(),
+  );
+  expect(response.status).toBe(503);
+});
+
+test("routing: /media/ prefix dispatches to the Micropub handler directly (not yet reachable via run_worker_first in production, see worker.ts's ROUTES comment)", async () => {
+  // A GET against a *never-uploaded* key isn't distinguishing evidence here: @dwk/micropub's own
+  // handleMediaGet ("Serve a previously uploaded media blob from R2 (public, unauthenticated)")
+  // also 404s a missing key — same status as the router's own unclaimed-route 404, so `not.toBe
+  // (404)` can't tell "the router never dispatched" apart from "it dispatched and the library
+  // legitimately reported the key missing". Upload a real object first and retrieve it by its
+  // actual key instead: only a genuine dispatch into the Micropub media handler can answer with
+  // the uploaded bytes, so a 200 + matching body is unambiguous proof the /media/<key> prefix
+  // route reaches handleMicropub.
+  const { token, keyPair } = await mintAccessToken("media");
+  const uploadUrl = "https://owner.example/media";
+  const form = new FormData();
+  form.set("file", new File(["dispatch probe"], "probe.txt", { type: "text/plain" }));
+  const upload = await fetchWorker(new Request(uploadUrl, {
+    method: "POST",
+    headers: {
+      authorization: `DPoP ${token}`,
+      DPoP: await dpopProof(uploadUrl, "POST", keyPair, token),
+    },
+    body: form,
+  }));
+  expect(upload.status).toBe(201);
+  const location = upload.headers.get("location");
+  expect(location).toBeTruthy();
+
+  const response = await worker.fetch(
+    new Request(location!, { method: "GET" }),
+    testEnv,
+    createExecutionContext(),
+  );
+  expect(response.status).toBe(200);
+  // Not `text/plain` in the served response — handleMediaGet forces `application/octet-stream`
+  // for any type outside its image/video/audio inline allowlist, so read the bytes directly
+  // rather than `.text()` (which would warn about a non-text content-type on a body that, in
+  // fact, is text).
+  expect(new TextDecoder().decode(await response.arrayBuffer())).toBe("dispatch probe");
 });
