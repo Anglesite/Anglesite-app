@@ -164,9 +164,17 @@ public enum ContentScaffold {
                 lines.append("\(field.name): 0")
             case .stringArray, .imageArray:
                 lines.append("\(field.name): []")
-            case .string, .text, .url, .image:
+            case .string, .text, .image:
                 let value = titleLikeFieldNames.contains(field.name) ? (title ?? "") : ""
                 lines.append("\(field.name): \"\(escapeYAML(value))\"")
+            // Optional `.url` fields scaffold commented-out: an emitted `""` is not a valid URL
+            // under `z.string().url()`, unlike `.string`/`.text`/`.image`'s bare `z.string()`,
+            // which accepts an empty string. Mirrors the `.datetime`/`.date` comment-out rationale
+            // above. Required ones (bookmarkOf, inReplyTo, likeOf) stay live — those entries are
+            // already incomplete without them, same as every other required field.
+            case .url:
+                let value = titleLikeFieldNames.contains(field.name) ? (title ?? "") : ""
+                lines.append("\(field.required ? "" : "# ")\(field.name): \"\(escapeYAML(value))\"")
             }
         }
         lines.append("---")
