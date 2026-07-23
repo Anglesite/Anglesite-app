@@ -676,6 +676,16 @@ test("micropub: 503 when AUTH_DB isn't bound (IndieAuth not provisioned)", async
   expect(response.status).toBe(503);
 });
 
+test("micropub: 503 when TOKEN_SIGNING_KEY isn't bound", async () => {
+  const { TOKEN_SIGNING_KEY: _unusedSigningKey, ...envWithoutSigningKey } = testEnv;
+  const response = await worker.fetch(
+    new Request("https://owner.example/micropub?q=config"),
+    envWithoutSigningKey as WorkerEnv,
+    createExecutionContext(),
+  );
+  expect(response.status).toBe(503);
+});
+
 test("micropub media: uploading a file with the media scope returns 201 + Location", async () => {
   const { token, keyPair } = await mintAccessToken("media");
   const url = "https://owner.example/media";

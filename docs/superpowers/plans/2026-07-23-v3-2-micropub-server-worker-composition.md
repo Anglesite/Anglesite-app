@@ -1242,7 +1242,10 @@ git commit -m "docs: reflect V-3.2 Micropub server composition landing (#360)"
 ## Self-Review
 
 **Spec coverage:**
-- "Prerequisite fix: `WorkerDescriptor.Resources` decoding" — Task 1.
+- "Prerequisite fix: `WorkerDescriptor.Resources` decoding" — Task 1. **Correction
+  (post-rebase):** this half of Task 1 shipped independently as #914/#915 before
+  the branch was rebased onto current `main`; it is not part of this PR's diff.
+  Only the `requires` field addition below is this PR's own contribution.
 - "`WorkerDescriptor.requires` — model the new dependency field" — Task 1.
 - "`WorkerActivation.effectiveActiveIDs` — resolve `requires` transitively" — Task 2.
 - "`WorkerComposition.generateWranglerToml` — `hasMicropub` branch" — Task 3.
