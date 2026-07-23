@@ -20,6 +20,12 @@ public struct WorkerDescriptor: Sendable, Equatable, Codable, Identifiable {
     /// `WorkerActivation.effectiveActiveIDs`) ever reach routing configuration — see
     /// `WorkerRouteClaims.activeClaims`.
     public let routes: [WorkerRouteClaim]?
+    /// Ids of other catalog workers this one requires to function (e.g. Micropub requires
+    /// IndieAuth's issued-token store). Optional so catalogs published before this field existed
+    /// still decode; `nil` (or `[]`) means no dependency. `WorkerActivation.effectiveActiveIDs`
+    /// resolves this transitively — activating a worker with a `requires` entry also activates
+    /// the ids it names, provided they're present in the catalog.
+    public let requires: [String]?
 
     public init(
         id: String,
@@ -28,7 +34,8 @@ public struct WorkerDescriptor: Sendable, Equatable, Codable, Identifiable {
         group: String,
         binding: Binding,
         resources: Resources,
-        routes: [WorkerRouteClaim]? = nil
+        routes: [WorkerRouteClaim]? = nil,
+        requires: [String]? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -37,6 +44,7 @@ public struct WorkerDescriptor: Sendable, Equatable, Codable, Identifiable {
         self.binding = binding
         self.resources = resources
         self.routes = routes
+        self.requires = requires
     }
 
     /// How a worker becomes active. `componentTied` workers are never manually toggled — their
