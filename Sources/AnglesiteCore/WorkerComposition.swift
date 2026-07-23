@@ -31,6 +31,14 @@ public enum WorkerComposition {
     /// change in the external `davidwkeith/workers` catalog repo.
     public static let webmentionWorkerID = "webmention"
 
+    /// `@dwk/micropub`'s catalog id — like `webmentionWorkerID`, composition keys off this
+    /// directly for the create/update/delete endpoint's bespoke `MICROPUB_DB` binding, since that
+    /// binding name is part of `@dwk/micropub`'s public composition contract, not something a
+    /// generic `resources` flag can express. `MEDIA` (R2) is covered by the existing generic
+    /// `needsR2` branch below — Micropub's catalog entry declares an `r2` resource, so it falls
+    /// out for free once `WorkerDescriptor.Resources` decodes that entry correctly.
+    public static let micropubWorkerID = "micropub"
+
     /// The bespoke app-side inbox-capture route (#587) — not a `@dwk/workers` catalog worker, so
     /// its claim lives here rather than in `catalog.json`. Appended automatically when
     /// `generateWranglerToml` is called with `inboxCaptureEnabled`.
@@ -113,6 +121,7 @@ public enum WorkerComposition {
         // than generic resource flags.
         let hasIndieauth = workers.contains(where: { $0.id == indieauthWorkerID })
         let hasWebmentionReceive = workers.contains(where: { $0.id == webmentionWorkerID })
+        let hasMicropub = workers.contains(where: { $0.id == micropubWorkerID })
 
         var lines: [String] = []
         lines.append("name = \"\(siteName)\"")
@@ -169,6 +178,21 @@ public enum WorkerComposition {
             lines.append("")
             lines.append("[[d1_databases]]")
             lines.append("binding = \"WEBMENTION_INBOX\"")
+            lines.append("database_name = \"\(siteName)-social\"")
+            if let id = resources.d1DatabaseID, !id.isEmpty {
+                lines.append("database_id = \"\(id)\"")
+            } else {
+                lines.append("database_id = \"\"  # filled by provisioning")
+            }
+        }
+
+        // Same shared per-site D1 database as DB/AUTH_DB/WEBMENTION_INBOX, bound a fourth time
+        // under MICROPUB_DB — @dwk/micropub creates its own tables on first use, so no separate
+        // database or migration is needed here (matches the WEBMENTION_INBOX comment above).
+        if hasMicropub {
+            lines.append("")
+            lines.append("[[d1_databases]]")
+            lines.append("binding = \"MICROPUB_DB\"")
             lines.append("database_name = \"\(siteName)-social\"")
             if let id = resources.d1DatabaseID, !id.isEmpty {
                 lines.append("database_id = \"\(id)\"")
