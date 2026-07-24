@@ -243,6 +243,26 @@ struct WellKnownInventoryTests {
         }
     }
 
+    @Test("an exact claim inside the SAME owner's own prefix claim is self-delegation, not a collision")
+    func exactInsideOwnPrefixIsSelfDelegation() throws {
+        let runtime = [
+            row("acme-challenge/", delivery: .externalRuntime, owner: "cloudflare-managed-tls", match: .prefix),
+            row("acme-challenge/http-01", delivery: .externalRuntime, owner: "cloudflare-managed-tls"),
+        ]
+        let merged = try WellKnownInventory.merge(runtime: runtime)
+        #expect(merged.map(\.suffix) == ["acme-challenge/", "acme-challenge/http-01"])
+    }
+
+    @Test("two overlapping prefix claims from the SAME owner are self-delegation, not a collision")
+    func prefixPrefixSameOwnerIsSelfDelegation() throws {
+        let dynamic = [
+            row("oauth/", delivery: .dynamic, owner: "indieauth", match: .prefix),
+            row("oauth/callback", delivery: .dynamic, owner: "indieauth", match: .prefix),
+        ]
+        let merged = try WellKnownInventory.merge(dynamic: dynamic)
+        #expect(merged.map(\.suffix) == ["oauth/", "oauth/callback"])
+    }
+
     // MARK: #748 build-seam derivation and verification
 
     @Test("claimManifest derives one entry per row, preserving path/match/owner")

@@ -293,10 +293,19 @@ public enum WellKnownInventory {
                 claimants: claimants.sorted { ($0.owner, $0.delivery.rawValue) < ($1.owner, $1.delivery.rawValue) })
         }
 
+        // The design doc's overlap rules are scoped to "another owner['s]" prefix / "different
+        // owners" — a descriptor nested inside its OWN prefix claim is self-delegation, not a
+        // collision (e.g. a runtime reporting both "I own acme-challenge/ generally" and "I've
+        // placed a token at acme-challenge/http-01 right now"). This deliberately differs from
+        // `WorkerRouteClaims.activeClaims`'s stricter same-worker rejection: that type validates
+        // one flat HTTP dispatch table, where two overlapping declared routes from one worker are
+        // a manifest bug: there's nothing to reconcile once dispatch is fixed. Here, ownership
+        // claims and materialized artifacts are different concerns even from the same owner, so
+        // only a genuine cross-owner overlap blocks.
         let sorted = all.sorted { ($0.suffix, $0.owner) < ($1.suffix, $1.owner) }
         for (index, row) in sorted.enumerated() where row.match == .prefix {
             let prefixPath = row.suffix.hasSuffix("/") ? row.suffix : row.suffix + "/"
-            for other in sorted[(index + 1)...] where other.suffix.hasPrefix(prefixPath) {
+            for other in sorted[(index + 1)...] where other.suffix.hasPrefix(prefixPath) && other.owner != row.owner {
                 throw CollisionError.overlappingClaims(
                     path: other.suffix, claimant: Claimant(owner: other.owner, delivery: other.delivery),
                     otherPath: row.suffix, other: Claimant(owner: row.owner, delivery: row.delivery))
