@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { createExecutionContext } from "cloudflare:test";
+import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { createIndieAuthStore, type AuthorizationRequest } from "@dwk/indieauth";
 import { beforeEach, expect, test } from "vitest";
 import {
@@ -767,4 +767,100 @@ test("routing: /media/ prefix dispatches to the Micropub handler directly (not y
   // rather than `.text()` (which would warn about a non-text content-type on a body that, in
   // fact, is text).
   expect(new TextDecoder().decode(await response.arrayBuffer())).toBe("dispatch probe");
+});
+
+// --- ActivityPub actor (V-4.1, #363) --------------------------------------------------------
+// Composition of @dwk/activitypub's actor document, collections, and signed inbox. These run
+// through worker.fetch in the workerd pool with ACTOR/AP_PRIVATE_KEY/AP_PUBLIC_KEY/
+// AP_PUBLISH_TOKEN bound (see vitest.config.ts). The library's own signature/delivery internals
+// are its own concern, not re-tested here.
+
+test("activitypub: actor document is served as activity+json", async () => {
+  const response = await fetchWorker(new Request("https://owner.example/users/site"));
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toContain("application/activity+json");
+  const body = await response.json() as { type: string; preferredUsername: string };
+  expect(body.type).toBe("Person");
+  expect(body.preferredUsername).toBe("site");
+});
+
+test("activitypub: outbox collection is served", async () => {
+  const response = await fetchWorker(new Request("https://owner.example/users/site/outbox"));
+  expect(response.status).toBe(200);
+});
+
+test("activitypub: nodeinfo discovery document is served", async () => {
+  const response = await fetchWorker(new Request("https://owner.example/.well-known/nodeinfo"));
+  expect(response.status).toBe(200);
+});
+
+test("activitypub: 503 when ACTOR isn't bound", async () => {
+  const { ACTOR: _unusedActor, ...envWithoutActor } = testEnv;
+  const response = await worker.fetch(
+    new Request("https://owner.example/users/site"),
+    envWithoutActor as WorkerEnv,
+    createExecutionContext(),
+  );
+  expect(response.status).toBe(503);
+});
+
+test("activitypub: /inbox still serves inbox-capture, not the ActivityPub shared inbox", async () => {
+  // Regression guard for the route collision documented in worker.ts's activityPubConfig
+  // (sharedInbox: false) — POST /inbox must keep going to the bespoke inbox-capture handler.
+  const response = await fetchWorker(new Request("https://owner.example/inbox", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: "subject=Hi&from=a%40example.com&message=hello",
+  }));
+  expect(response.status).toBe(202);
+});
+
+test("micropub-to-activitypub fan-out: a successful create lands a Note in the outbox", async () => {
+  const { token, keyPair } = await mintAccessToken("create");
+  const url = "https://owner.example/micropub";
+  // Unlike `fetchWorker` (which mints its own throwaway ExecutionContext), the fan-out runs in
+  // `ctx.waitUntil` — it is NOT guaranteed to have completed just because `worker.fetch` resolved.
+  // Capture this call's own context and explicitly `waitOnExecutionContext` it before checking the
+  // outbox; without that wait this test is flaky-by-construction (a race, not a real "already
+  // landed" guarantee), per `@cloudflare/vitest-pool-workers`' documented waitUntil-testing helper.
+  const ctx = createExecutionContext();
+  const createResponse = await worker.fetch(new Request(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `DPoP ${token}`,
+      DPoP: await dpopProof(url, "POST", keyPair, token),
+    },
+    body: JSON.stringify({
+      type: ["h-entry"],
+      properties: { content: ["Hello, fediverse"] },
+    }),
+  }), testEnv, ctx);
+  expect(createResponse.status).toBe(201);
+  await waitOnExecutionContext(ctx);
+
+  // The collection root (`/outbox`) is just an `OrderedCollection` summary (`totalItems` +
+  // `first`/`last` page links) — `@dwk/activitypub` puts the actual `orderedItems` array on the
+  // paged `OrderedCollectionPage` sub-resource, so that's what a fan-out assertion needs to fetch.
+  const outboxPageResponse = await fetchWorker(new Request("https://owner.example/users/site/outbox?page=1"));
+  const outboxPage = await outboxPageResponse.json() as { orderedItems?: Array<{ object?: { content?: string } }> };
+  expect(outboxPage.orderedItems?.some((item) => item.object?.content?.includes("Hello, fediverse"))).toBe(true);
+});
+
+test("micropub-to-activitypub fan-out: never fires when ActivityPub isn't provisioned", async () => {
+  const { AP_PUBLISH_TOKEN: _unusedToken, ...envWithoutToken } = testEnv;
+  const { token, keyPair } = await mintAccessToken("create");
+  const url = "https://owner.example/micropub";
+  const request = new Request(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `DPoP ${token}`,
+      DPoP: await dpopProof(url, "POST", keyPair, token),
+    },
+    body: JSON.stringify({ type: ["h-entry"], properties: { content: ["No federation here"] } }),
+  });
+  const response = await worker.fetch(request, envWithoutToken as WorkerEnv, createExecutionContext());
+  // Must still succeed as a plain Micropub create — the fan-out being skipped is silent, not a failure.
+  expect(response.status).toBe(201);
 });

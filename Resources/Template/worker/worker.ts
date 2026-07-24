@@ -14,6 +14,12 @@ import {
   createMicropub,
   type MicropubEnv,
 } from "@dwk/micropub";
+import {
+  createActivityPub,
+  ActivityPubObject,
+  type ActivityPubConfig,
+  type ActivityPubEnv,
+} from "@dwk/activitypub";
 
 /**
  * Per-site Cloudflare Worker entry point.
@@ -73,7 +79,26 @@ export interface WorkerEnv extends IndieAuthEnv {
    */
   MICROPUB_DB?: D1Database;
   MEDIA?: R2Bucket;
+  /**
+   * ActivityPub actor bindings (V-4.1, #363). All optional: a site that hasn't provisioned
+   * ActivityPub has none of them bound, and every actor route degrades to 503 rather than
+   * letting @dwk/activitypub throw its own loud startup error. `ACTOR` is the per-actor Durable
+   * Object namespace the package ships (`ActivityPubObject`, re-exported below so wrangler can
+   * bind it). `AP_PRIVATE_KEY`/`AP_PUBLIC_KEY` are the actor's signing keypair (PKCS#8/SPKI PEM,
+   * app-generated — see `ActivityPubKeyProvisioning.swift`). `AP_PUBLISH_TOKEN` gates the
+   * owner-only publish endpoint the Micropub fan-out below calls internally.
+   * `AP_DISPLAY_NAME` is the actor's `Person.name`, threaded from `SiteSettings.displayName`;
+   * falls back to a generic name when unset. See `WorkerComposition.generateWranglerToml`
+   * (Swift) for the binding generation.
+   */
+  ACTOR?: DurableObjectNamespace<ActivityPubObject>;
+  AP_PRIVATE_KEY?: string;
+  AP_PUBLIC_KEY?: string;
+  AP_PUBLISH_TOKEN?: string;
+  AP_DISPLAY_NAME?: string;
 }
+
+export { ActivityPubObject };
 
 const RATE_LIMIT_WINDOW_SECONDS = 3600;
 const RATE_LIMIT_MAX_PER_WINDOW = 5;
@@ -453,7 +478,126 @@ function handleMicropub(
     AUTH_DB: env.AUTH_DB,
     TOKEN_SIGNING_KEY: env.TOKEN_SIGNING_KEY,
   };
-  return micropub(request, micropubEnv, ctx);
+  return micropub(request, micropubEnv, ctx).then((response) => {
+    if (request.method === "POST" && response.status === 201) {
+      ctx.waitUntil(fanOutMicropubCreateToActivityPub(request, response, env, ctx));
+    }
+    return response;
+  });
+}
+
+/**
+ * Micropub-to-ActivityPub fan-out (V-4.1, #363): a successful Micropub create becomes a `Note`
+ * activity, published through `@dwk/activitypub`'s owner-only publish endpoint
+ * (`POST <actor>/outbox`) so it lands in the outbox and fans out to followers. In-process —
+ * same Worker script, same invocation this request is already inside, no real network
+ * round-trip. Only runs when ActivityPub is provisioned (`AP_PUBLISH_TOKEN` set); activating
+ * Micropub alone never attempts to federate. Failure here must never fail the Micropub create
+ * response (the post is already saved) — logged and swallowed.
+ */
+async function fanOutMicropubCreateToActivityPub(
+  originalRequest: Request,
+  micropubResponse: Response,
+  env: WorkerEnv,
+  ctx: ExecutionContext,
+): Promise<void> {
+  if (!env.AP_PUBLISH_TOKEN) return;
+  const location = micropubResponse.headers.get("location");
+  if (!location) return;
+
+  let content = "";
+  try {
+    const contentType = originalRequest.headers.get("content-type") ?? "";
+    const cloned = originalRequest.clone();
+    if (contentType.includes("application/json")) {
+      const body = (await cloned.json()) as { properties?: { content?: unknown[] } };
+      content = String(body.properties?.content?.[0] ?? "");
+    } else {
+      const form = await cloned.formData();
+      content = String(form.get("content") ?? form.get("properties[content]") ?? "");
+    }
+  } catch {
+    return; // Can't recover the post content — skip the fan-out rather than publish an empty Note.
+  }
+  if (!content) return;
+
+  const baseUrl = new URL(originalRequest.url).origin;
+  const actorIRI = `${baseUrl}/users/${ACTIVITYPUB_USERNAME}`;
+  const note = {
+    "@context": "https://www.w3.org/ns/activitystreams",
+    type: "Note",
+    attributedTo: actorIRI,
+    content,
+    url: location,
+    to: ["https://www.w3.org/ns/activitystreams#Public"],
+  };
+  const publishRequest = new Request(`${actorIRI}/outbox`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/activity+json",
+      authorization: `Bearer ${env.AP_PUBLISH_TOKEN}`,
+    },
+    body: JSON.stringify(note),
+  });
+  try {
+    await handleActivityPub(publishRequest, env, ctx);
+  } catch {
+    // Swallow: the Micropub post is already saved; a federation hiccup must not surface as a
+    // failure to the Micropub client.
+  }
+}
+
+/**
+ * Fixed identity for this app's single-actor-per-site model (V-4.1, #363) — no per-site
+ * Settings field for a custom handle; see the design doc §"Actor identity source". WebFinger
+ * (`.well-known/webfinger`, so `@site@domain` search resolves) is a separate feature (#364);
+ * Mastodon can still follow this actor by pasting its URL directly into search.
+ */
+const ACTIVITYPUB_USERNAME = "site";
+
+function activityPubConfig(request: Request, env: WorkerEnv): ActivityPubConfig | null {
+  if (!env.ACTOR || !env.AP_PRIVATE_KEY || !env.AP_PUBLIC_KEY) return null;
+  const baseUrl = new URL(request.url).origin;
+  return {
+    baseUrl,
+    actor: {
+      username: ACTIVITYPUB_USERNAME,
+      name: env.AP_DISPLAY_NAME ?? new URL(baseUrl).hostname,
+      summary: `Posts from ${new URL(baseUrl).hostname}`,
+    },
+    publicKeyPem: env.AP_PUBLIC_KEY,
+    privateKeyPem: env.AP_PRIVATE_KEY,
+    publishToken: env.AP_PUBLISH_TOKEN,
+    // The package's shared-inbox route (POST /inbox at the origin root) collides with this
+    // app's existing inbox-capture feature (#587, a public "visitor sends a message" form —
+    // an unrelated concept already serving that exact path). Disabling it means inbound
+    // federated deliveries go to the actor-specific /users/site/inbox instead, which is
+    // equally valid ActivityPub — just without an optional batching optimization for
+    // high-volume peers, irrelevant for a single-actor personal site.
+    sharedInbox: false,
+  };
+}
+
+/**
+ * ActivityPub actor (V-4.1, #363).
+ *
+ * Composes `@dwk/activitypub`'s actor document, follower/following/outbox collections, and
+ * signed server-to-server inbox — the Fediverse-facing half of this site. Returns 503 when
+ * ActivityPub isn't fully provisioned (`ACTOR`/`AP_PRIVATE_KEY`/`AP_PUBLIC_KEY` unbound) rather
+ * than letting `@dwk/activitypub` throw its own loud startup error, matching every other
+ * composed handler in this file.
+ */
+function handleActivityPub(
+  request: Request,
+  env: WorkerEnv,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const config = activityPubConfig(request, env);
+  if (!config) {
+    return Promise.resolve(new Response("ActivityPub is not configured", { status: 503 }));
+  }
+  const activitypub = createActivityPub(config);
+  return activitypub(request, env as unknown as ActivityPubEnv, ctx);
 }
 
 export interface InboxFields {
@@ -633,6 +777,29 @@ export const ROUTES: readonly WorkerRoute[] = [
     match: "prefix",
     methods: ["GET", "HEAD"],
     handler: (request, env, ctx) => handleMicropub(request, env, ctx),
+  },
+  {
+    // Actor document + outbox/followers/following collections (V-4.1, #363). No trailing slash:
+    // `matchRoute`'s prefix check appends its own `/` to `path` before comparing, so a `path` that
+    // already ends in `/` would build a double-slash prefix ("/users//") that never matches
+    // "/users/site" — see the other prefix entries above (e.g. "/media") for the same convention.
+    path: "/users",
+    match: "prefix",
+    methods: ["GET", "POST", "HEAD"],
+    handler: (request, env, ctx) => handleActivityPub(request, env, ctx),
+  },
+  {
+    path: "/.well-known/nodeinfo",
+    match: "exact",
+    methods: ["GET", "HEAD"],
+    handler: (request, env, ctx) => handleActivityPub(request, env, ctx),
+  },
+  {
+    // No trailing slash — see the "/users" comment above for why.
+    path: "/nodeinfo",
+    match: "prefix",
+    methods: ["GET", "HEAD"],
+    handler: (request, env, ctx) => handleActivityPub(request, env, ctx),
   },
 ];
 
