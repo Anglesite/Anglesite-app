@@ -102,6 +102,22 @@ import Testing
         }
     }
 
+    /// BaseLayout.astro imports `readConfig` unconditionally at the top of the file (added for
+    /// WEBMENTION_RECEIVE_ENABLED) — a descriptor whose "// anglesite:imports" snippet re-imports
+    /// it produces a duplicate identifier that `astro check` rejects, breaking `npm run build` for
+    /// any real site with that integration installed (the template's own `astro check` never runs
+    /// against a scaffolded copy, so this is invisible until someone builds an actual site). See
+    /// the co2Badge fix (#686) for the reference case this guards against regressing on again.
+    @Test(arguments: IntegrationCatalog.all)
+    func noDescriptorReimportsReadConfigIntoBaseLayout(_ descriptor: IntegrationDescriptor) {
+        let pattern = #/import\s*\{[^}]*\breadConfig\b[^}]*\}\s*from\s*"\.\./\.\./scripts/config"/#
+        for case .injectAtAnchor(let file, let anchor, let snippet, _, _) in descriptor.operations
+        where file.raw == "src/layouts/BaseLayout.astro" && anchor == "// anglesite:imports" {
+            #expect(snippet.raw.firstMatch(of: pattern) == nil,
+                "\(descriptor.id) re-imports readConfig into BaseLayout.astro, which already provides it: \(snippet.raw)")
+        }
+    }
+
     @Test func bookingWritesEventSlugAndButtonText() {
         let keys = writtenConfigKeys(for: IntegrationCatalog.descriptor(for: .booking))
         #expect(keys.isSuperset(of: ["BOOKING_PROVIDER", "BOOKING_USERNAME", "BOOKING_STYLE", "BOOKING_EVENT_SLUG", "BOOKING_BUTTON_TEXT"]))
