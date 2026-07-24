@@ -471,6 +471,23 @@ function handleWebmentionQueue(
 }
 
 /**
+ * Extracts a plain-text value from an mf2 `content` property entry (V-4.1, #363 review fix).
+ * Microformats2-JSON — and `@dwk/micropub`'s own accepted input shape — allows `content` to be
+ * either a plain string or a rich-text object (`{ html, value }`); naively coercing the object
+ * form with `String(...)` produces the literal `"[object Object]"`, which would silently publish
+ * garbage to followers instead of skipping the fan-out. `undefined` (missing/unrecognized shape)
+ * is treated the same as an empty string by the caller, which already skips the fan-out rather
+ * than publish an empty Note.
+ */
+function extractMf2ContentString(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (raw && typeof raw === "object" && typeof (raw as { value?: unknown }).value === "string") {
+    return (raw as { value: string }).value;
+  }
+  return "";
+}
+
+/**
  * Micropub server (V-3.2, #360).
  *
  * Composes `@dwk/micropub`'s create/update/delete endpoint and its R2-backed media endpoint.
@@ -512,7 +529,7 @@ function handleMicropub(
       const contentType = cloned.headers.get("content-type") ?? "";
       if (contentType.includes("application/json")) {
         const body = (await cloned.json()) as { properties?: { content?: unknown[] } };
-        return String(body.properties?.content?.[0] ?? "");
+        return extractMf2ContentString(body.properties?.content?.[0]);
       }
       const form = await cloned.formData();
       return String(form.get("content") ?? form.get("properties[content]") ?? "");
