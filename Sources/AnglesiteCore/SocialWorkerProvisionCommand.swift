@@ -47,6 +47,11 @@ public actor SocialWorkerProvisionCommand {
         _ environment: [String: String],
         _ source: String
     ) async throws -> ProcessSupervisor.RunResult
+    /// Produces (generating and persisting on first call, per site) the ActivityPub actor's
+    /// signing keypair and publish token. Defaults to the real Keychain via
+    /// `ActivityPubKeyProvisioning`; tests inject a fake to avoid touching the real login
+    /// keychain and to control the returned values deterministically.
+    public typealias KeyPairSource = @Sendable (_ siteID: String) throws -> ActivityPubKeyProvisioning.Secrets
     public typealias Deployer = @Sendable (
         _ token: String,
         _ siteID: String,
@@ -55,17 +60,20 @@ public actor SocialWorkerProvisionCommand {
 
     public nonisolated let tokenSource: TokenSource
     private let runner: CommandRunner
+    private let keyPairSource: KeyPairSource
     private let secretRunner: SecretRunner
     private let deployer: Deployer
 
     public init(
         tokenSource: @escaping TokenSource = DeployCommand.keychainTokenSource,
         runner: @escaping CommandRunner = SocialWorkerProvisionCommand.defaultRunner,
+        keyPairSource: @escaping KeyPairSource = SocialWorkerProvisionCommand.defaultKeyPairSource,
         secretRunner: @escaping SecretRunner = SocialWorkerProvisionCommand.defaultSecretRunner,
         deployer: @escaping Deployer = SocialWorkerProvisionCommand.defaultDeployer
     ) {
         self.tokenSource = tokenSource
         self.runner = runner
+        self.keyPairSource = keyPairSource
         self.secretRunner = secretRunner
         self.deployer = deployer
     }
@@ -191,6 +199,31 @@ public actor SocialWorkerProvisionCommand {
                 resources.r2BucketName = name
                 if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
                     return failure
+                }
+            }
+        }
+
+        let hasActivityPub = workers.contains(where: { $0.id == WorkerComposition.activitypubWorkerID })
+        if hasActivityPub {
+            let keys: ActivityPubKeyProvisioning.Secrets
+            do {
+                keys = try keyPairSource(siteID)
+            } catch {
+                return .failed(reason: "couldn't prepare ActivityPub signing key: \(error)", exitCode: nil, resources: resources)
+            }
+            for (name, value) in [
+                ("AP_PRIVATE_KEY", keys.privateKeyPem),
+                ("AP_PUBLIC_KEY", keys.publicKeyPem),
+                ("AP_PUBLISH_TOKEN", keys.publishToken),
+            ] {
+                do {
+                    let secretResult = try await secretRunner(siteDirectory, name, value, environment, source)
+                    guard secretResult.exitCode == 0 else {
+                        let output = secretResult.stdout.isEmpty ? secretResult.stderr : secretResult.stdout
+                        return .failed(reason: "couldn't push \(name): \(output)", exitCode: secretResult.exitCode, resources: resources)
+                    }
+                } catch {
+                    return .failed(reason: "couldn't push \(name): \(error)", exitCode: nil, resources: resources)
                 }
             }
         }
@@ -406,6 +439,10 @@ public actor SocialWorkerProvisionCommand {
         let reason = HostNodeRetirement.reason("social worker secret provisioning")
         await LogCenter.shared.append(source: source, stream: .stderr, text: reason)
         return ProcessSupervisor.RunResult(stdout: reason, stderr: "", exitCode: 127)
+    }
+
+    public static let defaultKeyPairSource: KeyPairSource = { siteID in
+        try ActivityPubKeyProvisioning.secrets(siteID: siteID, secretStore: PlatformSecretStore.make())
     }
 
     public static let defaultDeployer: Deployer = { token, siteID, siteDirectory in
