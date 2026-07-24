@@ -98,6 +98,11 @@ public actor SocialWorkerProvisionCommand {
         /// var. `nil` on a first-ever deploy before any host is known — the composed Worker
         /// degrades gracefully (worker.ts no-ops the queue consumer without it).
         siteURL: String? = nil,
+        /// The site's display name (`SiteSettings.displayName`), threaded into the ActivityPub
+        /// actor's `AP_DISPLAY_NAME` var via `WorkerComposition.generateWranglerToml`. `nil` when
+        /// unknown — the composed Worker's actor document then falls back to a fixed generic
+        /// name (`worker.ts`'s concern, not this function's).
+        displayName: String? = nil,
         /// Explicit per-deploy opt-in that the user has acknowledged inbound Webmention requires
         /// the Cloudflare Workers Paid plan (#359) — `DeployModel` sets this from
         /// `SiteSettings.webmentionReceivePaidPlanAcknowledged` plus the in-flight confirmation
@@ -150,7 +155,7 @@ public actor SocialWorkerProvisionCommand {
                     return .failed(reason: "wrangler created D1 database \(name) but no database id was found", exitCode: 0, resources: resources)
                 }
                 resources.d1DatabaseID = id
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName) {
                     return failure
                 }
             }
@@ -177,7 +182,7 @@ public actor SocialWorkerProvisionCommand {
                     return .failed(reason: "wrangler created KV namespace \(name) but no namespace id was found", exitCode: 0, resources: resources)
                 }
                 resources.kvNamespaceID = id
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName) {
                     return failure
                 }
             }
@@ -197,7 +202,7 @@ public actor SocialWorkerProvisionCommand {
                     return failure
                 }
                 resources.r2BucketName = name
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName) {
                     return failure
                 }
             }
@@ -249,13 +254,13 @@ public actor SocialWorkerProvisionCommand {
             }
             if let failure = persistConfig(
                 siteDirectory: siteDirectory, siteName: siteName, workers: workers,
-                routeClaims: routeClaims, resources: resources, siteURL: siteURL
+                routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName
             ) {
                 return failure
             }
         }
 
-        if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
+        if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName) {
             return failure
         }
 
@@ -321,7 +326,8 @@ public actor SocialWorkerProvisionCommand {
         workers: [WorkerDescriptor],
         routeClaims: [WorkerRouteClaim],
         resources: WorkerComposition.ProvisionedResources,
-        siteURL: String? = nil
+        siteURL: String? = nil,
+        displayName: String? = nil
     ) -> Result? {
         do {
             // Called without `inboxCaptureEnabled`/`inboxKVNamespaceID` — #587's inbox-capture
@@ -334,7 +340,8 @@ public actor SocialWorkerProvisionCommand {
                 workers: workers,
                 routeClaims: routeClaims,
                 resources: resources,
-                siteURL: siteURL
+                siteURL: siteURL,
+                displayName: displayName
             )
             try toml.write(
                 to: siteDirectory.appendingPathComponent("wrangler.toml"),
