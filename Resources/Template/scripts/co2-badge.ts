@@ -1,4 +1,9 @@
 import { co2 } from "@tgwf/co2";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { AstroIntegration } from "astro";
+import { readConfig } from "./config";
 
 /// Rendered by CO2Badge.astro instead of a real value: the page's own final byte size (which
 /// includes this badge's own markup) isn't knowable until after Astro has finished rendering it,
@@ -33,10 +38,15 @@ export function patchHtml(html: string, grams: number): string {
   return html.split(CO2_PLACEHOLDER).join(formatGrams(grams));
 }
 
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { extname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import type { AstroIntegration } from "astro";
+/// The byte size the page will actually ship at once its placeholder token(s) are replaced by
+/// the short formatted number — NOT `byteLength(html)` on the raw pre-patch HTML, which would
+/// overcount by roughly len(CO2_PLACEHOLDER) - len(formatted) per badge instance (the placeholder
+/// is 25 bytes; a formatted value is typically 4-6). Approximates the eventual replacement as
+/// zero-length, undercounting by only the few digits of the final number — negligible next to a
+/// typical page's size, and far closer to the truth than counting the placeholder as real content.
+export function estimatedFinalByteLength(html: string): number {
+  return byteLength(html.split(CO2_PLACEHOLDER).join(""));
+}
 
 /// Recursively collects every `.html` file under `dir`. Mirrors microformats.ts's walkHtml.
 function walkHtmlFiles(dir: string): string[] {
@@ -55,22 +65,36 @@ function walkHtmlFiles(dir: string): string[] {
   return out;
 }
 
-/// Patches every built page carrying CO2_PLACEHOLDER with a real, per-page CO2 estimate computed
-/// from that page's own final byte size. A complete no-op for sites that haven't installed the
-/// co2Badge integration (no page will contain the placeholder), matching redirects()'s
-/// always-registered-but-conditionally-active shape.
+/// Walks `distDir` and patches every built page carrying CO2_PLACEHOLDER with a real, per-page
+/// CO2 estimate. A complete no-op for sites that haven't installed the co2Badge integration (no
+/// page will contain the placeholder), matching redirects()'s always-registered-but-conditionally
+/// -active shape. `configPath` is forwarded to readConfig() for the green-hosting lookup — tests
+/// pass an explicit path to avoid readConfig's process.cwd()-keyed module-level cache; production
+/// (co2Badge()'s hook, below) omits it and gets the normal cwd-based `.site-config` lookup.
+///
+/// A single unreadable/unwritable file, or a `@tgwf/co2` failure, is warned and skipped rather
+/// than failing the whole `astro build` — matching this template's existing astro:build:done
+/// convention (see redirects.ts's try/catch-and-warn shape).
+export function patchDist(distDir: string, configPath?: string): void {
+  const greenHosting = readConfig("GREEN_HOST_VERIFIED", configPath) === "true";
+  for (const file of walkHtmlFiles(distDir)) {
+    try {
+      const html = readFileSync(file, "utf-8");
+      if (!html.includes(CO2_PLACEHOLDER)) continue;
+      const grams = estimateGramsPerByte(estimatedFinalByteLength(html), greenHosting);
+      writeFileSync(file, patchHtml(html, grams));
+    } catch (err) {
+      console.warn(`[anglesite-co2-badge] couldn't patch ${file}: ${err}`);
+    }
+  }
+}
+
 export default function co2Badge(): AstroIntegration {
   return {
     name: "anglesite-co2-badge",
     hooks: {
       "astro:build:done": ({ dir }) => {
-        const distDir = fileURLToPath(dir);
-        for (const file of walkHtmlFiles(distDir)) {
-          const html = readFileSync(file, "utf-8");
-          if (!html.includes(CO2_PLACEHOLDER)) continue;
-          const grams = estimateGramsPerByte(byteLength(html));
-          writeFileSync(file, patchHtml(html, grams));
-        }
+        patchDist(fileURLToPath(dir));
       },
     },
   };
