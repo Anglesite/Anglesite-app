@@ -457,6 +457,7 @@ final class DeployModel {
         // `DeployCommand`) continues to work unmodified.
         let activeCommand: DeployCommand
         let containerRunner: SocialWorkerProvisionCommand.CommandRunner?
+        let containerSecretRunner: SocialWorkerProvisionCommand.SecretRunner?
         if let cc = containerControl {
             activeCommand = DeployCommand(
                 tokenSource: command.tokenSource,
@@ -466,10 +467,13 @@ final class DeployModel {
                     logCenter: logCenter
                 )
             )
-            containerRunner = ContainerCommandRunner(control: cc.control, siteID: cc.siteID, logCenter: logCenter).runner
+            let containerCommandRunner = ContainerCommandRunner(control: cc.control, siteID: cc.siteID, logCenter: logCenter)
+            containerRunner = containerCommandRunner.runner
+            containerSecretRunner = containerCommandRunner.secretRunner
         } else {
             activeCommand = command
             containerRunner = nil
+            containerSecretRunner = nil
         }
 
         // Effective active worker set (#709 design §4-5, #825): the content-graph snapshot build
@@ -536,6 +540,7 @@ final class DeployModel {
         let socialCommand = SocialWorkerProvisionCommand(
             tokenSource: { [weak self] in try await self?.command.tokenSource() },
             runner: containerRunner ?? SocialWorkerProvisionCommand.defaultRunner,
+            secretRunner: containerSecretRunner ?? SocialWorkerProvisionCommand.defaultSecretRunner,
             deployer: { [weak self] _, deploySiteID, deploySiteDirectory in
                 await activeCommand.deploy(
                     siteID: deploySiteID,
@@ -575,6 +580,7 @@ final class DeployModel {
             routeClaims: routeClaims.map(\.claim),
             knownResources: settings.provisionedWorkerResources ?? .init(),
             siteURL: siteURL,
+            displayName: settings.displayName,
             acknowledgesPaidPlan: acknowledgesPaidPlan
         )
 

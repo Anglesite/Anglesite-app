@@ -131,6 +131,143 @@ struct SocialWorkerProvisionCommandTests {
         #expect(toml.contains("bucket_name = \"my-site-media\""))
     }
 
+    @Test("provisions ActivityPub: generates keys once, pushes secrets, writes the DO binding")
+    func provisionsActivityPub() async throws {
+        let site = try temporaryDirectory()
+        let recorder = WranglerRecorder([:])
+        var pushedSecrets: [(name: String, value: String)] = []
+        let secretRunnerLock = NSLock()
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "token" },
+            runner: recorder.runner,
+            keyPairSource: { _ in
+                .init(privateKeyPem: "PRIVATE-PEM", publicKeyPem: "PUBLIC-PEM", publishToken: "TOKEN-VALUE")
+            },
+            secretRunner: { _, name, value, _, _ in
+                secretRunnerLock.lock()
+                pushedSecrets.append((name, value))
+                secretRunnerLock.unlock()
+                return .init(stdout: "Success!", stderr: "", exitCode: 0)
+            },
+            deployer: DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1)).deployer
+        )
+        let activitypub = worker(WorkerComposition.activitypubWorkerID, d1: false, kv: false, r2: false)
+
+        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: [activitypub])
+
+        guard case .succeeded = result else {
+            Issue.record("expected success, got \(result)")
+            return
+        }
+        #expect(pushedSecrets.contains { $0.name == "AP_PRIVATE_KEY" && $0.value == "PRIVATE-PEM" })
+        #expect(pushedSecrets.contains { $0.name == "AP_PUBLIC_KEY" && $0.value == "PUBLIC-PEM" })
+        #expect(pushedSecrets.contains { $0.name == "AP_PUBLISH_TOKEN" && $0.value == "TOKEN-VALUE" })
+
+        let toml = try String(contentsOf: site.appendingPathComponent("wrangler.toml"), encoding: .utf8)
+        #expect(toml.contains("[[durable_objects.bindings]]"))
+    }
+
+    @Test("ActivityPub-only (no D1/KV/R2 worker active) has wrangler.toml on disk before the first secret push")
+    func activitypubOnlyPersistsConfigBeforeSecrets() async throws {
+        // ActivityPub's catalog resources are all needsD1/needsKV/needsR2 == false (it only needs
+        // a Durable Object, which isn't tracked by those flags), so when it's the only active
+        // worker none of the D1/KV/R2 blocks in `provision()` run. Regression coverage for #363:
+        // `wrangler secret put` resolves its target Worker's name from `wrangler.toml` in the
+        // working directory, so that file must already exist by the time the first secretRunner
+        // call happens — checking only the final on-disk state (as `provisionsActivityPub` above
+        // does) wouldn't catch an ordering bug, since the unconditional `persistConfig` call at
+        // the very end of `provision()` would paper over it in a passing test even with the bug
+        // present. So this secretRunner closure itself reads and asserts on `wrangler.toml`
+        // *before* returning success — that's exactly the moment a real `wrangler secret put`
+        // subprocess would need the file to already be resolvable.
+        let site = try temporaryDirectory()
+        let recorder = WranglerRecorder([:])
+        var secretRunnerCallCount = 0
+        var tomlContentsAtFirstSecretCall: String?
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "token" },
+            runner: recorder.runner,
+            keyPairSource: { _ in
+                .init(privateKeyPem: "PRIVATE-PEM", publicKeyPem: "PUBLIC-PEM", publishToken: "TOKEN-VALUE")
+            },
+            secretRunner: { siteDirectory, _, _, _, _ in
+                secretRunnerCallCount += 1
+                if secretRunnerCallCount == 1 {
+                    tomlContentsAtFirstSecretCall = try? String(
+                        contentsOf: siteDirectory.appendingPathComponent("wrangler.toml"), encoding: .utf8
+                    )
+                }
+                return .init(stdout: "Success!", stderr: "", exitCode: 0)
+            },
+            deployer: DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1)).deployer
+        )
+        let activitypub = worker(WorkerComposition.activitypubWorkerID, d1: false, kv: false, r2: false)
+
+        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: [activitypub])
+
+        guard case .succeeded = result else {
+            Issue.record("expected success, got \(result)")
+            return
+        }
+        #expect(secretRunnerCallCount == 3)
+        let toml = try #require(tomlContentsAtFirstSecretCall, "wrangler.toml must exist before the first secretRunner call")
+        #expect(toml.contains("[[durable_objects.bindings]]"))
+    }
+
+    @Test("no activitypub worker means keyPairSource and the ActivityPub secretRunner calls never run")
+    func noActivitypubSkipsKeyGeneration() async throws {
+        let site = try temporaryDirectory()
+        let recorder = WranglerRecorder([:])
+        var keyPairSourceCalled = false
+        var secretRunnerCalled = false
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "token" },
+            runner: recorder.runner,
+            keyPairSource: { _ in
+                keyPairSourceCalled = true
+                return .init(privateKeyPem: "x", publicKeyPem: "y", publishToken: "z")
+            },
+            secretRunner: { _, _, _, _, _ in
+                secretRunnerCalled = true
+                return .init(stdout: "", stderr: "", exitCode: 0)
+            },
+            deployer: DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1)).deployer
+        )
+
+        _ = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: [])
+
+        #expect(!keyPairSourceCalled)
+        #expect(!secretRunnerCalled)
+    }
+
+    @Test("a secretRunner failure fails provisioning before deploy")
+    func secretPushFailureFailsProvisioning() async throws {
+        let site = try temporaryDirectory()
+        let recorder = WranglerRecorder([:])
+        let deployer = DeployRecorder(result: .succeeded(url: URL(string: "https://my-site.example.workers.dev")!, duration: 1))
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "token" },
+            runner: recorder.runner,
+            keyPairSource: { _ in .init(privateKeyPem: "PRIVATE-PEM", publicKeyPem: "PUBLIC-PEM", publishToken: "TOKEN-VALUE") },
+            secretRunner: { _, name, _, _, _ in
+                if name == "AP_PUBLIC_KEY" {
+                    return .init(stdout: "", stderr: "authentication error", exitCode: 1)
+                }
+                return .init(stdout: "Success!", stderr: "", exitCode: 0)
+            },
+            deployer: deployer.deployer
+        )
+        let activitypub = worker(WorkerComposition.activitypubWorkerID, d1: false, kv: false, r2: false)
+
+        let result = await command.provision(siteID: "site-1", siteDirectory: site, siteName: "my-site", workers: [activitypub])
+
+        guard case .failed = result else {
+            Issue.record("expected failure, got \(result)")
+            return
+        }
+        #expect(await deployer.calls.isEmpty)
+    }
+
     @Test("fails before running wrangler when no token is available")
     func missingToken() async throws {
         let site = try temporaryDirectory()

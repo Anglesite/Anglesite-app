@@ -37,6 +37,24 @@ public actor SocialWorkerProvisionCommand {
         _ environment: [String: String],
         _ source: String
     ) async throws -> ProcessSupervisor.RunResult
+    /// Pushes one Cloudflare Worker secret whose value can't travel as a plain CLI argument
+    /// (`wrangler secret put <NAME>` reads its value from stdin). Unlike `CommandRunner`, which
+    /// always shapes a bare `wrangler <args>` call, this closure's production conformer
+    /// (`ContainerCommandRunner.secretRunner`) runs a small in-guest shell script that reads
+    /// `value` from an environment variable rather than stdin — the container-exec seam
+    /// (`LocalContainerControl.exec`) is one-shot with no stdin plumbing.
+    public typealias SecretRunner = @Sendable (
+        _ siteDirectory: URL,
+        _ name: String,
+        _ value: String,
+        _ environment: [String: String],
+        _ source: String
+    ) async throws -> ProcessSupervisor.RunResult
+    /// Produces (generating and persisting on first call, per site) the ActivityPub actor's
+    /// signing keypair and publish token. Defaults to the real Keychain via
+    /// `ActivityPubKeyProvisioning`; tests inject a fake to avoid touching the real login
+    /// keychain and to control the returned values deterministically.
+    public typealias KeyPairSource = @Sendable (_ siteID: String) throws -> ActivityPubKeyProvisioning.Secrets
     public typealias Deployer = @Sendable (
         _ token: String,
         _ siteID: String,
@@ -45,15 +63,21 @@ public actor SocialWorkerProvisionCommand {
 
     public nonisolated let tokenSource: TokenSource
     private let runner: CommandRunner
+    private let keyPairSource: KeyPairSource
+    private let secretRunner: SecretRunner
     private let deployer: Deployer
 
     public init(
         tokenSource: @escaping TokenSource = DeployCommand.keychainTokenSource,
         runner: @escaping CommandRunner = SocialWorkerProvisionCommand.defaultRunner,
+        keyPairSource: @escaping KeyPairSource = SocialWorkerProvisionCommand.defaultKeyPairSource,
+        secretRunner: @escaping SecretRunner = SocialWorkerProvisionCommand.defaultSecretRunner,
         deployer: @escaping Deployer = SocialWorkerProvisionCommand.defaultDeployer
     ) {
         self.tokenSource = tokenSource
         self.runner = runner
+        self.keyPairSource = keyPairSource
+        self.secretRunner = secretRunner
         self.deployer = deployer
     }
 
@@ -77,6 +101,11 @@ public actor SocialWorkerProvisionCommand {
         /// var. `nil` on a first-ever deploy before any host is known — the composed Worker
         /// degrades gracefully (worker.ts no-ops the queue consumer without it).
         siteURL: String? = nil,
+        /// The site's display name (`SiteSettings.displayName`), threaded into the ActivityPub
+        /// actor's `AP_DISPLAY_NAME` var via `WorkerComposition.generateWranglerToml`. `nil` when
+        /// unknown — the composed Worker's actor document then falls back to a fixed generic
+        /// name (`worker.ts`'s concern, not this function's).
+        displayName: String? = nil,
         /// Explicit per-deploy opt-in that the user has acknowledged inbound Webmention requires
         /// the Cloudflare Workers Paid plan (#359) — `DeployModel` sets this from
         /// `SiteSettings.webmentionReceivePaidPlanAcknowledged` plus the in-flight confirmation
@@ -129,7 +158,7 @@ public actor SocialWorkerProvisionCommand {
                     return .failed(reason: "wrangler created D1 database \(name) but no database id was found", exitCode: 0, resources: resources)
                 }
                 resources.d1DatabaseID = id
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName) {
                     return failure
                 }
             }
@@ -156,7 +185,7 @@ public actor SocialWorkerProvisionCommand {
                     return .failed(reason: "wrangler created KV namespace \(name) but no namespace id was found", exitCode: 0, resources: resources)
                 }
                 resources.kvNamespaceID = id
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName) {
                     return failure
                 }
             }
@@ -176,8 +205,42 @@ public actor SocialWorkerProvisionCommand {
                     return failure
                 }
                 resources.r2BucketName = name
-                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
+                if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName) {
                     return failure
+                }
+            }
+        }
+
+        let hasActivityPub = workers.contains(where: { $0.id == WorkerComposition.activitypubWorkerID })
+        if hasActivityPub {
+            // ActivityPub's catalog resources are all needsD1/needsKV/needsR2 == false (it only
+            // needs a Durable Object, which those flags don't track), so if it's the only active
+            // worker none of the D1/KV/R2 blocks above ran and wrangler.toml may not exist yet.
+            // `wrangler secret put` (below) resolves the Worker's project name from
+            // wrangler.toml in the working directory — persist it here first so that lookup
+            // succeeds even on an ActivityPub-only first deploy.
+            if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName) {
+                return failure
+            }
+            let keys: ActivityPubKeyProvisioning.Secrets
+            do {
+                keys = try keyPairSource(siteID)
+            } catch {
+                return .failed(reason: "couldn't prepare ActivityPub signing key: \(error)", exitCode: nil, resources: resources)
+            }
+            for (name, value) in [
+                ("AP_PRIVATE_KEY", keys.privateKeyPem),
+                ("AP_PUBLIC_KEY", keys.publicKeyPem),
+                ("AP_PUBLISH_TOKEN", keys.publishToken),
+            ] {
+                do {
+                    let secretResult = try await secretRunner(siteDirectory, name, value, environment, source)
+                    guard secretResult.exitCode == 0 else {
+                        let output = secretResult.stdout.isEmpty ? secretResult.stderr : secretResult.stdout
+                        return .failed(reason: "couldn't push \(name): \(output)", exitCode: secretResult.exitCode, resources: resources)
+                    }
+                } catch {
+                    return .failed(reason: "couldn't push \(name): \(error)", exitCode: nil, resources: resources)
                 }
             }
         }
@@ -210,7 +273,7 @@ public actor SocialWorkerProvisionCommand {
             }
             if let failure = persistConfig(
                 siteDirectory: siteDirectory, siteName: siteName, workers: workers,
-                routeClaims: routeClaims, resources: resources, siteURL: siteURL
+                routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName
             ) {
                 return failure
             }
@@ -233,7 +296,7 @@ public actor SocialWorkerProvisionCommand {
             }
             if let failure = persistConfig(
                 siteDirectory: siteDirectory, siteName: siteName, workers: workers,
-                routeClaims: routeClaims, resources: resources, siteURL: siteURL
+                routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName
             ) {
                 return failure
             }
@@ -256,13 +319,13 @@ public actor SocialWorkerProvisionCommand {
             }
             if let failure = persistConfig(
                 siteDirectory: siteDirectory, siteName: siteName, workers: workers,
-                routeClaims: routeClaims, resources: resources, siteURL: siteURL
+                routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName
             ) {
                 return failure
             }
         }
 
-        if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL) {
+        if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName) {
             return failure
         }
 
@@ -328,7 +391,8 @@ public actor SocialWorkerProvisionCommand {
         workers: [WorkerDescriptor],
         routeClaims: [WorkerRouteClaim],
         resources: WorkerComposition.ProvisionedResources,
-        siteURL: String? = nil
+        siteURL: String? = nil,
+        displayName: String? = nil
     ) -> Result? {
         do {
             // Called without `inboxCaptureEnabled`/`inboxKVNamespaceID` — #587's inbox-capture
@@ -341,7 +405,8 @@ public actor SocialWorkerProvisionCommand {
                 workers: workers,
                 routeClaims: routeClaims,
                 resources: resources,
-                siteURL: siteURL
+                siteURL: siteURL,
+                displayName: displayName
             )
             try toml.write(
                 to: siteDirectory.appendingPathComponent("wrangler.toml"),
@@ -460,6 +525,16 @@ public actor SocialWorkerProvisionCommand {
         let reason = HostNodeRetirement.reason("social worker provisioning")
         await LogCenter.shared.append(source: source, stream: .stderr, text: reason)
         return ProcessSupervisor.RunResult(stdout: reason, stderr: "", exitCode: 127)
+    }
+
+    public static let defaultSecretRunner: SecretRunner = { siteDirectory, name, value, environment, source in
+        let reason = HostNodeRetirement.reason("social worker secret provisioning")
+        await LogCenter.shared.append(source: source, stream: .stderr, text: reason)
+        return ProcessSupervisor.RunResult(stdout: reason, stderr: "", exitCode: 127)
+    }
+
+    public static let defaultKeyPairSource: KeyPairSource = { siteID in
+        try ActivityPubKeyProvisioning.secrets(siteID: siteID, secretStore: PlatformSecretStore.make())
     }
 
     // Calls `DeployCommand.deploy` with its defaults: no `configDirectory` (route-coverage
