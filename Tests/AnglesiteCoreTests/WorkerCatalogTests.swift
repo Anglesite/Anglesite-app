@@ -64,6 +64,27 @@ struct WorkerDescriptorTests {
         #expect(decoded.resources.needsR2 == true)
     }
 
+    @Test("a durable-object resource entry decodes without throwing and sets no D1/KV/R2 flag")
+    func decodesDurableObjectResourceEntry() throws {
+        let json = """
+        {
+            "id": "activitypub",
+            "displayName": "Fediverse",
+            "description": "Make this site a Fediverse actor",
+            "group": "social",
+            "binding": { "kind": "settingsActivated" },
+            "resources": [
+                { "type": "durable-object", "binding": "ACTOR", "className": "ActivityPubObject", "sqlite": true }
+            ]
+        }
+        """
+        let workers = try WorkerCatalogReader.parse(Data("{\"workers\":[\(json)]}".utf8))
+        let activitypub = try #require(workers.first)
+        #expect(activitypub.resources.needsD1 == false)
+        #expect(activitypub.resources.needsKV == false)
+        #expect(activitypub.resources.needsR2 == false)
+    }
+
     @Test("still decodes the legacy flat-object resources shape")
     func decodesLegacyFlatResources() throws {
         let json = """
