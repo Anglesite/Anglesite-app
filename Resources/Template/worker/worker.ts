@@ -478,9 +478,32 @@ function handleMicropub(
     AUTH_DB: env.AUTH_DB,
     TOKEN_SIGNING_KEY: env.TOKEN_SIGNING_KEY,
   };
-  return micropub(request, micropubEnv, ctx).then((response) => {
+  // Extract the post content from a *clone taken before* `micropub()` ever reads the original
+  // request's body (V-4.1, #363). Cloning an unconsumed Request is always spec-safe; cloning
+  // one whose body a library has already read is not a documented-safe operation (workerd
+  // happens to tolerate it today, but a future `@dwk/micropub` release that reads the body via
+  // a locked stream reader could silently break the fan-out with no visible failure). Doing the
+  // extraction up front — before `micropub(request, ...)` is called — sidesteps that hazard
+  // entirely rather than relying on it.
+  const contentPromise: Promise<string> = (async () => {
+    if (!env.AP_PUBLISH_TOKEN || request.method !== "POST") return "";
+    const cloned = request.clone();
+    try {
+      const contentType = cloned.headers.get("content-type") ?? "";
+      if (contentType.includes("application/json")) {
+        const body = (await cloned.json()) as { properties?: { content?: unknown[] } };
+        return String(body.properties?.content?.[0] ?? "");
+      }
+      const form = await cloned.formData();
+      return String(form.get("content") ?? form.get("properties[content]") ?? "");
+    } catch {
+      return ""; // Can't recover the post content — skip the fan-out rather than publish an empty Note.
+    }
+  })();
+  return micropub(request, micropubEnv, ctx).then(async (response) => {
     if (request.method === "POST" && response.status === 201) {
-      ctx.waitUntil(fanOutMicropubCreateToActivityPub(request, response, env, ctx));
+      const content = await contentPromise;
+      ctx.waitUntil(fanOutMicropubCreateToActivityPub(content, baseUrl, response, env, ctx));
     }
     return response;
   });
@@ -496,32 +519,17 @@ function handleMicropub(
  * response (the post is already saved) — logged and swallowed.
  */
 async function fanOutMicropubCreateToActivityPub(
-  originalRequest: Request,
+  content: string,
+  baseUrl: string,
   micropubResponse: Response,
   env: WorkerEnv,
   ctx: ExecutionContext,
 ): Promise<void> {
   if (!env.AP_PUBLISH_TOKEN) return;
+  if (!content) return;
   const location = micropubResponse.headers.get("location");
   if (!location) return;
 
-  let content = "";
-  try {
-    const contentType = originalRequest.headers.get("content-type") ?? "";
-    const cloned = originalRequest.clone();
-    if (contentType.includes("application/json")) {
-      const body = (await cloned.json()) as { properties?: { content?: unknown[] } };
-      content = String(body.properties?.content?.[0] ?? "");
-    } else {
-      const form = await cloned.formData();
-      content = String(form.get("content") ?? form.get("properties[content]") ?? "");
-    }
-  } catch {
-    return; // Can't recover the post content — skip the fan-out rather than publish an empty Note.
-  }
-  if (!content) return;
-
-  const baseUrl = new URL(originalRequest.url).origin;
   const actorIRI = `${baseUrl}/users/${ACTIVITYPUB_USERNAME}`;
   const note = {
     "@context": "https://www.w3.org/ns/activitystreams",
