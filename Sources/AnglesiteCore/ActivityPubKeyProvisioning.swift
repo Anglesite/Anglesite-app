@@ -23,6 +23,13 @@ public enum ActivityPubKeyProvisioning {
 
     /// Returns this site's ActivityPub secrets, generating and persisting them into `secretStore`
     /// on first call. Every subsequent call for the same `siteID` returns the same values.
+    ///
+    /// **Concurrency note:** This function is not safe to call concurrently for the same `siteID`.
+    /// A race between two concurrent calls' read-then-write pairs could cause two independent keypairs
+    /// to be generated, with the last write silently overwriting the first — violating the "never
+    /// regenerate" invariant. Its current sole caller (`SocialWorkerProvisionCommand.provision()`)
+    /// invokes this from a single user-initiated deploy action per site, never concurrently. Future
+    /// callers must not violate this serial-access guarantee.
     public static func secrets(siteID: String, secretStore: any SecretStore) throws -> Secrets {
         let privateKeyAccount = SecretAccounts.activityPubPrivateKeyPem(siteID: siteID)
         let publishTokenAccount = SecretAccounts.activityPubPublishToken(siteID: siteID)
