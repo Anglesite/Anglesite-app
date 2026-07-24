@@ -357,6 +357,9 @@
     "Apply…" : {
 
     },
+    "Approve sign-in in your browser, then copy the final URL from the address bar (it will fail to load — that's expected) and paste it here." : {
+
+    },
     "Arguments (space-separated)" : {
 
     },
@@ -516,6 +519,9 @@
     "Change Logo…" : {
 
     },
+    "Channel" : {
+
+    },
     "Chat" : {
 
     },
@@ -631,6 +637,9 @@
 
     },
     "Commit and push working-tree changes to your current branch" : {
+
+    },
+    "Complete Sign In" : {
 
     },
     "Component" : {
@@ -1063,6 +1072,12 @@
     "Flip Vertically" : {
 
     },
+    "Follow" : {
+
+    },
+    "Follow a feed or site URL…" : {
+
+    },
     "Font" : {
 
     },
@@ -1459,6 +1474,9 @@
     "No copy issues found across %lld pages — nice work." : {
 
     },
+    "No entries yet — follow a feed above to get started." : {
+
+    },
     "No issues found in the most recent scan." : {
 
     },
@@ -1612,6 +1630,9 @@
     "Paste the HTML code from another analytics provider here, such as Google Analytics, Plausible, Fathom, or a conversion tag." : {
 
     },
+    "Pasted callback URL" : {
+
+    },
     "Pause" : {
 
     },
@@ -1721,6 +1742,9 @@
 
     },
     "Re-check" : {
+
+    },
+    "Reader…" : {
 
     },
     "Reading %@ zone settings from Cloudflare…" : {
@@ -2123,6 +2147,15 @@
     "Shows the most recent pre-deploy scan results" : {
 
     },
+    "Sign In…" : {
+
+    },
+    "Sign Out" : {
+
+    },
+    "Sign in to read your feeds" : {
+
+    },
     "Signed in as %@" : {
 
     },
@@ -2283,6 +2316,9 @@
 
     },
     "That's a different site — choose the original package folder instead." : {
+
+    },
+    "The Reader follows feeds and stores your timeline on this site's own Microsub endpoint — sign in as this site's owner to use it." : {
 
     },
     "The build produced no output." : {

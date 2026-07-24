@@ -21,8 +21,21 @@ struct DeployCommandTests {
         /// Optional hook fired (inside `run`) when a given step runs — used to assert a step is
         /// NOT reached (the parallel to the old `confirmation(expectedCount: 0)` resolver guards).
         private var onRun: [String: @Sendable () -> Void] = [:]
+        /// Fed back by `reportOwnedPathClaims()` — #744's pre-build well-known collision check.
+        private var runtimeClaims: [RuntimeOwnedPathClaim] = []
 
         init() {}
+
+        @discardableResult
+        func withRuntimeClaims(_ claims: [RuntimeOwnedPathClaim]) -> FakeExecutor {
+            lock.lock(); runtimeClaims = claims; lock.unlock()
+            return self
+        }
+
+        func reportOwnedPathClaims() async -> [RuntimeOwnedPathClaim] {
+            lock.lock(); defer { lock.unlock() }
+            return runtimeClaims
+        }
 
         private func key(_ step: DeployStep) -> String {
             switch step {
@@ -117,6 +130,107 @@ struct DeployCommandTests {
         #expect(exec.environment(for: .build)?["CLOUDFLARE_API_TOKEN"] == nil)
         #expect(exec.environment(for: .preflight)?["CLOUDFLARE_API_TOKEN"] == nil)
         #expect(exec.environment(for: .wrangler)?["CLOUDFLARE_API_TOKEN"] == "secret-tok")
+    }
+
+    // MARK: #744 well-known collision check
+
+    /// A fresh temp site directory (unlike the shared `tmpDir`, isolated per test) with the given
+    /// `public/.well-known/<relative path>: content` files written.
+    private func makeWellKnownSiteDirectory(wellKnownFiles: [String: String] = [:]) throws -> URL {
+        let siteDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DeployCommandTests-\(UUID().uuidString)", isDirectory: true)
+        let wellKnownDir = siteDirectory.appendingPathComponent("public/.well-known", isDirectory: true)
+        try FileManager.default.createDirectory(at: wellKnownDir, withIntermediateDirectories: true)
+        for (relativePath, content) in wellKnownFiles {
+            let fileURL = wellKnownDir.appendingPathComponent(relativePath)
+            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try content.write(to: fileURL, atomically: true, encoding: .utf8)
+        }
+        return siteDirectory
+    }
+
+    @Test("a committed static file colliding with a runtime-reported claim blocks before build runs")
+    func wellKnownCollisionBlocksBeforeBuild() async throws {
+        let siteDirectory = try makeWellKnownSiteDirectory(wellKnownFiles: ["acme-challenge/mine": "token"])
+        defer { try? FileManager.default.removeItem(at: siteDirectory) }
+        let exec = FakeExecutor()
+            .withRuntimeClaims([RuntimeOwnedPathClaim(
+                id: "acme", owner: "cloudflare-managed-tls", path: "acme-challenge/", match: .prefix,
+                capability: "RFC 8555 managed-TLS ownership")])
+            .set(.build, exitCode: 0, output: "should not run")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDirectory)
+        guard case .blocked(let failures, _) = result else {
+            Issue.record("expected .blocked, got \(result)"); return
+        }
+        #expect(failures.count == 1)
+        #expect(failures.first?.category == .wellKnownCollision)
+        #expect(failures.first?.message.contains("acme-challenge/mine") == true)
+        #expect(!exec.ran(.build), "a declared collision must block before spending time on a build")
+    }
+
+    @Test("an active dynamic route claim colliding with a runtime reservation blocks before build")
+    func wellKnownDynamicRuntimeCollisionBlocks() async throws {
+        let siteDirectory = try makeWellKnownSiteDirectory()
+        defer { try? FileManager.default.removeItem(at: siteDirectory) }
+        let exec = FakeExecutor()
+            .withRuntimeClaims([RuntimeOwnedPathClaim(
+                id: "acme", owner: "cloudflare-managed-tls", path: "acme-challenge/", match: .prefix,
+                capability: "RFC 8555 managed-TLS ownership")])
+            .set(.build, exitCode: 0, output: "should not run")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let claim = WorkerRouteClaims.OwnedClaim(
+            owner: "some-worker",
+            claim: WorkerRouteClaim(path: "/.well-known/acme-challenge/http-01", match: .exact, methods: ["GET"], handler: "h"))
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDirectory, wellKnownDynamicClaims: [claim])
+        guard case .blocked = result else {
+            Issue.record("expected .blocked, got \(result)"); return
+        }
+        #expect(!exec.ran(.build))
+    }
+
+    @Test("a rejected well-known file (symlink) becomes an advisory warning, not a blocker")
+    func wellKnownScanFindingBecomesWarning() async throws {
+        let siteDirectory = try makeWellKnownSiteDirectory()
+        defer { try? FileManager.default.removeItem(at: siteDirectory) }
+        let wellKnownDir = siteDirectory.appendingPathComponent("public/.well-known", isDirectory: true)
+        let outside = siteDirectory.appendingPathComponent("secret")
+        try "shh".write(to: outside, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: wellKnownDir.appendingPathComponent("linked"), withDestinationURL: outside)
+
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        var observedOutcome: PreDeployCheck.Outcome?
+        let result = await cmd.deploy(
+            siteID: "s", siteDirectory: siteDirectory,
+            onPreflight: { observedOutcome = $0 })
+        guard case .succeeded = result else {
+            Issue.record("expected .succeeded (a rejected file is advisory, not blocking), got \(result)"); return
+        }
+        guard case .passed(let warnings) = observedOutcome else {
+            Issue.record("expected .passed with warnings, got \(String(describing: observedOutcome))"); return
+        }
+        #expect(warnings.contains { $0.category == .wellKnownArtifact })
+        #expect(exec.ran(.build) && exec.ran(.preflight) && exec.ran(.wrangler))
+    }
+
+    @Test("no well-known content and no claims deploys unaffected")
+    func wellKnownCheckIsNoOpWhenEmpty() async throws {
+        let siteDirectory = try makeWellKnownSiteDirectory()
+        defer { try? FileManager.default.removeItem(at: siteDirectory) }
+        let exec = FakeExecutor()
+            .set(.build, exitCode: 0, output: "")
+            .set(.preflight, exitCode: 0, output: scanJSON(ok: true))
+            .set(.wrangler, exitCode: 0, output: "Published x (0.1 sec)\n  https://x.workers.dev")
+        let cmd = DeployCommand(tokenSource: { "tok" }, executor: exec)
+        let result = await cmd.deploy(siteID: "s", siteDirectory: siteDirectory)
+        guard case .succeeded = result else {
+            Issue.record("expected .succeeded, got \(result)"); return
+        }
     }
 
     // MARK: Host environment curation

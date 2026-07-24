@@ -51,6 +51,13 @@ public enum WorkerComposition {
     /// those binding names are part of `@dwk/websub`'s public composition contract.
     public static let websubWorkerID = "websub"
 
+    /// `@dwk/microsub`'s catalog id — like `webmentionWorkerID`, composition keys off this
+    /// directly for the reader's bespoke bindings (`MICROSUB_DB`, its own Queue), since those
+    /// binding names are part of `@dwk/microsub`'s public composition contract. The catalog
+    /// declares `requires: ["indieauth"]`, so `WorkerActivation` always activates `indieauth`
+    /// alongside this one — the `AUTH_DB`/`TOKEN_SIGNING_KEY` bindings below fall out for free.
+    public static let microsubWorkerID = "microsub"
+
     /// The bespoke app-side inbox-capture route (#587) — not a `@dwk/workers` catalog worker, so
     /// its claim lives here rather than in `catalog.json`. Appended automatically when
     /// `generateWranglerToml` is called with `inboxCaptureEnabled`.
@@ -79,16 +86,23 @@ public enum WorkerComposition {
         /// suffix. Optional like every other field: `nil` decodes cleanly from settings
         /// persisted before this field existed.
         public var websubQueueName: String?
+        /// The Cloudflare Queue name backing `@dwk/microsub`'s feed-poll fan-out and retries —
+        /// deterministic (`\(siteName)-microsub`), separate from `queueName`/`websubQueueName` so
+        /// the composed Worker's `queue()` handler can dispatch on the name suffix. Optional like
+        /// every other field: `nil` decodes cleanly from settings persisted before this field
+        /// existed.
+        public var microsubQueueName: String?
 
         public init(
             d1DatabaseID: String? = nil, kvNamespaceID: String? = nil, r2BucketName: String? = nil,
-            queueName: String? = nil, websubQueueName: String? = nil
+            queueName: String? = nil, websubQueueName: String? = nil, microsubQueueName: String? = nil
         ) {
             self.d1DatabaseID = d1DatabaseID
             self.kvNamespaceID = kvNamespaceID
             self.r2BucketName = r2BucketName
             self.queueName = queueName
             self.websubQueueName = websubQueueName
+            self.microsubQueueName = microsubQueueName
         }
     }
 
@@ -149,6 +163,7 @@ public enum WorkerComposition {
         let hasMicropub = workers.contains(where: { $0.id == micropubWorkerID })
         let hasActivityPub = workers.contains(where: { $0.id == activitypubWorkerID })
         let hasWebSub = workers.contains(where: { $0.id == websubWorkerID })
+        let hasMicrosub = workers.contains(where: { $0.id == microsubWorkerID })
 
         var lines: [String] = []
         lines.append("name = \"\(siteName)\"")
@@ -278,6 +293,47 @@ public enum WorkerComposition {
             lines.append("max_retries = 3")
         }
 
+        // Same shared per-site D1 database, bound under MICROSUB_DB — @dwk/microsub creates its
+        // own channels/follows/timeline-item tables on first use, so no separate database or
+        // migration is needed here (matches the WEBSUB_DB comment above).
+        if hasMicrosub {
+            lines.append("")
+            lines.append("[[d1_databases]]")
+            lines.append("binding = \"MICROSUB_DB\"")
+            lines.append("database_name = \"\(siteName)-social\"")
+            if let id = resources.d1DatabaseID, !id.isEmpty {
+                lines.append("database_id = \"\(id)\"")
+            } else {
+                lines.append("database_id = \"\"  # filled by provisioning")
+            }
+        }
+
+        // Dedicated Cloudflare Queue for @dwk/microsub's feed-poll fan-out and retries.
+        // Deliberately separate from the Webmention/WebSub queues: the composed Worker's
+        // queue() handler dispatches on the queue-name suffix (`-microsub`).
+        if hasMicrosub {
+            lines.append("")
+            let microsubQueueName = resources.microsubQueueName ?? "\(siteName)-microsub"
+            lines.append("[[queues.producers]]")
+            lines.append("queue = \"\(microsubQueueName)\"")
+            lines.append("binding = \"MICROSUB_QUEUE\"")
+            lines.append("")
+            lines.append("[[queues.consumers]]")
+            lines.append("queue = \"\(microsubQueueName)\"")
+            lines.append("max_batch_size = 10")
+            lines.append("max_batch_timeout = 30")
+            lines.append("max_retries = 3")
+        }
+
+        // @dwk/microsub's poller runs off the read path on a Cron Trigger, enqueuing one poll job
+        // per followed feed (see `createMicrosubPoller` in the package README) — the read path
+        // itself only ever serves stored entries.
+        if hasMicrosub {
+            lines.append("")
+            lines.append("[triggers]")
+            lines.append("crons = [\"*/15 * * * *\"]")
+        }
+
         if workers.contains(where: { $0.resources.needsKV }) {
             lines.append("")
             lines.append("[[kv_namespaces]]")
@@ -320,9 +376,10 @@ public enum WorkerComposition {
 
         var varsLines: [String] = []
         // SITE_URL: the canonical origin the queue consumers key on — Webmention's verifier
-        // scopes accepted targets with it, and WebSub's consumer derives its topic URLs from it
-        // (neither has a request to derive an origin from).
-        if hasWebmentionReceive || hasWebSub, let siteURL, !siteURL.isEmpty, isSafeTomlStringValue(siteURL) {
+        // scopes accepted targets with it, WebSub's consumer derives its topic URLs from it, and
+        // Microsub's poller/queue consumer use it as their `baseUrl`/`me` (none of the three has
+        // a request to derive an origin from).
+        if hasWebmentionReceive || hasWebSub || hasMicrosub, let siteURL, !siteURL.isEmpty, isSafeTomlStringValue(siteURL) {
             varsLines.append("SITE_URL = \"\(siteURL)\"")
         }
         if hasActivityPub, let displayName, !displayName.isEmpty, isSafeTomlStringValue(displayName) {

@@ -547,6 +547,9 @@ final class DeployModel {
                     siteDirectory: deploySiteDirectory,
                     configDirectory: configDirectory,
                     currentRoutes: currentRoutes,
+                    // #744: feeds the same already-validated active route claims (#746, computed
+                    // above) into DeployCommand's pre-build /.well-known/ collision check.
+                    wellKnownDynamicClaims: WorkerRouteClaims.wellKnownClaims(routeClaims),
                     onPreflight: { [weak self] outcome in
                         Task { @MainActor in self?.onScanComplete?(outcome) }
                     },
