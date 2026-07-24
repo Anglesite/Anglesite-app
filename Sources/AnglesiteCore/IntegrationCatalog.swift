@@ -52,7 +52,7 @@ public enum IntegrationCatalog {
         tracking, share, podcast,
         indieweb, menu,
         buyButton, lemonSqueezy, paddle, snipcart, shopifyBuyButton,
-        inbox, membership, carbonTxt, greenHostCheck,
+        inbox, membership, carbonTxt, greenHostCheck, co2Badge,
     ]
 
     public static func descriptor(for id: IntegrationID) -> IntegrationDescriptor {
@@ -741,6 +741,44 @@ public enum IntegrationCatalog {
                 ConfigEntry(key: "GREEN_HOST_VERIFIED", value: "{{green}}"),
                 ConfigEntry(key: "GREEN_HOST_NAME", value: "{{hostname}}"),
                 ConfigEntry(key: "GREEN_HOST_CHECKED_AT", value: "{{checkedAt}}"),
+            ], when: .always),
+        ])
+
+    // MARK: co2Badge
+    // No providers, no async check (contrast with greenHostCheck/#684): the estimate must be
+    // fresh on every build, not a one-time wizard-time snapshot, so all computation lives in the
+    // Astro-side co2-badge.ts integration (scripts/co2-badge.ts's astro:build:done hook) — this
+    // descriptor only ships the static plumbing (component, optional dedicated page, one config
+    // key for placement).
+    static let co2Badge = IntegrationDescriptor(
+        id: .co2Badge,
+        displayName: "Carbon Footprint Badge",
+        summary: "Show an estimated per-page CO2 footprint, computed at build time from each page's weight (CO2.js).",
+        providers: [],
+        fields: [
+            Field(key: "style", label: "Placement", kind: .choice([
+                Choice(value: "footer", label: "Footer (site-wide)"),
+                Choice(value: "page", label: "Dedicated page"),
+            ]), defaultValue: "footer"),
+        ],
+        operations: [
+            .copyFile(from: TemplateRef("integrations/components/CO2Badge.astro"),
+                      to: "src/components/CO2Badge.astro", when: .always),
+            .copyFile(from: TemplateRef("integrations/pages/carbon-footprint.astro"),
+                      to: "src/pages/carbon-footprint.astro", when: .fieldEquals(key: "style", value: "page")),
+            // No readConfig re-import here (contrast with booking/pwa/greenHostCheck's snippets):
+            // BaseLayout.astro already imports it unconditionally at the top of the file (added
+            // for WEBMENTION_RECEIVE_ENABLED), and a real deployed site's copy of that file is
+            // typed by `astro check`, which rejects a duplicate identifier — re-importing it here
+            // would break `npm run build` for any site with the footer placement installed.
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "// anglesite:imports",
+                            snippet: "import CO2Badge from \"../components/CO2Badge.astro\";",
+                            when: .fieldEquals(key: "style", value: "footer"), style: .line),
+            .injectAtAnchor(file: "src/layouts/BaseLayout.astro", anchor: "<!-- anglesite:body-end -->",
+                            snippet: "{readConfig(\"CO2_BADGE_STYLE\") === \"footer\" && (<CO2Badge />)}",
+                            when: .fieldEquals(key: "style", value: "footer"), style: .html),
+            .writeConfig([
+                ConfigEntry(key: "CO2_BADGE_STYLE", value: "{{style}}"),
             ], when: .always),
         ])
 }
