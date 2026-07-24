@@ -49,6 +49,24 @@ public enum SecretAccounts {
         "posse:\(siteID):bluesky-app-password"
     }
 
+    /// The ActivityPub actor's signing keypair (PKCS#8 PEM, private half only — the public half
+    /// is re-derived on demand). App-generated once per site by `ActivityPubKeyProvisioning`
+    /// (#363) and never regenerated: a rotated key breaks federation trust with existing
+    /// followers, unlike the opaque tokens above which can be rotated freely.
+    public static func activityPubPrivateKeyPem(siteID: String) -> String {
+        "activitypub:\(siteID):private-key-pem"
+    }
+
+    /// Bearer token gating `@dwk/activitypub`'s owner-only publish endpoint
+    /// (`POST <actor>/outbox`), which this app's Micropub-to-ActivityPub fan-out calls
+    /// internally. App-generated random bytes, distinct from `activityPubPrivateKeyPem` — unlike
+    /// the signing key, rotating this has no federation-trust consequence, but it still must
+    /// never be a hardcoded constant (this endpoint's fan-out caller and target both live in the
+    /// open-source template shipped to every site).
+    public static func activityPubPublishToken(siteID: String) -> String {
+        "activitypub:\(siteID):publish-token"
+    }
+
     /// Bearer token for a `.remote` ACP agent connection, keyed by the connection's `id` — there
     /// can be many connections, so this is a function, not a single constant like
     /// `cloudflareToken`/`gitHubToken`.
