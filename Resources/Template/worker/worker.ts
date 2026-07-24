@@ -598,6 +598,11 @@ async function fanOutMicropubCreateToActivityPub(
     attributedTo: actorIRI,
     content,
     url: location,
+    // No `cc` naming the followers collection: unlike the convention some AP implementations
+    // use for "public post, also cc followers" addressing, @dwk/activitypub's owner-publish
+    // outbox handler (`#publish` in its Durable Object) fans out to every current follower's
+    // inbox unconditionally — it never inspects `to`/`cc` to decide who receives delivery, only
+    // to shape what's displayed. Public-only addressing is sufficient here.
     to: ["https://www.w3.org/ns/activitystreams#Public"],
   };
   const publishRequest = new Request(`${actorIRI}/outbox`, {
