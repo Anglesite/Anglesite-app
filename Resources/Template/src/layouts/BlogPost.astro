@@ -11,6 +11,10 @@ import BaseLayout from "./BaseLayout.astro";
 import SyndicationLinks from "../components/SyndicationLinks.astro";
 import DraftBadge from "../components/DraftBadge.astro";
 import Interactions from "../components/Interactions.astro";
+// Imported unconditionally (like BaseLayout.astro) so the giscus and share
+// integrations, which both read config at this anchor, don't each need their
+// own copy — astro check rejects the resulting duplicate identifier.
+import { readConfig } from "../../scripts/config";
 
 interface Props {
   title: string;

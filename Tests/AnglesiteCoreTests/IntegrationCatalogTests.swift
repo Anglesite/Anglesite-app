@@ -102,19 +102,22 @@ import Testing
         }
     }
 
-    /// BaseLayout.astro imports `readConfig` unconditionally at the top of the file (added for
-    /// WEBMENTION_RECEIVE_ENABLED) — a descriptor whose "// anglesite:imports" snippet re-imports
-    /// it produces a duplicate identifier that `astro check` rejects, breaking `npm run build` for
-    /// any real site with that integration installed (the template's own `astro check` never runs
-    /// against a scaffolded copy, so this is invisible until someone builds an actual site). See
-    /// the co2Badge fix (#686) for the reference case this guards against regressing on again.
+    /// BaseLayout.astro and BlogPost.astro both import `readConfig` unconditionally at the top of
+    /// the file — a descriptor whose "// anglesite:imports" snippet re-imports it into either of
+    /// them produces a duplicate identifier that `astro check` rejects, breaking `npm run build`
+    /// for any real site with that integration installed (the template's own `astro check` never
+    /// runs against a scaffolded copy, so this is invisible until someone builds an actual site).
+    /// See the co2Badge fix (#686) for the reference case this guards against regressing on again.
     @Test(arguments: IntegrationCatalog.all)
-    func noDescriptorReimportsReadConfigIntoBaseLayout(_ descriptor: IntegrationDescriptor) {
+    func noDescriptorReimportsReadConfigIntoALayoutThatAlreadyProvidesIt(_ descriptor: IntegrationDescriptor) {
+        let layoutsWithUnconditionalReadConfig: Set<String> = [
+            "src/layouts/BaseLayout.astro", "src/layouts/BlogPost.astro",
+        ]
         let pattern = #/import\s*\{[^}]*\breadConfig\b[^}]*\}\s*from\s*"\.\./\.\./scripts/config"/#
         for case .injectAtAnchor(let file, let anchor, let snippet, _, _) in descriptor.operations
-        where file.raw == "src/layouts/BaseLayout.astro" && anchor == "// anglesite:imports" {
+        where layoutsWithUnconditionalReadConfig.contains(file.raw) && anchor == "// anglesite:imports" {
             #expect(snippet.raw.firstMatch(of: pattern) == nil,
-                "\(descriptor.id) re-imports readConfig into BaseLayout.astro, which already provides it: \(snippet.raw)")
+                "\(descriptor.id) re-imports readConfig into \(file.raw), which already provides it: \(snippet.raw)")
         }
     }
 

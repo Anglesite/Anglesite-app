@@ -195,8 +195,11 @@ public enum IntegrationCatalog {
         operations: [
             .copyFile(from: TemplateRef("integrations/components/Comments.astro"),
                       to: "src/components/Comments.astro", when: .always),
+            // No readConfig re-import here: BlogPost.astro already imports it unconditionally at
+            // the top of the file (so giscus and share can share it without colliding), and astro
+            // check rejects a duplicate identifier — see the co2Badge fix (#686).
             .injectAtAnchor(file: "src/layouts/BlogPost.astro", anchor: "// anglesite:imports",
-                            snippet: "import Comments from \"../components/Comments.astro\";\nimport { readConfig } from \"../../scripts/config\";",
+                            snippet: "import Comments from \"../components/Comments.astro\";",
                             when: .always, style: .line),
             .injectAtAnchor(file: "src/layouts/BlogPost.astro", anchor: "<!-- anglesite:comments -->",
                             snippet: "{!!readConfig(\"GISCUS_REPO\") && (<Comments repo={readConfig(\"GISCUS_REPO\")} repoId={readConfig(\"GISCUS_REPO_ID\")} category={readConfig(\"GISCUS_CATEGORY\")} categoryId={readConfig(\"GISCUS_CATEGORY_ID\")} mapping={readConfig(\"GISCUS_MAPPING\")} />)}",
@@ -417,8 +420,11 @@ public enum IntegrationCatalog {
         operations: [
             .copyFile(from: TemplateRef("integrations/components/ShareButtons.astro"),
                       to: "src/components/ShareButtons.astro", when: .always),
+            // No readConfig re-import here: BlogPost.astro already imports it unconditionally at
+            // the top of the file (so giscus and share can share it without colliding), and astro
+            // check rejects a duplicate identifier — see the co2Badge fix (#686).
             .injectAtAnchor(file: "src/layouts/BlogPost.astro", anchor: "// anglesite:imports",
-                            snippet: "import ShareButtons from \"../components/ShareButtons.astro\";\nimport { readConfig } from \"../../scripts/config\";",
+                            snippet: "import ShareButtons from \"../components/ShareButtons.astro\";",
                             when: .always, style: .line),
             .injectAtAnchor(file: "src/layouts/BlogPost.astro", anchor: "<!-- anglesite:share -->",
                             snippet: "<ShareButtons title={title} twitter={readConfig(\"SHARE_TWITTER\") === \"true\"} mastodon={readConfig(\"SHARE_MASTODON\") === \"true\"} linkedin={readConfig(\"SHARE_LINKEDIN\") === \"true\"} copyLink={readConfig(\"SHARE_COPY_LINK\") === \"true\"} />",
