@@ -52,6 +52,9 @@ struct WebsiteCommands: Commands {
             Button("Cleanup…") { model?.presentCleanup() }
                 .disabled(model == nil)
 
+            Button("Reader…") { model?.presentReader() }
+                .disabled(model == nil)
+
             // Ellipsis items open a sheet for further input, per the HIG.
             Button("Harden…") { model?.harden.openSheet() }
                 .disabled(model?.canRunHarden != true)

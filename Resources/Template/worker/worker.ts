@@ -21,6 +21,13 @@ import {
   type WebSubEnv,
   type WebSubJob,
 } from "@dwk/websub";
+import {
+  createMicrosub,
+  createMicrosubPoller,
+  createMicrosubQueueConsumer,
+  type MicrosubEnv,
+  type MicrosubJob,
+} from "@dwk/microsub";
 
 /**
  * Per-site Cloudflare Worker entry point.
@@ -93,6 +100,18 @@ export interface WorkerEnv extends IndieAuthEnv {
    */
   WEBSUB_DB?: D1Database;
   WEBSUB_QUEUE?: Queue<WebSubJob>;
+  /**
+   * Microsub reader bindings (V-4.3, #365). Both optional: a site that hasn't provisioned
+   * Microsub has neither bound, and `/microsub` plus its scheduled poller/queue consumer degrade
+   * gracefully (503 / no-op) rather than throwing. `AUTH_DB`/`TOKEN_SIGNING_KEY` are already
+   * required by `IndieAuthEnv` above — Microsub's catalog entry `requires: ["indieauth"]`
+   * (resolved by `WorkerActivation`) guarantees both are provisioned together, so this handler
+   * still explicitly checks all four before dispatching, matching `handleMicropub`'s
+   * defense-in-depth pattern rather than trusting reachability alone. See
+   * `WorkerComposition.generateWranglerToml` (Swift) for the binding generation.
+   */
+  MICROSUB_DB?: D1Database;
+  MICROSUB_QUEUE?: Queue<MicrosubJob>;
 }
 
 const RATE_LIMIT_WINDOW_SECONDS = 3600;
@@ -363,7 +382,12 @@ function indieAuthHandler(request: Request, env: WorkerEnv) {
   const baseUrl = new URL(request.url).origin;
   return createIndieAuth({
     baseUrl,
-    scopesSupported: ["create", "update", "delete", "media"],
+    // Micropub's scopes ("create"/"update"/"delete"/"media") plus Microsub's ("follow"/
+    // "channels"/"read", V-4.3 #365) — @dwk/indieauth's constrainScopes drops any requested
+    // scope absent from this list, so a client authorizing for Microsub without "follow"/
+    // "channels" listed here would silently be granted an empty scope and then fail every
+    // Microsub action with `insufficient_scope`.
+    scopesSupported: ["create", "update", "delete", "media", "follow", "channels", "read"],
     resourceIndicatorPolicy(resource) {
       try {
         return new URL(resource).origin === baseUrl;
@@ -474,6 +498,87 @@ function handleMicropub(
     TOKEN_SIGNING_KEY: env.TOKEN_SIGNING_KEY,
   };
   return micropub(request, micropubEnv, ctx);
+}
+
+/**
+ * Microsub reader (V-4.3, #365).
+ *
+ * Composes `@dwk/microsub`'s single endpoint: channel/feed subscriptions, following (with
+ * immediate timeline population from the discovery fetch), and the normalised JF2 timeline
+ * (mark read/unread, remove, per-channel unread counts). Requires `@dwk/indieauth` to be active
+ * on the same site (catalog `requires`, resolved by `WorkerActivation`) — Microsub authorizes
+ * every request against `AUTH_DB`'s issued-token store with a DPoP-bound access token, the same
+ * as `@dwk/micropub`.
+ *
+ * Returns `503` when Microsub isn't fully provisioned (`MICROSUB_DB`/`MICROSUB_QUEUE` unbound,
+ * or IndieAuth's `AUTH_DB`/`TOKEN_SIGNING_KEY` unbound) rather than letting `@dwk/microsub` throw
+ * its own loud startup error.
+ */
+function handleMicrosub(
+  request: Request,
+  env: WorkerEnv,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  if (!env.MICROSUB_DB || !env.MICROSUB_QUEUE || !env.AUTH_DB || !env.TOKEN_SIGNING_KEY) {
+    return Promise.resolve(new Response("Microsub is not configured", { status: 503 }));
+  }
+  const baseUrl = new URL(request.url).origin;
+  const microsub = createMicrosub({ baseUrl, me: `${baseUrl}/` });
+  const microsubEnv: MicrosubEnv = {
+    MICROSUB_DB: env.MICROSUB_DB,
+    MICROSUB_QUEUE: env.MICROSUB_QUEUE,
+    AUTH_DB: env.AUTH_DB,
+    TOKEN_SIGNING_KEY: env.TOKEN_SIGNING_KEY,
+  };
+  return microsub(request, microsubEnv, ctx);
+}
+
+/**
+ * Cron-triggered feed poller for Microsub (V-4.3, #365): enqueues one poll job per followed
+ * feed onto `MICROSUB_QUEUE`. Runs off the read path — `handleMicrosub`'s timeline action only
+ * ever serves stored entries. No-ops when Microsub isn't provisioned.
+ */
+function handleMicrosubScheduled(
+  controller: ScheduledController,
+  env: WorkerEnv,
+  ctx: ExecutionContext,
+): Promise<void> {
+  if (!env.MICROSUB_DB || !env.MICROSUB_QUEUE || !env.AUTH_DB || !env.TOKEN_SIGNING_KEY) {
+    return Promise.resolve();
+  }
+  const baseUrl = env.SITE_URL ?? "";
+  if (!baseUrl) return Promise.resolve();
+  const poll = createMicrosubPoller({ baseUrl, me: `${baseUrl}/` });
+  const microsubEnv: MicrosubEnv = {
+    MICROSUB_DB: env.MICROSUB_DB,
+    MICROSUB_QUEUE: env.MICROSUB_QUEUE,
+    AUTH_DB: env.AUTH_DB,
+    TOKEN_SIGNING_KEY: env.TOKEN_SIGNING_KEY,
+  };
+  return poll(controller, microsubEnv, ctx);
+}
+
+/**
+ * Queue consumer for Microsub's feed-poll fan-out (V-4.3, #365): fetches + parses each polled
+ * feed and appends new entries to the following channel's timeline. Acks-without-work when
+ * Microsub isn't provisioned — same contract as `handleWebmentionQueue`/`handleWebSubQueue`.
+ */
+function handleMicrosubQueue(
+  batch: MessageBatch<MicrosubJob>,
+  env: WorkerEnv,
+  ctx: ExecutionContext,
+): Promise<void> {
+  if (!env.MICROSUB_DB || !env.MICROSUB_QUEUE || !env.AUTH_DB || !env.TOKEN_SIGNING_KEY || !env.SITE_URL) {
+    return Promise.resolve();
+  }
+  const consume = createMicrosubQueueConsumer({ baseUrl: env.SITE_URL, me: `${env.SITE_URL}/` });
+  const microsubEnv: MicrosubEnv = {
+    MICROSUB_DB: env.MICROSUB_DB,
+    MICROSUB_QUEUE: env.MICROSUB_QUEUE,
+    AUTH_DB: env.AUTH_DB,
+    TOKEN_SIGNING_KEY: env.TOKEN_SIGNING_KEY,
+  };
+  return consume(batch, microsubEnv, ctx);
 }
 
 /**
@@ -746,6 +851,13 @@ export const ROUTES: readonly WorkerRoute[] = [
     methods: ["POST"],
     handler: (request, env, ctx) => handleWebSubHub(request, env, ctx),
   },
+  {
+    // Microsub reader (V-4.3, #365): action=channels|follow|unfollow|timeline|search|preview.
+    path: "/microsub",
+    match: "exact",
+    methods: ["GET", "POST"],
+    handler: (request, env, ctx) => handleMicrosub(request, env, ctx),
+  },
 ];
 
 export function matchRoute(pathname: string, routes: readonly WorkerRoute[] = ROUTES): WorkerRoute | null {
@@ -830,13 +942,14 @@ export default {
   },
 
   // Async queue work, present unconditionally; no-ops for sites without the matching feature
-  // provisioned. Two queues deliver here — Webmention verification (V-3.1, #359) and WebSub
-  // verification/distribution/delivery (V-3.3, #361) — dispatched on the queue's name:
-  // Anglesite provisions deterministic names (`<site>-webmention`, `<site>-websub`). Both
-  // matches are positive (rather than "webmention = anything that isn't -websub") so a future
-  // third queue-backed feature can't get silently misrouted into the webmention consumer.
+  // provisioned. Three queues deliver here — Webmention verification (V-3.1, #359), WebSub
+  // verification/distribution/delivery (V-3.3, #361), and Microsub feed-poll fan-out (V-4.3,
+  // #365) — dispatched on the queue's name: Anglesite provisions deterministic names
+  // (`<site>-webmention`, `<site>-websub`, `<site>-microsub`). All matches are positive (rather
+  // than "webmention = anything that isn't -websub") so a future queue-backed feature can't get
+  // silently misrouted into another's consumer.
   async queue(
-    batch: MessageBatch<WebmentionJob | WebSubJob>,
+    batch: MessageBatch<WebmentionJob | WebSubJob | MicrosubJob>,
     env: WorkerEnv,
     ctx: ExecutionContext,
   ): Promise<void> {
@@ -846,6 +959,19 @@ export default {
     if (batch.queue.endsWith("-webmention")) {
       return handleWebmentionQueue(batch as MessageBatch<WebmentionJob>, env, ctx);
     }
+    if (batch.queue.endsWith("-microsub")) {
+      return handleMicrosubQueue(batch as MessageBatch<MicrosubJob>, env, ctx);
+    }
     return Promise.resolve();
   },
-} satisfies ExportedHandler<WorkerEnv, WebmentionJob | WebSubJob>;
+
+  // Cron Trigger, present unconditionally; no-ops for a site without Microsub provisioned
+  // (V-4.3, #365) — the only feature that schedules work today.
+  async scheduled(
+    controller: ScheduledController,
+    env: WorkerEnv,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    return handleMicrosubScheduled(controller, env, ctx);
+  },
+} satisfies ExportedHandler<WorkerEnv, WebmentionJob | WebSubJob | MicrosubJob>;

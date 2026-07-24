@@ -737,7 +737,93 @@ struct SocialWorkerProvisionCommandTests {
         #expect(SiteConfigFile.value(forKey: "WEBSUB_ENABLED", in: disabledConfig) == "false")
     }
 
-    @Test("readPersistedResources classifies webmention and websub queues by suffix")
+    @Test("microsub worker without paid-plan acknowledgment returns the confirmation-needed gate, no wrangler call")
+    func microsubWithoutAcknowledgmentBlocksBeforeAnyCall() async throws {
+        let site = try temporaryDirectory()
+        var calledArguments: [[String]] = []
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "tok" },
+            runner: { _, arguments, _, _ in
+                calledArguments.append(arguments)
+                return .init(stdout: "", stderr: "unexpected call", exitCode: 1)
+            },
+            deployer: { _, _, _ in .succeeded(url: URL(string: "https://example.com")!, duration: 0) }
+        )
+        let microsub = WorkerDescriptor(
+            id: "microsub", displayName: "Microsub", description: "test", group: "publishing",
+            binding: .settingsActivated, resources: .init(needsD1: false, needsKV: false, needsR2: false))
+
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site",
+            workers: [microsub], acknowledgesPaidPlan: false)
+
+        guard case .webmentionPaidPlanConfirmationNeeded = result else {
+            Issue.record("expected .webmentionPaidPlanConfirmationNeeded, got \(result)")
+            return
+        }
+        #expect(calledArguments.isEmpty, "must not call wrangler before the user acknowledges the paid-plan requirement")
+    }
+
+    @Test("microsub worker with acknowledgment creates its own queue")
+    func microsubWithAcknowledgmentCreatesQueue() async throws {
+        let site = try temporaryDirectory()
+        var calledArguments: [[String]] = []
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "tok" },
+            runner: { _, arguments, _, _ in
+                calledArguments.append(arguments)
+                if arguments.first == "queues" {
+                    return .init(stdout: #"{"result":{"queue_name":"my-site-microsub"}}"#, stderr: "", exitCode: 0)
+                }
+                return .init(stdout: "", stderr: "", exitCode: 0)
+            },
+            deployer: { _, _, _ in .succeeded(url: URL(string: "https://example.com")!, duration: 0) }
+        )
+        let microsub = WorkerDescriptor(
+            id: "microsub", displayName: "Microsub", description: "test", group: "publishing",
+            binding: .settingsActivated, resources: .init(needsD1: false, needsKV: false, needsR2: false))
+
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site",
+            workers: [microsub], acknowledgesPaidPlan: true)
+
+        guard case .succeeded(_, let resources, _) = result else {
+            Issue.record("expected .succeeded, got \(result)")
+            return
+        }
+        #expect(resources.microsubQueueName == "my-site-microsub")
+        #expect(calledArguments.contains(["queues", "create", "my-site-microsub", "--json"]))
+    }
+
+    @Test("an already-provisioned microsub queue is not re-created")
+    func alreadyProvisionedMicrosubQueueSkipsCreation() async throws {
+        let site = try temporaryDirectory()
+        var calledArguments: [[String]] = []
+        let command = SocialWorkerProvisionCommand(
+            tokenSource: { "tok" },
+            runner: { _, arguments, _, _ in
+                calledArguments.append(arguments)
+                return .init(stdout: "", stderr: "", exitCode: 0)
+            },
+            deployer: { _, _, _ in .succeeded(url: URL(string: "https://example.com")!, duration: 0) }
+        )
+        let microsub = WorkerDescriptor(
+            id: "microsub", displayName: "Microsub", description: "test", group: "publishing",
+            binding: .settingsActivated, resources: .init(needsD1: false, needsKV: false, needsR2: false))
+
+        let result = await command.provision(
+            siteID: "site-1", siteDirectory: site, siteName: "my-site",
+            workers: [microsub], knownResources: .init(microsubQueueName: "my-site-microsub"),
+            acknowledgesPaidPlan: true)
+
+        guard case .succeeded = result else {
+            Issue.record("expected .succeeded, got \(result)")
+            return
+        }
+        #expect(!calledArguments.contains(where: { $0.first == "queues" }))
+    }
+
+    @Test("readPersistedResources classifies webmention, websub, and microsub queues by suffix")
     func persistedQueueClassification() throws {
         let site = try temporaryDirectory()
         let toml = """
@@ -748,6 +834,9 @@ struct SocialWorkerProvisionCommandTests {
         [[queues.producers]]
         queue = "my-site-websub"
         binding = "WEBSUB_QUEUE"
+        [[queues.producers]]
+        queue = "my-site-microsub"
+        binding = "MICROSUB_QUEUE"
         """
         try toml.write(to: site.appendingPathComponent("wrangler.toml"), atomically: true, encoding: .utf8)
 
@@ -755,6 +844,7 @@ struct SocialWorkerProvisionCommandTests {
 
         #expect(resources.queueName == "my-site-webmention")
         #expect(resources.websubQueueName == "my-site-websub")
+        #expect(resources.microsubQueueName == "my-site-microsub")
     }
 
     @Test("readPersistedResources with only a websub queue leaves the webmention queue nil")

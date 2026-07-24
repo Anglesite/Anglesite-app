@@ -49,6 +49,21 @@ public enum SecretAccounts {
         "posse:\(siteID):bluesky-app-password"
     }
 
+    /// The site's own IndieAuth-issued DPoP-bound access token (V-4.3, #365) — what
+    /// `MicrosubClient` presents to the site's deployed `/microsub` endpoint. Deliberately
+    /// separate from `cloudflareToken`: this credential is minted by the site itself during
+    /// `SiteIndieAuthClient` sign-in and never reaches api.cloudflare.com.
+    public static func indieAuthAccessToken(siteID: String) -> String {
+        "indieauth:\(siteID):access-token"
+    }
+
+    /// The raw private-key bytes (`DPoPKeyPair.persistedRepresentation`) bound to
+    /// `indieAuthAccessToken`'s `cnf.jkt` — every resource request must sign its DPoP proof with
+    /// this same key pair, so it's persisted alongside the token rather than regenerated per call.
+    public static func indieAuthDPoPKey(siteID: String) -> String {
+        "indieauth:\(siteID):dpop-key"
+    }
+
     /// Bearer token for a `.remote` ACP agent connection, keyed by the connection's `id` — there
     /// can be many connections, so this is a function, not a single constant like
     /// `cloudflareToken`/`gitHubToken`.
@@ -101,6 +116,40 @@ public extension SecretStore {
     /// Clear the bearer token for a `.remote` ACP agent connection.
     func clearACPAgentToken(id: UUID) throws {
         try delete(account: SecretAccounts.acpAgentToken(id: id))
+    }
+
+    /// Read the site's IndieAuth access token (V-4.3, #365).
+    func readIndieAuthAccessToken(siteID: String) throws -> String? {
+        try read(account: SecretAccounts.indieAuthAccessToken(siteID: siteID))
+    }
+
+    /// Store the site's IndieAuth access token. Empty string clears.
+    func writeIndieAuthAccessToken(_ token: String, siteID: String) throws {
+        try write(token, account: SecretAccounts.indieAuthAccessToken(siteID: siteID))
+    }
+
+    /// Read the DPoP key pair bound to the site's IndieAuth session, if any. `nil` when unset or
+    /// the stored bytes no longer decode as a P-256 private key.
+    func readIndieAuthDPoPKeyPair(siteID: String) throws -> DPoPKeyPair? {
+        guard let base64 = try read(account: SecretAccounts.indieAuthDPoPKey(siteID: siteID)),
+              let data = Data(base64Encoded: base64) else { return nil }
+        return DPoPKeyPair(persistedRepresentation: data)
+    }
+
+    /// Store the DPoP key pair bound to the site's IndieAuth session.
+    func writeIndieAuthDPoPKeyPair(_ keyPair: DPoPKeyPair, siteID: String) throws {
+        try write(
+            keyPair.persistedRepresentation.base64EncodedString(),
+            account: SecretAccounts.indieAuthDPoPKey(siteID: siteID)
+        )
+    }
+
+    /// Clear the site's IndieAuth access token and its bound DPoP key pair together — a token
+    /// without its key (or vice versa) can never produce a valid proof, so the two are always
+    /// cleared as one unit rather than leaving either behind.
+    func clearIndieAuthSession(siteID: String) throws {
+        try delete(account: SecretAccounts.indieAuthAccessToken(siteID: siteID))
+        try delete(account: SecretAccounts.indieAuthDPoPKey(siteID: siteID))
     }
 }
 

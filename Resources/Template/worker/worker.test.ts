@@ -892,6 +892,144 @@ test("websub queue consumer: dispatches into @dwk/websub's consumer without thro
   ).resolves.toBeUndefined();
 });
 
+// --- Microsub reader (V-4.3, #365) ----------------------------------------------------------
+// Composition of @dwk/microsub's single endpoint. These run through worker.fetch in the workerd
+// pool with MICROSUB_DB/MICROSUB_QUEUE/AUTH_DB/TOKEN_SIGNING_KEY bound (see vitest.config.ts),
+// exercising the same DPoP-authorized dispatch path production serves. Feed discovery/parsing
+// and the poller/queue-consumer's own internals are the library's own concern (covered by its
+// suite), not re-tested here — `discoverFeed` fails closed against the sandbox's blocked network,
+// so `follow` still succeeds (it persists the subscription unconditionally) but never populates
+// the timeline from a live fetch.
+
+async function createMicrosubChannel(
+  name: string,
+  token: string,
+  keyPair: CryptoKeyPair,
+): Promise<string> {
+  const url = "https://owner.example/microsub?action=channels";
+  const response = await fetchWorker(new Request(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      authorization: `DPoP ${token}`,
+      DPoP: await dpopProof(url, "POST", keyPair, token),
+    },
+    body: new URLSearchParams({ name }),
+  }));
+  const { uid } = await response.json() as { uid: string };
+  return uid;
+}
+
+test("microsub: an unauthorized request (no Authorization header) is rejected", async () => {
+  const response = await fetchWorker(new Request("https://owner.example/microsub?action=channels"));
+  expect(response.status).toBe(401);
+});
+
+test("microsub: a valid token creates a channel and follows a feed (200)", async () => {
+  const { token, keyPair } = await mintAccessToken("follow channels");
+  const uid = await createMicrosubChannel("Blogs", token, keyPair);
+
+  const followURL = "https://owner.example/microsub?action=follow";
+  const follow = await fetchWorker(new Request(followURL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      authorization: `DPoP ${token}`,
+      DPoP: await dpopProof(followURL, "POST", keyPair, token),
+    },
+    body: new URLSearchParams({ channel: uid, url: "https://feed.example/atom.xml" }),
+  }));
+  expect(follow.status).toBe(200);
+  await expect(follow.json()).resolves.toMatchObject({ type: "feed", url: "https://feed.example/atom.xml" });
+});
+
+test("microsub: the timeline for a freshly created channel is empty with no paging cursor", async () => {
+  const { token, keyPair } = await mintAccessToken("channels");
+  const uid = await createMicrosubChannel("Timeline", token, keyPair);
+
+  const timelineURL = `https://owner.example/microsub?action=timeline&channel=${uid}`;
+  const timeline = await fetchWorker(new Request(timelineURL, {
+    headers: {
+      authorization: `DPoP ${token}`,
+      DPoP: await dpopProof(timelineURL, "GET", keyPair, token),
+    },
+  }));
+  expect(timeline.status).toBe(200);
+  await expect(timeline.json()).resolves.toMatchObject({ items: [], paging: {} });
+});
+
+test("microsub: an unknown channel is rejected (404)", async () => {
+  const { token, keyPair } = await mintAccessToken("channels");
+  const timelineURL = "https://owner.example/microsub?action=timeline&channel=does-not-exist";
+  const response = await fetchWorker(new Request(timelineURL, {
+    headers: {
+      authorization: `DPoP ${token}`,
+      DPoP: await dpopProof(timelineURL, "GET", keyPair, token),
+    },
+  }));
+  expect(response.status).toBe(404);
+});
+
+test("microsub: 503 when MICROSUB_DB isn't bound", async () => {
+  const { MICROSUB_DB: _unusedDB, ...envWithoutDB } = testEnv;
+  const response = await worker.fetch(
+    new Request("https://owner.example/microsub?action=channels"),
+    envWithoutDB as WorkerEnv,
+    createExecutionContext(),
+  );
+  expect(response.status).toBe(503);
+});
+
+test("microsub: 503 when MICROSUB_QUEUE isn't bound", async () => {
+  const { MICROSUB_QUEUE: _unusedQueue, ...envWithoutQueue } = testEnv;
+  const response = await worker.fetch(
+    new Request("https://owner.example/microsub?action=channels"),
+    envWithoutQueue as WorkerEnv,
+    createExecutionContext(),
+  );
+  expect(response.status).toBe(503);
+});
+
+test("microsub queue consumer: no-ops (does not throw) when unprovisioned", async () => {
+  const { MICROSUB_DB: _unusedDB, ...envWithoutMicrosub } = testEnv;
+  const emptyBatch = { queue: "site-microsub", messages: [] } as unknown as Parameters<
+    NonNullable<typeof worker.queue>
+  >[0];
+  await expect(
+    worker.queue!(emptyBatch, envWithoutMicrosub as WorkerEnv, createExecutionContext()),
+  ).resolves.toBeUndefined();
+});
+
+test("microsub queue consumer: dispatches into @dwk/microsub's consumer without throwing when provisioned", async () => {
+  // An empty batch exercises the real provisioned path without triggering any poll-fetch job —
+  // same rationale as the WebSub queue-consumer test above.
+  const emptyBatch = { queue: "site-microsub", messages: [] } as unknown as Parameters<
+    NonNullable<typeof worker.queue>
+  >[0];
+  await expect(
+    worker.queue!(emptyBatch, testEnv, createExecutionContext()),
+  ).resolves.toBeUndefined();
+});
+
+test("microsub scheduled poller: no-ops (does not throw) when unprovisioned", async () => {
+  const { MICROSUB_DB: _unusedDB, ...envWithoutMicrosub } = testEnv;
+  const controller = { cron: "*/15 * * * *", scheduledTime: Date.now() } as unknown as Parameters<
+    NonNullable<typeof worker.scheduled>
+  >[0];
+  await expect(
+    worker.scheduled!(controller, envWithoutMicrosub as WorkerEnv, createExecutionContext()),
+  ).resolves.toBeUndefined();
+});
+
+test("microsub scheduled poller: does not throw when provisioned (no followed feeds to poll)", async () => {
+  const controller = { cron: "*/15 * * * *", scheduledTime: Date.now() } as unknown as Parameters<
+    NonNullable<typeof worker.scheduled>
+  >[0];
+  await expect(
+    worker.scheduled!(controller, testEnv, createExecutionContext()),
+  ).resolves.toBeUndefined();
+});
+
 test("queue dispatch: an unrecognized queue name is a no-op, not misrouted to the webmention consumer", async () => {
   // Locks in the fail-safe default from worker.ts's queue() dispatcher: matching is positive
   // ("-webmention" / "-websub") rather than "webmention = doesn't end in -websub", so a queue

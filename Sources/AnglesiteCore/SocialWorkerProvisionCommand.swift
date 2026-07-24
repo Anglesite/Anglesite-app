@@ -184,9 +184,11 @@ public actor SocialWorkerProvisionCommand {
 
         let hasWebmentionReceive = workers.contains(where: { $0.id == WorkerComposition.webmentionWorkerID })
         let hasWebSub = workers.contains(where: { $0.id == WorkerComposition.websubWorkerID })
+        let hasMicrosub = workers.contains(where: { $0.id == WorkerComposition.microsubWorkerID })
         let needsWebmentionQueue = hasWebmentionReceive && resources.queueName == nil
         let needsWebSubQueue = hasWebSub && resources.websubQueueName == nil
-        if needsWebmentionQueue || needsWebSubQueue {
+        let needsMicrosubQueue = hasMicrosub && resources.microsubQueueName == nil
+        if needsWebmentionQueue || needsWebSubQueue || needsMicrosubQueue {
             guard acknowledgesPaidPlan else {
                 return .webmentionPaidPlanConfirmationNeeded(resources: resources)
             }
@@ -226,6 +228,29 @@ public actor SocialWorkerProvisionCommand {
             switch result {
             case .success:
                 resources.websubQueueName = name
+            case .failure(let failure):
+                return failure
+            }
+            if let failure = persistConfig(
+                siteDirectory: siteDirectory, siteName: siteName, workers: workers,
+                routeClaims: routeClaims, resources: resources, siteURL: siteURL
+            ) {
+                return failure
+            }
+        }
+
+        if needsMicrosubQueue {
+            let name = "\(siteName)-microsub"
+            let result = await runWrangler(
+                siteDirectory: siteDirectory,
+                arguments: ["queues", "create", name, "--json"],
+                environment: environment,
+                source: source,
+                resources: resources
+            )
+            switch result {
+            case .success:
+                resources.microsubQueueName = name
             case .failure(let failure):
                 return failure
             }
@@ -359,19 +384,21 @@ public actor SocialWorkerProvisionCommand {
         guard let toml = try? String(contentsOf: url, encoding: .utf8) else {
             return .init()
         }
-        // Two features each own a queue; the generated names are deterministic
-        // (`<site>-webmention` / `<site>-websub`), so classify every `queue = "…"` value by its
-        // suffix rather than taking the first match (which would mis-assign whichever block
-        // happened to be emitted first). Both matches are positive (rather than "webmention =
-        // doesn't end in -websub") so a future third queue-backed feature can't get silently
-        // misclassified as webmention's queue just because it doesn't end in "-websub".
+        // Three features each own a queue; the generated names are deterministic
+        // (`<site>-webmention` / `<site>-websub` / `<site>-microsub`), so classify every
+        // `queue = "…"` value by its suffix rather than taking the first match (which would
+        // mis-assign whichever block happened to be emitted first). All matches are positive
+        // (rather than "webmention = doesn't end in -websub") so a future queue-backed feature
+        // can't get silently misclassified as another's queue just because it doesn't end in
+        // that other feature's suffix.
         let queueNames = extractAllTomlStrings(named: "queue", from: toml)
         return .init(
             d1DatabaseID: extractTomlString(named: "database_id", from: toml),
             kvNamespaceID: extractTomlString(named: "id", from: toml),
             r2BucketName: extractTomlString(named: "bucket_name", from: toml),
             queueName: queueNames.first(where: { $0.hasSuffix("-webmention") }),
-            websubQueueName: queueNames.first(where: { $0.hasSuffix("-websub") })
+            websubQueueName: queueNames.first(where: { $0.hasSuffix("-websub") }),
+            microsubQueueName: queueNames.first(where: { $0.hasSuffix("-microsub") })
         )
     }
 
