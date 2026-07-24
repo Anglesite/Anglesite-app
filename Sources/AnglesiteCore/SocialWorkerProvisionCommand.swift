@@ -210,6 +210,15 @@ public actor SocialWorkerProvisionCommand {
 
         let hasActivityPub = workers.contains(where: { $0.id == WorkerComposition.activitypubWorkerID })
         if hasActivityPub {
+            // ActivityPub's catalog resources are all needsD1/needsKV/needsR2 == false (it only
+            // needs a Durable Object, which those flags don't track), so if it's the only active
+            // worker none of the D1/KV/R2 blocks above ran and wrangler.toml may not exist yet.
+            // `wrangler secret put` (below) resolves the Worker's project name from
+            // wrangler.toml in the working directory — persist it here first so that lookup
+            // succeeds even on an ActivityPub-only first deploy.
+            if let failure = persistConfig(siteDirectory: siteDirectory, siteName: siteName, workers: workers, routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName) {
+                return failure
+            }
             let keys: ActivityPubKeyProvisioning.Secrets
             do {
                 keys = try keyPairSource(siteID)
