@@ -34,6 +34,19 @@ public actor SocialWorkerProvisionCommand {
         _ environment: [String: String],
         _ source: String
     ) async throws -> ProcessSupervisor.RunResult
+    /// Pushes one Cloudflare Worker secret whose value can't travel as a plain CLI argument
+    /// (`wrangler secret put <NAME>` reads its value from stdin). Unlike `CommandRunner`, which
+    /// always shapes a bare `wrangler <args>` call, this closure's production conformer
+    /// (`ContainerCommandRunner.secretRunner`) runs a small in-guest shell script that reads
+    /// `value` from an environment variable rather than stdin — the container-exec seam
+    /// (`LocalContainerControl.exec`) is one-shot with no stdin plumbing.
+    public typealias SecretRunner = @Sendable (
+        _ siteDirectory: URL,
+        _ name: String,
+        _ value: String,
+        _ environment: [String: String],
+        _ source: String
+    ) async throws -> ProcessSupervisor.RunResult
     public typealias Deployer = @Sendable (
         _ token: String,
         _ siteID: String,
@@ -42,15 +55,18 @@ public actor SocialWorkerProvisionCommand {
 
     public nonisolated let tokenSource: TokenSource
     private let runner: CommandRunner
+    private let secretRunner: SecretRunner
     private let deployer: Deployer
 
     public init(
         tokenSource: @escaping TokenSource = DeployCommand.keychainTokenSource,
         runner: @escaping CommandRunner = SocialWorkerProvisionCommand.defaultRunner,
+        secretRunner: @escaping SecretRunner = SocialWorkerProvisionCommand.defaultSecretRunner,
         deployer: @escaping Deployer = SocialWorkerProvisionCommand.defaultDeployer
     ) {
         self.tokenSource = tokenSource
         self.runner = runner
+        self.secretRunner = secretRunner
         self.deployer = deployer
     }
 
@@ -382,6 +398,12 @@ public actor SocialWorkerProvisionCommand {
 
     public static let defaultRunner: CommandRunner = { siteDirectory, arguments, environment, source in
         let reason = HostNodeRetirement.reason("social worker provisioning")
+        await LogCenter.shared.append(source: source, stream: .stderr, text: reason)
+        return ProcessSupervisor.RunResult(stdout: reason, stderr: "", exitCode: 127)
+    }
+
+    public static let defaultSecretRunner: SecretRunner = { siteDirectory, name, value, environment, source in
+        let reason = HostNodeRetirement.reason("social worker secret provisioning")
         await LogCenter.shared.append(source: source, stream: .stderr, text: reason)
         return ProcessSupervisor.RunResult(stdout: reason, stderr: "", exitCode: 127)
     }
