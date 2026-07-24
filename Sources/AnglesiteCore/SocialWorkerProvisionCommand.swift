@@ -435,6 +435,12 @@ public actor SocialWorkerProvisionCommand {
         return ProcessSupervisor.RunResult(stdout: reason, stderr: "", exitCode: 127)
     }
 
+    // Calls `DeployCommand.deploy` with its defaults: no `configDirectory` (route-coverage
+    // scanning skipped, #530) and no `wellKnownDynamicClaims` (#744's pre-build /.well-known/
+    // collision check still runs — `scanUserStatic` and `executor.reportOwnedPathClaims()` don't
+    // need it — but with no visibility into this deploy's active dynamic Worker routes, so a
+    // static/dynamic collision on this path isn't caught pre-build). `DeployModel.runDeploy`
+    // constructs its own deployer closure specifically to thread both through.
     public static let defaultDeployer: Deployer = { token, siteID, siteDirectory in
         await DeployCommand(tokenSource: { token }).deploy(siteID: siteID, siteDirectory: siteDirectory)
     }
