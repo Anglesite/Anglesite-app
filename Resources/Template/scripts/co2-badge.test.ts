@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
+import { pathToFileURL } from "node:url";
+import co2Badge, {
   CO2_PLACEHOLDER,
   byteLength,
   estimateGramsPerByte,
@@ -140,4 +141,41 @@ test("patchDist: warns and continues past an unreadable file rather than throwin
 
   assert.ok(warnings.length >= 1, "expected a warning about the unreadable file");
   assert.ok(!readFileSync(real, "utf-8").includes(CO2_PLACEHOLDER), "the real page should still get patched");
+});
+
+test("patchDist: warns and continues past a dangling symlink rather than throwing", () => {
+  // Unlike the chmod case above, the throw happens in the directory walk's statSync (before the
+  // per-file try/catch), and reproduces even as root — so no skip needed.
+  const dist = makeTempDist();
+  symlinkSync("./does-not-exist.html", join(dist, "broken.html"));
+  const real = join(dist, "index.html");
+  writeFileSync(real, `<html><body>~${CO2_PLACEHOLDER}g CO2</body></html>`);
+
+  const originalWarn = console.warn;
+  const warnings: unknown[][] = [];
+  console.warn = (...args: unknown[]) => warnings.push(args);
+  try {
+    assert.doesNotThrow(() => patchDist(dist));
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.ok(warnings.length >= 1, "expected a warning about the dangling symlink");
+  assert.ok(!readFileSync(real, "utf-8").includes(CO2_PLACEHOLDER), "the real page should still get patched");
+});
+
+test("co2Badge: the astro:build:done hook patches pages under the emitted dir URL", () => {
+  const dist = makeTempDist();
+  const page = join(dist, "index.html");
+  writeFileSync(page, `<html><body>${FILLER}~${CO2_PLACEHOLDER}g CO2</body></html>`);
+
+  const hook = co2Badge().hooks["astro:build:done"];
+  assert.ok(hook, "integration must register an astro:build:done hook");
+  (hook as unknown as (opts: { dir: URL }) => void)({ dir: pathToFileURL(dist) });
+
+  const patched = readFileSync(page, "utf-8");
+  assert.ok(!patched.includes(CO2_PLACEHOLDER), "placeholder should be gone");
+  const match = patched.match(/~(\d+\.\d{2})g CO2/);
+  assert.ok(match, `expected a formatted grams value, got: ${patched.slice(-80)}`);
+  assert.ok(Number(match![1]) > 0, "expected a positive grams estimate");
 });

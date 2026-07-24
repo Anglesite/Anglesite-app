@@ -49,6 +49,8 @@ export function estimatedFinalByteLength(html: string): number {
 }
 
 /// Recursively collects every `.html` file under `dir`. Mirrors microformats.ts's walkHtml.
+/// An unstattable entry (e.g. a dangling symlink) is warned and skipped — an exception here
+/// would escape patchDist's per-file try/catch (the walk runs before it) and fail the build.
 function walkHtmlFiles(dir: string): string[] {
   const out: string[] = [];
   let names: string[];
@@ -59,8 +61,12 @@ function walkHtmlFiles(dir: string): string[] {
   }
   for (const name of names) {
     const full = join(dir, name);
-    if (statSync(full).isDirectory()) out.push(...walkHtmlFiles(full));
-    else if (extname(full) === ".html") out.push(full);
+    try {
+      if (statSync(full).isDirectory()) out.push(...walkHtmlFiles(full));
+      else if (extname(full) === ".html") out.push(full);
+    } catch (err) {
+      console.warn(`[anglesite-co2-badge] skipping unstattable entry ${full}: ${err}`);
+    }
   }
   return out;
 }
