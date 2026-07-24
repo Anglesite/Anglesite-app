@@ -60,6 +60,9 @@ public enum SiteIndieAuthError: Error, Equatable, Sendable {
     case tokenExchangeFailed(String)
     /// Signing the DPoP proof needs CryptoKit (Apple platforms only).
     case dpopUnavailable
+    /// The pasted-back URL's scheme/host/port/path don't match `request.redirectURI` — not the
+    /// callback URL for this sign-in attempt (e.g. pasted from a stale browser tab).
+    case redirectURIMismatch
 }
 
 /// One authorize attempt: the URL to present plus what's needed to complete it once a callback
@@ -151,10 +154,22 @@ public struct SiteIndieAuthClient: Sendable {
         )
     }
 
-    /// Extracts and validates the authorization code from the loopback listener's captured
-    /// callback URL against the `state` minted for `request`. Pure URL parsing, mirrors
-    /// `CloudflareOAuthClient.authorizationCode(from:matching:)`.
+    /// Extracts and validates the authorization code from the pasted-back callback URL against
+    /// `request`. Pure URL parsing, mirrors `CloudflareOAuthClient.authorizationCode(from:matching:)`
+    /// plus one check that type has no equivalent for: since the user manually copies this URL
+    /// from the browser address bar (there's no automatic capture — see `SiteIndieAuthLoopback`),
+    /// a stale tab or the wrong copy/paste could hand this a URL that isn't the callback at all.
+    /// Checking `redirectURI` first, before even reading `state`, turns that into a clear
+    /// `.redirectURIMismatch` instead of a confusing `.stateMismatch`.
     public static func authorizationCode(from callbackURL: URL, matching request: SiteIndieAuthRequest) throws -> String {
+        guard callbackURL.scheme == request.redirectURI.scheme,
+              callbackURL.host == request.redirectURI.host,
+              callbackURL.port == request.redirectURI.port,
+              callbackURL.path == request.redirectURI.path
+        else {
+            throw SiteIndieAuthError.redirectURIMismatch
+        }
+
         let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
 

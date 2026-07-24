@@ -79,6 +79,25 @@ struct SiteIndieAuthClientTests {
         #expect(try SiteIndieAuthClient.authorizationCode(from: callback, matching: request) == "xyz")
     }
 
+    @Test("a URL that isn't the redirect URI throws .redirectURIMismatch, even with a matching state/code")
+    func callbackWrongRedirectURI() {
+        let request = makeRequest()
+        // A plausible "pasted the wrong tab" mistake: right query params, wrong origin entirely.
+        let callback = URL(string: "https://accounts.example.com/oauth/callback?code=xyz&state=abc123")!
+        #expect(throws: SiteIndieAuthError.redirectURIMismatch) {
+            _ = try SiteIndieAuthClient.authorizationCode(from: callback, matching: request)
+        }
+    }
+
+    @Test("a URL on the right host but wrong path throws .redirectURIMismatch")
+    func callbackWrongPath() {
+        let request = makeRequest()
+        let callback = URL(string: "http://127.0.0.1:51789/not-the-callback?code=xyz&state=abc123")!
+        #expect(throws: SiteIndieAuthError.redirectURIMismatch) {
+            _ = try SiteIndieAuthClient.authorizationCode(from: callback, matching: request)
+        }
+    }
+
     @Test("a mismatched state throws .stateMismatch, never returns the code")
     func callbackMismatchedState() {
         let request = makeRequest()
