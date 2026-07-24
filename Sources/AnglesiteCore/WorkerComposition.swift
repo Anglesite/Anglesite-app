@@ -46,6 +46,11 @@ public enum WorkerComposition {
     /// not something the generic `resources` flags (`needsD1`/`needsKV`/`needsR2`) can express.
     public static let activitypubWorkerID = "activitypub"
 
+    /// `@dwk/websub`'s catalog id — like `webmentionWorkerID`, composition keys off this
+    /// directly for the hub's bespoke bindings (`WEBSUB_DB`, its own Queue, `SITE_URL`), since
+    /// those binding names are part of `@dwk/websub`'s public composition contract.
+    public static let websubWorkerID = "websub"
+
     /// The bespoke app-side inbox-capture route (#587) — not a `@dwk/workers` catalog worker, so
     /// its claim lives here rather than in `catalog.json`. Appended automatically when
     /// `generateWranglerToml` is called with `inboxCaptureEnabled`.
@@ -68,15 +73,22 @@ public enum WorkerComposition {
         /// `r2BucketName`, this is a deterministic name (`\(siteName)-webmention`), not an id —
         /// wrangler.toml's `[[queues.*]]` blocks reference queues by name.
         public var queueName: String?
+        /// The Cloudflare Queue name backing `@dwk/websub`'s intent verification and
+        /// per-subscriber delivery fan-out — deterministic (`\(siteName)-websub`), separate from
+        /// `queueName` so the composed Worker's `queue()` handler can dispatch on the name
+        /// suffix. Optional like every other field: `nil` decodes cleanly from settings
+        /// persisted before this field existed.
+        public var websubQueueName: String?
 
         public init(
             d1DatabaseID: String? = nil, kvNamespaceID: String? = nil, r2BucketName: String? = nil,
-            queueName: String? = nil
+            queueName: String? = nil, websubQueueName: String? = nil
         ) {
             self.d1DatabaseID = d1DatabaseID
             self.kvNamespaceID = kvNamespaceID
             self.r2BucketName = r2BucketName
             self.queueName = queueName
+            self.websubQueueName = websubQueueName
         }
     }
 
@@ -136,6 +148,7 @@ public enum WorkerComposition {
         let hasWebmentionReceive = workers.contains(where: { $0.id == webmentionWorkerID })
         let hasMicropub = workers.contains(where: { $0.id == micropubWorkerID })
         let hasActivityPub = workers.contains(where: { $0.id == activitypubWorkerID })
+        let hasWebSub = workers.contains(where: { $0.id == websubWorkerID })
 
         var lines: [String] = []
         lines.append("name = \"\(siteName)\"")
@@ -232,6 +245,39 @@ public enum WorkerComposition {
             lines.append("max_retries = 3")
         }
 
+        // Same shared per-site D1 database, bound under WEBSUB_DB — @dwk/websub's
+        // createD1SubscriptionStore creates its own `websub_subscriptions` table on first use,
+        // so no separate database or migration is needed here.
+        if hasWebSub {
+            lines.append("")
+            lines.append("[[d1_databases]]")
+            lines.append("binding = \"WEBSUB_DB\"")
+            lines.append("database_name = \"\(siteName)-social\"")
+            if let id = resources.d1DatabaseID, !id.isEmpty {
+                lines.append("database_id = \"\(id)\"")
+            } else {
+                lines.append("database_id = \"\"  # filled by provisioning")
+            }
+        }
+
+        // Dedicated Cloudflare Queue for @dwk/websub's intent verification and per-subscriber
+        // delivery fan-out. Deliberately separate from the Webmention queue: the composed
+        // Worker's queue() handler dispatches on the queue-name suffix (`-websub`), and each
+        // feature's retry traffic stays isolated from the other's.
+        if hasWebSub {
+            lines.append("")
+            let websubQueueName = resources.websubQueueName ?? "\(siteName)-websub"
+            lines.append("[[queues.producers]]")
+            lines.append("queue = \"\(websubQueueName)\"")
+            lines.append("binding = \"WEBSUB_QUEUE\"")
+            lines.append("")
+            lines.append("[[queues.consumers]]")
+            lines.append("queue = \"\(websubQueueName)\"")
+            lines.append("max_batch_size = 10")
+            lines.append("max_batch_timeout = 30")
+            lines.append("max_retries = 3")
+        }
+
         if workers.contains(where: { $0.resources.needsKV }) {
             lines.append("")
             lines.append("[[kv_namespaces]]")
@@ -273,7 +319,10 @@ public enum WorkerComposition {
         }
 
         var varsLines: [String] = []
-        if hasWebmentionReceive, let siteURL, !siteURL.isEmpty, isSafeTomlStringValue(siteURL) {
+        // SITE_URL: the canonical origin the queue consumers key on — Webmention's verifier
+        // scopes accepted targets with it, and WebSub's consumer derives its topic URLs from it
+        // (neither has a request to derive an origin from).
+        if hasWebmentionReceive || hasWebSub, let siteURL, !siteURL.isEmpty, isSafeTomlStringValue(siteURL) {
             varsLines.append("SITE_URL = \"\(siteURL)\"")
         }
         if hasActivityPub, let displayName, !displayName.isEmpty, isSafeTomlStringValue(displayName) {

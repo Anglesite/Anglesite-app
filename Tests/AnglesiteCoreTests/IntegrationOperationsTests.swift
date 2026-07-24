@@ -269,4 +269,53 @@ import Foundation
         let r = await ops.plan(integrationID: .greenHostCheck, answers: [:], siteID: "s1")
         #expect(r == .failure(.deployRequired))
     }
+
+    @Test func planThenApplySucceedsForCO2BadgeFooterPlacement() async {
+        let src = makeBookingSource()
+        let tmpl = makeTemplate()
+        try! FileManager.default.createDirectory(
+            at: tmpl.appendingPathComponent("integrations/components"), withIntermediateDirectories: true)
+        try! "BADGE".write(to: tmpl.appendingPathComponent("integrations/components/CO2Badge.astro"),
+                           atomically: true, encoding: .utf8)
+        let ops = IntegrationOperations(sourceDirectory: { _ in src }, templateDirectory: { tmpl })
+        let answers: Answers = ["style": "footer"]
+        guard case .success(let plan) = await ops.plan(integrationID: .co2Badge, answers: answers, siteID: "s1") else {
+            Issue.record("plan failed"); return
+        }
+        let terminal = await ops.apply(plan, siteID: "s1")
+        #expect(terminal == .done(integrationID: "co2Badge"))
+        #expect(FileManager.default.fileExists(atPath: src.appendingPathComponent("src/components/CO2Badge.astro").path))
+        #expect(!FileManager.default.fileExists(atPath: src.appendingPathComponent("src/pages/carbon-footprint.astro").path))
+        let layout = try! String(contentsOf: src.appendingPathComponent("src/layouts/BaseLayout.astro"), encoding: .utf8)
+        #expect(layout.contains("<CO2Badge"))
+        #expect(layout.contains("import CO2Badge from"))
+        let config = try! String(contentsOf: src.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(config.contains("CO2_BADGE_STYLE=footer"))
+    }
+
+    @Test func planThenApplySucceedsForCO2BadgeDedicatedPage() async {
+        let src = makeBookingSource()
+        let tmpl = makeTemplate()
+        try! FileManager.default.createDirectory(
+            at: tmpl.appendingPathComponent("integrations/components"), withIntermediateDirectories: true)
+        try! "BADGE".write(to: tmpl.appendingPathComponent("integrations/components/CO2Badge.astro"),
+                           atomically: true, encoding: .utf8)
+        try! FileManager.default.createDirectory(
+            at: tmpl.appendingPathComponent("integrations/pages"), withIntermediateDirectories: true)
+        try! "PAGE".write(to: tmpl.appendingPathComponent("integrations/pages/carbon-footprint.astro"),
+                          atomically: true, encoding: .utf8)
+        let ops = IntegrationOperations(sourceDirectory: { _ in src }, templateDirectory: { tmpl })
+        let answers: Answers = ["style": "page"]
+        guard case .success(let plan) = await ops.plan(integrationID: .co2Badge, answers: answers, siteID: "s1") else {
+            Issue.record("plan failed"); return
+        }
+        let terminal = await ops.apply(plan, siteID: "s1")
+        #expect(terminal == .done(integrationID: "co2Badge"))
+        #expect(FileManager.default.fileExists(atPath: src.appendingPathComponent("src/pages/carbon-footprint.astro").path))
+        let layout = try! String(contentsOf: src.appendingPathComponent("src/layouts/BaseLayout.astro"), encoding: .utf8)
+        #expect(!layout.contains("<CO2Badge"))
+        #expect(!layout.contains("import CO2Badge from"))
+        let config = try! String(contentsOf: src.appendingPathComponent(".site-config"), encoding: .utf8)
+        #expect(config.contains("CO2_BADGE_STYLE=page"))
+    }
 }

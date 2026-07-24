@@ -595,7 +595,7 @@ test("webmention receive: 503 when inbound Webmention isn't provisioned (no queu
 
 test("webmention queue consumer: no-ops (does not throw) when the inbox/site origin is unprovisioned", async () => {
   const { WEBMENTION_INBOX: _unusedInbox, SITE_URL: _unusedSiteURL, ...envWithoutInbox } = testEnv;
-  const emptyBatch = { queue: "site-webmentions", messages: [] } as unknown as Parameters<
+  const emptyBatch = { queue: "site-webmention", messages: [] } as unknown as Parameters<
     NonNullable<typeof worker.queue>
   >[0];
   await expect(
@@ -651,6 +651,105 @@ test("micropub: 503 when MICROPUB_DB isn't bound", async () => {
   const response = await worker.fetch(
     new Request("https://owner.example/micropub?q=config"),
     envWithoutDB as WorkerEnv,
+    createExecutionContext(),
+  );
+  expect(response.status).toBe(503);
+});
+
+// --- WebSub hub (V-3.3, #361) ---------------------------------------------------------------
+// Composition of @dwk/websub's hub. These run through worker.fetch in the workerd pool with
+// WEBSUB_DB/WEBSUB_QUEUE/SITE_URL bound (see vitest.config.ts), so they exercise the same
+// synchronous validate-then-enqueue path production serves. Intent verification, fan-out, and
+// HMAC delivery signing are the library's own concern (covered by its suite + websub.rocks),
+// not re-tested here. SITE_URL (https://test.example) is the canonical topic origin — requests
+// arrive on a different origin below precisely to pin down that topics are keyed on SITE_URL,
+// not on whatever host the request happened to hit.
+
+function websubForm(fields: Record<string, string>): Request {
+  return new Request("https://owner.example/websub", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(fields).toString(),
+  });
+}
+
+test("websub hub: a subscribe for a canonical feed topic is accepted (202)", async () => {
+  const response = await fetchWorker(
+    websubForm({
+      "hub.mode": "subscribe",
+      "hub.callback": "https://subscriber.example/callback",
+      "hub.topic": "https://test.example/rss.xml",
+    }),
+  );
+  expect(response.status).toBe(202);
+});
+
+test("websub hub: every root feed is a subscribable topic", async () => {
+  for (const path of ["/rss.xml", "/atom.xml", "/feed.json"]) {
+    const response = await fetchWorker(
+      websubForm({
+        "hub.mode": "subscribe",
+        "hub.callback": "https://subscriber.example/callback",
+        "hub.topic": `https://test.example${path}`,
+      }),
+    );
+    expect(response.status).toBe(202);
+  }
+});
+
+test("websub hub: a subscribe for a non-feed topic is rejected (400)", async () => {
+  const response = await fetchWorker(
+    websubForm({
+      "hub.mode": "subscribe",
+      "hub.callback": "https://subscriber.example/callback",
+      "hub.topic": "https://test.example/blog/hello/",
+    }),
+  );
+  expect(response.status).toBe(400);
+});
+
+test("websub hub: topics are keyed on SITE_URL, not the request origin", async () => {
+  // The request arrives on owner.example, but the canonical origin is SITE_URL
+  // (test.example) — a feed path on the request origin is not a topic this hub serves.
+  const response = await fetchWorker(
+    websubForm({
+      "hub.mode": "subscribe",
+      "hub.callback": "https://subscriber.example/callback",
+      "hub.topic": "https://owner.example/rss.xml",
+    }),
+  );
+  expect(response.status).toBe(400);
+});
+
+test("websub hub: a publish ping for a canonical feed topic is accepted (202)", async () => {
+  const response = await fetchWorker(
+    websubForm({ "hub.mode": "publish", "hub.url": "https://test.example/atom.xml" }),
+  );
+  expect(response.status).toBe(202);
+});
+
+test("websub hub: a publish ping for a foreign topic is rejected (400)", async () => {
+  const response = await fetchWorker(
+    websubForm({ "hub.mode": "publish", "hub.url": "https://elsewhere.example/rss.xml" }),
+  );
+  expect(response.status).toBe(400);
+});
+
+test("websub hub: a non-POST method gets 405 with Allow: POST", async () => {
+  const response = await fetchWorker(new Request("https://owner.example/websub", { method: "GET" }));
+  expect(response.status).toBe(405);
+  expect(response.headers.get("allow")).toBe("POST");
+});
+
+test("websub hub: 503 when the hub isn't provisioned (no queue/store binding)", async () => {
+  const { WEBSUB_QUEUE: _unusedQueue, WEBSUB_DB: _unusedDB, ...envWithoutHub } = testEnv;
+  const response = await worker.fetch(
+    websubForm({
+      "hub.mode": "subscribe",
+      "hub.callback": "https://subscriber.example/callback",
+      "hub.topic": "https://test.example/rss.xml",
+    }),
+    envWithoutHub as WorkerEnv,
     createExecutionContext(),
   );
   expect(response.status).toBe(503);
@@ -863,4 +962,40 @@ test("micropub-to-activitypub fan-out: never fires when ActivityPub isn't provis
   const response = await worker.fetch(request, envWithoutToken as WorkerEnv, createExecutionContext());
   // Must still succeed as a plain Micropub create — the fan-out being skipped is silent, not a failure.
   expect(response.status).toBe(201);
+});
+
+test("websub queue consumer: no-ops (does not throw) when the hub is unprovisioned", async () => {
+  const { WEBSUB_DB: _unusedDB, SITE_URL: _unusedSiteURL, ...envWithoutHub } = testEnv;
+  const emptyBatch = { queue: "site-websub", messages: [] } as unknown as Parameters<
+    NonNullable<typeof worker.queue>
+  >[0];
+  await expect(
+    worker.queue!(emptyBatch, envWithoutHub as WorkerEnv, createExecutionContext()),
+  ).resolves.toBeUndefined();
+});
+
+test("websub queue consumer: dispatches into @dwk/websub's consumer without throwing when provisioned", async () => {
+  // An empty batch exercises the real provisioned path — env validated, websubOrigin resolved,
+  // createWebSubQueueConsumer instantiated, consumer(batch, ...) invoked — without triggering any
+  // verify/distribute/deliver job (there are none), so it's safe to run against the real
+  // `@dwk/websub` consumer rather than a stub, unlike a populated batch (see vitest.config.ts's
+  // comment on why site-websub isn't a registered queue consumer in this suite).
+  const emptyBatch = { queue: "site-websub", messages: [] } as unknown as Parameters<
+    NonNullable<typeof worker.queue>
+  >[0];
+  await expect(
+    worker.queue!(emptyBatch, testEnv, createExecutionContext()),
+  ).resolves.toBeUndefined();
+});
+
+test("queue dispatch: an unrecognized queue name is a no-op, not misrouted to the webmention consumer", async () => {
+  // Locks in the fail-safe default from worker.ts's queue() dispatcher: matching is positive
+  // ("-webmention" / "-websub") rather than "webmention = doesn't end in -websub", so a queue
+  // name belonging to neither feature is dropped rather than silently handled as webmention.
+  const emptyBatch = { queue: "site-some-future-feature", messages: [] } as unknown as Parameters<
+    NonNullable<typeof worker.queue>
+  >[0];
+  await expect(
+    worker.queue!(emptyBatch, testEnv, createExecutionContext()),
+  ).resolves.toBeUndefined();
 });

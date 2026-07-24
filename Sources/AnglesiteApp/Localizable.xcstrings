@@ -1222,6 +1222,9 @@
     "Inactive — not used" : {
 
     },
+    "Inbound Webmention and WebSub require the Workers Paid plan" : {
+
+    },
     "Inbound Webmention requires the Workers Paid plan" : {
 
     },
@@ -1721,6 +1724,9 @@
 
     },
     "Reading %@ zone settings from Cloudflare…" : {
+
+    },
+    "Receiving webmentions and pushing feed updates to subscribers both work asynchronously using Cloudflare Queues, which aren't available on the Workers Free plan. Continuing will create the Queues these features need on your connected Cloudflare account." : {
 
     },
     "Receiving webmentions verifies each one asynchronously using a Cloudflare Queue, which isn't available on the Workers Free plan. Continuing will create a Queue on your connected Cloudflare account." : {

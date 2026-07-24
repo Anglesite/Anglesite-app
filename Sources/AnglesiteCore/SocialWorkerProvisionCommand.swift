@@ -17,12 +17,15 @@ public actor SocialWorkerProvisionCommand {
         /// this site has never deployed before — mirrors `DeployCommand.Result.workerNameConflict`
         /// rather than collapsing it, so callers can drive the same rename-and-retry UX (#740).
         case workerNameConflict(name: String, resources: WorkerComposition.ProvisionedResources)
-        /// Webmention receive is active but the site hasn't explicitly acknowledged that
-        /// Cloudflare Queues require the Workers Paid plan (#359). Returned *before any wrangler
-        /// call for the Queue* — earlier D1/KV/R2 wrangler calls (and their `persistConfig`
-        /// writes) may already have run in this same `provision()` invocation before this gate
-        /// is reached. `DeployModel` parks the deploy and presents a confirmation sheet;
-        /// retrying with `acknowledgesPaidPlan: true` proceeds to create the Queue.
+        /// A Queue-backed worker (inbound Webmention #359, or the WebSub hub #361) is active but
+        /// the site hasn't explicitly acknowledged that Cloudflare Queues require the Workers
+        /// Paid plan. Returned *before any wrangler call for a Queue* — earlier D1/KV/R2
+        /// wrangler calls (and their `persistConfig` writes) may already have run in this same
+        /// `provision()` invocation before this gate is reached. `DeployModel` parks the deploy
+        /// and presents a confirmation sheet; retrying with `acknowledgesPaidPlan: true`
+        /// proceeds to create the Queue(s). (The case keeps its original Webmention-era name;
+        /// one acknowledgment covers every Queue-backed feature — it's the same account-level
+        /// plan fact.)
         case webmentionPaidPlanConfirmationNeeded(resources: WorkerComposition.ProvisionedResources)
         case failed(reason: String, exitCode: Int32?, resources: WorkerComposition.ProvisionedResources)
     }
@@ -243,10 +246,15 @@ public actor SocialWorkerProvisionCommand {
         }
 
         let hasWebmentionReceive = workers.contains(where: { $0.id == WorkerComposition.webmentionWorkerID })
-        if hasWebmentionReceive, resources.queueName == nil {
+        let hasWebSub = workers.contains(where: { $0.id == WorkerComposition.websubWorkerID })
+        let needsWebmentionQueue = hasWebmentionReceive && resources.queueName == nil
+        let needsWebSubQueue = hasWebSub && resources.websubQueueName == nil
+        if needsWebmentionQueue || needsWebSubQueue {
             guard acknowledgesPaidPlan else {
                 return .webmentionPaidPlanConfirmationNeeded(resources: resources)
             }
+        }
+        if needsWebmentionQueue {
             let name = "\(siteName)-webmention"
             let result = await runWrangler(
                 siteDirectory: siteDirectory,
@@ -258,6 +266,29 @@ public actor SocialWorkerProvisionCommand {
             switch result {
             case .success:
                 resources.queueName = name
+            case .failure(let failure):
+                return failure
+            }
+            if let failure = persistConfig(
+                siteDirectory: siteDirectory, siteName: siteName, workers: workers,
+                routeClaims: routeClaims, resources: resources, siteURL: siteURL, displayName: displayName
+            ) {
+                return failure
+            }
+        }
+
+        if needsWebSubQueue {
+            let name = "\(siteName)-websub"
+            let result = await runWrangler(
+                siteDirectory: siteDirectory,
+                arguments: ["queues", "create", name, "--json"],
+                environment: environment,
+                source: source,
+                resources: resources
+            )
+            switch result {
+            case .success:
+                resources.websubQueueName = name
             case .failure(let failure):
                 return failure
             }
@@ -366,10 +397,18 @@ public actor SocialWorkerProvisionCommand {
             // `<link rel="webmention">` at an endpoint the Worker no longer serves.
             let hasWebmentionReceive = workers.contains(where: { $0.id == WorkerComposition.webmentionWorkerID })
             let webmentionReceiveEnabled = hasWebmentionReceive && resources.queueName != nil
+            // Same "actually live" contract for the WebSub hub: the flag gates the feeds'
+            // rel="hub" advertisement (src/lib/feeds.ts), which must never point at an endpoint
+            // the Worker doesn't serve or a hub whose Queue doesn't exist.
+            let hasWebSub = workers.contains(where: { $0.id == WorkerComposition.websubWorkerID })
+            let websubEnabled = hasWebSub && resources.websubQueueName != nil
             let configURL = siteDirectory.appendingPathComponent(".site-config")
             let existing = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
             let updated = SiteConfigFile.upsert(
-                [("WEBMENTION_RECEIVE_ENABLED", webmentionReceiveEnabled ? "true" : "false")], into: existing
+                [
+                    ("WEBMENTION_RECEIVE_ENABLED", webmentionReceiveEnabled ? "true" : "false"),
+                    ("WEBSUB_ENABLED", websubEnabled ? "true" : "false"),
+                ], into: existing
             )
             if updated != existing {
                 try updated.write(to: configURL, atomically: true, encoding: .utf8)
@@ -385,11 +424,19 @@ public actor SocialWorkerProvisionCommand {
         guard let toml = try? String(contentsOf: url, encoding: .utf8) else {
             return .init()
         }
+        // Two features each own a queue; the generated names are deterministic
+        // (`<site>-webmention` / `<site>-websub`), so classify every `queue = "…"` value by its
+        // suffix rather than taking the first match (which would mis-assign whichever block
+        // happened to be emitted first). Both matches are positive (rather than "webmention =
+        // doesn't end in -websub") so a future third queue-backed feature can't get silently
+        // misclassified as webmention's queue just because it doesn't end in "-websub".
+        let queueNames = extractAllTomlStrings(named: "queue", from: toml)
         return .init(
             d1DatabaseID: extractTomlString(named: "database_id", from: toml),
             kvNamespaceID: extractTomlString(named: "id", from: toml),
             r2BucketName: extractTomlString(named: "bucket_name", from: toml),
-            queueName: extractTomlString(named: "queue", from: toml)
+            queueName: queueNames.first(where: { $0.hasSuffix("-webmention") }),
+            websubQueueName: queueNames.first(where: { $0.hasSuffix("-websub") })
         )
     }
 
@@ -410,16 +457,18 @@ public actor SocialWorkerProvisionCommand {
     }
 
     private static func extractTomlString(named key: String, from toml: String) -> String? {
+        extractAllTomlStrings(named: key, from: toml).first
+    }
+
+    private static func extractAllTomlStrings(named key: String, from toml: String) -> [String] {
         let escaped = NSRegularExpression.escapedPattern(for: key)
         let pattern = #"(?m)^\s*#(KEY)\s*=\s*"([^"]+)""#.replacingOccurrences(of: "#(KEY)", with: escaped)
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: toml, range: NSRange(toml.startIndex..., in: toml)),
-              match.numberOfRanges > 1,
-              let range = Range(match.range(at: 1), in: toml) else {
-            return nil
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        return regex.matches(in: toml, range: NSRange(toml.startIndex..., in: toml)).compactMap { match in
+            guard match.numberOfRanges > 1, let range = Range(match.range(at: 1), in: toml) else { return nil }
+            let value = String(toml[range])
+            return value.isEmpty ? nil : value
         }
-        let value = String(toml[range])
-        return value.isEmpty ? nil : value
     }
 
     private static func findID(in value: Any) -> String? {
@@ -484,7 +533,7 @@ extension SocialWorkerProvisionCommand.Result {
             // convenience mapping (rather than reading `SocialWorkerProvisionCommand.Result`
             // directly) see this as a plain failure until the confirmation-sheet wiring lands.
             return .failed(
-                reason: "Inbound Webmention requires the Cloudflare Workers Paid plan — confirm in Settings before deploying",
+                reason: "Inbound Webmention and WebSub require the Cloudflare Workers Paid plan — confirm in Settings before deploying",
                 exitCode: nil
             )
         case .failed(let reason, let exitCode, _):
