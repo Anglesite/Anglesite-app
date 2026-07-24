@@ -132,11 +132,32 @@ bespoke binding names are part of a package's public composition contract, so
 - `handleActivityPub`, following `handleMicropub`'s shape: 503 when
   `ACTOR`/`AP_PRIVATE_KEY`/`AP_PUBLIC_KEY` aren't all bound, otherwise
   `createActivityPub({...}).(request, env, ctx)`.
+- **Route collision fix**: `@dwk/activitypub`'s catalog entry claims
+  `POST /inbox` (its optional instance-level *shared inbox*), but that exact
+  path is already claimed by this app's existing inbox-capture feature (#587,
+  `WorkerComposition.inboxCaptureRouteClaim`, a public "visitor sends a
+  message" form — an unrelated concept). Fix: pass `sharedInbox: false` to
+  `createActivityPub`, so the package serves no `/inbox` route at all —
+  federated inbound deliveries go to the actor-specific `/users/site/inbox`
+  instead (equally valid ActivityPub, just forgoes an optional batching
+  optimization for high-volume peers, irrelevant for a single-actor site).
+  `worker.ts`'s `ROUTES` table therefore gets entries only for `/users/`
+  (prefix), `/.well-known/nodeinfo` (exact), and `/nodeinfo/` (prefix) —
+  never `/inbox`, which stays exclusively owned by `handleInbox`.
 
 ## Keypair generation & storage
 
 The one genuinely new capability here — no prior secret in this app has
 needed real key material, only opaque tokens/passwords.
+
+Alongside the RSA keypair, `AP_PUBLISH_TOKEN` (gating the owner-publish
+endpoint the Micropub fan-out calls) must also be an app-generated random
+secret, not a hardcoded constant — the fan-out call and the endpoint it
+targets live in the same open-source template shipped to every site, so a
+literal token embedded in that source would be discoverable by anyone and
+would let any outsider forge posts into any Anglesite site's outbox. It's
+generated once per site (random bytes, base64url-encoded) the same way as
+the keypair, and stored under its own Keychain account.
 
 - New `AnglesiteCore` type (`ActivityPubKeyProvisioning`) using the Security
   framework (`SecKeyCreateRandomKey`, `kSecAttrKeyTypeRSA`, 2048-bit) to
@@ -161,13 +182,21 @@ needed real key material, only opaque tokens/passwords.
   subsequent deploys — regenerating it would break federation trust with
   existing followers.
 - Pushing the value to Cloudflare needs `wrangler secret put <NAME>`, which
-  reads its value from stdin. The existing `SocialWorkerProvisionCommand.
-  CommandRunner` closure (used for `d1 create`/`r2 bucket create`/etc.) has no
-  stdin parameter, but `ProcessSupervisor` already supports this generically
-  (`launch(attachStdin: true)` + `stdinWriter`, today used for MCP JSON-RPC
-  framing). Secret provisioning uses that lower-level path directly, piping
-  the PEM value straight into the child process's stdin — it never touches
-  argv or an environment variable.
+  reads its value from stdin. `SocialWorkerProvisionCommand`'s wrangler calls
+  don't run on the host at all — production wiring (`DeployModel`) routes
+  them through `ContainerCommandRunner`, which runs `npx wrangler <args>`
+  *inside the container* via `LocalContainerControl.exec` (a one-shot call
+  with no stdin plumbing; that's a different seam than
+  `ProcessSupervisor.attachStdin`, which is host-side and used elsewhere for
+  MCP JSON-RPC framing). Since the stdin need is entirely internal to the
+  guest process, it doesn't require a new interactive-exec capability: a new
+  `SocialWorkerProvisionCommand.SecretRunner` closure (injected the same way
+  as `runner`/`deployer`) invokes a small in-guest shell script —
+  `sh -c 'printf "%s" "$WRANGLER_SECRET_VALUE" | npx wrangler secret put "$WRANGLER_SECRET_NAME"'`
+  — with the secret's name and value passed only via the guest process's
+  `environment` (never interpolated into the command string or argv),
+  mirroring exactly how `CLOUDFLARE_API_TOKEN` already crosses into the guest
+  today (`ContainerCommandRunner.guestEnvAllowlist`).
 
 ## Micropub → ActivityPub fan-out
 
