@@ -268,6 +268,65 @@ struct WorkerCompositionTests {
         #expect(tail.contains("database_id = \"d1-existing\""))
     }
 
+    @Test("activitypub adds a durable_objects.bindings block and a migrations block")
+    func activitypubAddsDurableObjectBinding() throws {
+        let activitypub = worker(WorkerComposition.activitypubWorkerID, d1: false, kv: false, r2: false)
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [activitypub])
+        #expect(toml.contains("[[durable_objects.bindings]]"))
+        #expect(toml.contains("name = \"ACTOR\""))
+        #expect(toml.contains("class_name = \"ActivityPubObject\""))
+        #expect(toml.contains("[[migrations]]"))
+        #expect(toml.contains("tag = \"v1\""))
+        #expect(toml.contains("new_sqlite_classes = [\"ActivityPubObject\"]"))
+    }
+
+    @Test("no activitypub worker means no durable_objects or migrations block")
+    func noActivitypubMeansNoDurableObjectBinding() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [])
+        #expect(!toml.contains("durable_objects"))
+        #expect(!toml.contains("[[migrations]]"))
+    }
+
+    @Test("activitypub with a known display name emits an AP_DISPLAY_NAME var")
+    func activitypubWithDisplayNameEmitsVar() throws {
+        let activitypub = worker(WorkerComposition.activitypubWorkerID, d1: false, kv: false, r2: false)
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [activitypub], displayName: "Alice's Blog"
+        )
+        #expect(toml.contains("[vars]"))
+        #expect(toml.contains("AP_DISPLAY_NAME = \"Alice's Blog\""))
+    }
+
+    @Test("activitypub with no known display name omits AP_DISPLAY_NAME but not other vars")
+    func activitypubWithoutDisplayNameOmitsVar() throws {
+        let activitypub = worker(WorkerComposition.activitypubWorkerID, d1: false, kv: false, r2: false)
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [activitypub])
+        #expect(!toml.contains("AP_DISPLAY_NAME"))
+    }
+
+    @Test("displayName and siteURL vars coexist in one [vars] block when both are known")
+    func displayNameAndSiteURLCoexist() throws {
+        let activitypub = worker(WorkerComposition.activitypubWorkerID, d1: false, kv: false, r2: false)
+        let webmention = worker(WorkerComposition.webmentionWorkerID, d1: false, kv: false, r2: false)
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [activitypub, webmention],
+            siteURL: "https://example.com", displayName: "Alice's Blog"
+        )
+        let varsRange = try #require(toml.range(of: "[vars]"))
+        let afterVars = toml[varsRange.upperBound...]
+        #expect(afterVars.contains("SITE_URL = \"https://example.com\""))
+        #expect(afterVars.contains("AP_DISPLAY_NAME = \"Alice's Blog\""))
+    }
+
+    @Test("a displayName containing a double quote is rejected, not interpolated raw into TOML")
+    func displayNameWithDoubleQuoteIsRejected() throws {
+        let activitypub = worker(WorkerComposition.activitypubWorkerID, d1: false, kv: false, r2: false)
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [activitypub], displayName: "Alice\" INJECTED"
+        )
+        #expect(!toml.contains("AP_DISPLAY_NAME"))
+    }
+
     @Test("siteURL is ignored when webmention receive isn't active")
     func siteURLIgnoredWithoutWebmention() throws {
         let toml = try WorkerComposition.generateWranglerToml(

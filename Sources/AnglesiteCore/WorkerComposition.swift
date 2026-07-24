@@ -39,6 +39,13 @@ public enum WorkerComposition {
     /// out for free once `WorkerDescriptor.Resources` decodes that entry correctly.
     public static let micropubWorkerID = "micropub"
 
+    /// `@dwk/activitypub`'s catalog id — like `webmentionWorkerID`/`micropubWorkerID`, composition
+    /// keys off this directly for the actor's bespoke `ACTOR` Durable Object binding, since the
+    /// binding name and class name (`ActivityPubObject`) are part of `@dwk/activitypub`'s public
+    /// composition contract (its README documents the exact `durable_objects`/`migrations` shape),
+    /// not something the generic `resources` flags (`needsD1`/`needsKV`/`needsR2`) can express.
+    public static let activitypubWorkerID = "activitypub"
+
     /// The bespoke app-side inbox-capture route (#587) — not a `@dwk/workers` catalog worker, so
     /// its claim lives here rather than in `catalog.json`. Appended automatically when
     /// `generateWranglerToml` is called with `inboxCaptureEnabled`.
@@ -96,7 +103,13 @@ public enum WorkerComposition {
         resources: ProvisionedResources = .init(),
         inboxCaptureEnabled: Bool = false,
         inboxKVNamespaceID: String? = nil,
-        siteURL: String? = nil
+        siteURL: String? = nil,
+        /// The site's display name (`SiteSettings.displayName`, already falling back to the site
+        /// name by the time a caller passes it in — this function stays pure and does no
+        /// fallback of its own), threaded into the ActivityPub actor's `AP_DISPLAY_NAME` var.
+        /// `nil` when unknown; the composed Worker's actor document then falls back to a fixed
+        /// generic name (`worker.ts`'s concern, not this function's).
+        displayName: String? = nil
     ) throws -> String {
         guard isValidSiteName(siteName) else {
             throw ConfigError.invalidSiteName(siteName)
@@ -122,6 +135,7 @@ public enum WorkerComposition {
         let hasIndieauth = workers.contains(where: { $0.id == indieauthWorkerID })
         let hasWebmentionReceive = workers.contains(where: { $0.id == webmentionWorkerID })
         let hasMicropub = workers.contains(where: { $0.id == micropubWorkerID })
+        let hasActivityPub = workers.contains(where: { $0.id == activitypubWorkerID })
 
         var lines: [String] = []
         lines.append("name = \"\(siteName)\"")
@@ -236,6 +250,17 @@ public enum WorkerComposition {
             lines.append("bucket_name = \"\(resources.r2BucketName ?? "\(siteName)-media")\"")
         }
 
+        if hasActivityPub {
+            lines.append("")
+            lines.append("[[durable_objects.bindings]]")
+            lines.append("name = \"ACTOR\"")
+            lines.append("class_name = \"ActivityPubObject\"")
+            lines.append("")
+            lines.append("[[migrations]]")
+            lines.append("tag = \"v1\"")
+            lines.append("new_sqlite_classes = [\"ActivityPubObject\"]")
+        }
+
         if inboxCaptureEnabled {
             lines.append("")
             lines.append("[[kv_namespaces]]")
@@ -247,10 +272,17 @@ public enum WorkerComposition {
             }
         }
 
+        var varsLines: [String] = []
         if hasWebmentionReceive, let siteURL, !siteURL.isEmpty, isSafeTomlStringValue(siteURL) {
+            varsLines.append("SITE_URL = \"\(siteURL)\"")
+        }
+        if hasActivityPub, let displayName, !displayName.isEmpty, isSafeTomlStringValue(displayName) {
+            varsLines.append("AP_DISPLAY_NAME = \"\(displayName)\"")
+        }
+        if !varsLines.isEmpty {
             lines.append("")
             lines.append("[vars]")
-            lines.append("SITE_URL = \"\(siteURL)\"")
+            lines.append(contentsOf: varsLines)
         }
 
         if hasIndieauth {
