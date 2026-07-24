@@ -765,6 +765,8 @@ struct SiteWindow: View {
                 onOpen: { model.openCleanupCandidate($0) },
                 onDelete: { await model.deleteCleanupCandidate($0) }
             )
+        case .reader:
+            MicrosubReaderView(reader: model.reader)
         case .preview:
             previewPane(for: site)
         }

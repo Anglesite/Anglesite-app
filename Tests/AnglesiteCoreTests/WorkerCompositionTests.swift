@@ -14,6 +14,7 @@ private let genericD1KVWorker = worker("generic-d1kv-fixture", d1: true, kv: tru
 private let indieauthWorker = worker("indieauth", d1: true, kv: true, r2: false)
 private let micropubWorker = worker("micropub", d1: true, kv: true, r2: true)
 private let websubWorker = worker("websub", d1: true, kv: true, r2: false)
+private let microsubWorker = worker(WorkerComposition.microsubWorkerID, d1: true, kv: false, r2: false)
 private let v2Workers = [genericD1KVWorker, indieauthWorker]
 private let v3Workers = [genericD1KVWorker, indieauthWorker, micropubWorker, websubWorker]
 private let webmentionWorker = worker(WorkerComposition.webmentionWorkerID, d1: false, kv: false, r2: false)
@@ -284,6 +285,70 @@ struct WorkerCompositionTests {
         let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [webmentionWorker])
         #expect(!toml.contains("[vars]"))
         #expect(!toml.contains("SITE_URL"))
+    }
+
+    // MARK: - Microsub reader (V-4.3, #365)
+
+    @Test("microsub adds a MICROSUB_DB D1 binding on the shared database")
+    func microsubAddsStoreBinding() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site",
+            workers: [microsubWorker],
+            resources: .init(d1DatabaseID: "d1-id")
+        )
+        #expect(toml.contains("binding = \"MICROSUB_DB\""))
+        #expect(toml.contains("database_id = \"d1-id\""))
+    }
+
+    @Test("no microsub worker means no MICROSUB_DB binding or microsub queue")
+    func noMicrosubOmitsReaderBindings() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [webmentionWorker])
+        #expect(!toml.contains("MICROSUB_DB"))
+        #expect(!toml.contains("MICROSUB_QUEUE"))
+        #expect(!toml.contains("my-site-microsub"))
+    }
+
+    @Test("microsub adds its own queue producer/consumer blocks, separate from webmention's/websub's")
+    func microsubAddsQueueBlocks() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site",
+            workers: [webmentionWorker, websubWorker, microsubWorker],
+            resources: .init(
+                queueName: "my-site-webmention", websubQueueName: "my-site-websub",
+                microsubQueueName: "my-site-microsub"
+            )
+        )
+        #expect(toml.contains("binding = \"WEBMENTION_QUEUE\""))
+        #expect(toml.contains("binding = \"WEBSUB_QUEUE\""))
+        #expect(toml.contains("binding = \"MICROSUB_QUEUE\""))
+        #expect(toml.contains("queue = \"my-site-microsub\""))
+    }
+
+    @Test("microsub queue name defaults to a deterministic placeholder before provisioning")
+    func microsubQueueDefaultsUnprovisioned() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [microsubWorker])
+        #expect(toml.contains("queue = \"my-site-microsub\""))
+    }
+
+    @Test("microsub adds a Cron Trigger for the feed poller")
+    func microsubAddsCronTrigger() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [microsubWorker])
+        #expect(toml.contains("[triggers]"))
+        #expect(toml.contains("crons = [\"*/15 * * * *\"]"))
+    }
+
+    @Test("no microsub worker means no Cron Trigger")
+    func noMicrosubMeansNoCronTrigger() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [webmentionWorker])
+        #expect(!toml.contains("[triggers]"))
+    }
+
+    @Test("microsub alone (no webmention/websub) with a known site URL emits a SITE_URL var")
+    func microsubEmitsSiteURL() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [microsubWorker], siteURL: "https://my-site.example")
+        #expect(toml.contains("[vars]"))
+        #expect(toml.contains("SITE_URL = \"https://my-site.example\""))
     }
 
     @Test("micropub adds a MICROPUB_DB D1 binding on the shared database")
