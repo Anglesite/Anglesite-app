@@ -97,6 +97,7 @@ final class DeployModel {
     private let command: DeployCommand
     private let webmentionCommand: WebmentionSendCommand
     private let posseCommand: POSSESyndicationCommand
+    private let websubPing: WebSubPublishPing
     private let logCenter: LogCenter
     private let keychain: KeychainStore
     private let onboarding: TokenOnboarding
@@ -137,6 +138,7 @@ final class DeployModel {
         command: DeployCommand = DeployCommand(),
         webmentionCommand: WebmentionSendCommand = WebmentionSendCommand(),
         posseCommand: POSSESyndicationCommand = POSSESyndicationCommand(),
+        websubPing: WebSubPublishPing = WebSubPublishPing(),
         logCenter: LogCenter = .shared,
         keychain: KeychainStore = KeychainStore(),
         verifier: TokenVerifying = CloudflareAPITokenVerifier(),
@@ -149,6 +151,7 @@ final class DeployModel {
         self.command = command
         self.webmentionCommand = webmentionCommand
         self.posseCommand = posseCommand
+        self.websubPing = websubPing
         self.logCenter = logCenter
         self.keychain = keychain
         self.onboarding = TokenOnboarding(verifier: verifier)
@@ -582,15 +585,24 @@ final class DeployModel {
             drawerPresented = false
             webmentionPaidPlanConfirmationPresented = presentation == .foreground
             return .failed(
-                reason: "Inbound Webmention requires the Cloudflare Workers Paid plan — confirm to continue",
+                reason: "Inbound Webmention and WebSub require the Cloudflare Workers Paid plan — confirm to continue",
                 exitCode: nil)
         }
 
+        // Whether the WebSub hub is actually live after this provision (worker active AND its
+        // Queue exists) — the gate for the post-deploy publish pings below. Computed from the
+        // provision result's resources, not settings, so a hub provisioned in this very run
+        // pings on its first deploy.
+        let websubProvisioned: Bool
         if case .succeeded(_, let resources, _) = provisionResult {
             await DeployCoordinator.persistProvisionedResources(
                 configStore: configStore, settings: settings,
                 effectiveActiveIDs: effectiveActiveIDs, resources: resources
             )
+            websubProvisioned = workers.contains(where: { $0.id == WorkerComposition.websubWorkerID })
+                && resources.websubQueueName != nil
+        } else {
+            websubProvisioned = false
         }
 
         let result = provisionResult.asDeployCommandResult
@@ -618,6 +630,17 @@ final class DeployModel {
                     guard let self else { return }
                     await self.posseCommand.syndicate(
                         siteID: siteID, siteDirectory: siteDirectory, configDirectory: configDirectory, siteBase: url
+                    )
+                },
+                notifySubscribers: { [weak self] in
+                    // WebSub publish pings (#361): only when the hub is live for this site. The
+                    // canonical site URL is preferred — the hub's allowed topics derive from the
+                    // Worker's SITE_URL var, which resolveSiteURL also sourced — falling back to
+                    // the deployed URL (whose request origin the un-var'd hub falls back to).
+                    guard let self, websubProvisioned else { return }
+                    _ = await self.websubPing.notify(
+                        siteURL: siteURL ?? url.absoluteString,
+                        source: "websub:\(siteID)"
                     )
                 }
             )

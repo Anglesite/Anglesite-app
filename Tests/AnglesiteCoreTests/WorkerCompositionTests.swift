@@ -225,6 +225,52 @@ struct WorkerCompositionTests {
         #expect(toml.contains("queue = \"my-site-webmention\""))
     }
 
+    @Test("websub adds a WEBSUB_DB D1 binding on the shared database")
+    func websubAddsStoreBinding() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site",
+            workers: [websubWorker],
+            resources: .init(d1DatabaseID: "d1-id")
+        )
+        #expect(toml.contains("binding = \"WEBSUB_DB\""))
+        #expect(toml.contains("database_id = \"d1-id\""))
+    }
+
+    @Test("no websub worker means no WEBSUB_DB binding or websub queue")
+    func noWebsubOmitsHubBindings() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [webmentionWorker])
+        #expect(!toml.contains("WEBSUB_DB"))
+        #expect(!toml.contains("WEBSUB_QUEUE"))
+        #expect(!toml.contains("my-site-websub"))
+    }
+
+    @Test("websub adds its own queue producer/consumer blocks, separate from webmention's")
+    func websubAddsQueueBlocks() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site",
+            workers: [webmentionWorker, websubWorker],
+            resources: .init(queueName: "my-site-webmention", websubQueueName: "my-site-websub")
+        )
+        #expect(toml.contains("binding = \"WEBMENTION_QUEUE\""))
+        #expect(toml.contains("queue = \"my-site-webmention\""))
+        #expect(toml.contains("binding = \"WEBSUB_QUEUE\""))
+        #expect(toml.contains("queue = \"my-site-websub\""))
+    }
+
+    @Test("websub queue name defaults to a deterministic placeholder before provisioning")
+    func websubQueueDefaultsUnprovisioned() throws {
+        let toml = try WorkerComposition.generateWranglerToml(siteName: "my-site", workers: [websubWorker])
+        #expect(toml.contains("queue = \"my-site-websub\""))
+    }
+
+    @Test("websub alone (no webmention) with a known site URL emits a SITE_URL var")
+    func websubEmitsSiteURL() throws {
+        let toml = try WorkerComposition.generateWranglerToml(
+            siteName: "my-site", workers: [websubWorker], siteURL: "https://my-site.example")
+        #expect(toml.contains("[vars]"))
+        #expect(toml.contains("SITE_URL = \"https://my-site.example\""))
+    }
+
     @Test("webmention receive with a known site URL emits a SITE_URL var")
     func webmentionEmitsSiteURL() throws {
         let toml = try WorkerComposition.generateWranglerToml(
