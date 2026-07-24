@@ -136,7 +136,7 @@ struct DeployCommandTests {
 
     /// A fresh temp site directory (unlike the shared `tmpDir`, isolated per test) with the given
     /// `public/.well-known/<relative path>: content` files written.
-    private func makeSiteDirectory(wellKnownFiles: [String: String] = [:]) throws -> URL {
+    private func makeWellKnownSiteDirectory(wellKnownFiles: [String: String] = [:]) throws -> URL {
         let siteDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("DeployCommandTests-\(UUID().uuidString)", isDirectory: true)
         let wellKnownDir = siteDirectory.appendingPathComponent("public/.well-known", isDirectory: true)
@@ -151,7 +151,7 @@ struct DeployCommandTests {
 
     @Test("a committed static file colliding with a runtime-reported claim blocks before build runs")
     func wellKnownCollisionBlocksBeforeBuild() async throws {
-        let siteDirectory = try makeSiteDirectory(wellKnownFiles: ["acme-challenge/mine": "token"])
+        let siteDirectory = try makeWellKnownSiteDirectory(wellKnownFiles: ["acme-challenge/mine": "token"])
         defer { try? FileManager.default.removeItem(at: siteDirectory) }
         let exec = FakeExecutor()
             .withRuntimeClaims([RuntimeOwnedPathClaim(
@@ -171,7 +171,7 @@ struct DeployCommandTests {
 
     @Test("an active dynamic route claim colliding with a runtime reservation blocks before build")
     func wellKnownDynamicRuntimeCollisionBlocks() async throws {
-        let siteDirectory = try makeSiteDirectory()
+        let siteDirectory = try makeWellKnownSiteDirectory()
         defer { try? FileManager.default.removeItem(at: siteDirectory) }
         let exec = FakeExecutor()
             .withRuntimeClaims([RuntimeOwnedPathClaim(
@@ -191,7 +191,7 @@ struct DeployCommandTests {
 
     @Test("a rejected well-known file (symlink) becomes an advisory warning, not a blocker")
     func wellKnownScanFindingBecomesWarning() async throws {
-        let siteDirectory = try makeSiteDirectory()
+        let siteDirectory = try makeWellKnownSiteDirectory()
         defer { try? FileManager.default.removeItem(at: siteDirectory) }
         let wellKnownDir = siteDirectory.appendingPathComponent("public/.well-known", isDirectory: true)
         let outside = siteDirectory.appendingPathComponent("secret")
@@ -220,7 +220,7 @@ struct DeployCommandTests {
 
     @Test("no well-known content and no claims deploys unaffected")
     func wellKnownCheckIsNoOpWhenEmpty() async throws {
-        let siteDirectory = try makeSiteDirectory()
+        let siteDirectory = try makeWellKnownSiteDirectory()
         defer { try? FileManager.default.removeItem(at: siteDirectory) }
         let exec = FakeExecutor()
             .set(.build, exitCode: 0, output: "")
