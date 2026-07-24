@@ -98,6 +98,12 @@ public actor DeployCommand {
         /// The site's currently published route set (from `SiteContentGraph`), used only when
         /// `configDirectory` is non-nil.
         currentRoutes: [String] = [],
+        /// Effective active dynamic `/.well-known/` route claims (#746), already validated via
+        /// `WorkerRouteClaims.activeClaims` and filtered with `WorkerRouteClaims.wellKnownClaims`.
+        /// Empty means "no active dynamic well-known routes," not "skip the #744 collision check"
+        /// — the check always runs, using whatever this array and `executor.reportOwnedPathClaims()`
+        /// report.
+        wellKnownDynamicClaims: [WorkerRouteClaims.OwnedClaim] = [],
         onPreflight: PreflightObserver? = nil,
         onProgress: ProgressHandler? = nil
     ) async -> Result {
@@ -123,6 +129,44 @@ public actor DeployCommand {
         // stripping unrelated secrets the developer's shell may carry. The token is added only
         // for the wrangler step below.
         let baseEnvironment = Self.hostDeployEnvironment()
+
+        // #744: validate the effective /.well-known/ inventory before spending time on a build.
+        // Static/generated rows come from whatever's already on disk in Source/public/.well-known/
+        // (which mirrors the guest's clone — see ContainerDeployExecutor's HOST-path doc comment,
+        // and note `scanUserStatic` classifies a previously-generated file like security.txt by its
+        // own marker, so a redeploy sees it correctly without this re-deriving the TS generator's
+        // activation logic); dynamic rows from the caller's already-validated active route claims;
+        // runtime rows from whatever this executor can affirmatively prove it owns (empty when
+        // unsupported or when the runtime reports no claims — either way, no reservation). A
+        // collision blocks the deploy immediately with no override, matching the design doc's "no
+        // collision precedence" (docs/superpowers/specs/2026-07-14-well-known-support-design.md).
+        // Non-fatal scan findings (a rejected symlink/oversized/percent-encoded file) are folded
+        // into the preflight outcome's warnings below rather than blocking.
+        let wellKnownScan = WellKnownInventory.scanUserStatic(
+            wellKnownDirectory: siteDirectory.appendingPathComponent("public/.well-known", isDirectory: true))
+        let wellKnownRuntimeRows = WellKnownInventory.runtimeRows(from: await executor.reportOwnedPathClaims())
+        let wellKnownDynamicRows = WellKnownInventory.dynamicRows(from: wellKnownDynamicClaims)
+        do {
+            _ = try WellKnownInventory.merge(
+                userStatic: wellKnownScan.rows.filter { $0.delivery == .userStatic },
+                generated: wellKnownScan.rows.filter { $0.delivery == .generated },
+                dynamic: wellKnownDynamicRows,
+                runtime: wellKnownRuntimeRows)
+        } catch {
+            let failure = PreDeployCheck.ScanFailure(
+                category: .wellKnownCollision,
+                message: "\(error)",
+                remediation: "Resolve the /.well-known/ ownership conflict named above (rename or remove one of the claims), then redeploy."
+            )
+            let outcome = PreDeployCheck.Outcome.blocked(failures: [failure], warnings: [])
+            onPreflight?(outcome)
+            return .blocked(failures: [failure], warnings: [])
+        }
+        let wellKnownScanWarnings = wellKnownScan.findings.map {
+            PreDeployCheck.ScanWarning(
+                category: .wellKnownArtifact, message: $0.message,
+                file: $0.path.map { "public/.well-known/\($0)" })
+        }
 
         // Build dist/ before the scan needs it. Streams to LogCenter via the executor.
         onProgress?(.deployBuilding)
@@ -157,23 +201,26 @@ public actor DeployCommand {
             source: "deploy:\(siteID):preflight"
         )
         var preflightOutcome = Self.parseScanReport(output: preflightResult.output, exitCode: preflightResult.exitCode)
+        // Swift-computed warnings, not emitted by the JS scan script — merged into the outcome
+        // the same way `RouteCoverageScanner`'s `.orphanedRoute` findings always have been.
+        var extraWarnings = wellKnownScanWarnings
         if let configDirectory {
             let previousRoutes = DeployedRoutesSnapshot.load(from: configDirectory)
             let redirects = (try? RedirectsStore(sourceDirectory: siteDirectory).load()) ?? []
-            let coverageWarnings = RouteCoverageScanner.scan(
+            extraWarnings += RouteCoverageScanner.scan(
                 currentRoutes: currentRoutes,
                 previousRoutes: previousRoutes,
                 redirectSources: Set(redirects.map(\.source))
             )
-            if !coverageWarnings.isEmpty {
-                switch preflightOutcome {
-                case .passed(let warnings):
-                    preflightOutcome = .passed(warnings: warnings + coverageWarnings)
-                case .blocked(let failures, let warnings):
-                    preflightOutcome = .blocked(failures: failures, warnings: warnings + coverageWarnings)
-                case .error:
-                    break
-                }
+        }
+        if !extraWarnings.isEmpty {
+            switch preflightOutcome {
+            case .passed(let warnings):
+                preflightOutcome = .passed(warnings: warnings + extraWarnings)
+            case .blocked(let failures, let warnings):
+                preflightOutcome = .blocked(failures: failures, warnings: warnings + extraWarnings)
+            case .error:
+                break
             }
         }
         onPreflight?(preflightOutcome)
